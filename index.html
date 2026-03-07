@@ -131,10 +131,10 @@ document.getElementById(tab).classList.add('active')
 <h1>Pullback Playbook</h1>
 <p class="sub">Installable app version with watchlist traffic lights, sizing, journal, and chart-analysis handoff.</p>
 
-<div class="card install" id="installCard">
+<div class="card">
   <h2>Install App</h2>
-  <div class="small">Tap below to install this on your home screen.</div>
-  <div class="actions"><button class="action primary" id="installBtn">Install Pullback Playbook</button></div>
+  <p>To install this playbook:</p>
+  <p><b>Chrome menu (⋮) → Install App → Add to Home Screen</b></p>
 </div>
 
 <div class="tabs">
@@ -265,13 +265,6 @@ document.getElementById(tab).classList.add('active')
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));
 }
-let deferredPrompt = null;
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  document.getElementById('installCard').classList.add('show');
-});
-document.getElementById('installBtn').addEventListener('click', async () => {
   if (!deferredPrompt) return;
   deferredPrompt.prompt();
   await deferredPrompt.userChoice;
