@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pullback Playbook v2</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;background:#0b1020;color:#eef2ff;margin:0;padding:20px}
+h1{margin-top:0}
+textarea,input,select{width:100%;padding:10px;margin-top:6px;margin-bottom:10px;border-radius:6px;border:1px solid #333;background:#111;color:#fff}
+button{padding:10px 14px;border-radius:6px;border:0;background:#7c9cff;color:white;font-weight:bold;cursor:pointer}
+.card{background:#141c30;padding:16px;border-radius:10px;margin-bottom:16px}
+.small{color:#a7b0c8;font-size:14px}
+</style>
+</head>
+<body>
+
+<h1>Pullback Playbook</h1>
+<p class="small">Quality Pullback workflow tool</p>
+
+<div class="card">
+<h2>Account Settings</h2>
+<label>Account Size (£)</label>
+<input id="accountSize" type="number" value="4000">
+
+<label>Max Risk (£)</label>
+<input id="maxRisk" type="number" value="40">
+</div>
+
+<div class="card">
+<h2>Watchlist Import</h2>
+<label>Paste watchlist</label>
+<textarea id="watchlistRaw" placeholder="HLT Hilton Worldwide&#10;NVDA Nvidia"></textarea>
+
+<button onclick="extract()">Extract Tickers</button>
+
+<label>Clean Tickers</label>
+<input id="watchlist">
+</div>
+
+<div class="card">
+<h2>Generate ChatGPT Prompt</h2>
+<button onclick="generate()">Generate Prompt</button>
+<textarea id="prompt"></textarea>
+</div>
+
+<div class="card">
+<h2>Trade Plan</h2>
+<label>Ticker</label>
+<input id="ticker">
+
+<label>Entry</label>
+<input id="entry" type="number">
+
+<label>Stop</label>
+<input id="stop" type="number">
+
+<label>Target</label>
+<input id="target" type="number">
+
+<button onclick="calc()">Calculate Position Size</button>
+
+<p id="result"></p>
+</div>
+
+<script>
+function extract(){
+let raw=document.getElementById("watchlistRaw").value
+let tickers=(raw.match(/\\b[A-Z]{1,5}\\b/g)||[])
+document.getElementById("watchlist").value=[...new Set(tickers)].join(", ")
+}
+
+function generate(){
+let watch=document.getElementById("watchlist").value.split(",").join("\\n")
+let acc=document.getElementById("accountSize").value
+let risk=document.getElementById("maxRisk").value
+
+let prompt=`Analyse these stocks for my Quality Pullback strategy.
+
+Rules:
+- Prefer strong stocks in an uptrend
+- Pullback near 20MA or 50MA
+- Must stabilise or bounce
+- Previous swing high = first target
+
+Account:
+£${acc} account
+£${risk} max risk
+
+Watchlist:
+${watch}
+
+Return:
+Watch / Near Pullback / Entry / Avoid
+with a pullback score out of 10.`
+
+document.getElementById("prompt").value=prompt
+}
+
+function calc(){
+let entry=parseFloat(document.getElementById("entry").value)
+let stop=parseFloat(document.getElementById("stop").value)
+let target=parseFloat(document.getElementById("target").value)
+let risk=parseFloat(document.getElementById("maxRisk").value)
+
+if(!entry||!stop){return}
+
+let riskPerShare=entry-stop
+let shares=Math.floor(risk/riskPerShare)
+
+document.getElementById("result").innerText=
+"Risk per share: "+riskPerShare.toFixed(2)+
+" | Shares: "+shares
+}
+</script>
+
+</body>
+</html>
