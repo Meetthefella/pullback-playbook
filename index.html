@@ -1,784 +1,516 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Pullback Trading Playbook</title>
-  <meta name="theme-color" content="#0b1630">
-  <link rel="manifest" href="./manifest.webmanifest">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pullback Playbook v2</title>
   <style>
     :root {
-      --bg: #0b1630;
-      --panel: #14213d;
-      --panel-2: #1e293b;
-      --muted: #b8c3d6;
-      --line: #31435f;
-      --accent: #7df0a7;
-      --accent-2: #22c55e;
-      --warn: #ffd66b;
-      --danger: #ff9a9a;
-      --pill: #22314d;
-      --shadow: 0 10px 30px rgba(0,0,0,.22);
+      --bg: #0b1020;
+      --panel: rgba(20, 28, 48, 0.92);
+      --panel-2: rgba(16, 23, 40, 0.95);
+      --line: rgba(255,255,255,0.08);
+      --text: #eef2ff;
+      --muted: #a7b0c8;
+      --accent: #7c9cff;
+      --accent-2: #63e6be;
+      --warn: #ffd166;
+      --danger: #ff6b6b;
+      --shadow: 0 18px 45px rgba(0,0,0,.35);
+      --radius: 18px;
     }
-
     * { box-sizing: border-box; }
-
-    body {
+    html, body {
       margin: 0;
-      padding: 18px;
-      font-family: Arial, sans-serif;
-      background: linear-gradient(180deg, #0b1630 0%, #0d1833 100%);
-      color: white;
-      min-height: 100vh;
+      padding: 0;
+      background: radial-gradient(circle at top, #131d38 0%, var(--bg) 55%);
+      color: var(--text);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     }
-
-    .wrap {
-      max-width: 900px;
-      margin: 0 auto;
-      padding-bottom: 36px;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 28px;
-      line-height: 1.1;
-    }
-
-    .subtitle {
-      color: var(--muted);
-      margin: 8px 0 18px;
-      font-size: 15px;
-    }
-
-    .hero, .card {
-      background: rgba(30, 41, 59, 0.96);
-      border: 1px solid rgba(255,255,255,.06);
-      border-radius: 18px;
-      padding: 16px;
-      margin-bottom: 16px;
+    body { min-height: 100vh; }
+    .app { max-width: 1260px; margin: 0 auto; padding: 22px 16px 36px; }
+    .hero { display: grid; grid-template-columns: 1.15fr .85fr; gap: 16px; margin-bottom: 16px; }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
       box-shadow: var(--shadow);
-    }
-
-    .hero {
       padding: 18px;
-      background: linear-gradient(180deg, rgba(33,50,82,.96), rgba(24,37,62,.98));
+      backdrop-filter: blur(12px);
     }
+    h1, h2, h3 { margin: 0 0 10px; }
+    h1 { font-size: 1.8rem; letter-spacing: .2px; }
+    h2 { font-size: 1.05rem; color: var(--text); }
+    h3 { font-size: .95rem; color: var(--muted); }
+    p, label, small { color: var(--muted); }
+    .hero-title p { margin: 0; line-height: 1.5; }
 
     .stats {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
+      gap: 12px;
       margin-top: 14px;
     }
-
     .stat {
-      background: rgba(10,18,36,.48);
-      border: 1px solid rgba(255,255,255,.06);
+      border: 1px solid var(--line);
       border-radius: 14px;
       padding: 12px;
+      background: var(--panel-2);
+    }
+    .stat .label { font-size: .8rem; color: var(--muted); }
+    .stat .value { font-size: 1.15rem; font-weight: 700; margin-top: 6px; }
+
+    .layout { display: grid; grid-template-columns: 1.05fr .95fr; gap: 16px; }
+    .stack { display: grid; gap: 16px; }
+
+    textarea, input, select {
+      width: 100%;
+      background: rgba(6,10,18,.8);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font: inherit;
+      outline: none;
+    }
+    textarea { min-height: 92px; resize: vertical; }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(124,156,255,.15);
     }
 
-    .stat-label {
-      color: var(--muted);
-      font-size: 12px;
-      margin-bottom: 6px;
+    .row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
     }
 
-    .stat-value {
-      font-size: 20px;
-      font-weight: bold;
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 11px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform .15s ease, opacity .15s ease, box-shadow .15s ease;
     }
+    button:hover { transform: translateY(-1px); }
+    .primary { background: linear-gradient(135deg, var(--accent), #9c7cff); color: white; }
+    .secondary { background: rgba(255,255,255,.07); color: var(--text); border: 1px solid var(--line); }
+    .secondary.inline-btn { padding: 7px 10px; font-size: .84rem; }
 
-    .install-banner {
-      display: none;
+    .section-head {
+      display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      background: #10203f;
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 16px;
-      padding: 14px;
-      margin: 0 0 16px;
-    }
-
-    .install-actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      flex-shrink: 0;
-    }
-
-    .tabs {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 18px;
-      overflow-x: auto;
-      padding-bottom: 4px;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .tabs::-webkit-scrollbar { height: 6px; }
-
-    .tab {
-      background: var(--pill);
-      color: white;
-      border: 1px solid rgba(255,255,255,.06);
-      border-radius: 999px;
-      padding: 12px 16px;
-      font-size: 16px;
-      cursor: pointer;
-      white-space: nowrap;
-      flex: 0 0 auto;
-    }
-
-    .tab.active {
-      background: #2f4b73;
-      border-color: rgba(255,255,255,.12);
-    }
-
-    .panel { display: none; }
-    .panel.active { display: block; }
-
-    label {
-      display: block;
-      margin-bottom: 6px;
-      font-weight: bold;
-      font-size: 14px;
-    }
-
-    input, textarea, select {
-      width: 100%;
-      padding: 12px;
-      margin-top: 6px;
-      margin-bottom: 12px;
-      border-radius: 12px;
-      border: 1px solid #3b4b63;
-      background: #0f1b33;
-      color: white;
-      font: inherit;
-    }
-
-    textarea {
-      min-height: 96px;
-      resize: vertical;
-    }
-
-    button.action,
-    button.secondary,
-    button.ghost,
-    button.small-btn {
-      border: none;
-      border-radius: 12px;
-      padding: 12px 14px;
-      font-weight: bold;
-      cursor: pointer;
-      margin-right: 8px;
-      margin-top: 8px;
-      font: inherit;
-    }
-
-    button.action {
-      background: var(--accent-2);
-      color: #04110a;
-    }
-
-    button.secondary {
-      background: #d7e4ff;
-      color: #10203f;
-    }
-
-    button.ghost,
-    button.small-btn {
-      background: #22314d;
-      color: white;
-    }
-
-    .row-buttons {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .watch-item {
-      background: #16223a;
-      padding: 14px;
-      border-radius: 14px;
       margin-bottom: 10px;
-      border: 1px solid rgba(255,255,255,.05);
     }
 
-    .signal {
-      display: inline-block;
+    .muted-box {
+      background: rgba(255,255,255,.03);
+      border: 1px dashed var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+
+    .results { display: grid; gap: 10px; margin-top: 12px; }
+    .result-item {
+      display: grid;
+      grid-template-columns: 82px 1.3fr auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,.03);
+    }
+    .ticker { font-weight: 800; letter-spacing: .5px; }
+
+    .status-badge, .score-badge {
+      justify-self: end;
       padding: 6px 10px;
       border-radius: 999px;
-      font-size: 14px;
-      font-weight: bold;
-      margin-top: 8px;
+      font-size: .82rem;
+      font-weight: 700;
     }
 
-    .green { background: #153822; color: var(--accent); }
-    .amber { background: #3b3115; color: var(--warn); }
-    .red { background: #3b1717; color: var(--danger); }
+    .watch { background: rgba(124,156,255,.15); color: #dbe5ff; }
+    .near { background: rgba(255,209,102,.16); color: #ffefbf; }
+    .entry { background: rgba(99,230,190,.18); color: #d5fff1; }
+    .avoid { background: rgba(255,107,107,.16); color: #ffd2d2; }
 
-    .muted { color: var(--muted); }
+    .score-low { background: rgba(255,107,107,.14); color: #ffd2d2; }
+    .score-mid { background: rgba(255,209,102,.16); color: #ffefbf; }
+    .score-high { background: rgba(99,230,190,.18); color: #d5fff1; }
 
-    .codebox {
-      white-space: pre-wrap;
-      background: #0f1b33;
+    .check-grid { display: grid; gap: 12px; }
+    .check-group {
+      border: 1px solid var(--line);
+      border-radius: 14px;
       padding: 12px;
-      border-radius: 12px;
-      font-size: 14px;
-      line-height: 1.45;
+      background: rgba(255,255,255,.03);
     }
-
-    .check-row {
+    .check-group h3 { margin-bottom: 10px; color: var(--text); }
+    .check-item {
       display: flex;
       gap: 10px;
       align-items: flex-start;
-      margin-bottom: 12px;
-      padding: 10px 0;
-      border-bottom: 1px solid rgba(255,255,255,.05);
+      padding: 7px 0;
+      color: var(--text);
     }
 
-    .check-row:last-child { border-bottom: 0; }
-    .check-row input[type="checkbox"] { width: auto; margin: 2px 0 0; }
-    .check-row label { margin: 0; font-weight: normal; }
-
-    .two-col {
-      display: grid;
-      grid-template-columns: 1.1fr .9fr;
-      gap: 16px;
+    .progress-wrap { margin-top: 14px; }
+    .progress-bar {
+      width: 100%;
+      height: 12px;
+      background: rgba(255,255,255,.06);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width .2s ease;
     }
 
-    .result-box {
-      background: #101b32;
-      border-radius: 14px;
-      padding: 14px;
-      margin-top: 12px;
-      line-height: 1.5;
-    }
+    .calc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .big-number { font-size: 1.5rem; font-weight: 800; margin-top: 4px; }
 
-    .tiny {
-      font-size: 12px;
+    .mini-note {
+      margin-top: 10px;
+      font-size: .9rem;
+      line-height: 1.45;
       color: var(--muted);
     }
 
-    @media (max-width: 720px) {
-      body { padding: 14px; }
-      h1 { font-size: 24px; }
-      .stats, .two-col { grid-template-columns: 1fr; }
-      .install-banner {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      .tab { font-size: 15px; padding: 11px 14px; }
+    .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .pill {
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      color: var(--muted);
+      font-size: .84rem;
+    }
+
+    .footer-note {
+      text-align: center;
+      color: var(--muted);
+      margin-top: 18px;
+      font-size: .88rem;
+    }
+
+    .copy-box {
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .9rem;
+      line-height: 1.45;
+      max-height: 260px;
+      overflow: auto;
+    }
+
+    .subtle { font-size: .84rem; color: var(--muted); margin-top: 8px; }
+    .result-meta { font-size: .86rem; color: var(--muted); }
+    .result-actions { display: flex; gap: 8px; justify-content: end; flex-wrap: wrap; }
+
+    @media (max-width: 980px) {
+      .hero, .layout, .row, .row-3, .calc-grid { grid-template-columns: 1fr; }
+      .result-item { grid-template-columns: 1fr; }
+      .status-badge, .score-badge { justify-self: start; }
+      .result-actions { justify-content: start; }
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="app">
     <div class="hero">
-      <h1>Pullback Trading Playbook</h1>
-      <div class="subtitle">Quality pullback workflow for your current ~£4k account size.</div>
-      <div class="stats">
-        <div class="stat">
-          <div class="stat-label">Default account</div>
-          <div class="stat-value">£4,000</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Base risk</div>
-          <div class="stat-value">1%</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Base £ risk</div>
-          <div class="stat-value">£40</div>
+      <div class="card hero-title">
+        <h1>Pullback Playbook</h1>
+        <p>Your Quality Pullback workflow in one place: paste a messy watchlist, extract tickers, generate a ChatGPT prompt, import ranked results, open charts fast, then build the trade plan and size it to your £4,000 account and £40 max risk.</p>
+        <div class="pill-row">
+          <div class="pill">Strong stocks in uptrends</div>
+          <div class="pill">20 MA / 50 MA pullbacks</div>
+          <div class="pill">Bounce required</div>
+          <div class="pill">Score each setup</div>
         </div>
       </div>
-    </div>
-
-    <div id="installBanner" class="install-banner">
-      <div>
-        <strong>Install on Home Screen</strong><br>
-        <span class="tiny">Use the app like a proper mobile tool with offline access.</span>
-      </div>
-      <div class="install-actions">
-        <button type="button" id="installBtn" class="secondary">Install</button>
-        <button type="button" id="dismissInstallBtn" class="ghost">Dismiss</button>
-      </div>
-    </div>
-
-    <div class="tabs" role="tablist" aria-label="Sections">
-      <button type="button" class="tab active" data-tab="rules" onclick="showTab('rules', this)">Rules</button>
-      <button type="button" class="tab" data-tab="watchlist" onclick="showTab('watchlist', this)">Watchlist</button>
-      <button type="button" class="tab" data-tab="checklist" onclick="showTab('checklist', this)">Checklist</button>
-      <button type="button" class="tab" data-tab="sizing" onclick="showTab('sizing', this)">Sizing</button>
-      <button type="button" class="tab" data-tab="journal" onclick="showTab('journal', this)">Journal</button>
-      <button type="button" class="tab" data-tab="analyse" onclick="showTab('analyse', this)">Analyse</button>
-    </div>
-
-    <div id="rules" class="panel active">
-      <div class="card">Strong stock → orderly pullback → stabilisation or bounce → controlled risk.</div>
-      <div class="card">S&amp;P 500 above 50 MA = normal risk and cleaner setups.</div>
-      <div class="card">S&amp;P 500 below 50 MA = smaller size, fewer trades, more selectivity.</div>
-      <div class="card">Best candidates are usually leaders pulling back into the 20 MA or 50 MA with volume calming down.</div>
-      <div class="card">For your account, default risk is <strong>£40</strong> per trade unless conditions justify less.</div>
-    </div>
-
-    <div id="watchlist" class="panel">
-      <div class="two-col">
-        <div class="card">
-          <label for="wlTicker">Ticker</label>
-          <input id="wlTicker" placeholder="TSLA">
-
-          <label for="wlStatus">Status</label>
-          <select id="wlStatus">
-            <option value="green">🟢 Near Pullback</option>
-            <option value="amber">🟡 Watch</option>
-            <option value="red">🔴 Avoid</option>
-          </select>
-
-          <label for="wlNote">Note</label>
-          <input id="wlNote" placeholder="Near 50 MA with volume drying up">
-
-          <div class="row-buttons">
-            <button type="button" class="action" onclick="addWatchItem()">Save ticker</button>
-            <button type="button" class="small-btn" onclick="loadStarterList()">Load starter list</button>
-            <button type="button" class="small-btn" onclick="clearWatchlist()">Clear watchlist</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="row-buttons">
-            <button type="button" class="small-btn" onclick="setFilter('all')">All</button>
-            <button type="button" class="small-btn" onclick="setFilter('green')">🟢</button>
-            <button type="button" class="small-btn" onclick="setFilter('amber')">🟡</button>
-            <button type="button" class="small-btn" onclick="setFilter('red')">🔴</button>
-          </div>
-          <div id="watchlistItems" class="muted" style="margin-top:12px;">No tickers saved yet.</div>
-        </div>
-      </div>
-    </div>
-
-    <div id="checklist" class="panel">
       <div class="card">
-        <div class="check-row"><input type="checkbox" id="c1"><label for="c1">Market conditions are supportive or at least acceptable.</label></div>
-        <div class="check-row"><input type="checkbox" id="c2"><label for="c2">Stock is a leader or in a clear uptrend.</label></div>
-        <div class="check-row"><input type="checkbox" id="c3"><label for="c3">Price is pulling back into the 20 MA or 50 MA area.</label></div>
-        <div class="check-row"><input type="checkbox" id="c4"><label for="c4">Pullback looks orderly rather than heavy or broken.</label></div>
-        <div class="check-row"><input type="checkbox" id="c5"><label for="c5">Bounce, hold, or stabilisation is visible.</label></div>
-        <div class="check-row"><input type="checkbox" id="c6"><label for="c6">Entry, stop, and first target are defined before entry.</label></div>
-        <div class="check-row"><input type="checkbox" id="c7"><label for="c7">Risk is within plan and position size is sensible.</label></div>
-      </div>
-    </div>
-
-    <div id="sizing" class="panel">
-      <div class="card">
-        <label for="account">Account size (£)</label>
-        <input id="account" type="number" value="4000">
-
-        <label for="risk">Risk per trade (£)</label>
-        <input id="risk" type="number" value="40">
-
-        <label for="entry">Entry price</label>
-        <input id="entry" type="number" placeholder="430">
-
-        <label for="stop">Stop price</label>
-        <input id="stop" type="number" placeholder="420">
-
-        <div class="row-buttons">
-          <button type="button" class="action" onclick="calcSize()">Calculate</button>
-          <button type="button" class="small-btn" onclick="fillBaseRisk()">Reset to base risk</button>
+        <h2>Trading Parameters</h2>
+        <div class="stats">
+          <div class="stat"><div class="label">Account Size</div><div class="value" id="accountStat">£4,000</div></div>
+          <div class="stat"><div class="label">Max Risk</div><div class="value" id="riskStat">£40</div></div>
+          <div class="stat"><div class="label">Risk %</div><div class="value" id="riskPctStat">1.0%</div></div>
         </div>
-        <div id="sizeResult" class="result-box muted">Enter values and calculate.</div>
       </div>
     </div>
 
-    <div id="journal" class="panel">
-      <div class="two-col">
+    <div class="layout">
+      <div class="stack">
         <div class="card">
-          <label for="jtTicker">Ticker</label>
-          <input id="jtTicker" placeholder="TSLA">
-
-          <label for="jtStatus">Status</label>
-          <select id="jtStatus">
-            <option>Watching</option>
-            <option>Planned</option>
-            <option>Entered</option>
-            <option>Closed</option>
-            <option>Skipped</option>
-          </select>
-
-          <label for="jtNotes">Notes</label>
-          <textarea id="jtNotes" placeholder="Why this setup, what was the trigger, what invalidates it?"></textarea>
-
-          <div class="row-buttons">
-            <button type="button" class="action" onclick="saveJournal()">Save note</button>
-            <button type="button" class="small-btn" onclick="exportJournalCsv()">Export CSV</button>
-            <button type="button" class="small-btn" onclick="clearJournal()">Clear journal</button>
+          <div class="section-head">
+            <h2>1) Watchlist Input + Ticker Finder</h2>
+            <button class="secondary" id="saveSettingsBtn">Save</button>
           </div>
-        </div>
-
-        <div class="card">
-          <div id="journalItems" class="muted">No notes saved yet.</div>
-        </div>
-      </div>
-    </div>
-
-    <div id="analyse" class="panel">
-      <div class="two-col">
-        <div class="card">
-          <label for="chartFile">Chart image</label>
-          <input type="file" id="chartFile" accept="image/*">
-
-          <label for="analyseAccount">Account size (£)</label>
-          <input id="analyseAccount" type="number" value="4000">
-
-          <label for="analyseRiskPct">Risk per trade (%)</label>
-          <input id="analyseRiskPct" type="number" value="1" step="0.1">
-
-          <label for="analyseTicker">Ticker</label>
-          <input id="analyseTicker" placeholder="TSLA">
-
-          <label for="marketState">Market status</label>
-          <select id="marketState">
-            <option>S&amp;P above 50 MA</option>
-            <option>S&amp;P below 50 MA</option>
-            <option>Unsure</option>
-          </select>
-
-          <label for="analyseNotes">Extra notes</label>
-          <textarea id="analyseNotes" placeholder="20 MA, 50 MA and volume visible. Looking for pullback bounce."></textarea>
-
-          <div class="row-buttons">
-            <button type="button" class="action" onclick="buildPrompt()">Analyse for Entry</button>
-            <button type="button" class="small-btn" onclick="copyPrompt()">Copy prompt</button>
+          <div class="row">
+            <div>
+              <label for="accountSize">Account Size (£)</label>
+              <input id="accountSize" type="number" value="4000" step="1" min="1" />
+            </div>
+            <div>
+              <label for="maxRisk">Max Risk Per Trade (£)</label>
+              <input id="maxRisk" type="number" value="40" step="1" min="1" />
+            </div>
           </div>
+          <div class="row" style="margin-top:12px;">
+            <div>
+              <label for="marketStatus">Market Status</label>
+              <select id="marketStatus">
+                <option>S&P above 50 MA</option>
+                <option>S&P near 50 MA</option>
+                <option>S&P below 50 MA</option>
+              </select>
+            </div>
+            <div>
+              <label for="finderInput">Quick Company Name Finder</label>
+              <input id="finderInput" type="text" placeholder="Hilton, Nvidia, Costco" />
+            </div>
+          </div>
+          <div class="actions">
+            <button class="secondary" id="findTickerBtn">Find Ticker</button>
+            <button class="secondary" id="addFoundBtn">Add Found Tickers</button>
+          </div>
+          <div id="finderResults" class="muted-box">Best-effort offline finder. For highest accuracy, paste from TradingView or your broker watchlist.</div>
+          <div style="margin-top:12px;">
+            <label for="watchlistRaw">Paste Watchlist or Raw Export</label>
+            <textarea id="watchlistRaw" placeholder="Hilton Worldwide Holdings&#10;HLT Hilton Worldwide&#10;NVDA Nvidia&#10;Costco Wholesale"></textarea>
+          </div>
+          <div class="actions">
+            <button class="primary" id="extractTickersBtn">Extract Tickers</button>
+            <button class="secondary" id="generateWatchlistPromptBtn">Analyse Watchlist</button>
+          </div>
+          <div style="margin-top:12px;">
+            <label for="watchlist">Clean Tickers</label>
+            <input id="watchlist" type="text" placeholder="HLT, NVDA, COST, MSFT" />
+          </div>
+          <div class="subtle">You can paste messy text here and the app will try to pull out tickers automatically.</div>
         </div>
 
         <div class="card">
-          <div id="promptBox" class="codebox">Tap “Analyse for Entry” to generate your chart-analysis prompt.</div>
+          <div class="section-head">
+            <h2>2) Generated Watchlist Prompt</h2>
+            <button class="secondary" id="copyPromptFromBoxBtn">Copy Prompt</button>
+          </div>
+          <div id="watchlistPromptBox" class="muted-box copy-box">Your generated prompt will appear here.</div>
+        </div>
+
+        <div class="card">
+          <div class="section-head">
+            <h2>3) Import Analysis</h2>
+            <button class="secondary" id="importResultsBtn">Import Results</button>
+          </div>
+          <label for="analysisInput">Paste ChatGPT watchlist decisions here</label>
+          <textarea id="analysisInput" placeholder="HLT – Watch – score 7/10 – trend strong, not bouncing yet&#10;NVDA – Near Pullback – score 8/10 – close to 20 MA&#10;AVGO – Entry – score 9/10 – entry 305 stop 292 target 320"></textarea>
+          <div class="subtle">It can read status, score, reason, and optional entry / stop / target if you include them.</div>
+          <div id="results" class="results"></div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="card">
+          <div class="section-head">
+            <h2>4) Entry Checklist + Trade Plan</h2>
+            <button class="secondary" id="resetChecklistBtn">Reset</button>
+          </div>
+          <div class="row-3">
+            <div><label for="selectedTicker">Ticker</label><input id="selectedTicker" type="text" placeholder="HLT" /></div>
+            <div><label for="entryPrice">Entry</label><input id="entryPrice" type="number" step="0.01" placeholder="305" /></div>
+            <div><label for="stopPrice">Stop</label><input id="stopPrice" type="number" step="0.01" placeholder="292" /></div>
+          </div>
+          <div class="row" style="margin-top:12px;">
+            <div><label for="targetPrice">First Target</label><input id="targetPrice" type="number" step="0.01" placeholder="320" /></div>
+            <div><label for="chartNotes">Quick Notes</label><input id="chartNotes" type="text" placeholder="Pullback to 20 MA, waiting for bounce" /></div>
+          </div>
+          <div class="check-grid" style="margin-top:14px;">
+            <div class="check-group">
+              <h3>Trend + Location</h3>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> Stock is in a strong uptrend</label>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> 20 MA is rising</label>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> 50 MA is rising</label>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> Price is pulling back near the 20 MA or 50 MA</label>
+            </div>
+            <div class="check-group">
+              <h3>Confirmation</h3>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> Pullback is stabilising</label>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> Price is bouncing or trying to bounce</label>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> Volume supports the move if visible</label>
+            </div>
+            <div class="check-group">
+              <h3>Trade Plan</h3>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> Entry is clearly defined</label>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> Stop is clearly defined</label>
+              <label class="check-item"><input type="checkbox" class="rule-check" /> Previous swing high is a sensible first target</label>
+            </div>
+          </div>
+          <div class="progress-wrap">
+            <div class="section-head" style="margin-bottom:8px;"><h3>Setup Quality</h3><strong id="progressText">0 / 10</strong></div>
+            <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+          </div>
+          <div class="actions">
+            <button class="primary" id="generateChartPromptBtn">Generate Chart Prompt</button>
+            <button class="secondary" id="copyChartPromptBtn">Copy Chart Prompt</button>
+            <button class="secondary" id="openChartBtn">Open Chart</button>
+          </div>
+          <div id="chartPromptBox" class="muted-box copy-box" style="margin-top:12px;">Your chart-analysis prompt will appear here.</div>
+        </div>
+
+        <div class="card">
+          <div class="section-head">
+            <h2>5) Position Size Calculator</h2>
+            <button class="secondary" id="calcBtn">Calculate</button>
+          </div>
+          <div class="calc-grid">
+            <div class="stat"><div class="label">Risk Per Share</div><div class="big-number" id="riskPerShare">–</div></div>
+            <div class="stat"><div class="label">Position Size</div><div class="big-number" id="positionSize">–</div></div>
+            <div class="stat"><div class="label">Approx Position Value</div><div class="big-number" id="positionValue">–</div></div>
+            <div class="stat"><div class="label">Reward / Risk to Target 1</div><div class="big-number" id="rrValue">–</div></div>
+          </div>
+          <div class="mini-note" id="calcNote">Enter an entry, stop and target to calculate a size based on your max risk.</div>
         </div>
       </div>
     </div>
+
+    <div class="footer-note">Built for your Quality Pullback workflow. Local-only storage. No backend required.</div>
   </div>
 
   <script>
-    const DEFAULT_ACCOUNT = 4000;
-    const DEFAULT_RISK = 40;
-    const WATCHLIST_KEY = 'pullback_watchlist';
-    const JOURNAL_KEY = 'pullback_journal';
-    const ACTIVE_TAB_KEY = 'pullback_active_tab';
-    const INSTALL_DISMISSED_KEY = 'pullback_install_dismissed';
-    let activeFilter = 'all';
-    let deferredInstallPrompt = null;
+    const $ = (id) => document.getElementById(id);
+    const storageKey = 'pullbackPlaybookV2';
 
-    function getEl(id) {
-      return document.getElementById(id);
-    }
+    const state = {
+      accountSize: 4000,
+      maxRisk: 40,
+      marketStatus: 'S&P above 50 MA',
+      watchlist: 'HLT, NVDA, COST, MSFT',
+      watchlistRaw: '',
+      importedResults: []
+    };
 
-    function showTab(id, btn) {
-      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      getEl(id).classList.add('active');
-      const tabBtn = btn || document.querySelector('.tab[data-tab="' + id + '"]');
-      if (tabBtn) tabBtn.classList.add('active');
-      localStorage.setItem(ACTIVE_TAB_KEY, id);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    const companyMap = {
+      'hilton': 'HLT',
+      'hilton worldwide': 'HLT',
+      'hilton worldwide holdings': 'HLT',
+      'nvidia': 'NVDA',
+      'microsoft': 'MSFT',
+      'costco': 'COST',
+      'costco wholesale': 'COST',
+      'broadcom': 'AVGO',
+      'apple': 'AAPL',
+      'meta': 'META',
+      'alphabet': 'GOOGL',
+      'google': 'GOOGL',
+      'amazon': 'AMZN',
+      'tesla': 'TSLA',
+      'netflix': 'NFLX',
+      'visa': 'V',
+      'mastercard': 'MA',
+      'eli lilly': 'LLY',
+      'palantir': 'PLTR',
+      'booking': 'BKNG',
+      'uber': 'UBER',
+      'cadence design systems': 'CDNS',
+      'lam research': 'LRCX',
+      'micron': 'MU',
+      'costar': 'CSGP',
+      'crowdstrike': 'CRWD',
+      'servicenow': 'NOW',
+      'rolls-royce': 'RR.',
+      'rolls royce': 'RR.',
+      'disney': 'DIS',
+      'chevron': 'CVX',
+      'mondelez': 'MDLZ',
+      'marriott': 'MAR',
+      'airbnb': 'ABNB',
+      'intuit': 'INTU',
+      'fortinet': 'FTNT',
+      'oracle': 'ORCL'
+    };
 
-    function restoreTab() {
-      const saved = localStorage.getItem(ACTIVE_TAB_KEY) || 'rules';
-      const btn = document.querySelector('.tab[data-tab="' + saved + '"]');
-      if (btn && getEl(saved)) showTab(saved, btn);
-    }
-
-    function fillBaseRisk() {
-      getEl('account').value = DEFAULT_ACCOUNT;
-      getEl('risk').value = DEFAULT_RISK;
-    }
-
-    function calcSize() {
-      const account = parseFloat(getEl('account').value);
-      const risk = parseFloat(getEl('risk').value);
-      const entry = parseFloat(getEl('entry').value);
-      const stop = parseFloat(getEl('stop').value);
-      const out = getEl('sizeResult');
-
-      if (!account || !risk || !entry || !stop || entry === stop) {
-        out.textContent = 'Enter valid account, risk, entry, and stop values.';
-        return;
-      }
-
-      const stopDistance = Math.abs(entry - stop);
-      const stopPct = stopDistance / entry;
-      const positionValue = risk / stopPct;
-      const shares = positionValue / entry;
-      const accountPct = (positionValue / account) * 100;
-
-      out.innerHTML =
-        'Stop distance: <strong>' + stopDistance.toFixed(2) + '</strong> (' + (stopPct * 100).toFixed(2) + '%)<br>' +
-        'Position value: <strong>£' + positionValue.toFixed(2) + '</strong><br>' +
-        'Units / shares: <strong>' + shares.toFixed(2) + '</strong><br>' +
-        'Capital used: <strong>' + accountPct.toFixed(1) + '%</strong> of account';
-    }
-
-    function getWatchlist() {
-      return JSON.parse(localStorage.getItem(WATCHLIST_KEY) || '[]');
-    }
-
-    function saveWatchlist(items) {
-      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(items));
-    }
-
-    function renderWatchlist() {
-      const container = getEl('watchlistItems');
-      const sourceItems = getWatchlist();
-      let items = sourceItems;
-      if (activeFilter !== 'all') items = items.filter(x => x.status === activeFilter);
-
-      if (!items.length) {
-        container.textContent = sourceItems.length ? 'No items match this filter.' : 'No tickers saved yet.';
-        return;
-      }
-
-      container.innerHTML = items.map(item => {
-        const label = item.status === 'green' ? '🟢 Near Pullback' : item.status === 'amber' ? '🟡 Watch' : '🔴 Avoid';
-        const safeTicker = escapeHtml(item.ticker || '');
-        const safeNote = escapeHtml(item.note || '');
-        return '<div class="watch-item"><strong>' + safeTicker + '</strong><br>' +
-               '<span class="signal ' + item.status + '">' + label + '</span><br><br>' +
-               safeNote + '<br><br>' +
-               '<button type="button" class="small-btn" onclick="sendToAnalyse(' + JSON.stringify(item.ticker) + ')">Analyse</button>' +
-               '<button type="button" class="small-btn" onclick="removeWatchItem(' + JSON.stringify(item.ticker) + ')">Delete</button></div>';
-      }).join('');
-    }
-
-    function addWatchItem() {
-      const ticker = getEl('wlTicker').value.trim().toUpperCase();
-      const status = getEl('wlStatus').value;
-      const note = getEl('wlNote').value.trim();
-      if (!ticker) return;
-
-      const items = getWatchlist();
-      const existing = items.find(x => x.ticker === ticker);
-      if (existing) {
-        existing.status = status;
-        existing.note = note;
-      } else {
-        items.unshift({ ticker, status, note });
-      }
-
-      saveWatchlist(items);
-      getEl('wlTicker').value = '';
-      getEl('wlNote').value = '';
-      renderWatchlist();
-    }
-
-    function removeWatchItem(ticker) {
-      const items = getWatchlist().filter(x => x.ticker !== ticker);
-      saveWatchlist(items);
-      renderWatchlist();
-    }
-
-    function setFilter(filter) {
-      activeFilter = filter;
-      renderWatchlist();
-    }
-
-    function loadStarterList() {
-      const starter = [
-        {ticker:'MSFT', status:'amber', note:'Strong trend, wait for cleaner pullback'},
-        {ticker:'AMZN', status:'amber', note:'Watch 20/50 MA support'},
-        {ticker:'TSLA', status:'green', note:'Near pullback zone'},
-        {ticker:'RR.L', status:'green', note:'Check bounce near support'},
-        {ticker:'XOM', status:'amber', note:'Energy leader, wait for dip'},
-        {ticker:'CVX', status:'amber', note:'Strong sector but not at support yet'},
-        {ticker:'UNP', status:'green', note:'Near support zone'},
-        {ticker:'DIS', status:'red', note:'Only if trend improves'}
-      ];
-      saveWatchlist(starter);
-      renderWatchlist();
-    }
-
-    function clearWatchlist() {
-      saveWatchlist([]);
-      renderWatchlist();
-    }
-
-    function sendToAnalyse(ticker) {
-      getEl('analyseTicker').value = ticker || '';
-      showTab('analyse');
-    }
-
-    function getJournal() {
-      return JSON.parse(localStorage.getItem(JOURNAL_KEY) || '[]');
-    }
-
-    function saveJournal() {
-      const ticker = getEl('jtTicker').value.trim().toUpperCase();
-      const status = getEl('jtStatus').value;
-      const notes = getEl('jtNotes').value.trim();
-      const items = getJournal();
-      items.unshift({ ticker, status, notes, when: new Date().toLocaleString() });
-      localStorage.setItem(JOURNAL_KEY, JSON.stringify(items.slice(0, 50)));
-      getEl('jtTicker').value = '';
-      getEl('jtNotes').value = '';
-      renderJournal();
-    }
-
-    function clearJournal() {
-      localStorage.setItem(JOURNAL_KEY, '[]');
-      renderJournal();
-    }
-
-    function renderJournal() {
-      const items = getJournal();
-      const box = getEl('journalItems');
-      if (!items.length) {
-        box.textContent = 'No notes saved yet.';
-        return;
-      }
-      box.innerHTML = items.map(x =>
-        '<div class="watch-item"><strong>' + escapeHtml(x.ticker || 'Untitled') + '</strong> — ' +
-        escapeHtml(x.status || '') + '<br><span class="muted">' + escapeHtml(x.when || '') + '</span><br><br>' +
-        escapeHtml(x.notes || '') + '</div>'
-      ).join('');
-    }
-
-    function exportJournalCsv() {
-      const items = getJournal();
-      if (!items.length) {
-        alert('No journal entries to export yet.');
-        return;
-      }
-      const rows = [['Ticker', 'Status', 'When', 'Notes']].concat(
-        items.map(x => [x.ticker || '', x.status || '', x.when || '', x.notes || ''])
-      );
-      const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'pullback-journal.csv';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    }
-
-    function buildPrompt() {
-      const account = parseFloat(getEl('analyseAccount').value) || DEFAULT_ACCOUNT;
-      const riskPct = parseFloat(getEl('analyseRiskPct').value) || 1;
-      const riskCash = account * riskPct / 100;
-      const ticker = (getEl('analyseTicker').value || 'this stock').toUpperCase();
-      const market = getEl('marketState').value;
-      const extra = getEl('analyseNotes').value.trim();
-      const file = getEl('chartFile').files[0];
-      const fileNote = file ? 'A chart image is attached.' : 'No chart image attached yet.';
-
-      const prompt =
-`Analyse this uploaded chart for my Quality Pullback strategy.
-
-Use these rules:
-- Prefer strong stocks in an uptrend
-- Use the 20 MA, 50 MA, and volume if visible
-- I want a pullback near the 20 MA or 50 MA
-- Do not count it as valid unless price is stabilising or bouncing
-- Use previous swing high as the first target area
-- If the setup is unclear, tell me not to trade
-- Explain in plain English and avoid jargon
-
-My account and risk rules:
-- Account size: £${account.toFixed(0)}
-- Max risk per trade: £${riskCash.toFixed(2)} (${riskPct.toFixed(1)}%)
-- After reading the chart, propose an entry, stop, and first target if valid
-- Then calculate position size from the proposed entry and stop based on my max risk
-- If the stop distance makes the trade too wide or unsuitable, say so clearly
-
-Context:
-- Ticker: ${ticker}
-- Market status: ${market}
-- Chart file: ${fileNote}${extra ? '\n- Extra notes: ' + extra : ''}
-
-Please give me:
-1. Plain-English chart read
-2. Verdict: Watch / Near Entry / Entry / Avoid
-3. Suggested entry
-4. Suggested stop
-5. First target
-6. Position size based on my account and max risk
-7. One-sentence final verdict`;
-
-      getEl('promptBox').textContent = prompt;
-    }
-
-    async function copyPrompt() {
+    function loadState() {
+      const saved = localStorage.getItem(storageKey);
+      if (!saved) return;
       try {
-        await navigator.clipboard.writeText(getEl('promptBox').textContent);
-      } catch (e) {
-        alert('Copy failed on this browser. You can still long-press and copy manually.');
+        Object.assign(state, JSON.parse(saved));
+      } catch {}
+    }
+
+    function saveState() {
+      state.accountSize = Number($('accountSize').value || 0);
+      state.maxRisk = Number($('maxRisk').value || 0);
+      state.marketStatus = $('marketStatus').value;
+      state.watchlist = $('watchlist').value;
+      state.watchlistRaw = $('watchlistRaw').value;
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      renderHeaderStats();
+    }
+
+    function renderInitialValues() {
+      $('accountSize').value = state.accountSize;
+      $('maxRisk').value = state.maxRisk;
+      $('marketStatus').value = state.marketStatus;
+      $('watchlist').value = state.watchlist;
+      $('watchlistRaw').value = state.watchlistRaw || '';
+      renderHeaderStats();
+      renderResults();
+      updateProgress();
+      generateWatchlistPrompt();
+      generateChartPrompt();
+      calculatePositionSize();
+    }
+
+    function renderHeaderStats() {
+      const riskPct = state.accountSize > 0 ? ((state.maxRisk / state.accountSize) * 100).toFixed(1) : '0.0';
+      $('accountStat').textContent = `£${Number(state.accountSize).toLocaleString()}`;
+      $('riskStat').textContent = `£${Number(state.maxRisk).toLocaleString()}`;
+      $('riskPctStat').textContent = `${riskPct}%`;
+    }
+
+    function uniq(arr) {
+      return [...new Set(arr.filter(Boolean))];
+    }
+
+    function findTickersFromNames(raw) {
+      const parts = raw.toLowerCase().split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
+      const found = [];
+      const misses = [];
+
+      for (const part of parts) {
+        let match = companyMap[part];
+        if (!match) {
+          const key = Object.keys(companyMap).find(k => part.includes(k) || k.includes(part));
+          match = key ? companyMap[key] : null;
+        }
+        if (match) found.push(`${part} → ${match}`);
+        else misses.push(part);
       }
+
+      $('finderResults').textContent = found.length
+        ? `Found:\n${found.join('\n')}${misses.length ? `\n\nNot matched:\n${misses.join('\n')}` : ''}`
+        : 'No offline matches found. Paste a TradingView or broker watchlist for better extraction.';
+
+      return uniq(found.map(x => x.split('→')[1].trim()));
     }
 
-    function csvEscape(value) {
-      const text = String(value).replace(/"/g, '""');
-      return '"' + text + '"';
-    }
-
-    function escapeHtml(text) {
-      return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    }
-
-    function setupInstallPrompt() {
-      const banner = getEl('installBanner');
-      const installBtn = getEl('installBtn');
-      const dismissBtn = getEl('dismissInstallBtn');
-
-      window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredInstallPrompt = e;
-        if (localStorage.getItem(INSTALL_DISMISSED_KEY) !== '1') {
-          banner.style.display = 'flex';
-        }
-      });
-
-      installBtn.addEventListener('click', async () => {
-        if (!deferredInstallPrompt) {
-          alert('If the install prompt does not appear automatically, open your browser menu and choose “Add to Home screen” or “Install app”.');
-          return;
-        }
-        deferredInstallPrompt.prompt();
-        await deferredInstallPrompt.userChoice;
-        deferredInstallPrompt = null;
-        banner.style.display = 'none';
-      });
-
-      dismissBtn.addEventListener('click', () => {
-        localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
-        banner.style.display = 'none';
-      });
-
-      window.addEventListener('appinstalled', () => {
-        banner.style.display = 'none';
-        deferredInstallPrompt = null;
-      });
-    }
-
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js').catch(() => {});
-      });
-    }
-
-    renderWatchlist();
-    renderJournal();
-    restoreTab();
-    setupInstallPrompt();
-  </script>
-</body>
-</html>
+    function findTickersInline(text) {
+      const lower = text.toLowerCase();
+      const found = [];
+      for (const [name, ticker] of Object.entries(companyMap)) {
+        if (lower.includes(name)) found.push(t
