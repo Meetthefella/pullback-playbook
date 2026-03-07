@@ -2,56 +2,148 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Pullback Trading Playbook</title>
+  <meta name="theme-color" content="#0b1630">
+  <link rel="manifest" href="./manifest.webmanifest">
   <style>
+    :root {
+      --bg: #0b1630;
+      --panel: #14213d;
+      --panel-2: #1e293b;
+      --muted: #b8c3d6;
+      --line: #31435f;
+      --accent: #7df0a7;
+      --accent-2: #22c55e;
+      --warn: #ffd66b;
+      --danger: #ff9a9a;
+      --pill: #22314d;
+      --shadow: 0 10px 30px rgba(0,0,0,.22);
+    }
+
+    * { box-sizing: border-box; }
+
     body {
       margin: 0;
-      padding: 20px;
+      padding: 18px;
       font-family: Arial, sans-serif;
-      background: #0b1630;
+      background: linear-gradient(180deg, #0b1630 0%, #0d1833 100%);
       color: white;
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 900px;
+      margin: 0 auto;
+      padding-bottom: 36px;
     }
 
     h1 {
-      margin-top: 0;
-      font-size: 24px;
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin: 8px 0 18px;
+      font-size: 15px;
+    }
+
+    .hero, .card {
+      background: rgba(30, 41, 59, 0.96);
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 18px;
+      background: linear-gradient(180deg, rgba(33,50,82,.96), rgba(24,37,62,.98));
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .stat {
+      background: rgba(10,18,36,.48);
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .install-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: #10203f;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 16px;
+      padding: 14px;
+      margin: 0 0 16px;
+    }
+
+    .install-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      flex-shrink: 0;
     }
 
     .tabs {
       display: flex;
-      flex-wrap: wrap;
       gap: 10px;
-      margin-bottom: 20px;
+      margin-bottom: 18px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch;
     }
 
+    .tabs::-webkit-scrollbar { height: 6px; }
+
     .tab {
-      background: #22314d;
+      background: var(--pill);
       color: white;
-      border: none;
-      border-radius: 12px;
-      padding: 12px 18px;
-      font-size: 18px;
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 999px;
+      padding: 12px 16px;
+      font-size: 16px;
       cursor: pointer;
+      white-space: nowrap;
+      flex: 0 0 auto;
     }
 
     .tab.active {
       background: #2f4b73;
+      border-color: rgba(255,255,255,.12);
     }
 
-    .panel {
-      display: none;
-    }
+    .panel { display: none; }
+    .panel.active { display: block; }
 
-    .panel.active {
+    label {
       display: block;
-    }
-
-    .card {
-      background: #1e293b;
-      padding: 16px;
-      border-radius: 16px;
-      margin-bottom: 16px;
+      margin-bottom: 6px;
+      font-weight: bold;
+      font-size: 14px;
     }
 
     input, textarea, select {
@@ -59,41 +151,60 @@
       padding: 12px;
       margin-top: 6px;
       margin-bottom: 12px;
-      border-radius: 10px;
+      border-radius: 12px;
       border: 1px solid #3b4b63;
       background: #0f1b33;
       color: white;
-      box-sizing: border-box;
+      font: inherit;
     }
 
-    button.action {
-      background: #22c55e;
-      color: black;
+    textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    button.action,
+    button.secondary,
+    button.ghost,
+    button.small-btn {
       border: none;
-      border-radius: 10px;
-      padding: 12px 16px;
+      border-radius: 12px;
+      padding: 12px 14px;
       font-weight: bold;
       cursor: pointer;
       margin-right: 8px;
       margin-top: 8px;
+      font: inherit;
     }
 
-    .small-btn {
+    button.action {
+      background: var(--accent-2);
+      color: #04110a;
+    }
+
+    button.secondary {
+      background: #d7e4ff;
+      color: #10203f;
+    }
+
+    button.ghost,
+    button.small-btn {
       background: #22314d;
       color: white;
-      border: none;
-      border-radius: 10px;
-      padding: 10px 12px;
-      cursor: pointer;
-      margin-right: 8px;
-      margin-top: 8px;
+    }
+
+    .row-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
     }
 
     .watch-item {
       background: #16223a;
-      padding: 12px;
-      border-radius: 12px;
+      padding: 14px;
+      border-radius: 14px;
       margin-bottom: 10px;
+      border: 1px solid rgba(255,255,255,.05);
     }
 
     .signal {
@@ -105,13 +216,11 @@
       margin-top: 8px;
     }
 
-    .green { background: #153822; color: #7df0a7; }
-    .amber { background: #3b3115; color: #ffd66b; }
-    .red { background: #3b1717; color: #ff9a9a; }
+    .green { background: #153822; color: var(--accent); }
+    .amber { background: #3b3115; color: var(--warn); }
+    .red { background: #3b1717; color: var(--danger); }
 
-    .muted {
-      color: #b8c3d6;
-    }
+    .muted { color: var(--muted); }
 
     .codebox {
       white-space: pre-wrap;
@@ -119,213 +228,335 @@
       padding: 12px;
       border-radius: 12px;
       font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .check-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+
+    .check-row:last-child { border-bottom: 0; }
+    .check-row input[type="checkbox"] { width: auto; margin: 2px 0 0; }
+    .check-row label { margin: 0; font-weight: normal; }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 16px;
+    }
+
+    .result-box {
+      background: #101b32;
+      border-radius: 14px;
+      padding: 14px;
+      margin-top: 12px;
+      line-height: 1.5;
+    }
+
+    .tiny {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 720px) {
+      body { padding: 14px; }
+      h1 { font-size: 24px; }
+      .stats, .two-col { grid-template-columns: 1fr; }
+      .install-banner {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .tab { font-size: 15px; padding: 11px 14px; }
     }
   </style>
 </head>
 <body>
-  <h1>Pullback Trading Playbook</h1>
-
-  <div class="tabs">
-    <button class="tab active" onclick="showTab('rules', this)">Rules</button>
-    <button class="tab" onclick="showTab('watchlist', this)">Watchlist</button>
-    <button class="tab" onclick="showTab('checklist', this)">Checklist</button>
-    <button class="tab" onclick="showTab('sizing', this)">Sizing</button>
-    <button class="tab" onclick="showTab('journal', this)">Journal</button>
-    <button class="tab" onclick="showTab('analyse', this)">Analyse</button>
-  </div>
-
-  <div id="rules" class="panel active">
-    <div class="card">Strong stock → pullback → bounce → controlled risk</div>
-    <div class="card">S&amp;P 500 above 50 MA = trade normally</div>
-    <div class="card">S&amp;P 500 below 50 MA = reduce size / fewer trades</div>
-    <div class="card">Focus on stocks down 1% to 3%</div>
-  </div>
-
-  <div id="watchlist" class="panel">
-    <div class="card">
-      <label>Ticker</label>
-      <input id="wlTicker" placeholder="TSLA">
-
-      <label>Status</label>
-      <select id="wlStatus">
-        <option value="green">🟢 Near Pullback</option>
-        <option value="amber">🟡 Watch</option>
-        <option value="red">🔴 Avoid</option>
-      </select>
-
-      <label>Note</label>
-      <input id="wlNote" placeholder="Near 50 MA">
-
-      <button class="action" onclick="addWatchItem()">Save ticker</button>
-      <button class="small-btn" onclick="loadStarterList()">Load starter list</button>
-      <button class="small-btn" onclick="clearWatchlist()">Clear watchlist</button>
+  <div class="wrap">
+    <div class="hero">
+      <h1>Pullback Trading Playbook</h1>
+      <div class="subtitle">Quality pullback workflow for your current ~£4k account size.</div>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">Default account</div>
+          <div class="stat-value">£4,000</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Base risk</div>
+          <div class="stat-value">1%</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Base £ risk</div>
+          <div class="stat-value">£40</div>
+        </div>
+      </div>
     </div>
 
-    <div class="card">
-      <button class="small-btn" onclick="setFilter('all')">All</button>
-      <button class="small-btn" onclick="setFilter('green')">🟢</button>
-      <button class="small-btn" onclick="setFilter('amber')">🟡</button>
-      <button class="small-btn" onclick="setFilter('red')">🔴</button>
-      <div id="watchlistItems" class="muted" style="margin-top:12px;">No tickers saved yet.</div>
-    </div>
-  </div>
-
-  <div id="checklist" class="panel">
-    <div class="card">
-      <label><input type="checkbox"> Market above 50 MA or acceptable conditions</label><br>
-      <label><input type="checkbox"> Stock is in an uptrend</label><br>
-      <label><input type="checkbox"> Price is near 20 MA or 50 MA</label><br>
-      <label><input type="checkbox"> Pullback looks orderly</label><br>
-      <label><input type="checkbox"> Bounce or stabilisation is visible</label><br>
-      <label><input type="checkbox"> Entry, stop, and target are defined</label><br>
-      <label><input type="checkbox"> Risk is within plan</label>
-    </div>
-  </div>
-
-  <div id="sizing" class="panel">
-    <div class="card">
-      <label>Account size (£)</label>
-      <input id="account" type="number" value="4000">
-
-      <label>Risk per trade (£)</label>
-      <input id="risk" type="number" value="40">
-
-      <label>Entry price</label>
-      <input id="entry" type="number" placeholder="430">
-
-      <label>Stop price</label>
-      <input id="stop" type="number" placeholder="420">
-
-      <button class="action" onclick="calcSize()">Calculate</button>
-      <div id="sizeResult" class="muted" style="margin-top:12px;">Enter values and calculate.</div>
-    </div>
-  </div>
-
-  <div id="journal" class="panel">
-    <div class="card">
-      <label>Ticker</label>
-      <input id="jtTicker" placeholder="TSLA">
-
-      <label>Status</label>
-      <select id="jtStatus">
-        <option>Watching</option>
-        <option>Planned</option>
-        <option>Entered</option>
-        <option>Closed</option>
-        <option>Skipped</option>
-      </select>
-
-      <label>Notes</label>
-      <textarea id="jtNotes" placeholder="Why this setup?"></textarea>
-
-      <button class="action" onclick="saveJournal()">Save note</button>
+    <div id="installBanner" class="install-banner">
+      <div>
+        <strong>Install on Home Screen</strong><br>
+        <span class="tiny">Use the app like a proper mobile tool with offline access.</span>
+      </div>
+      <div class="install-actions">
+        <button type="button" id="installBtn" class="secondary">Install</button>
+        <button type="button" id="dismissInstallBtn" class="ghost">Dismiss</button>
+      </div>
     </div>
 
-    <div class="card">
-      <div id="journalItems" class="muted">No notes saved yet.</div>
-    </div>
-  </div>
-
-  <div id="analyse" class="panel">
-    <div class="card">
-      <label>Chart image</label>
-      <input type="file" id="chartFile" accept="image/*">
-
-      <label>Account size (£)</label>
-      <input id="analyseAccount" type="number" value="4000">
-
-      <label>Risk per trade (%)</label>
-      <input id="analyseRiskPct" type="number" value="1" step="0.1">
-
-      <label>Ticker</label>
-      <input id="analyseTicker" placeholder="TSLA">
-
-      <label>Market status</label>
-      <select id="marketState">
-        <option>S&amp;P above 50 MA</option>
-        <option>S&amp;P below 50 MA</option>
-        <option>Unsure</option>
-      </select>
-
-      <label>Extra notes</label>
-      <textarea id="analyseNotes" placeholder="20 MA, 50 MA and volume visible. Looking for pullback bounce."></textarea>
-
-      <button class="action" onclick="buildPrompt()">Analyse for Entry</button>
-      <button class="small-btn" onclick="copyPrompt()">Copy prompt</button>
+    <div class="tabs" role="tablist" aria-label="Sections">
+      <button type="button" class="tab active" data-tab="rules" onclick="showTab('rules', this)">Rules</button>
+      <button type="button" class="tab" data-tab="watchlist" onclick="showTab('watchlist', this)">Watchlist</button>
+      <button type="button" class="tab" data-tab="checklist" onclick="showTab('checklist', this)">Checklist</button>
+      <button type="button" class="tab" data-tab="sizing" onclick="showTab('sizing', this)">Sizing</button>
+      <button type="button" class="tab" data-tab="journal" onclick="showTab('journal', this)">Journal</button>
+      <button type="button" class="tab" data-tab="analyse" onclick="showTab('analyse', this)">Analyse</button>
     </div>
 
-    <div class="card">
-      <div id="promptBox" class="codebox">Tap “Analyse for Entry” to generate your chart-analysis prompt.</div>
+    <div id="rules" class="panel active">
+      <div class="card">Strong stock → orderly pullback → stabilisation or bounce → controlled risk.</div>
+      <div class="card">S&amp;P 500 above 50 MA = normal risk and cleaner setups.</div>
+      <div class="card">S&amp;P 500 below 50 MA = smaller size, fewer trades, more selectivity.</div>
+      <div class="card">Best candidates are usually leaders pulling back into the 20 MA or 50 MA with volume calming down.</div>
+      <div class="card">For your account, default risk is <strong>£40</strong> per trade unless conditions justify less.</div>
+    </div>
+
+    <div id="watchlist" class="panel">
+      <div class="two-col">
+        <div class="card">
+          <label for="wlTicker">Ticker</label>
+          <input id="wlTicker" placeholder="TSLA">
+
+          <label for="wlStatus">Status</label>
+          <select id="wlStatus">
+            <option value="green">🟢 Near Pullback</option>
+            <option value="amber">🟡 Watch</option>
+            <option value="red">🔴 Avoid</option>
+          </select>
+
+          <label for="wlNote">Note</label>
+          <input id="wlNote" placeholder="Near 50 MA with volume drying up">
+
+          <div class="row-buttons">
+            <button type="button" class="action" onclick="addWatchItem()">Save ticker</button>
+            <button type="button" class="small-btn" onclick="loadStarterList()">Load starter list</button>
+            <button type="button" class="small-btn" onclick="clearWatchlist()">Clear watchlist</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row-buttons">
+            <button type="button" class="small-btn" onclick="setFilter('all')">All</button>
+            <button type="button" class="small-btn" onclick="setFilter('green')">🟢</button>
+            <button type="button" class="small-btn" onclick="setFilter('amber')">🟡</button>
+            <button type="button" class="small-btn" onclick="setFilter('red')">🔴</button>
+          </div>
+          <div id="watchlistItems" class="muted" style="margin-top:12px;">No tickers saved yet.</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="checklist" class="panel">
+      <div class="card">
+        <div class="check-row"><input type="checkbox" id="c1"><label for="c1">Market conditions are supportive or at least acceptable.</label></div>
+        <div class="check-row"><input type="checkbox" id="c2"><label for="c2">Stock is a leader or in a clear uptrend.</label></div>
+        <div class="check-row"><input type="checkbox" id="c3"><label for="c3">Price is pulling back into the 20 MA or 50 MA area.</label></div>
+        <div class="check-row"><input type="checkbox" id="c4"><label for="c4">Pullback looks orderly rather than heavy or broken.</label></div>
+        <div class="check-row"><input type="checkbox" id="c5"><label for="c5">Bounce, hold, or stabilisation is visible.</label></div>
+        <div class="check-row"><input type="checkbox" id="c6"><label for="c6">Entry, stop, and first target are defined before entry.</label></div>
+        <div class="check-row"><input type="checkbox" id="c7"><label for="c7">Risk is within plan and position size is sensible.</label></div>
+      </div>
+    </div>
+
+    <div id="sizing" class="panel">
+      <div class="card">
+        <label for="account">Account size (£)</label>
+        <input id="account" type="number" value="4000">
+
+        <label for="risk">Risk per trade (£)</label>
+        <input id="risk" type="number" value="40">
+
+        <label for="entry">Entry price</label>
+        <input id="entry" type="number" placeholder="430">
+
+        <label for="stop">Stop price</label>
+        <input id="stop" type="number" placeholder="420">
+
+        <div class="row-buttons">
+          <button type="button" class="action" onclick="calcSize()">Calculate</button>
+          <button type="button" class="small-btn" onclick="fillBaseRisk()">Reset to base risk</button>
+        </div>
+        <div id="sizeResult" class="result-box muted">Enter values and calculate.</div>
+      </div>
+    </div>
+
+    <div id="journal" class="panel">
+      <div class="two-col">
+        <div class="card">
+          <label for="jtTicker">Ticker</label>
+          <input id="jtTicker" placeholder="TSLA">
+
+          <label for="jtStatus">Status</label>
+          <select id="jtStatus">
+            <option>Watching</option>
+            <option>Planned</option>
+            <option>Entered</option>
+            <option>Closed</option>
+            <option>Skipped</option>
+          </select>
+
+          <label for="jtNotes">Notes</label>
+          <textarea id="jtNotes" placeholder="Why this setup, what was the trigger, what invalidates it?"></textarea>
+
+          <div class="row-buttons">
+            <button type="button" class="action" onclick="saveJournal()">Save note</button>
+            <button type="button" class="small-btn" onclick="exportJournalCsv()">Export CSV</button>
+            <button type="button" class="small-btn" onclick="clearJournal()">Clear journal</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div id="journalItems" class="muted">No notes saved yet.</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="analyse" class="panel">
+      <div class="two-col">
+        <div class="card">
+          <label for="chartFile">Chart image</label>
+          <input type="file" id="chartFile" accept="image/*">
+
+          <label for="analyseAccount">Account size (£)</label>
+          <input id="analyseAccount" type="number" value="4000">
+
+          <label for="analyseRiskPct">Risk per trade (%)</label>
+          <input id="analyseRiskPct" type="number" value="1" step="0.1">
+
+          <label for="analyseTicker">Ticker</label>
+          <input id="analyseTicker" placeholder="TSLA">
+
+          <label for="marketState">Market status</label>
+          <select id="marketState">
+            <option>S&amp;P above 50 MA</option>
+            <option>S&amp;P below 50 MA</option>
+            <option>Unsure</option>
+          </select>
+
+          <label for="analyseNotes">Extra notes</label>
+          <textarea id="analyseNotes" placeholder="20 MA, 50 MA and volume visible. Looking for pullback bounce."></textarea>
+
+          <div class="row-buttons">
+            <button type="button" class="action" onclick="buildPrompt()">Analyse for Entry</button>
+            <button type="button" class="small-btn" onclick="copyPrompt()">Copy prompt</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div id="promptBox" class="codebox">Tap “Analyse for Entry” to generate your chart-analysis prompt.</div>
+        </div>
+      </div>
     </div>
   </div>
 
   <script>
+    const DEFAULT_ACCOUNT = 4000;
+    const DEFAULT_RISK = 40;
+    const WATCHLIST_KEY = 'pullback_watchlist';
+    const JOURNAL_KEY = 'pullback_journal';
+    const ACTIVE_TAB_KEY = 'pullback_active_tab';
+    const INSTALL_DISMISSED_KEY = 'pullback_install_dismissed';
+    let activeFilter = 'all';
+    let deferredInstallPrompt = null;
+
+    function getEl(id) {
+      return document.getElementById(id);
+    }
+
     function showTab(id, btn) {
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.getElementById(id).classList.add('active');
-      btn.classList.add('active');
+      getEl(id).classList.add('active');
+      const tabBtn = btn || document.querySelector('.tab[data-tab="' + id + '"]');
+      if (tabBtn) tabBtn.classList.add('active');
+      localStorage.setItem(ACTIVE_TAB_KEY, id);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function restoreTab() {
+      const saved = localStorage.getItem(ACTIVE_TAB_KEY) || 'rules';
+      const btn = document.querySelector('.tab[data-tab="' + saved + '"]');
+      if (btn && getEl(saved)) showTab(saved, btn);
+    }
+
+    function fillBaseRisk() {
+      getEl('account').value = DEFAULT_ACCOUNT;
+      getEl('risk').value = DEFAULT_RISK;
     }
 
     function calcSize() {
-      const account = parseFloat(document.getElementById('account').value);
-      const risk = parseFloat(document.getElementById('risk').value);
-      const entry = parseFloat(document.getElementById('entry').value);
-      const stop = parseFloat(document.getElementById('stop').value);
-      const out = document.getElementById('sizeResult');
+      const account = parseFloat(getEl('account').value);
+      const risk = parseFloat(getEl('risk').value);
+      const entry = parseFloat(getEl('entry').value);
+      const stop = parseFloat(getEl('stop').value);
+      const out = getEl('sizeResult');
 
-      if (!entry || !stop || entry === stop) {
-        out.textContent = 'Enter valid entry and stop values.';
+      if (!account || !risk || !entry || !stop || entry === stop) {
+        out.textContent = 'Enter valid account, risk, entry, and stop values.';
         return;
       }
 
-      const stopPct = Math.abs(entry - stop) / entry;
+      const stopDistance = Math.abs(entry - stop);
+      const stopPct = stopDistance / entry;
       const positionValue = risk / stopPct;
       const shares = positionValue / entry;
       const accountPct = (positionValue / account) * 100;
 
       out.innerHTML =
-        'Stop distance: ' + (stopPct * 100).toFixed(2) + '%<br>' +
-        'Position value: £' + positionValue.toFixed(2) + '<br>' +
-        'Units / shares: ' + shares.toFixed(2) + '<br>' +
-        '% of account: ' + accountPct.toFixed(1) + '%';
+        'Stop distance: <strong>' + stopDistance.toFixed(2) + '</strong> (' + (stopPct * 100).toFixed(2) + '%)<br>' +
+        'Position value: <strong>£' + positionValue.toFixed(2) + '</strong><br>' +
+        'Units / shares: <strong>' + shares.toFixed(2) + '</strong><br>' +
+        'Capital used: <strong>' + accountPct.toFixed(1) + '%</strong> of account';
     }
 
     function getWatchlist() {
-      return JSON.parse(localStorage.getItem('pullback_watchlist') || '[]');
+      return JSON.parse(localStorage.getItem(WATCHLIST_KEY) || '[]');
     }
 
     function saveWatchlist(items) {
-      localStorage.setItem('pullback_watchlist', JSON.stringify(items));
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(items));
     }
 
-    let activeFilter = 'all';
-
     function renderWatchlist() {
-      const container = document.getElementById('watchlistItems');
-      let items = getWatchlist();
+      const container = getEl('watchlistItems');
+      const sourceItems = getWatchlist();
+      let items = sourceItems;
       if (activeFilter !== 'all') items = items.filter(x => x.status === activeFilter);
 
       if (!items.length) {
-        container.textContent = 'No tickers saved yet.';
+        container.textContent = sourceItems.length ? 'No items match this filter.' : 'No tickers saved yet.';
         return;
       }
 
-      container.innerHTML = items.map((item, i) => {
-        const label = item.status === 'green' ? '🟢 Near Pullback' :
-                      item.status === 'amber' ? '🟡 Watch' : '🔴 Avoid';
-        return '<div class="watch-item"><strong>' + item.ticker + '</strong><br>' +
+      container.innerHTML = items.map(item => {
+        const label = item.status === 'green' ? '🟢 Near Pullback' : item.status === 'amber' ? '🟡 Watch' : '🔴 Avoid';
+        const safeTicker = escapeHtml(item.ticker || '');
+        const safeNote = escapeHtml(item.note || '');
+        return '<div class="watch-item"><strong>' + safeTicker + '</strong><br>' +
                '<span class="signal ' + item.status + '">' + label + '</span><br><br>' +
-               (item.note || '') + '<br><br>' +
-               '<button class="small-btn" onclick="sendToAnalyse(\\'' + item.ticker + '\\')">Analyse</button>' +
-               '<button class="small-btn" onclick="removeWatchItem(' + i + ')">Delete</button></div>';
+               safeNote + '<br><br>' +
+               '<button type="button" class="small-btn" onclick="sendToAnalyse(' + JSON.stringify(item.ticker) + ')">Analyse</button>' +
+               '<button type="button" class="small-btn" onclick="removeWatchItem(' + JSON.stringify(item.ticker) + ')">Delete</button></div>';
       }).join('');
     }
 
     function addWatchItem() {
-      const ticker = document.getElementById('wlTicker').value.trim().toUpperCase();
-      const status = document.getElementById('wlStatus').value;
-      const note = document.getElementById('wlNote').value.trim();
+      const ticker = getEl('wlTicker').value.trim().toUpperCase();
+      const status = getEl('wlStatus').value;
+      const note = getEl('wlNote').value.trim();
       if (!ticker) return;
 
       const items = getWatchlist();
@@ -338,14 +569,13 @@
       }
 
       saveWatchlist(items);
-      document.getElementById('wlTicker').value = '';
-      document.getElementById('wlNote').value = '';
+      getEl('wlTicker').value = '';
+      getEl('wlNote').value = '';
       renderWatchlist();
     }
 
-    function removeWatchItem(index) {
-      const items = getWatchlist();
-      items.splice(index, 1);
+    function removeWatchItem(ticker) {
+      const items = getWatchlist().filter(x => x.ticker !== ticker);
       saveWatchlist(items);
       renderWatchlist();
     }
@@ -376,41 +606,75 @@
     }
 
     function sendToAnalyse(ticker) {
-      document.getElementById('analyseTicker').value = ticker;
-      showTab('analyse', document.querySelectorAll('.tab')[5]);
+      getEl('analyseTicker').value = ticker || '';
+      showTab('analyse');
+    }
+
+    function getJournal() {
+      return JSON.parse(localStorage.getItem(JOURNAL_KEY) || '[]');
     }
 
     function saveJournal() {
-      const ticker = document.getElementById('jtTicker').value.trim().toUpperCase();
-      const status = document.getElementById('jtStatus').value;
-      const notes = document.getElementById('jtNotes').value.trim();
-      const items = JSON.parse(localStorage.getItem('pullback_journal') || '[]');
+      const ticker = getEl('jtTicker').value.trim().toUpperCase();
+      const status = getEl('jtStatus').value;
+      const notes = getEl('jtNotes').value.trim();
+      const items = getJournal();
       items.unshift({ ticker, status, notes, when: new Date().toLocaleString() });
-      localStorage.setItem('pullback_journal', JSON.stringify(items.slice(0, 20)));
+      localStorage.setItem(JOURNAL_KEY, JSON.stringify(items.slice(0, 50)));
+      getEl('jtTicker').value = '';
+      getEl('jtNotes').value = '';
+      renderJournal();
+    }
+
+    function clearJournal() {
+      localStorage.setItem(JOURNAL_KEY, '[]');
       renderJournal();
     }
 
     function renderJournal() {
-      const items = JSON.parse(localStorage.getItem('pullback_journal') || '[]');
-      const box = document.getElementById('journalItems');
+      const items = getJournal();
+      const box = getEl('journalItems');
       if (!items.length) {
         box.textContent = 'No notes saved yet.';
         return;
       }
       box.innerHTML = items.map(x =>
-        '<div class="watch-item"><strong>' + (x.ticker || 'Untitled') + '</strong> — ' +
-        x.status + '<br><span class="muted">' + x.when + '</span><br><br>' +
-        (x.notes || '') + '</div>'
+        '<div class="watch-item"><strong>' + escapeHtml(x.ticker || 'Untitled') + '</strong> — ' +
+        escapeHtml(x.status || '') + '<br><span class="muted">' + escapeHtml(x.when || '') + '</span><br><br>' +
+        escapeHtml(x.notes || '') + '</div>'
       ).join('');
     }
 
+    function exportJournalCsv() {
+      const items = getJournal();
+      if (!items.length) {
+        alert('No journal entries to export yet.');
+        return;
+      }
+      const rows = [['Ticker', 'Status', 'When', 'Notes']].concat(
+        items.map(x => [x.ticker || '', x.status || '', x.when || '', x.notes || ''])
+      );
+      const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'pullback-journal.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
     function buildPrompt() {
-      const account = parseFloat(document.getElementById('analyseAccount').value) || 4000;
-      const riskPct = parseFloat(document.getElementById('analyseRiskPct').value) || 1;
+      const account = parseFloat(getEl('analyseAccount').value) || DEFAULT_ACCOUNT;
+      const riskPct = parseFloat(getEl('analyseRiskPct').value) || 1;
       const riskCash = account * riskPct / 100;
-      const ticker = (document.getElementById('analyseTicker').value || 'this stock').toUpperCase();
-      const market = document.getElementById('marketState').value;
-      const extra = document.getElementById('analyseNotes').value.trim();
+      const ticker = (getEl('analyseTicker').value || 'this stock').toUpperCase();
+      const market = getEl('marketState').value;
+      const extra = getEl('analyseNotes').value.trim();
+      const file = getEl('chartFile').files[0];
+      const fileNote = file ? 'A chart image is attached.' : 'No chart image attached yet.';
 
       const prompt =
 `Analyse this uploaded chart for my Quality Pullback strategy.
@@ -433,7 +697,8 @@ My account and risk rules:
 
 Context:
 - Ticker: ${ticker}
-- Market status: ${market}${extra ? '\\n- Extra notes: ' + extra : ''}
+- Market status: ${market}
+- Chart file: ${fileNote}${extra ? '\n- Extra notes: ' + extra : ''}
 
 Please give me:
 1. Plain-English chart read
@@ -444,19 +709,76 @@ Please give me:
 6. Position size based on my account and max risk
 7. One-sentence final verdict`;
 
-      document.getElementById('promptBox').textContent = prompt;
+      getEl('promptBox').textContent = prompt;
     }
 
     async function copyPrompt() {
       try {
-        await navigator.clipboard.writeText(document.getElementById('promptBox').textContent);
+        await navigator.clipboard.writeText(getEl('promptBox').textContent);
       } catch (e) {
         alert('Copy failed on this browser. You can still long-press and copy manually.');
       }
     }
 
+    function csvEscape(value) {
+      const text = String(value).replace(/"/g, '""');
+      return '"' + text + '"';
+    }
+
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function setupInstallPrompt() {
+      const banner = getEl('installBanner');
+      const installBtn = getEl('installBtn');
+      const dismissBtn = getEl('dismissInstallBtn');
+
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredInstallPrompt = e;
+        if (localStorage.getItem(INSTALL_DISMISSED_KEY) !== '1') {
+          banner.style.display = 'flex';
+        }
+      });
+
+      installBtn.addEventListener('click', async () => {
+        if (!deferredInstallPrompt) {
+          alert('If the install prompt does not appear automatically, open your browser menu and choose “Add to Home screen” or “Install app”.');
+          return;
+        }
+        deferredInstallPrompt.prompt();
+        await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        banner.style.display = 'none';
+      });
+
+      dismissBtn.addEventListener('click', () => {
+        localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+        banner.style.display = 'none';
+      });
+
+      window.addEventListener('appinstalled', () => {
+        banner.style.display = 'none';
+        deferredInstallPrompt = null;
+      });
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+      });
+    }
+
     renderWatchlist();
     renderJournal();
+    restoreTab();
+    setupInstallPrompt();
   </script>
 </body>
 </html>

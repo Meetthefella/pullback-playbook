@@ -1,10 +1,11 @@
 {
   "name": "Pullback Playbook",
   "short_name": "Pullback",
-  "start_url": "./index.html",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#0f1115",
-  "theme_color": "#111111",
+  "background_color": "#0b1630",
+  "theme_color": "#0b1630",
   "description": "Quality pullback trading checklist and chart-analysis handoff.",
   "icons": [
     {
