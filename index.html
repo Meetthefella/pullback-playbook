@@ -43,4 +43,420 @@
       display: none;
     }
 
-    .panel.active
+    .panel.active {
+      display: block;
+    }
+
+    .card {
+      background: #1e293b;
+      padding: 16px;
+      border-radius: 16px;
+      margin-bottom: 16px;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      padding: 12px;
+      margin-top: 6px;
+      margin-bottom: 12px;
+      border-radius: 10px;
+      border: 1px solid #3b4b63;
+      background: #0f1b33;
+      color: white;
+      box-sizing: border-box;
+    }
+
+    button.action {
+      background: #22c55e;
+      color: black;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-right: 8px;
+      margin-top: 8px;
+    }
+
+    .small-btn {
+      background: #22314d;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      margin-right: 8px;
+      margin-top: 8px;
+    }
+
+    .watch-item {
+      background: #16223a;
+      padding: 12px;
+      border-radius: 12px;
+      margin-bottom: 10px;
+    }
+
+    .signal {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+
+    .green { background: #153822; color: #7df0a7; }
+    .amber { background: #3b3115; color: #ffd66b; }
+    .red { background: #3b1717; color: #ff9a9a; }
+
+    .muted {
+      color: #b8c3d6;
+    }
+
+    .codebox {
+      white-space: pre-wrap;
+      background: #0f1b33;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Pullback Trading Playbook</h1>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('rules', this)">Rules</button>
+    <button class="tab" onclick="showTab('watchlist', this)">Watchlist</button>
+    <button class="tab" onclick="showTab('checklist', this)">Checklist</button>
+    <button class="tab" onclick="showTab('sizing', this)">Sizing</button>
+    <button class="tab" onclick="showTab('journal', this)">Journal</button>
+    <button class="tab" onclick="showTab('analyse', this)">Analyse</button>
+  </div>
+
+  <div id="rules" class="panel active">
+    <div class="card">Strong stock → pullback → bounce → controlled risk</div>
+    <div class="card">S&amp;P 500 above 50 MA = trade normally</div>
+    <div class="card">S&amp;P 500 below 50 MA = reduce size / fewer trades</div>
+    <div class="card">Focus on stocks down 1% to 3%</div>
+  </div>
+
+  <div id="watchlist" class="panel">
+    <div class="card">
+      <label>Ticker</label>
+      <input id="wlTicker" placeholder="TSLA">
+
+      <label>Status</label>
+      <select id="wlStatus">
+        <option value="green">🟢 Near Pullback</option>
+        <option value="amber">🟡 Watch</option>
+        <option value="red">🔴 Avoid</option>
+      </select>
+
+      <label>Note</label>
+      <input id="wlNote" placeholder="Near 50 MA">
+
+      <button class="action" onclick="addWatchItem()">Save ticker</button>
+      <button class="small-btn" onclick="loadStarterList()">Load starter list</button>
+      <button class="small-btn" onclick="clearWatchlist()">Clear watchlist</button>
+    </div>
+
+    <div class="card">
+      <button class="small-btn" onclick="setFilter('all')">All</button>
+      <button class="small-btn" onclick="setFilter('green')">🟢</button>
+      <button class="small-btn" onclick="setFilter('amber')">🟡</button>
+      <button class="small-btn" onclick="setFilter('red')">🔴</button>
+      <div id="watchlistItems" class="muted" style="margin-top:12px;">No tickers saved yet.</div>
+    </div>
+  </div>
+
+  <div id="checklist" class="panel">
+    <div class="card">
+      <label><input type="checkbox"> Market above 50 MA or acceptable conditions</label><br>
+      <label><input type="checkbox"> Stock is in an uptrend</label><br>
+      <label><input type="checkbox"> Price is near 20 MA or 50 MA</label><br>
+      <label><input type="checkbox"> Pullback looks orderly</label><br>
+      <label><input type="checkbox"> Bounce or stabilisation is visible</label><br>
+      <label><input type="checkbox"> Entry, stop, and target are defined</label><br>
+      <label><input type="checkbox"> Risk is within plan</label>
+    </div>
+  </div>
+
+  <div id="sizing" class="panel">
+    <div class="card">
+      <label>Account size (£)</label>
+      <input id="account" type="number" value="4000">
+
+      <label>Risk per trade (£)</label>
+      <input id="risk" type="number" value="40">
+
+      <label>Entry price</label>
+      <input id="entry" type="number" placeholder="430">
+
+      <label>Stop price</label>
+      <input id="stop" type="number" placeholder="420">
+
+      <button class="action" onclick="calcSize()">Calculate</button>
+      <div id="sizeResult" class="muted" style="margin-top:12px;">Enter values and calculate.</div>
+    </div>
+  </div>
+
+  <div id="journal" class="panel">
+    <div class="card">
+      <label>Ticker</label>
+      <input id="jtTicker" placeholder="TSLA">
+
+      <label>Status</label>
+      <select id="jtStatus">
+        <option>Watching</option>
+        <option>Planned</option>
+        <option>Entered</option>
+        <option>Closed</option>
+        <option>Skipped</option>
+      </select>
+
+      <label>Notes</label>
+      <textarea id="jtNotes" placeholder="Why this setup?"></textarea>
+
+      <button class="action" onclick="saveJournal()">Save note</button>
+    </div>
+
+    <div class="card">
+      <div id="journalItems" class="muted">No notes saved yet.</div>
+    </div>
+  </div>
+
+  <div id="analyse" class="panel">
+    <div class="card">
+      <label>Chart image</label>
+      <input type="file" id="chartFile" accept="image/*">
+
+      <label>Account size (£)</label>
+      <input id="analyseAccount" type="number" value="4000">
+
+      <label>Risk per trade (%)</label>
+      <input id="analyseRiskPct" type="number" value="1" step="0.1">
+
+      <label>Ticker</label>
+      <input id="analyseTicker" placeholder="TSLA">
+
+      <label>Market status</label>
+      <select id="marketState">
+        <option>S&amp;P above 50 MA</option>
+        <option>S&amp;P below 50 MA</option>
+        <option>Unsure</option>
+      </select>
+
+      <label>Extra notes</label>
+      <textarea id="analyseNotes" placeholder="20 MA, 50 MA and volume visible. Looking for pullback bounce."></textarea>
+
+      <button class="action" onclick="buildPrompt()">Analyse for Entry</button>
+      <button class="small-btn" onclick="copyPrompt()">Copy prompt</button>
+    </div>
+
+    <div class="card">
+      <div id="promptBox" class="codebox">Tap “Analyse for Entry” to generate your chart-analysis prompt.</div>
+    </div>
+  </div>
+
+  <script>
+    function showTab(id, btn) {
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+      btn.classList.add('active');
+    }
+
+    function calcSize() {
+      const account = parseFloat(document.getElementById('account').value);
+      const risk = parseFloat(document.getElementById('risk').value);
+      const entry = parseFloat(document.getElementById('entry').value);
+      const stop = parseFloat(document.getElementById('stop').value);
+      const out = document.getElementById('sizeResult');
+
+      if (!entry || !stop || entry === stop) {
+        out.textContent = 'Enter valid entry and stop values.';
+        return;
+      }
+
+      const stopPct = Math.abs(entry - stop) / entry;
+      const positionValue = risk / stopPct;
+      const shares = positionValue / entry;
+      const accountPct = (positionValue / account) * 100;
+
+      out.innerHTML =
+        'Stop distance: ' + (stopPct * 100).toFixed(2) + '%<br>' +
+        'Position value: £' + positionValue.toFixed(2) + '<br>' +
+        'Units / shares: ' + shares.toFixed(2) + '<br>' +
+        '% of account: ' + accountPct.toFixed(1) + '%';
+    }
+
+    function getWatchlist() {
+      return JSON.parse(localStorage.getItem('pullback_watchlist') || '[]');
+    }
+
+    function saveWatchlist(items) {
+      localStorage.setItem('pullback_watchlist', JSON.stringify(items));
+    }
+
+    let activeFilter = 'all';
+
+    function renderWatchlist() {
+      const container = document.getElementById('watchlistItems');
+      let items = getWatchlist();
+      if (activeFilter !== 'all') items = items.filter(x => x.status === activeFilter);
+
+      if (!items.length) {
+        container.textContent = 'No tickers saved yet.';
+        return;
+      }
+
+      container.innerHTML = items.map((item, i) => {
+        const label = item.status === 'green' ? '🟢 Near Pullback' :
+                      item.status === 'amber' ? '🟡 Watch' : '🔴 Avoid';
+        return '<div class="watch-item"><strong>' + item.ticker + '</strong><br>' +
+               '<span class="signal ' + item.status + '">' + label + '</span><br><br>' +
+               (item.note || '') + '<br><br>' +
+               '<button class="small-btn" onclick="sendToAnalyse(\\'' + item.ticker + '\\')">Analyse</button>' +
+               '<button class="small-btn" onclick="removeWatchItem(' + i + ')">Delete</button></div>';
+      }).join('');
+    }
+
+    function addWatchItem() {
+      const ticker = document.getElementById('wlTicker').value.trim().toUpperCase();
+      const status = document.getElementById('wlStatus').value;
+      const note = document.getElementById('wlNote').value.trim();
+      if (!ticker) return;
+
+      const items = getWatchlist();
+      const existing = items.find(x => x.ticker === ticker);
+      if (existing) {
+        existing.status = status;
+        existing.note = note;
+      } else {
+        items.unshift({ ticker, status, note });
+      }
+
+      saveWatchlist(items);
+      document.getElementById('wlTicker').value = '';
+      document.getElementById('wlNote').value = '';
+      renderWatchlist();
+    }
+
+    function removeWatchItem(index) {
+      const items = getWatchlist();
+      items.splice(index, 1);
+      saveWatchlist(items);
+      renderWatchlist();
+    }
+
+    function setFilter(filter) {
+      activeFilter = filter;
+      renderWatchlist();
+    }
+
+    function loadStarterList() {
+      const starter = [
+        {ticker:'MSFT', status:'amber', note:'Strong trend, wait for cleaner pullback'},
+        {ticker:'AMZN', status:'amber', note:'Watch 20/50 MA support'},
+        {ticker:'TSLA', status:'green', note:'Near pullback zone'},
+        {ticker:'RR.L', status:'green', note:'Check bounce near support'},
+        {ticker:'XOM', status:'amber', note:'Energy leader, wait for dip'},
+        {ticker:'CVX', status:'amber', note:'Strong sector but not at support yet'},
+        {ticker:'UNP', status:'green', note:'Near support zone'},
+        {ticker:'DIS', status:'red', note:'Only if trend improves'}
+      ];
+      saveWatchlist(starter);
+      renderWatchlist();
+    }
+
+    function clearWatchlist() {
+      saveWatchlist([]);
+      renderWatchlist();
+    }
+
+    function sendToAnalyse(ticker) {
+      document.getElementById('analyseTicker').value = ticker;
+      showTab('analyse', document.querySelectorAll('.tab')[5]);
+    }
+
+    function saveJournal() {
+      const ticker = document.getElementById('jtTicker').value.trim().toUpperCase();
+      const status = document.getElementById('jtStatus').value;
+      const notes = document.getElementById('jtNotes').value.trim();
+      const items = JSON.parse(localStorage.getItem('pullback_journal') || '[]');
+      items.unshift({ ticker, status, notes, when: new Date().toLocaleString() });
+      localStorage.setItem('pullback_journal', JSON.stringify(items.slice(0, 20)));
+      renderJournal();
+    }
+
+    function renderJournal() {
+      const items = JSON.parse(localStorage.getItem('pullback_journal') || '[]');
+      const box = document.getElementById('journalItems');
+      if (!items.length) {
+        box.textContent = 'No notes saved yet.';
+        return;
+      }
+      box.innerHTML = items.map(x =>
+        '<div class="watch-item"><strong>' + (x.ticker || 'Untitled') + '</strong> — ' +
+        x.status + '<br><span class="muted">' + x.when + '</span><br><br>' +
+        (x.notes || '') + '</div>'
+      ).join('');
+    }
+
+    function buildPrompt() {
+      const account = parseFloat(document.getElementById('analyseAccount').value) || 4000;
+      const riskPct = parseFloat(document.getElementById('analyseRiskPct').value) || 1;
+      const riskCash = account * riskPct / 100;
+      const ticker = (document.getElementById('analyseTicker').value || 'this stock').toUpperCase();
+      const market = document.getElementById('marketState').value;
+      const extra = document.getElementById('analyseNotes').value.trim();
+
+      const prompt =
+`Analyse this uploaded chart for my Quality Pullback strategy.
+
+Use these rules:
+- Prefer strong stocks in an uptrend
+- Use the 20 MA, 50 MA, and volume if visible
+- I want a pullback near the 20 MA or 50 MA
+- Do not count it as valid unless price is stabilising or bouncing
+- Use previous swing high as the first target area
+- If the setup is unclear, tell me not to trade
+- Explain in plain English and avoid jargon
+
+My account and risk rules:
+- Account size: £${account.toFixed(0)}
+- Max risk per trade: £${riskCash.toFixed(2)} (${riskPct.toFixed(1)}%)
+- After reading the chart, propose an entry, stop, and first target if valid
+- Then calculate position size from the proposed entry and stop based on my max risk
+- If the stop distance makes the trade too wide or unsuitable, say so clearly
+
+Context:
+- Ticker: ${ticker}
+- Market status: ${market}${extra ? '\\n- Extra notes: ' + extra : ''}
+
+Please give me:
+1. Plain-English chart read
+2. Verdict: Watch / Near Entry / Entry / Avoid
+3. Suggested entry
+4. Suggested stop
+5. First target
+6. Position size based on my account and max risk
+7. One-sentence final verdict`;
+
+      document.getElementById('promptBox').textContent = prompt;
+    }
+
+    async function copyPrompt() {
+      try {
+        await navigator.clipboard.writeText(document.getElementById('promptBox').textContent);
+      } catch (e) {
+        alert('Copy failed on this browser. You can still long-press and copy manually.');
+      }
+    }
+
+    renderWatchlist();
+    renderJournal();
+  </script>
+</body>
+</html>
