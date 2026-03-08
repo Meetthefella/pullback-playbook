@@ -277,28 +277,28 @@ function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
 function sma(values, period, index){ if(index+period>values.length) return null; let sum=0; for(let i=index;i<index+period;i++) sum+=values[i].close; return sum/period; }
 function maxHigh(values, start, end){ let m=-Infinity; for(let i=start;i<end;i++) if(values[i]&&values[i].high>m) m=values[i].high; return Number.isFinite(m)?m:null; }
 function analyseSeries(ticker, rows){
-  if(!rows || rows.length < 220) throw new Error('Not enough daily history returned for '+ticker);
+  if(!rows || rows.length < 60) throw new Error('Not enough daily history returned for '+ticker);
   const latest=rows[0], prev=rows[1], prev2=rows[2];
   const close=latest.close, low=latest.low, high=latest.high;
-  const ma20=sma(rows,20,0), ma50=sma(rows,50,0), ma200=sma(rows,200,0), ma50Prev10=sma(rows,50,10), avgVol20=rows.slice(1,21).reduce((a,b)=>a+b.volume,0)/20;
-  const uptrend = close>ma50 && close>ma200 && ma20>ma50 && ma50>ma200 && ma50>ma50Prev10;
+  const ma20=sma(rows,20,0), ma50=sma(rows,50,0), ma50Prev10=sma(rows,50,10), avgVol20=rows.slice(1,21).reduce((a,b)=>a+b.volume,0)/20;
+  if(!Number.isFinite(ma20) || !Number.isFinite(ma50)) throw new Error('Could not calculate the 20 MA and 50 MA for '+ticker);
+  const uptrend = close>ma50 && ma20>ma50 && ma50>ma50Prev10;
   const near20 = Math.abs(close-ma20)/ma20 <= 0.02;
   const near50 = Math.abs(close-ma50)/ma50 <= 0.03;
   const recent5 = rows.slice(0,5);
   const recentLow = Math.min(...recent5.map(r=>r.low));
   const recentRangeAvg = recent5.reduce((a,b)=>a+(b.high-b.low),0)/recent5.length;
   const priorRangeAvg = rows.slice(5,10).reduce((a,b)=>a+(b.high-b.low),0)/5;
-  const stabilising = close >= recentLow*1.01 && recentRangeAvg <= priorRangeAvg*1.08 && latest.low >= Math.min(prev.low, prev2.low)*0.985;
+  const stabilising = close >= recentLow*1.005 && recentRangeAvg <= priorRangeAvg*1.12 && latest.low >= Math.min(prev.low, prev2.low)*0.985;
   const bounce = close > prev.close && close >= latest.open && low >= prev.low*0.985;
   const volume = latest.volume >= avgVol20*0.9 || latest.volume > prev.volume;
   const swingHigh = maxHigh(rows,5,35);
   const roomPct = swingHigh ? ((swingHigh-close)/close)*100 : 0;
-  const roomToHigh = roomPct >= 4;
   const checks = {
     trendStrong: uptrend,
     above50: close>ma50,
-    above200: close>ma200,
-    ma50gt200: ma50>ma200,
+    above200: false,
+    ma50gt200: false,
     near20,
     near50,
     stabilising,
@@ -308,19 +308,27 @@ function analyseSeries(ticker, rows){
     stopDefined: true,
     targetDefined: !!swingHigh
   };
-  let result = scoreAndStatusFromChecks(checks);
-  if(state.marketStatus === 'S&P below 50 MA') result.score = Math.max(0, result.score - 1);
-  if(!uptrend) result.status = 'Avoid';
-  else if((near20 || near50) && stabilising && bounce) result.status = result.score >= 7 ? 'Ready' : 'Near Pullback';
-  else if((near20 || near50) && (stabilising || bounce)) result.status = 'Near Pullback';
-  else if((near20 || near50)) result.status = 'Watch';
+  let score = 0;
+  if(uptrend) score += 3;
+  if(near20 || near50) score += 2;
+  if(stabilising) score += 2;
+  if(bounce) score += 2;
+  if(swingHigh && roomPct >= 4) score += 1;
+  if(state.marketStatus === 'S&P below 50 MA') score = Math.max(0, score - 1);
+  let status = 'Watch';
+  if(!uptrend) status = 'Avoid';
+  else if((near20 || near50) && stabilising && bounce) status = score >= 8 ? 'Ready' : 'Near Pullback';
+  else if((near20 || near50) && (stabilising || bounce)) status = 'Near Pullback';
+  else if(!(near20 || near50)) status = 'Watch';
+  if(score <= 3) status = 'Avoid';
+  const result = {score, status};
   const support = near20 ? ma20 : ma50;
   const stop = Math.min(recentLow, support*0.985);
   let entry = bounce ? high + 0.05 : Math.max(close, support);
   if(entry <= stop) entry = close;
   const target = swingHigh || maxHigh(rows,35,60) || close;
-  const summary = buildAutoSummary({ticker, close, ma20, ma50, ma200, swingHigh, roomPct, checks, result, entry, stop, target});
-  return {ticker, close, ma20, ma50, ma200, swingHigh, roomPct, checks, result, entry, stop, target, summary};
+  const summary = buildAutoSummary({ticker, close, ma20, ma50, swingHigh, roomPct, checks, result, entry, stop, target});
+  return {ticker, close, ma20, ma50, ma200:null, swingHigh, roomPct, checks, result, entry, stop, target, summary};
 }
 function buildAutoSummary(a){
   const loc = a.checks.near20 ? '20 MA' : (a.checks.near50 ? '50 MA' : 'moving averages');
@@ -332,22 +340,25 @@ function buildAutoSummary(a){
 async function fetchAlphaSeries(symbol){
   const apiKey=(state.apiKey||'').trim();
   if(!apiKey) throw new Error('Add your Alpha Vantage API key first.');
-  const url=`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&outputsize=full&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(apiKey)}`;
+  const url=`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&outputsize=compact&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(apiKey)}`;
   const res=await fetch(url);
   if(!res.ok) throw new Error('Request failed for '+symbol);
   const data=await res.json();
   if(data['Error Message']) throw new Error(`Alpha Vantage could not find ${symbol}.`);
   if(data['Note']) throw new Error('Alpha Vantage rate limit hit. Wait a minute and try again, or scan fewer tickers.');
-  const series=data['Time Series (Daily)'];
-  if(!series) throw new Error('No daily series returned for '+symbol);
-  return Object.entries(series).map(([date, row])=>( {
+  if(data['Information']) throw new Error(data['Information']);
+  const series=data['Time Series (Daily)'] || data['Weekly Time Series'] || data['Monthly Time Series'];
+  if(!series) throw new Error('No daily series returned for '+symbol+'. Save the key, then test again.');
+  const rows=Object.entries(series).map(([date, row])=>( {
     date,
     open:Number(row['1. open']),
     high:Number(row['2. high']),
     low:Number(row['3. low']),
     close:Number(row['4. close']),
     volume:Number(row['6. volume'] || row['5. volume'] || 0)
-  })).sort((a,b)=> a.date < b.date ? 1 : -1);
+  })).filter(r=>Number.isFinite(r.close)).sort((a,b)=> a.date < b.date ? 1 : -1);
+  if(rows.length < 60) throw new Error('Not enough daily history returned for '+symbol);
+  return rows;
 }
 async function testApiConnection(){
   saveState();
@@ -418,7 +429,7 @@ function renderCards(){
   }
   const ordered=[...state.cards].sort((a,b)=>b.score-a.score||a.ticker.localeCompare(b.ticker));
   ordered.forEach(card=>{
-    const sourceLabel=card.source==='ai'?'AI import':'Checklist';
+    const sourceLabel=card.source==='ai'?'AI import':(card.source==='alpha'?'Alpha Vantage':'Checklist');
     const marketLabel=card.marketStatus||state.marketStatus;
     const updatedLabel=card.updatedAt?new Date(card.updatedAt).toLocaleString():'';
     const meta=`<div class="tiny">${sourceLabel} • ${marketLabel}${updatedLabel?` • ${updatedLabel}`:''}</div>`;

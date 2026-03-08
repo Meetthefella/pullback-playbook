@@ -1,4 +1,4 @@
-const CACHE = 'pullback-playbook-v3.2';
+const CACHE = 'pullback-playbook-v3.2.2';
 const ASSETS = [
   './',
   './index.html',
