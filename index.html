@@ -82,6 +82,31 @@ GNRC | Near Pullback | 7/10 | Strong trend but needs a cleaner bounce.'></textar
     </div>
   </div>
 
+
+
+  <div class="grid" style="margin-top:14px">
+    <div class="card">
+      <h2 id="apiSettings">2b) API Settings + Auto Analyse</h2>
+      <p class="tiny">Connect Alpha Vantage directly in the app, test the key, then auto-analyse the whole watchlist.</p>
+      <div class="row">
+        <div><label>Data Provider</label><select id="dataProvider"><option value="alphavantage">Alpha Vantage</option></select></div>
+        <div><label>Plan Speed</label><select id="apiPlan"><option value="free">Free tier (slow + safer)</option><option value="paid">Paid tier (faster)</option></select></div>
+      </div>
+      <div style="margin-top:10px"><label>Alpha Vantage API Key</label><input id="apiKey" type="password" placeholder="Paste your API key here" /></div>
+      <div class="actions"><button class="primary" id="saveApiBtn">Save API Key</button><button class="secondary" id="testApiBtn">Test Connection</button><button class="secondary" id="autoAnalyseBtn">Auto Analyse Watchlist</button></div>
+      <div id="apiStatus" class="subtle">No API test run yet.</div>
+    </div>
+
+    <div class="card">
+      <h2>How Auto Analyse Works</h2>
+      <div class="helpbox">
+        The app pulls daily price history for each ticker, then estimates trend strength, pullback location, stabilisation, bounce quality, and room back to the previous swing high.
+        <br><br>
+        On the free Alpha Vantage plan the scan is deliberately slow to avoid rate-limit errors.
+      </div>
+    </div>
+  </div>
+
   <div class="grid" style="margin-top:14px">
     <div class="card">
       <h2 id="resultsSection">3) Ranked Results</h2>
@@ -154,6 +179,8 @@ GNRC | Near Pullback | 7/10 | Strong trend but needs a cleaner bounce.'></textar
 
 <script>
 const $ = id => document.getElementById(id);
+const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
+const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
 const state = {accountSize:4000,maxRisk:40,marketStatus:'S&P above 50 MA',listName:"Today's Scan",tickers:[],cards:[],lastImportRaw:'',apiKey:'',dataProvider:'alphavantage',apiPlan:'free'};
 
@@ -566,25 +593,25 @@ function importResults(){
   $('importStatus').innerHTML=`<span class="ok">Imported ${updated} result${updated===1?'':'s'} to cards.</span>`;
 }
 async function copyText(text){try{await navigator.clipboard.writeText(text)}catch(e){}}
-$('buildBtn').onclick=buildCards;
-$('saveBtn').onclick=()=>{buildCards();saveState()};
-$('loadBtn').onclick=loadState;
-$('clearBtn').onclick=()=>{$('tickerInput').value='';state.tickers=[];state.cards=[];localStorage.setItem(key,JSON.stringify(state));renderCards();};
-$('genWatchPromptBtn').onclick=()=>{buildCards();copyText(generateWatchPrompt())};
-$('copyWatchPromptBtn').onclick=()=>copyText($('watchPromptBox').textContent);
-$('importResultsBtn').onclick=importResults;
-$('saveApiBtn').onclick=()=>{saveState(); $('apiStatus').innerHTML='<span class="ok">API settings saved in this app on this device.</span>';};
-$('testApiBtn').onclick=testApiConnection;
-$('autoAnalyseBtn').onclick=autoAnalyseWatchlist;
-$('clearImportBtn').onclick=()=>{$('importResultsInput').value='';state.lastImportRaw='';$('importStatus').textContent='Pasted AI result cleared.';localStorage.setItem(key,JSON.stringify(state));};
-$('saveReviewBtn').onclick=saveReview;
-$('resetReviewBtn').onclick=resetReview;
-$('calcBtn').onclick=calculate;
-$('genChartPromptBtn').onclick=()=>{calculate();copyText(generateChartPrompt())};
-$('copyChartPromptBtn').onclick=()=>copyText(generateChartPrompt());
-['accountSize','maxRisk','marketStatus','listName','apiKey','dataProvider','apiPlan'].forEach(id=>$(id).addEventListener('change',saveState));
+click('buildBtn', buildCards);
+click('saveBtn', ()=>{buildCards();saveState()});
+click('loadBtn', loadState);
+click('clearBtn', ()=>{$('tickerInput').value='';state.tickers=[];state.cards=[];localStorage.setItem(key,JSON.stringify(state));renderCards();});
+click('genWatchPromptBtn', ()=>{buildCards();copyText(generateWatchPrompt())});
+click('copyWatchPromptBtn', ()=>copyText($('watchPromptBox').textContent));
+click('importResultsBtn', importResults);
+click('saveApiBtn', ()=>{saveState(); $('apiStatus').innerHTML='<span class="ok">API settings saved in this app on this device.</span>';});
+click('testApiBtn', testApiConnection);
+click('autoAnalyseBtn', autoAnalyseWatchlist);
+click('clearImportBtn', ()=>{$('importResultsInput').value='';state.lastImportRaw='';$('importStatus').textContent='Pasted AI result cleared.';localStorage.setItem(key,JSON.stringify(state));});
+click('saveReviewBtn', saveReview);
+click('resetReviewBtn', resetReview);
+click('calcBtn', calculate);
+click('genChartPromptBtn', ()=>{calculate();copyText(generateChartPrompt())});
+click('copyChartPromptBtn', ()=>copyText(generateChartPrompt()));
+['accountSize','maxRisk','marketStatus','listName','apiKey','dataProvider','apiPlan'].forEach(id=>on(id,'change',saveState));
 document.querySelectorAll('.logic').forEach(el=>el.addEventListener('change',refreshReview));
-['entryPrice','stopPrice','targetPrice'].forEach(id=>$(id).addEventListener('input',calculate));
+['entryPrice','stopPrice','targetPrice'].forEach(id=>on(id,'input',calculate));
 loadState();
 generateWatchPrompt();
 generateChartPrompt();
