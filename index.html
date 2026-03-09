@@ -29,6 +29,7 @@
         <a class="tablink" href="#resultsSection">Results</a>
         <a class="tablink" href="#reviewSection">Review</a>
         <a class="tablink" href="#plannerSection">Planner</a>
+        <a class="tablink" href="#diarySection">Diary</a>
       </div>
     </div>
     <div class="card">
@@ -60,6 +61,18 @@
         <div style="align-self:end"><button class="primary" id="addTickerBtn" style="width:100%">Add Ticker</button></div>
       </div>
       <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or paste multiple below.</div>
+      <div class="panelbox" style="margin-top:10px">
+        <div class="quicklisthead">
+          <strong>Watchlist</strong>
+          <span class="tiny">Tap a chip to remove it.</span>
+        </div>
+        <div class="quicklist" id="watchlistQuickList"></div>
+        <div class="quicklisthead" style="margin-top:12px">
+          <strong>Recent Tickers</strong>
+          <span class="tiny">Tap to add back quickly.</span>
+        </div>
+        <div class="quicklist" id="recentTickerList"></div>
+      </div>
       <div style="margin-top:10px"><label>Watchlist Tickers</label><textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea></div>
       <div class="actions">
         <button class="primary" id="buildBtn">Build Cards</button>
@@ -191,6 +204,12 @@
       <div class="actions"><button class="secondary" id="copyChartPromptBtn">Copy Chart Prompt</button></div>
       <div id="chartPromptBox" class="mutebox" style="margin-top:10px">Your chart prompt will appear here.</div>
     </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2 id="diarySection">8) Trade Diary</h2>
+    <p class="tiny">Save analysed setups as local trade records, then edit outcome and lesson learned later.</p>
+    <div id="tradeDiary" class="list"></div>
   </div>
 </div>
 <script src="./app.js"></script>

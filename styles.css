@@ -63,8 +63,21 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
 .dropzone input[type=file]{display:none}
 .thumbwrap{display:flex;align-items:center;gap:10px;margin-top:10px}
 .thumb{width:88px;height:88px;border-radius:12px;border:1px solid var(--line);object-fit:cover;background:#09101d}
+.quicklisthead{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.quicklist{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.quickchip{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:var(--chip);color:var(--text);font-size:.9rem;line-height:1}
+.quickchip button{min-height:36px;padding:8px 10px;border-radius:999px}
+.quickchip.empty{background:transparent;color:var(--muted);border-style:dashed}
+.quickchip.active{background:rgba(52,211,153,.12);border-color:rgba(52,211,153,.35)}
+.quickchip .chiplabel{font-weight:700}
+.quickchip .chipmeta{color:var(--muted);font-size:.78rem}
+.diarycard{display:grid;gap:12px;padding:14px;border:1px solid var(--line);border-radius:16px;background:#0f172a}
+.diaryhead{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.diarymeta{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.diarygrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+button[disabled]{opacity:.55;cursor:not-allowed}
 .promptdetails summary,.responsepanel summary{cursor:pointer;font-weight:700;color:var(--text);margin-bottom:8px}
 .responsegrid{display:grid;gap:10px}
 .responsechips{display:flex;gap:8px;flex-wrap:wrap}
 .inline-status{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-@media (max-width:900px){.hero,.grid,.row,.row3,.stats,.resulthead,.resultbody{grid-template-columns:1fr}}
+@media (max-width:900px){.hero,.grid,.row,.row3,.stats,.resulthead,.resultbody,.diarygrid{grid-template-columns:1fr}}

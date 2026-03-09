@@ -28,6 +28,13 @@ function extractOutputText(payload){
   return '';
 }
 
+function extractOpenAiErrorMessage(payload){
+  if(payload && payload.error && typeof payload.error.message === 'string' && payload.error.message.trim()){
+    return payload.error.message.trim();
+  }
+  return '';
+}
+
 exports.handler = async function handler(event){
   if(event.httpMethod === 'OPTIONS') return jsonResponse(200, {ok:true});
   if(event.httpMethod !== 'POST') return jsonResponse(405, {error:'Method not allowed'});
@@ -62,19 +69,20 @@ exports.handler = async function handler(event){
   }
 
   const instructions = [
-    'You are analysing a Quality Pullback stock setup for a UK retail trader.',
+    'Analyse a Quality Pullback stock setup.',
     'Return JSON only.',
     'Use verdict exactly one of: Watch, Near Entry, Entry, Avoid.',
-    'Use plain English with no jargon-heavy phrasing.',
-    'Respect the supplied market status and fixed risk rules.',
-    'Do not invent chart details when the screenshot is unclear or missing.'
+    'Use plain English.',
+    'Respect market status and risk limits.',
+    'Do not invent chart details.'
   ].join('\n');
 
   const requestBody = {
     model,
     instructions,
     input:[{role:'user', content}],
-    text:{format:{type:'json_object'}}
+    text:{format:{type:'json_object'}},
+    max_output_tokens:300
   };
 
   let upstream;
@@ -99,8 +107,21 @@ exports.handler = async function handler(event){
 
   const upstreamJson = await upstream.json().catch(() => ({}));
   if(!upstream.ok){
-    const message = upstreamJson && upstreamJson.error && upstreamJson.error.message ? upstreamJson.error.message : 'OpenAI request failed.';
-    return jsonResponse(upstream.status, {error:message});
+    const openAiMessage = extractOpenAiErrorMessage(upstreamJson) || 'OpenAI request failed.';
+    console.error('OpenAI API error', {
+      status:upstream.status,
+      model,
+      ticker:String(payload.ticker || ''),
+      message:openAiMessage,
+      error:upstreamJson && upstreamJson.error ? upstreamJson.error : upstreamJson
+    });
+    if(upstream.status === 401){
+      return jsonResponse(401, {error:'OpenAI authentication failed. Check OPENAI_API_KEY on the server.'});
+    }
+    if(upstream.status === 429){
+      return jsonResponse(429, {error:'OpenAI rate limit reached. Retry in a moment.'});
+    }
+    return jsonResponse(upstream.status, {error:openAiMessage});
   }
 
   const text = extractOutputText(upstreamJson);

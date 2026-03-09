@@ -25,7 +25,9 @@ const state = {
   marketStatus:'S&P above 50 MA',
   listName:"Today's Scan",
   tickers:[],
+  recentTickers:[],
   cards:[],
+  tradeDiary:[],
   lastImportRaw:'',
   apiKey:'',
   dataProvider:'alphavantage',
@@ -36,6 +38,17 @@ const state = {
 const uiState = {promptOpen:{},responseOpen:{},loadingTicker:''};
 const MAX_CHART_BYTES = 4 * 1024 * 1024;
 const ANALYSIS_TIMEOUT_MS = 45000;
+const tradingViewConfig = {
+  defaultExchange:'NASDAQ',
+  suffixMap:{
+    '.L':'LSE'
+  },
+  symbolOverrides:{
+    // Example:
+    // 'TSCO':'LSE:TSCO',
+    // 'VOD.L':'LSE:VOD'
+  }
+};
 
 function formatGbp(value){
   return `GBP ${Number(value || 0).toLocaleString()}`;
@@ -76,6 +89,48 @@ function parseTickersDetailed(text){
 
 function parseTickers(text){
   return parseTickersDetailed(text).valid;
+}
+
+function uniqueTickers(values){
+  const out = [];
+  const seen = new Set();
+  (values || []).forEach(value => {
+    const ticker = normalizeTicker(value);
+    if(!ticker || seen.has(ticker) || !validateTickerSymbol(ticker)) return;
+    seen.add(ticker);
+    out.push(ticker);
+  });
+  return out;
+}
+
+function createTradeRecord(values){
+  return {
+    id:`trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    ticker:'',
+    date:new Date().toISOString().slice(0, 10),
+    verdict:'Watch',
+    entry:'',
+    stop:'',
+    firstTarget:'',
+    notes:'',
+    outcome:'',
+    lesson:'',
+    ...values
+  };
+}
+
+function normalizeTradeRecord(record){
+  const normalized = createTradeRecord(record || {});
+  normalized.ticker = normalizeTicker(normalized.ticker);
+  normalized.date = String(normalized.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  normalized.verdict = normalizeImportedStatus(normalized.verdict);
+  normalized.entry = String(normalized.entry || '');
+  normalized.stop = String(normalized.stop || '');
+  normalized.firstTarget = String(normalized.firstTarget || '');
+  normalized.notes = String(normalized.notes || '');
+  normalized.outcome = String(normalized.outcome || '');
+  normalized.lesson = String(normalized.lesson || '');
+  return normalized;
 }
 
 function baseCard(ticker){
@@ -160,7 +215,9 @@ function loadState(){
   }catch(e){}
   state.aiEndpoint = state.aiEndpoint || defaultAiEndpoint;
   state.tickers = parseTickers((state.tickers || []).join('\n'));
+  state.recentTickers = uniqueTickers(state.recentTickers || []);
   state.cards = (state.cards || []).map(normalizeCard).filter(card => card.ticker);
+  state.tradeDiary = (state.tradeDiary || []).map(normalizeTradeRecord);
   $('accountSize').value = state.accountSize;
   $('maxRisk').value = state.maxRisk;
   $('marketStatus').value = state.marketStatus || 'S&P above 50 MA';
@@ -172,7 +229,9 @@ function loadState(){
   $('apiPlan').value = state.apiPlan || 'free';
   $('aiEndpoint').value = state.aiEndpoint || defaultAiEndpoint;
   renderStats();
+  renderTickerQuickLists();
   renderCards();
+  renderTradeDiary();
 }
 
 function renderStats(){
@@ -186,9 +245,134 @@ function updateTickerInputFromState(){
   $('tickerInput').value = (state.tickers || []).join('\n');
 }
 
+function updateRecentTickers(tickers){
+  const fresh = uniqueTickers(tickers);
+  if(!fresh.length) return;
+  state.recentTickers = uniqueTickers([...fresh, ...(state.recentTickers || [])]).slice(0, 12);
+}
+
+function tickerSearchState(){
+  const query = normalizeTicker(($('tickerSearch') && $('tickerSearch').value) || '');
+  if(!query) return {query:'', valid:false, inWatchlist:false, inRecent:false};
+  return {
+    query,
+    valid:validateTickerSymbol(query),
+    inWatchlist:state.tickers.includes(query),
+    inRecent:(state.recentTickers || []).includes(query)
+  };
+}
+
+function renderTickerQuickLists(){
+  const watchlistBox = $('watchlistQuickList');
+  const recentBox = $('recentTickerList');
+  if(!watchlistBox || !recentBox) return;
+  if(!state.tickers.length){
+    watchlistBox.innerHTML = '<div class="quickchip empty">No tickers in the watchlist yet.</div>';
+  }else{
+    watchlistBox.innerHTML = state.tickers.map(ticker => (
+      `<div class="quickchip active"><span class="chiplabel">${escapeHtml(ticker)}</span><button class="danger" data-act="quick-remove" data-ticker="${escapeHtml(ticker)}">Remove</button></div>`
+    )).join('');
+  }
+  const search = tickerSearchState();
+  const recent = uniqueTickers([search.valid && !search.inWatchlist ? search.query : '', ...(state.recentTickers || [])]).slice(0, 12);
+  if(!recent.length){
+    recentBox.innerHTML = '<div class="quickchip empty">Recent tickers will appear here after you add them.</div>';
+  }else{
+    recentBox.innerHTML = recent.map(ticker => {
+      const inWatchlist = state.tickers.includes(ticker);
+      const isSearchMatch = search.query === ticker;
+      const label = isSearchMatch && !inWatchlist ? 'Add now' : (inWatchlist ? 'In watchlist' : 'Add');
+      return `<div class="quickchip ${inWatchlist ? 'active' : ''}"><span class="chiplabel">${escapeHtml(ticker)}</span><button class="${inWatchlist ? 'secondary' : 'primary'}" data-act="quick-add" data-ticker="${escapeHtml(ticker)}" ${inWatchlist ? 'disabled' : ''}>${label}</button></div>`;
+    }).join('');
+  }
+  watchlistBox.querySelectorAll('[data-act="quick-remove"]').forEach(button => {
+    button.onclick = () => removeTicker(button.getAttribute('data-ticker') || '');
+  });
+  recentBox.querySelectorAll('[data-act="quick-add"]').forEach(button => {
+    button.onclick = () => addTicker(button.getAttribute('data-ticker') || '');
+  });
+}
+
 function setStatus(id, html){
   const el = $(id);
   if(el) el.innerHTML = html;
+}
+
+function getTradeRecord(recordId){
+  return (state.tradeDiary || []).find(record => record.id === recordId);
+}
+
+function saveTradeFromCard(ticker){
+  const card = getCard(ticker);
+  if(!card) return;
+  const record = normalizeTradeRecord(createTradeRecord({
+    ticker:card.ticker,
+    verdict:card.lastAnalysis ? card.lastAnalysis.verdict : card.status,
+    entry:card.lastAnalysis && card.lastAnalysis.entry ? card.lastAnalysis.entry : (card.entry || ''),
+    stop:card.lastAnalysis && card.lastAnalysis.stop ? card.lastAnalysis.stop : (card.stop || ''),
+    firstTarget:card.lastAnalysis && card.lastAnalysis.first_target ? card.lastAnalysis.first_target : (card.target || ''),
+    notes:card.notes || card.summary || ''
+  }));
+  state.tradeDiary.unshift(record);
+  state.tradeDiary = state.tradeDiary.slice(0, 100);
+  localStorage.setItem(key, JSON.stringify(state));
+  renderTradeDiary();
+  const diarySection = $('diarySection');
+  if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function updateTradeRecord(recordId, field, value){
+  const record = getTradeRecord(recordId);
+  if(!record) return;
+  if(field === 'ticker') record.ticker = normalizeTicker(value);
+  else if(field === 'verdict') record.verdict = normalizeImportedStatus(value);
+  else record[field] = value;
+  localStorage.setItem(key, JSON.stringify(state));
+}
+
+function deleteTradeRecord(recordId){
+  state.tradeDiary = (state.tradeDiary || []).filter(record => record.id !== recordId);
+  localStorage.setItem(key, JSON.stringify(state));
+  renderTradeDiary();
+}
+
+function renderTradeDiary(){
+  const box = $('tradeDiary');
+  if(!box) return;
+  if(!state.tradeDiary || !state.tradeDiary.length){
+    box.innerHTML = '<div class="summary">No trade records yet. Save an analysed setup from a ticker card.</div>';
+    return;
+  }
+  box.innerHTML = '';
+  state.tradeDiary.forEach(record => {
+    const div = document.createElement('div');
+    div.className = 'diarycard';
+    div.innerHTML = `<div class="diaryhead"><div class="diarymeta"><span class="badge ${statusClass(record.verdict)}">${escapeHtml(record.verdict)}</span><strong>${escapeHtml(record.ticker || 'Ticker')}</strong><span class="tiny">${escapeHtml(record.date || '')}</span></div><button class="danger" data-act="delete-trade">Delete</button></div><div class="diarygrid"><div><label>Date</label><input data-field="date" type="date" value="${escapeHtml(record.date)}" /></div><div><label>Ticker</label><input data-field="ticker" value="${escapeHtml(record.ticker)}" placeholder="AAPL" /></div><div><label>Verdict</label><select data-field="verdict"><option ${record.verdict === 'Watch' ? 'selected' : ''}>Watch</option><option ${record.verdict === 'Near Entry' ? 'selected' : ''}>Near Entry</option><option ${record.verdict === 'Entry' ? 'selected' : ''}>Entry</option><option ${record.verdict === 'Avoid' ? 'selected' : ''}>Avoid</option></select></div><div><label>Outcome</label><select data-field="outcome"><option value="" ${record.outcome === '' ? 'selected' : ''}>Not set</option><option ${record.outcome === 'Open' ? 'selected' : ''}>Open</option><option ${record.outcome === 'Win' ? 'selected' : ''}>Win</option><option ${record.outcome === 'Loss' ? 'selected' : ''}>Loss</option><option ${record.outcome === 'Scratch' ? 'selected' : ''}>Scratch</option><option ${record.outcome === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div></div><div class="diarygrid"><div><label>Entry</label><input data-field="entry" value="${escapeHtml(record.entry)}" placeholder="123.45" /></div><div><label>Stop</label><input data-field="stop" value="${escapeHtml(record.stop)}" placeholder="119.80" /></div><div><label>First Target</label><input data-field="firstTarget" value="${escapeHtml(record.firstTarget)}" placeholder="130.00" /></div><div><label>Lesson Learned</label><input data-field="lesson" value="${escapeHtml(record.lesson)}" placeholder="Wait for cleaner bounce" /></div></div><div><label>Notes</label><textarea data-field="notes" placeholder="Why this setup was worth tracking.">${escapeHtml(record.notes)}</textarea></div>`;
+    div.querySelector('[data-act="delete-trade"]').onclick = () => deleteTradeRecord(record.id);
+    div.querySelectorAll('[data-field]').forEach(field => {
+      field.addEventListener('change', event => updateTradeRecord(record.id, event.target.getAttribute('data-field'), event.target.value));
+      field.addEventListener('input', event => {
+        if(event.target.tagName === 'TEXTAREA' || event.target.getAttribute('data-field') === 'lesson'){
+          updateTradeRecord(record.id, event.target.getAttribute('data-field'), event.target.value);
+        }
+      });
+    });
+    box.appendChild(div);
+  });
+}
+
+function updateTickerSearchStatus(){
+  const search = tickerSearchState();
+  if(!search.query){
+    setStatus('tickerSearchStatus', '<span class="tiny">Add one ticker quickly, or tap a recent symbol below.</span>');
+  }else if(!search.valid){
+    setStatus('tickerSearchStatus', `<span class="badtext">${escapeHtml(search.query)} is not a valid ticker format.</span>`);
+  }else if(search.inWatchlist){
+    setStatus('tickerSearchStatus', `<span class="warntext">${escapeHtml(search.query)} is already in the watchlist.</span>`);
+  }else{
+    setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(search.query)} is ready to add.</span>`);
+  }
+  renderTickerQuickLists();
 }
 
 function buildCards(){
@@ -196,8 +380,10 @@ function buildCards(){
   const parsed = parseTickersDetailed($('tickerInput').value);
   state.tickers = parsed.valid;
   state.cards = parsed.valid.map(ticker => normalizeCard(getCard(ticker) || baseCard(ticker)));
+  updateRecentTickers(parsed.valid);
   updateTickerInputFromState();
   localStorage.setItem(key, JSON.stringify(state));
+  renderTickerQuickLists();
   renderCards();
   generateWatchPrompt();
   const messages = [];
@@ -207,9 +393,9 @@ function buildCards(){
   setStatus('inputStatus', messages.join(' ') || 'No valid tickers yet.');
 }
 
-function addTickerFromSearch(){
+function addTicker(rawTicker){
   const input = $('tickerSearch');
-  const ticker = normalizeTicker(input.value);
+  const ticker = normalizeTicker(rawTicker || (input && input.value));
   if(!ticker){
     setStatus('tickerSearchStatus', '<span class="warntext">Enter a ticker first.</span>');
     return;
@@ -220,17 +406,23 @@ function addTickerFromSearch(){
   }
   if(state.tickers.includes(ticker)){
     setStatus('tickerSearchStatus', `<span class="warntext">${escapeHtml(ticker)} is already in the watchlist.</span>`);
-    input.select();
+    if(input) input.select();
     return;
   }
   state.tickers.push(ticker);
-  state.cards.push(baseCard(ticker));
+  upsertCard(ticker);
+  updateRecentTickers([ticker]);
   updateTickerInputFromState();
+  if(input) input.value = '';
   localStorage.setItem(key, JSON.stringify(state));
+  renderTickerQuickLists();
   renderCards();
   generateWatchPrompt();
-  input.value = '';
   setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`);
+}
+
+function addTickerFromSearch(){
+  addTicker();
 }
 
 function removeTicker(ticker){
@@ -241,8 +433,10 @@ function removeTicker(ticker){
   if($('selectedTicker').value === ticker) resetReview();
   updateTickerInputFromState();
   localStorage.setItem(key, JSON.stringify(state));
+  renderTickerQuickLists();
   renderCards();
   generateWatchPrompt();
+  updateTickerSearchStatus();
 }
 
 function scoreAndStatusFromChecks(checks){
@@ -473,6 +667,23 @@ function checklistText(checks){
   return checklistIds.map(id => `- ${checklistLabels[id]}: ${checks && checks[id] ? 'Yes' : 'No'}`).join('\n');
 }
 
+function compactChecklistText(checks){
+  return [
+    `uptrend=${checks && checks.trendStrong ? 'Y' : 'N'}`,
+    `above50=${checks && checks.above50 ? 'Y' : 'N'}`,
+    `above200=${checks && checks.above200 ? 'Y' : 'N'}`,
+    `ma50gt200=${checks && checks.ma50gt200 ? 'Y' : 'N'}`,
+    `near20=${checks && checks.near20 ? 'Y' : 'N'}`,
+    `near50=${checks && checks.near50 ? 'Y' : 'N'}`,
+    `stabilising=${checks && checks.stabilising ? 'Y' : 'N'}`,
+    `bounce=${checks && checks.bounce ? 'Y' : 'N'}`,
+    `volume=${checks && checks.volume ? 'Y' : 'N'}`,
+    `entryDefined=${checks && checks.entryDefined ? 'Y' : 'N'}`,
+    `stopDefined=${checks && checks.stopDefined ? 'Y' : 'N'}`,
+    `targetDefined=${checks && checks.targetDefined ? 'Y' : 'N'}`
+  ].join(', ');
+}
+
 function buildAnalysisPayload(card){
   const safeCard = normalizeCard(card);
   return {
@@ -493,8 +704,21 @@ function buildAnalysisPayload(card){
 
 function buildTickerPrompt(card){
   const payload = buildAnalysisPayload(card);
-  const chartLine = payload.chartAttached ? `- Chart screenshot attached: Yes (${payload.chartFileName || 'chart image'})` : '- Chart screenshot attached: No';
-  return `Analyse this ticker for my Quality Pullback strategy.\n\nTicker:\n- ${payload.ticker}\n\nMarket status:\n- ${payload.marketStatus}\n\nQuality Pullback strategy rules:\n- Prefer strong stocks in an uptrend\n- Prefer pullbacks near the 20 MA or 50 MA\n- Require stabilisation or a bounce before entry\n- Use the previous swing high as the first target\n- Avoid weak or broken trends\n- Avoid chasing extended price\n- Avoid setups without stabilisation or bounce\n\nChecklist:\n${checklistText(payload.checklist)}\n\nUser notes:\n${payload.notes ? payload.notes : '- No notes added.'}\n\nRisk rules:\n- Account size: ${formatGbp(payload.accountSize)}\n- Max risk per trade: ${formatGbp(payload.maxRisk)}\n\nChart context:\n${chartLine}\n\nTrade plan context:\n- Entry: ${payload.entry || 'Not set'}\n- Stop: ${payload.stop || 'Not set'}\n- First target: ${payload.target || 'Not set'}\n\nReturn JSON only with these keys:\n{\n  "verdict": "Watch | Near Entry | Entry | Avoid",\n  "plain_english_chart_read": "short paragraph",\n  "entry": "price or guidance",\n  "stop": "price or guidance",\n  "first_target": "price or guidance",\n  "risk_per_share": "plain English",\n  "position_size": "plain English based on my max risk",\n  "quality_score": 0,\n  "key_reasons": ["reason"],\n  "risks": ["risk"],\n  "final_verdict": "one sentence"\n}`;
+  const chartValue = payload.chartAttached ? `Y:${payload.chartFileName || 'chart'}` : 'N';
+  const notes = payload.notes ? payload.notes : 'none';
+  return [
+    'Quality Pullback setup. Return JSON only.',
+    'Rules: prefer strong uptrends; pullback near 20MA/50MA; need stabilising or bounce before entry; first target near prior swing high; avoid weak, broken, or extended setups.',
+    `ticker=${payload.ticker}`,
+    `market=${payload.marketStatus}`,
+    `checks=${compactChecklistText(payload.checklist)}`,
+    `notes=${notes}`,
+    `risk=account ${formatGbp(payload.accountSize)}; max_loss ${formatGbp(payload.maxRisk)}`,
+    `chart=${chartValue}`,
+    `plan=entry:${payload.entry || 'na'}; stop:${payload.stop || 'na'}; target:${payload.target || 'na'}`,
+    'keys=verdict, plain_english_chart_read, entry, stop, first_target, risk_per_share, position_size, quality_score, key_reasons, risks, final_verdict',
+    'verdict must be one of Watch, Near Entry, Entry, Avoid.'
+  ].join('\n');
 }
 
 function normalizeImportedStatus(value){
@@ -537,7 +761,27 @@ function formatApproxBytes(bytes){
   return `${Math.ceil(bytes / 1024)} KB`;
 }
 
+function tradingViewSymbolForTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return '';
+  if(tradingViewConfig.symbolOverrides[symbol]) return tradingViewConfig.symbolOverrides[symbol];
+  for(const [suffix, exchange] of Object.entries(tradingViewConfig.suffixMap)){
+    if(symbol.endsWith(suffix)){
+      const baseSymbol = symbol.slice(0, -suffix.length) || symbol;
+      return `${exchange}:${baseSymbol}`;
+    }
+  }
+  return `${tradingViewConfig.defaultExchange}:${symbol}`;
+}
+
+function openTickerChart(ticker){
+  const tvSymbol = tradingViewSymbolForTicker(ticker);
+  if(!tvSymbol) return;
+  window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`, '_blank', 'noopener');
+}
+
 async function analyseSetup(ticker){
+  if(uiState.loadingTicker) return;
   saveState();
   const card = upsertCard(ticker);
   const notesEl = $(`notes-${ticker}`);
@@ -598,7 +842,6 @@ async function analyseSetup(ticker){
 }
 
 function renderAnalysisPanel(card){
-  if(card.lastError && !card.lastResponse) return `<div class="mutebox">${escapeHtml(card.lastError)}</div>`;
   if(!card.lastResponse) return '<div class="tiny">No AI response saved yet.</div>';
   if(card.lastAnalysis){
     const reasons = card.lastAnalysis.key_reasons.length ? card.lastAnalysis.key_reasons.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No key reasons returned.</li>';
@@ -622,14 +865,25 @@ function renderCards(){
     const marketLabel = card.marketStatus || state.marketStatus;
     const updatedLabel = card.updatedAt ? new Date(card.updatedAt).toLocaleString() : '';
     const loading = uiState.loadingTicker === card.ticker;
+    const analysisBusy = !!uiState.loadingTicker;
     const analyseLabel = loading ? 'Analysing...' : (card.lastError ? 'Retry Analysis' : 'Analyse Setup');
     const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>`;
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${card.score}/10</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse">${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button></div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : 'No AI analysis saved yet.'))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${card.score}/10</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button></div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
+    div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(card.ticker);
     div.querySelector('[data-act="load"]').onclick = () => loadCard(card.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeTicker(card.ticker);
-    div.querySelector('[data-act="analyse"]').onclick = () => { if(!loading) analyseSetup(card.ticker); };
+    div.querySelector('[data-act="analyse"]').onclick = () => { if(!uiState.loadingTicker) analyseSetup(card.ticker); };
+    div.querySelector('[data-act="save-trade"]').onclick = () => {
+      const liveCard = upsertCard(card.ticker);
+      const notesEl = $(`notes-${card.ticker}`);
+      if(notesEl) liveCard.notes = notesEl.value;
+      localStorage.setItem(key, JSON.stringify(state));
+      saveTradeFromCard(card.ticker);
+      const statusBox = $(`cardStatus-${card.ticker}`);
+      if(statusBox) statusBox.innerHTML = '<span class="ok">Trade record saved to the diary.</span>';
+    };
     div.querySelector('[data-act="copy-prompt"]').onclick = async () => {
       const liveCard = upsertCard(card.ticker);
       const notesEl = $(`notes-${card.ticker}`);
@@ -857,9 +1111,11 @@ function importResults(){
     card.updatedAt = new Date().toISOString();
     updated += 1;
   });
+  updateRecentTickers(parsed.map(item => item.ticker));
   state.lastImportRaw = raw;
   updateTickerInputFromState();
   localStorage.setItem(key, JSON.stringify(state));
+  renderTickerQuickLists();
   renderCards();
   setStatus('importStatus', `<span class="ok">Imported ${updated} result${updated === 1 ? '' : 's'} to cards.</span>`);
 }
@@ -907,10 +1163,12 @@ click('clearBtn', () => {
   uiState.promptOpen = {};
   uiState.responseOpen = {};
   localStorage.setItem(key, JSON.stringify(state));
+  renderTickerQuickLists();
   renderCards();
   resetReview();
   generateWatchPrompt();
   setStatus('inputStatus', 'Watchlist cleared.');
+  updateTickerSearchStatus();
 });
 click('genWatchPromptBtn', async () => { buildCards(); await copyText(generateWatchPrompt()); });
 click('copyWatchPromptBtn', () => copyText($('watchPromptBox').textContent));
@@ -936,6 +1194,7 @@ on('tickerSearch', 'keydown', event => {
     addTickerFromSearch();
   }
 });
+on('tickerSearch', 'input', updateTickerSearchStatus);
 
 ['accountSize','maxRisk','marketStatus','listName','apiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
 document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', refreshReview));
@@ -943,5 +1202,6 @@ document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', 
 
 registerPwa();
 loadState();
+updateTickerSearchStatus();
 generateWatchPrompt();
 generateChartPrompt();
