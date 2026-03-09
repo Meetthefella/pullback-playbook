@@ -1,7 +1,9 @@
-const CACHE = 'pullback-playbook-v3.2.2';
+const CACHE = 'pullback-playbook-v4.0.0';
 const ASSETS = [
   './',
   './index.html',
+  './styles.css',
+  './app.js',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png'
@@ -25,6 +27,8 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/.netlify/functions/')) return;
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;

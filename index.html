@@ -3,48 +3,43 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pullback Playbook v3</title>
+  <title>Pullback Playbook v4</title>
   <meta name="theme-color" content="#0f172a" />
-  <style>
-    :root{--bg:#0b1220;--panel:#121b2d;--panel2:#0f172a;--line:#24324a;--text:#edf2ff;--muted:#a8b3c7;--accent:#7c9cff;--good:#34d399;--warn:#fbbf24;--bad:#f87171;--chip:#1a2540}
-    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#0b1220,#09101d 45%,#0b1220);color:var(--text);font-family:Inter,system-ui,Arial,sans-serif}
-    .wrap{max-width:1150px;margin:0 auto;padding:18px 14px 28px}.hero,.grid{display:grid;gap:14px}.hero{grid-template-columns:1.3fr .7fr}.grid{grid-template-columns:1fr 1fr}
-    .card{background:rgba(18,27,45,.95);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
-    h1,h2,h3,p{margin:0 0 10px} h1{font-size:1.7rem} h2{font-size:1.05rem} h3{font-size:.92rem;color:var(--muted)} p,label,small{color:var(--muted)}
-    .row,.row3{display:grid;gap:10px}.row{grid-template-columns:1fr 1fr}.row3{grid-template-columns:1fr 1fr 1fr}
-    textarea,input,select{width:100%;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:#0b1220;color:var(--text);font:inherit}
-    textarea{min-height:105px;resize:vertical} button{border:0;padding:11px 14px;border-radius:12px;cursor:pointer;font:inherit;font-weight:700}
-    .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}.primary{background:linear-gradient(135deg,#7c9cff,#8b5cf6);color:#fff}.secondary{background:#1b2742;color:var(--text);border:1px solid var(--line)}.ghost{background:transparent;border:1px dashed var(--line);color:var(--muted)}
-    .pillrow{display:flex;flex-wrap:wrap;gap:8px}.pill{background:var(--chip);border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:6px 10px;font-size:.84rem}
-    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.stat{padding:12px;border-radius:14px;background:var(--panel2);border:1px solid var(--line)}.stat .big{font-size:1.2rem;font-weight:800;color:var(--text)}
-    .result{display:grid;grid-template-columns:78px 1fr auto auto;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:14px;background:#0f172a}
-    .ticker{font-weight:800;letter-spacing:.4px}.badge,.score{padding:6px 10px;border-radius:999px;font-size:.82rem;font-weight:800;white-space:nowrap}
-    .watch{background:rgba(124,156,255,.18);color:#dfe8ff}.near{background:rgba(251,191,36,.18);color:#fde7a0}.ready{background:rgba(52,211,153,.18);color:#c8ffea}.avoid{background:rgba(248,113,113,.18);color:#ffd5d5}
-    .s-low{background:rgba(248,113,113,.18);color:#ffd5d5}.s-mid{background:rgba(251,191,36,.18);color:#fde7a0}.s-hi{background:rgba(52,211,153,.18);color:#c8ffea}
-    .list{display:grid;gap:10px;margin-top:10px}.checks{display:grid;gap:10px}.checkgroup{border:1px solid var(--line);border-radius:14px;padding:12px;background:#0f172a}.checkitem{display:flex;gap:9px;align-items:flex-start;padding:6px 0}
-    .summary{background:#0f172a;border:1px dashed var(--line);border-radius:14px;padding:12px;line-height:1.45}
-    .mutebox{white-space:pre-wrap;background:#0f172a;border:1px dashed var(--line);border-radius:14px;padding:12px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.4}
-    .subtle{margin-top:8px;font-size:.8rem;color:var(--muted)} .ok{color:#c8ffea}.warntext{color:#fde7a0}.badtext{color:#ffd5d5}
-    .tiny{font-size:.86rem;color:var(--muted)}.prog{height:10px;border-radius:999px;background:#0b1220;border:1px solid var(--line);overflow:hidden}.fill{height:100%;width:0;background:linear-gradient(90deg,#7c9cff,#34d399)}
-    .navtabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.tablink{background:#1b2742;color:var(--text);border:1px solid var(--line);padding:8px 12px;border-radius:999px;text-decoration:none;font-size:.85rem}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.split{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}.statusline{margin-top:8px;min-height:20px}.helpbox{background:#0f172a;border:1px dashed var(--line);border-radius:14px;padding:12px;line-height:1.45;color:var(--muted)}
-    @media (max-width:900px){.hero,.grid,.row,.row3,.stats,.result{grid-template-columns:1fr}}
-  </style>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
 <div class="wrap">
   <div class="hero">
     <div class="card">
-      <h1>Pullback Playbook v3</h1>
-      <p>Manual ticker entry, Alpha Vantage auto-analysis, smarter setup scoring, prompt generation with market context, AI result import back into cards, and trade planning built around your £4,000 account and £40 max risk.</p>
-      <div class="pillrow"><span class="pill">Manual tickers</span><span class="pill">Alpha Vantage</span><span class="pill">Auto status</span><span class="pill">AI result import</span><span class="pill">Trade planner</span></div>
-      <div class="navtabs"><a class="tablink" href="#dailyInput">Scan</a><a class="tablink" href="#apiSettings">API Settings</a><a class="tablink" href="#results">Results</a></div>
+      <h1>Pullback Playbook v4</h1>
+      <p>Fast Quality Pullback workflow with validated ticker entry, per-ticker chart upload, in-app OpenAI setup analysis, Alpha Vantage auto analysis, review scoring, and risk planning built around your GBP 4,000 account and GBP 40 max risk.</p>
+      <div class="pillrow">
+        <span class="pill">Validated tickers</span>
+        <span class="pill">Per-card analysis</span>
+        <span class="pill">Chart upload</span>
+        <span class="pill">Alpha Vantage</span>
+        <span class="pill">PWA ready</span>
+      </div>
+      <div class="navtabs">
+        <a class="tablink" href="#dailyInput">Scan</a>
+        <a class="tablink" href="#apiSettings">API</a>
+        <a class="tablink" href="#resultsSection">Results</a>
+        <a class="tablink" href="#reviewSection">Review</a>
+        <a class="tablink" href="#plannerSection">Planner</a>
+      </div>
     </div>
     <div class="card">
       <h2>Trading Parameters</h2>
       <div class="stats">
-        <div class="stat"><div>Account</div><div class="big" id="accountStat">£4,000</div></div>
-        <div class="stat"><div>Max Risk</div><div class="big" id="riskStat">£40</div></div>
+        <div class="stat"><div>Account</div><div class="big" id="accountStat">GBP 4,000</div></div>
+        <div class="stat"><div>Max Risk</div><div class="big" id="riskStat">GBP 40</div></div>
         <div class="stat"><div>Risk %</div><div class="big" id="riskPctStat">1.0%</div></div>
+      </div>
+      <div class="helpbox" style="margin-top:12px">
+        Every generated prompt and AI response includes market status plus your fixed risk rule of GBP 40 max loss per trade.
       </div>
     </div>
   </div>
@@ -53,75 +48,89 @@
     <div class="card">
       <h2 id="dailyInput">1) Daily Ticker Input</h2>
       <div class="row">
-        <div><label>Account Size (£)</label><input id="accountSize" type="number" value="4000" min="1" /></div>
-        <div><label>Max Risk (£)</label><input id="maxRisk" type="number" value="40" min="1" /></div>
+        <div><label>Account Size (GBP)</label><input id="accountSize" type="number" value="4000" min="1" /></div>
+        <div><label>Max Risk (GBP)</label><input id="maxRisk" type="number" value="40" min="1" /></div>
       </div>
       <div class="row" style="margin-top:10px">
-        <div><label>Market Status</label><select id="marketStatus"><option>S&P above 50 MA</option><option>S&P near 50 MA</option><option>S&P below 50 MA</option></select></div>
+        <div><label>Market Status</label><select id="marketStatus"><option>S&amp;P above 50 MA</option><option>S&amp;P near 50 MA</option><option>S&amp;P below 50 MA</option></select></div>
         <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
       </div>
-      <div style="margin-top:10px"><label>Tickers</label><textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea></div>
-      <div class="actions"><button class="primary" id="buildBtn">Build Cards</button><button class="secondary" id="saveBtn">Save List</button><button class="secondary" id="loadBtn">Load Saved</button><button class="ghost" id="clearBtn">Clear</button></div>
-      <div class="tiny">Use one ticker per line or comma-separated. Best for phone workflow.</div>
+      <div class="row" style="margin-top:10px">
+        <div><label>Ticker Search / Add</label><input id="tickerSearch" placeholder="AAPL or BRK.B" /></div>
+        <div style="align-self:end"><button class="primary" id="addTickerBtn" style="width:100%">Add Ticker</button></div>
+      </div>
+      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or paste multiple below.</div>
+      <div style="margin-top:10px"><label>Watchlist Tickers</label><textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea></div>
+      <div class="actions">
+        <button class="primary" id="buildBtn">Build Cards</button>
+        <button class="secondary" id="saveBtn">Save List</button>
+        <button class="secondary" id="loadBtn">Load Saved</button>
+        <button class="ghost" id="clearBtn">Clear</button>
+      </div>
+      <div class="statusline tiny" id="inputStatus">Validation runs when you add or rebuild tickers.</div>
     </div>
 
     <div class="card">
-      <h2>2) Prompt Generator + Result Import</h2>
-      <p class="tiny">Generate a watchlist prompt that includes market status, then paste the chat result back in to update each card automatically.</p>
-      <div class="actions"><button class="primary" id="genWatchPromptBtn">Generate Watchlist Prompt</button><button class="secondary" id="copyWatchPromptBtn">Copy Prompt</button></div>
+      <h2>2) Bulk Watchlist Tools</h2>
+      <p class="tiny">Optional legacy fallback for bulk watchlist review. Per-ticker setup analysis now runs directly inside each ticker card.</p>
+      <div class="actions">
+        <button class="primary" id="genWatchPromptBtn">Generate Watchlist Prompt</button>
+        <button class="secondary" id="copyWatchPromptBtn">Copy Prompt</button>
+      </div>
       <div id="watchPromptBox" class="mutebox" style="margin-top:10px">Your prompt will appear here.</div>
-      <div style="margin-top:12px"><label>Paste AI watchlist result</label><textarea id="importResultsInput" placeholder='Best format:
-[
-  {"ticker":"GNRC","status":"Near Pullback","score":7,"reason":"Strong trend but needs a cleaner bounce."}
-]
-
-Also accepts plain text lines like:
-GNRC | Near Pullback | 7/10 | Strong trend but needs a cleaner bounce.'></textarea></div>
-      <div class="actions"><button class="primary" id="importResultsBtn">Import Results to Cards</button><button class="ghost" id="clearImportBtn">Clear Pasted Result</button></div>
+      <div style="margin-top:12px"><label>Paste Bulk AI Watchlist Result</label><textarea id="importResultsInput" placeholder='[
+  {"ticker":"GNRC","status":"Near Entry","score":7,"reason":"Healthy pullback but wants more confirmation."}
+]'></textarea></div>
+      <div class="actions">
+        <button class="primary" id="importResultsBtn">Import Results to Cards</button>
+        <button class="ghost" id="clearImportBtn">Clear Pasted Result</button>
+      </div>
       <div id="importStatus" class="subtle">No AI results imported yet.</div>
     </div>
   </div>
 
-
-
   <div class="grid" style="margin-top:14px">
     <div class="card">
-      <h2 id="apiSettings">2b) API Settings + Auto Analyse</h2>
-      <p class="tiny">Connect Alpha Vantage directly in the app, test the key, then auto-analyse the whole watchlist.</p>
+      <h2 id="apiSettings">3) API Settings</h2>
       <div class="row">
         <div><label>Data Provider</label><select id="dataProvider"><option value="alphavantage">Alpha Vantage</option></select></div>
         <div><label>Plan Speed</label><select id="apiPlan"><option value="free">Free tier (slow + safer)</option><option value="paid">Paid tier (faster)</option></select></div>
       </div>
-      <div style="margin-top:10px"><label>Alpha Vantage API Key</label><input id="apiKey" type="password" placeholder="Paste your API key here" /></div>
-      <div class="actions"><button class="primary" id="saveApiBtn">Save API Key</button><button class="secondary" id="testApiBtn">Test Connection</button><button class="secondary" id="autoAnalyseBtn">Auto Analyse Watchlist</button></div>
+      <div style="margin-top:10px"><label>Alpha Vantage API Key</label><input id="apiKey" type="password" placeholder="Paste your Alpha Vantage key here" /></div>
+      <div style="margin-top:10px"><label>AI Endpoint URL</label><input id="aiEndpoint" placeholder="/api/analyse-setup or full serverless URL" /></div>
+      <div class="tiny">Use `/api/analyse-setup` on Netlify. If the frontend is on GitHub Pages, paste the full deployed function URL here.</div>
+      <div class="actions">
+        <button class="primary" id="saveApiBtn">Save Settings</button>
+        <button class="secondary" id="testApiBtn">Test Alpha Vantage</button>
+        <button class="secondary" id="autoAnalyseBtn">Auto Analyse Watchlist</button>
+      </div>
       <div id="apiStatus" class="subtle">No API test run yet.</div>
     </div>
 
     <div class="card">
-      <h2>How Auto Analyse Works</h2>
+      <h2>How In-App Analysis Works</h2>
       <div class="helpbox">
-        The app pulls daily price history for each ticker, then estimates trend strength, pullback location, stabilisation, bounce quality, and room back to the previous swing high.
+        Each ticker card builds a structured setup payload with ticker, market status, saved checklist, notes, chart context, and your fixed risk rules.
         <br><br>
-        On the free Alpha Vantage plan the scan is deliberately slow to avoid rate-limit errors.
+        The browser sends that payload to a lightweight serverless endpoint. The endpoint calls the OpenAI Responses API securely using your server-side `OPENAI_API_KEY`, then returns structured analysis back into the card.
       </div>
     </div>
   </div>
 
   <div class="grid" style="margin-top:14px">
     <div class="card">
-      <h2 id="resultsSection">3) Ranked Results</h2>
-      <p class="tiny">Each ticker gets a status, score, and note from either checklist logic or pasted AI results.</p>
+      <h2 id="resultsSection">4) Ranked Results</h2>
+      <p class="tiny">Each ticker card stores notes, chart, saved prompt, and last AI response locally on this device.</p>
       <div id="results" class="list"></div>
     </div>
 
     <div class="card">
-      <h2>4) Setup Review</h2>
+      <h2 id="reviewSection">5) Setup Review</h2>
       <div class="row3">
         <div><label>Ticker</label><input id="selectedTicker" placeholder="PWR" /></div>
         <div><label>Status</label><input id="statusBox" readonly /></div>
         <div><label>Score</label><input id="scoreBox" readonly /></div>
       </div>
-
       <div class="checks" style="margin-top:12px">
         <div class="checkgroup">
           <h3>Trend</h3>
@@ -145,487 +154,45 @@ GNRC | Near Pullback | 7/10 | Strong trend but needs a cleaner bounce.'></textar
           <label class="checkitem"><input type="checkbox" class="logic" id="targetDefined"> Target defined</label>
         </div>
       </div>
-
-      <div style="margin-top:12px"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><strong>Setup Quality</strong><span id="progressText">0 / 10</span></div><div class="prog"><div class="fill" id="progressFill"></div></div></div>
+      <div style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><strong>Setup Quality</strong><span id="progressText">0 / 10</span></div>
+        <div class="prog"><div class="fill" id="progressFill"></div></div>
+      </div>
       <div style="margin-top:12px"><h3>Auto Summary</h3><div class="summary" id="summaryBox">No setup reviewed yet.</div></div>
-      <div class="actions"><button class="primary" id="saveReviewBtn">Save Review to Card</button><button class="secondary" id="resetReviewBtn">Reset Review</button></div>
+      <div class="actions">
+        <button class="primary" id="saveReviewBtn">Save Review to Card</button>
+        <button class="secondary" id="resetReviewBtn">Reset Review</button>
+      </div>
     </div>
   </div>
 
   <div class="grid" style="margin-top:14px">
     <div class="card">
-      <h2>5) Trade Planner</h2>
+      <h2 id="plannerSection">6) Trade Planner</h2>
       <div class="row3">
         <div><label>Entry</label><input id="entryPrice" type="number" step="0.01" /></div>
         <div><label>Stop</label><input id="stopPrice" type="number" step="0.01" /></div>
         <div><label>Target</label><input id="targetPrice" type="number" step="0.01" /></div>
       </div>
-      <div class="actions"><button class="primary" id="calcBtn">Calculate</button><button class="secondary" id="genChartPromptBtn">Generate Chart Prompt</button></div>
+      <div class="actions">
+        <button class="primary" id="calcBtn">Calculate</button>
+        <button class="secondary" id="genChartPromptBtn">Generate Chart Prompt</button>
+      </div>
       <div class="stats" style="margin-top:10px">
-        <div class="stat"><div>Risk / Share</div><div class="big" id="riskPerShare">–</div></div>
-        <div class="stat"><div>Position Size</div><div class="big" id="positionSize">–</div></div>
-        <div class="stat"><div>Reward / Risk</div><div class="big" id="rrValue">–</div></div>
+        <div class="stat"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
+        <div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
+        <div class="stat"><div>Reward / Risk</div><div class="big" id="rrValue">-</div></div>
       </div>
       <div class="tiny" id="calcNote" style="margin-top:10px">Enter entry, stop, and target to calculate size.</div>
     </div>
 
     <div class="card">
-      <h2>6) Chart Prompt</h2>
+      <h2 id="chartPromptSection">7) Chart Prompt</h2>
       <div class="actions"><button class="secondary" id="copyChartPromptBtn">Copy Chart Prompt</button></div>
       <div id="chartPromptBox" class="mutebox" style="margin-top:10px">Your chart prompt will appear here.</div>
     </div>
   </div>
 </div>
-
-<script>
-const $ = id => document.getElementById(id);
-const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
-const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
-const key = 'pullbackPlaybookV3';
-const state = {accountSize:4000,maxRisk:40,marketStatus:'S&P above 50 MA',listName:"Today's Scan",tickers:[],cards:[],lastImportRaw:'',apiKey:'',dataProvider:'alphavantage',apiPlan:'free'};
-
-function saveState(){
-  state.accountSize=Number($('accountSize').value||0);
-  state.maxRisk=Number($('maxRisk').value||0);
-  state.marketStatus=$('marketStatus').value;
-  state.listName=$('listName').value||"Today's Scan";
-  state.apiKey=$('apiKey')?$('apiKey').value.trim():state.apiKey;
-  state.dataProvider=$('dataProvider')?$('dataProvider').value:'alphavantage';
-  state.apiPlan=$('apiPlan')?$('apiPlan').value:'free';
-  localStorage.setItem(key,JSON.stringify(state));
-  renderStats();
-}
-
-function loadState(){
-  try{Object.assign(state,JSON.parse(localStorage.getItem(key)||'{}')||{})}catch(e){}
-  $('accountSize').value=state.accountSize;
-  $('maxRisk').value=state.maxRisk;
-  $('marketStatus').value=state.marketStatus||'S&P above 50 MA';
-  $('listName').value=state.listName||"Today's Scan";
-  $('tickerInput').value=(state.tickers||[]).join('\n');
-  if($('importResultsInput')) $('importResultsInput').value=state.lastImportRaw||'';
-  if($('apiKey')) $('apiKey').value=state.apiKey||'';
-  if($('dataProvider')) $('dataProvider').value=state.dataProvider||'alphavantage';
-  if($('apiPlan')) $('apiPlan').value=state.apiPlan||'free';
-  renderStats();
-  renderCards();
-}
-
-function renderStats(){
-  const pct=state.accountSize?((state.maxRisk/state.accountSize)*100).toFixed(1):'0.0';
-  $('accountStat').textContent=`£${state.accountSize.toLocaleString()}`;
-  $('riskStat').textContent=`£${state.maxRisk.toLocaleString()}`;
-  $('riskPctStat').textContent=`${pct}%`;
-}
-function parseTickers(text){
-  return [...new Set(text.split(/[\n, ]+/).map(x=>x.trim().toUpperCase()).filter(Boolean))];
-}
-function baseCard(ticker){
-  return {ticker,status:'Watch',score:0,summary:'No review saved yet.',checks:{},entry:'',stop:'',target:'',source:'manual',updatedAt:'',marketStatus:'',analysis:null};
-}
-function buildCards(){
-  saveState();
-  state.tickers=parseTickers($('tickerInput').value);
-  state.cards=state.tickers.map(t=>{
-    const ex=(state.cards||[]).find(c=>c.ticker===t);
-    return ex||baseCard(t);
-  });
-  localStorage.setItem(key,JSON.stringify(state));
-  renderCards();
-  generateWatchPrompt();
-}
-function scoreAndStatusFromChecks(checks){
-  const nearMA=!!(checks.near20||checks.near50),trendStrong=!!checks.trendStrong,above50=!!checks.above50,above200=!!checks.above200,ma50gt200=!!checks.ma50gt200,stabilising=!!checks.stabilising,bounce=!!checks.bounce,volume=!!checks.volume,tradePlan=!!(checks.entryDefined&&checks.stopDefined&&checks.targetDefined);
-  let score=0;
-  if(trendStrong)score+=2;
-  if(above50)score+=1;
-  if(above200)score+=1;
-  if(ma50gt200)score+=1;
-  if(nearMA)score+=2;
-  if(stabilising)score+=1;
-  if(bounce)score+=1;
-  if(volume)score+=1;
-  if(tradePlan)score+=1;
-  let status='Watch';
-  const hardFail=!above50||!above200||!nearMA||!trendStrong;
-  if(hardFail)status='Avoid';
-  else if(stabilising&&bounce&&tradePlan)status='Ready';
-  else if(stabilising)status='Near Pullback';
-  return {score,status};
-}
-function buildSummary(checks,status){
-  const nearMA=checks.near20||checks.near50,stabilising=!!checks.stabilising,bounce=!!checks.bounce,trendStrong=!!checks.trendStrong,above50=!!checks.above50,above200=!!checks.above200;
-  if(!trendStrong||!above50||!above200||!nearMA){
-    let reason='The stock does not meet the basic quality pullback rules.';
-    if(!trendStrong)reason+=' Trend quality is not strong enough.';
-    else if(!nearMA)reason+=' Pullback location is not close enough to the 20 MA or 50 MA.';
-    else reason+=' The broader trend structure is not strong enough.';
-    return reason;
-  }
-  let a='Strong uptrend.';
-  let b=checks.near20?' Pullback is near the 20 MA.':' Pullback is near the 50 MA.';
-  let c=' There is no clear stabilisation or bounce yet.';
-  if(stabilising&&!bounce)c=' Price is starting to stabilise, but the bounce is not confirmed yet.';
-  if(stabilising&&bounce&&status==='Ready')c=' Price is stabilising and a bounce is forming. Setup is ready for entry review.';
-  if(stabilising&&bounce&&status!=='Ready')c=' Price is stabilising and a bounce is forming, but the trade plan is not fully defined yet.';
-  return a+b+c;
-}
-function statusClass(status){if(status==='Ready')return'ready';if(status==='Near Pullback')return'near';if(status==='Avoid')return'avoid';return'watch'}
-function scoreClass(score){if(score>=8)return's-hi';if(score>=5)return's-mid';return's-low'}
-function fmtPrice(value){return Number.isFinite(value)?Number(value).toFixed(2):'–'}
-function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
-function sma(values, period, index){ if(index+period>values.length) return null; let sum=0; for(let i=index;i<index+period;i++) sum+=values[i].close; return sum/period; }
-function maxHigh(values, start, end){ let m=-Infinity; for(let i=start;i<end;i++) if(values[i]&&values[i].high>m) m=values[i].high; return Number.isFinite(m)?m:null; }
-function analyseSeries(ticker, rows){
-  if(!rows || rows.length < 60) throw new Error('Not enough daily history returned for '+ticker);
-  const latest=rows[0], prev=rows[1], prev2=rows[2];
-  const close=latest.close, low=latest.low, high=latest.high;
-  const ma20=sma(rows,20,0), ma50=sma(rows,50,0), ma50Prev10=sma(rows,50,10), avgVol20=rows.slice(1,21).reduce((a,b)=>a+b.volume,0)/20;
-  if(!Number.isFinite(ma20) || !Number.isFinite(ma50)) throw new Error('Could not calculate the 20 MA and 50 MA for '+ticker);
-  const uptrend = close>ma50 && ma20>ma50 && ma50>ma50Prev10;
-  const near20 = Math.abs(close-ma20)/ma20 <= 0.02;
-  const near50 = Math.abs(close-ma50)/ma50 <= 0.03;
-  const recent5 = rows.slice(0,5);
-  const recentLow = Math.min(...recent5.map(r=>r.low));
-  const recentRangeAvg = recent5.reduce((a,b)=>a+(b.high-b.low),0)/recent5.length;
-  const priorRangeAvg = rows.slice(5,10).reduce((a,b)=>a+(b.high-b.low),0)/5;
-  const stabilising = close >= recentLow*1.005 && recentRangeAvg <= priorRangeAvg*1.12 && latest.low >= Math.min(prev.low, prev2.low)*0.985;
-  const bounce = close > prev.close && close >= latest.open && low >= prev.low*0.985;
-  const volume = latest.volume >= avgVol20*0.9 || latest.volume > prev.volume;
-  const swingHigh = maxHigh(rows,5,35);
-  const roomPct = swingHigh ? ((swingHigh-close)/close)*100 : 0;
-  const checks = {
-    trendStrong: uptrend,
-    above50: close>ma50,
-    above200: false,
-    ma50gt200: false,
-    near20,
-    near50,
-    stabilising,
-    bounce,
-    volume,
-    entryDefined: true,
-    stopDefined: true,
-    targetDefined: !!swingHigh
-  };
-  let score = 0;
-  if(uptrend) score += 3;
-  if(near20 || near50) score += 2;
-  if(stabilising) score += 2;
-  if(bounce) score += 2;
-  if(swingHigh && roomPct >= 4) score += 1;
-  if(state.marketStatus === 'S&P below 50 MA') score = Math.max(0, score - 1);
-  let status = 'Watch';
-  if(!uptrend) status = 'Avoid';
-  else if((near20 || near50) && stabilising && bounce) status = score >= 8 ? 'Ready' : 'Near Pullback';
-  else if((near20 || near50) && (stabilising || bounce)) status = 'Near Pullback';
-  else if(!(near20 || near50)) status = 'Watch';
-  if(score <= 3) status = 'Avoid';
-  const result = {score, status};
-  const support = near20 ? ma20 : ma50;
-  const stop = Math.min(recentLow, support*0.985);
-  let entry = bounce ? high + 0.05 : Math.max(close, support);
-  if(entry <= stop) entry = close;
-  const target = swingHigh || maxHigh(rows,35,60) || close;
-  const summary = buildAutoSummary({ticker, close, ma20, ma50, swingHigh, roomPct, checks, result, entry, stop, target});
-  return {ticker, close, ma20, ma50, ma200:null, swingHigh, roomPct, checks, result, entry, stop, target, summary};
-}
-function buildAutoSummary(a){
-  const loc = a.checks.near20 ? '20 MA' : (a.checks.near50 ? '50 MA' : 'moving averages');
-  if(a.result.status === 'Avoid') return `Trend is not strong enough for a quality pullback right now. Price is not in the kind of uptrend your rules prefer.`;
-  if(a.result.status === 'Ready') return `Strong uptrend, pullback is sitting near the ${loc}, and price is starting to bounce. First target is the prior swing high around ${fmtPrice(a.target)}.`;
-  if(a.result.status === 'Near Pullback') return `The trend still looks healthy and price is close to the ${loc}, but it needs a little more proof that the pullback has finished.`;
-  return `The stock is worth watching, but the pullback is not quite settled enough yet for a clean entry.`;
-}
-async function fetchAlphaSeries(symbol){
-  const apiKey=(state.apiKey||'').trim();
-  if(!apiKey) throw new Error('Add your Alpha Vantage API key first.');
-  const url=`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&outputsize=compact&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(apiKey)}`;
-  const res=await fetch(url);
-  if(!res.ok) throw new Error('Request failed for '+symbol);
-  const data=await res.json();
-  if(data['Error Message']) throw new Error(`Alpha Vantage could not find ${symbol}.`);
-  if(data['Note']) throw new Error('Alpha Vantage rate limit hit. Wait a minute and try again, or scan fewer tickers.');
-  if(data['Information']) throw new Error(data['Information']);
-  const series=data['Time Series (Daily)'] || data['Weekly Time Series'] || data['Monthly Time Series'];
-  if(!series) throw new Error('No daily series returned for '+symbol+'. Save the key, then test again.');
-  const rows=Object.entries(series).map(([date, row])=>( {
-    date,
-    open:Number(row['1. open']),
-    high:Number(row['2. high']),
-    low:Number(row['3. low']),
-    close:Number(row['4. close']),
-    volume:Number(row['6. volume'] || row['5. volume'] || 0)
-  })).filter(r=>Number.isFinite(r.close)).sort((a,b)=> a.date < b.date ? 1 : -1);
-  if(rows.length < 60) throw new Error('Not enough daily history returned for '+symbol);
-  return rows;
-}
-async function testApiConnection(){
-  saveState();
-  const box=$('apiStatus');
-  box.innerHTML='<span class="warntext">Testing connection…</span>';
-  try{
-    const rows=await fetchAlphaSeries('IBM');
-    box.innerHTML=`<span class="ok">Connected.</span> Pulled ${rows.length} daily bars from Alpha Vantage.`;
-  }catch(err){
-    box.innerHTML=`<span class="badtext">${err.message}</span>`;
-  }
-}
-async function autoAnalyseWatchlist(){
-  buildCards();
-  saveState();
-  const tickers=state.tickers||[];
-  const box=$('apiStatus');
-  if(!tickers.length){ box.innerHTML='<span class="badtext">Add at least one ticker first.</span>'; return; }
-  if(!(state.apiKey||'').trim()){ box.innerHTML='<span class="badtext">Add and save your Alpha Vantage API key first.</span>'; return; }
-  const delay = state.apiPlan === 'free' ? 15000 : 1000;
-  let done=0, failed=0;
-  for(let i=0;i<tickers.length;i++){
-    const ticker=tickers[i];
-    box.innerHTML=`<span class="warntext">Analysing ${ticker} (${i+1}/${tickers.length})…</span> ${done} done, ${failed} failed.`;
-    try{
-      const rows=await fetchAlphaSeries(ticker);
-      const analysis=analyseSeries(ticker, rows);
-      let card=state.cards.find(c=>c.ticker===ticker);
-      if(!card){ card=baseCard(ticker); state.cards.push(card); }
-      card.checks=analysis.checks;
-      card.score=analysis.result.score;
-      card.status=analysis.result.status;
-      card.summary=analysis.summary;
-      card.entry=fmtPrice(analysis.entry);
-      card.stop=fmtPrice(analysis.stop);
-      card.target=fmtPrice(analysis.target);
-      card.source='alpha';
-      card.marketStatus=state.marketStatus;
-      card.updatedAt=new Date().toISOString();
-      card.analysis={close:analysis.close,ma20:analysis.ma20,ma50:analysis.ma50,ma200:analysis.ma200,swingHigh:analysis.swingHigh,roomPct:analysis.roomPct};
-      done+=1;
-      renderCards();
-      localStorage.setItem(key,JSON.stringify(state));
-    }catch(err){
-      failed+=1;
-      let card=state.cards.find(c=>c.ticker===ticker);
-      if(!card){ card=baseCard(ticker); state.cards.push(card); }
-      card.status='Avoid';
-      card.score=0;
-      card.summary=err.message;
-      card.source='alpha';
-      card.marketStatus=state.marketStatus;
-      card.updatedAt=new Date().toISOString();
-      renderCards();
-      localStorage.setItem(key,JSON.stringify(state));
-      if(String(err.message).includes('rate limit')) break;
-    }
-    if(i < tickers.length-1) await sleep(delay);
-  }
-  box.innerHTML=`<span class="ok">Auto analysis finished.</span> ${done} updated, ${failed} failed.`;
-}
-function renderCards(){
-  const box=$('results');
-  box.innerHTML='';
-  if(!state.cards||!state.cards.length){
-    box.innerHTML='<div class="summary">No cards yet. Add tickers and press Build Cards.</div>';
-    return;
-  }
-  const ordered=[...state.cards].sort((a,b)=>b.score-a.score||a.ticker.localeCompare(b.ticker));
-  ordered.forEach(card=>{
-    const sourceLabel=card.source==='ai'?'AI import':(card.source==='alpha'?'Alpha Vantage':'Checklist');
-    const marketLabel=card.marketStatus||state.marketStatus;
-    const updatedLabel=card.updatedAt?new Date(card.updatedAt).toLocaleString():'';
-    const meta=`<div class="tiny">${sourceLabel} • ${marketLabel}${updatedLabel?` • ${updatedLabel}`:''}</div>`;
-    const div=document.createElement('div');
-    div.className='result';
-    div.innerHTML=`<div class="ticker">${card.ticker}</div><div><div>${card.summary}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${card.score}/10</div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${card.status}</span><button class="secondary" data-act="load">Load</button></div>`;
-    div.querySelector('[data-act="load"]').onclick=()=>loadCard(card.ticker);
-    box.appendChild(div);
-  });
-}
-function loadCard(ticker){
-  const card=state.cards.find(c=>c.ticker===ticker);
-  if(!card)return;
-  $('selectedTicker').value=card.ticker;
-  const c=card.checks||{};
-  ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'].forEach(id=>$(id).checked=!!c[id]);
-  $('entryPrice').value=card.entry||'';
-  $('stopPrice').value=card.stop||'';
-  $('targetPrice').value=card.target||'';
-  refreshReview();
-  generateChartPrompt();
-  calculate();
-}
-function currentChecks(){
-  const out={};
-  ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'].forEach(id=>out[id]=$(id).checked);
-  return out;
-}
-function refreshReview(){
-  const checks=currentChecks();
-  const r=scoreAndStatusFromChecks(checks);
-  $('scoreBox').value=`${r.score}/10`;
-  $('statusBox').value=r.status;
-  $('summaryBox').textContent=buildSummary(checks,r.status);
-  $('progressText').textContent=`${r.score} / 10`;
-  $('progressFill').style.width=`${r.score*10}%`;
-}
-function saveReview(){
-  const ticker=$('selectedTicker').value.trim().toUpperCase();
-  if(!ticker)return;
-  const checks=currentChecks();
-  const r=scoreAndStatusFromChecks(checks);
-  const summary=buildSummary(checks,r.status);
-  let card=state.cards.find(c=>c.ticker===ticker);
-  if(!card){
-    card=baseCard(ticker);
-    state.cards.push(card);
-  }
-  card.checks=checks;
-  card.score=r.score;
-  card.status=r.status;
-  card.summary=summary;
-  card.entry=$('entryPrice').value||'';
-  card.stop=$('stopPrice').value||'';
-  card.target=$('targetPrice').value||'';
-  card.source='manual';
-  card.marketStatus=state.marketStatus;
-  card.updatedAt=new Date().toISOString();
-  localStorage.setItem(key,JSON.stringify(state));
-  renderCards();
-}
-function resetReview(){
-  ['selectedTicker','statusBox','scoreBox','entryPrice','stopPrice','targetPrice'].forEach(id=>$(id).value='');
-  ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'].forEach(id=>$(id).checked=false);
-  $('summaryBox').textContent='No setup reviewed yet.';
-  $('progressText').textContent='0 / 10';
-  $('progressFill').style.width='0%';
-  $('chartPromptBox').textContent='Your chart prompt will appear here.';
-  $('calcNote').textContent='Enter entry, stop, and target to calculate size.';
-  ['riskPerShare','positionSize','rrValue'].forEach(id=>$(id).textContent='–');
-}
-function calculate(){
-  saveState();
-  const entry=Number($('entryPrice').value),stop=Number($('stopPrice').value),target=Number($('targetPrice').value);
-  if(!entry||!stop||entry<=stop){
-    $('riskPerShare').textContent='–';
-    $('positionSize').textContent='–';
-    $('rrValue').textContent='–';
-    $('calcNote').textContent='Entry must be above stop for a long setup.';
-    return;
-  }
-  const r=entry-stop,shares=Math.floor(state.maxRisk/r),rr=target&&target>entry?(target-entry)/r:null;
-  $('riskPerShare').textContent=r.toFixed(2);
-  $('positionSize').textContent=shares>0?`${shares} shares`:'0 shares';
-  $('rrValue').textContent=rr?`${rr.toFixed(2)}R`:'–';
-  $('calcNote').textContent=shares<1?'This stop is too wide for your £40 max risk.':'Size is based on your £40 max risk. Check the chart before trading.';
-}
-function generateWatchPrompt(){
-  saveState();
-  const watch=(state.tickers||[]).join('\n')||'(add tickers here)';
-  const prompt=`Analyse these stocks for my Quality Pullback strategy.\n\nRules:\n- Prefer strong stocks in an uptrend\n- Pullback near 20MA or 50MA\n- Must stabilise or bounce\n- Previous swing high = first target\n\nAccount:\n£${state.accountSize} account\n£${state.maxRisk} max risk\n\nMarket status:\n${state.marketStatus}\n\nWatchlist:\n${watch}\n\nReturn ONLY valid JSON in this format:\n[\n  {"ticker":"GNRC","status":"Watch | Near Pullback | Ready | Avoid","score":7,"reason":"One plain-English line."}\n]`;
-  $('watchPromptBox').textContent=prompt;
-  return prompt;
-}
-function generateChartPrompt(){
-  saveState();
-  const ticker=$('selectedTicker').value.trim().toUpperCase()||'[TICKER]';
-  const prompt=`Analyse this uploaded chart for my Quality Pullback strategy.\n\nUse these rules:\n- Prefer strong stocks in an uptrend\n- Use the 20 MA, 50 MA, and volume if visible\n- I want a pullback near the 20 MA or 50 MA\n- Do not count it as valid unless price is stabilising or bouncing\n- Use previous swing high as the first target area\n- If the setup is unclear, tell me not to trade\n- Explain in plain English and avoid jargon\n\nMy account and risk rules:\n- Account size: £${state.accountSize}\n- Max risk per trade: £${state.maxRisk.toFixed(2)}\n\nContext:\n- Ticker: ${ticker}\n- Market status: ${state.marketStatus}\n- Chart file: A chart image is attached.\n\nPlease give me:\n1. Plain-English chart read\n2. Verdict: Watch / Near Entry / Entry / Avoid\n3. Suggested entry\n4. Suggested stop\n5. First target\n6. Position size based on my account and max risk\n7. One-sentence final verdict`;
-  $('chartPromptBox').textContent=prompt;
-  return prompt;
-}
-function normaliseImportedStatus(value){
-  const v=String(value||'').trim().toLowerCase();
-  if(v==='ready'||v==='entry')return 'Ready';
-  if(v==='near pullback'||v==='near entry')return 'Near Pullback';
-  if(v==='avoid')return 'Avoid';
-  return 'Watch';
-}
-function parseImportedResults(raw){
-  const text=String(raw||'').trim();
-  if(!text)return [];
-  try{
-    const parsed=JSON.parse(text);
-    const arr=Array.isArray(parsed)?parsed:[parsed];
-    return arr.map(item=>({
-      ticker:String(item.ticker||'').trim().toUpperCase(),
-      status:normaliseImportedStatus(item.status),
-      score:Math.max(0,Math.min(10,Number(item.score)||0)),
-      reason:String(item.reason||item.summary||'').trim()
-    })).filter(item=>item.ticker);
-  }catch(e){}
-  const lines=text.split(/\n+/).map(line=>line.trim()).filter(Boolean);
-  const results=[];
-  for(const line of lines){
-    const clean=line.replace(/^[-*•]\s*/, '');
-    let parts=clean.split(/\s*\|\s*/);
-    if(parts.length<4) parts=clean.split(/\s*[–—-]\s*/);
-    if(parts.length>=4){
-      const ticker=(parts[0]||'').trim().toUpperCase();
-      const status=normaliseImportedStatus(parts[1]);
-      const scoreMatch=(parts[2]||'').match(/(\d+(?:\.\d+)?)/);
-      const score=scoreMatch?Math.max(0,Math.min(10,Number(scoreMatch[1]))):0;
-      const reason=parts.slice(3).join(' - ').trim();
-      if(ticker) results.push({ticker,status,score,reason});
-      continue;
-    }
-    const match=clean.match(/^([A-Z.\-]{1,10})\s+(.+?)\s+(\d+(?:\.\d+)?)\/?10\s+(.+)$/i);
-    if(match){
-      results.push({ticker:match[1].toUpperCase(),status:normaliseImportedStatus(match[2]),score:Math.max(0,Math.min(10,Number(match[3]))),reason:match[4].trim()});
-    }
-  }
-  return results;
-}
-function importResults(){
-  buildCards();
-  const raw=$('importResultsInput').value;
-  const parsed=parseImportedResults(raw);
-  if(!parsed.length){
-    $('importStatus').innerHTML='<span class="badtext">Nothing usable found.</span> Paste JSON or one ticker per line in the format TICKER | Status | 7/10 | Reason.';
-    return;
-  }
-  let updated=0;
-  parsed.forEach(item=>{
-    let card=state.cards.find(c=>c.ticker===item.ticker);
-    if(!card){
-      card=baseCard(item.ticker);
-      state.cards.push(card);
-      if(!state.tickers.includes(item.ticker))state.tickers.push(item.ticker);
-    }
-    card.status=item.status;
-    card.score=item.score;
-    card.summary=item.reason||'Imported from AI result.';
-    card.source='ai';
-    card.marketStatus=state.marketStatus;
-    card.updatedAt=new Date().toISOString();
-    updated+=1;
-  });
-  state.lastImportRaw=raw;
-  $('tickerInput').value=state.tickers.join('\n');
-  localStorage.setItem(key,JSON.stringify(state));
-  renderCards();
-  $('importStatus').innerHTML=`<span class="ok">Imported ${updated} result${updated===1?'':'s'} to cards.</span>`;
-}
-async function copyText(text){try{await navigator.clipboard.writeText(text)}catch(e){}}
-click('buildBtn', buildCards);
-click('saveBtn', ()=>{buildCards();saveState()});
-click('loadBtn', loadState);
-click('clearBtn', ()=>{$('tickerInput').value='';state.tickers=[];state.cards=[];localStorage.setItem(key,JSON.stringify(state));renderCards();});
-click('genWatchPromptBtn', ()=>{buildCards();copyText(generateWatchPrompt())});
-click('copyWatchPromptBtn', ()=>copyText($('watchPromptBox').textContent));
-click('importResultsBtn', importResults);
-click('saveApiBtn', ()=>{saveState(); $('apiStatus').innerHTML='<span class="ok">API settings saved in this app on this device.</span>';});
-click('testApiBtn', testApiConnection);
-click('autoAnalyseBtn', autoAnalyseWatchlist);
-click('clearImportBtn', ()=>{$('importResultsInput').value='';state.lastImportRaw='';$('importStatus').textContent='Pasted AI result cleared.';localStorage.setItem(key,JSON.stringify(state));});
-click('saveReviewBtn', saveReview);
-click('resetReviewBtn', resetReview);
-click('calcBtn', calculate);
-click('genChartPromptBtn', ()=>{calculate();copyText(generateChartPrompt())});
-click('copyChartPromptBtn', ()=>copyText(generateChartPrompt()));
-['accountSize','maxRisk','marketStatus','listName','apiKey','dataProvider','apiPlan'].forEach(id=>on(id,'change',saveState));
-document.querySelectorAll('.logic').forEach(el=>el.addEventListener('change',refreshReview));
-['entryPrice','stopPrice','targetPrice'].forEach(id=>on(id,'input',calculate));
-loadState();
-generateWatchPrompt();
-generateChartPrompt();
-</script>
+<script src="./app.js"></script>
 </body>
 </html>
