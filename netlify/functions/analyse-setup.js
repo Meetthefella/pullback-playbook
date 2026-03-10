@@ -19,28 +19,25 @@ function jsonResponse(statusCode, body){
 }
 
 function extractOutputText(payload){
-  if(typeof payload.output_text === 'string' && payload.output_text.trim()) return payload.output_text.trim();
-  const messages = Array.isArray(payload.output) ? payload.output : [];
-  for(const message of messages){
-    const content = Array.isArray(message.content) ? message.content : [];
-    for(const item of content){
-      if(item && typeof item.text === 'string' && item.text.trim()) return item.text.trim();
+  if(typeof payload?.output_text === 'string' && payload.output_text.trim()){
+    return payload.output_text.trim();
+  }
+
+  const output = Array.isArray(payload?.output) ? payload.output : [];
+  for(const item of output){
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for(const part of content){
+      if(typeof part?.text === 'string' && part.text.trim()){
+        return part.text.trim();
+      }
     }
   }
+
   return '';
 }
 
-function extractStructuredAnalysis(payload){
-  if(payload && payload.output_parsed && typeof payload.output_parsed === 'object'){
-    return payload.output_parsed;
-  }
-  const text = extractOutputText(payload);
-  if(!text) return null;
-  return JSON.parse(text);
-}
-
 function extractOpenAiErrorMessage(payload){
-  if(payload && payload.error && typeof payload.error.message === 'string' && payload.error.message.trim()){
+  if(typeof payload?.error?.message === 'string' && payload.error.message.trim()){
     return payload.error.message.trim();
   }
   return '';
@@ -76,20 +73,121 @@ async function sendOpenAiRequest(apiKey, requestBody){
 
     const payload = await upstream.json().catch(() => ({}));
     return { upstream, payload };
-  }finally{
+  } finally{
     clearTimeout(timeout);
   }
 }
 
+function stripCodeFences(text){
+  return String(text || '')
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
+}
+
+function extractFirstJsonObject(text){
+  const cleaned = stripCodeFences(text);
+  const start = cleaned.indexOf('{');
+  if(start === -1) return '';
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for(let i = start; i < cleaned.length; i += 1){
+    const ch = cleaned[i];
+
+    if(inString){
+      if(escape){
+        escape = false;
+      }else if(ch === '\\'){
+        escape = true;
+      }else if(ch === '"'){
+        inString = false;
+      }
+      continue;
+    }
+
+    if(ch === '"'){
+      inString = true;
+      continue;
+    }
+
+    if(ch === '{'){
+      depth += 1;
+      continue;
+    }
+
+    if(ch === '}'){
+      depth -= 1;
+      if(depth === 0){
+        return cleaned.slice(start, i + 1);
+      }
+    }
+  }
+
+  return '';
+}
+
+function tryParseJson(text){
+  if(typeof text !== 'string' || !text.trim()) return null;
+
+  const cleaned = stripCodeFences(text);
+
+  try{
+    return JSON.parse(cleaned);
+  }catch(err){}
+
+  const extracted = extractFirstJsonObject(cleaned);
+  if(extracted){
+    try{
+      return JSON.parse(extracted);
+    }catch(err){}
+  }
+
+  return null;
+}
+
+function normaliseString(value, fallback = ''){
+  return typeof value === 'string' ? value : fallback;
+}
+
+function normaliseStringArray(value){
+  return Array.isArray(value) ? value.map(item => String(item)) : [];
+}
+
+function normaliseAnalysis(obj){
+  return {
+    verdict: normaliseString(obj?.verdict, 'Watch'),
+    plain_english_chart_read: normaliseString(obj?.plain_english_chart_read, ''),
+    entry: normaliseString(obj?.entry, ''),
+    stop: normaliseString(obj?.stop, ''),
+    first_target: normaliseString(obj?.first_target, ''),
+    risk_per_share: normaliseString(obj?.risk_per_share, ''),
+    position_size: normaliseString(obj?.position_size, ''),
+    quality_score: Number.isFinite(Number(obj?.quality_score)) ? Number(obj?.quality_score) : 0,
+    key_reasons: normaliseStringArray(obj?.key_reasons),
+    risks: normaliseStringArray(obj?.risks),
+    final_verdict: normaliseString(obj?.final_verdict, '')
+  };
+}
+
 exports.handler = async function handler(event){
-  if(event.httpMethod === 'OPTIONS') return jsonResponse(200, { ok: true });
-  if(event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
+  if(event.httpMethod === 'OPTIONS'){
+    return jsonResponse(200, { ok: true });
+  }
+
+  if(event.httpMethod !== 'POST'){
+    return jsonResponse(405, { error: 'Method not allowed' });
+  }
 
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
   if(!apiKey){
-    return jsonResponse(500, { error: 'OPENAI_API_KEY is not configured on the server.' });
+    return jsonResponse(500, {
+      error: 'OPENAI_API_KEY is not configured on the server.'
+    });
   }
 
   let body;
@@ -104,29 +202,51 @@ exports.handler = async function handler(event){
   const chartRef = body.chartRef || null;
 
   if(!payload.ticker || !payload.marketStatus || !prompt){
-    return jsonResponse(400, { error: 'Missing ticker, market status, or prompt.' });
+    return jsonResponse(400, {
+      error: 'Missing ticker, market status, or prompt.'
+    });
   }
 
   if(prompt.length > 12000){
-    return jsonResponse(400, { error: 'Prompt is too large for the serverless endpoint.' });
+    return jsonResponse(400, {
+      error: 'Prompt is too large for the serverless endpoint.'
+    });
   }
 
-  const content = [{ type: 'input_text', text: prompt }];
+  const tightenedPrompt = [
+    prompt,
+    '',
+    'Return ONLY valid raw JSON.',
+    'Do not include markdown.',
+    'Do not include code fences.',
+    'Do not include commentary before or after the JSON.'
+  ].join('\n');
+
+  const content = [
+    { type: 'input_text', text: tightenedPrompt }
+  ];
 
   if(chartRef && typeof chartRef.dataUrl === 'string' && /^data:image\/(png|jpeg);base64,/i.test(chartRef.dataUrl)){
     if(chartRef.dataUrl.length > MAX_CHART_DATA_URL_LENGTH){
-      return jsonResponse(413, { error: 'Chart image is too large. Upload a smaller PNG or JPG screenshot.' });
+      return jsonResponse(413, {
+        error: 'Chart image is too large. Upload a smaller PNG or JPG screenshot.'
+      });
     }
-    content.push({ type: 'input_image', image_url: chartRef.dataUrl, detail: 'low' });
+
+    content.push({
+      type: 'input_image',
+      image_url: chartRef.dataUrl,
+      detail: 'low'
+    });
   }
 
   const instructions = [
     'Analyse a Quality Pullback stock setup.',
-    'Return JSON only.',
-    'Use verdict exactly one of: Watch, Near Entry, Entry, Avoid.',
     'Use plain English.',
-    'Respect market status and risk limits.',
-    'Do not invent chart details.'
+    'Respect the supplied market status and risk limits.',
+    'Do not invent chart details that are not provided.',
+    'Return exactly one JSON object.',
+    'Verdict must be one of: Watch, Near Entry, Entry, Avoid.'
   ].join('\n');
 
   let upstream;
@@ -139,7 +259,7 @@ exports.handler = async function handler(event){
       buildRequestBody(model, instructions, activeContent)
     ));
   }catch(err){
-    const message = err && err.name === 'AbortError'
+    const message = err?.name === 'AbortError'
       ? 'OpenAI request timed out.'
       : 'Could not reach the OpenAI API.';
     return jsonResponse(502, { error: message });
@@ -147,6 +267,7 @@ exports.handler = async function handler(event){
 
   if(!upstream.ok && upstream.status === 400 && activeContent.length > 1){
     const originalMessage = extractOpenAiErrorMessage(upstreamJson);
+
     console.error('OpenAI API rejected image input, retrying without chart', {
       status: upstream.status,
       model,
@@ -162,7 +283,7 @@ exports.handler = async function handler(event){
         buildRequestBody(model, instructions, activeContent)
       ));
     }catch(err){
-      const message = err && err.name === 'AbortError'
+      const message = err?.name === 'AbortError'
         ? 'OpenAI request timed out.'
         : 'Could not reach the OpenAI API.';
       return jsonResponse(502, { error: message });
@@ -178,7 +299,7 @@ exports.handler = async function handler(event){
         buildRequestBody(model, instructions, activeContent)
       ));
     }catch(err){
-      const message = err && err.name === 'AbortError'
+      const message = err?.name === 'AbortError'
         ? 'OpenAI request timed out.'
         : 'Could not reach the OpenAI API.';
       return jsonResponse(502, { error: message });
@@ -193,7 +314,7 @@ exports.handler = async function handler(event){
       model,
       ticker: String(payload.ticker || ''),
       message: openAiMessage,
-      error: upstreamJson && upstreamJson.error ? upstreamJson.error : upstreamJson
+      error: upstreamJson?.error || upstreamJson
     });
 
     if(upstream.status === 401){
@@ -211,22 +332,23 @@ exports.handler = async function handler(event){
     return jsonResponse(upstream.status, { error: openAiMessage });
   }
 
-  let analysis;
-  try{
-    analysis = extractStructuredAnalysis(upstreamJson);
-  }catch(err){
-    const text = extractOutputText(upstreamJson);
-    console.error('OpenAI API returned unparsable analysis output', {
+  const rawText = extractOutputText(upstreamJson);
+  const parsed = tryParseJson(rawText);
+
+  if(!parsed || typeof parsed !== 'object'){
+    console.error('OpenAI returned unparsable analysis output', {
       model,
       ticker: String(payload.ticker || ''),
-      raw: text || null
+      raw: rawText || null
     });
-    return jsonResponse(502, { error: 'OpenAI returned non-JSON output.', raw: text });
+
+    return jsonResponse(502, {
+      error: 'OpenAI response could not be parsed as JSON.',
+      raw: rawText || null
+    });
   }
 
-  if(!analysis || typeof analysis !== 'object'){
-    return jsonResponse(502, { error: 'OpenAI returned no usable analysis output.' });
-  }
+  const analysis = normaliseAnalysis(parsed);
 
   return jsonResponse(200, {
     ok: true,
