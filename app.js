@@ -601,7 +601,9 @@ function queueTickerSuggestions(){
 
 function buildCards(){
   saveState();
-  const parsed = parseTickersDetailed($('tickerInput').value);
+  const tickerText = ($('tickerInput').value || '').trim();
+  const fallbackText = (state.tickers || []).join('\n');
+  const parsed = parseTickersDetailed(tickerText || fallbackText);
   state.tickers = parsed.valid;
   uiState.selectedScanner = {};
   if(!parsed.valid.length) state.scannerResults = [];
@@ -611,13 +613,14 @@ function buildCards(){
   renderTickerQuickLists();
   renderScannerResults();
   renderCards();
+  renderScannerRulesPanel();
   generateWatchPrompt();
   if(parsed.valid.length) autoAnalyseWatchlist().catch(err => setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`));
   const messages = [];
   if(parsed.valid.length) messages.push(`<span class="ok">${parsed.valid.length} ticker${parsed.valid.length === 1 ? '' : 's'} loaded.</span>`);
   if(parsed.invalid.length) messages.push(`<span class="badtext">Invalid: ${escapeHtml(parsed.invalid.join(', '))}</span>`);
   if(parsed.duplicates.length) messages.push(`<span class="warntext">Duplicates skipped: ${escapeHtml([...new Set(parsed.duplicates)].join(', '))}</span>`);
-  setStatus('inputStatus', messages.join(' ') || 'No valid tickers yet.');
+  setStatus('inputStatus', messages.join(' ') || 'Add at least one valid ticker to the Scanner Universe first.');
 }
 
 function addTicker(rawTicker, meta){
@@ -943,7 +946,9 @@ async function renderScannerRulesPanel(){
   }
   if(debugBox){
     if(!state.scannerDebug.length){
-      debugBox.innerHTML = 'No scan debug data yet.';
+      debugBox.innerHTML = state.tickers.length
+        ? 'No scan debug data yet. Run the Quality Pullback Scanner to see pass/fail detail for the current universe.'
+        : 'No scan debug data yet. Add tickers to the Scanner Universe, then run the Quality Pullback Scanner.';
     }else{
       debugBox.innerHTML = state.scannerDebug.map(item => (
         `${escapeHtml(item.ticker)} | ${escapeHtml(item.passed ? 'PASS' : 'FAIL')} | ${escapeHtml(item.failedRule || 'All rules passed')}\n${escapeHtml((item.breakdown || []).map(entry => `${entry.passed ? 'Y' : 'N'} ${entry.label}`).join(' | '))}`
