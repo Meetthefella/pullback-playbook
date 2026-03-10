@@ -120,6 +120,15 @@ function safeStorageSet(storageKey, value){
   }
 }
 
+function safeStorageRemove(storageKey){
+  try{
+    localStorage.removeItem(storageKey);
+    return true;
+  }catch(error){
+    return false;
+  }
+}
+
 function persistState(){
   safeStorageSet(key, state);
 }
@@ -346,7 +355,7 @@ function loadState(){
   $('marketStatus').value = state.marketStatus || 'S&P above 50 MA';
   $('listName').value = state.listName || "Today's Scan";
   $('tickerInput').value = (state.tickers || []).join('\n');
-  $('importResultsInput').value = state.lastImportRaw || '';
+  if($('importResultsInput')) $('importResultsInput').value = state.lastImportRaw || '';
   if($('apiKey') && !$('apiKey').readOnly) $('apiKey').value = state.apiKey || '';
   if($('dataProvider')) $('dataProvider').value = state.dataProvider || 'fmp';
   if($('apiPlan')) $('apiPlan').value = state.apiPlan || 'free';
@@ -1231,7 +1240,7 @@ function tradingViewSymbolForTicker(ticker){
       return `${exchange}:${baseSymbol}`;
     }
   }
-  return `${tradingViewConfig.defaultExchange}:${symbol}`;
+  return symbol;
 }
 
 function openTickerChart(ticker){
@@ -1574,7 +1583,7 @@ function generateWatchPrompt(){
   const ranked = [...(state.cards || [])].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
   const watch = ranked.length ? ranked.map(card => `${card.ticker} | ${card.status} | ${card.score}/10`).join('\n') : ((state.tickers || []).join('\n') || '(add tickers here)');
   const prompt = `Analyse these stocks for my Quality Pullback strategy.\n\nRules:\n- Prefer strong stocks in an uptrend\n- Pullback near 20MA or 50MA\n- Must stabilise or bounce\n- Previous swing high = first target\n\nAccount:\n${formatGbp(state.accountSize)} account\n${formatGbp(state.maxRisk)} max risk\n\nMarket status:\n${state.marketStatus}\n\nWatchlist:\n${watch}\n\nReturn ONLY valid JSON in this format:\n[\n  {"ticker":"GNRC","status":"Watch | Near Entry | Entry | Avoid","score":7,"reason":"One plain-English line."}\n]`;
-  $('watchPromptBox').textContent = prompt;
+  if($('watchPromptBox')) $('watchPromptBox').textContent = prompt;
   return prompt;
 }
 
@@ -1613,6 +1622,10 @@ function parseImportedResults(raw){
 
 function importResults(){
   buildCards();
+  if(!$('importResultsInput')){
+    setStatus('importStatus', 'Bulk import is no longer shown in the main UI.');
+    return;
+  }
   const raw = $('importResultsInput').value;
   const parsed = parseImportedResults(raw);
   if(!parsed.length){
@@ -1682,6 +1695,40 @@ async function runDueWatchRechecks(){
   await refreshMarketDataForTickers(due);
 }
 
+function resetAllData(){
+  safeStorageRemove(key);
+  safeStorageRemove(marketCacheKey);
+  marketDataCache.clear();
+  state.accountSize = 4000;
+  state.maxRisk = 40;
+  state.marketStatus = 'S&P above 50 MA';
+  state.listName = "Today's Scan";
+  state.tickers = [];
+  state.recentTickers = [];
+  state.cards = [];
+  state.tradeDiary = [];
+  state.lastImportRaw = '';
+  state.apiKey = '';
+  state.dataProvider = 'fmp';
+  state.apiPlan = 'scanner';
+  state.aiEndpoint = defaultAiEndpoint;
+  state.marketDataEndpoint = defaultMarketDataEndpoint;
+  state.symbolMeta = {};
+  uiState.promptOpen = {};
+  uiState.responseOpen = {};
+  uiState.loadingTicker = '';
+  $('tickerInput').value = '';
+  $('tickerSearch').value = '';
+  if($('importResultsInput')) $('importResultsInput').value = '';
+  renderTickerSuggestions([]);
+  loadState();
+  resetReview();
+  generateWatchPrompt();
+  generateChartPrompt();
+  setStatus('inputStatus', '<span class="ok">All local app data and cached market data were reset.</span>');
+  setStatus('apiStatus', 'API settings were reset to defaults.');
+}
+
 function registerPwa(){
   if(!('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
@@ -1732,11 +1779,12 @@ click('clearBtn', () => {
   setStatus('inputStatus', 'Watchlist cleared.');
   updateTickerSearchStatus();
 });
+click('resetAllBtn', resetAllData);
 click('genWatchPromptBtn', async () => { buildCards(); await copyText(generateWatchPrompt()); });
-click('copyWatchPromptBtn', () => copyText($('watchPromptBox').textContent));
+click('copyWatchPromptBtn', () => copyText(($('watchPromptBox') && $('watchPromptBox').textContent) || generateWatchPrompt()));
 click('importResultsBtn', importResults);
 click('clearImportBtn', () => {
-  $('importResultsInput').value = '';
+  if($('importResultsInput')) $('importResultsInput').value = '';
   state.lastImportRaw = '';
   persistState();
   setStatus('importStatus', 'Pasted AI result cleared.');

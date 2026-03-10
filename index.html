@@ -91,28 +91,16 @@
         <button class="secondary" id="saveBtn">Save List</button>
         <button class="secondary" id="loadBtn">Load Saved</button>
         <button class="ghost" id="clearBtn">Clear</button>
+        <button class="danger" id="resetAllBtn">Reset All</button>
       </div>
       <div class="statusline tiny" id="inputStatus">Validation and scanner refresh run when you add or rebuild tickers.</div>
     </div>
 
     <div class="card">
-      <details open>
-        <summary><strong>2) Bulk Watchlist Tools</strong></summary>
-        <p class="tiny" style="margin-top:10px">Optional fallback for bulk watchlist review. The main workflow now comes from the automated scanner and per-ticker analysis cards.</p>
-        <div class="actions">
-          <button class="primary" id="genWatchPromptBtn">Generate Watchlist Prompt</button>
-          <button class="secondary" id="copyWatchPromptBtn">Copy Prompt</button>
-        </div>
-        <div id="watchPromptBox" class="mutebox" style="margin-top:10px">Your prompt will appear here.</div>
-        <div style="margin-top:12px"><label>Paste Bulk AI Watchlist Result</label><textarea id="importResultsInput" placeholder='[
-  {"ticker":"GNRC","status":"Near Entry","score":7,"reason":"Healthy pullback but wants more confirmation."}
-]'></textarea></div>
-        <div class="actions">
-          <button class="primary" id="importResultsBtn">Import Results to Cards</button>
-          <button class="ghost" id="clearImportBtn">Clear Pasted Result</button>
-        </div>
-        <div id="importStatus" class="subtle">No AI results imported yet.</div>
-      </details>
+      <h2>2) Scanner Notes</h2>
+      <div class="helpbox">
+        The scanner shortlist is now the main workflow. Open a chart, save notes, upload a screenshot, and run <strong>Analyse Setup</strong> directly from each ticker card.
+      </div>
     </div>
   </div>
 
