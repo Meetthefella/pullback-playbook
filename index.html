@@ -94,48 +94,63 @@
         <button class="danger" id="resetAllBtn">Reset All</button>
       </div>
       <div class="statusline tiny" id="inputStatus">Validation and scanner refresh run when you add or rebuild tickers.</div>
+      <details style="margin-top:12px">
+        <summary><strong>Active Scanner Rules</strong></summary>
+        <div id="scannerRulesList" class="mutebox" style="margin-top:10px">Loading active scanner rules...</div>
+        <div id="scannerDebugList" class="mutebox" style="margin-top:10px">No scan debug data yet.</div>
+      </details>
     </div>
 
-    <div class="card">
-      <h2>2) Scanner Notes</h2>
-      <div class="helpbox">
-        The scanner shortlist is now the main workflow. Open a chart, save notes, upload a screenshot, and run <strong>Analyse Setup</strong> directly from each ticker card.
-      </div>
+    <div class="card compact-card">
+      <details class="compact-details">
+        <summary><strong>2) Scanner Notes</strong></summary>
+        <div class="helpbox" style="margin-top:10px">
+          The scanner shortlist is now the main workflow. Open a chart, save notes, upload a screenshot, and run <strong>Analyse Setup</strong> directly from each ticker card.
+        </div>
+      </details>
     </div>
   </div>
 
   <div class="grid" style="margin-top:14px">
     <div class="card">
-      <h2 id="apiSettings">3) API Settings</h2>
-      <div class="row">
-        <div><label>Data Provider</label><select id="dataProvider"><option value="fmp">Financial Modeling Prep</option></select></div>
-        <div><label>Scanner Mode</label><select id="apiPlan"><option value="scanner">Quality Pullback Scanner</option></select></div>
-      </div>
-      <div style="margin-top:10px"><label>Market Data Key</label><input id="apiKey" type="text" value="Uses server-side FMP_API_KEY on Netlify" readonly /></div>
-      <div style="margin-top:10px"><label>AI Endpoint URL</label><input id="aiEndpoint" placeholder="/api/analyse-setup or full serverless URL" /></div>
-      <div class="tiny">Use `/api/analyse-setup` on Netlify for AI analysis. Market data runs through `/api/market-data` using the server-side `FMP_API_KEY`.</div>
-      <div class="actions">
-        <button class="primary" id="saveApiBtn">Save Settings</button>
-        <button class="secondary" id="testApiBtn">Test Market Data</button>
-        <button class="secondary" id="autoAnalyseBtn">Run Scanner</button>
-      </div>
-      <div id="apiStatus" class="subtle">No API test run yet.</div>
+      <details>
+        <summary><strong id="apiSettings">3) API Settings</strong></summary>
+        <div class="row" style="margin-top:10px">
+          <div><label>Data Provider</label><select id="dataProvider"><option value="fmp">Financial Modeling Prep</option></select></div>
+          <div><label>Scanner Mode</label><select id="apiPlan"><option value="scanner">Quality Pullback Scanner</option></select></div>
+        </div>
+        <div style="margin-top:10px"><label>Market Data Key</label><input id="apiKey" type="text" value="Uses server-side FMP_API_KEY on Netlify" readonly /></div>
+        <div style="margin-top:10px"><label>AI Endpoint URL</label><input id="aiEndpoint" placeholder="/api/analyse-setup or full serverless URL" /></div>
+        <div class="tiny">Use `/api/analyse-setup` on Netlify for AI analysis. Market data runs through `/api/market-data` using the server-side `FMP_API_KEY`.</div>
+        <div class="actions">
+          <button class="primary" id="saveApiBtn">Save Settings</button>
+          <button class="secondary" id="testApiBtn">Test Market Data</button>
+        </div>
+        <div id="apiStatus" class="subtle">No API test run yet.</div>
+      </details>
     </div>
 
     <div class="card">
-      <h2>How In-App Analysis Works</h2>
-      <div class="helpbox">
-        Each ticker card builds a structured setup payload with ticker, market status, saved checklist, notes, chart context, and your fixed risk rules.
-        <br><br>
-        The browser sends that payload to a lightweight serverless endpoint. The endpoint calls the OpenAI Responses API securely using your server-side `OPENAI_API_KEY`, then returns structured analysis back into the card.
-      </div>
+      <details>
+        <summary><strong>How In-App Analysis Works</strong></summary>
+        <div class="helpbox" style="margin-top:10px">
+          Each ticker card builds a structured setup payload with ticker, market status, saved checklist, notes, chart context, and your fixed risk rules.
+          <br><br>
+          The browser sends that payload to a lightweight serverless endpoint. The endpoint calls the OpenAI Responses API securely using your server-side `OPENAI_API_KEY`, then returns structured analysis back into the card.
+        </div>
+      </details>
     </div>
   </div>
 
   <div class="grid" style="margin-top:14px">
     <div class="card">
       <h2 id="resultsSection">4) Ranked Results</h2>
-      <p class="tiny">Scanner output is grouped into Ready, Near Setup, Watch, and Avoid. Each ticker card stores notes, chart, saved prompt, and last AI response locally on this device.</p>
+      <p class="tiny">The scanner applies your TradingView rules first, then ranks only the passing tickers by suitability. Move the best ideas into ticker cards when you want to review and plan them.</p>
+      <div class="actions" style="margin-top:0">
+        <button class="secondary" id="migrateSelectedBtn">Migrate Selected</button>
+        <button class="secondary" id="migrateTop3Btn">Migrate Top 3</button>
+      </div>
+      <div class="statusline tiny" id="scannerSelectionStatus">Select ranked results to migrate, or use the Top 3 shortcut.</div>
       <div id="results" class="list"></div>
     </div>
 
@@ -181,9 +196,15 @@
     </div>
   </div>
 
+  <div class="card" style="margin-top:14px">
+    <h2>6) Ticker Cards</h2>
+    <p class="tiny">Only migrated scanner results appear here. Use cards for chart upload, AI analysis, trade planning, and diary logging.</p>
+    <div id="cardsList" class="list"></div>
+  </div>
+
   <div class="grid" style="margin-top:14px">
     <div class="card">
-      <h2 id="plannerSection">6) Trade Planner</h2>
+      <h2 id="plannerSection">7) Trade Planner</h2>
       <div class="row3">
         <div><label>Entry</label><input id="entryPrice" type="number" step="0.01" /></div>
         <div><label>Stop</label><input id="stopPrice" type="number" step="0.01" /></div>
@@ -201,9 +222,9 @@
       <div class="tiny" id="calcNote" style="margin-top:10px">Enter entry, stop, and target to calculate size.</div>
     </div>
 
-    <div class="card">
-      <details>
-        <summary><strong id="chartPromptSection">7) Chart Prompt</strong></summary>
+    <div class="card compact-card">
+      <details class="compact-details">
+        <summary><strong id="chartPromptSection">8) Chart Prompt</strong></summary>
         <div class="actions" style="margin-top:10px"><button class="secondary" id="copyChartPromptBtn">Copy Chart Prompt</button></div>
         <div id="chartPromptBox" class="mutebox" style="margin-top:10px">Your chart prompt will appear here.</div>
       </details>
@@ -211,7 +232,13 @@
   </div>
 
   <div class="card" style="margin-top:14px">
-    <h2 id="diarySection">8) Trade Diary</h2>
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+      <h2 id="diarySection" style="margin-bottom:0">9) Trade Diary</h2>
+      <div class="actions" style="margin-top:0">
+        <button class="secondary" id="jumpToDiaryBtn">Diary Section</button>
+        <button class="secondary" id="exportDiaryBtn">Export Diary JSON</button>
+      </div>
+    </div>
     <p class="tiny">Save analysed setups as local trade records, then edit outcome and lesson learned later.</p>
     <div id="tradeDiary" class="list"></div>
   </div>

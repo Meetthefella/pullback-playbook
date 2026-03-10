@@ -1,6 +1,10 @@
 [
   {
     "name": "Quality Pullback Scanner Core",
+    "universe": [
+      "US stocks",
+      "Watchlist-only mode when a watchlist is present"
+    ],
     "rules": [
       { "field": "perf1w", "operator": "<", "value": 0 },
       { "field": "price", "operator": "<", "valueField": "sma20" },

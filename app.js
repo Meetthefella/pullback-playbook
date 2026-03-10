@@ -29,6 +29,7 @@ const state = {
   listName:"Today's Scan",
   tickers:[],
   recentTickers:[],
+  scannerResults:[],
   cards:[],
   tradeDiary:[],
   lastImportRaw:'',
@@ -38,10 +39,11 @@ const state = {
   aiEndpoint:defaultAiEndpoint,
   marketDataEndpoint:defaultMarketDataEndpoint,
   symbolMeta:{},
-  scannerPresetName:'Quality Pullback Scanner Core'
+  scannerPresetName:'Quality Pullback Scanner Core',
+  scannerDebug:[]
 };
 
-const uiState = {promptOpen:{},responseOpen:{},loadingTicker:''};
+const uiState = {promptOpen:{},responseOpen:{},loadingTicker:'',selectedScanner:{}};
 const MAX_CHART_BYTES = 4 * 1024 * 1024;
 const ANALYSIS_TIMEOUT_MS = 45000;
 const MARKET_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -53,6 +55,7 @@ const MARKET_CACHE_SCHEMA_VERSION = 1;
 const marketDataCache = new Map();
 const scannerPresetFallback = [{
   name:'Quality Pullback Scanner Core',
+  universe:['US stocks', 'Watchlist-only mode when a watchlist is present'],
   rules:[
     {field:'perf1w', operator:'<', value:0},
     {field:'price', operator:'<', valueField:'sma20'},
@@ -256,6 +259,7 @@ function baseCard(ticker){
     marketCap:null,
     marketData:null,
     marketDataUpdatedAt:'',
+    scannerUpdatedAt:'',
     perf1w:null,
     perf1m:null,
     perf3m:null,
@@ -288,6 +292,7 @@ function normalizeCard(card){
   normalized.exchange = String(normalized.exchange || '');
   normalized.tradingViewSymbol = String(normalized.tradingViewSymbol || '');
   normalized.marketDataUpdatedAt = String(normalized.marketDataUpdatedAt || '');
+  normalized.scannerUpdatedAt = String(normalized.scannerUpdatedAt || '');
   normalized.marketData = normalized.marketData && typeof normalized.marketData === 'object' ? normalized.marketData : null;
   normalized.watchTracking = normalized.watchTracking && typeof normalized.watchTracking === 'object' ? {
     firstFlaggedAt:String(normalized.watchTracking.firstFlaggedAt || ''),
@@ -303,6 +308,10 @@ function normalizeCard(card){
 
 function getCard(ticker){
   return state.cards.find(card => card.ticker === normalizeTicker(ticker));
+}
+
+function getScannerResult(ticker){
+  return state.scannerResults.find(card => card.ticker === normalizeTicker(ticker));
 }
 
 function upsertCard(ticker){
@@ -347,9 +356,11 @@ function loadState(){
   state.marketDataEndpoint = defaultMarketDataEndpoint;
   state.tickers = parseTickers((state.tickers || []).join('\n'));
   state.recentTickers = uniqueTickers(state.recentTickers || []);
+  state.scannerResults = (state.scannerResults || []).map(normalizeCard).filter(card => card.ticker);
   state.cards = (state.cards || []).map(normalizeCard).filter(card => card.ticker);
   state.tradeDiary = (state.tradeDiary || []).map(normalizeTradeRecord);
   state.symbolMeta = state.symbolMeta && typeof state.symbolMeta === 'object' ? state.symbolMeta : {};
+  state.scannerDebug = Array.isArray(state.scannerDebug) ? state.scannerDebug : [];
   $('accountSize').value = state.accountSize;
   $('maxRisk').value = state.maxRisk;
   $('marketStatus').value = state.marketStatus || 'S&P above 50 MA';
@@ -363,7 +374,9 @@ function loadState(){
   if($('appVersion')) $('appVersion').textContent = APP_VERSION;
   renderStats();
   renderTickerQuickLists();
+  renderScannerResults();
   renderCards();
+  renderScannerRulesPanel();
   renderTradeDiary();
 }
 
@@ -494,6 +507,30 @@ function renderTradeDiary(){
   });
 }
 
+function downloadJsonFile(filename, data){
+  try{
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  }catch(error){
+    return false;
+  }
+}
+
+function exportTradeDiary(){
+  const ok = downloadJsonFile(`pullback-playbook-trade-diary-${todayIsoDate()}.json`, state.tradeDiary || []);
+  setStatus('inputStatus', ok
+    ? '<span class="ok">Trade diary exported as JSON.</span>'
+    : '<span class="warntext">Direct file access is browser-limited here. Use your browser download prompt to save the diary export.</span>');
+}
+
 function updateTickerSearchStatus(){
   const search = tickerSearchState();
   if(!search.query){
@@ -566,15 +603,13 @@ function buildCards(){
   saveState();
   const parsed = parseTickersDetailed($('tickerInput').value);
   state.tickers = parsed.valid;
-  state.cards = parsed.valid.map(ticker => {
-    const card = normalizeCard(getCard(ticker) || baseCard(ticker));
-    applyTickerMetaToCard(card, getStoredTickerMeta(ticker));
-    return card;
-  });
+  uiState.selectedScanner = {};
+  if(!parsed.valid.length) state.scannerResults = [];
   updateRecentTickers(parsed.valid);
   updateTickerInputFromState();
   persistState();
   renderTickerQuickLists();
+  renderScannerResults();
   renderCards();
   generateWatchPrompt();
   if(parsed.valid.length) autoAnalyseWatchlist().catch(err => setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`));
@@ -603,14 +638,13 @@ function addTicker(rawTicker, meta){
   }
   if(meta) rememberTickerMeta(meta);
   state.tickers.push(ticker);
-  const card = upsertCard(ticker);
-  applyTickerMetaToCard(card, getStoredTickerMeta(ticker));
   updateRecentTickers([ticker]);
   updateTickerInputFromState();
   if(input) input.value = '';
   renderTickerSuggestions([]);
   persistState();
   renderTickerQuickLists();
+  renderScannerResults();
   renderCards();
   generateWatchPrompt();
   setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`);
@@ -627,13 +661,16 @@ function addTickerFromSearch(){
 
 function removeTicker(ticker){
   state.tickers = state.tickers.filter(item => item !== ticker);
+  state.scannerResults = state.scannerResults.filter(card => card.ticker !== ticker);
   state.cards = state.cards.filter(card => card.ticker !== ticker);
+  delete uiState.selectedScanner[ticker];
   delete uiState.promptOpen[ticker];
   delete uiState.responseOpen[ticker];
   if($('selectedTicker').value === ticker) resetReview();
   updateTickerInputFromState();
   persistState();
   renderTickerQuickLists();
+  renderScannerResults();
   renderCards();
   generateWatchPrompt();
   updateTickerSearchStatus();
@@ -696,6 +733,11 @@ function statusClass(status){
 }
 
 function scoreClass(score){
+  if(score > 10){
+    if(score >= 75) return 's-hi';
+    if(score >= 55) return 's-mid';
+    return 's-low';
+  }
   if(score >= 8) return 's-hi';
   if(score >= 5) return 's-mid';
   return 's-low';
@@ -715,6 +757,24 @@ function formatPercent(value){
 
 function todayIsoDate(){
   return new Date().toISOString().slice(0, 10);
+}
+
+function relativeAgeLabel(timestamp){
+  const time = Date.parse(timestamp || '');
+  if(!Number.isFinite(time)) return '';
+  const diffMs = Math.max(0, Date.now() - time);
+  const diffMinutes = Math.round(diffMs / 60000);
+  if(diffMinutes < 1) return 'just now';
+  if(diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if(diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function isFreshScanTimestamp(timestamp){
+  const time = Date.parse(timestamp || '');
+  return Number.isFinite(time) && (Date.now() - time) <= MARKET_CACHE_TTL_MS;
 }
 
 function readMarketCache(){
@@ -757,6 +817,17 @@ function applyTickerMetaToCard(card, meta){
   if(meta.companyName) card.companyName = String(meta.companyName);
   if(meta.exchange) card.exchange = String(meta.exchange);
   if(meta.tradingViewSymbol) card.tradingViewSymbol = String(meta.tradingViewSymbol);
+}
+
+function cloneCardData(card){
+  return normalizeCard({
+    ...card,
+    checks:{...(card && card.checks || {})},
+    marketData:card && card.marketData ? {...card.marketData} : null,
+    analysis:card && card.analysis ? safeJsonParse(JSON.stringify(card.analysis), null) : null,
+    chartRef:card && card.chartRef ? {...card.chartRef} : null,
+    watchTracking:card && card.watchTracking ? safeJsonParse(JSON.stringify(card.watchTracking), null) : null
+  });
 }
 
 function getCachedMarketData(symbol, ttlMs = MARKET_CACHE_TTL_MS){
@@ -829,6 +900,58 @@ async function getActiveScannerPreset(){
   return list.find(item => item.name === state.scannerPresetName) || list[0];
 }
 
+function scannerFieldLabel(field){
+  return {
+    exchange:'Exchange',
+    perf1w:'Perf 1W',
+    price:'Price',
+    sma20:'SMA 20',
+    sma50:'SMA 50',
+    sma200:'SMA 200',
+    avgVolume30d:'Avg Volume 30D',
+    marketCap:'Market Cap',
+    rsi14:'RSI 14',
+    perf1m:'Perf 1M',
+    perf3m:'Perf 3M',
+    perf6m:'Perf 6M',
+    perfYtd:'Perf YTD'
+  }[field] || field;
+}
+
+function formatScannerRule(rule){
+  if(!rule || typeof rule !== 'object') return 'Unknown rule';
+  if(rule.label) return rule.label;
+  const right = rule.valueField ? scannerFieldLabel(rule.valueField) : Number(rule.value || 0).toLocaleString();
+  return `${scannerFieldLabel(rule.field)} ${rule.operator} ${right}`;
+}
+
+async function renderScannerRulesPanel(){
+  const rulesBox = $('scannerRulesList');
+  const debugBox = $('scannerDebugList');
+  if(!rulesBox && !debugBox) return;
+  const preset = await getActiveScannerPreset().catch(() => scannerPresetFallback[0]);
+  if(rulesBox){
+    const universe = Array.isArray(preset && preset.universe) ? preset.universe : ['US stocks', 'Watchlist-only mode when a watchlist is present'];
+    const rules = Array.isArray(preset && preset.rules) ? preset.rules : [];
+    rulesBox.innerHTML = [
+      '<strong>Universe</strong>',
+      ...universe.map(item => `- ${escapeHtml(item)}`),
+      '',
+      '<strong>Required filters</strong>',
+      ...rules.map(rule => `- ${escapeHtml(formatScannerRule(rule))}`)
+    ].join('\n');
+  }
+  if(debugBox){
+    if(!state.scannerDebug.length){
+      debugBox.innerHTML = 'No scan debug data yet.';
+    }else{
+      debugBox.innerHTML = state.scannerDebug.map(item => (
+        `${escapeHtml(item.ticker)} | ${escapeHtml(item.passed ? 'PASS' : 'FAIL')} | ${escapeHtml(item.failedRule || 'All rules passed')}\n${escapeHtml((item.breakdown || []).map(entry => `${entry.passed ? 'Y' : 'N'} ${entry.label}`).join(' | '))}`
+      )).join('\n\n');
+    }
+  }
+}
+
 function compareValues(left, operator, right){
   if(!Number.isFinite(left) || !Number.isFinite(right)) return false;
   if(operator === '>') return left > right;
@@ -837,6 +960,28 @@ function compareValues(left, operator, right){
   if(operator === '<=') return left <= right;
   if(operator === '===') return left === right;
   return false;
+}
+
+function isUsExchange(exchange){
+  return ['NASDAQ', 'NYSE', 'AMEX'].includes(String(exchange || '').trim().toUpperCase());
+}
+
+function evaluateScannerRuleDetailed(rule, data){
+  if(!rule || typeof rule !== 'object') return {passed:false, label:'Invalid rule'};
+  if(rule.rules && Array.isArray(rule.rules)){
+    const details = rule.rules.map(item => evaluateScannerRuleDetailed(item, data));
+    const mode = rule.mode === 'any' ? 'any' : 'all';
+    const passed = mode === 'any' ? details.some(item => item.passed) : details.every(item => item.passed);
+    return {passed, label:rule.label || 'Rule group', details};
+  }
+  const left = numericOrNull(data && data[rule.field]);
+  const right = rule.valueField ? numericOrNull(data && data[rule.valueField]) : numericOrNull(rule.value);
+  return {
+    passed:compareValues(left, rule.operator, right),
+    label:formatScannerRule(rule),
+    left,
+    right
+  };
 }
 
 function evaluateScannerRule(rule, data){
@@ -869,10 +1014,106 @@ function isNearLevel(price, level, tolerance){
 }
 
 function buildScannerSummary(result){
-  if(result.status === 'Ready') return `Quality pullback is shaping well near the moving averages with supportive trend and momentum data.`;
-  if(result.status === 'Near Setup') return `Trend and momentum are healthy, but the pullback still needs a cleaner setup signal.`;
-  if(result.status === 'Watch') return `The name stays on watch for follow-up while the pullback develops.`;
-  return `The current market-data scan does not support a quality pullback setup right now.`;
+  if(result.passed) return 'Passed the active TradingView scanner rules.';
+  return `Rejected by ${result.failedRule || 'the scanner rules'}.`;
+}
+
+function clamp(value, min, max){
+  return Math.max(min, Math.min(max, value));
+}
+
+function scoreRange(value, min, max, points){
+  if(!Number.isFinite(value)) return 0;
+  if(max <= min) return 0;
+  return clamp(((value - min) / (max - min)) * points, 0, points);
+}
+
+function deriveTradePlan(data){
+  const price = numericOrNull(data.price);
+  const sma20 = numericOrNull(data.sma20);
+  const sma50 = numericOrNull(data.sma50);
+  if(!Number.isFinite(price) || !Number.isFinite(sma20) || !Number.isFinite(sma50)) return {entry:null, stop:null, target:null, riskPerShare:null, rr:null, positionSize:0};
+  const entry = Math.max(price, sma20);
+  const stop = Math.min(price, sma50 * 0.99);
+  const riskPerShare = entry > stop ? entry - stop : null;
+  const target = Number.isFinite(riskPerShare) ? Math.max(entry + (riskPerShare * 2), entry * 1.05) : null;
+  const rr = Number.isFinite(riskPerShare) && target > entry ? (target - entry) / riskPerShare : null;
+  const positionSize = Number.isFinite(riskPerShare) && riskPerShare > 0 ? Math.floor(state.maxRisk / riskPerShare) : 0;
+  return {entry, stop, target, riskPerShare, rr, positionSize};
+}
+
+function buildSuitabilitySummary(parts){
+  const reasons = [];
+  if(parts.trend >= 22) reasons.push('strong trend');
+  if(parts.pullback >= 22) reasons.push('controlled pullback');
+  if(parts.readiness >= 14) reasons.push('setup looks actionable');
+  if(parts.liquidity >= 7) reasons.push('high liquidity');
+  if(parts.risk >= 7) reasons.push('risk fits account');
+  if(!reasons.length) reasons.push('meets screener but needs more work');
+  return reasons.slice(0, 3).join(', ') + '.';
+}
+
+function scoreSuitability(card, data, checks){
+  const perf3m = numericOrNull(data.perf3m);
+  const perf6m = numericOrNull(data.perf6m);
+  const perfYtd = numericOrNull(data.perfYtd);
+  const perf1w = numericOrNull(data.perf1w);
+  const rsi14 = numericOrNull(data.rsi14);
+  const avgVolume30d = numericOrNull(data.avgVolume30d);
+  const marketCap = numericOrNull(data.marketCap);
+  const price = numericOrNull(data.price);
+  const sma20 = numericOrNull(data.sma20);
+  const sma50 = numericOrNull(data.sma50);
+  const sma200 = numericOrNull(data.sma200);
+  const tradePlan = deriveTradePlan(data);
+  const trend =
+    (checks.above50 ? 5 : 0) +
+    (checks.above200 ? 5 : 0) +
+    (checks.ma50gt200 ? 5 : 0) +
+    scoreRange(perf3m, 5, 25, 5) +
+    scoreRange(perf6m, 10, 40, 5) +
+    scoreRange(perfYtd, 5, 30, 5);
+  const pullbackDepth = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0 ? ((sma20 - price) / sma20) * 100 : null;
+  const pullback =
+    (Number.isFinite(pullbackDepth) ? clamp(12 - Math.abs(pullbackDepth - 2.5) * 4, 0, 12) : 0) +
+    (checks.above50 ? 6 : 0) +
+    (Number.isFinite(rsi14) ? clamp(8 - Math.abs(rsi14 - 50) * 0.5, 0, 8) : 0) +
+    (Number.isFinite(perf1w) ? clamp(4 - Math.abs(perf1w + 2) * 1.2, 0, 4) : 0);
+  const entryDefined = !!(card.entry || Number.isFinite(tradePlan.entry));
+  const stopDefined = !!(card.stop || Number.isFinite(tradePlan.stop));
+  const targetDefined = !!(card.target || Number.isFinite(tradePlan.target));
+  const readiness =
+    (checks.stabilising ? 6 : 0) +
+    (checks.bounce ? 6 : 0) +
+    (entryDefined ? 3 : 0) +
+    (stopDefined ? 3 : 0) +
+    (targetDefined ? 2 : 0);
+  const liquidity =
+    scoreRange(avgVolume30d, 1000000, 10000000, 5) +
+    scoreRange(marketCap, 10000000000, 200000000000, 5);
+  const risk =
+    (tradePlan.positionSize >= 1 ? 4 : 0) +
+    (tradePlan.positionSize >= 10 ? 2 : 0) +
+    (Number.isFinite(tradePlan.rr) ? clamp((tradePlan.rr - 1.5) * 3, 0, 4) : 0);
+  const total = Math.round(clamp(trend, 0, 30) + clamp(pullback, 0, 30) + clamp(readiness, 0, 20) + clamp(liquidity, 0, 10) + clamp(risk, 0, 10));
+  return {
+    total,
+    breakdown:{
+      trend:Math.round(clamp(trend, 0, 30)),
+      pullback:Math.round(clamp(pullback, 0, 30)),
+      readiness:Math.round(clamp(readiness, 0, 20)),
+      liquidity:Math.round(clamp(liquidity, 0, 10)),
+      risk:Math.round(clamp(risk, 0, 10))
+    },
+    tradePlan,
+    summary:buildSuitabilitySummary({
+      trend:clamp(trend, 0, 30),
+      pullback:clamp(pullback, 0, 30),
+      readiness:clamp(readiness, 0, 20),
+      liquidity:clamp(liquidity, 0, 10),
+      risk:clamp(risk, 0, 10)
+    })
+  };
 }
 
 function buildScannerChecks(data){
@@ -921,24 +1162,28 @@ async function evaluateScannerForData(data){
   const preset = await getActiveScannerPreset();
   const safeData = data && typeof data === 'object' ? data : {};
   const rules = Array.isArray(preset && preset.rules) ? preset.rules : [];
-  const ruleResults = rules.map(rule => evaluateScannerRule(rule, safeData));
-  const passedRules = ruleResults.filter(Boolean).length;
+  const universeRule = {
+    passed:isUsExchange(safeData.exchange),
+    label:'Universe: US stocks only'
+  };
+  const ruleResults = rules.map(rule => evaluateScannerRuleDetailed(rule, safeData));
+  const breakdown = [universeRule, ...ruleResults].map(item => ({passed:!!item.passed, label:item.label}));
+  const passedRules = breakdown.filter(item => item.passed).length;
   const {score, checks} = scoreMarketData(safeData);
-  const trendReady = checks.above50 && checks.above200 && checks.ma50gt200;
-  const pullbackReady = checks.near20 || checks.near50;
-  const momentumReady = Number.isFinite(safeData.perf3m) && safeData.perf3m > 5 && Number.isFinite(safeData.perf6m) && safeData.perf6m > 10;
-  const rsiReady = !Number.isFinite(safeData.rsi14) || (safeData.rsi14 >= 40 && safeData.rsi14 <= 60);
-  let status = 'Avoid';
-  if(trendReady && pullbackReady && checks.volume && momentumReady && rsiReady && score >= 7) status = 'Ready';
-  else if(trendReady && score >= 6) status = 'Near Setup';
-  else if(score >= 4 || (ruleResults.length && passedRules >= Math.ceil(ruleResults.length * 0.45))) status = 'Watch';
+  const passed = breakdown.every(item => item.passed);
+  const failedRule = (breakdown.find(item => !item.passed) || {}).label || '';
+  const scaledScore = Math.round((passedRules / Math.max(1, breakdown.length)) * 10);
+  const status = passed ? 'Watch' : 'Avoid';
   const result = {
     status,
-    score,
+    score:passed ? 10 : scaledScore,
     checks,
-    summary:buildScannerSummary({status, score, passedRules}),
+    summary:buildScannerSummary({passed, failedRule}),
     passedRules,
-    totalRules:ruleResults.length
+    totalRules:breakdown.length,
+    passed,
+    failedRule,
+    breakdown
   };
   return result;
 }
@@ -1015,19 +1260,23 @@ function pruneExpiredWatches(){
 }
 
 async function refreshCardMarketData(ticker, options = {}){
-  const card = upsertCard(ticker);
+  const existingCard = getCard(ticker);
+  const existingResult = getScannerResult(ticker);
+  const card = normalizeCard(existingCard || existingResult || baseCard(ticker));
   const meta = getStoredTickerMeta(ticker);
   if(meta) applyTickerMetaToCard(card, meta);
   const data = await fetchMarketData(ticker, options);
   applyMarketDataToCard(card, data);
   const scan = await evaluateScannerForData(data);
   card.checks = scan.checks;
-  card.score = scan.score;
+  const suitability = scan.passed ? scoreSuitability(card, data, scan.checks) : null;
+  card.score = suitability ? suitability.total : scan.score;
   card.status = scan.status;
-  card.summary = scan.summary;
+  card.summary = suitability ? suitability.summary : scan.summary;
   card.source = 'scanner';
   card.marketStatus = state.marketStatus;
   card.updatedAt = new Date().toISOString();
+  card.scannerUpdatedAt = card.updatedAt;
   if(data.__error){
     card.lastError = data.__error;
   }
@@ -1044,41 +1293,81 @@ async function refreshCardMarketData(ticker, options = {}){
     perfYtd:data.perfYtd,
     rsi14:data.rsi14,
     passedRules:scan.passedRules,
-    totalRules:scan.totalRules
+    totalRules:scan.totalRules,
+    breakdown:scan.breakdown,
+    failedRule:scan.failedRule,
+    passed:scan.passed,
+    suitability:suitability ? suitability.breakdown : null
   };
-  updateWatchTracking(card);
-  return card;
+  if(suitability){
+    if(!card.entry && Number.isFinite(suitability.tradePlan.entry)) card.entry = suitability.tradePlan.entry.toFixed(2);
+    if(!card.stop && Number.isFinite(suitability.tradePlan.stop)) card.stop = suitability.tradePlan.stop.toFixed(2);
+    if(!card.target && Number.isFinite(suitability.tradePlan.target)) card.target = suitability.tradePlan.target.toFixed(2);
+  }
+  if(existingCard) updateWatchTracking(card);
+  return {card, scan};
 }
 
 async function refreshMarketDataForTickers(tickers, options = {}){
   const unique = uniqueTickers(tickers);
-  if(!unique.length) return {done:0, failed:0};
+  if(!unique.length) return {done:0, failed:0, rejected:0};
+  state.scannerDebug = [];
   let done = 0;
   let failed = 0;
+  let rejected = 0;
+  const nextResults = [];
+  const scannerDebug = [];
   for(const ticker of unique){
     try{
-      await refreshCardMarketData(ticker, options);
-      done += 1;
+      const {card, scan} = await refreshCardMarketData(ticker, options);
+      const existingCard = getCard(card.ticker);
+      const debugEntry = {
+        ticker:card.ticker,
+        passed:!!scan.passed,
+        failedRule:scan.failedRule || '',
+        breakdown:scan.breakdown || []
+      };
+      scannerDebug.push(debugEntry);
+      if(existingCard){
+        const preserved = {
+          notes:existingCard.notes,
+          chartRef:existingCard.chartRef,
+          lastPrompt:existingCard.lastPrompt,
+          lastResponse:existingCard.lastResponse,
+          lastError:existingCard.lastError,
+          lastAnalysis:existingCard.lastAnalysis,
+          source:existingCard.source === 'manual' ? 'manual' : card.source
+        };
+        Object.assign(existingCard, cloneCardData(card), preserved);
+      }
+      if(scan.passed){
+        nextResults.push(card);
+        done += 1;
+      }else{
+        rejected += 1;
+      }
       persistState();
+      renderScannerResults();
       renderCards();
     }catch(err){
-      const card = upsertCard(ticker);
-      card.status = 'Avoid';
-      card.score = 0;
-      card.summary = String(err && err.message || 'Market-data scan failed.');
-      card.source = 'scanner';
-      card.updatedAt = new Date().toISOString();
-      card.lastError = 'Market data is unavailable right now. The scanner skipped this ticker.';
+      scannerDebug.push({
+        ticker:normalizeTicker(ticker),
+        passed:false,
+        failedRule:String(err && err.message || 'Market-data scan failed.'),
+        breakdown:[{passed:false, label:String(err && err.message || 'Market-data scan failed.')}]
+      });
       failed += 1;
-      persistState();
-      renderCards();
     }
   }
+  state.scannerResults = nextResults.sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker));
+  state.scannerDebug = scannerDebug;
   pruneExpiredWatches();
   persistState();
   renderTickerQuickLists();
+  renderScannerResults();
   renderCards();
-  return {done, failed};
+  renderScannerRulesPanel();
+  return {done, failed, rejected};
 }
 
 async function testApiConnection(){
@@ -1101,7 +1390,7 @@ async function autoAnalyseWatchlist(options = {}){
   }
   setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${tickers.length} ticker${tickers.length === 1 ? '' : 's'}...</span>`);
   const result = await refreshMarketDataForTickers(tickers, options);
-  setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} updated, ${result.failed} failed.`);
+  setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} passed, ${result.rejected} rejected, ${result.failed} failed.`);
 }
 
 function currentChecks(){
@@ -1336,11 +1625,104 @@ function watchTrackingText(card){
   return `Watching from ${escapeHtml(card.watchTracking.firstFlaggedAt || '-')}, expires ${escapeHtml(card.watchTracking.expiryDate || '-')} (${checks} daily checks logged).`;
 }
 
-function renderCards(){
+function migrateScannerResultToCard(ticker){
+  const result = getScannerResult(ticker);
+  if(!result) return;
+  let card = getCard(ticker);
+  if(card){
+    Object.assign(card, cloneCardData(result), {
+      notes:card.notes,
+      chartRef:card.chartRef,
+      lastPrompt:card.lastPrompt,
+      lastResponse:card.lastResponse,
+      lastError:card.lastError,
+      lastAnalysis:card.lastAnalysis,
+      source:card.source || 'scanner'
+    });
+  }else{
+    card = cloneCardData(result);
+    state.cards.push(card);
+  }
+  if(!state.tickers.includes(card.ticker)) state.tickers.push(card.ticker);
+  delete uiState.selectedScanner[card.ticker];
+  updateTickerInputFromState();
+  persistState();
+  renderTickerQuickLists();
+  renderScannerResults();
+  renderCards();
+}
+
+function selectedScannerTickers(){
+  return uniqueTickers(Object.keys(uiState.selectedScanner || {}).filter(ticker => uiState.selectedScanner[ticker]));
+}
+
+function updateScannerSelectionStatus(){
+  const selectedCount = selectedScannerTickers().length;
+  const resultCount = (state.scannerResults || []).length;
+  if(!$('scannerSelectionStatus')) return;
+  if(!resultCount){
+    setStatus('scannerSelectionStatus', 'Run the scanner to build ranked results first.');
+    return;
+  }
+  if(selectedCount){
+    setStatus('scannerSelectionStatus', `<span class="ok">${selectedCount} ranked result${selectedCount === 1 ? '' : 's'} selected.</span>`);
+    return;
+  }
+  setStatus('scannerSelectionStatus', `Select ranked results to migrate, or use the Top ${Math.min(3, resultCount)} shortcut.`);
+}
+
+function migrateSelectedScannerResults(limit){
+  const pool = limit ? (state.scannerResults || []).slice(0, limit).map(card => card.ticker) : selectedScannerTickers();
+  const tickers = uniqueTickers(pool);
+  if(!tickers.length){
+    updateScannerSelectionStatus();
+    return;
+  }
+  tickers.forEach(migrateScannerResultToCard);
+  setStatus('scannerSelectionStatus', `<span class="ok">${tickers.length} ranked result${tickers.length === 1 ? '' : 's'} moved into ticker cards.</span>`);
+}
+
+function renderScannerResults(){
   const box = $('results');
+  if(!box) return;
+  box.innerHTML = '';
+  if(!state.scannerResults || !state.scannerResults.length){
+    updateScannerSelectionStatus();
+    box.innerHTML = state.scannerDebug && state.scannerDebug.length
+      ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div>'
+      : '<div class="summary">Run the scanner to build a ranked shortlist.</div>';
+    return;
+  }
+  state.scannerResults.forEach(card => {
+    const div = document.createElement('div');
+    const inCards = !!getCard(card.ticker);
+    const selected = !!uiState.selectedScanner[card.ticker];
+    const companyLine = card.companyName ? `<div class="tiny">${escapeHtml(card.companyName)}${card.exchange ? ` • ${escapeHtml(card.exchange)}` : ''}</div>` : '';
+    const marketDataLine = card.marketData ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} • 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} • 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} • 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} • RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : '<div class="tiny">Market data pending...</div>';
+    const suitabilityLine = card.analysis && card.analysis.suitability
+      ? `<div class="tiny">Trend ${card.analysis.suitability.trend}/30 • Pullback ${card.analysis.suitability.pullback}/30 • Readiness ${card.analysis.suitability.readiness}/20 • Liquidity ${card.analysis.suitability.liquidity}/10 • Risk ${card.analysis.suitability.risk}/10</div>`
+      : '';
+    div.className = 'resultcompact';
+    div.innerHTML = `<div class="resulthead"><label class="resultselect" aria-label="Select ${escapeHtml(card.ticker)}"><input type="checkbox" data-act="select" ${selected ? 'checked' : ''} /></label><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div>${escapeHtml(card.summary)}</div>${companyLine}${marketDataLine}${suitabilityLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="${inCards ? 'secondary' : 'primary'}" data-act="migrate">${inCards ? 'Open Card' : 'Add To Cards'}</button></div></div>`;
+    div.querySelector('[data-act="select"]').onchange = event => {
+      uiState.selectedScanner[card.ticker] = !!event.target.checked;
+      updateScannerSelectionStatus();
+    };
+    div.querySelector('[data-act="migrate"]').onclick = () => {
+      migrateScannerResultToCard(card.ticker);
+      loadCard(card.ticker);
+    };
+    box.appendChild(div);
+  });
+  updateScannerSelectionStatus();
+}
+
+function renderCards(){
+  const box = $('cardsList');
+  if(!box) return;
   box.innerHTML = '';
   if(!state.cards || !state.cards.length){
-    box.innerHTML = '<div class="summary">No cards yet. Add tickers and press Build Cards.</div>';
+    box.innerHTML = '<div class="summary">No ticker cards yet. Start in Ranked Results, then move the best names into cards when you are ready to review them.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>';
     return;
   }
   const ordered = [...state.cards].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
@@ -1364,10 +1746,16 @@ function renderCards(){
     const marketDataLine = card.marketData ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} • 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} • 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} • 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} • Vol ${escapeHtml(formatPercent(card.volume && card.avgVolume30d ? ((card.volume / card.avgVolume30d) - 1) * 100 : null))} vs avg • RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : '<div class="tiny">Market data pending...</div>';
     const performanceLine = card.marketData ? `<div class="tiny">1W ${escapeHtml(formatPercent(card.perf1w))} • 1M ${escapeHtml(formatPercent(card.perf1m))} • 3M ${escapeHtml(formatPercent(card.perf3m))} • 6M ${escapeHtml(formatPercent(card.perf6m))} • YTD ${escapeHtml(formatPercent(card.perfYtd))}</div>` : '';
     const watchLine = card.watchTracking ? `<div class="tiny">${watchTrackingText(card)}</div>` : '';
-    const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>${companyLine}${marketDataLine}${performanceLine}${watchLine}`;
+    const suitabilityLine = card.source === 'scanner' && card.analysis && card.analysis.suitability
+      ? `<div class="tiny">Trend ${card.analysis.suitability.trend}/30 • Pullback ${card.analysis.suitability.pullback}/30 • Readiness ${card.analysis.suitability.readiness}/20 • Liquidity ${card.analysis.suitability.liquidity}/10 • Risk ${card.analysis.suitability.risk}/10</div>`
+      : '';
+    const freshnessAge = relativeAgeLabel(card.scannerUpdatedAt);
+    const freshnessBadge = card.scannerUpdatedAt ? `<span class="badge ${isFreshScanTimestamp(card.scannerUpdatedAt) ? 'freshness-fresh' : 'freshness-stale'}">${isFreshScanTimestamp(card.scannerUpdatedAt) ? 'Fresh' : 'Stale'}${freshnessAge ? ` • ${escapeHtml(freshnessAge)}` : ''}</span>` : '';
+    const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>${freshnessBadge ? `<div class="inline-status">${freshnessBadge}</div>` : ''}${companyLine}${marketDataLine}${performanceLine}${suitabilityLine}${watchLine}`;
+    const scoreLabel = card.source === 'scanner' ? `${card.score}/100` : `${card.score}/10`;
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${card.score}/10</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(card.ticker);
     div.querySelector('[data-act="load"]').onclick = () => loadCard(card.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeTicker(card.ticker);
@@ -1580,8 +1968,9 @@ function calculate(){
 
 function generateWatchPrompt(){
   saveState();
-  const ranked = [...(state.cards || [])].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
-  const watch = ranked.length ? ranked.map(card => `${card.ticker} | ${card.status} | ${card.score}/10`).join('\n') : ((state.tickers || []).join('\n') || '(add tickers here)');
+  const sourceCards = state.cards && state.cards.length ? state.cards : state.scannerResults;
+  const ranked = [...(sourceCards || [])].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
+  const watch = ranked.length ? ranked.map(card => `${card.ticker} | ${card.status} | ${card.score}${card.score > 10 ? '/100' : '/10'}`).join('\n') : ((state.tickers || []).join('\n') || '(add tickers here)');
   const prompt = `Analyse these stocks for my Quality Pullback strategy.\n\nRules:\n- Prefer strong stocks in an uptrend\n- Pullback near 20MA or 50MA\n- Must stabilise or bounce\n- Previous swing high = first target\n\nAccount:\n${formatGbp(state.accountSize)} account\n${formatGbp(state.maxRisk)} max risk\n\nMarket status:\n${state.marketStatus}\n\nWatchlist:\n${watch}\n\nReturn ONLY valid JSON in this format:\n[\n  {"ticker":"GNRC","status":"Watch | Near Entry | Entry | Avoid","score":7,"reason":"One plain-English line."}\n]`;
   if($('watchPromptBox')) $('watchPromptBox').textContent = prompt;
   return prompt;
@@ -1705,6 +2094,7 @@ function resetAllData(){
   state.listName = "Today's Scan";
   state.tickers = [];
   state.recentTickers = [];
+  state.scannerResults = [];
   state.cards = [];
   state.tradeDiary = [];
   state.lastImportRaw = '';
@@ -1714,9 +2104,11 @@ function resetAllData(){
   state.aiEndpoint = defaultAiEndpoint;
   state.marketDataEndpoint = defaultMarketDataEndpoint;
   state.symbolMeta = {};
+  state.scannerDebug = [];
   uiState.promptOpen = {};
   uiState.responseOpen = {};
   uiState.loadingTicker = '';
+  uiState.selectedScanner = {};
   $('tickerInput').value = '';
   $('tickerSearch').value = '';
   if($('importResultsInput')) $('importResultsInput').value = '';
@@ -1766,13 +2158,16 @@ click('clearBtn', () => {
   $('tickerInput').value = '';
   $('tickerSearch').value = '';
   state.tickers = [];
+  state.scannerResults = [];
   state.cards = [];
   state.listName = "Today's Scan";
   uiState.promptOpen = {};
   uiState.responseOpen = {};
+  uiState.selectedScanner = {};
   renderTickerSuggestions([]);
   persistState();
   renderTickerQuickLists();
+  renderScannerResults();
   renderCards();
   resetReview();
   generateWatchPrompt();
@@ -1792,6 +2187,13 @@ click('clearImportBtn', () => {
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
 click('autoAnalyseBtn', buildCards);
+click('migrateSelectedBtn', () => migrateSelectedScannerResults());
+click('migrateTop3Btn', () => migrateSelectedScannerResults(3));
+click('jumpToDiaryBtn', () => {
+  const diarySection = $('diarySection');
+  if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});
+});
+click('exportDiaryBtn', exportTradeDiary);
 click('saveReviewBtn', saveReview);
 click('resetReviewBtn', resetReview);
 click('calcBtn', calculate);
