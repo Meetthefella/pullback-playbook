@@ -3,25 +3,37 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pullback Playbook v4</title>
+  <title>Pullback Playbook v4.1</title>
   <meta name="theme-color" content="#0f172a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="build-version" content="" />
+  <link id="appManifest" rel="manifest" href="./manifest.webmanifest" />
   <link rel="stylesheet" href="./styles.css" />
+  <script>
+    (function(){
+      var buildVersion = (document.lastModified || new Date().toISOString()).replace(/[^\dA-Za-z]+/g, '-');
+      window.__BUILD_VERSION__ = buildVersion;
+      var meta = document.querySelector('meta[name="build-version"]');
+      if(meta) meta.setAttribute('content', buildVersion);
+      var manifest = document.getElementById('appManifest');
+      if(manifest) manifest.setAttribute('href', './manifest.webmanifest?v=' + encodeURIComponent(buildVersion));
+    })();
+  </script>
 </head>
 <body>
 <div class="wrap">
   <div class="hero">
     <div class="card">
-      <h1>Pullback Playbook v4</h1>
-      <p>Fast Quality Pullback workflow with validated ticker entry, per-ticker chart upload, in-app OpenAI setup analysis, Alpha Vantage auto analysis, review scoring, and risk planning built around your GBP 4,000 account and GBP 40 max risk.</p>
+      <h1>Pullback Playbook v4.1</h1>
+      <p>Scanner-first Quality Pullback workflow with Financial Modeling Prep market data, ranked shortlist automation, per-ticker chart upload, in-app OpenAI setup analysis, and risk planning built around your GBP 4,000 account and GBP 40 max risk.</p>
       <div class="pillrow">
-        <span class="pill">Validated tickers</span>
+        <span class="pill">Quality Pullback Scanner</span>
         <span class="pill">Per-card analysis</span>
         <span class="pill">Chart upload</span>
-        <span class="pill">Alpha Vantage</span>
+        <span class="pill">FMP market data</span>
         <span class="pill">PWA ready</span>
+        <span class="pill" id="appVersion">v4.1.0</span>
       </div>
       <div class="navtabs">
         <a class="tablink" href="#dailyInput">Scan</a>
@@ -47,7 +59,7 @@
 
   <div class="grid" style="margin-top:14px">
     <div class="card">
-      <h2 id="dailyInput">1) Daily Ticker Input</h2>
+      <h2 id="dailyInput">1) Scanner Universe</h2>
       <div class="row">
         <div><label>Account Size (GBP)</label><input id="accountSize" type="number" value="4000" min="1" /></div>
         <div><label>Max Risk (GBP)</label><input id="maxRisk" type="number" value="40" min="1" /></div>
@@ -57,13 +69,13 @@
         <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
       </div>
       <div class="row" style="margin-top:10px">
-        <div><label>Ticker Search / Add</label><input id="tickerSearch" placeholder="AAPL or BRK.B" /></div>
+        <div><label>Ticker Search / Add</label><input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" /><div id="tickerSuggestions" class="suggestions" hidden></div></div>
         <div style="align-self:end"><button class="primary" id="addTickerBtn" style="width:100%">Add Ticker</button></div>
       </div>
-      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or paste multiple below.</div>
+      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search FMP symbols below.</div>
       <div class="panelbox" style="margin-top:10px">
         <div class="quicklisthead">
-          <strong>Watchlist</strong>
+          <strong>Scanner Universe</strong>
           <span class="tiny">Tap a chip to remove it.</span>
         </div>
         <div class="quicklist" id="watchlistQuickList"></div>
@@ -73,32 +85,34 @@
         </div>
         <div class="quicklist" id="recentTickerList"></div>
       </div>
-      <div style="margin-top:10px"><label>Watchlist Tickers</label><textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea></div>
+      <div style="margin-top:10px"><label>Tickers To Scan</label><textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea></div>
       <div class="actions">
-        <button class="primary" id="buildBtn">Build Cards</button>
+        <button class="primary" id="buildBtn">Run Quality Pullback Scanner</button>
         <button class="secondary" id="saveBtn">Save List</button>
         <button class="secondary" id="loadBtn">Load Saved</button>
         <button class="ghost" id="clearBtn">Clear</button>
       </div>
-      <div class="statusline tiny" id="inputStatus">Validation runs when you add or rebuild tickers.</div>
+      <div class="statusline tiny" id="inputStatus">Validation and scanner refresh run when you add or rebuild tickers.</div>
     </div>
 
     <div class="card">
-      <h2>2) Bulk Watchlist Tools</h2>
-      <p class="tiny">Optional legacy fallback for bulk watchlist review. Per-ticker setup analysis now runs directly inside each ticker card.</p>
-      <div class="actions">
-        <button class="primary" id="genWatchPromptBtn">Generate Watchlist Prompt</button>
-        <button class="secondary" id="copyWatchPromptBtn">Copy Prompt</button>
-      </div>
-      <div id="watchPromptBox" class="mutebox" style="margin-top:10px">Your prompt will appear here.</div>
-      <div style="margin-top:12px"><label>Paste Bulk AI Watchlist Result</label><textarea id="importResultsInput" placeholder='[
+      <details open>
+        <summary><strong>2) Bulk Watchlist Tools</strong></summary>
+        <p class="tiny" style="margin-top:10px">Optional fallback for bulk watchlist review. The main workflow now comes from the automated scanner and per-ticker analysis cards.</p>
+        <div class="actions">
+          <button class="primary" id="genWatchPromptBtn">Generate Watchlist Prompt</button>
+          <button class="secondary" id="copyWatchPromptBtn">Copy Prompt</button>
+        </div>
+        <div id="watchPromptBox" class="mutebox" style="margin-top:10px">Your prompt will appear here.</div>
+        <div style="margin-top:12px"><label>Paste Bulk AI Watchlist Result</label><textarea id="importResultsInput" placeholder='[
   {"ticker":"GNRC","status":"Near Entry","score":7,"reason":"Healthy pullback but wants more confirmation."}
 ]'></textarea></div>
-      <div class="actions">
-        <button class="primary" id="importResultsBtn">Import Results to Cards</button>
-        <button class="ghost" id="clearImportBtn">Clear Pasted Result</button>
-      </div>
-      <div id="importStatus" class="subtle">No AI results imported yet.</div>
+        <div class="actions">
+          <button class="primary" id="importResultsBtn">Import Results to Cards</button>
+          <button class="ghost" id="clearImportBtn">Clear Pasted Result</button>
+        </div>
+        <div id="importStatus" class="subtle">No AI results imported yet.</div>
+      </details>
     </div>
   </div>
 
@@ -106,16 +120,16 @@
     <div class="card">
       <h2 id="apiSettings">3) API Settings</h2>
       <div class="row">
-        <div><label>Data Provider</label><select id="dataProvider"><option value="alphavantage">Alpha Vantage</option></select></div>
-        <div><label>Plan Speed</label><select id="apiPlan"><option value="free">Free tier (slow + safer)</option><option value="paid">Paid tier (faster)</option></select></div>
+        <div><label>Data Provider</label><select id="dataProvider"><option value="fmp">Financial Modeling Prep</option></select></div>
+        <div><label>Scanner Mode</label><select id="apiPlan"><option value="scanner">Quality Pullback Scanner</option></select></div>
       </div>
-      <div style="margin-top:10px"><label>Alpha Vantage API Key</label><input id="apiKey" type="password" placeholder="Paste your Alpha Vantage key here" /></div>
+      <div style="margin-top:10px"><label>Market Data Key</label><input id="apiKey" type="text" value="Uses server-side FMP_API_KEY on Netlify" readonly /></div>
       <div style="margin-top:10px"><label>AI Endpoint URL</label><input id="aiEndpoint" placeholder="/api/analyse-setup or full serverless URL" /></div>
-      <div class="tiny">Use `/api/analyse-setup` on Netlify. If the frontend is on GitHub Pages, paste the full deployed function URL here.</div>
+      <div class="tiny">Use `/api/analyse-setup` on Netlify for AI analysis. Market data runs through `/api/market-data` using the server-side `FMP_API_KEY`.</div>
       <div class="actions">
         <button class="primary" id="saveApiBtn">Save Settings</button>
-        <button class="secondary" id="testApiBtn">Test Alpha Vantage</button>
-        <button class="secondary" id="autoAnalyseBtn">Auto Analyse Watchlist</button>
+        <button class="secondary" id="testApiBtn">Test Market Data</button>
+        <button class="secondary" id="autoAnalyseBtn">Run Scanner</button>
       </div>
       <div id="apiStatus" class="subtle">No API test run yet.</div>
     </div>
@@ -133,7 +147,7 @@
   <div class="grid" style="margin-top:14px">
     <div class="card">
       <h2 id="resultsSection">4) Ranked Results</h2>
-      <p class="tiny">Each ticker card stores notes, chart, saved prompt, and last AI response locally on this device.</p>
+      <p class="tiny">Scanner output is grouped into Ready, Near Setup, Watch, and Avoid. Each ticker card stores notes, chart, saved prompt, and last AI response locally on this device.</p>
       <div id="results" class="list"></div>
     </div>
 
@@ -200,9 +214,11 @@
     </div>
 
     <div class="card">
-      <h2 id="chartPromptSection">7) Chart Prompt</h2>
-      <div class="actions"><button class="secondary" id="copyChartPromptBtn">Copy Chart Prompt</button></div>
-      <div id="chartPromptBox" class="mutebox" style="margin-top:10px">Your chart prompt will appear here.</div>
+      <details>
+        <summary><strong id="chartPromptSection">7) Chart Prompt</strong></summary>
+        <div class="actions" style="margin-top:10px"><button class="secondary" id="copyChartPromptBtn">Copy Chart Prompt</button></div>
+        <div id="chartPromptBox" class="mutebox" style="margin-top:10px">Your chart prompt will appear here.</div>
+      </details>
     </div>
   </div>
 

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Quality Pullback Scanner Core",
+    "rules": [
+      { "field": "perf1w", "operator": "<", "value": 0 },
+      { "field": "price", "operator": "<", "valueField": "sma20" },
+      { "field": "price", "operator": ">", "valueField": "sma50" },
+      { "field": "price", "operator": ">", "valueField": "sma200" },
+      { "field": "sma50", "operator": ">", "valueField": "sma200" },
+      { "field": "rsi14", "operator": ">", "value": 40 },
+      { "field": "rsi14", "operator": "<", "value": 60 },
+      { "field": "avgVolume30d", "operator": ">", "value": 1000000 },
+      { "field": "marketCap", "operator": ">", "value": 10000000000 },
+      { "field": "perf1m", "operator": ">", "value": 0 },
+      { "field": "perf3m", "operator": ">", "value": 5 },
+      { "field": "perf6m", "operator": ">", "value": 10 },
+      { "field": "perfYtd", "operator": ">", "value": 5 }
+    ]
+  }
+]

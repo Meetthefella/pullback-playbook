@@ -80,4 +80,9 @@ button[disabled]{opacity:.55;cursor:not-allowed}
 .responsegrid{display:grid;gap:10px}
 .responsechips{display:flex;gap:8px;flex-wrap:wrap}
 .inline-status{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.suggestions{display:grid;gap:8px;margin-top:8px}
+.suggestionitem{display:flex;justify-content:space-between;gap:10px;align-items:center;text-align:left;background:#0f172a;border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:12px}
+details{border:1px solid var(--line);border-radius:14px;padding:12px;background:#0f172a}
+details>summary{cursor:pointer;font-weight:700;color:var(--text);list-style:none}
+details>summary::-webkit-details-marker{display:none}
 @media (max-width:900px){.hero,.grid,.row,.row3,.stats,.resulthead,.resultbody,.diarygrid{grid-template-columns:1fr}}

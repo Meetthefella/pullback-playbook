@@ -2,7 +2,10 @@ const $ = id => document.getElementById(id);
 const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
+const APP_VERSION = 'v4.1.0';
 const defaultAiEndpoint = '/api/analyse-setup';
+const defaultMarketDataEndpoint = '/api/market-data';
+const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
@@ -30,14 +33,42 @@ const state = {
   tradeDiary:[],
   lastImportRaw:'',
   apiKey:'',
-  dataProvider:'alphavantage',
+  dataProvider:'fmp',
   apiPlan:'free',
-  aiEndpoint:defaultAiEndpoint
+  aiEndpoint:defaultAiEndpoint,
+  marketDataEndpoint:defaultMarketDataEndpoint,
+  symbolMeta:{},
+  scannerPresetName:'Quality Pullback Scanner Core'
 };
 
 const uiState = {promptOpen:{},responseOpen:{},loadingTicker:''};
 const MAX_CHART_BYTES = 4 * 1024 * 1024;
 const ANALYSIS_TIMEOUT_MS = 45000;
+const MARKET_CACHE_TTL_MS = 15 * 60 * 1000;
+const SEARCH_DEBOUNCE_MS = 250;
+const DEFAULT_WATCH_TRADING_DAYS = 3;
+const EXTENDED_WATCH_TRADING_DAYS = 5;
+const APP_FETCH_TIMEOUT_MS = 12000;
+const MARKET_CACHE_SCHEMA_VERSION = 1;
+const marketDataCache = new Map();
+const scannerPresetFallback = [{
+  name:'Quality Pullback Scanner Core',
+  rules:[
+    {field:'perf1w', operator:'<', value:0},
+    {field:'price', operator:'<', valueField:'sma20'},
+    {field:'price', operator:'>', valueField:'sma50'},
+    {field:'price', operator:'>', valueField:'sma200'},
+    {field:'sma50', operator:'>', valueField:'sma200'},
+    {field:'rsi14', operator:'>', value:40},
+    {field:'rsi14', operator:'<', value:60},
+    {field:'avgVolume30d', operator:'>', value:1000000},
+    {field:'marketCap', operator:'>', value:10000000000},
+    {field:'perf1m', operator:'>', value:0},
+    {field:'perf3m', operator:'>', value:5},
+    {field:'perf6m', operator:'>', value:10},
+    {field:'perfYtd', operator:'>', value:5}
+  ]
+}];
 const tradingViewConfig = {
   defaultExchange:'NASDAQ',
   suffixMap:{
@@ -49,9 +80,66 @@ const tradingViewConfig = {
     // 'VOD.L':'LSE:VOD'
   }
 };
+let scannerPresetPromise = null;
+let suggestionTimer = null;
+let suggestionRequestToken = 0;
 
 function formatGbp(value){
   return `GBP ${Number(value || 0).toLocaleString()}`;
+}
+
+function numericOrNull(value){
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function safeJsonParse(value, fallback){
+  try{
+    const parsed = JSON.parse(value);
+    return parsed == null ? fallback : parsed;
+  }catch(error){
+    return fallback;
+  }
+}
+
+function safeStorageGet(storageKey, fallback){
+  try{
+    const raw = localStorage.getItem(storageKey);
+    if(raw == null) return fallback;
+    return safeJsonParse(raw, fallback);
+  }catch(error){
+    return fallback;
+  }
+}
+
+function safeStorageSet(storageKey, value){
+  try{
+    localStorage.setItem(storageKey, JSON.stringify(value));
+    return true;
+  }catch(error){
+    return false;
+  }
+}
+
+function persistState(){
+  safeStorageSet(key, state);
+}
+
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = APP_FETCH_TIMEOUT_MS, maxAttempts = 2){
+  for(let attempt = 0; attempt < maxAttempts; attempt += 1){
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try{
+      const response = await fetch(url, {...options, signal:controller.signal});
+      return response;
+    }catch(error){
+      const isFinalAttempt = attempt === maxAttempts - 1;
+      if(isFinalAttempt) throw error;
+      await sleep(300);
+    }finally{
+      clearTimeout(timeout);
+    }
+  }
+  throw new Error('Request failed.');
 }
 
 function escapeHtml(value){
@@ -152,7 +240,27 @@ function baseCard(ticker){
     source:'manual',
     updatedAt:'',
     marketStatus:'',
-    analysis:null
+    analysis:null,
+    companyName:'',
+    exchange:'',
+    tradingViewSymbol:'',
+    marketCap:null,
+    marketData:null,
+    marketDataUpdatedAt:'',
+    perf1w:null,
+    perf1m:null,
+    perf3m:null,
+    perf6m:null,
+    perfYtd:null,
+    rsi14:null,
+    price:null,
+    sma20:null,
+    sma50:null,
+    sma200:null,
+    volume:null,
+    avgVolume30d:null,
+    watchTracking:null,
+    pinned:false
   };
 }
 
@@ -167,6 +275,20 @@ function normalizeCard(card){
   normalized.lastResponse = String(normalized.lastResponse || '');
   normalized.lastError = String(normalized.lastError || '');
   normalized.lastAnalysis = normalized.lastAnalysis || null;
+  normalized.companyName = String(normalized.companyName || '');
+  normalized.exchange = String(normalized.exchange || '');
+  normalized.tradingViewSymbol = String(normalized.tradingViewSymbol || '');
+  normalized.marketDataUpdatedAt = String(normalized.marketDataUpdatedAt || '');
+  normalized.marketData = normalized.marketData && typeof normalized.marketData === 'object' ? normalized.marketData : null;
+  normalized.watchTracking = normalized.watchTracking && typeof normalized.watchTracking === 'object' ? {
+    firstFlaggedAt:String(normalized.watchTracking.firstFlaggedAt || ''),
+    expiryDate:String(normalized.watchTracking.expiryDate || ''),
+    extensionDays:Number(normalized.watchTracking.extensionDays || DEFAULT_WATCH_TRADING_DAYS),
+    pinned:!!normalized.watchTracking.pinned,
+    manualRetain:!!normalized.watchTracking.manualRetain,
+    dailyChecks:Array.isArray(normalized.watchTracking.dailyChecks) ? normalized.watchTracking.dailyChecks : [],
+    lastCheckedDate:String(normalized.watchTracking.lastCheckedDate || '')
+  } : null;
   return normalized;
 }
 
@@ -201,33 +323,35 @@ function saveState(){
   state.maxRisk = Number($('maxRisk').value || 0);
   state.marketStatus = $('marketStatus').value;
   state.listName = $('listName').value || "Today's Scan";
-  state.apiKey = $('apiKey').value.trim();
-  state.dataProvider = $('dataProvider').value;
-  state.apiPlan = $('apiPlan').value;
+  if($('apiKey')) state.apiKey = $('apiKey').readOnly ? '' : $('apiKey').value.trim();
+  if($('dataProvider')) state.dataProvider = $('dataProvider').value;
+  if($('apiPlan')) state.apiPlan = $('apiPlan').value;
   state.aiEndpoint = $('aiEndpoint').value.trim() || defaultAiEndpoint;
-  localStorage.setItem(key, JSON.stringify(state));
+  state.marketDataEndpoint = defaultMarketDataEndpoint;
+  persistState();
   renderStats();
 }
 
 function loadState(){
-  try{
-    Object.assign(state, JSON.parse(localStorage.getItem(key) || '{}') || {});
-  }catch(e){}
+  Object.assign(state, safeStorageGet(key, {}) || {});
   state.aiEndpoint = state.aiEndpoint || defaultAiEndpoint;
+  state.marketDataEndpoint = defaultMarketDataEndpoint;
   state.tickers = parseTickers((state.tickers || []).join('\n'));
   state.recentTickers = uniqueTickers(state.recentTickers || []);
   state.cards = (state.cards || []).map(normalizeCard).filter(card => card.ticker);
   state.tradeDiary = (state.tradeDiary || []).map(normalizeTradeRecord);
+  state.symbolMeta = state.symbolMeta && typeof state.symbolMeta === 'object' ? state.symbolMeta : {};
   $('accountSize').value = state.accountSize;
   $('maxRisk').value = state.maxRisk;
   $('marketStatus').value = state.marketStatus || 'S&P above 50 MA';
   $('listName').value = state.listName || "Today's Scan";
   $('tickerInput').value = (state.tickers || []).join('\n');
   $('importResultsInput').value = state.lastImportRaw || '';
-  $('apiKey').value = state.apiKey || '';
-  $('dataProvider').value = state.dataProvider || 'alphavantage';
-  $('apiPlan').value = state.apiPlan || 'free';
+  if($('apiKey') && !$('apiKey').readOnly) $('apiKey').value = state.apiKey || '';
+  if($('dataProvider')) $('dataProvider').value = state.dataProvider || 'fmp';
+  if($('apiPlan')) $('apiPlan').value = state.apiPlan || 'free';
   $('aiEndpoint').value = state.aiEndpoint || defaultAiEndpoint;
+  if($('appVersion')) $('appVersion').textContent = APP_VERSION;
   renderStats();
   renderTickerQuickLists();
   renderCards();
@@ -315,7 +439,7 @@ function saveTradeFromCard(ticker){
   }));
   state.tradeDiary.unshift(record);
   state.tradeDiary = state.tradeDiary.slice(0, 100);
-  localStorage.setItem(key, JSON.stringify(state));
+  persistState();
   renderTradeDiary();
   const diarySection = $('diarySection');
   if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});
@@ -327,12 +451,12 @@ function updateTradeRecord(recordId, field, value){
   if(field === 'ticker') record.ticker = normalizeTicker(value);
   else if(field === 'verdict') record.verdict = normalizeImportedStatus(value);
   else record[field] = value;
-  localStorage.setItem(key, JSON.stringify(state));
+  persistState();
 }
 
 function deleteTradeRecord(recordId){
   state.tradeDiary = (state.tradeDiary || []).filter(record => record.id !== recordId);
-  localStorage.setItem(key, JSON.stringify(state));
+  persistState();
   renderTradeDiary();
 }
 
@@ -347,7 +471,7 @@ function renderTradeDiary(){
   state.tradeDiary.forEach(record => {
     const div = document.createElement('div');
     div.className = 'diarycard';
-    div.innerHTML = `<div class="diaryhead"><div class="diarymeta"><span class="badge ${statusClass(record.verdict)}">${escapeHtml(record.verdict)}</span><strong>${escapeHtml(record.ticker || 'Ticker')}</strong><span class="tiny">${escapeHtml(record.date || '')}</span></div><button class="danger" data-act="delete-trade">Delete</button></div><div class="diarygrid"><div><label>Date</label><input data-field="date" type="date" value="${escapeHtml(record.date)}" /></div><div><label>Ticker</label><input data-field="ticker" value="${escapeHtml(record.ticker)}" placeholder="AAPL" /></div><div><label>Verdict</label><select data-field="verdict"><option ${record.verdict === 'Watch' ? 'selected' : ''}>Watch</option><option ${record.verdict === 'Near Entry' ? 'selected' : ''}>Near Entry</option><option ${record.verdict === 'Entry' ? 'selected' : ''}>Entry</option><option ${record.verdict === 'Avoid' ? 'selected' : ''}>Avoid</option></select></div><div><label>Outcome</label><select data-field="outcome"><option value="" ${record.outcome === '' ? 'selected' : ''}>Not set</option><option ${record.outcome === 'Open' ? 'selected' : ''}>Open</option><option ${record.outcome === 'Win' ? 'selected' : ''}>Win</option><option ${record.outcome === 'Loss' ? 'selected' : ''}>Loss</option><option ${record.outcome === 'Scratch' ? 'selected' : ''}>Scratch</option><option ${record.outcome === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div></div><div class="diarygrid"><div><label>Entry</label><input data-field="entry" value="${escapeHtml(record.entry)}" placeholder="123.45" /></div><div><label>Stop</label><input data-field="stop" value="${escapeHtml(record.stop)}" placeholder="119.80" /></div><div><label>First Target</label><input data-field="firstTarget" value="${escapeHtml(record.firstTarget)}" placeholder="130.00" /></div><div><label>Lesson Learned</label><input data-field="lesson" value="${escapeHtml(record.lesson)}" placeholder="Wait for cleaner bounce" /></div></div><div><label>Notes</label><textarea data-field="notes" placeholder="Why this setup was worth tracking.">${escapeHtml(record.notes)}</textarea></div>`;
+    div.innerHTML = `<div class="diaryhead"><div class="diarymeta"><span class="badge ${statusClass(record.verdict)}">${escapeHtml(record.verdict)}</span><strong>${escapeHtml(record.ticker || 'Ticker')}</strong><span class="tiny">${escapeHtml(record.date || '')}</span></div><button class="danger" data-act="delete-trade">Delete</button></div><div class="diarygrid"><div><label>Date</label><input data-field="date" type="date" value="${escapeHtml(record.date)}" /></div><div><label>Ticker</label><input data-field="ticker" value="${escapeHtml(record.ticker)}" placeholder="AAPL" /></div><div><label>Verdict</label><select data-field="verdict"><option ${record.verdict === 'Watch' ? 'selected' : ''}>Watch</option><option ${record.verdict === 'Near Setup' ? 'selected' : ''}>Near Setup</option><option ${record.verdict === 'Ready' ? 'selected' : ''}>Ready</option><option ${record.verdict === 'Entry' ? 'selected' : ''}>Entry</option><option ${record.verdict === 'Avoid' ? 'selected' : ''}>Avoid</option></select></div><div><label>Outcome</label><select data-field="outcome"><option value="" ${record.outcome === '' ? 'selected' : ''}>Not set</option><option ${record.outcome === 'Open' ? 'selected' : ''}>Open</option><option ${record.outcome === 'Win' ? 'selected' : ''}>Win</option><option ${record.outcome === 'Loss' ? 'selected' : ''}>Loss</option><option ${record.outcome === 'Scratch' ? 'selected' : ''}>Scratch</option><option ${record.outcome === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div></div><div class="diarygrid"><div><label>Entry</label><input data-field="entry" value="${escapeHtml(record.entry)}" placeholder="123.45" /></div><div><label>Stop</label><input data-field="stop" value="${escapeHtml(record.stop)}" placeholder="119.80" /></div><div><label>First Target</label><input data-field="firstTarget" value="${escapeHtml(record.firstTarget)}" placeholder="130.00" /></div><div><label>Lesson Learned</label><input data-field="lesson" value="${escapeHtml(record.lesson)}" placeholder="Wait for cleaner bounce" /></div></div><div><label>Notes</label><textarea data-field="notes" placeholder="Why this setup was worth tracking.">${escapeHtml(record.notes)}</textarea></div>`;
     div.querySelector('[data-act="delete-trade"]').onclick = () => deleteTradeRecord(record.id);
     div.querySelectorAll('[data-field]').forEach(field => {
       field.addEventListener('change', event => updateTradeRecord(record.id, event.target.getAttribute('data-field'), event.target.value));
@@ -375,17 +499,76 @@ function updateTickerSearchStatus(){
   renderTickerQuickLists();
 }
 
+function renderTickerSuggestions(results){
+  const box = $('tickerSuggestions');
+  if(!box) return;
+  const list = Array.isArray(results) ? results : [];
+  if(!list.length){
+    box.innerHTML = '';
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = list.map(item => (
+    `<button class="suggestionitem" type="button" data-act="suggestion" data-ticker="${escapeHtml(item.ticker)}">
+      <span><strong>${escapeHtml(item.ticker)}</strong> ${escapeHtml(item.companyName || '')}</span>
+      <span class="tiny">${escapeHtml(item.exchange || '')}</span>
+    </button>`
+  )).join('');
+  box.querySelectorAll('[data-act="suggestion"]').forEach(button => {
+    button.onclick = () => {
+      const ticker = button.getAttribute('data-ticker') || '';
+      const selected = list.find(item => item.ticker === ticker);
+      if(selected){
+        rememberTickerMeta(selected);
+        $('tickerSearch').value = selected.ticker;
+        renderTickerSuggestions([]);
+        updateTickerSearchStatus();
+      }
+    };
+  });
+}
+
+async function updateTickerSuggestions(){
+  const search = tickerSearchState();
+  if(!search.query || search.query.length < 1){
+    renderTickerSuggestions([]);
+    return;
+  }
+  const token = ++suggestionRequestToken;
+  try{
+    const results = await fetchTickerSuggestions(search.query);
+    if(token !== suggestionRequestToken) return;
+    renderTickerSuggestions(results);
+  }catch(err){
+    if(token !== suggestionRequestToken) return;
+    renderTickerSuggestions([]);
+  }
+}
+
+function queueTickerSuggestions(){
+  clearTimeout(suggestionTimer);
+  suggestionTimer = setTimeout(() => {
+    updateTickerSuggestions().catch(() => {});
+  }, SEARCH_DEBOUNCE_MS);
+}
+
 function buildCards(){
   saveState();
   const parsed = parseTickersDetailed($('tickerInput').value);
   state.tickers = parsed.valid;
-  state.cards = parsed.valid.map(ticker => normalizeCard(getCard(ticker) || baseCard(ticker)));
+  state.cards = parsed.valid.map(ticker => {
+    const card = normalizeCard(getCard(ticker) || baseCard(ticker));
+    applyTickerMetaToCard(card, getStoredTickerMeta(ticker));
+    return card;
+  });
   updateRecentTickers(parsed.valid);
   updateTickerInputFromState();
-  localStorage.setItem(key, JSON.stringify(state));
+  persistState();
   renderTickerQuickLists();
   renderCards();
   generateWatchPrompt();
+  if(parsed.valid.length) autoAnalyseWatchlist().catch(err => setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`));
   const messages = [];
   if(parsed.valid.length) messages.push(`<span class="ok">${parsed.valid.length} ticker${parsed.valid.length === 1 ? '' : 's'} loaded.</span>`);
   if(parsed.invalid.length) messages.push(`<span class="badtext">Invalid: ${escapeHtml(parsed.invalid.join(', '))}</span>`);
@@ -393,7 +576,7 @@ function buildCards(){
   setStatus('inputStatus', messages.join(' ') || 'No valid tickers yet.');
 }
 
-function addTicker(rawTicker){
+function addTicker(rawTicker, meta){
   const input = $('tickerSearch');
   const ticker = normalizeTicker(rawTicker || (input && input.value));
   if(!ticker){
@@ -409,16 +592,24 @@ function addTicker(rawTicker){
     if(input) input.select();
     return;
   }
+  if(meta) rememberTickerMeta(meta);
   state.tickers.push(ticker);
-  upsertCard(ticker);
+  const card = upsertCard(ticker);
+  applyTickerMetaToCard(card, getStoredTickerMeta(ticker));
   updateRecentTickers([ticker]);
   updateTickerInputFromState();
   if(input) input.value = '';
-  localStorage.setItem(key, JSON.stringify(state));
+  renderTickerSuggestions([]);
+  persistState();
   renderTickerQuickLists();
   renderCards();
   generateWatchPrompt();
   setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`);
+  refreshMarketDataForTickers([ticker]).then(() => {
+    setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added and scanned.</span>`);
+  }).catch(err => {
+    setStatus('tickerSearchStatus', `<span class="warntext">${escapeHtml(ticker)} added, but market data failed: ${escapeHtml(err.message || 'unknown error')}.</span>`);
+  });
 }
 
 function addTickerFromSearch(){
@@ -432,7 +623,7 @@ function removeTicker(ticker){
   delete uiState.responseOpen[ticker];
   if($('selectedTicker').value === ticker) resetReview();
   updateTickerInputFromState();
-  localStorage.setItem(key, JSON.stringify(state));
+  persistState();
   renderTickerQuickLists();
   renderCards();
   generateWatchPrompt();
@@ -490,7 +681,7 @@ function buildSummary(checks, status){
 
 function statusClass(status){
   if(status === 'Entry' || status === 'Ready') return 'ready';
-  if(status === 'Near Entry' || status === 'Near Pullback') return 'near';
+  if(status === 'Near Entry' || status === 'Near Pullback' || status === 'Near Setup') return 'near';
   if(status === 'Avoid') return 'avoid';
   return 'watch';
 }
@@ -509,152 +700,399 @@ function sleep(ms){
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function sma(values, period, index){
-  if(index + period > values.length) return null;
-  let sum = 0;
-  for(let i = index; i < index + period; i += 1) sum += values[i].close;
-  return sum / period;
+function formatPercent(value){
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : '-';
 }
 
-function maxHigh(values, start, end){
-  let max = -Infinity;
-  for(let i = start; i < end; i += 1){
-    if(values[i] && values[i].high > max) max = values[i].high;
+function todayIsoDate(){
+  return new Date().toISOString().slice(0, 10);
+}
+
+function readMarketCache(){
+  const parsed = safeStorageGet(marketCacheKey, {});
+  if(!parsed || typeof parsed !== 'object') return {};
+  if(parsed.__schemaVersion !== MARKET_CACHE_SCHEMA_VERSION) return {};
+  return parsed.entries && typeof parsed.entries === 'object' ? parsed.entries : {};
+}
+
+function writeMarketCache(cache){
+  safeStorageSet(marketCacheKey, {
+    __schemaVersion:MARKET_CACHE_SCHEMA_VERSION,
+    updatedAt:new Date().toISOString(),
+    entries:cache || {}
+  });
+}
+
+function isFreshTimestamp(value, ttlMs = MARKET_CACHE_TTL_MS){
+  if(!value) return false;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) && (Date.now() - timestamp) < ttlMs;
+}
+
+function rememberTickerMeta(meta){
+  if(!meta || !meta.ticker) return;
+  const symbol = normalizeTicker(meta.ticker);
+  state.symbolMeta[symbol] = {
+    companyName:String(meta.companyName || ''),
+    exchange:String(meta.exchange || ''),
+    tradingViewSymbol:String(meta.tradingViewSymbol || '')
+  };
+}
+
+function getStoredTickerMeta(ticker){
+  return state.symbolMeta[normalizeTicker(ticker)] || null;
+}
+
+function applyTickerMetaToCard(card, meta){
+  if(!card || !meta) return;
+  if(meta.companyName) card.companyName = String(meta.companyName);
+  if(meta.exchange) card.exchange = String(meta.exchange);
+  if(meta.tradingViewSymbol) card.tradingViewSymbol = String(meta.tradingViewSymbol);
+}
+
+function getCachedMarketData(symbol, ttlMs = MARKET_CACHE_TTL_MS){
+  const ticker = normalizeTicker(symbol);
+  if(!ticker) return null;
+  const memoryHit = marketDataCache.get(ticker);
+  if(memoryHit && memoryHit.ticker === ticker && isFreshTimestamp(memoryHit.fetchedAt, ttlMs)) return memoryHit;
+  const diskCache = readMarketCache();
+  const item = diskCache[ticker];
+  if(item && typeof item === 'object' && item.ticker === ticker && isFreshTimestamp(item.fetchedAt, ttlMs)){
+    marketDataCache.set(ticker, item);
+    return item;
   }
-  return Number.isFinite(max) ? max : null;
+  return null;
 }
 
-function analyseSeries(ticker, rows){
-  if(!rows || rows.length < 60) throw new Error(`Not enough daily history returned for ${ticker}`);
-  const latest = rows[0];
-  const prev = rows[1];
-  const prev2 = rows[2];
-  const close = latest.close;
-  const ma20 = sma(rows, 20, 0);
-  const ma50 = sma(rows, 50, 0);
-  const ma50Prev10 = sma(rows, 50, 10);
-  const avgVol20 = rows.slice(1, 21).reduce((sum, row) => sum + row.volume, 0) / 20;
-  if(!Number.isFinite(ma20) || !Number.isFinite(ma50)) throw new Error(`Could not calculate the 20 MA and 50 MA for ${ticker}`);
-  const uptrend = close > ma50 && ma20 > ma50 && ma50 > ma50Prev10;
-  const near20 = Math.abs(close - ma20) / ma20 <= 0.02;
-  const near50 = Math.abs(close - ma50) / ma50 <= 0.03;
-  const recent5 = rows.slice(0, 5);
-  const recentLow = Math.min(...recent5.map(row => row.low));
-  const recentRangeAvg = recent5.reduce((sum, row) => sum + (row.high - row.low), 0) / recent5.length;
-  const priorRangeAvg = rows.slice(5, 10).reduce((sum, row) => sum + (row.high - row.low), 0) / 5;
-  const stabilising = close >= recentLow * 1.005 && recentRangeAvg <= priorRangeAvg * 1.12 && latest.low >= Math.min(prev.low, prev2.low) * 0.985;
-  const bounce = close > prev.close && close >= latest.open && latest.low >= prev.low * 0.985;
-  const volume = latest.volume >= avgVol20 * 0.9 || latest.volume > prev.volume;
-  const swingHigh = maxHigh(rows, 5, 35);
-  const roomPct = swingHigh ? ((swingHigh - close) / close) * 100 : 0;
-  const checks = {trendStrong:uptrend, above50:close > ma50, above200:false, ma50gt200:false, near20, near50, stabilising, bounce, volume, entryDefined:true, stopDefined:true, targetDefined:!!swingHigh};
+function setCachedMarketData(symbol, data){
+  const ticker = normalizeTicker(symbol);
+  if(!ticker || !data) return;
+  const payload = {...data, ticker, fetchedAt:data.fetchedAt || new Date().toISOString(), cacheVersion:MARKET_CACHE_SCHEMA_VERSION};
+  marketDataCache.set(ticker, payload);
+  const diskCache = readMarketCache();
+  diskCache[ticker] = payload;
+  writeMarketCache(diskCache);
+}
+
+async function fetchMarketData(symbol, options = {}){
+  const ticker = normalizeTicker(symbol);
+  if(!ticker) throw new Error('Missing ticker.');
+  if(!options.force){
+    const cached = getCachedMarketData(ticker);
+    if(cached) return cached;
+  }
+  const response = await fetchJsonWithTimeout(`${defaultMarketDataEndpoint}?symbol=${encodeURIComponent(ticker)}`);
+  const payload = await response.json().catch(() => ({}));
+  if(!response.ok){
+    throw new Error(payload && payload.error ? payload.error : `Market data request failed for ${ticker}.`);
+  }
+  const safeData = payload && payload.data && typeof payload.data === 'object' ? payload.data : null;
+  if(!safeData){
+    throw new Error(payload && payload.error ? payload.error : `Market data request returned no usable data for ${ticker}.`);
+  }
+  setCachedMarketData(ticker, safeData);
+  rememberTickerMeta(safeData);
+  if(payload && payload.ok === false){
+    safeData.__error = String(payload.error || `Market data is incomplete for ${ticker}.`);
+  }
+  return safeData;
+}
+
+async function fetchTickerSuggestions(query){
+  const response = await fetchJsonWithTimeout(`${defaultMarketDataEndpoint}?mode=search&query=${encodeURIComponent(query)}`);
+  const payload = await response.json().catch(() => ({}));
+  if(!response.ok) throw new Error(payload && payload.error ? payload.error : 'Search request failed.');
+  return Array.isArray(payload.results) ? payload.results : [];
+}
+
+async function loadScannerPresets(){
+  if(!scannerPresetPromise){
+    scannerPresetPromise = fetch('./scanner-presets.json', {cache:'no-store'})
+      .then(response => response.ok ? response.json() : scannerPresetFallback)
+      .catch(() => scannerPresetFallback);
+  }
+  return scannerPresetPromise;
+}
+
+async function getActiveScannerPreset(){
+  const presets = await loadScannerPresets();
+  const list = Array.isArray(presets) && presets.length ? presets : scannerPresetFallback;
+  return list.find(item => item.name === state.scannerPresetName) || list[0];
+}
+
+function compareValues(left, operator, right){
+  if(!Number.isFinite(left) || !Number.isFinite(right)) return false;
+  if(operator === '>') return left > right;
+  if(operator === '>=') return left >= right;
+  if(operator === '<') return left < right;
+  if(operator === '<=') return left <= right;
+  if(operator === '===') return left === right;
+  return false;
+}
+
+function evaluateScannerRule(rule, data){
+  if(!rule || typeof rule !== 'object') return false;
+  if(rule.rules && Array.isArray(rule.rules)){
+    const mode = rule.mode === 'any' ? 'any' : 'all';
+    const results = rule.rules.map(item => evaluateScannerRule(item, data));
+    return mode === 'any' ? results.some(Boolean) : results.every(Boolean);
+  }
+  if(!data || typeof data !== 'object' || !rule.field || !rule.operator) return false;
+  const left = numericOrNull(data && data[rule.field]);
+  const right = rule.valueField ? numericOrNull(data && data[rule.valueField]) : numericOrNull(rule.value);
+  return compareValues(left, rule.operator, right);
+}
+
+function tradingDaysFrom(startDate, count){
+  const base = new Date(`${startDate}T12:00:00Z`);
+  let added = 0;
+  while(added < count){
+    base.setUTCDate(base.getUTCDate() + 1);
+    const day = base.getUTCDay();
+    if(day !== 0 && day !== 6) added += 1;
+  }
+  return base.toISOString().slice(0, 10);
+}
+
+function isNearLevel(price, level, tolerance){
+  if(!Number.isFinite(price) || !Number.isFinite(level) || level === 0) return false;
+  return Math.abs(price - level) / level <= tolerance;
+}
+
+function buildScannerSummary(result){
+  if(result.status === 'Ready') return `Quality pullback is shaping well near the moving averages with supportive trend and momentum data.`;
+  if(result.status === 'Near Setup') return `Trend and momentum are healthy, but the pullback still needs a cleaner setup signal.`;
+  if(result.status === 'Watch') return `The name stays on watch for follow-up while the pullback develops.`;
+  return `The current market-data scan does not support a quality pullback setup right now.`;
+}
+
+function buildScannerChecks(data){
+  const price = numericOrNull(data.price);
+  const sma20 = numericOrNull(data.sma20);
+  const sma50 = numericOrNull(data.sma50);
+  const sma200 = numericOrNull(data.sma200);
+  const volume = numericOrNull(data.volume);
+  const avgVolume30d = numericOrNull(data.avgVolume30d);
+  const near20 = isNearLevel(price, sma20, 0.025);
+  const near50 = isNearLevel(price, sma50, 0.035);
+  const trendStrong = Number.isFinite(price) && Number.isFinite(sma50) && Number.isFinite(sma200) && Number.isFinite(sma20) && price > sma50 && price > sma200 && sma20 > sma50 && sma50 > sma200;
+  return {
+    trendStrong,
+    above50:Number.isFinite(price) && Number.isFinite(sma50) && price > sma50,
+    above200:Number.isFinite(price) && Number.isFinite(sma200) && price > sma200,
+    ma50gt200:Number.isFinite(sma50) && Number.isFinite(sma200) && sma50 > sma200,
+    near20,
+    near50,
+    stabilising:near20 || near50,
+    bounce:Number.isFinite(data.perf1w) && data.perf1w < 0,
+    volume:Number.isFinite(volume) && Number.isFinite(avgVolume30d) && volume >= avgVolume30d,
+    entryDefined:false,
+    stopDefined:false,
+    targetDefined:false
+  };
+}
+
+function scoreMarketData(data){
   let score = 0;
-  if(uptrend) score += 3;
-  if(near20 || near50) score += 2;
-  if(stabilising) score += 2;
-  if(bounce) score += 2;
-  if(swingHigh && roomPct >= 4) score += 1;
-  if(state.marketStatus === 'S&P below 50 MA') score = Math.max(0, score - 1);
-  let status = 'Watch';
-  if(!uptrend) status = 'Avoid';
-  else if((near20 || near50) && stabilising && bounce) status = score >= 8 ? 'Entry' : 'Near Entry';
-  else if((near20 || near50) && (stabilising || bounce)) status = 'Near Entry';
-  if(score <= 3) status = 'Avoid';
-  const support = near20 ? ma20 : ma50;
-  const stop = Math.min(recentLow, support * 0.985);
-  let entry = bounce ? latest.high + 0.05 : Math.max(close, support);
-  if(entry <= stop) entry = close;
-  const target = swingHigh || maxHigh(rows, 35, 60) || close;
-  return {ticker, checks, result:{score, status}, entry, stop, target, summary:buildAutoSummary({checks, result:{status}, target}), close, ma20, ma50, ma200:null, swingHigh, roomPct};
+  const checks = buildScannerChecks(data);
+  if(checks.above50) score += 1;
+  if(checks.above200) score += 1;
+  if(checks.ma50gt200) score += 1;
+  if(checks.volume) score += 1;
+  if(checks.near20 || checks.near50) score += 2;
+  if(Number.isFinite(data.perf1m) && data.perf1m > 0) score += 1;
+  if(Number.isFinite(data.perf3m) && data.perf3m > 5) score += 1;
+  if(Number.isFinite(data.perf6m) && data.perf6m > 10) score += 1;
+  if(Number.isFinite(data.perfYtd) && data.perfYtd > 5) score += 1;
+  if(Number.isFinite(data.rsi14) && data.rsi14 >= 40 && data.rsi14 <= 60) score += 1;
+  return {score:Math.max(0, Math.min(10, score)), checks};
 }
 
-function buildAutoSummary(data){
-  const loc = data.checks.near20 ? '20 MA' : (data.checks.near50 ? '50 MA' : 'moving averages');
-  if(data.result.status === 'Avoid') return 'Trend is not strong enough for a quality pullback right now.';
-  if(data.result.status === 'Entry') return `Strong uptrend, pullback is near the ${loc}, and price is starting to bounce. First target is near ${fmtPrice(data.target)}.`;
-  if(data.result.status === 'Near Entry') return `The trend still looks healthy and price is close to the ${loc}, but it needs more proof that the pullback has finished.`;
-  return 'The stock is worth watching, but the pullback is not settled enough yet for a clean entry.';
+async function evaluateScannerForData(data){
+  const preset = await getActiveScannerPreset();
+  const safeData = data && typeof data === 'object' ? data : {};
+  const rules = Array.isArray(preset && preset.rules) ? preset.rules : [];
+  const ruleResults = rules.map(rule => evaluateScannerRule(rule, safeData));
+  const passedRules = ruleResults.filter(Boolean).length;
+  const {score, checks} = scoreMarketData(safeData);
+  const trendReady = checks.above50 && checks.above200 && checks.ma50gt200;
+  const pullbackReady = checks.near20 || checks.near50;
+  const momentumReady = Number.isFinite(safeData.perf3m) && safeData.perf3m > 5 && Number.isFinite(safeData.perf6m) && safeData.perf6m > 10;
+  const rsiReady = !Number.isFinite(safeData.rsi14) || (safeData.rsi14 >= 40 && safeData.rsi14 <= 60);
+  let status = 'Avoid';
+  if(trendReady && pullbackReady && checks.volume && momentumReady && rsiReady && score >= 7) status = 'Ready';
+  else if(trendReady && score >= 6) status = 'Near Setup';
+  else if(score >= 4 || (ruleResults.length && passedRules >= Math.ceil(ruleResults.length * 0.45))) status = 'Watch';
+  const result = {
+    status,
+    score,
+    checks,
+    summary:buildScannerSummary({status, score, passedRules}),
+    passedRules,
+    totalRules:ruleResults.length
+  };
+  return result;
 }
 
-async function fetchAlphaSeries(symbol){
-  const apiKey = (state.apiKey || '').trim();
-  if(!apiKey) throw new Error('Add your Alpha Vantage API key first.');
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&outputsize=compact&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(apiKey)}`;
-  const response = await fetch(url);
-  if(!response.ok) throw new Error(`Request failed for ${symbol}`);
-  const data = await response.json();
-  if(data['Error Message']) throw new Error(`Alpha Vantage could not find ${symbol}.`);
-  if(data.Note) throw new Error('Alpha Vantage rate limit hit. Wait a minute and try again, or scan fewer tickers.');
-  const series = data['Time Series (Daily)'];
-  if(!series) throw new Error(`No daily series returned for ${symbol}.`);
-  const rows = Object.entries(series).map(([date, row]) => ({date, open:Number(row['1. open']), high:Number(row['2. high']), low:Number(row['3. low']), close:Number(row['4. close']), volume:Number(row['6. volume'] || row['5. volume'] || 0)})).filter(row => Number.isFinite(row.close)).sort((a, b) => a.date < b.date ? 1 : -1);
-  if(rows.length < 60) throw new Error(`Not enough daily history returned for ${symbol}`);
-  return rows;
+function applyMarketDataToCard(card, data){
+  if(!card || !data) return;
+  card.marketData = {...data};
+  card.marketDataUpdatedAt = data.fetchedAt || new Date().toISOString();
+  card.companyName = String(data.companyName || card.companyName || '');
+  card.exchange = String(data.exchange || card.exchange || '');
+  card.tradingViewSymbol = String(data.tradingViewSymbol || card.tradingViewSymbol || '');
+  card.marketCap = numericOrNull(data.marketCap);
+  card.price = numericOrNull(data.price);
+  card.sma20 = numericOrNull(data.sma20);
+  card.sma50 = numericOrNull(data.sma50);
+  card.sma200 = numericOrNull(data.sma200);
+  card.volume = numericOrNull(data.volume);
+  card.avgVolume30d = numericOrNull(data.avgVolume30d);
+  card.perf1w = numericOrNull(data.perf1w);
+  card.perf1m = numericOrNull(data.perf1m);
+  card.perf3m = numericOrNull(data.perf3m);
+  card.perf6m = numericOrNull(data.perf6m);
+  card.perfYtd = numericOrNull(data.perfYtd);
+  card.rsi14 = numericOrNull(data.rsi14);
+}
+
+function ensureWatchTracking(card, days = DEFAULT_WATCH_TRADING_DAYS){
+  if(!card) return;
+  const safeDays = days === EXTENDED_WATCH_TRADING_DAYS ? EXTENDED_WATCH_TRADING_DAYS : DEFAULT_WATCH_TRADING_DAYS;
+  const firstFlaggedAt = card.watchTracking && /^\d{4}-\d{2}-\d{2}$/.test(card.watchTracking.firstFlaggedAt || '') ? card.watchTracking.firstFlaggedAt : todayIsoDate();
+  card.watchTracking = {
+    firstFlaggedAt,
+    expiryDate:tradingDaysFrom(firstFlaggedAt, safeDays),
+    extensionDays:safeDays,
+    pinned:!!(card.watchTracking && card.watchTracking.pinned),
+    manualRetain:!!(card.watchTracking && card.watchTracking.manualRetain),
+    dailyChecks:Array.isArray(card.watchTracking && card.watchTracking.dailyChecks) ? card.watchTracking.dailyChecks : [],
+    lastCheckedDate:String(card.watchTracking && card.watchTracking.lastCheckedDate || '')
+  };
+}
+
+function recordDailyWatchCheck(card){
+  if(!card || !card.watchTracking) return;
+  const date = todayIsoDate();
+  card.watchTracking.lastCheckedDate = date;
+  card.watchTracking.dailyChecks = (card.watchTracking.dailyChecks || []).filter(item => item && item.date !== date);
+  card.watchTracking.dailyChecks.unshift({date, status:card.status, score:card.score});
+  card.watchTracking.dailyChecks = card.watchTracking.dailyChecks.slice(0, EXTENDED_WATCH_TRADING_DAYS);
+}
+
+function updateWatchTracking(card){
+  if(!card) return;
+  if(card.status === 'Watch'){
+    ensureWatchTracking(card, card.watchTracking && card.watchTracking.extensionDays === EXTENDED_WATCH_TRADING_DAYS ? EXTENDED_WATCH_TRADING_DAYS : DEFAULT_WATCH_TRADING_DAYS);
+    recordDailyWatchCheck(card);
+  }else if(card.watchTracking){
+    recordDailyWatchCheck(card);
+  }
+}
+
+function pruneExpiredWatches(){
+  const today = todayIsoDate();
+  const keepTickers = new Set();
+  state.cards = state.cards.filter(card => {
+    if(!card.watchTracking || !card.watchTracking.expiryDate) return true;
+    if(card.status !== 'Watch') return true;
+    if(card.watchTracking.pinned || card.watchTracking.manualRetain) return true;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(card.watchTracking.expiryDate)) return true;
+    if(card.watchTracking.expiryDate >= today) return true;
+    return false;
+  });
+  state.cards.forEach(card => keepTickers.add(card.ticker));
+  state.tickers = state.tickers.filter(ticker => keepTickers.has(ticker));
+}
+
+async function refreshCardMarketData(ticker, options = {}){
+  const card = upsertCard(ticker);
+  const meta = getStoredTickerMeta(ticker);
+  if(meta) applyTickerMetaToCard(card, meta);
+  const data = await fetchMarketData(ticker, options);
+  applyMarketDataToCard(card, data);
+  const scan = await evaluateScannerForData(data);
+  card.checks = scan.checks;
+  card.score = scan.score;
+  card.status = scan.status;
+  card.summary = scan.summary;
+  card.source = 'scanner';
+  card.marketStatus = state.marketStatus;
+  card.updatedAt = new Date().toISOString();
+  if(data.__error){
+    card.lastError = data.__error;
+  }
+  card.analysis = {
+    price:data.price,
+    sma20:data.sma20,
+    sma50:data.sma50,
+    sma200:data.sma200,
+    avgVolume30d:data.avgVolume30d,
+    perf1w:data.perf1w,
+    perf1m:data.perf1m,
+    perf3m:data.perf3m,
+    perf6m:data.perf6m,
+    perfYtd:data.perfYtd,
+    rsi14:data.rsi14,
+    passedRules:scan.passedRules,
+    totalRules:scan.totalRules
+  };
+  updateWatchTracking(card);
+  return card;
+}
+
+async function refreshMarketDataForTickers(tickers, options = {}){
+  const unique = uniqueTickers(tickers);
+  if(!unique.length) return {done:0, failed:0};
+  let done = 0;
+  let failed = 0;
+  for(const ticker of unique){
+    try{
+      await refreshCardMarketData(ticker, options);
+      done += 1;
+      persistState();
+      renderCards();
+    }catch(err){
+      const card = upsertCard(ticker);
+      card.status = 'Avoid';
+      card.score = 0;
+      card.summary = String(err && err.message || 'Market-data scan failed.');
+      card.source = 'scanner';
+      card.updatedAt = new Date().toISOString();
+      card.lastError = 'Market data is unavailable right now. The scanner skipped this ticker.';
+      failed += 1;
+      persistState();
+      renderCards();
+    }
+  }
+  pruneExpiredWatches();
+  persistState();
+  renderTickerQuickLists();
+  renderCards();
+  return {done, failed};
 }
 
 async function testApiConnection(){
   saveState();
-  setStatus('apiStatus', '<span class="warntext">Testing Alpha Vantage connection...</span>');
+  setStatus('apiStatus', '<span class="warntext">Testing Financial Modeling Prep market data...</span>');
   try{
-    const rows = await fetchAlphaSeries('IBM');
-    setStatus('apiStatus', `<span class="ok">Connected.</span> Pulled ${rows.length} daily bars from Alpha Vantage.`);
+    const data = await fetchMarketData('AAPL', {force:true});
+    setStatus('apiStatus', `<span class="ok">Connected.</span> Loaded ${escapeHtml(data.ticker)} with price ${escapeHtml(fmtPrice(Number(data.price)))} and SMA 50 ${escapeHtml(fmtPrice(Number(data.sma50)))}.`);
   }catch(err){
     setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message)}</span>`);
   }
 }
 
-async function autoAnalyseWatchlist(){
-  buildCards();
+async function autoAnalyseWatchlist(options = {}){
   saveState();
   const tickers = state.tickers || [];
   if(!tickers.length){
     setStatus('apiStatus', '<span class="badtext">Add at least one ticker first.</span>');
     return;
   }
-  if(!(state.apiKey || '').trim()){
-    setStatus('apiStatus', '<span class="badtext">Add and save your Alpha Vantage API key first.</span>');
-    return;
-  }
-  const delay = state.apiPlan === 'free' ? 15000 : 1000;
-  let done = 0;
-  let failed = 0;
-  for(let index = 0; index < tickers.length; index += 1){
-    const ticker = tickers[index];
-    setStatus('apiStatus', `<span class="warntext">Analysing ${escapeHtml(ticker)} (${index + 1}/${tickers.length})...</span> ${done} done, ${failed} failed.`);
-    try{
-      const rows = await fetchAlphaSeries(ticker);
-      const analysis = analyseSeries(ticker, rows);
-      const card = upsertCard(ticker);
-      card.checks = analysis.checks;
-      card.score = analysis.result.score;
-      card.status = analysis.result.status;
-      card.summary = analysis.summary;
-      card.entry = fmtPrice(analysis.entry);
-      card.stop = fmtPrice(analysis.stop);
-      card.target = fmtPrice(analysis.target);
-      card.source = 'alpha';
-      card.marketStatus = state.marketStatus;
-      card.updatedAt = new Date().toISOString();
-      card.analysis = {close:analysis.close, ma20:analysis.ma20, ma50:analysis.ma50, ma200:analysis.ma200, swingHigh:analysis.swingHigh, roomPct:analysis.roomPct};
-      done += 1;
-      localStorage.setItem(key, JSON.stringify(state));
-      renderCards();
-    }catch(err){
-      const card = upsertCard(ticker);
-      card.status = 'Avoid';
-      card.score = 0;
-      card.summary = err.message;
-      card.source = 'alpha';
-      card.marketStatus = state.marketStatus;
-      card.updatedAt = new Date().toISOString();
-      failed += 1;
-      localStorage.setItem(key, JSON.stringify(state));
-      renderCards();
-      if(String(err.message).includes('rate limit')) break;
-    }
-    if(index < tickers.length - 1) await sleep(delay);
-  }
-  setStatus('apiStatus', `<span class="ok">Auto analysis finished.</span> ${done} updated, ${failed} failed.`);
+  setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${tickers.length} ticker${tickers.length === 1 ? '' : 's'}...</span>`);
+  const result = await refreshMarketDataForTickers(tickers, options);
+  setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} updated, ${result.failed} failed.`);
 }
 
 function currentChecks(){
@@ -698,7 +1136,23 @@ function buildAnalysisPayload(card){
     chartFileName:safeCard.chartRef ? safeCard.chartRef.name : '',
     entry:safeCard.entry || '',
     stop:safeCard.stop || '',
-    target:safeCard.target || ''
+    target:safeCard.target || '',
+    marketData:safeCard.marketData ? {
+      price:safeCard.price,
+      sma20:safeCard.sma20,
+      sma50:safeCard.sma50,
+      sma200:safeCard.sma200,
+      volume:safeCard.volume,
+      avgVolume30d:safeCard.avgVolume30d,
+      perf1w:safeCard.perf1w,
+      perf1m:safeCard.perf1m,
+      perf3m:safeCard.perf3m,
+      perf6m:safeCard.perf6m,
+      perfYtd:safeCard.perfYtd,
+      rsi14:safeCard.rsi14,
+      companyName:safeCard.companyName,
+      exchange:safeCard.exchange
+    } : null
   };
 }
 
@@ -723,8 +1177,9 @@ function buildTickerPrompt(card){
 
 function normalizeImportedStatus(value){
   const v = String(value || '').trim().toLowerCase();
-  if(v === 'ready' || v === 'entry') return 'Entry';
-  if(v === 'near pullback' || v === 'near entry') return 'Near Entry';
+  if(v === 'ready') return 'Ready';
+  if(v === 'entry') return 'Entry';
+  if(v === 'near pullback' || v === 'near entry' || v === 'near setup') return 'Near Setup';
   if(v === 'avoid') return 'Avoid';
   return 'Watch';
 }
@@ -764,6 +1219,11 @@ function formatApproxBytes(bytes){
 function tradingViewSymbolForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return '';
+  const isValidTvSymbol = value => /^[A-Z0-9_]+:[A-Z0-9.-]+$/.test(String(value || '').trim().toUpperCase());
+  const card = getCard(symbol);
+  if(card && isValidTvSymbol(card.tradingViewSymbol)) return card.tradingViewSymbol;
+  const meta = getStoredTickerMeta(symbol);
+  if(meta && isValidTvSymbol(meta.tradingViewSymbol)) return meta.tradingViewSymbol;
   if(tradingViewConfig.symbolOverrides[symbol]) return tradingViewConfig.symbolOverrides[symbol];
   for(const [suffix, exchange] of Object.entries(tradingViewConfig.suffixMap)){
     if(symbol.endsWith(suffix)){
@@ -777,7 +1237,10 @@ function tradingViewSymbolForTicker(ticker){
 function openTickerChart(ticker){
   const tvSymbol = tradingViewSymbolForTicker(ticker);
   if(!tvSymbol) return;
-  window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`, '_blank', 'noopener');
+  const url = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`;
+  try{
+    window.open(url, '_blank', 'noopener');
+  }catch(error){}
 }
 
 async function analyseSetup(ticker){
@@ -791,7 +1254,7 @@ async function analyseSetup(ticker){
   uiState.loadingTicker = ticker;
   uiState.promptOpen[ticker] = true;
   uiState.responseOpen[ticker] = true;
-  localStorage.setItem(key, JSON.stringify(state));
+  persistState();
   renderCards();
   const endpoint = (state.aiEndpoint || defaultAiEndpoint).trim();
   if(!endpoint){
@@ -830,10 +1293,10 @@ async function analyseSetup(ticker){
       if(analysis.stop) card.stop = analysis.stop;
       if(analysis.first_target) card.target = analysis.first_target;
     }
-    localStorage.setItem(key, JSON.stringify(state));
+    persistState();
   }catch(err){
     card.lastError = err && err.name === 'AbortError' ? 'The analysis request timed out. Retry the setup.' : String(err.message || 'Analysis request failed.');
-    localStorage.setItem(key, JSON.stringify(state));
+    persistState();
   }finally{
     clearTimeout(timer);
     uiState.loadingTicker = '';
@@ -851,6 +1314,19 @@ function renderAnalysisPanel(card){
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
 
+function statusRank(status){
+  if(status === 'Ready') return 0;
+  if(status === 'Near Setup' || status === 'Near Entry') return 1;
+  if(status === 'Watch') return 2;
+  return 3;
+}
+
+function watchTrackingText(card){
+  if(!card.watchTracking) return '';
+  const checks = Array.isArray(card.watchTracking.dailyChecks) ? card.watchTracking.dailyChecks.length : 0;
+  return `Watching from ${escapeHtml(card.watchTracking.firstFlaggedAt || '-')}, expires ${escapeHtml(card.watchTracking.expiryDate || '-')} (${checks} daily checks logged).`;
+}
+
 function renderCards(){
   const box = $('results');
   box.innerHTML = '';
@@ -858,19 +1334,31 @@ function renderCards(){
     box.innerHTML = '<div class="summary">No cards yet. Add tickers and press Build Cards.</div>';
     return;
   }
-  const ordered = [...state.cards].sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker));
-  ordered.forEach(card => {
+  const ordered = [...state.cards].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
+  const groups = ['Ready', 'Near Setup', 'Watch', 'Avoid'];
+  groups.forEach(group => {
+    const items = ordered.filter(card => (group === 'Near Setup' ? (card.status === 'Near Setup' || card.status === 'Near Entry') : card.status === group));
+    if(!items.length) return;
+    const header = document.createElement('div');
+    header.className = 'summary';
+    header.innerHTML = `<strong>${escapeHtml(group)}</strong><div class="tiny">${items.length} candidate${items.length === 1 ? '' : 's'} in this scanner bucket.</div>`;
+    box.appendChild(header);
+    items.forEach(card => {
     const promptText = card.lastPrompt || buildTickerPrompt(card);
-    const sourceLabel = card.source === 'openai' ? 'OpenAI' : (card.source === 'alpha' ? 'Alpha Vantage' : (card.source === 'ai' ? 'Imported AI' : 'Checklist'));
+    const sourceLabel = card.source === 'openai' ? 'OpenAI' : (card.source === 'scanner' ? 'Scanner' : (card.source === 'ai' ? 'Imported AI' : 'Checklist'));
     const marketLabel = card.marketStatus || state.marketStatus;
     const updatedLabel = card.updatedAt ? new Date(card.updatedAt).toLocaleString() : '';
     const loading = uiState.loadingTicker === card.ticker;
     const analysisBusy = !!uiState.loadingTicker;
     const analyseLabel = loading ? 'Analysing...' : (card.lastError ? 'Retry Analysis' : 'Analyse Setup');
-    const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>`;
+    const companyLine = card.companyName ? `<div class="tiny">${escapeHtml(card.companyName)}${card.exchange ? ` • ${escapeHtml(card.exchange)}` : ''}</div>` : '';
+    const marketDataLine = card.marketData ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} • 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} • 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} • 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} • Vol ${escapeHtml(formatPercent(card.volume && card.avgVolume30d ? ((card.volume / card.avgVolume30d) - 1) * 100 : null))} vs avg • RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : '<div class="tiny">Market data pending...</div>';
+    const performanceLine = card.marketData ? `<div class="tiny">1W ${escapeHtml(formatPercent(card.perf1w))} • 1M ${escapeHtml(formatPercent(card.perf1m))} • 3M ${escapeHtml(formatPercent(card.perf3m))} • 6M ${escapeHtml(formatPercent(card.perf6m))} • YTD ${escapeHtml(formatPercent(card.perfYtd))}</div>` : '';
+    const watchLine = card.watchTracking ? `<div class="tiny">${watchTrackingText(card)}</div>` : '';
+    const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>${companyLine}${marketDataLine}${performanceLine}${watchLine}`;
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${card.score}/10</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button></div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${card.score}/10</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(card.ticker);
     div.querySelector('[data-act="load"]').onclick = () => loadCard(card.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeTicker(card.ticker);
@@ -879,7 +1367,7 @@ function renderCards(){
       const liveCard = upsertCard(card.ticker);
       const notesEl = $(`notes-${card.ticker}`);
       if(notesEl) liveCard.notes = notesEl.value;
-      localStorage.setItem(key, JSON.stringify(state));
+      persistState();
       saveTradeFromCard(card.ticker);
       const statusBox = $(`cardStatus-${card.ticker}`);
       if(statusBox) statusBox.innerHTML = '<span class="ok">Trade record saved to the diary.</span>';
@@ -889,22 +1377,51 @@ function renderCards(){
       const notesEl = $(`notes-${card.ticker}`);
       if(notesEl) liveCard.notes = notesEl.value;
       liveCard.lastPrompt = buildTickerPrompt(liveCard);
-      localStorage.setItem(key, JSON.stringify(state));
+      persistState();
       renderCards();
       const copied = await copyText(liveCard.lastPrompt);
       const statusBox = $(`cardStatus-${card.ticker}`);
       if(statusBox) statusBox.innerHTML = copied ? '<span class="ok">Prompt copied to clipboard.</span>' : '<span class="warntext">Clipboard copy was blocked. Use the prompt preview in this card.</span>';
     };
+    const extendWatchBtn = div.querySelector('[data-act="extend-watch"]');
+    if(extendWatchBtn){
+      extendWatchBtn.onclick = () => {
+        const liveCard = upsertCard(card.ticker);
+        ensureWatchTracking(liveCard, EXTENDED_WATCH_TRADING_DAYS);
+        persistState();
+        renderCards();
+      };
+    }
+    const pinBtn = div.querySelector('[data-act="toggle-pin"]');
+    if(pinBtn){
+      pinBtn.onclick = () => {
+        const liveCard = upsertCard(card.ticker);
+        ensureWatchTracking(liveCard, liveCard.watchTracking && liveCard.watchTracking.extensionDays || DEFAULT_WATCH_TRADING_DAYS);
+        liveCard.watchTracking.pinned = !liveCard.watchTracking.pinned;
+        persistState();
+        renderCards();
+      };
+    }
+    const retainBtn = div.querySelector('[data-act="toggle-retain"]');
+    if(retainBtn){
+      retainBtn.onclick = () => {
+        const liveCard = upsertCard(card.ticker);
+        ensureWatchTracking(liveCard, liveCard.watchTracking && liveCard.watchTracking.extensionDays || DEFAULT_WATCH_TRADING_DAYS);
+        liveCard.watchTracking.manualRetain = !liveCard.watchTracking.manualRetain;
+        persistState();
+        renderCards();
+      };
+    }
     const notesField = div.querySelector('[data-act="notes"]');
     notesField.addEventListener('input', event => {
       const liveCard = upsertCard(card.ticker);
       liveCard.notes = event.target.value;
-      localStorage.setItem(key, JSON.stringify(state));
+      persistState();
     });
     notesField.addEventListener('change', event => {
       const liveCard = upsertCard(card.ticker);
       liveCard.notes = event.target.value;
-      localStorage.setItem(key, JSON.stringify(state));
+      persistState();
     });
     const promptDetails = div.querySelector(`#prompt-${card.ticker}`);
     const responseDetails = div.querySelector(`#response-${card.ticker}`);
@@ -929,11 +1446,12 @@ function renderCards(){
       clearChartBtn.onclick = () => {
         const liveCard = upsertCard(card.ticker);
         liveCard.chartRef = null;
-        localStorage.setItem(key, JSON.stringify(state));
+        persistState();
         renderCards();
       };
     }
     box.appendChild(div);
+    });
   });
 }
 
@@ -957,7 +1475,7 @@ function handleChartSelection(ticker, file){
     card.chartRef = {name:file.name, type:file.type, dataUrl:String(reader.result || '')};
     card.lastError = '';
     card.updatedAt = new Date().toISOString();
-    localStorage.setItem(key, JSON.stringify(state));
+    persistState();
     renderCards();
     const liveStatus = $(`cardStatus-${ticker}`);
     if(liveStatus) liveStatus.innerHTML = '<span class="ok">Chart saved on this device for this ticker.</span>';
@@ -1013,8 +1531,9 @@ function saveReview(){
   card.marketStatus = state.marketStatus;
   card.updatedAt = new Date().toISOString();
   card.source = 'manual';
+  updateWatchTracking(card);
   updateTickerInputFromState();
-  localStorage.setItem(key, JSON.stringify(state));
+  persistState();
   renderCards();
 }
 
@@ -1052,7 +1571,8 @@ function calculate(){
 
 function generateWatchPrompt(){
   saveState();
-  const watch = (state.tickers || []).join('\n') || '(add tickers here)';
+  const ranked = [...(state.cards || [])].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
+  const watch = ranked.length ? ranked.map(card => `${card.ticker} | ${card.status} | ${card.score}/10`).join('\n') : ((state.tickers || []).join('\n') || '(add tickers here)');
   const prompt = `Analyse these stocks for my Quality Pullback strategy.\n\nRules:\n- Prefer strong stocks in an uptrend\n- Pullback near 20MA or 50MA\n- Must stabilise or bounce\n- Previous swing high = first target\n\nAccount:\n${formatGbp(state.accountSize)} account\n${formatGbp(state.maxRisk)} max risk\n\nMarket status:\n${state.marketStatus}\n\nWatchlist:\n${watch}\n\nReturn ONLY valid JSON in this format:\n[\n  {"ticker":"GNRC","status":"Watch | Near Entry | Entry | Avoid","score":7,"reason":"One plain-English line."}\n]`;
   $('watchPromptBox').textContent = prompt;
   return prompt;
@@ -1114,7 +1634,7 @@ function importResults(){
   updateRecentTickers(parsed.map(item => item.ticker));
   state.lastImportRaw = raw;
   updateTickerInputFromState();
-  localStorage.setItem(key, JSON.stringify(state));
+  persistState();
   renderTickerQuickLists();
   renderCards();
   setStatus('importStatus', `<span class="ok">Imported ${updated} result${updated === 1 ? '' : 's'} to cards.</span>`);
@@ -1143,10 +1663,51 @@ async function copyText(text){
   }
 }
 
+async function runDueWatchRechecks(){
+  pruneExpiredWatches();
+  const today = todayIsoDate();
+  const due = (state.cards || []).filter(card => (
+    card.watchTracking &&
+    card.watchTracking.expiryDate &&
+    card.watchTracking.expiryDate >= today &&
+    card.status === 'Watch' &&
+    card.watchTracking.lastCheckedDate !== today
+  )).map(card => card.ticker);
+  if(!due.length){
+    persistState();
+    renderTickerQuickLists();
+    renderCards();
+    return;
+  }
+  await refreshMarketDataForTickers(due);
+}
+
 function registerPwa(){
   if(!('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+    const buildVersion = String(window.__BUILD_VERSION__ || APP_VERSION || Date.now());
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if(refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+    navigator.serviceWorker.register(`./service-worker.js?v=${encodeURIComponent(buildVersion)}`, {updateViaCache:'none'}).then(registration => {
+      const activateWaitingWorker = worker => {
+        if(worker) worker.postMessage({type:'SKIP_WAITING'});
+      };
+      if(registration.waiting) activateWaitingWorker(registration.waiting);
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        if(!worker) return;
+        worker.addEventListener('statechange', () => {
+          if(worker.state === 'installed' && navigator.serviceWorker.controller){
+            activateWaitingWorker(registration.waiting || worker);
+          }
+        });
+      });
+      registration.update().catch(() => {});
+    }).catch(() => {});
   });
 }
 
@@ -1162,7 +1723,8 @@ click('clearBtn', () => {
   state.listName = "Today's Scan";
   uiState.promptOpen = {};
   uiState.responseOpen = {};
-  localStorage.setItem(key, JSON.stringify(state));
+  renderTickerSuggestions([]);
+  persistState();
   renderTickerQuickLists();
   renderCards();
   resetReview();
@@ -1176,12 +1738,12 @@ click('importResultsBtn', importResults);
 click('clearImportBtn', () => {
   $('importResultsInput').value = '';
   state.lastImportRaw = '';
-  localStorage.setItem(key, JSON.stringify(state));
+  persistState();
   setStatus('importStatus', 'Pasted AI result cleared.');
 });
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
-click('autoAnalyseBtn', autoAnalyseWatchlist);
+click('autoAnalyseBtn', buildCards);
 click('saveReviewBtn', saveReview);
 click('resetReviewBtn', resetReview);
 click('calcBtn', calculate);
@@ -1194,7 +1756,11 @@ on('tickerSearch', 'keydown', event => {
     addTickerFromSearch();
   }
 });
-on('tickerSearch', 'input', updateTickerSearchStatus);
+on('tickerSearch', 'input', () => {
+  updateTickerSearchStatus();
+  queueTickerSuggestions();
+});
+on('tickerSearch', 'blur', () => setTimeout(() => renderTickerSuggestions([]), 150));
 
 ['accountSize','maxRisk','marketStatus','listName','apiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
 document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', refreshReview));
@@ -1205,3 +1771,4 @@ loadState();
 updateTickerSearchStatus();
 generateWatchPrompt();
 generateChartPrompt();
+runDueWatchRechecks().catch(() => {});

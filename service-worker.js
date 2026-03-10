@@ -1,13 +1,30 @@
-const CACHE = 'pullback-playbook-v4.0.0';
+const BUILD_VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
+const CACHE = `pullback-playbook-cache-v${BUILD_VERSION}`;
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './scanner-presets.json',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png'
 ];
+
+function isHtmlRequest(request){
+  return request.mode === 'navigate' || request.destination === 'document' || (request.headers.get('accept') || '').includes('text/html');
+}
+
+function isStaticAssetRequest(request){
+  return ['style', 'script', 'image', 'font'].includes(request.destination);
+}
+
+async function putInCache(request, response){
+  if(!response || !response.ok) return response;
+  const cache = await caches.open(CACHE);
+  await cache.put(request, response.clone());
+  return response;
+}
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -15,6 +32,10 @@ self.addEventListener('install', event => {
       .then(cache => cache.addAll(ASSETS))
       .then(() => self.skipWaiting())
   );
+});
+
+self.addEventListener('message', event => {
+  if(event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
@@ -26,13 +47,28 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
+  if(event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/.netlify/functions/')) return;
-  event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) return cached;
-      return fetch(event.request).catch(() => caches.match('./index.html'));
-    })
-  );
+  if(url.origin !== self.location.origin) return;
+  if(url.pathname.startsWith('/api/') || url.pathname.startsWith('/.netlify/functions/')) return;
+  if(url.pathname.endsWith('/service-worker.js') || url.pathname.endsWith('service-worker.js')) return;
+
+  if(isHtmlRequest(event.request) || event.request.destination === 'manifest' || url.pathname.endsWith('.webmanifest')){
+    event.respondWith(
+      fetch(event.request)
+        .then(response => putInCache(event.request, response))
+        .catch(() => caches.match(event.request).then(cached => cached || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  if(isStaticAssetRequest(event.request)){
+    event.respondWith(
+      caches.match(event.request).then(cached => {
+        if(cached) return cached;
+        return fetch(event.request).then(response => putInCache(event.request, response));
+      })
+    );
+    return;
+  }
 });

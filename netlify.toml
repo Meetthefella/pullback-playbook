@@ -2,7 +2,32 @@
   publish = "."
   functions = "netlify/functions"
 
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/service-worker.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
 [[redirects]]
   from = "/api/analyse-setup"
   to = "/.netlify/functions/analyse-setup"
+  status = 200
+
+[[redirects]]
+  from = "/api/market-data"
+  to = "/.netlify/functions/market-data"
   status = 200
