@@ -86,6 +86,7 @@ const tradingViewConfig = {
 let scannerPresetPromise = null;
 let suggestionTimer = null;
 let suggestionRequestToken = 0;
+let autoScanTimer = null;
 
 function formatGbp(value){
   return `GBP ${Number(value || 0).toLocaleString()}`;
@@ -201,6 +202,16 @@ function uniqueTickers(values){
     out.push(ticker);
   });
   return out;
+}
+
+function syncUniverseFromInputs(preferExisting = false){
+  const rawInput = $('tickerInput') ? $('tickerInput').value : '';
+  const parsed = parseTickersDetailed(rawInput);
+  const fallback = preferExisting ? uniqueTickers(state.tickers || []) : [];
+  const nextTickers = parsed.valid.length ? parsed.valid : fallback;
+  state.tickers = nextTickers;
+  if($('tickerInput')) $('tickerInput').value = nextTickers.join('\n');
+  return {...parsed, valid:nextTickers};
 }
 
 function createTradeRecord(values){
@@ -439,6 +450,52 @@ function renderTickerQuickLists(){
   });
 }
 
+function scannerUniverse(){
+  return uniqueTickers(state.tickers || []);
+}
+
+function scannerEmptyState(message){
+  state.scannerResults = [];
+  state.scannerDebug = [];
+  uiState.selectedScanner = {};
+  persistState();
+  renderTickerQuickLists();
+  renderScannerResults();
+  renderCards();
+  renderScannerRulesPanel();
+  setStatus('apiStatus', message || 'Add tickers to the scanner universe first.');
+}
+
+async function runScannerWorkflow(options = {}){
+  saveState();
+  const parsed = syncUniverseFromInputs(true);
+  const universe = scannerUniverse();
+  updateRecentTickers(universe);
+  renderTickerQuickLists();
+  renderScannerRulesPanel();
+  if(!universe.length){
+    const messages = [];
+    if(parsed.invalid.length) messages.push(`Invalid: ${escapeHtml(parsed.invalid.join(', '))}`);
+    setStatus('inputStatus', messages.length ? `<span class="badtext">${messages.join(' ')}</span>` : 'Add at least one valid ticker to the Scanner Universe first.');
+    scannerEmptyState('Waiting for a scanner universe.');
+    return {done:0, failed:0, rejected:0};
+  }
+  setStatus('inputStatus', `<span class="ok">${universe.length} ticker${universe.length === 1 ? '' : 's'} ready in the scanner universe.</span>`);
+  setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${universe.length} ticker${universe.length === 1 ? '' : 's'}...</span>`);
+  const result = await refreshMarketDataForTickers(universe, options);
+  setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} passed, ${result.rejected} rejected, ${result.failed} failed.`);
+  return result;
+}
+
+function requestAutoScan(options = {}){
+  if(autoScanTimer) clearTimeout(autoScanTimer);
+  autoScanTimer = setTimeout(() => {
+    runScannerWorkflow(options).catch(err => {
+      setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
+    });
+  }, options.delayMs == null ? 250 : options.delayMs);
+}
+
 function setStatus(id, html){
   const el = $(id);
   if(el) el.innerHTML = html;
@@ -600,27 +657,10 @@ function queueTickerSuggestions(){
 }
 
 function buildCards(){
-  saveState();
-  const tickerText = ($('tickerInput').value || '').trim();
-  const fallbackText = (state.tickers || []).join('\n');
-  const parsed = parseTickersDetailed(tickerText || fallbackText);
-  state.tickers = parsed.valid;
   uiState.selectedScanner = {};
-  if(!parsed.valid.length) state.scannerResults = [];
-  updateRecentTickers(parsed.valid);
-  updateTickerInputFromState();
-  persistState();
-  renderTickerQuickLists();
-  renderScannerResults();
-  renderCards();
-  renderScannerRulesPanel();
-  generateWatchPrompt();
-  if(parsed.valid.length) autoAnalyseWatchlist().catch(err => setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`));
-  const messages = [];
-  if(parsed.valid.length) messages.push(`<span class="ok">${parsed.valid.length} ticker${parsed.valid.length === 1 ? '' : 's'} loaded.</span>`);
-  if(parsed.invalid.length) messages.push(`<span class="badtext">Invalid: ${escapeHtml(parsed.invalid.join(', '))}</span>`);
-  if(parsed.duplicates.length) messages.push(`<span class="warntext">Duplicates skipped: ${escapeHtml([...new Set(parsed.duplicates)].join(', '))}</span>`);
-  setStatus('inputStatus', messages.join(' ') || 'Add at least one valid ticker to the Scanner Universe first.');
+  runScannerWorkflow({force:true}).catch(err => {
+    setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
+  });
 }
 
 function addTicker(rawTicker, meta){
@@ -651,11 +691,7 @@ function addTicker(rawTicker, meta){
   renderCards();
   generateWatchPrompt();
   setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`);
-  refreshMarketDataForTickers([ticker]).then(() => {
-    setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added and scanned.</span>`);
-  }).catch(err => {
-    setStatus('tickerSearchStatus', `<span class="warntext">${escapeHtml(ticker)} added, but market data failed: ${escapeHtml(err.message || 'unknown error')}.</span>`);
-  });
+  requestAutoScan({force:false});
 }
 
 function addTickerFromSearch(){
@@ -677,6 +713,7 @@ function removeTicker(ticker){
   renderCards();
   generateWatchPrompt();
   updateTickerSearchStatus();
+  requestAutoScan({force:false});
 }
 
 function scoreAndStatusFromChecks(checks){
@@ -921,6 +958,12 @@ function scannerFieldLabel(field){
   }[field] || field;
 }
 
+function formatRuleNumber(value){
+  if(!Number.isFinite(value)) return 'missing';
+  if(Math.abs(value) >= 1000000) return Number(value).toLocaleString(undefined, {maximumFractionDigits:0});
+  return Number(value).toLocaleString(undefined, {maximumFractionDigits:2});
+}
+
 function formatScannerRule(rule){
   if(!rule || typeof rule !== 'object') return 'Unknown rule';
   if(rule.label) return rule.label;
@@ -951,7 +994,7 @@ async function renderScannerRulesPanel(){
         : 'No scan debug data yet. Add tickers to the Scanner Universe, then run the Quality Pullback Scanner.';
     }else{
       debugBox.innerHTML = state.scannerDebug.map(item => (
-        `${escapeHtml(item.ticker)} | ${escapeHtml(item.passed ? 'PASS' : 'FAIL')} | ${escapeHtml(item.failedRule || 'All rules passed')}\n${escapeHtml((item.breakdown || []).map(entry => `${entry.passed ? 'Y' : 'N'} ${entry.label}`).join(' | '))}`
+        `${escapeHtml(item.ticker)} | ${escapeHtml(item.passed ? 'PASS' : 'FAIL')} | ${escapeHtml((item.breakdown || []).map(entry => entry.label).join(' | '))}`
       )).join('\n\n');
     }
   }
@@ -981,9 +1024,14 @@ function evaluateScannerRuleDetailed(rule, data){
   }
   const left = numericOrNull(data && data[rule.field]);
   const right = rule.valueField ? numericOrNull(data && data[rule.valueField]) : numericOrNull(rule.value);
+  const passed = compareValues(left, rule.operator, right);
+  const leftLabel = `${scannerFieldLabel(rule.field)} ${formatRuleNumber(left)}`;
+  const rightLabel = rule.valueField
+    ? `${scannerFieldLabel(rule.valueField)} ${formatRuleNumber(right)}`
+    : formatRuleNumber(right);
   return {
-    passed:compareValues(left, rule.operator, right),
-    label:formatScannerRule(rule),
+    passed,
+    label:`${leftLabel} ${rule.operator} ${rightLabel} = ${passed ? 'PASS' : 'FAIL'}`,
     left,
     right
   };
@@ -1169,7 +1217,7 @@ async function evaluateScannerForData(data){
   const rules = Array.isArray(preset && preset.rules) ? preset.rules : [];
   const universeRule = {
     passed:isUsExchange(safeData.exchange),
-    label:'Universe: US stocks only'
+    label:`Exchange ${String(safeData.exchange || 'missing')} = ${isUsExchange(safeData.exchange) ? 'PASS' : 'FAIL'}`
   };
   const ruleResults = rules.map(rule => evaluateScannerRuleDetailed(rule, safeData));
   const breakdown = [universeRule, ...ruleResults].map(item => ({passed:!!item.passed, label:item.label}));
@@ -1387,15 +1435,7 @@ async function testApiConnection(){
 }
 
 async function autoAnalyseWatchlist(options = {}){
-  saveState();
-  const tickers = state.tickers || [];
-  if(!tickers.length){
-    setStatus('apiStatus', '<span class="badtext">Add at least one ticker first.</span>');
-    return;
-  }
-  setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${tickers.length} ticker${tickers.length === 1 ? '' : 's'}...</span>`);
-  const result = await refreshMarketDataForTickers(tickers, options);
-  setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} passed, ${result.rejected} rejected, ${result.failed} failed.`);
+  return runScannerWorkflow(options);
 }
 
 function currentChecks(){
@@ -1665,6 +1705,10 @@ function updateScannerSelectionStatus(){
   const selectedCount = selectedScannerTickers().length;
   const resultCount = (state.scannerResults || []).length;
   if(!$('scannerSelectionStatus')) return;
+  if(!(state.tickers || []).length){
+    setStatus('scannerSelectionStatus', 'Add tickers to the Scanner Universe to start automatic scanning.');
+    return;
+  }
   if(!resultCount){
     setStatus('scannerSelectionStatus', 'Run the scanner to build ranked results first.');
     return;
@@ -1693,9 +1737,11 @@ function renderScannerResults(){
   box.innerHTML = '';
   if(!state.scannerResults || !state.scannerResults.length){
     updateScannerSelectionStatus();
-    box.innerHTML = state.scannerDebug && state.scannerDebug.length
+    box.innerHTML = !(state.tickers || []).length
+      ? '<div class="summary">Add tickers to the Scanner Universe and the app will scan automatically.</div>'
+      : (state.scannerDebug && state.scannerDebug.length
       ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div>'
-      : '<div class="summary">Run the scanner to build a ranked shortlist.</div>';
+      : '<div class="summary">Running the scanner will populate ranked results here.</div>');
     return;
   }
   state.scannerResults.forEach(card => {
@@ -2216,8 +2262,18 @@ on('tickerSearch', 'input', () => {
   queueTickerSuggestions();
 });
 on('tickerSearch', 'blur', () => setTimeout(() => renderTickerSuggestions([]), 150));
+on('tickerInput', 'input', () => {
+  syncUniverseFromInputs();
+  persistState();
+  renderTickerQuickLists();
+  requestAutoScan({force:false, delayMs:450});
+});
 
-['accountSize','maxRisk','marketStatus','listName','apiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
+['accountSize','maxRisk','marketStatus'].forEach(id => on(id, 'change', () => {
+  saveState();
+  requestAutoScan({force:false});
+}));
+['listName','apiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
 document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', refreshReview));
 ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));
 
@@ -2226,4 +2282,6 @@ loadState();
 updateTickerSearchStatus();
 generateWatchPrompt();
 generateChartPrompt();
+if((state.tickers || []).length) requestAutoScan({force:false, delayMs:50});
+else scannerEmptyState('Waiting for a scanner universe.');
 runDueWatchRechecks().catch(() => {});

@@ -13,12 +13,17 @@ const REQUEST_TIMEOUT_MS = 12000;
 const MAX_ATTEMPTS = 2;
 const EXCHANGE_MAP = {
   NASDAQ:'NASDAQ',
+  NASDAQGLOBALSELECT:'NASDAQ',
+  NASDAQGLOBALMARKET:'NASDAQ',
+  NASDAQCAPITALMARKET:'NASDAQ',
   NASDAQGS:'NASDAQ',
   NASDAQGM:'NASDAQ',
   NASDAQCM:'NASDAQ',
   NYSE:'NYSE',
+  NEWYORKSTOCKEXCHANGE:'NYSE',
   NYSEARCA:'AMEX',
   NYSEAMERICAN:'AMEX',
+  NYSEAMERICANLLC:'AMEX',
   AMEX:'AMEX',
   ARCA:'AMEX',
   LSE:'LSE',
@@ -88,19 +93,25 @@ function sma(rows, period){
 
 function rsi(rows, period){
   if(!rows || rows.length <= period) return null;
+  const closes = rows.map(row => normaliseNumber(row.close)).filter(Number.isFinite).reverse();
+  if(closes.length <= period) return null;
   let gains = 0;
   let losses = 0;
-  for(let index = 0; index < period; index += 1){
-    const current = normaliseNumber(rows[index] && rows[index].close);
-    const next = normaliseNumber(rows[index + 1] && rows[index + 1].close);
-    if(!Number.isFinite(current) || !Number.isFinite(next)) return null;
-    const change = current - next;
+  for(let index = 1; index <= period; index += 1){
+    const change = closes[index] - closes[index - 1];
     if(change >= 0) gains += change;
     else losses += Math.abs(change);
   }
-  const averageGain = gains / period;
-  const averageLoss = losses / period;
-  if(averageLoss === 0) return 100;
+  let averageGain = gains / period;
+  let averageLoss = losses / period;
+  for(let index = period + 1; index < closes.length; index += 1){
+    const change = closes[index] - closes[index - 1];
+    const gain = change > 0 ? change : 0;
+    const loss = change < 0 ? Math.abs(change) : 0;
+    averageGain = ((averageGain * (period - 1)) + gain) / period;
+    averageLoss = ((averageLoss * (period - 1)) + loss) / period;
+  }
+  if(averageLoss === 0) return averageGain === 0 ? 50 : 100;
   const strength = averageGain / averageLoss;
   return 100 - (100 / (1 + strength));
 }
@@ -113,7 +124,11 @@ function percentageChange(latest, prior){
 function yearStartRow(rows){
   if(!rows || !rows.length) return null;
   const currentYear = String(rows[0].date || '').slice(0, 4);
-  return rows.find(row => String(row.date || '').slice(0, 4) === currentYear) || null;
+  let candidate = null;
+  rows.forEach(row => {
+    if(String(row.date || '').slice(0, 4) === currentYear) candidate = row;
+  });
+  return candidate;
 }
 
 function normaliseHistoricalRows(payload){
@@ -187,15 +202,18 @@ function buildMarketPayload(symbol, quote, profile, rows){
   const latestClose = normaliseNumber(latest.close);
   const quotePrice = normaliseNumber(quote && (quote.price || quote.previousClose));
   const price = Number.isFinite(quotePrice) ? quotePrice : latestClose;
-  const volume = normaliseNumber(quote && (quote.volume || quote.avgVolume)) || normaliseNumber(latest.volume);
-  const avgVolume30d = average(rows.slice(0, 30).map(row => normaliseNumber(row.volume)).filter(Number.isFinite));
+  const volume = normaliseNumber(quote && quote.volume) || normaliseNumber(latest.volume) || normaliseNumber(quote && quote.avgVolume);
+  const avgVolume30d = average(rows.slice(0, 30).map(row => normaliseNumber(row.volume)).filter(Number.isFinite)) || normaliseNumber(quote && quote.avgVolume);
   const ytdRow = yearStartRow(rows);
-  const exchange = profile && (profile.exchangeShortName || profile.exchange) ? (profile.exchangeShortName || profile.exchange) : (quote && quote.exchange ? quote.exchange : '');
+  const exchangeSource = profile && (profile.exchangeShortName || profile.exchange)
+    ? (profile.exchangeShortName || profile.exchange)
+    : (quote && (quote.exchangeShortName || quote.exchange) ? (quote.exchangeShortName || quote.exchange) : '');
+  const exchange = normaliseExchange(exchangeSource);
   return {
     ticker:String(symbol || '').trim().toUpperCase(),
     fetchedAt:new Date().toISOString(),
     companyName:String((profile && (profile.companyName || profile.name)) || (quote && quote.name) || '').trim(),
-    exchange:String(exchange || '').trim(),
+    exchange,
     tradingViewSymbol:buildTradingViewSymbol(symbol, exchange),
     marketCap:normaliseNumber((quote && quote.marketCap) || (profile && profile.mktCap)),
     price,
