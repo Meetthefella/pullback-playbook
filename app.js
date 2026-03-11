@@ -473,7 +473,8 @@ function scannerEmptyState(message){
 
 async function runScannerWorkflow(options = {}){
   saveState();
-  const parsed = syncUniverseFromInputs(true);
+  const parsed = options.syncInput ? syncUniverseFromInputs(true) : {valid:scannerUniverse(), invalid:[], duplicates:[]};
+  if(!options.syncInput) updateTickerInputFromState();
   const universe = scannerUniverse();
   updateRecentTickers(universe);
   renderTickerQuickLists();
@@ -663,7 +664,7 @@ function queueTickerSuggestions(){
 
 function buildCards(){
   uiState.selectedScanner = {};
-  runScannerWorkflow({force:true}).catch(err => {
+  runScannerWorkflow({force:true, syncInput:true}).catch(err => {
     setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
   });
 }
