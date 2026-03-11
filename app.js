@@ -53,6 +53,11 @@ const EXTENDED_WATCH_TRADING_DAYS = 5;
 const APP_FETCH_TIMEOUT_MS = 12000;
 const MARKET_CACHE_SCHEMA_VERSION = 2;
 const marketDataCache = new Map();
+const DEFAULT_AUTO_UNIVERSE = [
+  'AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','AVGO','BRK.B','JPM',
+  'LLY','V','MA','COST','WMT','NFLX','HD','ABBV','ORCL','CRM',
+  'BAC','KO','AMD','UNH','XOM','PM','LIN','UNP','DE','PWR'
+];
 const scannerPresetFallback = [{
   name:'Quality Pullback Scanner Core',
   universe:['US stocks', 'Watchlist-only mode when a watchlist is present'],
@@ -391,9 +396,7 @@ function loadState(){
   renderCards();
   renderScannerRulesPanel();
   renderTradeDiary();
-  if((state.tickers || []).length){
-    requestAutoScan({force:true, delayMs:25});
-  }
+  requestAutoScan({force:true, delayMs:25});
 }
 
 function renderStats(){
@@ -429,7 +432,7 @@ function renderTickerQuickLists(){
   const recentBox = $('recentTickerList');
   if(!watchlistBox || !recentBox) return;
   if(!state.tickers.length){
-    watchlistBox.innerHTML = '<div class="quickchip empty">No tickers in the watchlist yet.</div>';
+    watchlistBox.innerHTML = '<div class="quickchip empty">Using default automatic US large-cap universe. Add a ticker above to switch into watchlist/manual mode.</div>';
   }else{
     watchlistBox.innerHTML = state.tickers.map(ticker => (
       `<div class="quickchip active"><span class="chiplabel">${escapeHtml(ticker)}</span><button class="danger" data-act="quick-remove" data-ticker="${escapeHtml(ticker)}">Remove</button></div>`
@@ -456,7 +459,8 @@ function renderTickerQuickLists(){
 }
 
 function scannerUniverse(){
-  return uniqueTickers(state.tickers || []);
+  const manualUniverse = uniqueTickers(state.tickers || []);
+  return manualUniverse.length ? manualUniverse : DEFAULT_AUTO_UNIVERSE;
 }
 
 function scannerEmptyState(message){
@@ -1765,12 +1769,10 @@ function updateScannerSelectionStatus(){
   const selectedCount = selectedScannerTickers().length;
   const resultCount = (state.scannerResults || []).length;
   if(!$('scannerSelectionStatus')) return;
-  if(!(state.tickers || []).length){
-    setStatus('scannerSelectionStatus', 'Add tickers to the Scanner Universe to start automatic scanning.');
-    return;
-  }
   if(!resultCount){
-    setStatus('scannerSelectionStatus', 'Run the scanner to build ranked results first.');
+    setStatus('scannerSelectionStatus', (state.tickers || []).length
+      ? 'Running the scanner will populate ranked results for your watchlist.'
+      : 'Running the scanner will populate ranked results from the default automatic universe.');
     return;
   }
   if(selectedCount){
@@ -1819,7 +1821,7 @@ function renderScannerResults(){
   if(!state.scannerResults || !state.scannerResults.length){
     updateScannerSelectionStatus();
     box.innerHTML = !(state.tickers || []).length
-      ? '<div class="summary">Add tickers to the Scanner Universe and the app will scan automatically.</div>'
+      ? '<div class="summary">Scanning the default automatic US large-cap universe. Add your own tickers any time to switch into watchlist/manual mode.</div>'
       : (state.scannerDebug && state.scannerDebug.length
       ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div><button class="secondary" data-act="seed-from-universe">Open Universe In Cards</button>'
       : '<div class="summary">Running the scanner will populate ranked results here.</div>');
@@ -2387,5 +2389,4 @@ loadState();
 updateTickerSearchStatus();
 generateWatchPrompt();
 generateChartPrompt();
-if(!(state.tickers || []).length) scannerEmptyState('Waiting for a scanner universe.');
 runDueWatchRechecks().catch(() => {});
