@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
-const APP_VERSION = 'v4.1.1';
+const APP_VERSION = 'v4.1.2';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
@@ -51,7 +51,7 @@ const SEARCH_DEBOUNCE_MS = 250;
 const DEFAULT_WATCH_TRADING_DAYS = 3;
 const EXTENDED_WATCH_TRADING_DAYS = 5;
 const APP_FETCH_TIMEOUT_MS = 12000;
-const MARKET_CACHE_SCHEMA_VERSION = 1;
+const MARKET_CACHE_SCHEMA_VERSION = 2;
 const marketDataCache = new Map();
 const scannerPresetFallback = [{
   name:'Quality Pullback Scanner Core',
@@ -93,7 +93,9 @@ function formatGbp(value){
 }
 
 function numericOrNull(value){
-  return Number.isFinite(Number(value)) ? Number(value) : null;
+  if(value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function safeJsonParse(value, fallback){
@@ -389,6 +391,9 @@ function loadState(){
   renderCards();
   renderScannerRulesPanel();
   renderTradeDiary();
+  if((state.tickers || []).length){
+    requestAutoScan({force:true, delayMs:25});
+  }
 }
 
 function renderStats(){
@@ -691,7 +696,7 @@ function addTicker(rawTicker, meta){
   renderCards();
   generateWatchPrompt();
   setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`);
-  requestAutoScan({force:false});
+  requestAutoScan({force:true, delayMs:100});
 }
 
 function addTickerFromSearch(){
@@ -919,7 +924,7 @@ async function fetchMarketData(symbol, options = {}){
   if(!safeData){
     throw new Error(payload && payload.error ? payload.error : `Market data request returned no usable data for ${ticker}.`);
   }
-  setCachedMarketData(ticker, safeData);
+  if(payload && payload.ok !== false) setCachedMarketData(ticker, safeData);
   rememberTickerMeta(safeData);
   if(payload && payload.ok === false){
     safeData.__error = String(payload.error || `Market data is incomplete for ${ticker}.`);
@@ -1737,6 +1742,27 @@ function migrateSelectedScannerResults(limit){
   setStatus('scannerSelectionStatus', `<span class="ok">${tickers.length} ranked result${tickers.length === 1 ? '' : 's'} moved into ticker cards.</span>`);
 }
 
+function seedCardsFromUniverse(limit){
+  const universe = scannerUniverse().slice(0, limit || scannerUniverse().length);
+  if(!universe.length) return;
+  universe.forEach(ticker => {
+    const result = getScannerResult(ticker);
+    if(result){
+      migrateScannerResultToCard(ticker);
+      return;
+    }
+    let card = getCard(ticker);
+    if(!card){
+      card = baseCard(ticker);
+      const meta = getStoredTickerMeta(ticker);
+      if(meta) applyTickerMetaToCard(card, meta);
+      state.cards.push(card);
+    }
+  });
+  persistState();
+  renderCards();
+}
+
 function renderScannerResults(){
   const box = $('results');
   if(!box) return;
@@ -1746,8 +1772,16 @@ function renderScannerResults(){
     box.innerHTML = !(state.tickers || []).length
       ? '<div class="summary">Add tickers to the Scanner Universe and the app will scan automatically.</div>'
       : (state.scannerDebug && state.scannerDebug.length
-      ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div>'
+      ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div><button class="secondary" data-act="seed-from-universe">Open Universe In Cards</button>'
       : '<div class="summary">Running the scanner will populate ranked results here.</div>');
+    const seedBtn = box.querySelector('[data-act="seed-from-universe"]');
+    if(seedBtn){
+      seedBtn.onclick = () => {
+        seedCardsFromUniverse(6);
+        const reviewSection = $('reviewSection');
+        if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
+      };
+    }
     return;
   }
   state.scannerResults.forEach(card => {
@@ -1779,7 +1813,17 @@ function renderCards(){
   if(!box) return;
   box.innerHTML = '';
   if(!state.cards || !state.cards.length){
-    box.innerHTML = '<div class="summary">No ticker cards yet. Start in Ranked Results, then move the best names into cards when you are ready to review them.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>';
+    box.innerHTML = (state.tickers || []).length
+      ? '<div class="summary">No ticker cards yet. Start in Ranked Results, or open your saved universe directly in cards when you want to review charts manually.</div><div class="actions"><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a><button class="secondary" data-act="seed-cards">Open Universe In Cards</button></div>'
+      : '<div class="summary">No ticker cards yet. Start in Ranked Results, then move the best names into cards when you are ready to review them.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>';
+    const seedBtn = box.querySelector('[data-act="seed-cards"]');
+    if(seedBtn){
+      seedBtn.onclick = () => {
+        seedCardsFromUniverse(6);
+        const reviewSection = $('reviewSection');
+        if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
+      };
+    }
     return;
   }
   const ordered = [...state.cards].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
@@ -2288,6 +2332,5 @@ loadState();
 updateTickerSearchStatus();
 generateWatchPrompt();
 generateChartPrompt();
-if((state.tickers || []).length) requestAutoScan({force:false, delayMs:50});
-else scannerEmptyState('Waiting for a scanner universe.');
+if(!(state.tickers || []).length) scannerEmptyState('Waiting for a scanner universe.');
 runDueWatchRechecks().catch(() => {});
