@@ -731,6 +731,29 @@ function removeCard(ticker){
   renderCards();
 }
 
+function saveCardReviewFromElement(ticker, container){
+  const card = upsertCard(ticker);
+  const checks = {};
+  container.querySelectorAll('[data-card-check]').forEach(input => {
+    checks[input.getAttribute('data-card-check')] = !!input.checked;
+  });
+  container.querySelectorAll('[data-card-field]').forEach(input => {
+    const field = input.getAttribute('data-card-field');
+    card[field] = input.value || '';
+  });
+  const result = scoreAndStatusFromChecks(checks);
+  card.checks = checks;
+  card.score = result.score;
+  card.status = result.status === 'Entry' ? 'Ready' : (result.status === 'Near Entry' ? 'Near Setup' : result.status);
+  card.summary = buildSummary(checks, result.status);
+  card.marketStatus = state.marketStatus;
+  card.updatedAt = new Date().toISOString();
+  card.source = 'manual';
+  updateWatchTracking(card);
+  persistState();
+  renderCards();
+}
+
 function scoreAndStatusFromChecks(checks){
   const nearMA = !!(checks.near20 || checks.near50);
   const trendStrong = !!checks.trendStrong;
@@ -778,6 +801,31 @@ function buildSummary(checks, status){
   if(stabilising && bounce && status === 'Entry') return `${text} Price is stabilising and a bounce is forming. Setup is close to actionable if risk stays controlled.`;
   if(stabilising) return `${text} Price is stabilising, but the bounce still needs confirmation.`;
   return `${text} There is no clear stabilisation or bounce yet.`;
+}
+
+function renderCardChecklist(card){
+  const checks = card && card.checks ? card.checks : {};
+  return `
+    <div class="cardreviewgrid">
+      <div class="checkgroup">
+        <h3>Trend</h3>
+        ${['trendStrong','above50','above200','ma50gt200'].map(id => `<label class="checkitem"><input type="checkbox" data-card-check="${id}" ${checks[id] ? 'checked' : ''}> ${escapeHtml(checklistLabels[id])}</label>`).join('')}
+      </div>
+      <div class="checkgroup">
+        <h3>Pullback</h3>
+        ${['near20','near50','stabilising','bounce','volume'].map(id => `<label class="checkitem"><input type="checkbox" data-card-check="${id}" ${checks[id] ? 'checked' : ''}> ${escapeHtml(checklistLabels[id])}</label>`).join('')}
+      </div>
+      <div class="checkgroup">
+        <h3>Trade Plan</h3>
+        ${['entryDefined','stopDefined','targetDefined'].map(id => `<label class="checkitem"><input type="checkbox" data-card-check="${id}" ${checks[id] ? 'checked' : ''}> ${escapeHtml(checklistLabels[id])}</label>`).join('')}
+        <div class="row3" style="margin-top:10px">
+          <div><label>Entry</label><input data-card-field="entry" type="number" step="0.01" value="${escapeHtml(card.entry || '')}" /></div>
+          <div><label>Stop</label><input data-card-field="stop" type="number" step="0.01" value="${escapeHtml(card.stop || '')}" /></div>
+          <div><label>Target</label><input data-card-field="target" type="number" step="0.01" value="${escapeHtml(card.target || '')}" /></div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function statusClass(status){
@@ -1857,11 +1905,17 @@ function renderCards(){
     const scoreLabel = card.source === 'scanner' ? `${card.score}/100` : `${card.score}/10`;
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><details style="margin-top:10px"><summary>Review And Plan In Card</summary>${renderCardChecklist(card)}<div class="actions"><button class="secondary" data-act="save-card-review">Save Card Review</button><button class="secondary" data-act="use-in-planner">Use In Planner</button></div></details><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(card.ticker);
     div.querySelector('[data-act="load"]').onclick = () => loadCard(card.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeCard(card.ticker);
     div.querySelector('[data-act="analyse"]').onclick = () => { if(!uiState.loadingTicker) analyseSetup(card.ticker); };
+    div.querySelector('[data-act="save-card-review"]').onclick = () => {
+      saveCardReviewFromElement(card.ticker, div);
+      const statusBox = $(`cardStatus-${card.ticker}`);
+      if(statusBox) statusBox.innerHTML = '<span class="ok">Card review saved.</span>';
+    };
+    div.querySelector('[data-act="use-in-planner"]').onclick = () => loadCard(card.ticker);
     div.querySelector('[data-act="save-trade"]').onclick = () => {
       const liveCard = upsertCard(card.ticker);
       const notesEl = $(`notes-${card.ticker}`);

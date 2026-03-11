@@ -34,6 +34,7 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
 .result{display:grid;gap:12px;padding:14px;border:1px solid var(--line);border-radius:16px;background:#0f172a}
 .resulthead{display:grid;grid-template-columns:90px 1fr auto auto;gap:10px;align-items:start}
 .resultbody{display:grid;grid-template-columns:1.1fr .9fr;gap:12px}
+.cardreviewgrid{display:grid;gap:10px;margin-top:10px}
 .resultcompact{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:16px;background:#0f172a;align-content:start}
 .resultcompact .resulthead{grid-template-columns:28px 90px 1fr auto}
 .resultsummary{display:grid;gap:6px}
