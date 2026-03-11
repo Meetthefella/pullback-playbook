@@ -7,8 +7,10 @@ const corsHeaders = {
 };
 
 const FMP_BASE_URL = 'https://financialmodelingprep.com/stable';
+const FMP_LEGACY_BASE_URL = 'https://financialmodelingprep.com/api/v3';
 const DEFAULT_HISTORY_LENGTH = 260;
 const SEARCH_LIMIT = 8;
+const UNIVERSE_LIMIT = 800;
 const REQUEST_TIMEOUT_MS = 12000;
 const MAX_ATTEMPTS = 2;
 const EXCHANGE_MAP = {
@@ -197,6 +199,40 @@ function normaliseSearchResults(results){
   }).filter(item => item.ticker);
 }
 
+function normaliseUniverseResults(results){
+  return (Array.isArray(results) ? results : []).map(item => {
+    const ticker = String(item.symbol || item.ticker || '').trim().toUpperCase();
+    const exchange = normaliseExchange(item.exchangeShortName || item.exchange || '');
+    const marketCap = normaliseNumber(item.marketCap || item.marketCapUsd || item.mktCap);
+    return {
+      ticker,
+      companyName:String(item.companyName || item.name || '').trim(),
+      exchange,
+      marketCap,
+      tradingViewSymbol:buildTradingViewSymbol(ticker, exchange)
+    };
+  }).filter(item => item.ticker && isFinite(item.marketCap) && item.marketCap >= 10000000000 && ['NASDAQ','NYSE','AMEX'].includes(item.exchange));
+}
+
+async function fetchUniverse(apiKey){
+  const queries = [
+    `${FMP_BASE_URL}/company-screener?marketCapMoreThan=10000000000&isActivelyTrading=true&exchange=NASDAQ,NYSE,AMEX&limit=${UNIVERSE_LIMIT}`,
+    `${FMP_LEGACY_BASE_URL}/stock-screener?marketCapMoreThan=10000000000&isActivelyTrading=true&exchange=NASDAQ,NYSE,AMEX&limit=${UNIVERSE_LIMIT}`
+  ];
+  let lastError = 'Universe request failed.';
+  for(const url of queries){
+    try{
+      const payload = await fetchJson(url, apiKey);
+      const results = normaliseUniverseResults(payload);
+      if(results.length) return results;
+      lastError = 'Universe request returned no usable tickers.';
+    }catch(error){
+      lastError = safeErrorMessage(error, 'Universe request failed.');
+    }
+  }
+  throw new Error(lastError);
+}
+
 function buildMarketPayload(symbol, quote, profile, rows){
   const latest = rows[0] || {};
   const latestClose = normaliseNumber(latest.close);
@@ -245,6 +281,11 @@ exports.handler = async function handler(event){
   const query = String(params.query || params.q || '').trim();
 
   try{
+    if(mode === 'universe'){
+      const results = await fetchUniverse(apiKey);
+      return jsonResponse(200, {ok:true, error:null, results});
+    }
+
     if(mode === 'search' || query){
       if(query.length < 1) return jsonResponse(400, {error:'Missing search query.'});
       const results = await fetchJson(`${FMP_BASE_URL}/search-symbol?query=${encodeURIComponent(query)}`, apiKey);

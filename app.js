@@ -2,10 +2,11 @@ const $ = id => document.getElementById(id);
 const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
-const APP_VERSION = 'v4.1.2';
+const APP_VERSION = 'v4.1.3';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
+const universeCacheKey = 'pullbackPlaybookUniverseCacheV1';
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
@@ -52,6 +53,7 @@ const DEFAULT_WATCH_TRADING_DAYS = 3;
 const EXTENDED_WATCH_TRADING_DAYS = 5;
 const APP_FETCH_TIMEOUT_MS = 12000;
 const MARKET_CACHE_SCHEMA_VERSION = 2;
+const UNIVERSE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const marketDataCache = new Map();
 const DEFAULT_AUTO_UNIVERSE = [
   'AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','AVGO','BRK.B','JPM',
@@ -92,6 +94,7 @@ let scannerPresetPromise = null;
 let suggestionTimer = null;
 let suggestionRequestToken = 0;
 let autoScanTimer = null;
+let autoUniversePromise = null;
 
 function formatGbp(value){
   return `GBP ${Number(value || 0).toLocaleString()}`;
@@ -138,6 +141,22 @@ function safeStorageRemove(storageKey){
   }catch(error){
     return false;
   }
+}
+
+function readUniverseCache(){
+  const payload = safeStorageGet(universeCacheKey, {});
+  if(!payload || typeof payload !== 'object') return {fetchedAt:'', tickers:[]};
+  return {
+    fetchedAt:String(payload.fetchedAt || ''),
+    tickers:Array.isArray(payload.tickers) ? uniqueTickers(payload.tickers) : []
+  };
+}
+
+function writeUniverseCache(tickers){
+  safeStorageSet(universeCacheKey, {
+    fetchedAt:new Date().toISOString(),
+    tickers:uniqueTickers(tickers || [])
+  });
 }
 
 function persistState(){
@@ -432,7 +451,7 @@ function renderTickerQuickLists(){
   const recentBox = $('recentTickerList');
   if(!watchlistBox || !recentBox) return;
   if(!state.tickers.length){
-    watchlistBox.innerHTML = '<div class="quickchip empty">Using default automatic US large-cap universe. Add a ticker above to switch into watchlist/manual mode.</div>';
+    watchlistBox.innerHTML = '<div class="quickchip empty">Using the automatic US stocks over $10B universe. Add a ticker above to switch into watchlist/manual mode.</div>';
   }else{
     watchlistBox.innerHTML = state.tickers.map(ticker => (
       `<div class="quickchip active"><span class="chiplabel">${escapeHtml(ticker)}</span><button class="danger" data-act="quick-remove" data-ticker="${escapeHtml(ticker)}">Remove</button></div>`
@@ -460,7 +479,7 @@ function renderTickerQuickLists(){
 
 function scannerUniverse(){
   const manualUniverse = uniqueTickers(state.tickers || []);
-  return manualUniverse.length ? manualUniverse : DEFAULT_AUTO_UNIVERSE;
+  return manualUniverse.length ? manualUniverse : currentAutomaticUniverse();
 }
 
 function scannerEmptyState(message){
@@ -478,6 +497,14 @@ function scannerEmptyState(message){
 async function runScannerWorkflow(options = {}){
   saveState();
   const parsed = options.syncInput ? syncUniverseFromInputs(true) : {valid:scannerUniverse(), invalid:[], duplicates:[]};
+  if(!state.tickers.length){
+    try{
+      const automaticUniverse = await fetchAutomaticUniverse(options);
+      if(automaticUniverse.length && !options.syncInput) parsed.valid = automaticUniverse;
+    }catch(error){
+      setStatus('apiStatus', `<span class="warntext">${escapeHtml(String(error && error.message || 'Automatic universe request failed.'))} Falling back to the built-in starter universe.</span>`);
+    }
+  }
   if(!options.syncInput) updateTickerInputFromState();
   const universe = scannerUniverse();
   updateRecentTickers(universe);
@@ -911,6 +938,36 @@ function marketDataEndpoints(){
   ]);
 }
 
+async function fetchAutomaticUniverse(options = {}){
+  const cached = readUniverseCache();
+  if(!options.force && cached.tickers.length && isFreshTimestamp(cached.fetchedAt, UNIVERSE_CACHE_TTL_MS)){
+    return cached.tickers;
+  }
+  let lastError = '';
+  for(const endpoint of marketDataEndpoints()){
+    try{
+      const response = await fetchJsonWithTimeout(`${endpoint}?mode=universe`);
+      const payload = await response.json().catch(() => ({}));
+      if(!response.ok || payload.ok === false){
+        throw new Error(payload && payload.error ? payload.error : 'Automatic universe request failed.');
+      }
+      const tickers = uniqueTickers((Array.isArray(payload.results) ? payload.results : []).map(item => item && item.ticker));
+      if(!tickers.length) throw new Error('Automatic universe request returned no usable tickers.');
+      writeUniverseCache(tickers);
+      return tickers;
+    }catch(error){
+      lastError = String(error && error.message || 'Automatic universe request failed.');
+    }
+  }
+  if(cached.tickers.length) return cached.tickers;
+  throw new Error(lastError || 'Automatic universe request failed.');
+}
+
+function currentAutomaticUniverse(){
+  const cached = readUniverseCache().tickers;
+  return cached.length ? cached : DEFAULT_AUTO_UNIVERSE;
+}
+
 function analysisEndpoints(){
   return uniqueStrings([
     state.aiEndpoint,
@@ -1113,7 +1170,7 @@ async function renderScannerRulesPanel(){
     if(!state.scannerDebug.length){
       debugBox.innerHTML = scannerUniverse().length
         ? 'No scan debug data yet. The scanner will populate pass/fail detail after the next automatic or manual refresh.'
-        : 'No scan debug data yet. Add tickers to the Scanner Universe or let the default automatic universe run.';
+        : 'No scan debug data yet. Add tickers to the Scanner Universe or let the automatic US stocks over $10B universe run.';
     }else{
       debugBox.innerHTML = state.scannerDebug.map(item => (
         `${escapeHtml(item.ticker)} | ${escapeHtml(item.passed ? 'PASS' : 'FAIL')} | ${escapeHtml((item.breakdown || []).map(entry => entry.label).join(' | '))}`
@@ -1864,7 +1921,7 @@ function updateScannerSelectionStatus(){
   if(!resultCount){
     setStatus('scannerSelectionStatus', (state.tickers || []).length
       ? 'Running the scanner will populate ranked results for your watchlist.'
-      : 'Running the scanner will populate ranked results from the default automatic universe.');
+      : 'Running the scanner will populate ranked results from the automatic US stocks over $10B universe.');
     return;
   }
   if(selectedCount){
@@ -1913,7 +1970,7 @@ function renderScannerResults(){
   if(!state.scannerResults || !state.scannerResults.length){
     updateScannerSelectionStatus();
     box.innerHTML = !(state.tickers || []).length
-      ? '<div class="summary">Scanning the default automatic US large-cap universe. Add your own tickers any time to switch into watchlist/manual mode.</div>'
+      ? '<div class="summary">Scanning the automatic US stocks over $10B universe. Add your own tickers any time to switch into watchlist/manual mode.</div>'
       : (state.scannerDebug && state.scannerDebug.length
       ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div><button class="secondary" data-act="seed-from-universe">Open Universe In Cards</button>'
       : '<div class="summary">Running the scanner will populate ranked results here.</div>');
