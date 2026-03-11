@@ -899,6 +899,26 @@ function writeMarketCache(cache){
   });
 }
 
+function uniqueStrings(values){
+  return [...new Set((values || []).map(value => String(value || '').trim()).filter(Boolean))];
+}
+
+function marketDataEndpoints(){
+  return uniqueStrings([
+    state.marketDataEndpoint,
+    defaultMarketDataEndpoint,
+    '/.netlify/functions/market-data'
+  ]);
+}
+
+function analysisEndpoints(){
+  return uniqueStrings([
+    state.aiEndpoint,
+    defaultAiEndpoint,
+    '/.netlify/functions/analyse-setup'
+  ]);
+}
+
 function isFreshTimestamp(value, ttlMs = MARKET_CACHE_TTL_MS){
   if(!value) return false;
   const timestamp = new Date(value).getTime();
@@ -924,6 +944,25 @@ function applyTickerMetaToCard(card, meta){
   if(meta.companyName) card.companyName = String(meta.companyName);
   if(meta.exchange) card.exchange = String(meta.exchange);
   if(meta.tradingViewSymbol) card.tradingViewSymbol = String(meta.tradingViewSymbol);
+}
+
+function hasUsableScannerData(data){
+  if(!data || typeof data !== 'object') return false;
+  return [
+    data.exchange,
+    data.price,
+    data.sma20,
+    data.sma50,
+    data.sma200,
+    data.avgVolume30d,
+    data.marketCap,
+    data.perf1w,
+    data.perf1m,
+    data.perf3m,
+    data.perf6m,
+    data.perfYtd,
+    data.rsi14
+  ].some(value => value !== null && value !== undefined && value !== '');
 }
 
 function cloneCardData(card){
@@ -968,28 +1007,44 @@ async function fetchMarketData(symbol, options = {}){
     const cached = getCachedMarketData(ticker);
     if(cached) return cached;
   }
-  const response = await fetchJsonWithTimeout(`${defaultMarketDataEndpoint}?symbol=${encodeURIComponent(ticker)}`);
-  const payload = await response.json().catch(() => ({}));
-  if(!response.ok){
-    throw new Error(payload && payload.error ? payload.error : `Market data request failed for ${ticker}.`);
+  let lastError = '';
+  for(const endpoint of marketDataEndpoints()){
+    try{
+      const response = await fetchJsonWithTimeout(`${endpoint}?symbol=${encodeURIComponent(ticker)}`);
+      const payload = await response.json().catch(() => ({}));
+      if(!response.ok){
+        throw new Error(payload && payload.error ? payload.error : `Market data request failed for ${ticker}.`);
+      }
+      const safeData = payload && payload.data && typeof payload.data === 'object' ? payload.data : null;
+      if(!safeData){
+        throw new Error(payload && payload.error ? payload.error : `Market data request returned no usable data for ${ticker}.`);
+      }
+      if(payload && payload.ok !== false) setCachedMarketData(ticker, safeData);
+      rememberTickerMeta(safeData);
+      if(payload && payload.ok === false){
+        safeData.__error = String(payload.error || `Market data is incomplete for ${ticker}.`);
+      }
+      return safeData;
+    }catch(error){
+      lastError = String(error && error.message || 'Market data request failed.');
+    }
   }
-  const safeData = payload && payload.data && typeof payload.data === 'object' ? payload.data : null;
-  if(!safeData){
-    throw new Error(payload && payload.error ? payload.error : `Market data request returned no usable data for ${ticker}.`);
-  }
-  if(payload && payload.ok !== false) setCachedMarketData(ticker, safeData);
-  rememberTickerMeta(safeData);
-  if(payload && payload.ok === false){
-    safeData.__error = String(payload.error || `Market data is incomplete for ${ticker}.`);
-  }
-  return safeData;
+  throw new Error(lastError || `Market data request failed for ${ticker}.`);
 }
 
 async function fetchTickerSuggestions(query){
-  const response = await fetchJsonWithTimeout(`${defaultMarketDataEndpoint}?mode=search&query=${encodeURIComponent(query)}`);
-  const payload = await response.json().catch(() => ({}));
-  if(!response.ok) throw new Error(payload && payload.error ? payload.error : 'Search request failed.');
-  return Array.isArray(payload.results) ? payload.results : [];
+  let lastError = '';
+  for(const endpoint of marketDataEndpoints()){
+    try{
+      const response = await fetchJsonWithTimeout(`${endpoint}?mode=search&query=${encodeURIComponent(query)}`);
+      const payload = await response.json().catch(() => ({}));
+      if(!response.ok) throw new Error(payload && payload.error ? payload.error : 'Search request failed.');
+      return Array.isArray(payload.results) ? payload.results : [];
+    }catch(error){
+      lastError = String(error && error.message || 'Search request failed.');
+    }
+  }
+  throw new Error(lastError || 'Search request failed.');
 }
 
 async function loadScannerPresets(){
@@ -1056,9 +1111,9 @@ async function renderScannerRulesPanel(){
   }
   if(debugBox){
     if(!state.scannerDebug.length){
-      debugBox.innerHTML = state.tickers.length
-        ? 'No scan debug data yet. Run the Quality Pullback Scanner to see pass/fail detail for the current universe.'
-        : 'No scan debug data yet. Add tickers to the Scanner Universe, then run the Quality Pullback Scanner.';
+      debugBox.innerHTML = scannerUniverse().length
+        ? 'No scan debug data yet. The scanner will populate pass/fail detail after the next automatic or manual refresh.'
+        : 'No scan debug data yet. Add tickers to the Scanner Universe or let the default automatic universe run.';
     }else{
       debugBox.innerHTML = state.scannerDebug.map(item => (
         `${escapeHtml(item.ticker)} | ${escapeHtml(item.passed ? 'PASS' : 'FAIL')} | ${escapeHtml((item.breakdown || []).map(entry => entry.label).join(' | '))}`
@@ -1281,6 +1336,21 @@ function scoreMarketData(data){
 async function evaluateScannerForData(data){
   const preset = await getActiveScannerPreset();
   const safeData = data && typeof data === 'object' ? data : {};
+  if(safeData.__error || !hasUsableScannerData(safeData)){
+    const reason = String(safeData.__error || `Market data unavailable for ${safeData.ticker || 'ticker'}.`);
+    const breakdown = [{passed:false, label:`Market data unavailable = FAIL (${reason})`}];
+    return {
+      status:'Avoid',
+      score:0,
+      checks:buildScannerChecks({}),
+      summary:'Rejected because market data was unavailable.',
+      passedRules:0,
+      totalRules:1,
+      passed:false,
+      failedRule:reason,
+      breakdown
+    };
+  }
   const rules = Array.isArray(preset && preset.rules) ? preset.rules : [];
   const universeRule = {
     passed:isUsExchange(safeData.exchange),
@@ -1478,6 +1548,12 @@ async function refreshMarketDataForTickers(tickers, options = {}){
   }
   state.scannerResults = nextResults.sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker));
   state.scannerDebug = scannerDebug;
+  const failedMarketData = scannerDebug.filter(item => !item.passed && (item.breakdown || []).some(entry => /market data unavailable|market data request|no historical market data|fmp/i.test(String(entry.label || '')))).length;
+  if(failedMarketData){
+    setStatus('apiStatus', `<span class="badtext">Market data is failing for ${failedMarketData} ticker${failedMarketData === 1 ? '' : 's'}. Check the FMP API key or deployed Netlify route.</span>`);
+  }else if(unique.length){
+    setStatus('apiStatus', `<span class="ok">Scanner refreshed ${unique.length} ticker${unique.length === 1 ? '' : 's'}.</span>`);
+  }
   pruneExpiredWatches();
   persistState();
   renderTickerQuickLists();
@@ -1663,28 +1739,45 @@ async function analyseSetup(ticker){
   uiState.responseOpen[ticker] = true;
   persistState();
   renderCards();
-  const endpoint = (state.aiEndpoint || defaultAiEndpoint).trim();
-  if(!endpoint){
+  const endpoints = analysisEndpoints();
+  if(!endpoints.length){
     card.lastError = 'Add an AI endpoint URL first.';
     uiState.loadingTicker = '';
     renderCards();
     return;
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
   try{
-    const response = await fetch(endpoint, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      signal:controller.signal,
-      body:JSON.stringify({
-        payload:buildAnalysisPayload(card),
-        prompt:card.lastPrompt,
-        chartRef:card.chartRef ? {name:card.chartRef.name, type:card.chartRef.type, dataUrl:card.chartRef.dataUrl} : null
-      })
-    });
-    const data = await response.json().catch(() => ({}));
-    if(!response.ok) throw new Error(buildAnalysisErrorMessage(response.status, data, 'Analysis request failed.'));
+    let response = null;
+    let data = {};
+    let lastError = 'Analysis request failed.';
+    for(const endpoint of endpoints){
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
+      try{
+        response = await fetch(endpoint, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          signal:controller.signal,
+          body:JSON.stringify({
+            payload:buildAnalysisPayload(card),
+            prompt:card.lastPrompt,
+            chartRef:card.chartRef ? {name:card.chartRef.name, type:card.chartRef.type, dataUrl:card.chartRef.dataUrl} : null
+          })
+        });
+        data = await response.json().catch(() => ({}));
+        if(!response.ok) throw new Error(buildAnalysisErrorMessage(response.status, data, 'Analysis request failed.'));
+        lastError = '';
+        break;
+      }catch(err){
+        lastError = err && err.name === 'AbortError'
+          ? 'The analysis request timed out. Retry the setup.'
+          : String(err.message || 'Analysis request failed.');
+        response = null;
+      }finally{
+        clearTimeout(timer);
+      }
+    }
+    if(!response) throw new Error(lastError);
     const analysis = normalizeAnalysisResponse(data.analysis);
     card.lastResponse = JSON.stringify(data.analysis || {}, null, 2);
     card.lastAnalysis = analysis;
@@ -1705,7 +1798,6 @@ async function analyseSetup(ticker){
     card.lastError = err && err.name === 'AbortError' ? 'The analysis request timed out. Retry the setup.' : String(err.message || 'Analysis request failed.');
     persistState();
   }finally{
-    clearTimeout(timer);
     uiState.loadingTicker = '';
     renderCards();
   }
