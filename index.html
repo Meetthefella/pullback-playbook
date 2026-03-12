@@ -88,9 +88,30 @@
       <details style="margin-top:10px">
         <summary><strong>Manual Universe Edit</strong></summary>
         <div style="margin-top:10px">
+          <label>Import TradingView Tickers</label>
+          <textarea id="tvImportInput" placeholder="CAT,DE,UNP,GEV&#10;or&#10;CAT DE UNP GEV&#10;or one ticker per line"></textarea>
+          <div class="actions">
+            <button class="secondary" id="importTvBtn">Import Tickers</button>
+            <button class="secondary" id="importScreenshotBtn">Import From Screenshot</button>
+          </div>
+          <input id="ocrImportFile" type="file" accept="image/*" style="display:none" />
+          <div class="tiny" style="margin-top:8px">Paste comma-separated, space-separated, or one ticker per line. Import replaces the current manual scanner universe but does not run the scanner.</div>
+          <div class="tiny" style="margin-top:8px">Upload a TradingView screenshot to extract tickers.</div>
+          <div class="statusline tiny" id="ocrImportStatus">OCR import is optional and runs fully in your browser.</div>
+          <div style="margin-top:10px">
+            <label>OCR Review / Edit</label>
+            <textarea id="ocrReviewInput" placeholder="Detected tickers will appear here for review before import."></textarea>
+            <div class="actions">
+              <button class="secondary" id="applyOcrBtn">Confirm OCR Tickers</button>
+              <button class="ghost" id="clearOcrBtn">Clear OCR Review</button>
+            </div>
+          </div>
+          <div id="tvImportPreview" class="mutebox" style="margin-top:10px">No imported ticker list yet.</div>
+        </div>
+        <div style="margin-top:10px">
           <label>Universe Text List</label>
           <textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea>
-          <div class="tiny" style="margin-top:8px">Use this only if you want to paste or bulk-edit the scanner universe directly. Automatic scanning uses the live universe chips above.</div>
+          <div class="tiny" style="margin-top:8px">Use this only if you want to paste or bulk-edit the scanner universe directly. Scans use your manual tickers when present, otherwise the curated default list.</div>
         </div>
       </details>
       <div class="actions">
@@ -100,7 +121,7 @@
         <button class="ghost" id="clearBtn">Clear</button>
         <button class="danger" id="resetAllBtn">Reset All</button>
       </div>
-      <div class="statusline tiny" id="inputStatus">Automatic scanning uses the live scanner universe above. Manual refresh is optional.</div>
+      <div class="statusline tiny" id="inputStatus">Scans use your manual scanner universe when present, otherwise the curated default list. Manual refresh is optional.</div>
       <details style="margin-top:12px">
         <summary><strong>Active Scanner Rules</strong></summary>
         <div id="scannerRulesList" class="mutebox" style="margin-top:10px">Loading active scanner rules...</div>

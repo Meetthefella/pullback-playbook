@@ -6,7 +6,6 @@ const APP_VERSION = 'v4.1.3';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
-const universeCacheKey = 'pullbackPlaybookUniverseCacheV1';
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
@@ -53,7 +52,10 @@ const DEFAULT_WATCH_TRADING_DAYS = 3;
 const EXTENDED_WATCH_TRADING_DAYS = 5;
 const APP_FETCH_TIMEOUT_MS = 12000;
 const MARKET_CACHE_SCHEMA_VERSION = 2;
-const UNIVERSE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const SCAN_WARNING_THRESHOLD = 25;
+const SCAN_HARD_CAP = 50;
+const TESSERACT_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+const OCR_STOPWORDS = new Set(['OPEN','HIGH','LOW','CLOSE','VOLUME','VOL','CHANGE','PRICE','PERCENT','PCT','CHG','DATE','TIME','WATCH','LIST','SCREEN','SCREENER','TRADINGVIEW','SYMBOL','STOCK','STOCKS','NAME','LAST','USD','USDT','BUY','SELL','LONG','SHORT','NYSE','NASDAQ','AMEX','LSE','TOTAL','AVG','RSI','SMA','EMA']);
 const marketDataCache = new Map();
 const DEFAULT_AUTO_UNIVERSE = [
   'AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','AVGO','BRK.B','JPM',
@@ -94,7 +96,7 @@ let scannerPresetPromise = null;
 let suggestionTimer = null;
 let suggestionRequestToken = 0;
 let autoScanTimer = null;
-let autoUniversePromise = null;
+let tesseractLoaderPromise = null;
 
 function formatGbp(value){
   return `GBP ${Number(value || 0).toLocaleString()}`;
@@ -141,22 +143,6 @@ function safeStorageRemove(storageKey){
   }catch(error){
     return false;
   }
-}
-
-function readUniverseCache(){
-  const payload = safeStorageGet(universeCacheKey, {});
-  if(!payload || typeof payload !== 'object') return {fetchedAt:'', tickers:[]};
-  return {
-    fetchedAt:String(payload.fetchedAt || ''),
-    tickers:Array.isArray(payload.tickers) ? uniqueTickers(payload.tickers) : []
-  };
-}
-
-function writeUniverseCache(tickers){
-  safeStorageSet(universeCacheKey, {
-    fetchedAt:new Date().toISOString(),
-    tickers:uniqueTickers(tickers || [])
-  });
 }
 
 function persistState(){
@@ -238,6 +224,130 @@ function syncUniverseFromInputs(preferExisting = false){
   state.tickers = nextTickers;
   if($('tickerInput')) $('tickerInput').value = nextTickers.join('\n');
   return {...parsed, valid:nextTickers};
+}
+
+function setOcrImportStatus(html){
+  setStatus('ocrImportStatus', html);
+}
+
+function renderTvImportPreview(tickers, mode = 'manual'){
+  const box = $('tvImportPreview');
+  if(!box) return;
+  const list = uniqueTickers(tickers || []);
+  if(mode === 'default'){
+    box.textContent = `No manual import saved. The next scan will use the curated default universe:\n\n${DEFAULT_AUTO_UNIVERSE.join(', ')}`;
+    return;
+  }
+  if(!list.length){
+    box.textContent = 'No imported ticker list yet.';
+    return;
+  }
+  box.textContent = `Cleaned ticker list (${list.length}):\n\n${list.join(', ')}`;
+}
+
+function applyManualUniverseTickers(tickers){
+  const clean = uniqueTickers(tickers || []);
+  state.tickers = clean;
+  updateRecentTickers(clean);
+  updateTickerInputFromState();
+  persistState();
+  renderTickerQuickLists();
+  renderTvImportPreview(clean, clean.length ? 'manual' : 'default');
+  return clean;
+}
+
+function importTradingViewTickers(){
+  const input = $('tvImportInput');
+  const raw = input ? input.value : '';
+  const parsed = parseTickersDetailed(raw);
+  if(!String(raw || '').trim()){
+    applyManualUniverseTickers([]);
+    setStatus('inputStatus', '<span class="ok">No import provided. The next scan will use the curated default universe.</span>');
+    return;
+  }
+  applyManualUniverseTickers(parsed.valid);
+  const messages = [];
+  if(parsed.valid.length) messages.push(`<span class="ok">${parsed.valid.length} ticker${parsed.valid.length === 1 ? '' : 's'} imported into the manual scanner universe.</span>`);
+  if(parsed.invalid.length) messages.push(`<span class="badtext">Invalid: ${escapeHtml(parsed.invalid.join(', '))}</span>`);
+  if(parsed.duplicates.length) messages.push(`<span class="warntext">Duplicates removed: ${escapeHtml([...new Set(parsed.duplicates)].join(', '))}</span>`);
+  if(!parsed.valid.length) messages.push('<span class="warntext">No valid tickers found. The next scan will use the curated default universe.</span>');
+  setStatus('inputStatus', messages.join(' '));
+}
+
+function clearOcrReview(message){
+  if($('ocrReviewInput')) $('ocrReviewInput').value = '';
+  setOcrImportStatus(message || 'OCR import is optional and runs fully in your browser.');
+}
+
+function extractTickersFromOcrText(text){
+  const tokens = String(text || '').toUpperCase().split(/[^A-Z]+/).map(token => token.trim()).filter(Boolean);
+  return uniqueTickers(tokens.filter(token => /^[A-Z]{1,5}$/.test(token) && !OCR_STOPWORDS.has(token)));
+}
+
+function ensureTesseractLoaded(){
+  if(window.Tesseract) return Promise.resolve(window.Tesseract);
+  if(tesseractLoaderPromise) return tesseractLoaderPromise;
+  tesseractLoaderPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = TESSERACT_SCRIPT_URL;
+    script.async = true;
+    script.onload = () => window.Tesseract ? resolve(window.Tesseract) : reject(new Error('Tesseract.js did not load correctly.'));
+    script.onerror = () => reject(new Error('Could not load Tesseract.js in the browser.'));
+    document.head.appendChild(script);
+  }).catch(error => {
+    tesseractLoaderPromise = null;
+    throw error;
+  });
+  return tesseractLoaderPromise;
+}
+
+async function runOcrImport(file){
+  if(!file){
+    setOcrImportStatus('<span class="warntext">Choose a screenshot first.</span>');
+    return;
+  }
+  if(!(file.type || '').startsWith('image/')){
+    setOcrImportStatus('<span class="badtext">Use an image screenshot for OCR import.</span>');
+    return;
+  }
+  try{
+    setOcrImportStatus('<span class="warntext">Loading OCR engine...</span>');
+    const Tesseract = await ensureTesseractLoaded();
+    const {data} = await Tesseract.recognize(file, 'eng', {
+      logger: message => {
+        if(message && message.status === 'recognizing text' && typeof message.progress === 'number'){
+          setOcrImportStatus(`<span class="warntext">Reading screenshot... ${Math.round(message.progress * 100)}%</span>`);
+        }
+      }
+    });
+    const tickers = extractTickersFromOcrText(data && data.text);
+    if(!tickers.length){
+      if($('ocrReviewInput')) $('ocrReviewInput').value = '';
+      setOcrImportStatus('<span class="badtext">No ticker symbols detected. Try a clearer screenshot.</span>');
+      return;
+    }
+    if($('ocrReviewInput')) $('ocrReviewInput').value = tickers.join('\n');
+    setOcrImportStatus(`<span class="ok">${tickers.length} likely ticker${tickers.length === 1 ? '' : 's'} detected. Review and confirm before scanning.</span>`);
+  }catch(error){
+    if($('ocrReviewInput')) $('ocrReviewInput').value = '';
+    setOcrImportStatus(`<span class="badtext">${escapeHtml(String(error && error.message || 'No ticker symbols detected. Try a clearer screenshot.'))}</span>`);
+  }
+}
+
+function applyOcrTickers(){
+  const reviewText = $('ocrReviewInput') ? $('ocrReviewInput').value : '';
+  const parsed = parseTickersDetailed(reviewText);
+  if(!String(reviewText || '').trim() || !parsed.valid.length){
+    setOcrImportStatus('<span class="badtext">No ticker symbols detected. Try a clearer screenshot.</span>');
+    return;
+  }
+  applyManualUniverseTickers(parsed.valid);
+  const messages = [];
+  messages.push(`<span class="ok">${parsed.valid.length} ticker${parsed.valid.length === 1 ? '' : 's'} imported from OCR into the manual scanner universe.</span>`);
+  if(parsed.invalid.length) messages.push(`<span class="badtext">Ignored: ${escapeHtml(parsed.invalid.join(', '))}</span>`);
+  if(parsed.duplicates.length) messages.push(`<span class="warntext">Duplicates removed: ${escapeHtml([...new Set(parsed.duplicates)].join(', '))}</span>`);
+  setStatus('inputStatus', messages.join(' '));
+  setOcrImportStatus('<span class="ok">OCR tickers confirmed. Press Refresh Scanner Now when you are ready.</span>');
 }
 
 function createTradeRecord(values){
@@ -403,6 +513,8 @@ function loadState(){
   $('marketStatus').value = state.marketStatus || 'S&P above 50 MA';
   $('listName').value = state.listName || "Today's Scan";
   $('tickerInput').value = (state.tickers || []).join('\n');
+  if($('tvImportInput')) $('tvImportInput').value = '';
+  if($('ocrReviewInput')) $('ocrReviewInput').value = '';
   if($('importResultsInput')) $('importResultsInput').value = state.lastImportRaw || '';
   if($('apiKey') && !$('apiKey').readOnly) $('apiKey').value = state.apiKey || '';
   if($('dataProvider')) $('dataProvider').value = state.dataProvider || 'fmp';
@@ -411,6 +523,8 @@ function loadState(){
   if($('appVersion')) $('appVersion').textContent = APP_VERSION;
   renderStats();
   renderTickerQuickLists();
+  renderTvImportPreview(state.tickers && state.tickers.length ? state.tickers : [], state.tickers && state.tickers.length ? 'manual' : 'default');
+  clearOcrReview();
   renderScannerResults();
   renderCards();
   renderScannerRulesPanel();
@@ -479,7 +593,35 @@ function renderTickerQuickLists(){
 
 function scannerUniverse(){
   const manualUniverse = uniqueTickers(state.tickers || []);
-  return manualUniverse.length ? manualUniverse : currentAutomaticUniverse();
+  return manualUniverse.length ? manualUniverse : DEFAULT_AUTO_UNIVERSE.slice();
+}
+
+function scannerUniverseMode(){
+  return uniqueTickers(state.tickers || []).length ? 'manual' : 'default';
+}
+
+function prepareScannerUniverse(options = {}){
+  const parsed = options.syncInput ? syncUniverseFromInputs(true) : {valid:scannerUniverse(), invalid:[], duplicates:[]};
+  const universe = scannerUniverse();
+  if(!universe.length){
+    return {parsed, universe, blocked:false};
+  }
+  if(universe.length > SCAN_HARD_CAP){
+    setStatus('inputStatus', `<span class="badtext">Single scans are capped at ${SCAN_HARD_CAP} tickers. Reduce the scanner universe before running again.</span>`);
+    scannerEmptyState(`Single scans are capped at ${SCAN_HARD_CAP} tickers.`);
+    return {parsed, universe:universe.slice(0, SCAN_HARD_CAP), blocked:true};
+  }
+  if(universe.length > SCAN_WARNING_THRESHOLD){
+    setStatus('inputStatus', `<span class="warntext">Scanning more than ${SCAN_WARNING_THRESHOLD} stocks may exceed your API limit.</span>`);
+    if(options.requireConfirmation !== false){
+      const confirmed = window.confirm(`Scanning more than ${SCAN_WARNING_THRESHOLD} stocks may exceed your API limit.\n\nThis scan will use ${universe.length} symbols. Continue?`);
+      if(!confirmed){
+        setStatus('apiStatus', '<span class="warntext">Large scan cancelled.</span>');
+        return {parsed, universe, blocked:true};
+      }
+    }
+  }
+  return {parsed, universe, blocked:false};
 }
 
 function scannerEmptyState(message){
@@ -496,28 +638,22 @@ function scannerEmptyState(message){
 
 async function runScannerWorkflow(options = {}){
   saveState();
-  const parsed = options.syncInput ? syncUniverseFromInputs(true) : {valid:scannerUniverse(), invalid:[], duplicates:[]};
-  if(!state.tickers.length){
-    try{
-      const automaticUniverse = await fetchAutomaticUniverse(options);
-      if(automaticUniverse.length && !options.syncInput) parsed.valid = automaticUniverse;
-    }catch(error){
-      setStatus('apiStatus', `<span class="warntext">${escapeHtml(String(error && error.message || 'Automatic universe request failed.'))} Falling back to the built-in starter universe.</span>`);
-    }
-  }
+  const {parsed, universe, blocked} = prepareScannerUniverse(options);
+  if(blocked) return {done:0, failed:0, rejected:0};
   if(!options.syncInput) updateTickerInputFromState();
-  const universe = scannerUniverse();
   updateRecentTickers(universe);
   renderTickerQuickLists();
   renderScannerRulesPanel();
   if(!universe.length){
     const messages = [];
     if(parsed.invalid.length) messages.push(`Invalid: ${escapeHtml(parsed.invalid.join(', '))}`);
-    setStatus('inputStatus', messages.length ? `<span class="badtext">${messages.join(' ')}</span>` : 'Add at least one valid ticker to the Scanner Universe first.');
+    setStatus('inputStatus', messages.length ? `<span class="badtext">${messages.join(' ')}</span>` : 'Add at least one valid ticker to the scanner universe first.');
     scannerEmptyState('Waiting for a scanner universe.');
     return {done:0, failed:0, rejected:0};
   }
-  setStatus('inputStatus', `<span class="ok">${universe.length} ticker${universe.length === 1 ? '' : 's'} ready in the scanner universe.</span>`);
+  const modeLabel = scannerUniverseMode() === 'manual' ? 'manual scanner universe' : 'default curated universe';
+  const warning = universe.length > SCAN_WARNING_THRESHOLD ? ` <span class="warntext">Scanning more than ${SCAN_WARNING_THRESHOLD} stocks may exceed your API limit.</span>` : '';
+  setStatus('inputStatus', `<span class="ok">${universe.length} ticker${universe.length === 1 ? '' : 's'} ready in the ${modeLabel}.</span>${warning}`);
   setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${universe.length} ticker${universe.length === 1 ? '' : 's'}...</span>`);
   const result = await refreshMarketDataForTickers(universe, options);
   setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} passed, ${result.rejected} rejected, ${result.failed} failed.`);
@@ -531,6 +667,23 @@ function requestAutoScan(options = {}){
       setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
     });
   }, options.delayMs == null ? 250 : options.delayMs);
+}
+
+function syncScannerUniverseDraft(options = {}){
+  saveState();
+  const parsed = syncUniverseFromInputs(true);
+  updateRecentTickers(parsed.valid);
+  updateTickerInputFromState();
+  persistState();
+  renderTickerQuickLists();
+  if(options.updateInputStatus !== false){
+    const messages = [];
+    if(parsed.valid.length) messages.push(`<span class="ok">${parsed.valid.length} ticker${parsed.valid.length === 1 ? '' : 's'} saved in the scanner universe.</span>`);
+    if(parsed.invalid.length) messages.push(`<span class="badtext">Invalid: ${escapeHtml(parsed.invalid.join(', '))}</span>`);
+    if(parsed.duplicates.length) messages.push(`<span class="warntext">Duplicates skipped: ${escapeHtml([...new Set(parsed.duplicates)].join(', '))}</span>`);
+    setStatus('inputStatus', messages.join(' ') || 'No valid tickers in the scanner universe yet.');
+  }
+  return parsed;
 }
 
 function setStatus(id, html){
@@ -695,7 +848,7 @@ function queueTickerSuggestions(){
 
 function buildCards(){
   uiState.selectedScanner = {};
-  runScannerWorkflow({force:true, syncInput:true}).catch(err => {
+  return runScannerWorkflow({force:true, syncInput:true}).catch(err => {
     setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
   });
 }
@@ -938,36 +1091,6 @@ function marketDataEndpoints(){
   ]);
 }
 
-async function fetchAutomaticUniverse(options = {}){
-  const cached = readUniverseCache();
-  if(!options.force && cached.tickers.length && isFreshTimestamp(cached.fetchedAt, UNIVERSE_CACHE_TTL_MS)){
-    return cached.tickers;
-  }
-  let lastError = '';
-  for(const endpoint of marketDataEndpoints()){
-    try{
-      const response = await fetchJsonWithTimeout(`${endpoint}?mode=universe`);
-      const payload = await response.json().catch(() => ({}));
-      if(!response.ok || payload.ok === false){
-        throw new Error(payload && payload.error ? payload.error : 'Automatic universe request failed.');
-      }
-      const tickers = uniqueTickers((Array.isArray(payload.results) ? payload.results : []).map(item => item && item.ticker));
-      if(!tickers.length) throw new Error('Automatic universe request returned no usable tickers.');
-      writeUniverseCache(tickers);
-      return tickers;
-    }catch(error){
-      lastError = String(error && error.message || 'Automatic universe request failed.');
-    }
-  }
-  if(cached.tickers.length) return cached.tickers;
-  throw new Error(lastError || 'Automatic universe request failed.');
-}
-
-function currentAutomaticUniverse(){
-  const cached = readUniverseCache().tickers;
-  return cached.length ? cached : DEFAULT_AUTO_UNIVERSE;
-}
-
 function analysisEndpoints(){
   return uniqueStrings([
     state.aiEndpoint,
@@ -1156,7 +1279,7 @@ async function renderScannerRulesPanel(){
   if(!rulesBox && !debugBox) return;
   const preset = await getActiveScannerPreset().catch(() => scannerPresetFallback[0]);
   if(rulesBox){
-    const universe = Array.isArray(preset && preset.universe) ? preset.universe : ['US stocks', 'Watchlist-only mode when a watchlist is present'];
+    const universe = Array.isArray(preset && preset.universe) ? preset.universe : ['Curated default universe', 'Manual watchlist mode when tickers are present'];
     const rules = Array.isArray(preset && preset.rules) ? preset.rules : [];
     rulesBox.innerHTML = [
       '<strong>Universe</strong>',
@@ -1170,7 +1293,7 @@ async function renderScannerRulesPanel(){
     if(!state.scannerDebug.length){
       debugBox.innerHTML = scannerUniverse().length
         ? 'No scan debug data yet. The scanner will populate pass/fail detail after the next automatic or manual refresh.'
-        : 'No scan debug data yet. Add tickers to the Scanner Universe or let the automatic US stocks over $10B universe run.';
+        : 'No scan debug data yet. Add tickers to the scanner universe or use the curated default list.';
     }else{
       debugBox.innerHTML = state.scannerDebug.map(item => (
         `${escapeHtml(item.ticker)} | ${escapeHtml(item.passed ? 'PASS' : 'FAIL')} | ${escapeHtml((item.breakdown || []).map(entry => entry.label).join(' | '))}`
@@ -1921,7 +2044,7 @@ function updateScannerSelectionStatus(){
   if(!resultCount){
     setStatus('scannerSelectionStatus', (state.tickers || []).length
       ? 'Running the scanner will populate ranked results for your watchlist.'
-      : 'Running the scanner will populate ranked results from the automatic US stocks over $10B universe.');
+      : 'Running the scanner will populate ranked results from the curated default universe.');
     return;
   }
   if(selectedCount){
@@ -1970,7 +2093,7 @@ function renderScannerResults(){
   if(!state.scannerResults || !state.scannerResults.length){
     updateScannerSelectionStatus();
     box.innerHTML = !(state.tickers || []).length
-      ? '<div class="summary">Scanning the automatic US stocks over $10B universe. Add your own tickers any time to switch into watchlist/manual mode.</div>'
+      ? '<div class="summary">Scanning the curated default universe. Add your own tickers any time to switch into manual mode.</div>'
       : (state.scannerDebug && state.scannerDebug.length
       ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div><button class="secondary" data-act="seed-from-universe">Open Universe In Cards</button>'
       : '<div class="summary">Running the scanner will populate ranked results here.</div>');
@@ -2317,7 +2440,7 @@ function parseImportedResults(raw){
 }
 
 function importResults(){
-  buildCards();
+  syncScannerUniverseDraft({updateInputStatus:false});
   if(!$('importResultsInput')){
     setStatus('importStatus', 'Bulk import is no longer shown in the main UI.');
     return;
@@ -2459,10 +2582,16 @@ function registerPwa(){
 
 click('addTickerBtn', addTickerFromSearch);
 click('buildBtn', buildCards);
-click('saveBtn', () => { buildCards(); saveState(); });
+click('saveBtn', () => { syncScannerUniverseDraft(); saveState(); });
 click('loadBtn', loadState);
+click('importTvBtn', importTradingViewTickers);
+click('importScreenshotBtn', () => { if($('ocrImportFile')) $('ocrImportFile').click(); });
+click('applyOcrBtn', applyOcrTickers);
+click('clearOcrBtn', () => clearOcrReview('OCR review cleared.'));
 click('clearBtn', () => {
   $('tickerInput').value = '';
+  if($('tvImportInput')) $('tvImportInput').value = '';
+  if($('ocrReviewInput')) $('ocrReviewInput').value = '';
   $('tickerSearch').value = '';
   state.tickers = [];
   state.scannerResults = [];
@@ -2474,6 +2603,8 @@ click('clearBtn', () => {
   renderTickerSuggestions([]);
   persistState();
   renderTickerQuickLists();
+  renderTvImportPreview([], 'default');
+  clearOcrReview();
   renderScannerResults();
   renderCards();
   resetReview();
@@ -2482,7 +2613,7 @@ click('clearBtn', () => {
   updateTickerSearchStatus();
 });
 click('resetAllBtn', resetAllData);
-click('genWatchPromptBtn', async () => { buildCards(); await copyText(generateWatchPrompt()); });
+click('genWatchPromptBtn', async () => { syncScannerUniverseDraft({updateInputStatus:false}); await copyText(generateWatchPrompt()); });
 click('copyWatchPromptBtn', () => copyText(($('watchPromptBox') && $('watchPromptBox').textContent) || generateWatchPrompt()));
 click('importResultsBtn', importResults);
 click('clearImportBtn', () => {
@@ -2493,7 +2624,7 @@ click('clearImportBtn', () => {
 });
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
-click('autoAnalyseBtn', buildCards);
+click('autoAnalyseBtn', () => buildCards());
 click('migrateSelectedBtn', () => migrateSelectedScannerResults());
 click('migrateTop3Btn', () => migrateSelectedScannerResults(3));
 click('jumpToDiaryBtn', () => {
@@ -2518,10 +2649,16 @@ on('tickerSearch', 'input', () => {
   queueTickerSuggestions();
 });
 on('tickerSearch', 'blur', () => setTimeout(() => renderTickerSuggestions([]), 150));
+on('ocrImportFile', 'change', event => {
+  const file = event.target.files && event.target.files[0];
+  runOcrImport(file).catch(() => {});
+  event.target.value = '';
+});
 on('tickerInput', 'input', () => {
   syncUniverseFromInputs();
   persistState();
   renderTickerQuickLists();
+  renderTvImportPreview(state.tickers && state.tickers.length ? state.tickers : [], state.tickers && state.tickers.length ? 'manual' : 'default');
   requestAutoScan({force:false, delayMs:450});
 });
 
