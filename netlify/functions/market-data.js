@@ -297,10 +297,11 @@ function normaliseSearchResults(results){
 function buildMarketPayload(symbol, quote, profile, rows){
   const latest = rows[0] || {};
   const latestClose = normaliseNumber(latest.close);
-  const quotePrice = normaliseNumber(quote && (quote.price || quote.previousClose));
+  const quotePrice = normaliseNumber(quote && (quote.price || quote.previousClose || quote.close));
   const price = Number.isFinite(quotePrice) ? quotePrice : latestClose;
-  const volume = normaliseNumber(quote && quote.volume) || normaliseNumber(latest.volume) || normaliseNumber(quote && quote.avgVolume);
-  const avgVolume30d = average(rows.slice(0, 30).map(row => normaliseNumber(row.volume)).filter(Number.isFinite)) || normaliseNumber(quote && quote.avgVolume);
+  const volume = normaliseNumber(quote && (quote.volume || quote.avgVolume)) || normaliseNumber(latest.volume);
+  const avgVolume30d = average(rows.slice(0, 30).map(row => normaliseNumber(row.volume)).filter(Number.isFinite))
+    || normaliseNumber(quote && (quote.avgVolume || quote.volumeAverage || quote.avgVolume3m));
   const ytdRow = yearStartRow(rows);
   const exchangeSource = profile && (profile.exchangeShortName || profile.exchange)
     ? (profile.exchangeShortName || profile.exchange)
@@ -312,7 +313,7 @@ function buildMarketPayload(symbol, quote, profile, rows){
     companyName:String((profile && (profile.companyName || profile.name)) || (quote && quote.name) || '').trim(),
     exchange,
     tradingViewSymbol:buildTradingViewSymbol(symbol, exchange),
-    marketCap:normaliseNumber((quote && quote.marketCap) || (profile && profile.mktCap)),
+    marketCap:normaliseNumber((quote && (quote.marketCap || quote.marketCapUsd)) || (profile && (profile.marketCap || profile.mktCap))),
     price,
     volume,
     avgVolume30d,
@@ -360,13 +361,13 @@ exports.handler = async function handler(event){
       });
     }
 
-    const quoteEndpoint = `${FMP_BASE_URL}/quote-short?symbol=${encodeURIComponent(symbol)}`;
+    const quoteEndpoint = `${FMP_BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}`;
     const profileEndpoint = `${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`;
     const historyEndpoint = `${FMP_BASE_URL}/historical-price-eod/light?symbol=${encodeURIComponent(symbol)}`;
 
-    const quotePayload = await fetchJsonWithContext(quoteEndpoint, apiKey, 'quote_short', symbol).catch(error => ({__error:error}));
+    const quotePayload = await fetchJsonWithContext(quoteEndpoint, apiKey, 'quote', symbol).catch(error => ({__error:error}));
     if(quotePayload && quotePayload.__error){
-      const failure = classifyMarketDataFailure('quote_short', quotePayload.__error);
+      const failure = classifyMarketDataFailure('quote', quotePayload.__error);
       console.error(`[market-data] ${failure.logMessage}`);
       return jsonResponse(200, {
         ok:false,
