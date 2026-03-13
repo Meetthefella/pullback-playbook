@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, OPTIONS'
 };
 
-const FMP_BASE_URL = 'https://financialmodelingprep.com/stable';
+const FMP_LEGACY_BASE_URL = 'https://financialmodelingprep.com/api/v3';
 const DEFAULT_HISTORY_LENGTH = 260;
 const MIN_SCANNER_HISTORY_POINTS = 200;
 const SEARCH_LIMIT = 8;
@@ -188,6 +188,16 @@ function normaliseHistoricalRows(payload){
   })).filter(row => row.date && Number.isFinite(row.close)).sort((a, b) => a.date < b.date ? 1 : -1).slice(0, DEFAULT_HISTORY_LENGTH);
 }
 
+function normaliseQuotePayload(payload){
+  const item = Array.isArray(payload) ? payload[0] : payload;
+  return item && typeof item === 'object' ? item : {};
+}
+
+function normaliseProfilePayload(payload){
+  const item = Array.isArray(payload) ? payload[0] : payload;
+  return item && typeof item === 'object' ? item : {};
+}
+
 function normaliseExchange(value){
   const raw = String(value || '').trim().toUpperCase().replace(/\s+/g, '');
   return EXCHANGE_MAP[raw] || raw || '';
@@ -249,6 +259,26 @@ async function fetchJsonWithContext(url, apiKey, source, symbol){
     });
     throw error;
   }
+}
+
+function classifyMarketDataFailure(source, error){
+  const message = safeErrorMessage(error, 'FMP request failed.');
+  if(isEndpointAccessErrorMessage(message)){
+    return {
+      clientMessage:'Market data endpoint not available on free tier',
+      logMessage:`${source} endpoint not available on free tier: ${message}`
+    };
+  }
+  if(isMissingSymbolMessage(message)){
+    return {
+      clientMessage:message,
+      logMessage:`${source} missing symbol or data: ${message}`
+    };
+  }
+  return {
+    clientMessage:message,
+    logMessage:`${source} request failed: ${message}`
+  };
 }
 
 function normaliseSearchResults(results){
@@ -317,7 +347,7 @@ exports.handler = async function handler(event){
   try{
     if(mode === 'search' || query){
       if(query.length < 1) return jsonResponse(400, {error:'Missing search query.'});
-      const results = await fetchJson(`${FMP_BASE_URL}/search-symbol?query=${encodeURIComponent(query)}`, apiKey);
+      const results = await fetchJson(`${FMP_LEGACY_BASE_URL}/search?query=${encodeURIComponent(query)}&limit=${SEARCH_LIMIT}`, apiKey);
       return jsonResponse(200, {ok:true, error:null, results:normaliseSearchResults(results)});
     }
 
@@ -330,18 +360,45 @@ exports.handler = async function handler(event){
       });
     }
 
-    const quoteEndpoint = `${FMP_BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}`;
-    const profileEndpoint = `${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`;
-    const historyEndpoint = `${FMP_BASE_URL}/historical-price-eod/light?symbol=${encodeURIComponent(symbol)}`;
+    const quoteEndpoint = `${FMP_LEGACY_BASE_URL}/quote-short/${encodeURIComponent(symbol)}`;
+    const profileEndpoint = `${FMP_LEGACY_BASE_URL}/profile/${encodeURIComponent(symbol)}`;
+    const historyEndpoint = `${FMP_LEGACY_BASE_URL}/historical-price-full/${encodeURIComponent(symbol)}?timeseries=${DEFAULT_HISTORY_LENGTH}`;
 
-    const [quotePayload, profilePayload, historyPayload] = await Promise.all([
-      fetchJsonWithContext(quoteEndpoint, apiKey, 'quote', symbol),
-      fetchJsonWithContext(profileEndpoint, apiKey, 'profile', symbol),
-      fetchJsonWithContext(historyEndpoint, apiKey, 'historical_light', symbol)
-    ]);
+    const quotePayload = await fetchJsonWithContext(quoteEndpoint, apiKey, 'quote_short', symbol).catch(error => ({__error:error}));
+    if(quotePayload && quotePayload.__error){
+      const failure = classifyMarketDataFailure('quote_short', quotePayload.__error);
+      console.error(`[market-data] ${failure.logMessage}`);
+      return jsonResponse(200, {
+        ok:false,
+        error:failure.clientMessage,
+        data:baseMarketPayload(symbol)
+      });
+    }
 
-    const quote = Array.isArray(quotePayload) ? quotePayload[0] : quotePayload;
-    const profile = Array.isArray(profilePayload) ? profilePayload[0] : profilePayload;
+    const profilePayload = await fetchJsonWithContext(profileEndpoint, apiKey, 'profile', symbol).catch(error => ({__error:error}));
+    if(profilePayload && profilePayload.__error){
+      const failure = classifyMarketDataFailure('profile', profilePayload.__error);
+      console.error(`[market-data] ${failure.logMessage}`);
+      return jsonResponse(200, {
+        ok:false,
+        error:failure.clientMessage,
+        data:baseMarketPayload(symbol)
+      });
+    }
+
+    const historyPayload = await fetchJsonWithContext(historyEndpoint, apiKey, 'historical_full', symbol).catch(error => ({__error:error}));
+    if(historyPayload && historyPayload.__error){
+      const failure = classifyMarketDataFailure('historical_full', historyPayload.__error);
+      console.error(`[market-data] ${failure.logMessage}`);
+      return jsonResponse(200, {
+        ok:false,
+        error:failure.clientMessage,
+        data:baseMarketPayload(symbol)
+      });
+    }
+
+    const quote = normaliseQuotePayload(quotePayload);
+    const profile = normaliseProfilePayload(profilePayload);
     const rows = normaliseHistoricalRows(historyPayload);
     logHistoryCoverage(symbol, historyEndpoint, rows.length);
     if(!rows.length){
