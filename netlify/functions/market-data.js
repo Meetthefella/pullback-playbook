@@ -8,6 +8,7 @@ const corsHeaders = {
 
 const FMP_BASE_URL = 'https://financialmodelingprep.com/stable';
 const DEFAULT_HISTORY_LENGTH = 260;
+const MIN_SCANNER_HISTORY_POINTS = 200;
 const SEARCH_LIMIT = 8;
 const MAX_SCAN_TICKERS = 10;
 const REQUEST_TIMEOUT_MS = 12000;
@@ -60,6 +61,38 @@ function requestedTickerCount(params){
 
 function safeErrorMessage(error, fallback){
   return String(error && error.message || fallback || 'Unknown error');
+}
+
+function isEndpointAccessErrorMessage(message){
+  return /premium query parameter|special endpoint|premium-only|free tier|endpoint not available/i.test(String(message || ''));
+}
+
+function isMissingSymbolMessage(message){
+  return /not found|missing symbol|invalid symbol|no data/i.test(String(message || ''));
+}
+
+function logEndpointEvent(level, details){
+  const payload = {
+    endpoint:details.endpoint,
+    symbol:details.symbol,
+    source:details.source,
+    outcome:details.outcome,
+    status:details.status || null,
+    reason:details.reason || ''
+  };
+  const line = `[market-data] ${JSON.stringify(payload)}`;
+  if(level === 'error') console.error(line);
+  else console.log(line);
+}
+
+function logHistoryCoverage(symbol, endpoint, rowsLength){
+  logEndpointEvent(rowsLength >= MIN_SCANNER_HISTORY_POINTS ? 'info' : 'error', {
+    endpoint,
+    symbol,
+    source:'historical_coverage',
+    outcome:rowsLength >= MIN_SCANNER_HISTORY_POINTS ? 'sufficient_history' : 'insufficient_history',
+    reason:`rows=${rowsLength}`
+  });
 }
 
 function baseMarketPayload(symbol){
@@ -147,10 +180,10 @@ function normaliseHistoricalRows(payload){
   const list = Array.isArray(payload) ? payload : (Array.isArray(payload && payload.historical) ? payload.historical : []);
   return list.map(row => ({
     date:String(row.date || ''),
-    close:normaliseNumber(row.close),
-    open:normaliseNumber(row.open),
-    high:normaliseNumber(row.high),
-    low:normaliseNumber(row.low),
+    close:normaliseNumber(row.close ?? row.price ?? row.adjClose),
+    open:normaliseNumber(row.open ?? row.price ?? row.close ?? row.adjClose),
+    high:normaliseNumber(row.high ?? row.price ?? row.close ?? row.adjClose),
+    low:normaliseNumber(row.low ?? row.price ?? row.close ?? row.adjClose),
     volume:normaliseNumber(row.volume)
   })).filter(row => row.date && Number.isFinite(row.close)).sort((a, b) => a.date < b.date ? 1 : -1).slice(0, DEFAULT_HISTORY_LENGTH);
 }
@@ -194,6 +227,28 @@ async function fetchJson(url, apiKey){
     }
   }
   throw new Error('FMP request failed.');
+}
+
+async function fetchJsonWithContext(url, apiKey, source, symbol){
+  try{
+    const payload = await fetchJson(url, apiKey);
+    logEndpointEvent('info', {
+      endpoint:url,
+      symbol,
+      source,
+      outcome:'success'
+    });
+    return payload;
+  }catch(error){
+    logEndpointEvent('error', {
+      endpoint:url,
+      symbol,
+      source,
+      outcome:isEndpointAccessErrorMessage(error && error.message) ? 'endpoint_access_failure' : (isMissingSymbolMessage(error && error.message) ? 'missing_symbol' : 'request_failure'),
+      reason:safeErrorMessage(error, 'FMP request failed.')
+    });
+    throw error;
+  }
 }
 
 function normaliseSearchResults(results){
@@ -275,19 +330,31 @@ exports.handler = async function handler(event){
       });
     }
 
+    const quoteEndpoint = `${FMP_BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}`;
+    const profileEndpoint = `${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`;
+    const historyEndpoint = `${FMP_BASE_URL}/historical-price-eod/light?symbol=${encodeURIComponent(symbol)}`;
+
     const [quotePayload, profilePayload, historyPayload] = await Promise.all([
-      fetchJson(`${FMP_BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}`, apiKey),
-      fetchJson(`${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`, apiKey),
-      fetchJson(`${FMP_BASE_URL}/historical-price-eod/full?symbol=${encodeURIComponent(symbol)}`, apiKey)
+      fetchJsonWithContext(quoteEndpoint, apiKey, 'quote', symbol),
+      fetchJsonWithContext(profileEndpoint, apiKey, 'profile', symbol),
+      fetchJsonWithContext(historyEndpoint, apiKey, 'historical_light', symbol)
     ]);
 
     const quote = Array.isArray(quotePayload) ? quotePayload[0] : quotePayload;
     const profile = Array.isArray(profilePayload) ? profilePayload[0] : profilePayload;
     const rows = normaliseHistoricalRows(historyPayload);
+    logHistoryCoverage(symbol, historyEndpoint, rows.length);
     if(!rows.length){
       return jsonResponse(200, {
         ok:false,
         error:`No historical market data returned for ${symbol}.`,
+        data:baseMarketPayload(symbol)
+      });
+    }
+    if(rows.length < MIN_SCANNER_HISTORY_POINTS){
+      return jsonResponse(200, {
+        ok:false,
+        error:`Insufficient free-tier history for scanner metrics (${rows.length}/${MIN_SCANNER_HISTORY_POINTS} sessions returned).`,
         data:baseMarketPayload(symbol)
       });
     }
@@ -298,16 +365,20 @@ exports.handler = async function handler(event){
       data:buildMarketPayload(symbol, quote || {}, profile || {}, rows)
     });
   }catch(err){
+    const message = safeErrorMessage(err, 'FMP market-data request failed.');
+    const safeMessage = isEndpointAccessErrorMessage(message)
+      ? 'Market data endpoint not available on free tier'
+      : message;
     if(mode === 'search' || query){
       return jsonResponse(200, {
         ok:false,
-        error:safeErrorMessage(err, 'FMP search request failed.'),
+        error:safeMessage,
         results:[]
       });
     }
     return jsonResponse(200, {
       ok:false,
-      error:safeErrorMessage(err, 'FMP market-data request failed.'),
+      error:safeMessage,
       data:baseMarketPayload(symbol)
     });
   }

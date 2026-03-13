@@ -93,7 +93,6 @@ const tradingViewConfig = {
 let scannerPresetPromise = null;
 let suggestionTimer = null;
 let suggestionRequestToken = 0;
-let autoScanTimer = null;
 let tesseractLoaderPromise = null;
 
 function formatGbp(value){
@@ -580,7 +579,6 @@ function loadState(){
   renderCards();
   renderScannerRulesPanel();
   renderTradeDiary();
-  requestAutoScan({force:true, delayMs:25});
 }
 
 function renderStats(){
@@ -702,16 +700,6 @@ async function runScannerWorkflow(options = {}){
   const result = await refreshMarketDataForTickers(universe, options);
   setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} passed, ${result.rejected} rejected, ${result.failed} failed.`);
   return result;
-}
-
-function requestAutoScan(options = {}){
-  if(autoScanTimer) clearTimeout(autoScanTimer);
-  const scanOptions = {requireConfirmation:false, ...options};
-  autoScanTimer = setTimeout(() => {
-    runScannerWorkflow(scanOptions).catch(err => {
-      setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
-    });
-  }, scanOptions.delayMs == null ? 250 : scanOptions.delayMs);
 }
 
 function syncScannerUniverseDraft(options = {}){
@@ -926,7 +914,6 @@ function addTicker(rawTicker, meta){
   renderCards();
   generateWatchPrompt();
   setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`);
-  requestAutoScan({force:true, delayMs:100});
 }
 
 function addTickerFromSearch(){
@@ -948,7 +935,6 @@ function removeTicker(ticker){
   renderCards();
   generateWatchPrompt();
   updateTickerSearchStatus();
-  requestAutoScan({force:false});
 }
 
 function removeCard(ticker){
@@ -2581,25 +2567,6 @@ async function copyText(text){
   }
 }
 
-async function runDueWatchRechecks(){
-  pruneExpiredWatches();
-  const today = todayIsoDate();
-  const due = (state.cards || []).filter(card => (
-    card.watchTracking &&
-    card.watchTracking.expiryDate &&
-    card.watchTracking.expiryDate >= today &&
-    card.status === 'Watch' &&
-    card.watchTracking.lastCheckedDate !== today
-  )).map(card => card.ticker);
-  if(!due.length){
-    persistState();
-    renderTickerQuickLists();
-    renderCards();
-    return;
-  }
-  await refreshMarketDataForTickers(due);
-}
-
 function resetAllData(){
   safeStorageRemove(key);
   safeStorageRemove(marketCacheKey);
@@ -2750,7 +2717,6 @@ on('tickerInput', 'input', () => {
   renderTickerQuickLists();
   renderTvImportPreview(state.tickers && state.tickers.length ? state.tickers : [], state.tickers && state.tickers.length ? 'manual' : 'default');
   renderFinalUniversePreview();
-  requestAutoScan({force:false, delayMs:450});
 });
 on('universeMode', 'change', () => {
   saveState();
@@ -2759,7 +2725,6 @@ on('universeMode', 'change', () => {
 
 ['accountSize','maxRisk','marketStatus'].forEach(id => on(id, 'change', () => {
   saveState();
-  requestAutoScan({force:false});
 }));
 ['listName','apiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
 document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', refreshReview));
@@ -2770,4 +2735,3 @@ loadState();
 updateTickerSearchStatus();
 generateWatchPrompt();
 generateChartPrompt();
-runDueWatchRechecks().catch(() => {});
