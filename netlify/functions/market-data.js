@@ -9,6 +9,7 @@ const corsHeaders = {
 const FMP_BASE_URL = 'https://financialmodelingprep.com/stable';
 const DEFAULT_HISTORY_LENGTH = 260;
 const SEARCH_LIMIT = 8;
+const MAX_SCAN_TICKERS = 10;
 const REQUEST_TIMEOUT_MS = 12000;
 const MAX_ATTEMPTS = 2;
 const EXCHANGE_MAP = {
@@ -44,6 +45,17 @@ function jsonResponse(statusCode, body){
     headers:corsHeaders,
     body:JSON.stringify(body)
   };
+}
+
+function requestedTickerCount(params){
+  const raw = [
+    params.symbol,
+    params.ticker,
+    params.symbols,
+    params.tickers
+  ].map(value => String(value || '').trim()).filter(Boolean).join(',');
+  if(!raw) return 0;
+  return [...new Set(raw.split(/[\s,]+/).map(item => String(item || '').trim().toUpperCase()).filter(Boolean))].length;
 }
 
 function safeErrorMessage(error, fallback){
@@ -240,6 +252,9 @@ exports.handler = async function handler(event){
   if(!apiKey) return jsonResponse(500, {error:'FMP_API_KEY is not configured on the server.'});
 
   const params = event.queryStringParameters || {};
+  if(requestedTickerCount(params) > MAX_SCAN_TICKERS){
+    return jsonResponse(400, {error:'Maximum 10 tickers per scan in free tier mode'});
+  }
   const mode = String(params.mode || '').trim().toLowerCase();
   const symbol = String(params.symbol || params.ticker || '').trim().toUpperCase();
   const query = String(params.query || params.q || '').trim();

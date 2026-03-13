@@ -27,6 +27,7 @@ const state = {
   maxRisk:40,
   marketStatus:'S&P above 50 MA',
   listName:"Today's Scan",
+  universeMode:'core8',
   tickers:[],
   recentTickers:[],
   scannerResults:[],
@@ -52,19 +53,16 @@ const DEFAULT_WATCH_TRADING_DAYS = 3;
 const EXTENDED_WATCH_TRADING_DAYS = 5;
 const APP_FETCH_TIMEOUT_MS = 12000;
 const MARKET_CACHE_SCHEMA_VERSION = 2;
-const SCAN_WARNING_THRESHOLD = 25;
-const SCAN_HARD_CAP = 50;
+const MAX_SCAN_TICKERS = 10;
 const TESSERACT_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
 const OCR_STOPWORDS = new Set(['OPEN','HIGH','LOW','CLOSE','VOLUME','VOL','CHANGE','PRICE','PERCENT','PCT','CHG','DATE','TIME','WATCH','LIST','SCREEN','SCREENER','TRADINGVIEW','SYMBOL','STOCK','STOCKS','NAME','LAST','USD','USDT','BUY','SELL','LONG','SHORT','NYSE','NASDAQ','AMEX','LSE','TOTAL','AVG','RSI','SMA','EMA']);
 const marketDataCache = new Map();
 const DEFAULT_AUTO_UNIVERSE = [
-  'AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','AVGO','BRK.B','JPM',
-  'LLY','V','MA','COST','WMT','NFLX','HD','ABBV','ORCL','CRM',
-  'BAC','KO','AMD','UNH','XOM','PM','LIN','UNP','DE','PWR'
+  'NVDA','MSFT','AMZN','AMAT','CAT','HWM','TSLA','UNP'
 ];
 const scannerPresetFallback = [{
   name:'Quality Pullback Scanner Core',
-  universe:['US stocks', 'Watchlist-only mode when a watchlist is present'],
+  universe:['Curated Core 8 fallback universe', 'TradingView Only when user tickers are present', 'Combined mode merges TradingView tickers with Core 8'],
   rules:[
     {field:'perf1w', operator:'<', value:0},
     {field:'price', operator:'<', valueField:'sma20'},
@@ -226,6 +224,49 @@ function syncUniverseFromInputs(preferExisting = false){
   return {...parsed, valid:nextTickers};
 }
 
+function defaultUniverseModeForTickers(tickers){
+  return uniqueTickers(tickers || []).length ? 'tradingview_only' : 'core8';
+}
+
+function normalizeUniverseMode(value){
+  return ['tradingview_only','core8','combined'].includes(String(value || '')) ? String(value) : '';
+}
+
+function effectiveUniverseMode(){
+  return normalizeUniverseMode(state.universeMode) || defaultUniverseModeForTickers(state.tickers);
+}
+
+function finalScanUniverse(){
+  const imported = uniqueTickers(state.tickers || []);
+  const mode = effectiveUniverseMode();
+  if(mode === 'tradingview_only') return imported;
+  if(mode === 'combined') return uniqueTickers([...imported, ...DEFAULT_AUTO_UNIVERSE]).slice(0, MAX_SCAN_TICKERS);
+  return DEFAULT_AUTO_UNIVERSE.slice();
+}
+
+function renderFinalUniversePreview(){
+  const box = $('finalUniversePreview');
+  if(!box) return;
+  const mode = effectiveUniverseMode();
+  const universe = finalScanUniverse();
+  const imported = uniqueTickers(state.tickers || []);
+  const modeLabel = mode === 'tradingview_only'
+    ? 'TradingView Only'
+    : (mode === 'combined' ? 'Combined' : 'Curated Core 8');
+  if(!universe.length){
+    box.textContent = 'Final scan universe is empty. Add or import tickers, or switch to Curated Core 8.';
+    return;
+  }
+  if(mode === 'tradingview_only' && imported.length > MAX_SCAN_TICKERS){
+    box.textContent = `Final scan universe (${modeLabel}) is blocked.\n\nFree tier scans are limited to 10 tickers.\nImported tickers detected: ${imported.length}`;
+    return;
+  }
+  const note = mode === 'combined'
+    ? `\n\nCombined mode prioritises TradingView tickers first and caps the final unique list at ${MAX_SCAN_TICKERS}.`
+    : '';
+  box.textContent = `Final scan universe (${modeLabel}, ${universe.length}):\n\n${universe.join(', ')}${note}`;
+}
+
 function setOcrImportStatus(html){
   setStatus('ocrImportStatus', html);
 }
@@ -235,7 +276,7 @@ function renderTvImportPreview(tickers, mode = 'manual'){
   if(!box) return;
   const list = uniqueTickers(tickers || []);
   if(mode === 'default'){
-    box.textContent = `No manual import saved. The next scan will use the curated default universe:\n\n${DEFAULT_AUTO_UNIVERSE.join(', ')}`;
+    box.textContent = `No manual import saved. The next scan will use the Curated Core 8 fallback universe:\n\n${DEFAULT_AUTO_UNIVERSE.join(', ')}`;
     return;
   }
   if(!list.length){
@@ -248,11 +289,14 @@ function renderTvImportPreview(tickers, mode = 'manual'){
 function applyManualUniverseTickers(tickers){
   const clean = uniqueTickers(tickers || []);
   state.tickers = clean;
+  state.universeMode = defaultUniverseModeForTickers(clean);
   updateRecentTickers(clean);
   updateTickerInputFromState();
+  if($('universeMode')) $('universeMode').value = effectiveUniverseMode();
   persistState();
   renderTickerQuickLists();
   renderTvImportPreview(clean, clean.length ? 'manual' : 'default');
+  renderFinalUniversePreview();
   return clean;
 }
 
@@ -262,7 +306,7 @@ function importTradingViewTickers(){
   const parsed = parseTickersDetailed(raw);
   if(!String(raw || '').trim()){
     applyManualUniverseTickers([]);
-    setStatus('inputStatus', '<span class="ok">No import provided. The next scan will use the curated default universe.</span>');
+    setStatus('inputStatus', '<span class="ok">No import provided. The next scan will use the Curated Core 8 fallback universe.</span>');
     return;
   }
   applyManualUniverseTickers(parsed.valid);
@@ -270,7 +314,7 @@ function importTradingViewTickers(){
   if(parsed.valid.length) messages.push(`<span class="ok">${parsed.valid.length} ticker${parsed.valid.length === 1 ? '' : 's'} imported into the manual scanner universe.</span>`);
   if(parsed.invalid.length) messages.push(`<span class="badtext">Invalid: ${escapeHtml(parsed.invalid.join(', '))}</span>`);
   if(parsed.duplicates.length) messages.push(`<span class="warntext">Duplicates removed: ${escapeHtml([...new Set(parsed.duplicates)].join(', '))}</span>`);
-  if(!parsed.valid.length) messages.push('<span class="warntext">No valid tickers found. The next scan will use the curated default universe.</span>');
+  if(!parsed.valid.length) messages.push('<span class="warntext">No valid tickers found. The next scan will use the Curated Core 8 fallback universe.</span>');
   setStatus('inputStatus', messages.join(' '));
 }
 
@@ -407,6 +451,7 @@ function baseCard(ticker){
     marketData:null,
     marketDataUpdatedAt:'',
     scannerUpdatedAt:'',
+    pullbackType:'',
     perf1w:null,
     perf1m:null,
     perf3m:null,
@@ -440,6 +485,7 @@ function normalizeCard(card){
   normalized.tradingViewSymbol = String(normalized.tradingViewSymbol || '');
   normalized.marketDataUpdatedAt = String(normalized.marketDataUpdatedAt || '');
   normalized.scannerUpdatedAt = String(normalized.scannerUpdatedAt || '');
+  normalized.pullbackType = String(normalized.pullbackType || '');
   normalized.marketData = normalized.marketData && typeof normalized.marketData === 'object' ? normalized.marketData : null;
   normalized.watchTracking = normalized.watchTracking && typeof normalized.watchTracking === 'object' ? {
     firstFlaggedAt:String(normalized.watchTracking.firstFlaggedAt || ''),
@@ -488,6 +534,7 @@ function saveState(){
   state.maxRisk = Number($('maxRisk').value || 0);
   state.marketStatus = $('marketStatus').value;
   state.listName = $('listName').value || "Today's Scan";
+  if($('universeMode')) state.universeMode = normalizeUniverseMode($('universeMode').value) || defaultUniverseModeForTickers(state.tickers);
   if($('apiKey')) state.apiKey = $('apiKey').readOnly ? '' : $('apiKey').value.trim();
   if($('dataProvider')) state.dataProvider = $('dataProvider').value;
   if($('apiPlan')) state.apiPlan = $('apiPlan').value;
@@ -495,6 +542,7 @@ function saveState(){
   state.marketDataEndpoint = defaultMarketDataEndpoint;
   persistState();
   renderStats();
+  renderFinalUniversePreview();
 }
 
 function loadState(){
@@ -502,6 +550,7 @@ function loadState(){
   state.aiEndpoint = state.aiEndpoint || defaultAiEndpoint;
   state.marketDataEndpoint = defaultMarketDataEndpoint;
   state.tickers = parseTickers((state.tickers || []).join('\n'));
+  state.universeMode = normalizeUniverseMode(state.universeMode) || defaultUniverseModeForTickers(state.tickers);
   state.recentTickers = uniqueTickers(state.recentTickers || []);
   state.scannerResults = (state.scannerResults || []).map(normalizeCard).filter(card => card.ticker);
   state.cards = (state.cards || []).map(normalizeCard).filter(card => card.ticker);
@@ -512,6 +561,7 @@ function loadState(){
   $('maxRisk').value = state.maxRisk;
   $('marketStatus').value = state.marketStatus || 'S&P above 50 MA';
   $('listName').value = state.listName || "Today's Scan";
+  if($('universeMode')) $('universeMode').value = effectiveUniverseMode();
   $('tickerInput').value = (state.tickers || []).join('\n');
   if($('tvImportInput')) $('tvImportInput').value = '';
   if($('ocrReviewInput')) $('ocrReviewInput').value = '';
@@ -524,6 +574,7 @@ function loadState(){
   renderStats();
   renderTickerQuickLists();
   renderTvImportPreview(state.tickers && state.tickers.length ? state.tickers : [], state.tickers && state.tickers.length ? 'manual' : 'default');
+  renderFinalUniversePreview();
   clearOcrReview();
   renderScannerResults();
   renderCards();
@@ -565,7 +616,7 @@ function renderTickerQuickLists(){
   const recentBox = $('recentTickerList');
   if(!watchlistBox || !recentBox) return;
   if(!state.tickers.length){
-    watchlistBox.innerHTML = '<div class="quickchip empty">Using the automatic US stocks over $10B universe. Add a ticker above to switch into watchlist/manual mode.</div>';
+    watchlistBox.innerHTML = '<div class="quickchip empty">Using the Curated Core 8 fallback universe. Add a ticker above to switch into watchlist/manual mode.</div>';
   }else{
     watchlistBox.innerHTML = state.tickers.map(ticker => (
       `<div class="quickchip active"><span class="chiplabel">${escapeHtml(ticker)}</span><button class="danger" data-act="quick-remove" data-ticker="${escapeHtml(ticker)}">Remove</button></div>`
@@ -592,34 +643,25 @@ function renderTickerQuickLists(){
 }
 
 function scannerUniverse(){
-  const manualUniverse = uniqueTickers(state.tickers || []);
-  return manualUniverse.length ? manualUniverse : DEFAULT_AUTO_UNIVERSE.slice();
+  return finalScanUniverse();
 }
 
 function scannerUniverseMode(){
-  return uniqueTickers(state.tickers || []).length ? 'manual' : 'default';
+  return effectiveUniverseMode();
 }
 
 function prepareScannerUniverse(options = {}){
   const parsed = options.syncInput ? syncUniverseFromInputs(true) : {valid:scannerUniverse(), invalid:[], duplicates:[]};
   const universe = scannerUniverse();
+  const imported = uniqueTickers(state.tickers || []);
+  const mode = scannerUniverseMode();
   if(!universe.length){
     return {parsed, universe, blocked:false};
   }
-  if(universe.length > SCAN_HARD_CAP){
-    setStatus('inputStatus', `<span class="badtext">Single scans are capped at ${SCAN_HARD_CAP} tickers. Reduce the scanner universe before running again.</span>`);
-    scannerEmptyState(`Single scans are capped at ${SCAN_HARD_CAP} tickers.`);
-    return {parsed, universe:universe.slice(0, SCAN_HARD_CAP), blocked:true};
-  }
-  if(universe.length > SCAN_WARNING_THRESHOLD){
-    setStatus('inputStatus', `<span class="warntext">Scanning more than ${SCAN_WARNING_THRESHOLD} stocks may exceed your API limit.</span>`);
-    if(options.requireConfirmation !== false){
-      const confirmed = window.confirm(`Scanning more than ${SCAN_WARNING_THRESHOLD} stocks may exceed your API limit.\n\nThis scan will use ${universe.length} symbols. Continue?`);
-      if(!confirmed){
-        setStatus('apiStatus', '<span class="warntext">Large scan cancelled.</span>');
-        return {parsed, universe, blocked:true};
-      }
-    }
+  if(mode === 'tradingview_only' && imported.length > MAX_SCAN_TICKERS){
+    setStatus('inputStatus', '<span class="badtext">Free tier scans are limited to 10 tickers.</span>');
+    setStatus('apiStatus', '<span class="badtext">Free tier scans are limited to 10 tickers.</span>');
+    return {parsed, universe, blocked:true};
   }
   return {parsed, universe, blocked:false};
 }
@@ -651,9 +693,11 @@ async function runScannerWorkflow(options = {}){
     scannerEmptyState('Waiting for a scanner universe.');
     return {done:0, failed:0, rejected:0};
   }
-  const modeLabel = scannerUniverseMode() === 'manual' ? 'manual scanner universe' : 'default curated universe';
-  const warning = universe.length > SCAN_WARNING_THRESHOLD ? ` <span class="warntext">Scanning more than ${SCAN_WARNING_THRESHOLD} stocks may exceed your API limit.</span>` : '';
-  setStatus('inputStatus', `<span class="ok">${universe.length} ticker${universe.length === 1 ? '' : 's'} ready in the ${modeLabel}.</span>${warning}`);
+  const mode = scannerUniverseMode();
+  const modeLabel = mode === 'tradingview_only'
+    ? 'TradingView Only universe'
+    : (mode === 'combined' ? 'Combined universe' : 'Curated Core 8 fallback universe');
+  setStatus('inputStatus', `<span class="ok">${universe.length} ticker${universe.length === 1 ? '' : 's'} ready in the ${modeLabel}.</span>`);
   setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${universe.length} ticker${universe.length === 1 ? '' : 's'}...</span>`);
   const result = await refreshMarketDataForTickers(universe, options);
   setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} passed, ${result.rejected} rejected, ${result.failed} failed.`);
@@ -662,11 +706,12 @@ async function runScannerWorkflow(options = {}){
 
 function requestAutoScan(options = {}){
   if(autoScanTimer) clearTimeout(autoScanTimer);
+  const scanOptions = {requireConfirmation:false, ...options};
   autoScanTimer = setTimeout(() => {
-    runScannerWorkflow(options).catch(err => {
+    runScannerWorkflow(scanOptions).catch(err => {
       setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
     });
-  }, options.delayMs == null ? 250 : options.delayMs);
+  }, scanOptions.delayMs == null ? 250 : scanOptions.delayMs);
 }
 
 function syncScannerUniverseDraft(options = {}){
@@ -1279,7 +1324,7 @@ async function renderScannerRulesPanel(){
   if(!rulesBox && !debugBox) return;
   const preset = await getActiveScannerPreset().catch(() => scannerPresetFallback[0]);
   if(rulesBox){
-    const universe = Array.isArray(preset && preset.universe) ? preset.universe : ['Curated default universe', 'Manual watchlist mode when tickers are present'];
+    const universe = Array.isArray(preset && preset.universe) ? preset.universe : ['Curated Core 8 fallback universe', 'Manual watchlist mode when tickers are present'];
     const rules = Array.isArray(preset && preset.rules) ? preset.rules : [];
     rulesBox.innerHTML = [
       '<strong>Universe</strong>',
@@ -1408,6 +1453,36 @@ function buildSuitabilitySummary(parts){
   return reasons.slice(0, 3).join(', ') + '.';
 }
 
+function classifyPullbackType(data){
+  const price = numericOrNull(data.price);
+  const sma20 = numericOrNull(data.sma20);
+  const sma50 = numericOrNull(data.sma50);
+  if(!Number.isFinite(price) || !Number.isFinite(sma20) || !Number.isFinite(sma50) || sma20 <= 0 || sma50 <= 0){
+    return {type:'Unclassified', scoreAdjustment:0, distance20:null, distance50:null, extended:false};
+  }
+  const distance20 = Math.abs(price - sma20) / sma20;
+  const distance50 = Math.abs(price - sma50) / sma50;
+  if(price > sma20 * 1.06){
+    return {type:'Extended', scoreAdjustment:-2, distance20, distance50, extended:true};
+  }
+  if(price < sma50){
+    return {type:'Broken Trend', scoreAdjustment:-2, distance20, distance50, extended:false};
+  }
+  if(distance20 <= 0.03){
+    return {type:'20MA Touch', scoreAdjustment:2, distance20, distance50, extended:false};
+  }
+  if(distance20 <= 0.06){
+    return {type:'20MA Bounce', scoreAdjustment:1, distance20, distance50, extended:false};
+  }
+  if(distance20 > 0.06 && price > sma20){
+    return {type:'Shallow Pullback', scoreAdjustment:0, distance20, distance50, extended:false};
+  }
+  if(distance50 <= 0.03){
+    return {type:'50MA Pullback', scoreAdjustment:-1, distance20, distance50, extended:false};
+  }
+  return {type:'Unclassified', scoreAdjustment:0, distance20, distance50, extended:false};
+}
+
 function scoreSuitability(card, data, checks){
   const perf3m = numericOrNull(data.perf3m);
   const perf6m = numericOrNull(data.perf6m);
@@ -1421,6 +1496,7 @@ function scoreSuitability(card, data, checks){
   const sma50 = numericOrNull(data.sma50);
   const sma200 = numericOrNull(data.sma200);
   const tradePlan = deriveTradePlan(data);
+  const pullbackType = classifyPullbackType(data);
   const trend =
     (checks.above50 ? 5 : 0) +
     (checks.above200 ? 5 : 0) +
@@ -1433,7 +1509,8 @@ function scoreSuitability(card, data, checks){
     (Number.isFinite(pullbackDepth) ? clamp(12 - Math.abs(pullbackDepth - 2.5) * 4, 0, 12) : 0) +
     (checks.above50 ? 6 : 0) +
     (Number.isFinite(rsi14) ? clamp(8 - Math.abs(rsi14 - 50) * 0.5, 0, 8) : 0) +
-    (Number.isFinite(perf1w) ? clamp(4 - Math.abs(perf1w + 2) * 1.2, 0, 4) : 0);
+    (Number.isFinite(perf1w) ? clamp(4 - Math.abs(perf1w + 2) * 1.2, 0, 4) : 0) +
+    (pullbackType.scoreAdjustment * 4);
   const entryDefined = !!(card.entry || Number.isFinite(tradePlan.entry));
   const stopDefined = !!(card.stop || Number.isFinite(tradePlan.stop));
   const targetDefined = !!(card.target || Number.isFinite(tradePlan.target));
@@ -1458,7 +1535,12 @@ function scoreSuitability(card, data, checks){
       pullback:Math.round(clamp(pullback, 0, 30)),
       readiness:Math.round(clamp(readiness, 0, 20)),
       liquidity:Math.round(clamp(liquidity, 0, 10)),
-      risk:Math.round(clamp(risk, 0, 10))
+      risk:Math.round(clamp(risk, 0, 10)),
+      pullbackType:pullbackType.type,
+      pullbackAdjustment:pullbackType.scoreAdjustment,
+      distance20:pullbackType.distance20,
+      distance50:pullbackType.distance50,
+      extended:pullbackType.extended
     },
     tradePlan,
     summary:buildSuitabilitySummary({
@@ -1467,7 +1549,8 @@ function scoreSuitability(card, data, checks){
       readiness:clamp(readiness, 0, 20),
       liquidity:clamp(liquidity, 0, 10),
       risk:clamp(risk, 0, 10)
-    })
+    }),
+    pullbackType:pullbackType.type
   };
 }
 
@@ -1640,6 +1723,7 @@ async function refreshCardMarketData(ticker, options = {}){
   card.score = suitability ? suitability.total : scan.score;
   card.status = scan.status;
   card.summary = suitability ? suitability.summary : scan.summary;
+  card.pullbackType = suitability ? suitability.pullbackType : '';
   card.source = 'scanner';
   card.marketStatus = state.marketStatus;
   card.updatedAt = new Date().toISOString();
@@ -1664,7 +1748,8 @@ async function refreshCardMarketData(ticker, options = {}){
     breakdown:scan.breakdown,
     failedRule:scan.failedRule,
     passed:scan.passed,
-    suitability:suitability ? suitability.breakdown : null
+    suitability:suitability ? suitability.breakdown : null,
+    pullbackType:suitability ? suitability.pullbackType : ''
   };
   if(suitability){
     if(!card.entry && Number.isFinite(suitability.tradePlan.entry)) card.entry = suitability.tradePlan.entry.toFixed(2);
@@ -2044,7 +2129,7 @@ function updateScannerSelectionStatus(){
   if(!resultCount){
     setStatus('scannerSelectionStatus', (state.tickers || []).length
       ? 'Running the scanner will populate ranked results for your watchlist.'
-      : 'Running the scanner will populate ranked results from the curated default universe.');
+      : 'Running the scanner will populate ranked results from the Curated Core 8 fallback universe.');
     return;
   }
   if(selectedCount){
@@ -2093,7 +2178,7 @@ function renderScannerResults(){
   if(!state.scannerResults || !state.scannerResults.length){
     updateScannerSelectionStatus();
     box.innerHTML = !(state.tickers || []).length
-      ? '<div class="summary">Scanning the curated default universe. Add your own tickers any time to switch into manual mode.</div>'
+      ? '<div class="summary">Scanning the Curated Core 8 fallback universe. Add your own tickers any time to switch into manual mode.</div>'
       : (state.scannerDebug && state.scannerDebug.length
       ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div><button class="secondary" data-act="seed-from-universe">Open Universe In Cards</button>'
       : '<div class="summary">Running the scanner will populate ranked results here.</div>');
@@ -2113,11 +2198,12 @@ function renderScannerResults(){
     const selected = !!uiState.selectedScanner[card.ticker];
     const companyLine = card.companyName ? `<div class="tiny">${escapeHtml(card.companyName)}${card.exchange ? ` • ${escapeHtml(card.exchange)}` : ''}</div>` : '';
     const marketDataLine = card.marketData ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} • 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} • 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} • 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} • RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : '<div class="tiny">Market data pending...</div>';
+    const pullbackLine = `<div class="tiny">Pullback Type: ${escapeHtml(card.pullbackType || (card.analysis && card.analysis.pullbackType) || 'Unclassified')} • Quality Score: ${escapeHtml(String(card.score || 0))}</div>`;
     const suitabilityLine = card.analysis && card.analysis.suitability
       ? `<div class="tiny">Trend ${card.analysis.suitability.trend}/30 • Pullback ${card.analysis.suitability.pullback}/30 • Readiness ${card.analysis.suitability.readiness}/20 • Liquidity ${card.analysis.suitability.liquidity}/10 • Risk ${card.analysis.suitability.risk}/10</div>`
       : '';
     div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead"><label class="resultselect" aria-label="Select ${escapeHtml(card.ticker)}"><input type="checkbox" data-act="select" ${selected ? 'checked' : ''} /></label><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div>${escapeHtml(card.summary)}</div>${companyLine}${marketDataLine}${suitabilityLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="${inCards ? 'secondary' : 'primary'}" data-act="migrate">${inCards ? 'Open Card' : 'Add To Cards'}</button></div></div>`;
+    div.innerHTML = `<div class="resulthead"><label class="resultselect" aria-label="Select ${escapeHtml(card.ticker)}"><input type="checkbox" data-act="select" ${selected ? 'checked' : ''} /></label><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div>${escapeHtml(card.summary)}</div>${companyLine}${marketDataLine}${pullbackLine}${suitabilityLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="${inCards ? 'secondary' : 'primary'}" data-act="migrate">${inCards ? 'Open Card' : 'Add To Cards'}</button></div></div>`;
     div.querySelector('[data-act="select"]').onchange = event => {
       uiState.selectedScanner[card.ticker] = !!event.target.checked;
       updateScannerSelectionStatus();
@@ -2656,10 +2742,19 @@ on('ocrImportFile', 'change', event => {
 });
 on('tickerInput', 'input', () => {
   syncUniverseFromInputs();
+  if(!uniqueTickers(state.tickers || []).length){
+    state.universeMode = 'core8';
+    if($('universeMode')) $('universeMode').value = 'core8';
+  }
   persistState();
   renderTickerQuickLists();
   renderTvImportPreview(state.tickers && state.tickers.length ? state.tickers : [], state.tickers && state.tickers.length ? 'manual' : 'default');
+  renderFinalUniversePreview();
   requestAutoScan({force:false, delayMs:450});
+});
+on('universeMode', 'change', () => {
+  saveState();
+  renderFinalUniversePreview();
 });
 
 ['accountSize','maxRisk','marketStatus'].forEach(id => on(id, 'change', () => {

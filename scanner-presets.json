@@ -2,7 +2,7 @@
   {
     "name": "Quality Pullback Scanner Core",
     "universe": [
-      "US stocks",
+      "Curated Core 8 fallback universe",
       "Watchlist-only mode when a watchlist is present"
     ],
     "rules": [

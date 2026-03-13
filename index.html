@@ -69,6 +69,17 @@
         <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
       </div>
       <div class="row" style="margin-top:10px">
+        <div>
+          <label>Universe Mode</label>
+          <select id="universeMode">
+            <option value="tradingview_only">TradingView Only</option>
+            <option value="core8">Curated Core 8</option>
+            <option value="combined">Combined</option>
+          </select>
+        </div>
+        <div class="tiny" style="align-self:end">The final scan universe is shown below before you refresh the scanner.</div>
+      </div>
+      <div class="row" style="margin-top:10px">
         <div><label>Ticker Search / Add</label><input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" /><div id="tickerSuggestions" class="suggestions" hidden></div></div>
         <div style="align-self:end"><button class="primary" id="addTickerBtn" style="width:100%">Add Ticker</button></div>
       </div>
@@ -85,7 +96,8 @@
         </div>
         <div class="quicklist" id="recentTickerList"></div>
       </div>
-      <details style="margin-top:10px">
+      <div id="finalUniversePreview" class="mutebox" style="margin-top:10px">Final scan universe will appear here.</div>
+      <details open style="margin-top:10px">
         <summary><strong>Manual Universe Edit</strong></summary>
         <div style="margin-top:10px">
           <label>Import TradingView Tickers</label>
