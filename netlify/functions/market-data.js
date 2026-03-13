@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, OPTIONS'
 };
 
-const FMP_LEGACY_BASE_URL = 'https://financialmodelingprep.com/api/v3';
+const FMP_BASE_URL = 'https://financialmodelingprep.com/stable';
 const DEFAULT_HISTORY_LENGTH = 260;
 const MIN_SCANNER_HISTORY_POINTS = 200;
 const SEARCH_LIMIT = 8;
@@ -265,7 +265,7 @@ function classifyMarketDataFailure(source, error){
   const message = safeErrorMessage(error, 'FMP request failed.');
   if(isEndpointAccessErrorMessage(message)){
     return {
-      clientMessage:'Market data endpoint not available on free tier',
+      clientMessage:`Market data endpoint not available on free tier (${source})`,
       logMessage:`${source} endpoint not available on free tier: ${message}`
     };
   }
@@ -347,7 +347,7 @@ exports.handler = async function handler(event){
   try{
     if(mode === 'search' || query){
       if(query.length < 1) return jsonResponse(400, {error:'Missing search query.'});
-      const results = await fetchJson(`${FMP_LEGACY_BASE_URL}/search?query=${encodeURIComponent(query)}&limit=${SEARCH_LIMIT}`, apiKey);
+      const results = await fetchJson(`${FMP_BASE_URL}/search-symbol?query=${encodeURIComponent(query)}`, apiKey);
       return jsonResponse(200, {ok:true, error:null, results:normaliseSearchResults(results)});
     }
 
@@ -360,9 +360,9 @@ exports.handler = async function handler(event){
       });
     }
 
-    const quoteEndpoint = `${FMP_LEGACY_BASE_URL}/quote-short/${encodeURIComponent(symbol)}`;
-    const profileEndpoint = `${FMP_LEGACY_BASE_URL}/profile/${encodeURIComponent(symbol)}`;
-    const historyEndpoint = `${FMP_LEGACY_BASE_URL}/historical-price-full/${encodeURIComponent(symbol)}?timeseries=${DEFAULT_HISTORY_LENGTH}`;
+    const quoteEndpoint = `${FMP_BASE_URL}/quote-short?symbol=${encodeURIComponent(symbol)}`;
+    const profileEndpoint = `${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`;
+    const historyEndpoint = `${FMP_BASE_URL}/historical-price-eod/light?symbol=${encodeURIComponent(symbol)}`;
 
     const quotePayload = await fetchJsonWithContext(quoteEndpoint, apiKey, 'quote_short', symbol).catch(error => ({__error:error}));
     if(quotePayload && quotePayload.__error){
@@ -386,9 +386,9 @@ exports.handler = async function handler(event){
       });
     }
 
-    const historyPayload = await fetchJsonWithContext(historyEndpoint, apiKey, 'historical_full', symbol).catch(error => ({__error:error}));
+    const historyPayload = await fetchJsonWithContext(historyEndpoint, apiKey, 'historical_light', symbol).catch(error => ({__error:error}));
     if(historyPayload && historyPayload.__error){
-      const failure = classifyMarketDataFailure('historical_full', historyPayload.__error);
+      const failure = classifyMarketDataFailure('historical_light', historyPayload.__error);
       console.error(`[market-data] ${failure.logMessage}`);
       return jsonResponse(200, {
         ok:false,
