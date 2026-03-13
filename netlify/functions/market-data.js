@@ -188,11 +188,6 @@ function normaliseHistoricalRows(payload){
   })).filter(row => row.date && Number.isFinite(row.close)).sort((a, b) => a.date < b.date ? 1 : -1).slice(0, DEFAULT_HISTORY_LENGTH);
 }
 
-function normaliseQuotePayload(payload){
-  const item = Array.isArray(payload) ? payload[0] : payload;
-  return item && typeof item === 'object' ? item : {};
-}
-
 function normaliseProfilePayload(payload){
   const item = Array.isArray(payload) ? payload[0] : payload;
   return item && typeof item === 'object' ? item : {};
@@ -294,26 +289,25 @@ function normaliseSearchResults(results){
   }).filter(item => item.ticker);
 }
 
-function buildMarketPayload(symbol, quote, profile, rows){
+function buildMarketPayload(symbol, profile, rows){
   const latest = rows[0] || {};
   const latestClose = normaliseNumber(latest.close);
-  const quotePrice = normaliseNumber(quote && (quote.price || quote.previousClose || quote.close));
-  const price = Number.isFinite(quotePrice) ? quotePrice : latestClose;
-  const volume = normaliseNumber(quote && (quote.volume || quote.avgVolume)) || normaliseNumber(latest.volume);
+  const price = latestClose;
+  const volume = normaliseNumber(latest.volume);
   const avgVolume30d = average(rows.slice(0, 30).map(row => normaliseNumber(row.volume)).filter(Number.isFinite))
-    || normaliseNumber(quote && (quote.avgVolume || quote.volumeAverage || quote.avgVolume3m));
+    || normaliseNumber(profile && (profile.averageVolume || profile.avgVolume || profile.volAvg));
   const ytdRow = yearStartRow(rows);
   const exchangeSource = profile && (profile.exchangeShortName || profile.exchange)
     ? (profile.exchangeShortName || profile.exchange)
-    : (quote && (quote.exchangeShortName || quote.exchange) ? (quote.exchangeShortName || quote.exchange) : '');
+    : '';
   const exchange = normaliseExchange(exchangeSource);
   return {
     ticker:String(symbol || '').trim().toUpperCase(),
     fetchedAt:new Date().toISOString(),
-    companyName:String((profile && (profile.companyName || profile.name)) || (quote && quote.name) || '').trim(),
+    companyName:String((profile && (profile.companyName || profile.name)) || '').trim(),
     exchange,
     tradingViewSymbol:buildTradingViewSymbol(symbol, exchange),
-    marketCap:normaliseNumber((quote && (quote.marketCap || quote.marketCapUsd)) || (profile && (profile.marketCap || profile.mktCap))),
+    marketCap:normaliseNumber(profile && (profile.marketCap || profile.mktCap || profile.marketCapUsd)),
     price,
     volume,
     avgVolume30d,
@@ -361,20 +355,8 @@ exports.handler = async function handler(event){
       });
     }
 
-    const quoteEndpoint = `${FMP_BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}`;
     const profileEndpoint = `${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`;
     const historyEndpoint = `${FMP_BASE_URL}/historical-price-eod/light?symbol=${encodeURIComponent(symbol)}`;
-
-    const quotePayload = await fetchJsonWithContext(quoteEndpoint, apiKey, 'quote', symbol).catch(error => ({__error:error}));
-    if(quotePayload && quotePayload.__error){
-      const failure = classifyMarketDataFailure('quote', quotePayload.__error);
-      console.error(`[market-data] ${failure.logMessage}`);
-      return jsonResponse(200, {
-        ok:false,
-        error:failure.clientMessage,
-        data:baseMarketPayload(symbol)
-      });
-    }
 
     const profilePayload = await fetchJsonWithContext(profileEndpoint, apiKey, 'profile', symbol).catch(error => ({__error:error}));
     if(profilePayload && profilePayload.__error){
@@ -398,7 +380,6 @@ exports.handler = async function handler(event){
       });
     }
 
-    const quote = normaliseQuotePayload(quotePayload);
     const profile = normaliseProfilePayload(profilePayload);
     const rows = normaliseHistoricalRows(historyPayload);
     logHistoryCoverage(symbol, historyEndpoint, rows.length);
@@ -420,7 +401,7 @@ exports.handler = async function handler(event){
     return jsonResponse(200, {
       ok:true,
       error:null,
-      data:buildMarketPayload(symbol, quote || {}, profile || {}, rows)
+      data:buildMarketPayload(symbol, profile || {}, rows)
     });
   }catch(err){
     const message = safeErrorMessage(err, 'FMP market-data request failed.');
