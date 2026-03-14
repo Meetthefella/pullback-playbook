@@ -26,7 +26,7 @@
   <div class="hero">
     <div class="card">
       <h1>Pullback Playbook v4.2.0</h1>
-      <p>Shortlist-first Quality Pullback workflow with manual / OCR ticker import, ranked setup review, per-ticker chart upload, in-app AI analysis, and risk planning built around your GBP 4,000 account and GBP 40 max risk.</p>
+      <p>Shortlist-first Quality Pullback workflow with manual / OCR ticker import, ranked setups, per-ticker review cards, in-card chart upload, AI analysis, and planning built around your GBP 4,000 account and GBP 40 max risk.</p>
       <div class="pillrow">
         <span class="pill">Shortlist Workflow</span>
         <span class="pill">Ranked Setups</span>
@@ -39,8 +39,8 @@
         <a class="tablink" href="#dailyInput">Scan</a>
         <a class="tablink" href="#apiSettings">API</a>
         <a class="tablink" href="#resultsSection">Results</a>
-        <a class="tablink" href="#reviewSection">Review</a>
-        <a class="tablink" href="#plannerSection">Planner</a>
+        <a class="tablink" href="#resultsSection">Results</a>
+        <a class="tablink" href="#cardsSection">Active Review</a>
         <a class="tablink" href="#diarySection">Diary</a>
       </div>
     </div>
@@ -185,14 +185,14 @@
   <div class="grid" style="margin-top:14px">
     <div class="card">
       <h2 id="resultsSection">2) Ranked Setups</h2>
-      <p class="tiny">Run the shortlist through the scanner, then tap <strong>Review</strong> on the best setups. You no longer need to migrate tickers manually.</p>
+      <p class="tiny">Run the shortlist through the scanner, then tap <strong>Review</strong> on the best setups. The review card is now the main working area for chart upload, AI analysis, planning, and saving.</p>
       <div class="statusline tiny" id="scannerSelectionStatus">Tap Review to open a setup in the review workflow.</div>
       <div id="results" class="list"></div>
     </div>
 
-    <div class="card">
+    <div class="card" style="display:none">
       <details>
-        <summary><strong id="reviewSection">3) Setup Review</strong></summary>
+        <summary><strong id="reviewSection">Legacy Review Controls (hidden in normal workflow)</strong></summary>
         <div class="row3" style="margin-top:10px">
           <div><label>Ticker</label><input id="selectedTicker" placeholder="PWR" /></div>
           <div><label>Status</label><input id="statusBox" readonly /></div>
@@ -235,14 +235,14 @@
   </div>
 
   <div class="card" style="margin-top:14px">
-    <h2>4) Review Queue</h2>
-    <p class="tiny">Reviewed setups live here. Each card keeps your notes, chart upload, AI response, planner values, and journal shortcut in one place.</p>
+    <h2 id="cardsSection">3) Active Review</h2>
+    <p class="tiny">This is the main working area. Each review card keeps notes, chart upload, AI analysis, planning fields, and journal actions in one place.</p>
     <div id="cardsList" class="list"></div>
   </div>
 
   <div class="grid" style="margin-top:14px">
-    <div class="card">
-      <h2 id="plannerSection">5) Trade Planner</h2>
+    <div class="card" style="display:none">
+      <h2 id="plannerSection">Legacy Trade Planner</h2>
       <div class="row3">
         <div><label>Entry</label><input id="entryPrice" type="number" step="0.01" /></div>
         <div><label>Stop</label><input id="stopPrice" type="number" step="0.01" /></div>
@@ -262,7 +262,7 @@
 
     <div class="card compact-card">
       <details class="compact-details">
-        <summary><strong id="chartPromptSection">6) Chart Prompt</strong></summary>
+        <summary><strong id="chartPromptSection">Legacy Chart Prompt</strong></summary>
         <div class="actions" style="margin-top:10px"><button class="secondary" id="copyChartPromptBtn">Copy Chart Prompt</button></div>
         <div id="chartPromptBox" class="mutebox" style="margin-top:10px">Your chart prompt will appear here.</div>
       </details>

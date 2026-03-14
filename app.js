@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
-const APP_VERSION = 'v4.2.0';
+const APP_VERSION = 'v4.3.0';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
@@ -2130,7 +2130,7 @@ function updateScannerSelectionStatus(){
       : 'No shortlist yet. Import tickers or use the Curated Core 8 fallback.');
     return;
   }
-  setStatus('scannerSelectionStatus', `Tap Review to open a setup. ${resultCount} ranked result${resultCount === 1 ? '' : 's'} available.`);
+  setStatus('scannerSelectionStatus', `Tap Review to open the best setup in the Active Review area. ${resultCount} ranked result${resultCount === 1 ? '' : 's'} available.`);
 }
 
 function migrateSelectedScannerResults(limit){
@@ -2205,15 +2205,13 @@ function renderCards(){
   if(!box) return;
   box.innerHTML = '';
   if(!state.cards || !state.cards.length){
-    box.innerHTML = (state.tickers || []).length
-      ? '<div class="summary">No reviewed setups yet. Start in Ranked Setups and tap Review on the names you want to work on.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Setups</a>'
-      : '<div class="summary">No reviewed setups yet. Start in Ranked Setups and tap Review on the names you want to analyse.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Setups</a>';
+    box.innerHTML = '<div class="summary">No active review yet. Start in Ranked Setups and tap Review on the name you want to work on.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Setups</a>';
     const seedBtn = box.querySelector('[data-act="seed-cards"]');
     if(seedBtn){
       seedBtn.onclick = () => {
         seedCardsFromUniverse(6);
-        const reviewSection = $('reviewSection');
-        if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
+        const cardsSection = $('cardsSection');
+        if(cardsSection) cardsSection.scrollIntoView({behavior:'smooth', block:'start'});
       };
     }
     return;
@@ -2248,7 +2246,7 @@ function renderCards(){
     const scoreLabel = card.source === 'scanner' ? `${card.score}/100` : `${card.score}/10`;
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><details style="margin-top:10px"><summary>Review And Plan In Card</summary>${renderCardChecklist(card)}<div class="actions"><button class="secondary" data-act="save-card-review">Save Card Review</button><button class="secondary" data-act="use-in-planner">Use In Planner</button></div></details><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="primary" data-act="load">Open Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><details style="margin-top:10px" open><summary>Review Checklist & Plan</summary>${renderCardChecklist(card)}<div class="actions"><button class="secondary" data-act="save-card-review">Save Review & Plan</button></div></details><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Analysis Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}"><summary>Advanced / Prompt Debug</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(card.ticker);
     div.querySelector('[data-act="load"]').onclick = () => loadCard(card.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeCard(card.ticker);
@@ -2258,8 +2256,7 @@ function renderCards(){
       const statusBox = $(`cardStatus-${card.ticker}`);
       if(statusBox) statusBox.innerHTML = '<span class="ok">Card review saved.</span>';
     };
-    div.querySelector('[data-act="use-in-planner"]').onclick = () => loadCard(card.ticker);
-    div.querySelector('[data-act="save-trade"]').onclick = () => {
+        div.querySelector('[data-act="save-trade"]').onclick = () => {
       const liveCard = upsertCard(card.ticker);
       const notesEl = $(`notes-${card.ticker}`);
       if(notesEl) liveCard.notes = notesEl.value;
@@ -2393,8 +2390,8 @@ function loadCard(ticker){
   refreshReview();
   generateChartPrompt();
   calculate();
-  const reviewSection = $('reviewSection');
-  if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
+  const cardsSection = $('cardsSection');
+  if(cardsSection) cardsSection.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function refreshReview(){
