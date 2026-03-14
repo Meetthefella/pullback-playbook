@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
-const APP_VERSION = 'v4.3.0';
+const APP_VERSION = 'v4.1.3';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
@@ -253,14 +253,17 @@ function renderFinalUniversePreview(){
     ? 'TradingView Only'
     : (mode === 'combined' ? 'Combined' : 'Curated Core 8');
   if(!universe.length){
-    box.textContent = 'Final scan list: 0 tickers.';
+    box.textContent = 'Final scan universe is empty. Add or import tickers, or switch to Curated Core 8.';
     return;
   }
   if(mode === 'tradingview_only' && imported.length > MAX_SCAN_TICKERS){
-    box.textContent = `Final scan list blocked: ${imported.length} imported tickers exceeds the free-tier limit of ${MAX_SCAN_TICKERS}.`;
+    box.textContent = `Final scan universe (${modeLabel}) is blocked.\n\nFree tier scans are limited to 10 tickers.\nImported tickers detected: ${imported.length}`;
     return;
   }
-  box.textContent = `Final scan list (${modeLabel}): ${universe.length} ticker${universe.length === 1 ? '' : 's'} — ${universe.join(', ')}`;
+  const note = mode === 'combined'
+    ? `\n\nCombined mode prioritises TradingView tickers first and caps the final unique list at ${MAX_SCAN_TICKERS}.`
+    : '';
+  box.textContent = `Final scan universe (${modeLabel}, ${universe.length}):\n\n${universe.join(', ')}${note}`;
 }
 
 function setOcrImportStatus(html){
@@ -917,22 +920,6 @@ function addTickerFromSearch(){
   addTicker();
 }
 
-
-function removeTickerFromWorkflow(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return;
-  state.scannerResults = (state.scannerResults || []).filter(card => card.ticker !== symbol);
-  state.cards = (state.cards || []).filter(card => card.ticker !== symbol);
-  state.tickers = (state.tickers || []).filter(item => item !== symbol);
-  delete uiState.selectedScanner[symbol];
-  if($('selectedTicker') && $('selectedTicker').value === symbol) resetReview();
-  updateTickerInputFromState();
-  persistState();
-  renderTickerQuickLists();
-  renderScannerResults();
-  renderCards();
-  renderFinalUniversePreview();
-}
 function removeTicker(ticker){
   state.tickers = state.tickers.filter(item => item !== ticker);
   state.scannerResults = state.scannerResults.filter(card => card.ticker !== ticker);
@@ -1719,10 +1706,11 @@ async function refreshCardMarketData(ticker, options = {}){
   const scan = await evaluateScannerForData(data);
   card.checks = scan.checks;
   const suitability = scan.passed ? scoreSuitability(card, data, scan.checks) : null;
-  card.score = suitability ? suitability.total : scan.score;
-  card.status = scan.status;
-  card.summary = suitability ? suitability.summary : scan.summary;
-  card.pullbackType = suitability ? suitability.pullbackType : '';
+  const manualReviewOnly = !!data.__error;
+  card.score = suitability ? suitability.total : (manualReviewOnly ? Math.max(scan.score, 1) : scan.score);
+  card.status = manualReviewOnly ? 'Watch' : scan.status;
+  card.summary = suitability ? suitability.summary : (manualReviewOnly ? 'Market data unavailable — manual chart review still allowed.' : scan.summary);
+  card.pullbackType = suitability ? suitability.pullbackType : (manualReviewOnly ? 'Manual Review' : '');
   card.source = 'scanner';
   card.marketStatus = state.marketStatus;
   card.updatedAt = new Date().toISOString();
@@ -1791,7 +1779,7 @@ async function refreshMarketDataForTickers(tickers, options = {}){
         };
         Object.assign(existingCard, cloneCardData(card), preserved);
       }
-      if(scan.passed){
+      if(scan.passed || (card.marketData && card.marketData.__error)){
         nextResults.push(card);
         done += 1;
       }else{
@@ -1814,7 +1802,7 @@ async function refreshMarketDataForTickers(tickers, options = {}){
   state.scannerDebug = scannerDebug;
   const failedMarketData = scannerDebug.filter(item => !item.passed && (item.breakdown || []).some(entry => /market data unavailable|market data request|no historical market data|fmp/i.test(String(entry.label || '')))).length;
   if(failedMarketData){
-    setStatus('apiStatus', `<span class="badtext">Market data is failing for ${failedMarketData} ticker${failedMarketData === 1 ? '' : 's'}. Check the FMP API key or deployed Netlify route.</span>`);
+    setStatus('apiStatus', `<span class="warntext">Market data is unavailable for ${failedMarketData} ticker${failedMarketData === 1 ? '' : 's'}. You can still open them for manual chart review.</span>`);
   }else if(unique.length){
     setStatus('apiStatus', `<span class="ok">Scanner refreshed ${unique.length} ticker${unique.length === 1 ? '' : 's'}.</span>`);
   }
@@ -2122,15 +2110,20 @@ function selectedScannerTickers(){
 }
 
 function updateScannerSelectionStatus(){
+  const selectedCount = selectedScannerTickers().length;
   const resultCount = (state.scannerResults || []).length;
   if(!$('scannerSelectionStatus')) return;
   if(!resultCount){
     setStatus('scannerSelectionStatus', (state.tickers || []).length
-      ? 'Press Refresh Scanner Now to rank your shortlist.'
-      : 'No shortlist yet. Import tickers or use the Curated Core 8 fallback.');
+      ? 'Running the scanner will populate ranked results for your watchlist.'
+      : 'Running the scanner will populate ranked results from the Curated Core 8 fallback universe.');
     return;
   }
-  setStatus('scannerSelectionStatus', `Tap Review to open the best setup in the Active Review area. ${resultCount} ranked result${resultCount === 1 ? '' : 's'} available.`);
+  if(selectedCount){
+    setStatus('scannerSelectionStatus', `<span class="ok">${selectedCount} ranked result${selectedCount === 1 ? '' : 's'} selected.</span>`);
+    return;
+  }
+  setStatus('scannerSelectionStatus', `Select ranked results to migrate, or use the Top ${Math.min(3, resultCount)} shortcut.`);
 }
 
 function migrateSelectedScannerResults(limit){
@@ -2172,28 +2165,39 @@ function renderScannerResults(){
   if(!state.scannerResults || !state.scannerResults.length){
     updateScannerSelectionStatus();
     box.innerHTML = !(state.tickers || []).length
-      ? '<div class="summary">No imported shortlist yet. The scanner will use the Curated Core 8 fallback universe until you paste or OCR your TradingView tickers.</div>'
+      ? '<div class="summary">Scanning the Curated Core 8 fallback universe. Add your own tickers any time to switch into manual mode.</div>'
       : (state.scannerDebug && state.scannerDebug.length
-      ? '<div class="summary">No tickers passed the active TradingView scanner rules. Open the Advanced / Debug panel if you want to inspect rule failures.</div>'
-      : '<div class="summary">Running the scanner will populate ranked setups here.</div>');
+      ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div><button class="secondary" data-act="seed-from-universe">Open Universe In Cards</button>'
+      : '<div class="summary">Running the scanner will populate ranked results here.</div>');
+    const seedBtn = box.querySelector('[data-act="seed-from-universe"]');
+    if(seedBtn){
+      seedBtn.onclick = () => {
+        seedCardsFromUniverse(6);
+        const reviewSection = $('reviewSection');
+        if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
+      };
+    }
     return;
   }
   state.scannerResults.forEach(card => {
     const div = document.createElement('div');
+    const inCards = !!getCard(card.ticker);
+    const selected = !!uiState.selectedScanner[card.ticker];
     const companyLine = card.companyName ? `<div class="tiny">${escapeHtml(card.companyName)}${card.exchange ? ` • ${escapeHtml(card.exchange)}` : ''}</div>` : '';
-    const marketDataLine = card.marketData ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} • 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} • 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} • 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} • RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : '<div class="tiny">Market data pending...</div>';
+    const marketDataLine = card.marketData && !card.marketData.__error ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} • 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} • 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} • 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} • RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : `<div class="tiny">${escapeHtml(card.marketData && card.marketData.__error ? card.marketData.__error : 'Market data pending...')}</div>`;
     const pullbackLine = `<div class="tiny">Pullback Type: ${escapeHtml(card.pullbackType || (card.analysis && card.analysis.pullbackType) || 'Unclassified')} • Quality Score: ${escapeHtml(String(card.score || 0))}</div>`;
     const suitabilityLine = card.analysis && card.analysis.suitability
       ? `<div class="tiny">Trend ${card.analysis.suitability.trend}/30 • Pullback ${card.analysis.suitability.pullback}/30 • Readiness ${card.analysis.suitability.readiness}/20 • Liquidity ${card.analysis.suitability.liquidity}/10 • Risk ${card.analysis.suitability.risk}/10</div>`
       : '';
     div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div>${escapeHtml(card.summary)}</div>${companyLine}${marketDataLine}${pullbackLine}${suitabilityLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="primary" data-act="review">Review</button><button class="danger" data-act="remove">Remove</button></div></div>`;
-    div.querySelector('[data-act="review"]').onclick = () => {
+    div.innerHTML = `<div class="resulthead"><label class="resultselect" aria-label="Select ${escapeHtml(card.ticker)}"><input type="checkbox" data-act="select" ${selected ? 'checked' : ''} /></label><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div>${escapeHtml(card.summary)}</div>${companyLine}${marketDataLine}${pullbackLine}${suitabilityLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="${inCards ? 'secondary' : 'primary'}" data-act="migrate">Review</button></div></div>`;
+    div.querySelector('[data-act="select"]').onchange = event => {
+      uiState.selectedScanner[card.ticker] = !!event.target.checked;
+      updateScannerSelectionStatus();
+    };
+    div.querySelector('[data-act="migrate"]').onclick = () => {
       migrateScannerResultToCard(card.ticker);
       loadCard(card.ticker);
-    };
-    div.querySelector('[data-act="remove"]').onclick = () => {
-      removeTickerFromWorkflow(card.ticker);
     };
     box.appendChild(div);
   });
@@ -2205,13 +2209,15 @@ function renderCards(){
   if(!box) return;
   box.innerHTML = '';
   if(!state.cards || !state.cards.length){
-    box.innerHTML = '<div class="summary">No active review yet. Start in Ranked Setups and tap Review on the name you want to work on.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Setups</a>';
+    box.innerHTML = (state.tickers || []).length
+      ? '<div class="summary">No ticker cards yet. Start in Ranked Results, or open your saved universe directly in cards when you want to review charts manually.</div><div class="actions"><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a><button class="secondary" data-act="seed-cards">Open Universe In Cards</button></div>'
+      : '<div class="summary">No reviewed setups yet. Start in Ranked Setups and tap Review on the names you want to analyse.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>';
     const seedBtn = box.querySelector('[data-act="seed-cards"]');
     if(seedBtn){
       seedBtn.onclick = () => {
         seedCardsFromUniverse(6);
-        const cardsSection = $('cardsSection');
-        if(cardsSection) cardsSection.scrollIntoView({behavior:'smooth', block:'start'});
+        const reviewSection = $('reviewSection');
+        if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
       };
     }
     return;
@@ -2246,7 +2252,7 @@ function renderCards(){
     const scoreLabel = card.source === 'scanner' ? `${card.score}/100` : `${card.score}/10`;
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="primary" data-act="load">Open Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><details style="margin-top:10px" open><summary>Review Checklist & Plan</summary>${renderCardChecklist(card)}<div class="actions"><button class="secondary" data-act="save-card-review">Save Review & Plan</button></div></details><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Analysis Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}"><summary>Advanced / Prompt Debug</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><details style="margin-top:10px"><summary>Review And Plan In Card</summary>${renderCardChecklist(card)}<div class="actions"><button class="secondary" data-act="save-card-review">Save Card Review</button><button class="secondary" data-act="use-in-planner">Use In Planner</button></div></details><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${loading ? '<span class="warntext">Sending setup to the AI endpoint...</span>' : (card.lastError ? `<span class="badtext">${escapeHtml(card.lastError)}</span>` : (card.lastResponse ? 'Latest prompt and response saved to this ticker.' : (analysisBusy ? 'Another setup is being analysed right now.' : 'No AI analysis saved yet.')))}</div></div><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(card.ticker);
     div.querySelector('[data-act="load"]').onclick = () => loadCard(card.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeCard(card.ticker);
@@ -2256,7 +2262,8 @@ function renderCards(){
       const statusBox = $(`cardStatus-${card.ticker}`);
       if(statusBox) statusBox.innerHTML = '<span class="ok">Card review saved.</span>';
     };
-        div.querySelector('[data-act="save-trade"]').onclick = () => {
+    div.querySelector('[data-act="use-in-planner"]').onclick = () => loadCard(card.ticker);
+    div.querySelector('[data-act="save-trade"]').onclick = () => {
       const liveCard = upsertCard(card.ticker);
       const notesEl = $(`notes-${card.ticker}`);
       if(notesEl) liveCard.notes = notesEl.value;
@@ -2390,8 +2397,8 @@ function loadCard(ticker){
   refreshReview();
   generateChartPrompt();
   calculate();
-  const cardsSection = $('cardsSection');
-  if(cardsSection) cardsSection.scrollIntoView({behavior:'smooth', block:'start'});
+  const reviewSection = $('reviewSection');
+  if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function refreshReview(){

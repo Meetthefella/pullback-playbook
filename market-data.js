@@ -357,7 +357,7 @@ exports.handler = async function handler(event){
     }
 
     const profileEndpoint = `${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`;
-    const historyEndpoint = `${FMP_V3_BASE_URL}/historical-price-full/${encodeURIComponent(symbol)}?timeseries=${DEFAULT_HISTORY_LENGTH}`;
+    const historyEndpoint = `${FMP_V3_BASE_URL}/historical-price-full/${encodeURIComponent(symbol)}?serietype=line`; // free-tier friendly historical route
 
     const profilePayload = await fetchJsonWithContext(profileEndpoint, apiKey, 'profile', symbol).catch(error => ({__error:error}));
     if(profilePayload && profilePayload.__error){
@@ -370,7 +370,7 @@ exports.handler = async function handler(event){
       });
     }
 
-    const historyPayload = await fetchJsonWithContext(historyEndpoint, apiKey, 'historical_price_full', symbol).catch(error => ({__error:error}));
+    const historyPayload = await fetchJsonWithContext(historyEndpoint, apiKey, 'historical_non_split_adjusted', symbol).catch(error => ({__error:error}));
     if(historyPayload && historyPayload.__error){
       const failure = classifyMarketDataFailure('historical_price_full', historyPayload.__error);
       console.error(`[market-data] ${failure.logMessage}`);
