@@ -68,7 +68,7 @@ function isEndpointAccessErrorMessage(message){
 }
 
 function isMissingSymbolMessage(message){
-  return /not found|missing symbol|invalid symbol|no data/i.test(String(message || ''));
+  return /not found|missing symbol|invalid symbol|no data|limited symbol coverage|not available for this symbol/i.test(String(message || ''));
 }
 
 function logEndpointEvent(level, details){
@@ -266,7 +266,7 @@ function classifyMarketDataFailure(source, error){
   }
   if(isMissingSymbolMessage(message)){
     return {
-      clientMessage:message,
+      clientMessage:'Ticker not available on FMP free-tier symbol coverage',
       logMessage:`${source} missing symbol or data: ${message}`
     };
   }
@@ -356,7 +356,7 @@ exports.handler = async function handler(event){
     }
 
     const profileEndpoint = `${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`;
-    const historyEndpoint = `${FMP_BASE_URL}/historical-price-full/${encodeURIComponent(symbol)}?serietype=line`;
+    const historyEndpoint = `${FMP_BASE_URL}/historical-price-eod/light?symbol=${encodeURIComponent(symbol)}`;
 
     const profilePayload = await fetchJsonWithContext(profileEndpoint, apiKey, 'profile', symbol).catch(error => ({__error:error}));
     if(profilePayload && profilePayload.__error){
@@ -369,9 +369,9 @@ exports.handler = async function handler(event){
       });
     }
 
-    const historyPayload = await fetchJsonWithContext(historyEndpoint, apiKey, 'historical_price_full_line', symbol).catch(error => ({__error:error}));
+    const historyPayload = await fetchJsonWithContext(historyEndpoint, apiKey, 'historical_eod_light', symbol).catch(error => ({__error:error}));
     if(historyPayload && historyPayload.__error){
-      const failure = classifyMarketDataFailure('historical_price_full_line', historyPayload.__error);
+      const failure = classifyMarketDataFailure('historical_eod_light', historyPayload.__error);
       console.error(`[market-data] ${failure.logMessage}`);
       return jsonResponse(200, {
         ok:false,
