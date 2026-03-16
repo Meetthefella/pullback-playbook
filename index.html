@@ -26,12 +26,12 @@
   <div class="hero">
     <div class="card">
       <h1>Pullback Playbook v4.4.0</h1>
-      <p>Scanner-first Quality Pullback workflow with Financial Modeling Prep market data, ranked shortlist automation, per-ticker chart upload, in-app OpenAI setup analysis, and risk planning built around your GBP 4,000 account and GBP 40 max risk.</p>
+      <p>Scanner-first Quality Pullback workflow with provider-backed market data, ranked shortlist automation, per-ticker chart upload, in-app OpenAI setup analysis, and risk planning built around your GBP 4,000 account and GBP 40 max risk.</p>
       <div class="pillrow">
         <span class="pill">Quality Pullback Scanner</span>
         <span class="pill">Per-card analysis</span>
         <span class="pill">Chart upload</span>
-        <span class="pill">FMP market data</span>
+        <span class="pill">Provider-backed market data</span>
         <span class="pill">PWA ready</span>
         <span class="pill" id="appVersion">v4.4.0</span>
       </div>
@@ -83,7 +83,7 @@
         <div><label>Ticker Search / Add</label><input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" /><div id="tickerSuggestions" class="suggestions" hidden></div></div>
         <div style="align-self:end"><button class="primary" id="addTickerBtn" style="width:100%">Add Ticker</button></div>
       </div>
-      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search FMP symbols below.</div>
+      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
       <div class="panelbox" style="margin-top:10px">
         <div class="quicklisthead">
           <strong>Scanner Universe</strong>
@@ -156,12 +156,13 @@
       <details>
         <summary><strong id="apiSettings">3) API Settings</strong></summary>
         <div class="row" style="margin-top:10px">
-          <div><label>Data Provider</label><select id="dataProvider"><option value="fmp">Financial Modeling Prep</option></select></div>
-          <div><label>Scanner Mode</label><select id="apiPlan"><option value="scanner">Quality Pullback Scanner</option></select></div>
+          <div><label>Data Provider</label><select id="dataProvider"><option value="fmp">Financial Modeling Prep</option><option value="marketdata">MarketData.app</option></select></div>
+          <div><label>Provider Plan</label><select id="apiPlan"><option value="scanner">Scanner Default</option></select></div>
         </div>
-        <div style="margin-top:10px"><label>Market Data Key</label><input id="apiKey" type="text" value="Uses server-side FMP_API_KEY on Netlify" readonly /></div>
+        <div style="margin-top:10px"><label>Market Data Key</label><input id="apiKey" type="text" value="Uses server-side provider API keys on Netlify" readonly /></div>
         <div style="margin-top:10px"><label>AI Endpoint URL</label><input id="aiEndpoint" placeholder="/api/analyse-setup or full serverless URL" /></div>
-        <div class="tiny">Use `/api/analyse-setup` on Netlify for AI analysis. Market data runs through `/api/market-data` using the server-side `FMP_API_KEY`.</div>
+        <div class="tiny">Use `/api/analyse-setup` on Netlify for AI analysis. Market data runs through `/api/market-data` using the selected server-side provider adapter.</div>
+        <div class="tiny" id="providerStatusNote" style="margin-top:8px">FMP: search + snapshot. MarketData.app: snapshot only for now.</div>
         <div class="actions">
           <button class="primary" id="saveApiBtn">Save Settings</button>
           <button class="secondary" id="testApiBtn">Test Market Data</button>

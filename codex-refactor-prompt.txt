@@ -1,0 +1,12 @@
+Now implement MarketData.app support in the provider layer you just created.
+
+Requirements:
+- Keep FMP working
+- Add MarketData.app as a second provider
+- Use environment variables for server-side credentials only
+- Normalise MarketData.app responses into the same provider-neutral structure already used by the scanner
+- Update the Data Provider dropdown so both providers are selectable
+- If a provider cannot return a field directly, compute it from history where possible
+- Keep the scanner rules unchanged
+- Update README with exact environment variable names and setup notes
+- Summarise all changes and list any remaining gaps

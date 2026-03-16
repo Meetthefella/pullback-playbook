@@ -6,6 +6,8 @@ const APP_VERSION = 'v4.4.0';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
+const DEFAULT_PROVIDER = 'fmp';
+const DEFAULT_API_PLAN = 'scanner';
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
@@ -22,7 +24,7 @@ const checklistLabels = {
   targetDefined:'Target defined'
 };
 
-const state = {
+const DEFAULT_STATE = {
   accountSize:4000,
   maxRisk:40,
   marketStatus:'S&P above 50 MA',
@@ -33,16 +35,21 @@ const state = {
   scannerResults:[],
   cards:[],
   tradeDiary:[],
-  lastImportRaw:'',
   apiKey:'',
-  dataProvider:'fmp',
-  apiPlan:'free',
+  dataProvider:DEFAULT_PROVIDER,
+  apiPlan:DEFAULT_API_PLAN,
   aiEndpoint:defaultAiEndpoint,
   marketDataEndpoint:defaultMarketDataEndpoint,
   symbolMeta:{},
   scannerPresetName:'Quality Pullback Scanner Core',
   scannerDebug:[]
 };
+
+function createDefaultState(){
+  return safeJsonParse(JSON.stringify(DEFAULT_STATE), DEFAULT_STATE);
+}
+
+const state = createDefaultState();
 
 const uiState = {promptOpen:{},responseOpen:{},loadingTicker:'',selectedScanner:{}};
 const MAX_CHART_BYTES = 4 * 1024 * 1024;
@@ -52,8 +59,8 @@ const SEARCH_DEBOUNCE_MS = 250;
 const DEFAULT_WATCH_TRADING_DAYS = 3;
 const EXTENDED_WATCH_TRADING_DAYS = 5;
 const APP_FETCH_TIMEOUT_MS = 12000;
-const MARKET_CACHE_SCHEMA_VERSION = 2;
-const MAX_SCAN_TICKERS = 10;
+const MARKET_CACHE_SCHEMA_VERSION = 3;
+const SCAN_BATCH_SIZE = 4;
 const TESSERACT_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
 const OCR_STOPWORDS = new Set(['OPEN','HIGH','LOW','CLOSE','VOLUME','VOL','CHANGE','PRICE','PERCENT','PCT','CHG','DATE','TIME','WATCH','LIST','SCREEN','SCREENER','TRADINGVIEW','SYMBOL','STOCK','STOCKS','NAME','LAST','USD','USDT','BUY','SELL','LONG','SHORT','NYSE','NASDAQ','AMEX','LSE','TOTAL','AVG','RSI','SMA','EMA']);
 const marketDataCache = new Map();
@@ -74,6 +81,28 @@ const tradingViewConfig = {
     // Example:
     // 'TSCO':'LSE:TSCO',
     // 'VOD.L':'LSE:VOD'
+  }
+};
+const providerConfigs = {
+  fmp:{
+    id:'fmp',
+    label:'Financial Modeling Prep',
+    plan:'scanner',
+    maxScanTickers:10,
+    supportsSearch:true,
+    supportsDailyHistory:true,
+    supportsIntraday:false,
+    notes:'Default free-tier profile.'
+  },
+  marketdata:{
+    id:'marketdata',
+    label:'MarketData.app',
+    plan:'scanner',
+    maxScanTickers:10,
+    supportsSearch:false,
+    supportsDailyHistory:true,
+    supportsIntraday:true,
+    notes:'TODO: wire MarketData.app credentials and endpoints.'
   }
 };
 let scannerPresetPromise = null;
@@ -217,6 +246,29 @@ function normalizeUniverseMode(value){
   return ['tradingview_only','core8','combined'].includes(String(value || '')) ? String(value) : '';
 }
 
+function normalizeDataProvider(value){
+  const provider = String(value || '').trim().toLowerCase();
+  return providerConfigs[provider] ? provider : DEFAULT_PROVIDER;
+}
+
+function currentProviderConfig(){
+  return providerConfigs[normalizeDataProvider(state.dataProvider)] || providerConfigs[DEFAULT_PROVIDER];
+}
+
+function currentProviderLabel(){
+  return currentProviderConfig().label;
+}
+
+function currentMaxScanTickers(){
+  return Number(currentProviderConfig().maxScanTickers || 10);
+}
+
+function updateProviderStatusNote(){
+  const note = $('providerStatusNote');
+  if(!note) return;
+  note.textContent = 'FMP: search + snapshot. MarketData.app: snapshot only for now.';
+}
+
 function effectiveUniverseMode(){
   return normalizeUniverseMode(state.universeMode) || defaultUniverseModeForTickers(state.tickers);
 }
@@ -224,8 +276,9 @@ function effectiveUniverseMode(){
 function finalScanUniverse(){
   const imported = uniqueTickers(state.tickers || []);
   const mode = effectiveUniverseMode();
+  const limit = currentMaxScanTickers();
   if(mode === 'tradingview_only') return imported;
-  if(mode === 'combined') return uniqueTickers([...imported, ...DEFAULT_AUTO_UNIVERSE]).slice(0, MAX_SCAN_TICKERS);
+  if(mode === 'combined') return uniqueTickers([...imported, ...DEFAULT_AUTO_UNIVERSE]).slice(0, limit);
   return DEFAULT_AUTO_UNIVERSE.slice();
 }
 
@@ -242,12 +295,12 @@ function renderFinalUniversePreview(){
     box.textContent = 'Final scan universe is empty. Add or import tickers, or switch to Curated Core 8.';
     return;
   }
-  if(mode === 'tradingview_only' && imported.length > MAX_SCAN_TICKERS){
-    box.textContent = `Final scan universe (${modeLabel}) is blocked.\n\nFree tier scans are limited to 10 tickers.\nImported tickers detected: ${imported.length}`;
+  if(mode === 'tradingview_only' && imported.length > currentMaxScanTickers()){
+    box.textContent = `Final scan universe (${modeLabel}) is blocked.\n\n${currentProviderLabel()} scans are limited to ${currentMaxScanTickers()} tickers in the current plan.\nImported tickers detected: ${imported.length}`;
     return;
   }
   const note = mode === 'combined'
-    ? `\n\nCombined mode prioritises TradingView tickers first and caps the final unique list at ${MAX_SCAN_TICKERS}.`
+    ? `\n\nCombined mode prioritises TradingView tickers first and caps the final unique list at ${currentMaxScanTickers()}.`
     : '';
   box.textContent = `Final scan universe (${modeLabel}, ${universe.length}):\n\n${universe.join(', ')}${note}`;
 }
@@ -521,8 +574,8 @@ function saveState(){
   state.listName = $('listName').value || "Today's Scan";
   if($('universeMode')) state.universeMode = normalizeUniverseMode($('universeMode').value) || defaultUniverseModeForTickers(state.tickers);
   if($('apiKey')) state.apiKey = $('apiKey').readOnly ? '' : $('apiKey').value.trim();
-  if($('dataProvider')) state.dataProvider = $('dataProvider').value;
-  if($('apiPlan')) state.apiPlan = $('apiPlan').value;
+  if($('dataProvider')) state.dataProvider = normalizeDataProvider($('dataProvider').value);
+  if($('apiPlan')) state.apiPlan = String($('apiPlan').value || DEFAULT_API_PLAN);
   state.aiEndpoint = $('aiEndpoint').value.trim() || defaultAiEndpoint;
   state.marketDataEndpoint = defaultMarketDataEndpoint;
   persistState();
@@ -531,9 +584,12 @@ function saveState(){
 }
 
 function loadState(){
-  Object.assign(state, safeStorageGet(key, {}) || {});
+  Object.assign(state, createDefaultState(), safeStorageGet(key, {}) || {});
+  delete state.lastImportRaw;
   state.aiEndpoint = state.aiEndpoint || defaultAiEndpoint;
   state.marketDataEndpoint = defaultMarketDataEndpoint;
+  state.dataProvider = normalizeDataProvider(state.dataProvider);
+  state.apiPlan = String(state.apiPlan || DEFAULT_API_PLAN);
   state.tickers = parseTickers((state.tickers || []).join('\n'));
   state.universeMode = normalizeUniverseMode(state.universeMode) || defaultUniverseModeForTickers(state.tickers);
   state.recentTickers = uniqueTickers(state.recentTickers || []);
@@ -550,12 +606,12 @@ function loadState(){
   $('tickerInput').value = (state.tickers || []).join('\n');
   if($('tvImportInput')) $('tvImportInput').value = '';
   if($('ocrReviewInput')) $('ocrReviewInput').value = '';
-  if($('importResultsInput')) $('importResultsInput').value = state.lastImportRaw || '';
   if($('apiKey') && !$('apiKey').readOnly) $('apiKey').value = state.apiKey || '';
-  if($('dataProvider')) $('dataProvider').value = state.dataProvider || 'fmp';
-  if($('apiPlan')) $('apiPlan').value = state.apiPlan || 'free';
+  if($('dataProvider')) $('dataProvider').value = state.dataProvider || DEFAULT_PROVIDER;
+  if($('apiPlan')) $('apiPlan').value = state.apiPlan || DEFAULT_API_PLAN;
   $('aiEndpoint').value = state.aiEndpoint || defaultAiEndpoint;
   if($('appVersion')) $('appVersion').textContent = APP_VERSION;
+  updateProviderStatusNote();
   renderStats();
   renderTickerQuickLists();
   renderTvImportPreview(state.tickers && state.tickers.length ? state.tickers : [], state.tickers && state.tickers.length ? 'manual' : 'default');
@@ -646,9 +702,10 @@ function prepareScannerUniverse(options = {}){
   if(!universe.length){
     return {parsed, universe, blocked:false};
   }
-  if(mode === 'tradingview_only' && imported.length > MAX_SCAN_TICKERS){
-    setStatus('inputStatus', '<span class="badtext">Free tier scans are limited to 10 tickers.</span>');
-    setStatus('apiStatus', '<span class="badtext">Free tier scans are limited to 10 tickers.</span>');
+  if(mode === 'tradingview_only' && imported.length > currentMaxScanTickers()){
+    const message = `${currentProviderLabel()} scans are limited to ${currentMaxScanTickers()} tickers in the current plan.`;
+    setStatus('inputStatus', `<span class="badtext">${escapeHtml(message)}</span>`);
+    setStatus('apiStatus', `<span class="badtext">${escapeHtml(message)}</span>`);
     return {parsed, universe, blocked:true};
   }
   return {parsed, universe, blocked:false};
@@ -803,8 +860,10 @@ function exportTradeDiary(){
 
 function updateTickerSearchStatus(){
   const search = tickerSearchState();
-  if(!search.query){
-    setStatus('tickerSearchStatus', '<span class="tiny">Add one ticker quickly, or tap a recent symbol below.</span>');
+  if(!currentProviderConfig().supportsSearch){
+    setStatus('tickerSearchStatus', `<span class="tiny">${escapeHtml(currentProviderLabel())} search is not wired yet. Add tickers manually or from TradingView import.</span>`);
+  }else if(!search.query){
+    setStatus('tickerSearchStatus', `<span class="tiny">Add one ticker quickly, or search ${escapeHtml(currentProviderLabel())} symbols below.</span>`);
   }else if(!search.valid){
     setStatus('tickerSearchStatus', `<span class="badtext">${escapeHtml(search.query)} is not a valid ticker format.</span>`);
   }else if(search.inWatchlist){
@@ -847,6 +906,10 @@ function renderTickerSuggestions(results){
 
 async function updateTickerSuggestions(){
   const search = tickerSearchState();
+  if(!currentProviderConfig().supportsSearch){
+    renderTickerSuggestions([]);
+    return;
+  }
   if(!search.query || search.query.length < 1){
     renderTickerSuggestions([]);
     return;
@@ -902,7 +965,6 @@ function addTicker(rawTicker, meta){
   renderTickerQuickLists();
   renderScannerResults();
   renderCards();
-  generateWatchPrompt();
   setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`);
 }
 
@@ -923,7 +985,6 @@ function removeTicker(ticker){
   renderTickerQuickLists();
   renderScannerResults();
   renderCards();
-  generateWatchPrompt();
   updateTickerSearchStatus();
 }
 
@@ -1180,12 +1241,13 @@ function cloneCardData(card){
 function getCachedMarketData(symbol, ttlMs = MARKET_CACHE_TTL_MS){
   const ticker = normalizeTicker(symbol);
   if(!ticker) return null;
-  const memoryHit = marketDataCache.get(ticker);
+  const cacheKey = `${normalizeDataProvider(state.dataProvider)}:${ticker}`;
+  const memoryHit = marketDataCache.get(cacheKey);
   if(memoryHit && memoryHit.ticker === ticker && isFreshTimestamp(memoryHit.fetchedAt, ttlMs)) return memoryHit;
   const diskCache = readMarketCache();
-  const item = diskCache[ticker];
+  const item = diskCache[cacheKey];
   if(item && typeof item === 'object' && item.ticker === ticker && isFreshTimestamp(item.fetchedAt, ttlMs)){
-    marketDataCache.set(ticker, item);
+    marketDataCache.set(cacheKey, item);
     return item;
   }
   return null;
@@ -1194,16 +1256,62 @@ function getCachedMarketData(symbol, ttlMs = MARKET_CACHE_TTL_MS){
 function setCachedMarketData(symbol, data){
   const ticker = normalizeTicker(symbol);
   if(!ticker || !data) return;
-  const payload = {...data, ticker, fetchedAt:data.fetchedAt || new Date().toISOString(), cacheVersion:MARKET_CACHE_SCHEMA_VERSION};
-  marketDataCache.set(ticker, payload);
+  const provider = normalizeDataProvider(data.sourceProvider || data.dataProvider || state.dataProvider);
+  const cacheKey = `${provider}:${ticker}`;
+  const payload = {
+    ...data,
+    ticker,
+    dataProvider:provider,
+    sourceProvider:provider,
+    fetchedAt:data.fetchedAt || new Date().toISOString(),
+    cacheVersion:MARKET_CACHE_SCHEMA_VERSION
+  };
+  marketDataCache.set(cacheKey, payload);
   const diskCache = readMarketCache();
-  diskCache[ticker] = payload;
+  diskCache[cacheKey] = payload;
   writeMarketCache(diskCache);
+}
+
+function normalizeMarketSnapshot(snapshot, providerId = state.dataProvider){
+  const data = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const symbol = normalizeTicker(data.symbol || data.ticker || '');
+  return {
+    symbol,
+    ticker:symbol,
+    name:String(data.name || data.companyName || '').trim(),
+    companyName:String(data.companyName || data.name || '').trim(),
+    exchange:String(data.exchange || '').trim(),
+    currency:data.currency == null ? null : String(data.currency).trim(),
+    price:numericOrNull(data.price),
+    previousClose:numericOrNull(data.previousClose),
+    sma20:numericOrNull(data.sma20),
+    sma50:numericOrNull(data.sma50),
+    sma200:numericOrNull(data.sma200),
+    rsi14:numericOrNull(data.rsi14),
+    volume:numericOrNull(data.volume),
+    avgVolume30:numericOrNull(data.avgVolume30 ?? data.avgVolume30d),
+    avgVolume30d:numericOrNull(data.avgVolume30d ?? data.avgVolume30),
+    perf1w:numericOrNull(data.perf1w),
+    perf1m:numericOrNull(data.perf1m),
+    perf3m:numericOrNull(data.perf3m),
+    perf6m:numericOrNull(data.perf6m),
+    perfYtd:numericOrNull(data.perfYtd),
+    marketCap:numericOrNull(data.marketCap),
+    history:Array.isArray(data.history) ? data.history : [],
+    historyPoints:Number(data.historyPoints || (Array.isArray(data.history) ? data.history.length : 0) || 0),
+    fetchedAt:String(data.fetchedAt || new Date().toISOString()),
+    sourceProvider:normalizeDataProvider(data.sourceProvider || data.dataProvider || providerId),
+    dataProvider:normalizeDataProvider(data.dataProvider || data.sourceProvider || providerId),
+    warnings:Array.isArray(data.warnings) ? data.warnings.map(item => String(item)) : [],
+    tradingViewSymbol:String(data.tradingViewSymbol || '').trim()
+  };
 }
 
 async function fetchMarketData(symbol, options = {}){
   const ticker = normalizeTicker(symbol);
   if(!ticker) throw new Error('Missing ticker.');
+  const provider = normalizeDataProvider(state.dataProvider);
+  const plan = String(state.apiPlan || DEFAULT_API_PLAN);
   if(!options.force){
     const cached = getCachedMarketData(ticker);
     if(cached) return cached;
@@ -1211,7 +1319,12 @@ async function fetchMarketData(symbol, options = {}){
   let lastError = '';
   for(const endpoint of marketDataEndpoints()){
     try{
-      const response = await fetchJsonWithTimeout(`${endpoint}?symbol=${encodeURIComponent(ticker)}`);
+      const params = new URLSearchParams({
+        symbol:ticker,
+        provider,
+        plan
+      });
+      const response = await fetchJsonWithTimeout(`${endpoint}?${params.toString()}`);
       const payload = await response.json().catch(() => ({}));
       if(!response.ok){
         throw new Error(payload && payload.error ? payload.error : `Market data request failed for ${ticker}.`);
@@ -1220,12 +1333,13 @@ async function fetchMarketData(symbol, options = {}){
       if(!safeData){
         throw new Error(payload && payload.error ? payload.error : `Market data request returned no usable data for ${ticker}.`);
       }
-      if(payload && payload.ok !== false) setCachedMarketData(ticker, safeData);
-      rememberTickerMeta(safeData);
+      const normalized = normalizeMarketSnapshot(safeData, payload && payload.provider || provider);
+      if(payload && payload.ok !== false) setCachedMarketData(ticker, normalized);
+      rememberTickerMeta(normalized);
       if(payload && payload.ok === false){
-        safeData.__error = String(payload.error || `Market data is incomplete for ${ticker}.`);
+        normalized.__error = String(payload.error || `Market data is incomplete for ${ticker}.`);
       }
-      return safeData;
+      return normalized;
     }catch(error){
       lastError = String(error && error.message || 'Market data request failed.');
     }
@@ -1234,10 +1348,18 @@ async function fetchMarketData(symbol, options = {}){
 }
 
 async function fetchTickerSuggestions(query){
+  const provider = normalizeDataProvider(state.dataProvider);
+  const plan = String(state.apiPlan || DEFAULT_API_PLAN);
   let lastError = '';
   for(const endpoint of marketDataEndpoints()){
     try{
-      const response = await fetchJsonWithTimeout(`${endpoint}?mode=search&query=${encodeURIComponent(query)}`);
+      const params = new URLSearchParams({
+        mode:'search',
+        query,
+        provider,
+        plan
+      });
+      const response = await fetchJsonWithTimeout(`${endpoint}?${params.toString()}`);
       const payload = await response.json().catch(() => ({}));
       if(!response.ok) throw new Error(payload && payload.error ? payload.error : 'Search request failed.');
       return Array.isArray(payload.results) ? payload.results : [];
@@ -1441,10 +1563,10 @@ function buildSuitabilitySummary(parts){
 function marketDataIssueType(message){
   const text = String(message || '').toLowerCase();
   if(!text) return '';
-  if(text.includes('free-tier symbol coverage') || text.includes('free tier symbol coverage') || text.includes('limited symbol coverage')){
+  if(text.includes('free-tier symbol coverage') || text.includes('free tier symbol coverage') || text.includes('limited symbol coverage') || text.includes('ticker not covered by current provider')){
     return 'coverage';
   }
-  if(text.includes('endpoint not available on free tier') || text.includes('premium')){
+  if(text.includes('endpoint not available on free tier') || text.includes('premium') || text.includes('current provider plan')){
     return 'tier';
   }
   if(text.includes('rate limit') || text.includes('timed out') || text.includes('request failed') || text.includes('temporary')){
@@ -1455,9 +1577,9 @@ function marketDataIssueType(message){
 
 function marketDataManualReviewSummary(message){
   const kind = marketDataIssueType(message);
-  if(kind === 'coverage') return 'Manual Review: ticker not covered by FMP free tier.';
-  if(kind === 'tier') return 'Manual Review: free-tier market data is blocked for this ticker, but the chart can still be reviewed manually.';
-  if(kind === 'temporary') return 'Manual Review: market-data request failed temporarily.';
+  if(kind === 'coverage') return `Manual Review: ticker not covered by ${currentProviderLabel()}.`;
+  if(kind === 'tier') return `Manual Review: ${currentProviderLabel()} cannot supply this market-data route on the current plan, but the chart can still be reviewed manually.`;
+  if(kind === 'temporary') return `Manual Review: ${currentProviderLabel()} request failed temporarily.`;
   return 'Manual Review: market data is unavailable, but the chart can still be reviewed manually.';
 }
 
@@ -1803,47 +1925,56 @@ async function refreshMarketDataForTickers(tickers, options = {}){
   let rejected = 0;
   const nextResults = [];
   const scannerDebug = [];
-  for(const ticker of unique){
-    try{
-      const {card, scan} = await refreshCardMarketData(ticker, options);
-      const existingCard = getCard(card.ticker);
-      const debugEntry = {
-        ticker:card.ticker,
-        passed:card.status !== 'Avoid',
-        status:card.status,
-        failedRule:scan.failedRule || '',
-        breakdown:scan.breakdown || []
-      };
-      scannerDebug.push(debugEntry);
-      if(existingCard){
-        const preserved = {
-          notes:existingCard.notes,
-          chartRef:existingCard.chartRef,
-          lastPrompt:existingCard.lastPrompt,
-          lastResponse:existingCard.lastResponse,
-          lastError:card.lastError || existingCard.lastError,
-          lastAnalysis:existingCard.lastAnalysis,
-          source:existingCard.source === 'manual' ? 'manual' : card.source
-        };
-        Object.assign(existingCard, cloneCardData(card), preserved);
+  // Fetch in coarse batches so scans do not re-render and persist on every ticker.
+  for(let index = 0; index < unique.length; index += SCAN_BATCH_SIZE){
+    const batch = unique.slice(index, index + SCAN_BATCH_SIZE);
+    const outcomes = await Promise.all(batch.map(async ticker => {
+      try{
+        const result = await refreshCardMarketData(ticker, options);
+        return {ok:true, ticker, ...result};
+      }catch(err){
+        return {ok:false, ticker, error:err};
       }
-      nextResults.push(card);
-      if(card.status === 'Avoid') rejected += 1;
-      else done += 1;
-      persistState();
-      renderScannerResults();
-      renderCards();
-    }catch(err){
-      const tickerSymbol = normalizeTicker(ticker);
+    }));
+    outcomes.forEach(outcome => {
+      if(outcome.ok){
+        const {card, scan} = outcome;
+        const existingCard = getCard(card.ticker);
+        const debugEntry = {
+          ticker:card.ticker,
+          passed:card.status !== 'Avoid',
+          status:card.status,
+          failedRule:scan.failedRule || '',
+          breakdown:scan.breakdown || []
+        };
+        scannerDebug.push(debugEntry);
+        if(existingCard){
+          const preserved = {
+            notes:existingCard.notes,
+            chartRef:existingCard.chartRef,
+            lastPrompt:existingCard.lastPrompt,
+            lastResponse:existingCard.lastResponse,
+            lastError:card.lastError || existingCard.lastError,
+            lastAnalysis:existingCard.lastAnalysis,
+            source:existingCard.source === 'manual' ? 'manual' : card.source
+          };
+          Object.assign(existingCard, cloneCardData(card), preserved);
+        }
+        nextResults.push(card);
+        if(card.status === 'Avoid') rejected += 1;
+        else done += 1;
+        return;
+      }
+      const tickerSymbol = normalizeTicker(outcome.ticker);
       const fallbackCard = normalizeCard(getCard(tickerSymbol) || getScannerResult(tickerSymbol) || baseCard(tickerSymbol));
       fallbackCard.status = 'Manual Review';
       fallbackCard.score = 35;
-      fallbackCard.summary = marketDataManualReviewSummary(err && err.message);
+      fallbackCard.summary = marketDataManualReviewSummary(outcome.error && outcome.error.message);
       fallbackCard.source = 'scanner';
       fallbackCard.marketStatus = state.marketStatus;
       fallbackCard.updatedAt = new Date().toISOString();
       fallbackCard.scannerUpdatedAt = fallbackCard.updatedAt;
-      fallbackCard.lastError = String(err && err.message || 'Market data request failed.');
+      fallbackCard.lastError = String(outcome.error && outcome.error.message || 'Market data request failed.');
       fallbackCard.analysis = {
         passedRules:0,
         totalRules:1,
@@ -1858,15 +1989,17 @@ async function refreshMarketDataForTickers(tickers, options = {}){
         ticker:tickerSymbol,
         passed:true,
         status:'Manual Review',
-        failedRule:String(err && err.message || 'Market-data scan failed.'),
-        breakdown:[{passed:false, label:`Manual Review: ${String(err && err.message || 'Market-data scan failed.')}`}]
+        failedRule:String(outcome.error && outcome.error.message || 'Market-data scan failed.'),
+        breakdown:[{passed:false, label:`Manual Review: ${String(outcome.error && outcome.error.message || 'Market-data scan failed.')}`}]
       });
+      failed += 1;
       done += 1;
-    }
+    });
+    setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner... ${Math.min(index + batch.length, unique.length)} / ${unique.length} complete.</span>`);
   }
   state.scannerResults = nextResults.sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker));
   state.scannerDebug = scannerDebug;
-  const failedMarketData = scannerDebug.filter(item => (item.breakdown || []).some(entry => /market data unavailable|market data request|no historical market data|free tier|manual review/i.test(String(entry.label || '')))).length;
+  const failedMarketData = scannerDebug.filter(item => (item.breakdown || []).some(entry => /market data unavailable|market data request|no historical market data|free tier|manual review|current provider|not covered/i.test(String(entry.label || '')))).length;
   if(failedMarketData){
     setStatus('apiStatus', `<span class="warntext">Market data is unavailable for ${failedMarketData} ticker${failedMarketData === 1 ? '' : 's'}. You can still open them for manual chart review.</span>`);
   }else if(unique.length){
@@ -1883,10 +2016,10 @@ async function refreshMarketDataForTickers(tickers, options = {}){
 
 async function testApiConnection(){
   saveState();
-  setStatus('apiStatus', '<span class="warntext">Testing Financial Modeling Prep market data...</span>');
+  setStatus('apiStatus', `<span class="warntext">Testing ${escapeHtml(currentProviderLabel())} market data...</span>`);
   try{
     const data = await fetchMarketData('AAPL', {force:true});
-    setStatus('apiStatus', `<span class="ok">Connected.</span> Loaded ${escapeHtml(data.ticker)} with price ${escapeHtml(fmtPrice(Number(data.price)))} and SMA 50 ${escapeHtml(fmtPrice(Number(data.sma50)))}.`);
+    setStatus('apiStatus', `<span class="ok">Connected.</span> Loaded ${escapeHtml(data.ticker)} from ${escapeHtml(currentProviderLabel())} with price ${escapeHtml(fmtPrice(Number(data.price)))} and SMA 50 ${escapeHtml(fmtPrice(Number(data.sma50)))}.`);
   }catch(err){
     setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message)}</span>`);
   }
@@ -2530,80 +2663,12 @@ function calculate(){
   $('calcNote').textContent = shares < 1 ? 'This stop is too wide for your GBP 40 max risk.' : 'Size is based on your GBP 40 max risk. Check the chart before trading.';
 }
 
-function generateWatchPrompt(){
-  saveState();
-  const sourceCards = state.cards && state.cards.length ? state.cards : state.scannerResults;
-  const ranked = [...(sourceCards || [])].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
-  const watch = ranked.length ? ranked.map(card => `${card.ticker} | ${card.status} | ${card.score}${card.score > 10 ? '/100' : '/10'}`).join('\n') : ((state.tickers || []).join('\n') || '(add tickers here)');
-  const prompt = `Analyse these stocks for my Quality Pullback strategy.\n\nRules:\n- Prefer strong stocks in an uptrend\n- Pullback near 20MA or 50MA\n- Must stabilise or bounce\n- Previous swing high = first target\n\nAccount:\n${formatGbp(state.accountSize)} account\n${formatGbp(state.maxRisk)} max risk\n\nMarket status:\n${state.marketStatus}\n\nWatchlist:\n${watch}\n\nReturn ONLY valid JSON in this format:\n[\n  {"ticker":"GNRC","status":"Watch | Near Entry | Entry | Avoid","score":7,"reason":"One plain-English line."}\n]`;
-  if($('watchPromptBox')) $('watchPromptBox').textContent = prompt;
-  return prompt;
-}
-
 function generateChartPrompt(){
   saveState();
   const ticker = normalizeTicker($('selectedTicker').value) || '[TICKER]';
   const prompt = `Analyse this uploaded chart for my Quality Pullback strategy.\n\nUse these rules:\n- Prefer strong stocks in an uptrend\n- Use the 20 MA, 50 MA, and volume if visible\n- I want a pullback near the 20 MA or 50 MA\n- Do not count it as valid unless price is stabilising or bouncing\n- Use previous swing high as the first target area\n- If the setup is unclear, tell me not to trade\n- Explain in plain English and avoid jargon\n\nMy account and risk rules:\n- Account size: ${formatGbp(state.accountSize)}\n- Max risk per trade: ${formatGbp(state.maxRisk)}\n\nContext:\n- Ticker: ${ticker}\n- Market status: ${state.marketStatus}\n- Chart file: A chart image is attached if one is saved on the ticker.\n\nPlease give me:\n1. Plain-English chart read\n2. Verdict: Watch / Near Entry / Entry / Avoid\n3. Suggested entry\n4. Suggested stop\n5. First target\n6. Position size based on my account and max risk\n7. One-sentence final verdict`;
   $('chartPromptBox').textContent = prompt;
   return prompt;
-}
-
-function parseImportedResults(raw){
-  const text = String(raw || '').trim();
-  if(!text) return [];
-  try{
-    const parsed = JSON.parse(text);
-    const list = Array.isArray(parsed) ? parsed : [parsed];
-    return list.map(item => ({
-      ticker:normalizeTicker(item.ticker),
-      status:normalizeImportedStatus(item.status),
-      score:Math.max(0, Math.min(10, Number(item.score) || 0)),
-      reason:String(item.reason || item.summary || '').trim()
-    })).filter(item => item.ticker);
-  }catch(e){}
-  return text.split(/\n+/).map(line => line.trim()).filter(Boolean).map(line => {
-    const parts = line.split(/\s*\|\s*/);
-    if(parts.length < 4) return null;
-    return {
-      ticker:normalizeTicker(parts[0]),
-      status:normalizeImportedStatus(parts[1]),
-      score:Math.max(0, Math.min(10, Number((parts[2].match(/(\d+(?:\.\d+)?)/) || [])[1]) || 0)),
-      reason:parts.slice(3).join(' | ').trim()
-    };
-  }).filter(Boolean);
-}
-
-function importResults(){
-  syncScannerUniverseDraft({updateInputStatus:false});
-  if(!$('importResultsInput')){
-    setStatus('importStatus', 'Bulk import is no longer shown in the main UI.');
-    return;
-  }
-  const raw = $('importResultsInput').value;
-  const parsed = parseImportedResults(raw);
-  if(!parsed.length){
-    setStatus('importStatus', '<span class="badtext">Nothing usable found.</span> Paste JSON or lines in the format TICKER | Status | 7/10 | Reason.');
-    return;
-  }
-  let updated = 0;
-  parsed.forEach(item => {
-    const card = upsertCard(item.ticker);
-    if(!state.tickers.includes(item.ticker)) state.tickers.push(item.ticker);
-    card.status = item.status;
-    card.score = item.score;
-    card.summary = item.reason || 'Imported from AI result.';
-    card.source = 'ai';
-    card.marketStatus = state.marketStatus;
-    card.updatedAt = new Date().toISOString();
-    updated += 1;
-  });
-  updateRecentTickers(parsed.map(item => item.ticker));
-  state.lastImportRaw = raw;
-  updateTickerInputFromState();
-  persistState();
-  renderTickerQuickLists();
-  renderCards();
-  setStatus('importStatus', `<span class="ok">Imported ${updated} result${updated === 1 ? '' : 's'} to cards.</span>`);
 }
 
 async function copyText(text){
@@ -2633,34 +2698,16 @@ function resetAllData(){
   safeStorageRemove(key);
   safeStorageRemove(marketCacheKey);
   marketDataCache.clear();
-  state.accountSize = 4000;
-  state.maxRisk = 40;
-  state.marketStatus = 'S&P above 50 MA';
-  state.listName = "Today's Scan";
-  state.tickers = [];
-  state.recentTickers = [];
-  state.scannerResults = [];
-  state.cards = [];
-  state.tradeDiary = [];
-  state.lastImportRaw = '';
-  state.apiKey = '';
-  state.dataProvider = 'fmp';
-  state.apiPlan = 'scanner';
-  state.aiEndpoint = defaultAiEndpoint;
-  state.marketDataEndpoint = defaultMarketDataEndpoint;
-  state.symbolMeta = {};
-  state.scannerDebug = [];
+  Object.assign(state, createDefaultState());
   uiState.promptOpen = {};
   uiState.responseOpen = {};
   uiState.loadingTicker = '';
   uiState.selectedScanner = {};
   $('tickerInput').value = '';
   $('tickerSearch').value = '';
-  if($('importResultsInput')) $('importResultsInput').value = '';
   renderTickerSuggestions([]);
   loadState();
   resetReview();
-  generateWatchPrompt();
   generateChartPrompt();
   setStatus('inputStatus', '<span class="ok">All local app data and cached market data were reset.</span>');
   setStatus('apiStatus', 'API settings were reset to defaults.');
@@ -2723,23 +2770,12 @@ click('clearBtn', () => {
   renderScannerResults();
   renderCards();
   resetReview();
-  generateWatchPrompt();
   setStatus('inputStatus', 'Watchlist cleared.');
   updateTickerSearchStatus();
 });
 click('resetAllBtn', resetAllData);
-click('genWatchPromptBtn', async () => { syncScannerUniverseDraft({updateInputStatus:false}); await copyText(generateWatchPrompt()); });
-click('copyWatchPromptBtn', () => copyText(($('watchPromptBox') && $('watchPromptBox').textContent) || generateWatchPrompt()));
-click('importResultsBtn', importResults);
-click('clearImportBtn', () => {
-  if($('importResultsInput')) $('importResultsInput').value = '';
-  state.lastImportRaw = '';
-  persistState();
-  setStatus('importStatus', 'Pasted AI result cleared.');
-});
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
-click('autoAnalyseBtn', () => buildCards());
 click('jumpToDiaryBtn', () => {
   const diarySection = $('diarySection');
   if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});
@@ -2787,11 +2823,17 @@ on('universeMode', 'change', () => {
   saveState();
 }));
 ['listName','apiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
+on('dataProvider', 'change', () => {
+  renderTickerSuggestions([]);
+  renderFinalUniversePreview();
+  updateTickerSearchStatus();
+  updateProviderStatusNote();
+});
 document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', refreshReview));
 ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));
 
 registerPwa();
 loadState();
 updateTickerSearchStatus();
-generateWatchPrompt();
+updateProviderStatusNote();
 generateChartPrompt();
