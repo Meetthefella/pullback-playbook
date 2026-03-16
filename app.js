@@ -1456,7 +1456,7 @@ function marketDataIssueType(message){
 function marketDataManualReviewSummary(message){
   const kind = marketDataIssueType(message);
   if(kind === 'coverage') return 'Manual Review: ticker not covered by FMP free tier.';
-  if(kind === 'tier') return 'Manual Review: FMP free tier does not allow this market-data route.';
+  if(kind === 'tier') return 'Manual Review: free-tier market data is blocked for this ticker, but the chart can still be reviewed manually.';
   if(kind === 'temporary') return 'Manual Review: market-data request failed temporarily.';
   return 'Manual Review: market data is unavailable, but the chart can still be reviewed manually.';
 }

@@ -218,6 +218,7 @@ async function fetchJson(url, apiKey){
       if(response.status === 429) throw new Error('FMP rate limit reached. Try again shortly.');
       if(!response.ok){
         const text = await response.text().catch(() => '');
+        console.error(`[market-data] raw-fmp-error ${JSON.stringify({url, status:response.status, body:text})}`);
         throw new Error(text || `FMP request failed with ${response.status}.`);
       }
       const payload = await response.json().catch(() => null);
