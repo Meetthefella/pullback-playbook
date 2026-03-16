@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
-const APP_VERSION = 'v4.1.3';
+const APP_VERSION = 'v4.4.0';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
@@ -63,21 +63,7 @@ const DEFAULT_AUTO_UNIVERSE = [
 const scannerPresetFallback = [{
   name:'Quality Pullback Scanner Core',
   universe:['Curated Core 8 fallback universe', 'TradingView Only when user tickers are present', 'Combined mode merges TradingView tickers with Core 8'],
-  rules:[
-    {field:'perf1w', operator:'<', value:0},
-    {field:'price', operator:'<', valueField:'sma20'},
-    {field:'price', operator:'>', valueField:'sma50'},
-    {field:'price', operator:'>', valueField:'sma200'},
-    {field:'sma50', operator:'>', valueField:'sma200'},
-    {field:'rsi14', operator:'>', value:40},
-    {field:'rsi14', operator:'<', value:60},
-    {field:'avgVolume30d', operator:'>', value:1000000},
-    {field:'marketCap', operator:'>', value:10000000000},
-    {field:'perf1m', operator:'>', value:0},
-    {field:'perf3m', operator:'>', value:5},
-    {field:'perf6m', operator:'>', value:10},
-    {field:'perfYtd', operator:'>', value:5}
-  ]
+  rules:[]
 }];
 const tradingViewConfig = {
   defaultExchange:'NASDAQ',
@@ -698,7 +684,7 @@ async function runScannerWorkflow(options = {}){
   setStatus('inputStatus', `<span class="ok">${universe.length} ticker${universe.length === 1 ? '' : 's'} ready in the ${modeLabel}.</span>`);
   setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${universe.length} ticker${universe.length === 1 ? '' : 's'}...</span>`);
   const result = await refreshMarketDataForTickers(universe, options);
-  setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} passed, ${result.rejected} rejected, ${result.failed} failed.`);
+  setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} ranked, ${result.rejected} avoid, ${result.failed} failed.`);
   return result;
 }
 
@@ -1044,8 +1030,8 @@ function renderCardChecklist(card){
 }
 
 function statusClass(status){
-  if(status === 'Entry' || status === 'Ready') return 'ready';
-  if(status === 'Near Entry' || status === 'Near Pullback' || status === 'Near Setup') return 'near';
+  if(status === 'Strong Fit' || status === 'Entry' || status === 'Ready') return 'ready';
+  if(status === 'Possible Fit' || status === 'Near Entry' || status === 'Near Pullback' || status === 'Near Setup') return 'near';
   if(status === 'Avoid') return 'avoid';
   return 'watch';
 }
@@ -1308,26 +1294,33 @@ async function renderScannerRulesPanel(){
   const rulesBox = $('scannerRulesList');
   const debugBox = $('scannerDebugList');
   if(!rulesBox && !debugBox) return;
-  const preset = await getActiveScannerPreset().catch(() => scannerPresetFallback[0]);
   if(rulesBox){
-    const universe = Array.isArray(preset && preset.universe) ? preset.universe : ['Curated Core 8 fallback universe', 'Manual watchlist mode when tickers are present'];
-    const rules = Array.isArray(preset && preset.rules) ? preset.rules : [];
+    const universe = ['Curated Core 8 fallback universe', 'TradingView Only when imported tickers are present', 'Combined mode keeps TradingView tickers first'];
     rulesBox.innerHTML = [
       '<strong>Universe</strong>',
       ...universe.map(item => `- ${escapeHtml(item)}`),
       '',
-      '<strong>Required filters</strong>',
-      ...rules.map(rule => `- ${escapeHtml(formatScannerRule(rule))}`)
+      '<strong>Hard fails</strong>',
+      '- Price below 200 MA',
+      '- 50 MA below 200 MA',
+      '- Structure clearly broken',
+      '',
+      '<strong>Soft ranking signals</strong>',
+      '- 20 MA touch or bounce',
+      '- Rising 50 MA structure',
+      '- Room for a clean swing target',
+      '- Pullback quality and stabilisation',
+      '- Risk fit for GBP 40 max loss'
     ].join('\n');
   }
   if(debugBox){
     if(!state.scannerDebug.length){
       debugBox.innerHTML = scannerUniverse().length
-        ? 'No scan debug data yet. The scanner will populate pass/fail detail after the next automatic or manual refresh.'
+        ? 'No scan debug data yet. Refresh the scanner to rank the current universe.'
         : 'No scan debug data yet. Add tickers to the scanner universe or use the curated default list.';
     }else{
       debugBox.innerHTML = state.scannerDebug.map(item => (
-        `${escapeHtml(item.ticker)} | ${escapeHtml(item.passed ? 'PASS' : 'FAIL')} | ${escapeHtml((item.breakdown || []).map(entry => entry.label).join(' | '))}`
+        `${escapeHtml(item.ticker)} | ${escapeHtml(item.status || 'Manual Review')} | ${escapeHtml((item.breakdown || []).map(entry => entry.label).join(' | '))}`
       )).join('\n\n');
     }
   }
@@ -1400,8 +1393,10 @@ function isNearLevel(price, level, tolerance){
 }
 
 function buildScannerSummary(result){
-  if(result.passed) return 'Passed the active TradingView scanner rules.';
-  return `Rejected by ${result.failedRule || 'the scanner rules'}.`;
+  if(result.status === 'Strong Fit') return result.reason || 'High-quality pullback with trend support and workable risk.';
+  if(result.status === 'Possible Fit') return result.reason || 'Worth reviewing, but the setup is not fully aligned yet.';
+  if(result.status === 'Manual Review') return result.reason || 'Keep this ticker reviewable and confirm the chart manually.';
+  return result.reason || 'Trend structure looks broken for this workflow.';
 }
 
 function clamp(value, min, max){
@@ -1431,12 +1426,30 @@ function deriveTradePlan(data){
 function buildSuitabilitySummary(parts){
   const reasons = [];
   if(parts.trend >= 22) reasons.push('strong trend');
-  if(parts.pullback >= 22) reasons.push('controlled pullback');
+  if(parts.pullback >= 22) reasons.push('20 MA pullback is lining up well');
   if(parts.readiness >= 14) reasons.push('setup looks actionable');
   if(parts.liquidity >= 7) reasons.push('high liquidity');
-  if(parts.risk >= 7) reasons.push('risk fits account');
+  if(parts.risk >= 7) reasons.push('risk fits the GBP 40 max loss');
   if(!reasons.length) reasons.push('meets screener but needs more work');
   return reasons.slice(0, 3).join(', ') + '.';
+}
+
+function scannerHardFailReasons(data){
+  const price = numericOrNull(data.price);
+  const sma20 = numericOrNull(data.sma20);
+  const sma50 = numericOrNull(data.sma50);
+  const sma200 = numericOrNull(data.sma200);
+  const reasons = [];
+  if(Number.isFinite(price) && Number.isFinite(sma200) && price < sma200) reasons.push('Price is below the 200 MA.');
+  if(Number.isFinite(sma50) && Number.isFinite(sma200) && sma50 < sma200) reasons.push('50 MA is below the 200 MA.');
+  if(Number.isFinite(price) && Number.isFinite(sma20) && Number.isFinite(sma50) && price < sma50 && sma20 < sma50) reasons.push('Structure looks broken below the moving averages.');
+  return reasons;
+}
+
+function rankedStatusFromScore(score){
+  if(score >= 72) return 'Strong Fit';
+  if(score >= 48) return 'Possible Fit';
+  return 'Manual Review';
 }
 
 function classifyPullbackType(data){
@@ -1484,18 +1497,21 @@ function scoreSuitability(card, data, checks){
   const tradePlan = deriveTradePlan(data);
   const pullbackType = classifyPullbackType(data);
   const trend =
-    (checks.above50 ? 5 : 0) +
-    (checks.above200 ? 5 : 0) +
-    (checks.ma50gt200 ? 5 : 0) +
-    scoreRange(perf3m, 5, 25, 5) +
-    scoreRange(perf6m, 10, 40, 5) +
-    scoreRange(perfYtd, 5, 30, 5);
-  const pullbackDepth = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0 ? ((sma20 - price) / sma20) * 100 : null;
-  const pullback =
-    (Number.isFinite(pullbackDepth) ? clamp(12 - Math.abs(pullbackDepth - 2.5) * 4, 0, 12) : 0) +
+    (checks.above200 ? 10 : 0) +
+    (checks.ma50gt200 ? 10 : 0) +
     (checks.above50 ? 6 : 0) +
-    (Number.isFinite(rsi14) ? clamp(8 - Math.abs(rsi14 - 50) * 0.5, 0, 8) : 0) +
-    (Number.isFinite(perf1w) ? clamp(4 - Math.abs(perf1w + 2) * 1.2, 0, 4) : 0) +
+    scoreRange(perf3m, 5, 25, 2) +
+    scoreRange(perf6m, 10, 40, 1) +
+    scoreRange(perfYtd, 5, 30, 1);
+  const pullbackDepth = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0 ? ((sma20 - price) / sma20) * 100 : null;
+  const roomToPriorHigh = Number.isFinite(tradePlan.rr) ? clamp((tradePlan.rr - 1.2) * 4, 0, 6) : 0;
+  const pullback =
+    (pullbackType.type === '20MA Touch' ? 18 : 0) +
+    (pullbackType.type === '20MA Bounce' ? 15 : 0) +
+    (pullbackType.type === '50MA Pullback' ? 6 : 0) +
+    (Number.isFinite(pullbackDepth) ? clamp(10 - Math.abs(pullbackDepth - 2.5) * 3, 0, 10) : 0) +
+    (Number.isFinite(rsi14) ? clamp(4 - Math.abs(rsi14 - 50) * 0.2, 0, 4) : 0) +
+    (Number.isFinite(perf1w) ? clamp(4 - Math.abs(perf1w + 1.5) * 1.1, 0, 4) : 0) +
     (pullbackType.scoreAdjustment * 4);
   const entryDefined = !!(card.entry || Number.isFinite(tradePlan.entry));
   const stopDefined = !!(card.stop || Number.isFinite(tradePlan.stop));
@@ -1505,14 +1521,16 @@ function scoreSuitability(card, data, checks){
     (checks.bounce ? 6 : 0) +
     (entryDefined ? 3 : 0) +
     (stopDefined ? 3 : 0) +
-    (targetDefined ? 2 : 0);
+    (targetDefined ? 2 : 0) +
+    roomToPriorHigh;
   const liquidity =
     scoreRange(avgVolume30d, 1000000, 10000000, 5) +
     scoreRange(marketCap, 10000000000, 200000000000, 5);
   const risk =
     (tradePlan.positionSize >= 1 ? 4 : 0) +
     (tradePlan.positionSize >= 10 ? 2 : 0) +
-    (Number.isFinite(tradePlan.rr) ? clamp((tradePlan.rr - 1.5) * 3, 0, 4) : 0);
+    (Number.isFinite(tradePlan.riskPerShare) && tradePlan.riskPerShare > 0 ? clamp((state.maxRisk / tradePlan.riskPerShare) / 20, 0, 2) : 0) +
+    (Number.isFinite(tradePlan.rr) ? clamp((tradePlan.rr - 1.5) * 3, 0, 2) : 0);
   const total = Math.round(clamp(trend, 0, 30) + clamp(pullback, 0, 30) + clamp(readiness, 0, 20) + clamp(liquidity, 0, 10) + clamp(risk, 0, 10));
   return {
     total,
@@ -1583,45 +1601,48 @@ function scoreMarketData(data){
 }
 
 async function evaluateScannerForData(data){
-  const preset = await getActiveScannerPreset();
   const safeData = data && typeof data === 'object' ? data : {};
   if(safeData.__error || !hasUsableScannerData(safeData)){
-    const reason = String(safeData.__error || `Market data unavailable for ${safeData.ticker || 'ticker'}.`);
-    const breakdown = [{passed:false, label:`Market data unavailable = FAIL (${reason})`}];
+    const reason = String(safeData.__error || 'Market data is unavailable for this ticker right now.');
+    const breakdown = [{passed:false, label:`Manual Review: ${reason}`}];
     return {
-      status:'Avoid',
-      score:0,
+      status:'Manual Review',
+      score:35,
       checks:buildScannerChecks({}),
-      summary:'Rejected because market data was unavailable.',
+      summary:'Keep this ticker reviewable and confirm the chart manually.',
       passedRules:0,
       totalRules:1,
-      passed:false,
+      passed:true,
       failedRule:reason,
+      reason,
       breakdown
     };
   }
-  const rules = Array.isArray(preset && preset.rules) ? preset.rules : [];
-  const universeRule = {
-    passed:isUsExchange(safeData.exchange),
-    label:`Exchange ${String(safeData.exchange || 'missing')} = ${isUsExchange(safeData.exchange) ? 'PASS' : 'FAIL'}`
-  };
-  const ruleResults = rules.map(rule => evaluateScannerRuleDetailed(rule, safeData));
-  const breakdown = [universeRule, ...ruleResults].map(item => ({passed:!!item.passed, label:item.label}));
+  const checks = buildScannerChecks(safeData);
+  const hardReasons = scannerHardFailReasons(safeData);
+  const breakdown = [
+    {passed:isUsExchange(safeData.exchange), label:`Exchange: ${String(safeData.exchange || 'missing')}`},
+    {passed:checks.above200, label:checks.above200 ? 'Price is above the 200 MA.' : 'Price is below the 200 MA.'},
+    {passed:checks.ma50gt200, label:checks.ma50gt200 ? '50 MA is above the 200 MA.' : '50 MA is below the 200 MA.'},
+    {passed:checks.near20 || checks.near50, label:checks.near20 ? 'Near the 20 MA.' : (checks.near50 ? 'Near the 50 MA.' : 'Not near the 20 MA or 50 MA.')},
+    {passed:Number.isFinite(safeData.perf1w), label:Number.isFinite(safeData.perf1w) ? `1W pullback ${formatPercent(safeData.perf1w)}.` : '1W pullback is unavailable.'},
+    {passed:Number.isFinite(safeData.rsi14), label:Number.isFinite(safeData.rsi14) ? `RSI 14 ${fmtPrice(Number(safeData.rsi14))}.` : 'RSI is unavailable.'}
+  ];
   const passedRules = breakdown.filter(item => item.passed).length;
-  const {score, checks} = scoreMarketData(safeData);
-  const passed = breakdown.every(item => item.passed);
-  const failedRule = (breakdown.find(item => !item.passed) || {}).label || '';
-  const scaledScore = Math.round((passedRules / Math.max(1, breakdown.length)) * 10);
-  const status = passed ? 'Watch' : 'Avoid';
+  const hardFail = hardReasons.length > 0;
+  const failedRule = hardReasons[0] || '';
+  const status = hardFail ? 'Avoid' : 'Possible Fit';
+  const score = hardFail ? 18 : 45;
   const result = {
     status,
-    score:passed ? 10 : scaledScore,
+    score,
     checks,
-    summary:buildScannerSummary({passed, failedRule}),
+    summary:buildScannerSummary({status, failedRule, reason:hardFail ? hardReasons.join(' ') : 'Imported TradingView ticker kept reviewable for softer ranking.'}),
     passedRules,
     totalRules:breakdown.length,
-    passed,
+    passed:!hardFail,
     failedRule,
+    reason:hardFail ? hardReasons.join(' ') : 'Imported TradingView ticker kept reviewable for softer ranking.',
     breakdown
   };
   return result;
@@ -1705,10 +1726,10 @@ async function refreshCardMarketData(ticker, options = {}){
   applyMarketDataToCard(card, data);
   const scan = await evaluateScannerForData(data);
   card.checks = scan.checks;
-  const suitability = scan.passed ? scoreSuitability(card, data, scan.checks) : null;
+  const suitability = !data.__error && hasUsableScannerData(data) ? scoreSuitability(card, data, scan.checks) : null;
   card.score = suitability ? suitability.total : scan.score;
-  card.status = scan.status;
-  card.summary = suitability ? suitability.summary : scan.summary;
+  card.status = suitability && scan.status !== 'Avoid' ? rankedStatusFromScore(suitability.total) : scan.status;
+  card.summary = suitability && scan.status !== 'Avoid' ? buildScannerSummary({status:card.status, reason:suitability.summary}) : scan.summary;
   card.pullbackType = suitability ? suitability.pullbackType : '';
   card.source = 'scanner';
   card.marketStatus = state.marketStatus;
@@ -1761,7 +1782,8 @@ async function refreshMarketDataForTickers(tickers, options = {}){
       const existingCard = getCard(card.ticker);
       const debugEntry = {
         ticker:card.ticker,
-        passed:!!scan.passed,
+        passed:card.status !== 'Avoid',
+        status:card.status,
         failedRule:scan.failedRule || '',
         breakdown:scan.breakdown || []
       };
@@ -1772,34 +1794,52 @@ async function refreshMarketDataForTickers(tickers, options = {}){
           chartRef:existingCard.chartRef,
           lastPrompt:existingCard.lastPrompt,
           lastResponse:existingCard.lastResponse,
-          lastError:existingCard.lastError,
+          lastError:card.lastError || existingCard.lastError,
           lastAnalysis:existingCard.lastAnalysis,
           source:existingCard.source === 'manual' ? 'manual' : card.source
         };
         Object.assign(existingCard, cloneCardData(card), preserved);
       }
-      if(scan.passed){
-        nextResults.push(card);
-        done += 1;
-      }else{
-        rejected += 1;
-      }
+      nextResults.push(card);
+      if(card.status === 'Avoid') rejected += 1;
+      else done += 1;
       persistState();
       renderScannerResults();
       renderCards();
     }catch(err){
+      const tickerSymbol = normalizeTicker(ticker);
+      const fallbackCard = normalizeCard(getCard(tickerSymbol) || getScannerResult(tickerSymbol) || baseCard(tickerSymbol));
+      fallbackCard.status = 'Manual Review';
+      fallbackCard.score = 35;
+      fallbackCard.summary = 'Market data failed. Keep this ticker reviewable and confirm the chart manually.';
+      fallbackCard.source = 'scanner';
+      fallbackCard.marketStatus = state.marketStatus;
+      fallbackCard.updatedAt = new Date().toISOString();
+      fallbackCard.scannerUpdatedAt = fallbackCard.updatedAt;
+      fallbackCard.lastError = String(err && err.message || 'Market data request failed.');
+      fallbackCard.analysis = {
+        passedRules:0,
+        totalRules:1,
+        breakdown:[{passed:false, label:`Manual Review: ${fallbackCard.lastError}`}],
+        failedRule:fallbackCard.lastError,
+        passed:true,
+        suitability:null,
+        pullbackType:''
+      };
+      nextResults.push(fallbackCard);
       scannerDebug.push({
-        ticker:normalizeTicker(ticker),
-        passed:false,
+        ticker:tickerSymbol,
+        passed:true,
+        status:'Manual Review',
         failedRule:String(err && err.message || 'Market-data scan failed.'),
-        breakdown:[{passed:false, label:String(err && err.message || 'Market-data scan failed.')}]
+        breakdown:[{passed:false, label:`Manual Review: ${String(err && err.message || 'Market-data scan failed.')}`}]
       });
-      failed += 1;
+      done += 1;
     }
   }
   state.scannerResults = nextResults.sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker));
   state.scannerDebug = scannerDebug;
-  const failedMarketData = scannerDebug.filter(item => !item.passed && (item.breakdown || []).some(entry => /market data unavailable|market data request|no historical market data|fmp/i.test(String(entry.label || '')))).length;
+  const failedMarketData = scannerDebug.filter(item => (item.breakdown || []).some(entry => /market data unavailable|market data request|no historical market data|free tier|manual review/i.test(String(entry.label || '')))).length;
   if(failedMarketData){
     setStatus('apiStatus', `<span class="badtext">Market data is failing for ${failedMarketData} ticker${failedMarketData === 1 ? '' : 's'}. Check the FMP API key or deployed Netlify route.</span>`);
   }else if(unique.length){
@@ -1955,9 +1995,9 @@ function tradingViewSymbolForTicker(ticker){
   if(!symbol) return '';
   const isValidTvSymbol = value => /^[A-Z0-9_]+:[A-Z0-9.-]+$/.test(String(value || '').trim().toUpperCase());
   const card = getCard(symbol);
-  if(card && isValidTvSymbol(card.tradingViewSymbol)) return card.tradingViewSymbol;
+  if(card && card.exchange && isValidTvSymbol(card.tradingViewSymbol)) return card.tradingViewSymbol;
   const meta = getStoredTickerMeta(symbol);
-  if(meta && isValidTvSymbol(meta.tradingViewSymbol)) return meta.tradingViewSymbol;
+  if(meta && meta.exchange && isValidTvSymbol(meta.tradingViewSymbol)) return meta.tradingViewSymbol;
   if(tradingViewConfig.symbolOverrides[symbol]) return tradingViewConfig.symbolOverrides[symbol];
   for(const [suffix, exchange] of Object.entries(tradingViewConfig.suffixMap)){
     if(symbol.endsWith(suffix)){
@@ -2065,9 +2105,9 @@ function renderAnalysisPanel(card){
 }
 
 function statusRank(status){
-  if(status === 'Ready') return 0;
-  if(status === 'Near Setup' || status === 'Near Entry') return 1;
-  if(status === 'Watch') return 2;
+  if(status === 'Strong Fit' || status === 'Ready' || status === 'Entry') return 0;
+  if(status === 'Possible Fit' || status === 'Near Setup' || status === 'Near Entry') return 1;
+  if(status === 'Manual Review' || status === 'Watch') return 2;
   return 3;
 }
 
@@ -2077,9 +2117,12 @@ function watchTrackingText(card){
   return `Watching from ${escapeHtml(card.watchTracking.firstFlaggedAt || '-')}, expires ${escapeHtml(card.watchTracking.expiryDate || '-')} (${checks} daily checks logged).`;
 }
 
-function migrateScannerResultToCard(ticker){
+function openRankedResultInReview(ticker){
   const result = getScannerResult(ticker);
-  if(!result) return;
+  if(!result){
+    loadCard(ticker);
+    return;
+  }
   let card = getCard(ticker);
   if(card){
     Object.assign(card, cloneCardData(result), {
@@ -2102,6 +2145,7 @@ function migrateScannerResultToCard(ticker){
   renderTickerQuickLists();
   renderScannerResults();
   renderCards();
+  loadCard(card.ticker);
 }
 
 function selectedScannerTickers(){
@@ -2109,31 +2153,15 @@ function selectedScannerTickers(){
 }
 
 function updateScannerSelectionStatus(){
-  const selectedCount = selectedScannerTickers().length;
   const resultCount = (state.scannerResults || []).length;
   if(!$('scannerSelectionStatus')) return;
   if(!resultCount){
     setStatus('scannerSelectionStatus', (state.tickers || []).length
-      ? 'Running the scanner will populate ranked results for your watchlist.'
+      ? 'Refresh the scanner to rank your imported TradingView tickers.'
       : 'Running the scanner will populate ranked results from the Curated Core 8 fallback universe.');
     return;
   }
-  if(selectedCount){
-    setStatus('scannerSelectionStatus', `<span class="ok">${selectedCount} ranked result${selectedCount === 1 ? '' : 's'} selected.</span>`);
-    return;
-  }
-  setStatus('scannerSelectionStatus', `Select ranked results to migrate, or use the Top ${Math.min(3, resultCount)} shortcut.`);
-}
-
-function migrateSelectedScannerResults(limit){
-  const pool = limit ? (state.scannerResults || []).slice(0, limit).map(card => card.ticker) : selectedScannerTickers();
-  const tickers = uniqueTickers(pool);
-  if(!tickers.length){
-    updateScannerSelectionStatus();
-    return;
-  }
-  tickers.forEach(migrateScannerResultToCard);
-  setStatus('scannerSelectionStatus', `<span class="ok">${tickers.length} ranked result${tickers.length === 1 ? '' : 's'} moved into ticker cards.</span>`);
+  setStatus('scannerSelectionStatus', 'Open any ranked setup to jump straight into review.');
 }
 
 function seedCardsFromUniverse(limit){
@@ -2142,7 +2170,21 @@ function seedCardsFromUniverse(limit){
   universe.forEach(ticker => {
     const result = getScannerResult(ticker);
     if(result){
-      migrateScannerResultToCard(ticker);
+      let card = getCard(ticker);
+      if(card){
+        Object.assign(card, cloneCardData(result), {
+          notes:card.notes,
+          chartRef:card.chartRef,
+          lastPrompt:card.lastPrompt,
+          lastResponse:card.lastResponse,
+          lastError:card.lastError,
+          lastAnalysis:card.lastAnalysis,
+          source:card.source || 'scanner'
+        });
+      }else{
+        card = cloneCardData(result);
+        state.cards.push(card);
+      }
       return;
     }
     let card = getCard(ticker);
@@ -2166,7 +2208,7 @@ function renderScannerResults(){
     box.innerHTML = !(state.tickers || []).length
       ? '<div class="summary">Scanning the Curated Core 8 fallback universe. Add your own tickers any time to switch into manual mode.</div>'
       : (state.scannerDebug && state.scannerDebug.length
-      ? '<div class="summary">No tickers passed the active TradingView scanner rules. Use the debug panel to see which rule rejected each name.</div><button class="secondary" data-act="seed-from-universe">Open Universe In Cards</button>'
+      ? '<div class="summary">No ranked setups yet, but your imported tickers can still be opened in cards for manual review.</div><button class="secondary" data-act="seed-from-universe">Open Universe In Cards</button>'
       : '<div class="summary">Running the scanner will populate ranked results here.</div>');
     const seedBtn = box.querySelector('[data-act="seed-from-universe"]');
     if(seedBtn){
@@ -2180,23 +2222,14 @@ function renderScannerResults(){
   }
   state.scannerResults.forEach(card => {
     const div = document.createElement('div');
-    const inCards = !!getCard(card.ticker);
-    const selected = !!uiState.selectedScanner[card.ticker];
     const companyLine = card.companyName ? `<div class="tiny">${escapeHtml(card.companyName)}${card.exchange ? ` • ${escapeHtml(card.exchange)}` : ''}</div>` : '';
-    const marketDataLine = card.marketData ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} • 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} • 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} • 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} • RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : '<div class="tiny">Market data pending...</div>';
+    const marketDataLine = card.marketData ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} - 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} - 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} - 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} - RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : '<div class="tiny">Market data unavailable. Keep this ticker reviewable in the card workflow.</div>';
     const pullbackLine = `<div class="tiny">Pullback Type: ${escapeHtml(card.pullbackType || (card.analysis && card.analysis.pullbackType) || 'Unclassified')} • Quality Score: ${escapeHtml(String(card.score || 0))}</div>`;
-    const suitabilityLine = card.analysis && card.analysis.suitability
-      ? `<div class="tiny">Trend ${card.analysis.suitability.trend}/30 • Pullback ${card.analysis.suitability.pullback}/30 • Readiness ${card.analysis.suitability.readiness}/20 • Liquidity ${card.analysis.suitability.liquidity}/10 • Risk ${card.analysis.suitability.risk}/10</div>`
-      : '';
+    const suitabilityLine = `<div class="tiny">${escapeHtml(card.summary || 'Review this setup manually.')}</div>`;
     div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead"><label class="resultselect" aria-label="Select ${escapeHtml(card.ticker)}"><input type="checkbox" data-act="select" ${selected ? 'checked' : ''} /></label><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div>${escapeHtml(card.summary)}</div>${companyLine}${marketDataLine}${pullbackLine}${suitabilityLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="${inCards ? 'secondary' : 'primary'}" data-act="migrate">${inCards ? 'Open Card' : 'Add To Cards'}</button></div></div>`;
-    div.querySelector('[data-act="select"]').onchange = event => {
-      uiState.selectedScanner[card.ticker] = !!event.target.checked;
-      updateScannerSelectionStatus();
-    };
-    div.querySelector('[data-act="migrate"]').onclick = () => {
-      migrateScannerResultToCard(card.ticker);
-      loadCard(card.ticker);
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div><strong>${escapeHtml(card.status)}</strong></div>${suitabilityLine}${companyLine}${marketDataLine}${pullbackLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="primary" data-act="review">Review</button></div></div>`;
+    div.querySelector('[data-act="review"]').onclick = () => {
+      openRankedResultInReview(card.ticker);
     };
     box.appendChild(div);
   });
@@ -2209,8 +2242,8 @@ function renderCards(){
   box.innerHTML = '';
   if(!state.cards || !state.cards.length){
     box.innerHTML = (state.tickers || []).length
-      ? '<div class="summary">No ticker cards yet. Start in Ranked Results, or open your saved universe directly in cards when you want to review charts manually.</div><div class="actions"><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a><button class="secondary" data-act="seed-cards">Open Universe In Cards</button></div>'
-      : '<div class="summary">No ticker cards yet. Start in Ranked Results, then move the best names into cards when you are ready to review them.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>';
+      ? '<div class="summary">No ticker cards yet. Open any ranked setup, or open your saved universe directly in cards when you want to review charts manually.</div><div class="actions"><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a><button class="secondary" data-act="seed-cards">Open Universe In Cards</button></div>'
+      : '<div class="summary">No ticker cards yet. Start in Ranked Results, then open the best setups directly into review when you are ready.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>';
     const seedBtn = box.querySelector('[data-act="seed-cards"]');
     if(seedBtn){
       seedBtn.onclick = () => {
@@ -2222,7 +2255,7 @@ function renderCards(){
     return;
   }
   const ordered = [...state.cards].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
-  const groups = ['Ready', 'Near Setup', 'Watch', 'Avoid'];
+  const groups = ['Strong Fit', 'Possible Fit', 'Manual Review', 'Ready', 'Near Setup', 'Watch', 'Avoid'];
   groups.forEach(group => {
     const items = ordered.filter(card => (group === 'Near Setup' ? (card.status === 'Near Setup' || card.status === 'Near Entry') : card.status === group));
     if(!items.length) return;
@@ -2678,8 +2711,6 @@ click('clearImportBtn', () => {
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
 click('autoAnalyseBtn', () => buildCards());
-click('migrateSelectedBtn', () => migrateSelectedScannerResults());
-click('migrateTop3Btn', () => migrateSelectedScannerResults(3));
 click('jumpToDiaryBtn', () => {
   const diarySection = $('diarySection');
   if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});

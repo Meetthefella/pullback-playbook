@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pullback Playbook v4.1.3</title>
+  <title>Pullback Playbook v4.4.0</title>
   <meta name="theme-color" content="#0f172a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -25,7 +25,7 @@
 <div class="wrap">
   <div class="hero">
     <div class="card">
-      <h1>Pullback Playbook v4.1.3</h1>
+      <h1>Pullback Playbook v4.4.0</h1>
       <p>Scanner-first Quality Pullback workflow with Financial Modeling Prep market data, ranked shortlist automation, per-ticker chart upload, in-app OpenAI setup analysis, and risk planning built around your GBP 4,000 account and GBP 40 max risk.</p>
       <div class="pillrow">
         <span class="pill">Quality Pullback Scanner</span>
@@ -33,7 +33,7 @@
         <span class="pill">Chart upload</span>
         <span class="pill">FMP market data</span>
         <span class="pill">PWA ready</span>
-        <span class="pill" id="appVersion">v4.1.3</span>
+        <span class="pill" id="appVersion">v4.4.0</span>
       </div>
       <div class="navtabs">
         <a class="tablink" href="#dailyInput">Scan</a>
@@ -185,12 +185,8 @@
   <div class="grid" style="margin-top:14px">
     <div class="card">
       <h2 id="resultsSection">4) Ranked Results</h2>
-      <p class="tiny">The scanner applies your TradingView rules first, then ranks only the passing tickers by suitability. Move the best ideas into ticker cards when you want to review and plan them.</p>
-      <div class="actions" style="margin-top:0">
-        <button class="secondary" id="migrateSelectedBtn">Migrate Selected</button>
-        <button class="secondary" id="migrateTop3Btn">Migrate Top 3</button>
-      </div>
-      <div class="statusline tiny" id="scannerSelectionStatus">Select ranked results to migrate, or use the Top 3 shortcut.</div>
+      <p class="tiny">The scanner now soft-ranks your TradingView shortlist for review. Open any ranked setup directly into the review workflow.</p>
+      <div class="statusline tiny" id="scannerSelectionStatus">Open any ranked setup to jump straight into review.</div>
       <div id="results" class="list"></div>
     </div>
 
@@ -240,7 +236,7 @@
 
   <div class="card" style="margin-top:14px">
     <h2>6) Ticker Cards</h2>
-    <p class="tiny">Only migrated scanner results appear here. Use cards for chart upload, AI analysis, trade planning, and diary logging.</p>
+    <p class="tiny">Cards are created when you open a ranked setup for review, or when you open your saved universe directly in cards. Use cards for chart upload, AI analysis, trade planning, and diary logging.</p>
     <div id="cardsList" class="list"></div>
   </div>
 

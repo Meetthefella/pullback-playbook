@@ -205,7 +205,7 @@ function buildTradingViewSymbol(symbol, exchange){
   if(tvExchange === 'LSE' && cleanSymbol.endsWith('.L')) return `LSE:${cleanSymbol.slice(0, -2)}`;
   if(tvExchange) return `${tvExchange}:${cleanSymbol}`;
   if(cleanSymbol.endsWith('.L')) return `LSE:${cleanSymbol.slice(0, -2)}`;
-  return `NASDAQ:${cleanSymbol}`;
+  return cleanSymbol;
 }
 
 async function fetchJson(url, apiKey){
@@ -260,7 +260,7 @@ function classifyMarketDataFailure(source, error){
   const message = safeErrorMessage(error, 'FMP request failed.');
   if(isEndpointAccessErrorMessage(message)){
     return {
-      clientMessage:`Market data endpoint not available on free tier (${source})`,
+      clientMessage:'Market data endpoint not available on free tier',
       logMessage:`${source} endpoint not available on free tier: ${message}`
     };
   }
@@ -356,7 +356,7 @@ exports.handler = async function handler(event){
     }
 
     const profileEndpoint = `${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`;
-    const historyEndpoint = `${FMP_BASE_URL}/historical-price-eod/non-split-adjusted?symbol=${encodeURIComponent(symbol)}`;
+    const historyEndpoint = `${FMP_BASE_URL}/historical-price-full/${encodeURIComponent(symbol)}?serietype=line`;
 
     const profilePayload = await fetchJsonWithContext(profileEndpoint, apiKey, 'profile', symbol).catch(error => ({__error:error}));
     if(profilePayload && profilePayload.__error){
@@ -369,9 +369,9 @@ exports.handler = async function handler(event){
       });
     }
 
-    const historyPayload = await fetchJsonWithContext(historyEndpoint, apiKey, 'historical_non_split_adjusted', symbol).catch(error => ({__error:error}));
+    const historyPayload = await fetchJsonWithContext(historyEndpoint, apiKey, 'historical_price_full_line', symbol).catch(error => ({__error:error}));
     if(historyPayload && historyPayload.__error){
-      const failure = classifyMarketDataFailure('historical_non_split_adjusted', historyPayload.__error);
+      const failure = classifyMarketDataFailure('historical_price_full_line', historyPayload.__error);
       console.error(`[market-data] ${failure.logMessage}`);
       return jsonResponse(200, {
         ok:false,
