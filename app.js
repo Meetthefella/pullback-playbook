@@ -575,7 +575,11 @@ function renderStats(){
 }
 
 function updateTickerInputFromState(){
-  $('tickerInput').value = (state.tickers || []).join('\n');
+  const text = (state.tickers || []).join('\n');
+  if($('tickerInput')) $('tickerInput').value = text;
+  if($('tvImportInput')) $('tvImportInput').value = text;
+  renderTvImportPreview(state.tickers && state.tickers.length ? state.tickers : [], state.tickers && state.tickers.length ? 'manual' : 'default');
+  renderFinalUniversePreview();
 }
 
 function updateRecentTickers(tickers){
@@ -1803,12 +1807,6 @@ async function refreshMarketDataForTickers(tickers, options = {}){
       nextResults.push(card);
       if(card.status === 'Avoid') rejected += 1;
       else done += 1;
-      if(scan.passed || (card.marketData && card.marketData.__error)){
-        nextResults.push(card);
-        done += 1;
-      }else{
-        rejected += 1;
-      }
       persistState();
       renderScannerResults();
       renderCards();
