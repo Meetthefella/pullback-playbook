@@ -1726,20 +1726,11 @@ async function refreshCardMarketData(ticker, options = {}){
   applyMarketDataToCard(card, data);
   const scan = await evaluateScannerForData(data);
   card.checks = scan.checks;
-<<<<<<< HEAD
   const suitability = !data.__error && hasUsableScannerData(data) ? scoreSuitability(card, data, scan.checks) : null;
   card.score = suitability ? suitability.total : scan.score;
   card.status = suitability && scan.status !== 'Avoid' ? rankedStatusFromScore(suitability.total) : scan.status;
   card.summary = suitability && scan.status !== 'Avoid' ? buildScannerSummary({status:card.status, reason:suitability.summary}) : scan.summary;
   card.pullbackType = suitability ? suitability.pullbackType : '';
-=======
-  const suitability = scan.passed ? scoreSuitability(card, data, scan.checks) : null;
-  const manualReviewOnly = !!data.__error;
-  card.score = suitability ? suitability.total : (manualReviewOnly ? Math.max(scan.score, 1) : scan.score);
-  card.status = manualReviewOnly ? 'Watch' : scan.status;
-  card.summary = suitability ? suitability.summary : (manualReviewOnly ? 'Market data unavailable — manual chart review still allowed.' : scan.summary);
-  card.pullbackType = suitability ? suitability.pullbackType : (manualReviewOnly ? 'Manual Review' : '');
->>>>>>> 72b8f19ccdf5f8fb63abe30ba3197d53d8e21b99
   card.source = 'scanner';
   card.marketStatus = state.marketStatus;
   card.updatedAt = new Date().toISOString();
@@ -1809,18 +1800,15 @@ async function refreshMarketDataForTickers(tickers, options = {}){
         };
         Object.assign(existingCard, cloneCardData(card), preserved);
       }
-<<<<<<< HEAD
       nextResults.push(card);
       if(card.status === 'Avoid') rejected += 1;
       else done += 1;
-=======
       if(scan.passed || (card.marketData && card.marketData.__error)){
         nextResults.push(card);
         done += 1;
       }else{
         rejected += 1;
       }
->>>>>>> 72b8f19ccdf5f8fb63abe30ba3197d53d8e21b99
       persistState();
       renderScannerResults();
       renderCards();
@@ -2240,29 +2228,16 @@ function renderScannerResults(){
   }
   state.scannerResults.forEach(card => {
     const div = document.createElement('div');
-    const companyLine = card.companyName ? `<div class="tiny">${escapeHtml(card.companyName)}${card.exchange ? ` • ${escapeHtml(card.exchange)}` : ''}</div>` : '';
-<<<<<<< HEAD
-    const marketDataLine = card.marketData ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} - 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} - 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} - 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} - RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : '<div class="tiny">Market data unavailable. Keep this ticker reviewable in the card workflow.</div>';
-=======
-    const marketDataLine = card.marketData && !card.marketData.__error ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} • 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} • 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} • 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} • RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : `<div class="tiny">${escapeHtml(card.marketData && card.marketData.__error ? card.marketData.__error : 'Market data pending...')}</div>`;
->>>>>>> 72b8f19ccdf5f8fb63abe30ba3197d53d8e21b99
-    const pullbackLine = `<div class="tiny">Pullback Type: ${escapeHtml(card.pullbackType || (card.analysis && card.analysis.pullbackType) || 'Unclassified')} • Quality Score: ${escapeHtml(String(card.score || 0))}</div>`;
+    const companyLine = card.companyName ? `<div class="tiny">${escapeHtml(card.companyName)}${card.exchange ? ` - ${escapeHtml(card.exchange)}` : ''}</div>` : '';
+    const marketDataLine = card.marketData && !card.marketData.__error
+      ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} - 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} - 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} - 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} - RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>`
+      : '<div class="tiny">Market data unavailable. Keep this ticker reviewable in the card workflow.</div>';
+    const pullbackLine = `<div class="tiny">Pullback Type: ${escapeHtml(card.pullbackType || (card.analysis && card.analysis.pullbackType) || 'Unclassified')} - Quality Score: ${escapeHtml(String(card.score || 0))}</div>`;
     const suitabilityLine = `<div class="tiny">${escapeHtml(card.summary || 'Review this setup manually.')}</div>`;
     div.className = 'resultcompact';
-<<<<<<< HEAD
     div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div><strong>${escapeHtml(card.status)}</strong></div>${suitabilityLine}${companyLine}${marketDataLine}${pullbackLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="primary" data-act="review">Review</button></div></div>`;
     div.querySelector('[data-act="review"]').onclick = () => {
       openRankedResultInReview(card.ticker);
-=======
-    div.innerHTML = `<div class="resulthead"><label class="resultselect" aria-label="Select ${escapeHtml(card.ticker)}"><input type="checkbox" data-act="select" ${selected ? 'checked' : ''} /></label><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div>${escapeHtml(card.summary)}</div>${companyLine}${marketDataLine}${pullbackLine}${suitabilityLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="${inCards ? 'secondary' : 'primary'}" data-act="migrate">Review</button></div></div>`;
-    div.querySelector('[data-act="select"]').onchange = event => {
-      uiState.selectedScanner[card.ticker] = !!event.target.checked;
-      updateScannerSelectionStatus();
-    };
-    div.querySelector('[data-act="migrate"]').onclick = () => {
-      migrateScannerResultToCard(card.ticker);
-      loadCard(card.ticker);
->>>>>>> 72b8f19ccdf5f8fb63abe30ba3197d53d8e21b99
     };
     box.appendChild(div);
   });
@@ -2275,13 +2250,8 @@ function renderCards(){
   box.innerHTML = '';
   if(!state.cards || !state.cards.length){
     box.innerHTML = (state.tickers || []).length
-<<<<<<< HEAD
       ? '<div class="summary">No ticker cards yet. Open any ranked setup, or open your saved universe directly in cards when you want to review charts manually.</div><div class="actions"><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a><button class="secondary" data-act="seed-cards">Open Universe In Cards</button></div>'
       : '<div class="summary">No ticker cards yet. Start in Ranked Results, then open the best setups directly into review when you are ready.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>';
-=======
-      ? '<div class="summary">No ticker cards yet. Start in Ranked Results, or open your saved universe directly in cards when you want to review charts manually.</div><div class="actions"><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a><button class="secondary" data-act="seed-cards">Open Universe In Cards</button></div>'
-      : '<div class="summary">No reviewed setups yet. Start in Ranked Setups and tap Review on the names you want to analyse.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>';
->>>>>>> 72b8f19ccdf5f8fb63abe30ba3197d53d8e21b99
     const seedBtn = box.querySelector('[data-act="seed-cards"]');
     if(seedBtn){
       seedBtn.onclick = () => {
