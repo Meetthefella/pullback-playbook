@@ -191,8 +191,36 @@ function normalizeTicker(value){
   return String(value || '').trim().toUpperCase();
 }
 
+function normalizeScanType(value){
+  const text = String(value || '').trim().toUpperCase();
+  if(text === '20MA' || text === '50MA') return text;
+  return '';
+}
+
+function parseImportedTickerEntries(text){
+  const rawText = String(text || '').trim();
+  if(!rawText) return [];
+  const entries = [];
+  rawText.split(/\n+/).map(line => line.trim()).filter(Boolean).forEach(line => {
+    const explicit = line.match(/^([A-Z][A-Z0-9.-]{0,9})\s*(?:\||,|:|\s)\s*(20MA|50MA)$/i);
+    if(explicit){
+      entries.push({ticker:normalizeTicker(explicit[1]), scanType:normalizeScanType(explicit[2])});
+      return;
+    }
+    line.split(/[\s,]+/).map(token => token.trim()).filter(Boolean).forEach(token => {
+      const pair = token.match(/^([A-Z][A-Z0-9.-]{0,9})[:|](20MA|50MA)$/i);
+      if(pair){
+        entries.push({ticker:normalizeTicker(pair[1]), scanType:normalizeScanType(pair[2])});
+        return;
+      }
+      entries.push({ticker:normalizeTicker(token), scanType:''});
+    });
+  });
+  return entries;
+}
+
 function parseTickersDetailed(text){
-  const rawItems = String(text || '').split(/[\n, ]+/).map(item => normalizeTicker(item)).filter(Boolean);
+  const rawItems = parseImportedTickerEntries(text).map(item => item.ticker).filter(Boolean);
   const valid = [];
   const invalid = [];
   const duplicates = [];
@@ -214,6 +242,14 @@ function parseTickersDetailed(text){
 
 function parseTickers(text){
   return parseTickersDetailed(text).valid;
+}
+
+function renderTickerListWithScanTypes(tickers){
+  return uniqueTickers(tickers || []).map(ticker => {
+    const meta = getStoredTickerMeta(ticker);
+    const scanType = normalizeScanType(meta && meta.scanType);
+    return scanType ? `${ticker} | ${scanType}` : ticker;
+  }).join('\n');
 }
 
 function uniqueTickers(values){
@@ -321,12 +357,27 @@ function renderTvImportPreview(tickers, mode = 'manual'){
     box.textContent = 'No imported ticker list yet.';
     return;
   }
-  box.textContent = `Cleaned ticker list (${list.length}):\n\n${list.join(', ')}`;
+  const lines = list.map(ticker => {
+    const meta = getStoredTickerMeta(ticker);
+    const scanType = normalizeScanType(meta && meta.scanType);
+    return scanType ? `${ticker} (${scanType})` : ticker;
+  });
+  box.textContent = `Cleaned ticker list (${list.length}):\n\n${lines.join(', ')}`;
 }
 
-function applyManualUniverseTickers(tickers){
+function applyManualUniverseTickers(tickers, metaMap = {}){
   const clean = uniqueTickers(tickers || []);
   state.tickers = clean;
+  clean.forEach(ticker => {
+    const entry = metaMap[ticker];
+    if(entry && normalizeScanType(entry.scanType)){
+      const existing = getStoredTickerMeta(ticker) || {};
+      state.symbolMeta[ticker] = {
+        ...existing,
+        scanType:normalizeScanType(entry.scanType)
+      };
+    }
+  });
   state.universeMode = defaultUniverseModeForTickers(clean);
   updateRecentTickers(clean);
   updateTickerInputFromState();
@@ -341,17 +392,26 @@ function applyManualUniverseTickers(tickers){
 function importTradingViewTickers(){
   const input = $('tvImportInput');
   const raw = input ? input.value : '';
+  const importedEntries = parseImportedTickerEntries(raw);
   const parsed = parseTickersDetailed(raw);
   if(!String(raw || '').trim()){
     applyManualUniverseTickers([]);
     setStatus('inputStatus', '<span class="ok">No import provided. The next scan will use the Curated Core 8 fallback universe.</span>');
     return;
   }
-  applyManualUniverseTickers(parsed.valid);
+  const metaMap = {};
+  importedEntries.forEach(entry => {
+    if(normalizeScanType(entry.scanType) && validateTickerSymbol(entry.ticker)){
+      metaMap[entry.ticker] = {scanType:normalizeScanType(entry.scanType)};
+    }
+  });
+  applyManualUniverseTickers(parsed.valid, metaMap);
   const messages = [];
   if(parsed.valid.length) messages.push(`<span class="ok">${parsed.valid.length} ticker${parsed.valid.length === 1 ? '' : 's'} imported into the manual scanner universe.</span>`);
   if(parsed.invalid.length) messages.push(`<span class="badtext">Invalid: ${escapeHtml(parsed.invalid.join(', '))}</span>`);
   if(parsed.duplicates.length) messages.push(`<span class="warntext">Duplicates removed: ${escapeHtml([...new Set(parsed.duplicates)].join(', '))}</span>`);
+  const typedCount = Object.keys(metaMap).length;
+  if(typedCount) messages.push(`<span class="ok">${typedCount} explicit scan type${typedCount === 1 ? '' : 's'} saved.</span>`);
   if(!parsed.valid.length) messages.push('<span class="warntext">No valid tickers found. The next scan will use the Curated Core 8 fallback universe.</span>');
   setStatus('inputStatus', messages.join(' '));
 }
@@ -489,6 +549,10 @@ function baseCard(ticker){
     marketData:null,
     marketDataUpdatedAt:'',
     scannerUpdatedAt:'',
+    scanType:'',
+    setupType:'',
+    trendStatus:'',
+    pullbackStatus:'',
     pullbackType:'',
     perf1w:null,
     perf1m:null,
@@ -523,6 +587,10 @@ function normalizeCard(card){
   normalized.tradingViewSymbol = String(normalized.tradingViewSymbol || '');
   normalized.marketDataUpdatedAt = String(normalized.marketDataUpdatedAt || '');
   normalized.scannerUpdatedAt = String(normalized.scannerUpdatedAt || '');
+  normalized.scanType = normalizeScanType(normalized.scanType);
+  normalized.setupType = String(normalized.setupType || '');
+  normalized.trendStatus = String(normalized.trendStatus || '');
+  normalized.pullbackStatus = String(normalized.pullbackStatus || '');
   normalized.pullbackType = String(normalized.pullbackType || '');
   normalized.marketData = normalized.marketData && typeof normalized.marketData === 'object' ? normalized.marketData : null;
   normalized.watchTracking = normalized.watchTracking && typeof normalized.watchTracking === 'object' ? {
@@ -631,7 +699,7 @@ function renderStats(){
 }
 
 function updateTickerInputFromState(){
-  const text = (state.tickers || []).join('\n');
+  const text = renderTickerListWithScanTypes(state.tickers || []);
   if($('tickerInput')) $('tickerInput').value = text;
   if($('tvImportInput')) $('tvImportInput').value = text;
   renderTvImportPreview(state.tickers && state.tickers.length ? state.tickers : [], state.tickers && state.tickers.length ? 'manual' : 'default');
@@ -1193,7 +1261,8 @@ function rememberTickerMeta(meta){
   state.symbolMeta[symbol] = {
     companyName:String(meta.companyName || ''),
     exchange:String(meta.exchange || ''),
-    tradingViewSymbol:String(meta.tradingViewSymbol || '')
+    tradingViewSymbol:String(meta.tradingViewSymbol || ''),
+    scanType:normalizeScanType(meta.scanType || '')
   };
 }
 
@@ -1206,6 +1275,7 @@ function applyTickerMetaToCard(card, meta){
   if(meta.companyName) card.companyName = String(meta.companyName);
   if(meta.exchange) card.exchange = String(meta.exchange);
   if(meta.tradingViewSymbol) card.tradingViewSymbol = String(meta.tradingViewSymbol);
+  if(normalizeScanType(meta.scanType)) card.scanType = normalizeScanType(meta.scanType);
 }
 
 function hasUsableScannerData(data){
@@ -1446,7 +1516,7 @@ async function renderScannerRulesPanel(){
         : 'No scan debug data yet. Add tickers to the scanner universe or use the curated default list.';
     }else{
       debugBox.innerHTML = state.scannerDebug.map(item => (
-        `${escapeHtml(item.ticker)} | ${escapeHtml(item.status || 'Manual Review')} | ${escapeHtml((item.breakdown || []).map(entry => entry.label).join(' | '))}`
+        `${escapeHtml(item.ticker)} | ${escapeHtml(item.status || 'Manual Review')} | ${escapeHtml((item.breakdown || []).map(entry => entry.label).join(' | '))}${item.derivedStates ? ` | states=${escapeHtml(Object.entries(item.derivedStates).map(([key, value]) => `${key}:${value}`).join(', '))}` : ''}`
       )).join('\n\n');
     }
   }
@@ -1521,8 +1591,18 @@ function isNearLevel(price, level, tolerance){
 function buildScannerSummary(result){
   if(result.status === 'Strong Fit') return result.reason || 'High-quality pullback with trend support and workable risk.';
   if(result.status === 'Possible Fit') return result.reason || 'Worth reviewing, but the setup is not fully aligned yet.';
+  if(result.status === 'Entry') return result.reason || 'Trend, pullback, and trade plan are aligned for an actionable setup.';
+  if(result.status === 'Near Entry') return result.reason || 'The setup is developing and needs one more confirmation step.';
   if(result.status === 'Manual Review') return result.reason || 'Keep this ticker reviewable and confirm the chart manually.';
+  if(result.status === 'Watch') return result.reason || 'This is an early setup worth keeping on watch.';
   return result.reason || 'Trend structure looks broken for this workflow.';
+}
+
+function hardListFromScan(scan){
+  const failed = Array.isArray(scan && scan.breakdown)
+    ? scan.breakdown.filter(item => item && item.passed === false).map(item => String(item.label || '')).filter(Boolean)
+    : [];
+  return failed;
 }
 
 function clamp(value, min, max){
@@ -1535,15 +1615,29 @@ function scoreRange(value, min, max, points){
   return clamp(((value - min) / (max - min)) * points, 0, points);
 }
 
-function deriveTradePlan(data){
+function priorHighTarget(data, scanType){
+  const rows = Array.isArray(data && data.history) ? data.history : [];
+  const price = numericOrNull(data && data.price);
+  if(!rows.length || !Number.isFinite(price)) return null;
+  const lookback = scanType === '50MA' ? 84 : 42;
+  const windowRows = rows.slice(1, lookback);
+  const highs = windowRows.map(row => numericOrNull(row.high ?? row.close)).filter(Number.isFinite).filter(value => value > price);
+  if(!highs.length) return null;
+  return Math.max(...highs);
+}
+
+function deriveTradePlan(data, scanType = '20MA'){
   const price = numericOrNull(data.price);
   const sma20 = numericOrNull(data.sma20);
   const sma50 = numericOrNull(data.sma50);
   if(!Number.isFinite(price) || !Number.isFinite(sma20) || !Number.isFinite(sma50)) return {entry:null, stop:null, target:null, riskPerShare:null, rr:null, positionSize:0};
-  const entry = Math.max(price, sma20);
-  const stop = Math.min(price, sma50 * 0.99);
+  const support = scanType === '50MA' ? sma50 : sma20;
+  const backupSupport = scanType === '50MA' ? sma20 : sma50;
+  const entry = Math.max(price, support);
+  const stop = Math.min(price, Math.min(support, backupSupport) * 0.99);
   const riskPerShare = entry > stop ? entry - stop : null;
-  const target = Number.isFinite(riskPerShare) ? Math.max(entry + (riskPerShare * 2), entry * 1.05) : null;
+  const priorHigh = priorHighTarget(data, scanType);
+  const target = Number.isFinite(priorHigh) ? priorHigh : (Number.isFinite(riskPerShare) ? Math.max(entry + (riskPerShare * 2), entry * 1.05) : null);
   const rr = Number.isFinite(riskPerShare) && target > entry ? (target - entry) / riskPerShare : null;
   const positionSize = Number.isFinite(riskPerShare) && riskPerShare > 0 ? Math.floor(state.maxRisk / riskPerShare) : 0;
   return {entry, stop, target, riskPerShare, rr, positionSize};
@@ -1551,12 +1645,13 @@ function deriveTradePlan(data){
 
 function buildSuitabilitySummary(parts){
   const reasons = [];
-  if(parts.trend >= 22) reasons.push('strong trend');
-  if(parts.pullback >= 22) reasons.push('20 MA pullback is lining up well');
-  if(parts.readiness >= 14) reasons.push('setup looks actionable');
-  if(parts.liquidity >= 7) reasons.push('high liquidity');
-  if(parts.risk >= 7) reasons.push('risk fits the GBP 40 max loss');
-  if(!reasons.length) reasons.push('meets screener but needs more work');
+  if(parts.trend >= 3) reasons.push('trend structure is intact');
+  if(parts.pullback >= 2) reasons.push('pullback is close to support');
+  if(parts.tradeQuality >= 2) reasons.push('trade plan is mostly defined');
+  if(parts.scanType === '50MA') reasons.push('deeper 50 MA setup');
+  if(parts.controlledPullback) reasons.push('pullback remains controlled');
+  if(parts.bounceReady) reasons.push('stabilisation or bounce is improving');
+  if(!reasons.length) reasons.push('candidate is early and needs more chart confirmation');
   return reasons.slice(0, 3).join(', ') + '.';
 }
 
@@ -1600,22 +1695,25 @@ function renderCardStatusLine(card, loading, analysisBusy){
   return 'No AI analysis saved yet.';
 }
 
-function scannerHardFailReasons(data){
+function scannerHardFailReasons(data, checks, tradePlan){
   const price = numericOrNull(data.price);
-  const sma20 = numericOrNull(data.sma20);
   const sma50 = numericOrNull(data.sma50);
   const sma200 = numericOrNull(data.sma200);
   const reasons = [];
   if(Number.isFinite(price) && Number.isFinite(sma200) && price < sma200) reasons.push('Price is below the 200 MA.');
   if(Number.isFinite(sma50) && Number.isFinite(sma200) && sma50 < sma200) reasons.push('50 MA is below the 200 MA.');
-  if(Number.isFinite(price) && Number.isFinite(sma20) && Number.isFinite(sma50) && price < sma50 && sma20 < sma50) reasons.push('Structure looks broken below the moving averages.');
+  if(checks.structureBroken) reasons.push('Structure looks broken.');
+  if(!Number.isFinite(tradePlan.stop) || !Number.isFinite(tradePlan.riskPerShare) || tradePlan.riskPerShare <= 0) reasons.push('No valid stop.');
+  if(!Number.isFinite(tradePlan.target) || tradePlan.target <= tradePlan.entry) reasons.push('No valid target.');
+  if(tradePlan.positionSize < 1) reasons.push('Position size is below 1 share for the GBP 40 risk rule.');
   return reasons;
 }
 
 function rankedStatusFromScore(score){
-  if(score >= 72) return 'Strong Fit';
-  if(score >= 48) return 'Possible Fit';
-  return 'Manual Review';
+  if(score >= 8) return 'Entry';
+  if(score >= 6) return 'Near Entry';
+  if(score >= 4) return 'Watch';
+  return 'Avoid';
 }
 
 function classifyPullbackType(data){
@@ -1650,75 +1748,75 @@ function classifyPullbackType(data){
 
 function scoreSuitability(card, data, checks){
   const perf3m = numericOrNull(data.perf3m);
-  const perf6m = numericOrNull(data.perf6m);
-  const perfYtd = numericOrNull(data.perfYtd);
-  const perf1w = numericOrNull(data.perf1w);
-  const rsi14 = numericOrNull(data.rsi14);
-  const avgVolume30d = numericOrNull(data.avgVolume30d);
-  const marketCap = numericOrNull(data.marketCap);
   const price = numericOrNull(data.price);
   const sma20 = numericOrNull(data.sma20);
   const sma50 = numericOrNull(data.sma50);
-  const sma200 = numericOrNull(data.sma200);
-  const tradePlan = deriveTradePlan(data);
+  const explicitScanType = normalizeScanType(card && card.scanType);
+  const inferredScanType = checks.near50 ? '50MA' : (checks.near20 ? '20MA' : '');
+  const scanType = explicitScanType || inferredScanType || 'unknown';
+  const tradePlan = deriveTradePlan(data, scanType);
   const pullbackType = classifyPullbackType(data);
+  const distance20 = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0 ? Math.abs(price - sma20) / sma20 : null;
+  const distance50 = Number.isFinite(price) && Number.isFinite(sma50) && sma50 > 0 ? Math.abs(price - sma50) / sma50 : null;
+  const mediumTermStrength = Number.isFinite(perf3m) && perf3m > 0;
   const trend =
-    (checks.above200 ? 10 : 0) +
-    (checks.ma50gt200 ? 10 : 0) +
-    (checks.above50 ? 6 : 0) +
-    scoreRange(perf3m, 5, 25, 2) +
-    scoreRange(perf6m, 10, 40, 1) +
-    scoreRange(perfYtd, 5, 30, 1);
-  const pullbackDepth = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0 ? ((sma20 - price) / sma20) * 100 : null;
-  const roomToPriorHigh = Number.isFinite(tradePlan.rr) ? clamp((tradePlan.rr - 1.2) * 4, 0, 6) : 0;
+    (checks.above50 ? 1 : 0) +
+    (checks.above200 ? 1 : 0) +
+    (checks.ma50gt200 ? 1 : 0) +
+    (mediumTermStrength ? 1 : 0);
+  const controlledPullback = scanType === '50MA'
+    ? (checks.near50 || (Number.isFinite(distance50) && distance50 <= 0.05))
+    : (scanType === '20MA'
+      ? (checks.near20 || (Number.isFinite(distance20) && distance20 <= 0.04))
+      : ((checks.near20 || checks.near50) && ((Number.isFinite(distance20) && distance20 <= 0.04) || (Number.isFinite(distance50) && distance50 <= 0.05))));
   const pullback =
-    (pullbackType.type === '20MA Touch' ? 18 : 0) +
-    (pullbackType.type === '20MA Bounce' ? 15 : 0) +
-    (pullbackType.type === '50MA Pullback' ? 6 : 0) +
-    (Number.isFinite(pullbackDepth) ? clamp(10 - Math.abs(pullbackDepth - 2.5) * 3, 0, 10) : 0) +
-    (Number.isFinite(rsi14) ? clamp(4 - Math.abs(rsi14 - 50) * 0.2, 0, 4) : 0) +
-    (Number.isFinite(perf1w) ? clamp(4 - Math.abs(perf1w + 1.5) * 1.1, 0, 4) : 0) +
-    (pullbackType.scoreAdjustment * 4);
+    ((checks.near20 || checks.near50) ? 1 : 0) +
+    (controlledPullback ? 1 : 0) +
+    ((checks.stabilising || checks.bounce) ? 1 : 0);
   const entryDefined = !!(card.entry || Number.isFinite(tradePlan.entry));
   const stopDefined = !!(card.stop || Number.isFinite(tradePlan.stop));
   const targetDefined = !!(card.target || Number.isFinite(tradePlan.target));
-  const readiness =
-    (checks.stabilising ? 6 : 0) +
-    (checks.bounce ? 6 : 0) +
-    (entryDefined ? 3 : 0) +
-    (stopDefined ? 3 : 0) +
-    (targetDefined ? 2 : 0) +
-    roomToPriorHigh;
-  const liquidity =
-    scoreRange(avgVolume30d, 1000000, 10000000, 5) +
-    scoreRange(marketCap, 10000000000, 200000000000, 5);
-  const risk =
-    (tradePlan.positionSize >= 1 ? 4 : 0) +
-    (tradePlan.positionSize >= 10 ? 2 : 0) +
-    (Number.isFinite(tradePlan.riskPerShare) && tradePlan.riskPerShare > 0 ? clamp((state.maxRisk / tradePlan.riskPerShare) / 20, 0, 2) : 0) +
-    (Number.isFinite(tradePlan.rr) ? clamp((tradePlan.rr - 1.5) * 3, 0, 2) : 0);
-  const total = Math.round(clamp(trend, 0, 30) + clamp(pullback, 0, 30) + clamp(readiness, 0, 20) + clamp(liquidity, 0, 10) + clamp(risk, 0, 10));
+  const tradeQuality =
+    (entryDefined ? 1 : 0) +
+    (stopDefined ? 1 : 0) +
+    (targetDefined ? 1 : 0);
+  let total = trend + pullback + tradeQuality;
+  const marketBelow50 = /below 50 ma/i.test(String(state.marketStatus || ''));
+  if(marketBelow50){
+    if(total >= 8 && !checks.bounce) total = 7;
+    if(total >= 6 && !checks.stabilising && !checks.bounce) total = 5;
+  }
+  if(scanType === 'unknown'){
+    if(total >= 8 && !(checks.bounce && checks.stabilising)) total = 7;
+    if(total >= 6 && !checks.bounce) total = 5;
+  }
+  total = clamp(total, 0, 10);
+  const trendStatus = checks.above200 && checks.ma50gt200 ? (checks.above50 ? 'strong' : 'acceptable') : 'weak';
+  const pullbackStatus = checks.near20 ? 'near 20MA' : (checks.near50 ? 'near 50MA' : (pullbackType.extended ? 'extended' : 'not at support'));
   return {
-    total,
+    total:Math.round(total),
     breakdown:{
-      trend:Math.round(clamp(trend, 0, 30)),
-      pullback:Math.round(clamp(pullback, 0, 30)),
-      readiness:Math.round(clamp(readiness, 0, 20)),
-      liquidity:Math.round(clamp(liquidity, 0, 10)),
-      risk:Math.round(clamp(risk, 0, 10)),
+      trend,
+      pullback,
+      tradeQuality,
+      trendStatus,
+      pullbackStatus,
+      scanType,
       pullbackType:pullbackType.type,
-      pullbackAdjustment:pullbackType.scoreAdjustment,
       distance20:pullbackType.distance20,
       distance50:pullbackType.distance50,
-      extended:pullbackType.extended
+      extended:pullbackType.extended,
+      controlledPullback,
+      bounceReady:checks.stabilising || checks.bounce
     },
     tradePlan,
     summary:buildSuitabilitySummary({
-      trend:clamp(trend, 0, 30),
-      pullback:clamp(pullback, 0, 30),
-      readiness:clamp(readiness, 0, 20),
-      liquidity:clamp(liquidity, 0, 10),
-      risk:clamp(risk, 0, 10)
+      trend,
+      pullback,
+      tradeQuality,
+      scanType,
+      controlledPullback,
+      bounceReady:checks.stabilising || checks.bounce
     }),
     pullbackType:pullbackType.type
   };
@@ -1734,6 +1832,7 @@ function buildScannerChecks(data){
   const near20 = isNearLevel(price, sma20, 0.025);
   const near50 = isNearLevel(price, sma50, 0.035);
   const trendStrong = Number.isFinite(price) && Number.isFinite(sma50) && Number.isFinite(sma200) && Number.isFinite(sma20) && price > sma50 && price > sma200 && sma20 > sma50 && sma50 > sma200;
+  const structureBroken = Number.isFinite(price) && Number.isFinite(sma50) && Number.isFinite(sma20) && price < sma50 && sma20 < sma50;
   return {
     trendStrong,
     above50:Number.isFinite(price) && Number.isFinite(sma50) && price > sma50,
@@ -1742,8 +1841,10 @@ function buildScannerChecks(data){
     near20,
     near50,
     stabilising:near20 || near50,
-    bounce:Number.isFinite(data.perf1w) && data.perf1w < 0,
+    bounce:Number.isFinite(data.perf1w) && data.perf1w > 0,
     volume:Number.isFinite(volume) && Number.isFinite(avgVolume30d) && volume >= avgVolume30d,
+    mediumTermStrength:Number.isFinite(numericOrNull(data.perf3m)) && numericOrNull(data.perf3m) > 0,
+    structureBroken,
     entryDefined:false,
     stopDefined:false,
     targetDefined:false
@@ -1785,20 +1886,23 @@ async function evaluateScannerForData(data){
     };
   }
   const checks = buildScannerChecks(safeData);
-  const hardReasons = scannerHardFailReasons(safeData);
+  const explicitScanType = normalizeScanType((safeData && safeData.scanType) || '');
+  const scanType = explicitScanType || (checks.near50 ? '50MA' : (checks.near20 ? '20MA' : 'unknown'));
+  const tradePlan = deriveTradePlan(safeData, scanType);
+  const hardReasons = scannerHardFailReasons(safeData, checks, tradePlan);
   const breakdown = [
-    {passed:isUsExchange(safeData.exchange), label:`Exchange: ${String(safeData.exchange || 'missing')}`},
-    {passed:checks.above200, label:checks.above200 ? 'Price is above the 200 MA.' : 'Price is below the 200 MA.'},
+    {passed:checks.above200, label:checks.above200 ? 'Above the 200 MA.' : 'Below the 200 MA.'},
     {passed:checks.ma50gt200, label:checks.ma50gt200 ? '50 MA is above the 200 MA.' : '50 MA is below the 200 MA.'},
-    {passed:checks.near20 || checks.near50, label:checks.near20 ? 'Near the 20 MA.' : (checks.near50 ? 'Near the 50 MA.' : 'Not near the 20 MA or 50 MA.')},
-    {passed:Number.isFinite(safeData.perf1w), label:Number.isFinite(safeData.perf1w) ? `1W pullback ${formatPercent(safeData.perf1w)}.` : '1W pullback is unavailable.'},
-    {passed:Number.isFinite(safeData.rsi14), label:Number.isFinite(safeData.rsi14) ? `RSI 14 ${fmtPrice(Number(safeData.rsi14))}.` : 'RSI is unavailable.'}
+    {passed:checks.near20 || checks.near50, label:checks.near20 ? 'Pullback is near the 20 MA.' : (checks.near50 ? 'Pullback is near the 50 MA.' : 'Pullback is not near the main support zone.')},
+    {passed:checks.stabilising, label:checks.stabilising ? 'Setup is stabilising.' : 'Setup is still early.'},
+    {passed:checks.bounce, label:checks.bounce ? 'Bounce is developing.' : 'Bounce is not confirmed yet.'},
+    {passed:tradePlan.positionSize >= 1, label:tradePlan.positionSize >= 1 ? `Risk fits at ${tradePlan.positionSize} share(s).` : 'Risk rule does not allow 1 share.'}
   ];
   const passedRules = breakdown.filter(item => item.passed).length;
   const hardFail = hardReasons.length > 0;
   const failedRule = hardReasons[0] || '';
-  const status = hardFail ? 'Avoid' : 'Possible Fit';
-  const score = hardFail ? 18 : 45;
+  const status = hardFail ? 'Avoid' : 'Watch';
+  const score = hardFail ? 0 : 4;
   const result = {
     status,
     score,
@@ -1808,7 +1912,7 @@ async function evaluateScannerForData(data){
     totalRules:breakdown.length,
     passed:!hardFail,
     failedRule,
-    reason:hardFail ? hardReasons.join(' ') : 'Imported TradingView ticker kept reviewable for softer ranking.',
+    reason:hardFail ? hardReasons.join(' ') : 'TradingView candidate kept reviewable for stage-two evaluation.',
     breakdown
   };
   return result;
@@ -1893,10 +1997,14 @@ async function refreshCardMarketData(ticker, options = {}){
   const scan = await evaluateScannerForData(data);
   card.checks = scan.checks;
   const suitability = !data.__error && hasUsableScannerData(data) ? scoreSuitability(card, data, scan.checks) : null;
+  const derivedStates = deriveSetupStates(card, data, scan.checks, suitability ? suitability.tradePlan : null);
   card.score = suitability ? suitability.total : scan.score;
   card.status = suitability && scan.status !== 'Avoid' ? rankedStatusFromScore(suitability.total) : scan.status;
   card.summary = suitability && scan.status !== 'Avoid' ? buildScannerSummary({status:card.status, reason:suitability.summary}) : scan.summary;
   card.pullbackType = suitability ? suitability.pullbackType : '';
+  card.setupType = derivedStates.scan_type;
+  card.trendStatus = derivedStates.trend_state;
+  card.pullbackStatus = derivedStates.pullback_zone;
   card.source = 'scanner';
   card.marketStatus = state.marketStatus;
   card.updatedAt = new Date().toISOString();
@@ -1922,7 +2030,31 @@ async function refreshCardMarketData(ticker, options = {}){
     failedRule:scan.failedRule,
     passed:scan.passed,
     suitability:suitability ? suitability.breakdown : null,
-    pullbackType:suitability ? suitability.pullbackType : ''
+    pullbackType:suitability ? suitability.pullbackType : '',
+    derived_states:derivedStates,
+    scan_type:derivedStates.scan_type,
+    setup_type:derivedStates.scan_type,
+    trend_state:derivedStates.trend_state,
+    trend_status:derivedStates.trend_state,
+    pullback_zone:derivedStates.pullback_zone,
+    pullback_status:derivedStates.pullback_zone,
+    structure_state:derivedStates.structure_state,
+    stabilisation_state:derivedStates.stabilisation_state,
+    bounce_state:derivedStates.bounce_state,
+    volume_state:derivedStates.volume_state,
+    entry_defined:derivedStates.entry_defined,
+    stop_defined:derivedStates.stop_defined,
+    target_defined:derivedStates.target_defined,
+    entry:Number.isFinite(suitability && suitability.tradePlan && suitability.tradePlan.entry) ? suitability.tradePlan.entry.toFixed(2) : '',
+    stop:Number.isFinite(suitability && suitability.tradePlan && suitability.tradePlan.stop) ? suitability.tradePlan.stop.toFixed(2) : '',
+    first_target:Number.isFinite(suitability && suitability.tradePlan && suitability.tradePlan.target) ? suitability.tradePlan.target.toFixed(2) : '',
+    risk_per_share:Number.isFinite(suitability && suitability.tradePlan && suitability.tradePlan.riskPerShare) ? suitability.tradePlan.riskPerShare.toFixed(2) : '',
+    position_size:Number.isFinite(suitability && suitability.tradePlan && suitability.tradePlan.positionSize) ? suitability.tradePlan.positionSize : 0,
+    reward_risk:Number.isFinite(suitability && suitability.tradePlan && suitability.tradePlan.rr) ? suitability.tradePlan.rr.toFixed(2) : '',
+    quality_score:suitability ? suitability.total : scan.score,
+    confidence_score:suitability ? clamp((suitability.total * 10) + (scan.checks.bounce ? 10 : 0) + (scan.checks.stabilising ? 5 : 0), 10, 100) : 35,
+    key_reasons:suitability ? [suitability.summary] : [],
+    risks:hardListFromScan(scan)
   };
   if(suitability){
     if(!card.entry && Number.isFinite(suitability.tradePlan.entry)) card.entry = suitability.tradePlan.entry.toFixed(2);
@@ -1962,7 +2094,8 @@ async function refreshMarketDataForTickers(tickers, options = {}){
           passed:card.status !== 'Avoid',
           status:card.status,
           failedRule:scan.failedRule || '',
-          breakdown:scan.breakdown || []
+          breakdown:scan.breakdown || [],
+          derivedStates:card.analysis && card.analysis.derived_states ? card.analysis.derived_states : null
         };
         scannerDebug.push(debugEntry);
         if(existingCard){
@@ -2073,11 +2206,144 @@ function compactChecklistText(checks){
   ].join(', ');
 }
 
+function resolveScanType(card, data, checks){
+  const explicit = normalizeScanType((card && card.scanType) || (data && data.scanType));
+  if(explicit) return explicit;
+  if(checks && checks.near20 && !checks.near50) return '20MA';
+  if(checks && checks.near50 && !checks.near20) return '50MA';
+  return 'unknown';
+}
+
+function mergeDerivedChecks(cardChecks, dataChecks, tradePlan){
+  const merged = {};
+  checklistIds.forEach(id => {
+    merged[id] = false;
+  });
+  [dataChecks || {}, cardChecks || {}].forEach(source => {
+    checklistIds.forEach(id => {
+      if(source[id] === true) merged[id] = true;
+      else if(source[id] === false && merged[id] !== true) merged[id] = false;
+    });
+  });
+  if(tradePlan){
+    if(Number.isFinite(tradePlan.entry)) merged.entryDefined = true;
+    if(Number.isFinite(tradePlan.stop) && Number.isFinite(tradePlan.riskPerShare) && tradePlan.riskPerShare > 0) merged.stopDefined = true;
+    if(Number.isFinite(tradePlan.target) && Number.isFinite(tradePlan.rr) && tradePlan.rr > 0) merged.targetDefined = true;
+  }
+  return merged;
+}
+
+// Derive richer setup states from market data and current card context.
+function deriveSetupStates(card, data, checks, tradePlan){
+  const safeCard = card || {};
+  const safeData = data || {};
+  const baseChecks = buildScannerChecks(safeData);
+  const preflightChecks = mergeDerivedChecks((safeCard && safeCard.checks) || {}, checks || baseChecks, null);
+  const initialScanType = resolveScanType(safeCard, safeData, preflightChecks);
+  const plan = tradePlan || deriveTradePlan(safeData, initialScanType === 'unknown' ? '20MA' : initialScanType);
+  const safeChecks = mergeDerivedChecks((safeCard && safeCard.checks) || {}, checks || baseChecks, plan);
+  const scanType = resolveScanType(safeCard, safeData, safeChecks);
+  const price = numericOrNull(safeData.price ?? safeCard.price);
+  const sma20 = numericOrNull(safeData.sma20 ?? safeCard.sma20);
+  const sma50 = numericOrNull(safeData.sma50 ?? safeCard.sma50);
+  const sma200 = numericOrNull(safeData.sma200 ?? safeCard.sma200);
+  const perf1w = numericOrNull(safeData.perf1w ?? safeCard.perf1w);
+  const perf3m = numericOrNull(safeData.perf3m ?? safeCard.perf3m);
+  const volume = numericOrNull(safeData.volume ?? safeCard.volume);
+  const avgVolume30d = numericOrNull(safeData.avgVolume30d ?? safeCard.avgVolume30d);
+  const dist20 = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0 ? (price - sma20) / sma20 : null;
+  const dist50 = Number.isFinite(price) && Number.isFinite(sma50) && sma50 > 0 ? (price - sma50) / sma50 : null;
+  const entryDefined = !!(safeCard.entry || safeChecks.entryDefined || Number.isFinite(plan.entry));
+  const stopDefined = !!(safeCard.stop || safeChecks.stopDefined || Number.isFinite(plan.stop)) && Number.isFinite(plan.riskPerShare) && plan.riskPerShare > 0;
+  const targetDefined = !!(safeCard.target || safeChecks.targetDefined || Number.isFinite(plan.target)) && Number.isFinite(plan.rr) && plan.rr > 0;
+
+  let trendState = 'weak';
+  if((Number.isFinite(price) && Number.isFinite(sma200) && price < sma200) || (Number.isFinite(sma50) && Number.isFinite(sma200) && sma50 < sma200)){
+    trendState = 'broken';
+  }else if(Number.isFinite(price) && Number.isFinite(sma50) && Number.isFinite(sma200) && price > sma50 && price > sma200 && sma50 > sma200){
+    trendState = 'strong';
+  }else if(Number.isFinite(price) && Number.isFinite(sma200) && Number.isFinite(sma50) && price > sma200 && sma50 > sma200){
+    trendState = 'acceptable';
+  }else if(Number.isFinite(price) && Number.isFinite(sma200) && price > sma200){
+    trendState = 'weak';
+  }
+  if(trendState === 'acceptable' && Number.isFinite(perf3m) && perf3m < 2) trendState = 'weak';
+
+  let pullbackZone = 'none';
+  if(Number.isFinite(dist20) && dist20 >= -0.03 && dist20 <= 0.02 && (!Number.isFinite(dist50) || Math.abs(dist20) <= Math.abs(dist50))){
+    pullbackZone = 'near_20ma';
+  }else if(Number.isFinite(dist50) && dist50 >= -0.05 && dist50 <= 0.02){
+    pullbackZone = 'near_50ma';
+  }else if((scanType === '20MA' && Number.isFinite(dist20) && dist20 < -0.06) || (scanType === '50MA' && Number.isFinite(dist50) && dist50 < -0.07) || safeChecks.structureBroken){
+    pullbackZone = 'extended';
+  }
+
+  let structureState = 'weakening';
+  if(safeChecks.structureBroken || trendState === 'broken'){
+    structureState = 'broken';
+  }else if(safeChecks.trendStrong && (pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') && Number.isFinite(perf1w) && perf1w > -4){
+    structureState = 'intact';
+  }else{
+    structureState = 'weakening';
+  }
+
+  let stabilisationState = 'none';
+  if((pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') && safeChecks.stabilising && safeChecks.bounce){
+    stabilisationState = 'clear';
+  }else if((pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') && (safeChecks.stabilising || (Number.isFinite(perf1w) && perf1w > -2))){
+    stabilisationState = 'early';
+  }
+
+  let bounceState = 'none';
+  if(safeChecks.bounce && ((Number.isFinite(perf1w) && perf1w > 0) || (Number.isFinite(price) && Number.isFinite(sma20) && price > sma20))){
+    bounceState = 'confirmed';
+  }else if(safeChecks.bounce || (Number.isFinite(perf1w) && perf1w >= -0.5)){
+    bounceState = 'attempt';
+  }
+
+  let volumeState = 'normal';
+  if(safeChecks.volume && bounceState !== 'none'){
+    volumeState = 'supportive';
+  }else if(Number.isFinite(volume) && Number.isFinite(avgVolume30d) && avgVolume30d > 0){
+    if(volume >= avgVolume30d * 1.1 && bounceState !== 'none') volumeState = 'supportive';
+    else if(volume < avgVolume30d * 0.8) volumeState = 'weak';
+  }
+
+  return {
+    trend_state:trendState,
+    pullback_zone:pullbackZone,
+    structure_state:structureState,
+    stabilisation_state:stabilisationState,
+    bounce_state:bounceState,
+    volume_state:volumeState,
+    scan_type:scanType,
+    entry_defined:entryDefined ? 'yes' : 'no',
+    stop_defined:stopDefined ? 'yes' : 'no',
+    target_defined:targetDefined ? 'yes' : 'no'
+  };
+}
+
 function buildAnalysisPayload(card){
   const safeCard = normalizeCard(card);
+  const marketData = safeCard.marketData || safeCard;
+  const baseChecks = buildScannerChecks(marketData);
+  const scanType = resolveScanType(safeCard, marketData, mergeDerivedChecks(safeCard.checks || {}, baseChecks));
+  const tradePlan = deriveTradePlan(marketData, scanType === 'unknown' ? '20MA' : scanType);
+  const derivedStates = deriveSetupStates(safeCard, marketData, safeCard.checks || baseChecks, tradePlan);
   return {
     ticker:safeCard.ticker,
     marketStatus:state.marketStatus,
+    scanType:derivedStates.scan_type,
+    trendState:derivedStates.trend_state,
+    pullbackZone:derivedStates.pullback_zone,
+    structureState:derivedStates.structure_state,
+    stabilisationState:derivedStates.stabilisation_state,
+    bounceState:derivedStates.bounce_state,
+    volumeState:derivedStates.volume_state,
+    entryDefined:derivedStates.entry_defined,
+    stopDefined:derivedStates.stop_defined,
+    targetDefined:derivedStates.target_defined,
+    derivedStates,
     checklist:checklistIds.reduce((out, id) => { out[id] = !!safeCard.checks[id]; return out; }, {}),
     checklistLabels,
     notes:safeCard.notes || '',
@@ -2109,20 +2375,102 @@ function buildAnalysisPayload(card){
 
 function buildTickerPrompt(card){
   const payload = buildAnalysisPayload(card);
-  const chartValue = payload.chartAttached ? `Y:${payload.chartFileName || 'chart'}` : 'N';
-  const notes = payload.notes ? payload.notes : 'none';
   return [
     'Quality Pullback setup. Return JSON only.',
-    'Rules: prefer strong uptrends; pullback near 20MA/50MA; need stabilising or bounce before entry; first target near prior swing high; avoid weak, broken, or extended setups.',
+    '',
+    'You are analysing a stock for a swing-trading Quality Pullback strategy.',
+    '',
+    'Goal:',
+    'Identify strong stocks in uptrends that are pulling back toward support (20MA or 50MA) and assess whether they are Watch, Near Entry, Entry, or Avoid.',
+    '',
+    'Context:',
     `ticker=${payload.ticker}`,
-    `market=${payload.marketStatus}`,
-    `checks=${compactChecklistText(payload.checklist)}`,
-    `notes=${notes}`,
-    `risk=account ${formatGbp(payload.accountSize)}; max_loss ${formatGbp(payload.maxRisk)}`,
-    `chart=${chartValue}`,
-    `plan=entry:${payload.entry || 'na'}; stop:${payload.stop || 'na'}; target:${payload.target || 'na'}`,
-    'keys=verdict, plain_english_chart_read, entry, stop, first_target, risk_per_share, position_size, quality_score, key_reasons, risks, final_verdict',
-    'verdict must be one of Watch, Near Entry, Entry, Avoid.'
+    `market_status=${payload.marketStatus}`,
+    `scan_type=${payload.scanType}`,
+    `account_size_gbp=${payload.accountSize}`,
+    `max_loss_gbp=${payload.maxRisk}`,
+    '',
+    'Inputs:',
+    `trend_state=${payload.trendState}`,
+    `pullback_zone=${payload.pullbackZone}`,
+    `structure_state=${payload.structureState}`,
+    `stabilisation_state=${payload.stabilisationState}`,
+    `bounce_state=${payload.bounceState}`,
+    `volume_state=${payload.volumeState}`,
+    `entry_defined=${payload.entryDefined}`,
+    `stop_defined=${payload.stopDefined}`,
+    `target_defined=${payload.targetDefined}`,
+    '',
+    'Guidance:',
+    '',
+    'Trend:',
+    '- Prefer strong or acceptable trends',
+    '- Avoid weak or broken trends',
+    '',
+    'Pullback:',
+    '- Prefer price near 20MA (shallow) or 50MA (deeper)',
+    '- Avoid extended or broken pullbacks',
+    '',
+    'Stabilisation:',
+    '- none = still falling / volatile',
+    '- early = momentum slowing, smaller candles',
+    '- clear = base forming / higher lows',
+    '',
+    'Bounce:',
+    '- attempt = first reaction / wick / green candle',
+    '- confirmed = follow-through move',
+    '',
+    'Scan-type rules:',
+    '',
+    'If scan_type=20MA:',
+    '- Expect shallow pullbacks near 20MA',
+    '- Require stabilisation or bounce for Near Entry',
+    '- Require bounce or confirmation for Entry',
+    '',
+    'If scan_type=50MA:',
+    '- Expect deeper pullbacks near 50MA',
+    '- Allow Watch without stabilisation',
+    '- Require stabilisation for Near Entry',
+    '- Require bounce or confirmation for Entry',
+    '',
+    'Hard fail -> Avoid if:',
+    '- structure_state = broken',
+    '- trend_state = broken',
+    '- stop_defined = no',
+    '- target_defined = no',
+    '',
+    'Do NOT automatically mark Avoid just because stabilisation is missing.',
+    '',
+    'Trade plan:',
+    '- Entry should be logical (reclaim, bounce, or breakout)',
+    '- Stop should sit below support',
+    '- First target should be prior swing high',
+    '- Must respect GBP 40 max loss',
+    '',
+    'Output keys:',
+    'setup_type',
+    'plain_english_chart_read',
+    'entry',
+    'stop',
+    'first_target',
+    'risk_per_share',
+    'position_size',
+    'reward_risk',
+    'quality_score',
+    'confidence_score',
+    'key_reasons',
+    'risks',
+    'verdict',
+    'final_verdict',
+    '',
+    'Rules:',
+    '- verdict must be: Watch | Near Entry | Entry | Avoid',
+    '- quality_score = integer 1-10',
+    '- confidence_score = integer 1-100',
+    '- If unknown -> null',
+    '- Keep explanations short and practical',
+    '',
+    'Return valid JSON only.'
   ].join('\n');
 }
 
@@ -2135,17 +2483,28 @@ function normalizeImportedStatus(value){
   return 'Watch';
 }
 
+function normalizeAnalysisVerdict(value){
+  const v = String(value || '').trim().toLowerCase();
+  if(v === 'entry') return 'Entry';
+  if(v === 'near entry') return 'Near Entry';
+  if(v === 'avoid') return 'Avoid';
+  return 'Watch';
+}
+
 function normalizeAnalysisResponse(raw){
   if(!raw || typeof raw !== 'object') return null;
   return {
-    verdict:normalizeImportedStatus(raw.verdict),
+    setup_type:String(raw.setup_type || '').trim(),
+    verdict:normalizeAnalysisVerdict(raw.verdict),
     plain_english_chart_read:String(raw.plain_english_chart_read || raw.chart_read || '').trim(),
     entry:String(raw.entry || '').trim(),
     stop:String(raw.stop || '').trim(),
     first_target:String(raw.first_target || raw.target || '').trim(),
     risk_per_share:String(raw.risk_per_share || '').trim(),
     position_size:String(raw.position_size || '').trim(),
-    quality_score:Math.max(0, Math.min(10, Number(raw.quality_score) || 0)),
+    reward_risk:raw.reward_risk == null || raw.reward_risk === '' ? null : String(raw.reward_risk).trim(),
+    quality_score:Number.isFinite(Number(raw.quality_score)) ? Math.max(1, Math.min(10, Number(raw.quality_score))) : null,
+    confidence_score:Number.isFinite(Number(raw.confidence_score)) ? Math.max(1, Math.min(100, Number(raw.confidence_score))) : null,
     key_reasons:Array.isArray(raw.key_reasons) ? raw.key_reasons.map(item => String(item).trim()).filter(Boolean) : [],
     risks:Array.isArray(raw.risks) ? raw.risks.map(item => String(item).trim()).filter(Boolean) : [],
     final_verdict:String(raw.final_verdict || raw.summary || '').trim()
@@ -2255,7 +2614,7 @@ async function analyseSetup(ticker){
     card.updatedAt = new Date().toISOString();
     if(analysis){
       card.status = analysis.verdict;
-      card.score = analysis.quality_score;
+      if(Number.isFinite(analysis.quality_score)) card.score = analysis.quality_score;
       card.summary = analysis.final_verdict || analysis.plain_english_chart_read || 'AI analysis saved.';
       if(analysis.entry) card.entry = analysis.entry;
       if(analysis.stop) card.stop = analysis.stop;
@@ -2279,7 +2638,9 @@ function renderAnalysisPanel(card){
   if(card.lastAnalysis){
     const reasons = card.lastAnalysis.key_reasons.length ? card.lastAnalysis.key_reasons.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No key reasons returned.</li>';
     const risks = card.lastAnalysis.risks.length ? card.lastAnalysis.risks.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No risks returned.</li>';
-    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(card.lastAnalysis.verdict)}">${escapeHtml(card.lastAnalysis.verdict)}</span><span class="score ${scoreClass(card.lastAnalysis.quality_score)}">${card.lastAnalysis.quality_score}/10</span></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(card.lastAnalysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="row3"><div><strong>Entry</strong><div class="tiny">${escapeHtml(card.lastAnalysis.entry || 'Not given')}</div></div><div><strong>Stop</strong><div class="tiny">${escapeHtml(card.lastAnalysis.stop || 'Not given')}</div></div><div><strong>First Target</strong><div class="tiny">${escapeHtml(card.lastAnalysis.first_target || 'Not given')}</div></div></div><div class="row"><div><strong>Risk / Share</strong><div class="tiny">${escapeHtml(card.lastAnalysis.risk_per_share || 'Not given')}</div></div><div><strong>Position Size</strong><div class="tiny">${escapeHtml(card.lastAnalysis.position_size || 'Not given')}</div></div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><div><strong>Final Verdict</strong><div class="tiny">${escapeHtml(card.lastAnalysis.final_verdict || 'No final verdict returned.')}</div></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
+    const quality = Number.isFinite(card.lastAnalysis.quality_score) ? `${card.lastAnalysis.quality_score}/10` : 'n/a';
+    const confidence = Number.isFinite(card.lastAnalysis.confidence_score) ? `${card.lastAnalysis.confidence_score}/100` : 'n/a';
+    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(card.lastAnalysis.verdict)}">${escapeHtml(card.lastAnalysis.verdict)}</span><span class="score ${scoreClass(Number.isFinite(card.lastAnalysis.quality_score) ? card.lastAnalysis.quality_score : 0)}">${escapeHtml(quality)}</span></div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(card.lastAnalysis.setup_type || 'Not given')}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(card.lastAnalysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="row3"><div><strong>Entry</strong><div class="tiny">${escapeHtml(card.lastAnalysis.entry || 'Not given')}</div></div><div><strong>Stop</strong><div class="tiny">${escapeHtml(card.lastAnalysis.stop || 'Not given')}</div></div><div><strong>First Target</strong><div class="tiny">${escapeHtml(card.lastAnalysis.first_target || 'Not given')}</div></div></div><div class="row3"><div><strong>Risk / Share</strong><div class="tiny">${escapeHtml(card.lastAnalysis.risk_per_share || 'Not given')}</div></div><div><strong>Position Size</strong><div class="tiny">${escapeHtml(card.lastAnalysis.position_size || 'Not given')}</div></div><div><strong>Reward / Risk</strong><div class="tiny">${escapeHtml(card.lastAnalysis.reward_risk || 'Not given')}</div></div></div><div class="row"><div><strong>Confidence</strong><div class="tiny">${escapeHtml(confidence)}</div></div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><div><strong>Final Verdict</strong><div class="tiny">${escapeHtml(card.lastAnalysis.final_verdict || 'No final verdict returned.')}</div></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
@@ -2406,10 +2767,11 @@ function renderScannerResults(){
     const marketDataLine = card.marketData && !card.marketData.__error
       ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} - 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} - 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} - 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} - RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>`
       : `<div class="tiny">${escapeHtml(card.summary || 'Market data unavailable. Keep this ticker reviewable in the card workflow.')}</div>`;
-    const pullbackLine = `<div class="tiny">Pullback Type: ${escapeHtml(card.pullbackType || (card.analysis && card.analysis.pullbackType) || 'Unclassified')} - Quality Score: ${escapeHtml(String(card.score || 0))}</div>`;
+    const setupLine = `<div class="tiny">Setup: ${escapeHtml(card.setupType || (card.analysis && card.analysis.setup_type) || '20MA')} - Trend: ${escapeHtml(card.trendStatus || (card.analysis && card.analysis.trend_status) || 'review')} - Pullback: ${escapeHtml(card.pullbackStatus || (card.analysis && card.analysis.pullback_status) || 'review')}</div>`;
+    const pullbackLine = `<div class="tiny">Pullback Type: ${escapeHtml(card.pullbackType || (card.analysis && card.analysis.pullbackType) || 'Unclassified')} - Quality Score: ${escapeHtml(String(card.score || 0))}/10</div>`;
     const suitabilityLine = `<div class="tiny">${escapeHtml(card.summary || 'Review this setup manually.')}</div>`;
     div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div><strong>${escapeHtml(card.status)}</strong></div>${suitabilityLine}${companyLine}${marketDataLine}${pullbackLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/100`)}</div><button class="primary" data-act="review">Review</button></div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div><strong>${escapeHtml(card.status)}</strong></div>${suitabilityLine}${companyLine}${marketDataLine}${setupLine}${pullbackLine}</div><div class="inline-status" style="justify-content:flex-end"><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/10`)}</div><button class="primary" data-act="review">Review</button></div></div>`;
     div.querySelector('[data-act="review"]').onclick = () => {
       openRankedResultInReview(card.ticker);
     };
@@ -2437,9 +2799,11 @@ function renderCards(){
     return;
   }
   const ordered = [...state.cards].sort((a, b) => statusRank(a.status) - statusRank(b.status) || b.score - a.score || a.ticker.localeCompare(b.ticker));
-  const groups = ['Strong Fit', 'Possible Fit', 'Manual Review', 'Ready', 'Near Setup', 'Watch', 'Avoid'];
+  const groups = ['Entry', 'Near Entry', 'Watch', 'Manual Review', 'Ready', 'Near Setup', 'Avoid'];
   groups.forEach(group => {
-    const items = ordered.filter(card => (group === 'Near Setup' ? (card.status === 'Near Setup' || card.status === 'Near Entry') : card.status === group));
+    const items = ordered.filter(card => (group === 'Near Entry'
+      ? (card.status === 'Near Entry' || card.status === 'Near Setup')
+      : card.status === group));
     if(!items.length) return;
     const header = document.createElement('div');
     header.className = 'summary';
@@ -2458,12 +2822,12 @@ function renderCards(){
     const performanceLine = card.marketData ? `<div class="tiny">1W ${escapeHtml(formatPercent(card.perf1w))} • 1M ${escapeHtml(formatPercent(card.perf1m))} • 3M ${escapeHtml(formatPercent(card.perf3m))} • 6M ${escapeHtml(formatPercent(card.perf6m))} • YTD ${escapeHtml(formatPercent(card.perfYtd))}</div>` : '';
     const watchLine = card.watchTracking ? `<div class="tiny">${watchTrackingText(card)}</div>` : '';
     const suitabilityLine = card.source === 'scanner' && card.analysis && card.analysis.suitability
-      ? `<div class="tiny">Trend ${card.analysis.suitability.trend}/30 • Pullback ${card.analysis.suitability.pullback}/30 • Readiness ${card.analysis.suitability.readiness}/20 • Liquidity ${card.analysis.suitability.liquidity}/10 • Risk ${card.analysis.suitability.risk}/10</div>`
+      ? `<div class="tiny">Trend ${card.analysis.suitability.trend}/4 • Pullback ${card.analysis.suitability.pullback}/3 • Trade ${card.analysis.suitability.tradeQuality}/3</div>`
       : '';
     const freshnessAge = relativeAgeLabel(card.scannerUpdatedAt);
     const freshnessBadge = card.scannerUpdatedAt ? `<span class="badge ${isFreshScanTimestamp(card.scannerUpdatedAt) ? 'freshness-fresh' : 'freshness-stale'}">${isFreshScanTimestamp(card.scannerUpdatedAt) ? 'Fresh' : 'Stale'}${freshnessAge ? ` • ${escapeHtml(freshnessAge)}` : ''}</span>` : '';
     const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>${freshnessBadge ? `<div class="inline-status">${freshnessBadge}</div>` : ''}${companyLine}${marketDataLine}${performanceLine}${suitabilityLine}${watchLine}`;
-    const scoreLabel = card.source === 'scanner' ? `${card.score}/100` : `${card.score}/10`;
+    const scoreLabel = `${card.score}/10`;
     const div = document.createElement('div');
     div.className = 'result';
     div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><details style="margin-top:10px"><summary>Review And Plan In Card</summary>${renderCardChecklist(card)}<div class="actions"><button class="secondary" data-act="save-card-review">Save Card Review</button><button class="secondary" data-act="use-in-planner">Use In Planner</button></div></details><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${renderCardStatusLine(card, loading, analysisBusy)}</div></div></div>`;
