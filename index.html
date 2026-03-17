@@ -81,6 +81,7 @@
       </div>
       <div class="row" style="margin-top:10px">
         <div><label>Ticker Search / Add</label><input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" /><div id="tickerSuggestions" class="suggestions" hidden></div></div>
+        <div><label>Setup Type</label><select id="quickScanType"><option value="">Unknown</option><option value="20MA">20MA</option><option value="50MA">50MA</option></select></div>
         <div style="align-self:end"><button class="primary" id="addTickerBtn" style="width:100%">Add Ticker</button></div>
       </div>
       <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
@@ -199,6 +200,9 @@
           <div><label>Ticker</label><input id="selectedTicker" placeholder="PWR" /></div>
           <div><label>Status</label><input id="statusBox" readonly /></div>
           <div><label>Score</label><input id="scoreBox" readonly /></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div><label>Setup Type</label><select id="reviewScanType"><option value="">Unknown</option><option value="20MA">20MA</option><option value="50MA">50MA</option></select></div>
         </div>
         <div class="checks" style="margin-top:12px">
           <div class="checkgroup">

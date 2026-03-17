@@ -197,6 +197,14 @@ function normalizeScanType(value){
   return '';
 }
 
+function selectedQuickScanType(){
+  return normalizeScanType($('quickScanType') && $('quickScanType').value);
+}
+
+function selectedReviewScanType(){
+  return normalizeScanType($('reviewScanType') && $('reviewScanType').value);
+}
+
 function parseImportedTickerEntries(text){
   const rawText = String(text || '').trim();
   if(!rawText) return [];
@@ -1023,7 +1031,8 @@ function addTicker(rawTicker, meta){
     if(input) input.select();
     return;
   }
-  if(meta) rememberTickerMeta(meta);
+  const scanType = normalizeScanType((meta && meta.scanType) || selectedQuickScanType());
+  if(meta || scanType) rememberTickerMeta({...meta, ticker, scanType});
   state.tickers.push(ticker);
   updateRecentTickers([ticker]);
   updateTickerInputFromState();
@@ -1073,13 +1082,15 @@ function saveCardReviewFromElement(ticker, container){
   });
   container.querySelectorAll('[data-card-field]').forEach(input => {
     const field = input.getAttribute('data-card-field');
-    card[field] = input.value || '';
+    card[field] = field === 'scanType' ? normalizeScanType(input.value) : (input.value || '');
   });
+  if(card.scanType) rememberTickerMeta({ticker, scanType:card.scanType});
   const result = scoreAndStatusFromChecks(checks);
   card.checks = checks;
   card.score = result.score;
   card.status = result.status === 'Entry' ? 'Ready' : (result.status === 'Near Entry' ? 'Near Setup' : result.status);
   card.summary = buildSummary(checks, result.status);
+  card.setupType = card.scanType || 'unknown';
   card.marketStatus = state.marketStatus;
   card.updatedAt = new Date().toISOString();
   card.source = 'manual';
@@ -1151,6 +1162,7 @@ function renderCardChecklist(card){
       </div>
       <div class="checkgroup">
         <h3>Trade Plan</h3>
+        <div style="margin-bottom:10px"><label>Setup Type</label><select data-card-field="scanType"><option value="" ${!normalizeScanType(card.scanType) ? 'selected' : ''}>Unknown</option><option value="20MA" ${normalizeScanType(card.scanType) === '20MA' ? 'selected' : ''}>20MA</option><option value="50MA" ${normalizeScanType(card.scanType) === '50MA' ? 'selected' : ''}>50MA</option></select></div>
         ${['entryDefined','stopDefined','targetDefined'].map(id => `<label class="checkitem"><input type="checkbox" data-card-check="${id}" ${checks[id] ? 'checked' : ''}> ${escapeHtml(checklistLabels[id])}</label>`).join('')}
         <div class="row3" style="margin-top:10px">
           <div><label>Entry</label><input data-card-field="entry" type="number" step="0.01" value="${escapeHtml(card.entry || '')}" /></div>
@@ -2830,7 +2842,7 @@ function renderCards(){
     const scoreLabel = `${card.score}/10`;
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><details style="margin-top:10px"><summary>Review And Plan In Card</summary>${renderCardChecklist(card)}<div class="actions"><button class="secondary" data-act="save-card-review">Save Card Review</button><button class="secondary" data-act="use-in-planner">Use In Planner</button></div></details><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${renderCardStatusLine(card, loading, analysisBusy)}</div></div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status" style="justify-content:flex-end"><span class="badge ${statusClass(card.status)}">${escapeHtml(card.status)}</span><button class="secondary" data-act="open-chart">Open Chart</button><button class="secondary" data-act="load">Load Review</button><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Upload</label><div class="dropzone" data-act="dropzone"><div class="tiny">Drag a PNG or JPG here, or tap to choose a chart screenshot.</div><label class="primary" for="chart-${card.ticker}">Choose Chart</label><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg" /><div class="tiny">Stored locally on this device with this ticker. Max file size: ${formatApproxBytes(MAX_CHART_BYTES)}.</div></div>${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><button class="ghost" data-act="clear-chart">Remove Chart</button></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><div class="row" style="margin-bottom:10px"><div><label>Setup Type</label><select data-card-field="scanType"><option value="" ${!normalizeScanType(card.scanType) ? 'selected' : ''}>Unknown</option><option value="20MA" ${normalizeScanType(card.scanType) === '20MA' ? 'selected' : ''}>20MA</option><option value="50MA" ${normalizeScanType(card.scanType) === '50MA' ? 'selected' : ''}>50MA</option></select></div></div><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><details style="margin-top:10px"><summary>Review And Plan In Card</summary>${renderCardChecklist(card)}<div class="actions"><button class="secondary" data-act="save-card-review">Save Card Review</button><button class="secondary" data-act="use-in-planner">Use In Planner</button></div></details><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button><button class="secondary" data-act="copy-prompt">Copy Prompt</button><button class="secondary" data-act="save-trade">Save Trade</button>${card.status === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="statusline tiny" id="cardStatus-${card.ticker}">${renderCardStatusLine(card, loading, analysisBusy)}</div></div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(card.ticker);
     div.querySelector('[data-act="load"]').onclick = () => loadCard(card.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeCard(card.ticker);
@@ -2901,6 +2913,15 @@ function renderCards(){
       liveCard.notes = event.target.value;
       persistState();
     });
+    div.querySelectorAll('[data-card-field="scanType"]').forEach(select => {
+      select.addEventListener('change', event => {
+        const liveCard = upsertCard(card.ticker);
+        liveCard.scanType = normalizeScanType(event.target.value);
+        liveCard.setupType = liveCard.scanType || liveCard.setupType || 'unknown';
+        if(liveCard.scanType) rememberTickerMeta({ticker:card.ticker, scanType:liveCard.scanType});
+        persistState();
+      });
+    });
     const promptDetails = div.querySelector(`#prompt-${card.ticker}`);
     const responseDetails = div.querySelector(`#response-${card.ticker}`);
     promptDetails.addEventListener('toggle', () => { uiState.promptOpen[card.ticker] = promptDetails.open; });
@@ -2968,6 +2989,7 @@ function loadCard(ticker){
   const card = getCard(ticker);
   if(!card) return;
   $('selectedTicker').value = card.ticker;
+  if($('reviewScanType')) $('reviewScanType').value = normalizeScanType(card.scanType);
   checklistIds.forEach(id => { $(id).checked = !!card.checks[id]; });
   $('entryPrice').value = card.entry || '';
   $('stopPrice').value = card.stop || '';
@@ -2999,16 +3021,19 @@ function saveReview(){
   const result = scoreAndStatusFromChecks(checks);
   const card = upsertCard(ticker);
   if(!state.tickers.includes(ticker)) state.tickers.push(ticker);
+  card.scanType = selectedReviewScanType();
   card.checks = checks;
   card.score = result.score;
   card.status = result.status;
   card.summary = buildSummary(checks, result.status);
+  card.setupType = card.scanType || 'unknown';
   card.entry = $('entryPrice').value || '';
   card.stop = $('stopPrice').value || '';
   card.target = $('targetPrice').value || '';
   card.marketStatus = state.marketStatus;
   card.updatedAt = new Date().toISOString();
   card.source = 'manual';
+  if(card.scanType) rememberTickerMeta({ticker, scanType:card.scanType});
   updateWatchTracking(card);
   updateTickerInputFromState();
   persistState();
@@ -3017,6 +3042,7 @@ function saveReview(){
 
 function resetReview(){
   ['selectedTicker','statusBox','scoreBox','entryPrice','stopPrice','targetPrice'].forEach(id => { $(id).value = ''; });
+  if($('reviewScanType')) $('reviewScanType').value = '';
   checklistIds.forEach(id => { $(id).checked = false; });
   $('summaryBox').textContent = 'No setup reviewed yet.';
   $('progressText').textContent = '0 / 10';

@@ -158,6 +158,7 @@ function normaliseStringArray(value){
 
 function normaliseAnalysis(obj){
   return {
+    setup_type: normaliseString(obj?.setup_type, ''),
     verdict: normaliseString(obj?.verdict, 'Watch'),
     plain_english_chart_read: normaliseString(obj?.plain_english_chart_read, ''),
     entry: normaliseString(obj?.entry, ''),
@@ -165,7 +166,9 @@ function normaliseAnalysis(obj){
     first_target: normaliseString(obj?.first_target, ''),
     risk_per_share: normaliseString(obj?.risk_per_share, ''),
     position_size: normaliseString(obj?.position_size, ''),
-    quality_score: Number.isFinite(Number(obj?.quality_score)) ? Number(obj?.quality_score) : 0,
+    reward_risk: obj?.reward_risk == null || obj?.reward_risk === '' ? null : normaliseString(obj?.reward_risk, ''),
+    quality_score: Number.isFinite(Number(obj?.quality_score)) ? Number(obj?.quality_score) : null,
+    confidence_score: Number.isFinite(Number(obj?.confidence_score)) ? Number(obj?.confidence_score) : null,
     key_reasons: normaliseStringArray(obj?.key_reasons),
     risks: normaliseStringArray(obj?.risks),
     final_verdict: normaliseString(obj?.final_verdict, '')
@@ -246,7 +249,8 @@ exports.handler = async function handler(event){
     'Respect the supplied market status and risk limits.',
     'Do not invent chart details that are not provided.',
     'Return exactly one JSON object.',
-    'Verdict must be one of: Watch, Near Entry, Entry, Avoid.'
+    'Verdict must be one of: Watch, Near Entry, Entry, Avoid.',
+    'If a field is unknown, return null.'
   ].join('\n');
 
   let upstream;
