@@ -162,6 +162,7 @@
         <div style="margin-top:10px"><label>Market Data Key</label><input id="apiKey" type="text" value="Uses server-side provider API keys on Netlify" readonly /></div>
         <div style="margin-top:10px"><label>AI Endpoint URL</label><input id="aiEndpoint" placeholder="/api/analyse-setup or full serverless URL" /></div>
         <div class="tiny">Use `/api/analyse-setup` on Netlify for AI analysis. Market data runs through `/api/market-data` using the selected server-side provider adapter.</div>
+        <div class="tiny" style="margin-top:6px">`Analyse Setup` always uses the AI Endpoint URL above. The Data Provider selector only affects scanner market data.</div>
         <div class="tiny" id="providerStatusNote" style="margin-top:8px">FMP: search + snapshot. MarketData.app: snapshot only for now.</div>
         <div class="actions">
           <button class="primary" id="saveApiBtn">Save Settings</button>
