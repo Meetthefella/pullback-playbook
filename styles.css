@@ -79,8 +79,9 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
 .thumb{width:88px;height:88px;border-radius:12px;border:1px solid var(--line);object-fit:cover;background:#09101d}
 .quicklisthead{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
 .quicklist{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.quicklist.carousel{flex-wrap:nowrap;overflow-x:auto;padding:2px 4px 6px;scrollbar-width:thin;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;scroll-padding-inline:4px;overscroll-behavior-x:contain}
-.quicklist.carousel .quickchip{flex:0 0 auto;scroll-snap-align:start;scroll-snap-stop:always}
+.quicklist.carousel{display:grid;grid-auto-flow:column;grid-auto-columns:max-content;align-items:start;justify-content:start;gap:10px;overflow-x:auto;overflow-y:hidden;width:100%;max-width:100%;min-width:0;padding:2px 4px 8px;scrollbar-width:thin;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scroll-padding-inline:4px;overscroll-behavior-x:contain}
+.quicklist.carousel .quickchip{flex:0 0 auto;white-space:nowrap}
+.quicklaneitem{scroll-snap-align:start;scroll-snap-stop:always}
 .quickchip{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:var(--chip);color:var(--text);font-size:.9rem;line-height:1}
 .quickchip button{min-height:36px;padding:8px 10px;border-radius:999px}
 .quickchip.empty{background:transparent;color:var(--muted);border-style:dashed}
@@ -121,6 +122,7 @@ details[open]{width:100%}
   .searchaddrow{grid-template-columns:minmax(0,1fr) auto}
   .searchaddaction{justify-content:flex-start}
   .compactbutton{padding-inline:14px}
-  .quicklist.carousel{gap:10px;padding-inline:2px}
-  .quicklist.carousel .quickchip{min-width:max-content}
+  .quicklist.carousel{gap:8px;padding-inline:2px}
+  .quickchip{padding:8px 9px}
+  .quickchip button{padding:8px 9px}
 }

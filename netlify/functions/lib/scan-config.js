@@ -5,7 +5,7 @@ const PROVIDER_CONFIGS = {
     defaultPlan:'scanner',
     plans:{
       scanner:{
-        maxScanTickers:10,
+        maxScanTickers:null,
         supportsSearch:true,
         supportsDailyHistory:true,
         supportsIntraday:false,
@@ -19,7 +19,7 @@ const PROVIDER_CONFIGS = {
     defaultPlan:'scanner',
     plans:{
       scanner:{
-        maxScanTickers:10,
+        maxScanTickers:null,
         supportsSearch:false,
         supportsDailyHistory:true,
         supportsIntraday:true,

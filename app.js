@@ -92,7 +92,7 @@ const providerConfigs = {
     id:'fmp',
     label:'Financial Modeling Prep',
     plan:'scanner',
-    maxScanTickers:10,
+    maxScanTickers:null,
     supportsSearch:true,
     supportsDailyHistory:true,
     supportsIntraday:false,
@@ -102,7 +102,7 @@ const providerConfigs = {
     id:'marketdata',
     label:'MarketData.app',
     plan:'scanner',
-    maxScanTickers:10,
+    maxScanTickers:null,
     supportsSearch:false,
     supportsDailyHistory:true,
     supportsIntraday:true,
@@ -344,7 +344,8 @@ function currentProviderLabel(){
 }
 
 function currentMaxScanTickers(){
-  return Number(currentProviderConfig().maxScanTickers || 10);
+  const limit = Number(currentProviderConfig().maxScanTickers);
+  return Number.isFinite(limit) && limit > 0 ? limit : null;
 }
 
 function updateProviderStatusNote(){
@@ -362,7 +363,10 @@ function finalScanUniverse(){
   const mode = effectiveUniverseMode();
   const limit = currentMaxScanTickers();
   if(mode === 'tradingview_only') return imported;
-  if(mode === 'combined') return uniqueTickers([...imported, ...DEFAULT_AUTO_UNIVERSE]).slice(0, limit);
+  if(mode === 'combined'){
+    const merged = uniqueTickers([...imported, ...DEFAULT_AUTO_UNIVERSE]);
+    return Number.isFinite(limit) ? merged.slice(0, limit) : merged;
+  }
   return DEFAULT_AUTO_UNIVERSE.slice();
 }
 
@@ -379,11 +383,11 @@ function renderFinalUniversePreview(){
     box.textContent = 'Final scan universe is empty. Add or import tickers, or switch to Curated Core 8.';
     return;
   }
-  if(mode === 'tradingview_only' && imported.length > currentMaxScanTickers()){
+  if(Number.isFinite(currentMaxScanTickers()) && mode === 'tradingview_only' && imported.length > currentMaxScanTickers()){
     box.textContent = `Final scan universe (${modeLabel}) is blocked.\n\n${currentProviderLabel()} scans are limited to ${currentMaxScanTickers()} tickers in the current plan.\nImported tickers detected: ${imported.length}`;
     return;
   }
-  const note = mode === 'combined'
+  const note = mode === 'combined' && Number.isFinite(currentMaxScanTickers())
     ? `\n\nCombined mode prioritises TradingView tickers first and caps the final unique list at ${currentMaxScanTickers()}.`
     : '';
   box.textContent = `Final scan universe (${modeLabel}, ${universe.length}):\n\n${universe.join(', ')}${note}`;
@@ -827,7 +831,7 @@ function renderTickerQuickLists(){
       const inWatchlist = state.tickers.includes(ticker);
       const isSearchMatch = search.query === ticker;
       const label = isSearchMatch && !inWatchlist ? 'Add now' : (inWatchlist ? 'In watchlist' : 'Add');
-      return `<div class="quickchip ${inWatchlist ? 'active' : ''}"><span class="chiplabel">${escapeHtml(ticker)}</span><button class="${inWatchlist ? 'secondary' : 'primary'}" data-act="quick-add" data-ticker="${escapeHtml(ticker)}" ${inWatchlist ? 'disabled' : ''}>${label}</button></div>`;
+      return `<div class="quicklaneitem"><div class="quickchip ${inWatchlist ? 'active' : ''}"><span class="chiplabel">${escapeHtml(ticker)}</span><button class="${inWatchlist ? 'secondary' : 'primary'}" data-act="quick-add" data-ticker="${escapeHtml(ticker)}" ${inWatchlist ? 'disabled' : ''}>${label}</button></div></div>`;
     }).join('');
   }
   watchlistBox.querySelectorAll('[data-act="quick-remove"]').forEach(button => {
@@ -854,7 +858,7 @@ function prepareScannerUniverse(options = {}){
   if(!universe.length){
     return {parsed, universe, blocked:false};
   }
-  if(mode === 'tradingview_only' && imported.length > currentMaxScanTickers()){
+  if(Number.isFinite(currentMaxScanTickers()) && mode === 'tradingview_only' && imported.length > currentMaxScanTickers()){
     const message = `${currentProviderLabel()} scans are limited to ${currentMaxScanTickers()} tickers in the current plan.`;
     setStatus('inputStatus', `<span class="badtext">${escapeHtml(message)}</span>`);
     setStatus('apiStatus', `<span class="badtext">${escapeHtml(message)}</span>`);

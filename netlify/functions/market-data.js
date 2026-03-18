@@ -93,7 +93,7 @@ exports.handler = async function handler(event){
     return jsonResponse(500, {ok:false, error:providerNotConfiguredMessage(providerConfig)});
   }
 
-  if(requestedTickerCount(params) > providerConfig.planConfig.maxScanTickers){
+  if(Number.isFinite(providerConfig.planConfig.maxScanTickers) && requestedTickerCount(params) > providerConfig.planConfig.maxScanTickers){
     return jsonResponse(400, {
       error:`Maximum ${providerConfig.planConfig.maxScanTickers} tickers per scan for ${providerConfig.label}`
     });
