@@ -927,27 +927,50 @@ function getTradeRecord(recordId){
   return (state.tradeDiary || []).find(record => record.id === recordId);
 }
 
-function saveTradeFromCard(ticker){
-  const card = getCard(ticker);
-  if(!card) return;
-  const entry = card.lastAnalysis && card.lastAnalysis.entry ? card.lastAnalysis.entry : (card.entry || '');
-  const stop = card.lastAnalysis && card.lastAnalysis.stop ? card.lastAnalysis.stop : (card.stop || '');
-  const firstTarget = card.lastAnalysis && card.lastAnalysis.first_target ? card.lastAnalysis.first_target : (card.target || '');
+function getCanonicalTradeSnapshot(cardOrTicker){
+  const card = typeof cardOrTicker === 'string' ? getCard(cardOrTicker) : cardOrTicker;
+  if(!card) return null;
+  const normalized = normalizeCard(card);
+  const sourceData = normalized.marketData || normalized;
+  const scanType = resolveScanType(normalized, sourceData, normalized.checks || buildScannerChecks(sourceData));
+  const derivedPlan = deriveTradePlan(sourceData, scanType === 'unknown' ? '20MA' : scanType);
+  const entry = normalized.lastAnalysis && normalized.lastAnalysis.entry ? normalized.lastAnalysis.entry : (normalized.entry || (Number.isFinite(derivedPlan.entry) ? derivedPlan.entry.toFixed(2) : ''));
+  const stop = normalized.lastAnalysis && normalized.lastAnalysis.stop ? normalized.lastAnalysis.stop : (normalized.stop || (Number.isFinite(derivedPlan.stop) ? derivedPlan.stop.toFixed(2) : ''));
+  const firstTarget = normalized.lastAnalysis && normalized.lastAnalysis.first_target ? normalized.lastAnalysis.first_target : (normalized.target || (Number.isFinite(derivedPlan.target) ? derivedPlan.target.toFixed(2) : ''));
   const riskFit = evaluateRiskFit({entry, stop, ...currentRiskSettings()});
-  const record = normalizeTradeRecord(createTradeRecord({
-    ticker:card.ticker,
-    verdict:card.chartVerdict || (card.lastAnalysis ? card.lastAnalysis.verdict : card.status),
-    chartVerdict:card.chartVerdict || (card.lastAnalysis ? card.lastAnalysis.verdict : card.status),
-    qualityScore:Number.isFinite(card.score) ? String(card.score) : '',
-    entry,
-    stop,
-    firstTarget,
+  return {
+    ticker:normalized.ticker,
+    chartVerdict:normalized.chartVerdict || normalized.status || 'Watch',
+    verdict:normalized.chartVerdict || normalized.status || 'Watch',
+    qualityScore:Number.isFinite(normalized.score) ? normalized.score : '',
+    entry:String(entry || ''),
+    stop:String(stop || ''),
+    firstTarget:String(firstTarget || ''),
     maxLoss:Number.isFinite(riskFit.max_loss) ? String(Number(riskFit.max_loss.toFixed(2))) : '',
     riskPerShare:Number.isFinite(riskFit.risk_per_share) ? String(Number(riskFit.risk_per_share.toFixed(2))) : '',
     positionSize:String(riskFit.position_size || ''),
     riskStatus:riskFit.risk_status,
     accountSize:String(state.accountSize || ''),
-    notes:card.notes || card.summary || ''
+    notes:normalized.notes || normalized.summary || ''
+  };
+}
+
+function syncPlannerFromTicker(ticker){
+  const snapshot = getCanonicalTradeSnapshot(ticker);
+  if(!snapshot) return;
+  if($('selectedTicker')) $('selectedTicker').value = snapshot.ticker;
+  if($('entryPrice')) $('entryPrice').value = snapshot.entry || '';
+  if($('stopPrice')) $('stopPrice').value = snapshot.stop || '';
+  if($('targetPrice')) $('targetPrice').value = snapshot.firstTarget || '';
+  calculate();
+}
+
+function saveTradeFromCard(ticker){
+  const card = getCard(ticker);
+  if(!card) return;
+  const snapshot = getCanonicalTradeSnapshot(card);
+  const record = normalizeTradeRecord(createTradeRecord({
+    ...snapshot
   }));
   state.tradeDiary.unshift(record);
   state.tradeDiary = state.tradeDiary.slice(0, 100);
@@ -2759,6 +2782,9 @@ async function analyseSetup(ticker){
       if(analysis.stop) card.stop = analysis.stop;
       if(analysis.first_target) card.target = analysis.first_target;
     }
+    if(($('selectedTicker') && normalizeTicker($('selectedTicker').value) === card.ticker) || !normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '')){
+      syncPlannerFromTicker(card.ticker);
+    }
     persistState();
   }catch(err){
     const baseMessage = err && err.name === 'AbortError'
@@ -3116,11 +3142,8 @@ function loadCard(ticker){
   const review = card.manualReview && typeof card.manualReview === 'object' ? card.manualReview : null;
   const reviewChecks = review && review.checks ? review.checks : card.checks;
   checklistIds.forEach(id => { $(id).checked = !!reviewChecks[id]; });
-  $('entryPrice').value = review && review.entry ? review.entry : (card.entry || '');
-  $('stopPrice').value = review && review.stop ? review.stop : (card.stop || '');
-  $('targetPrice').value = review && review.target ? review.target : (card.target || '');
   refreshReview();
-  calculate();
+  syncPlannerFromTicker(card.ticker);
   const reviewSection = $('reviewSection');
   if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
 }

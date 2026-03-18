@@ -72,9 +72,9 @@
         <label class="checkitem" style="padding:0"><input id="wholeSharesOnly" type="checkbox" checked> Whole shares only</label>
         <div class="tiny" style="align-self:end">Max loss is computed from override if set, otherwise account size × risk %.</div>
       </div>
-      <div class="row" style="margin-top:10px">
-        <div><label>Ticker Search / Add</label><input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" /><div id="tickerSuggestions" class="suggestions" hidden></div></div>
-        <div style="align-self:end"><button class="primary" id="addTickerBtn" style="width:100%">Add Ticker</button></div>
+      <div class="searchaddrow" style="margin-top:10px">
+        <div class="searchaddinput"><label>Ticker Search / Add</label><input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" /><div id="tickerSuggestions" class="suggestions" hidden></div></div>
+        <div class="searchaddaction"><button class="primary compactbutton" id="addTickerBtn">Add Ticker</button></div>
       </div>
       <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
       <details open style="margin-top:10px">
