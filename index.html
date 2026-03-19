@@ -40,6 +40,7 @@
         <a class="tablink" href="#apiSettings">API</a>
         <a class="tablink" href="#resultsSection">Results</a>
         <a class="tablink" href="#reviewSection">Review</a>
+        <a class="tablink" href="#watchlistSection">Watchlist</a>
         <a class="tablink" href="#plannerSection">Planner</a>
         <a class="tablink" href="#diarySection">Diary</a>
       </div>
@@ -114,12 +115,7 @@
             <strong>Scanner Universe</strong>
             <span class="tiny">This is the live universe used for automatic scanning.</span>
           </div>
-          <div class="quicklist" id="watchlistQuickList"></div>
-          <div class="quicklisthead" style="margin-top:12px">
-            <strong>Recent Tickers</strong>
-            <span class="tiny">Tap to add back quickly.</span>
-          </div>
-          <div class="quicklist carousel" id="recentTickerList"></div>
+          <div class="quicklist" id="scannerUniverseQuickList"></div>
         </div>
         <div style="margin-top:10px">
           <label>Universe Text List</label>
@@ -243,9 +239,15 @@
     <div id="cardsList" class="list"></div>
   </div>
 
+  <div class="card" style="margin-top:14px">
+    <h2 id="watchlistSection">7) Watchlist</h2>
+    <p class="tiny">Add a ticker here only from a reviewed setup. Entries expire after 5 trading days unless refreshed.</p>
+    <div id="watchlistList" class="list"></div>
+  </div>
+
   <div class="grid" style="margin-top:14px">
     <div class="card">
-      <h2 id="plannerSection">7) Risk Planner</h2>
+      <h2 id="plannerSection">8) Risk Planner</h2>
       <div class="row3">
         <div><label>Entry</label><input id="entryPrice" type="number" step="0.01" /></div>
         <div><label>Stop</label><input id="stopPrice" type="number" step="0.01" /></div>
@@ -265,7 +267,7 @@
 
   <div class="card" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="diarySection" style="margin-bottom:0">8) Trade Diary</h2>
+      <h2 id="diarySection" style="margin-bottom:0">9) Trade Diary</h2>
       <div class="actions" style="margin-top:0">
         <button class="secondary" id="jumpToDiaryBtn">Diary Section</button>
         <button class="secondary" id="exportDiaryBtn">Export Diary JSON</button>

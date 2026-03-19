@@ -36,6 +36,7 @@ const DEFAULT_STATE = {
   universeMode:'core8',
   tickers:[],
   recentTickers:[],
+  watchlist:[],
   scannerResults:[],
   cards:[],
   tradeDiary:[],
@@ -778,6 +779,7 @@ function loadState(){
   state.tickers = parseTickers((state.tickers || []).join('\n'));
   state.universeMode = normalizeUniverseMode(state.universeMode) || defaultUniverseModeForTickers(state.tickers);
   state.recentTickers = uniqueTickers(state.recentTickers || []);
+  state.watchlist = (state.watchlist || []).map(normalizeWatchlistEntry).filter(Boolean);
   state.scannerResults = (state.scannerResults || []).map(normalizeCard).filter(card => card.ticker);
   state.cards = (state.cards || []).map(normalizeCard).filter(card => card.ticker);
   state.tradeDiary = (state.tradeDiary || []).map(normalizeTradeRecord);
@@ -808,6 +810,7 @@ function loadState(){
   renderScannerResults();
   renderCards();
   renderScannerRulesPanel();
+  renderWatchlist();
   renderTradeDiary();
   refreshRiskContextForActiveSetups();
 }
@@ -836,43 +839,102 @@ function updateRecentTickers(tickers){
 
 function tickerSearchState(){
   const query = normalizeTicker(($('tickerSearch') && $('tickerSearch').value) || '');
-  if(!query) return {query:'', valid:false, inWatchlist:false, inRecent:false};
+  if(!query) return {query:'', valid:false, inUniverse:false};
   return {
     query,
     valid:validateTickerSymbol(query),
-    inWatchlist:state.tickers.includes(query),
-    inRecent:(state.recentTickers || []).includes(query)
+    inUniverse:state.tickers.includes(query)
   };
 }
 
 function renderTickerQuickLists(){
-  const watchlistBox = $('watchlistQuickList');
-  const recentBox = $('recentTickerList');
-  if(!watchlistBox || !recentBox) return;
+  const scannerUniverseBox = $('scannerUniverseQuickList');
+  if(!scannerUniverseBox) return;
   if(!state.tickers.length){
-    watchlistBox.innerHTML = '<div class="quickchip empty">Using the Curated Core 8 fallback universe. Add a ticker above to switch into watchlist/manual mode.</div>';
+    scannerUniverseBox.innerHTML = '<div class="quickchip empty">Using the Curated Core 8 fallback universe. Add a ticker above to switch into manual scanner mode.</div>';
   }else{
-    watchlistBox.innerHTML = state.tickers.map(ticker => (
+    scannerUniverseBox.innerHTML = state.tickers.map(ticker => (
       `<div class="quickchip active"><span class="chiplabel">${escapeHtml(ticker)}</span><button class="danger" data-act="quick-remove" data-ticker="${escapeHtml(ticker)}">Remove</button></div>`
     )).join('');
   }
-  const search = tickerSearchState();
-  const recent = uniqueTickers([search.valid && !search.inWatchlist ? search.query : '', ...(state.recentTickers || [])]).slice(0, 12);
-  if(!recent.length){
-    recentBox.innerHTML = '<div class="quickchip empty">Recent tickers will appear here after you add them.</div>';
-  }else{
-    recentBox.innerHTML = recent.map(ticker => {
-      const inWatchlist = state.tickers.includes(ticker);
-      const isSearchMatch = search.query === ticker;
-      const label = isSearchMatch && !inWatchlist ? 'Add now' : (inWatchlist ? 'In watchlist' : 'Add');
-      return `<div class="quicklaneitem"><div class="quickchip ${inWatchlist ? 'active' : ''}"><span class="chiplabel">${escapeHtml(ticker)}</span><button class="${inWatchlist ? 'secondary' : 'primary'}" data-act="quick-add" data-ticker="${escapeHtml(ticker)}" ${inWatchlist ? 'disabled' : ''}>${label}</button></div></div>`;
-    }).join('');
-  }
-  watchlistBox.querySelectorAll('[data-act="quick-remove"]').forEach(button => {
+  scannerUniverseBox.querySelectorAll('[data-act="quick-remove"]').forEach(button => {
     button.onclick = () => removeTicker(button.getAttribute('data-ticker') || '');
   });
-  recentBox.querySelectorAll('[data-act="quick-add"]').forEach(button => {
-    button.onclick = () => addTicker(button.getAttribute('data-ticker') || '');
+}
+
+function normalizeWatchlistEntry(entry){
+  const normalized = {
+    ticker:normalizeTicker(entry && entry.ticker),
+    dateAdded:String(entry && entry.dateAdded || todayIsoDate()).slice(0, 10),
+    scoreWhenAdded:Number.isFinite(Number(entry && entry.scoreWhenAdded)) ? Number(entry.scoreWhenAdded) : null,
+    verdictWhenAdded:entry && entry.verdictWhenAdded ? normalizeImportedStatus(entry.verdictWhenAdded) : '',
+    expiryAfterTradingDays:Number.isFinite(Number(entry && entry.expiryAfterTradingDays)) ? Math.max(1, Number(entry.expiryAfterTradingDays)) : 5
+  };
+  return normalized.ticker ? normalized : null;
+}
+
+function addToWatchlist(tickerData){
+  const entry = normalizeWatchlistEntry(tickerData);
+  if(!entry) return null;
+  const existingIndex = (state.watchlist || []).findIndex(item => item.ticker === entry.ticker);
+  if(existingIndex >= 0) state.watchlist.splice(existingIndex, 1, entry);
+  else state.watchlist.unshift(entry);
+  state.watchlist = (state.watchlist || []).map(normalizeWatchlistEntry).filter(Boolean).sort((a, b) => b.dateAdded.localeCompare(a.dateAdded) || a.ticker.localeCompare(b.ticker));
+  persistState();
+  renderWatchlist();
+  return entry;
+}
+
+function removeFromWatchlist(ticker){
+  const symbol = normalizeTicker(ticker);
+  state.watchlist = (state.watchlist || []).filter(entry => entry.ticker !== symbol);
+  persistState();
+  renderWatchlist();
+}
+
+function countTradingDaysBetween(startDate, endDate){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(startDate || '') || !/^\d{4}-\d{2}-\d{2}$/.test(endDate || '')) return 0;
+  const start = new Date(`${startDate}T12:00:00Z`);
+  const end = new Date(`${endDate}T12:00:00Z`);
+  if(end <= start) return 0;
+  let count = 0;
+  const cursor = new Date(start);
+  while(cursor < end){
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const day = cursor.getUTCDay();
+    if(day !== 0 && day !== 6 && cursor <= end) count += 1;
+  }
+  return count;
+}
+
+function getTradingDaysRemaining(entry){
+  const normalized = normalizeWatchlistEntry(entry);
+  if(!normalized) return 0;
+  const expiryDate = tradingDaysFrom(normalized.dateAdded, normalized.expiryAfterTradingDays);
+  return countTradingDaysBetween(todayIsoDate(), expiryDate);
+}
+
+function purgeExpiredWatchlistEntries(){
+  state.watchlist = (state.watchlist || []).map(normalizeWatchlistEntry).filter(Boolean).filter(entry => getTradingDaysRemaining(entry) > 0);
+}
+
+function renderWatchlist(){
+  purgeExpiredWatchlistEntries();
+  const box = $('watchlistList');
+  if(!box) return;
+  if(!state.watchlist || !state.watchlist.length){
+    box.innerHTML = '<div class="summary">No watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+    return;
+  }
+  box.innerHTML = '';
+  state.watchlist.forEach(entry => {
+    const remaining = getTradingDaysRemaining(entry);
+    const div = document.createElement('div');
+    div.className = 'resultcompact';
+    div.innerHTML = `<div class="resulthead rankedgrid"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="resultsummary"><div><strong>${escapeHtml(entry.verdictWhenAdded || 'Watchlist')}</strong></div><div class="tiny">Added ${escapeHtml(entry.dateAdded)}</div><div class="tiny">Score when added: ${escapeHtml(entry.scoreWhenAdded == null ? '-' : String(entry.scoreWhenAdded))}</div><div class="tiny">Trading days remaining: ${escapeHtml(String(remaining))}</div></div><div class="score ${scoreClass(Number.isFinite(entry.scoreWhenAdded) ? entry.scoreWhenAdded : 0)}">${escapeHtml(entry.scoreWhenAdded == null ? '-' : `${entry.scoreWhenAdded}/10`)}</div><div class="resultreview inline-status"><button class="primary" data-act="review">Review</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
+    div.querySelector('[data-act="review"]').onclick = () => openRankedResultInReview(entry.ticker);
+    div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
+    box.appendChild(div);
   });
 }
 
@@ -1095,8 +1157,8 @@ function updateTickerSearchStatus(){
     setStatus('tickerSearchStatus', `<span class="tiny">Add one ticker quickly, or search ${escapeHtml(currentProviderLabel())} symbols below.</span>`);
   }else if(!search.valid){
     setStatus('tickerSearchStatus', `<span class="badtext">${escapeHtml(search.query)} is not a valid ticker format.</span>`);
-  }else if(search.inWatchlist){
-    setStatus('tickerSearchStatus', `<span class="warntext">${escapeHtml(search.query)} is already in the watchlist.</span>`);
+  }else if(search.inUniverse){
+    setStatus('tickerSearchStatus', `<span class="warntext">${escapeHtml(search.query)} is already in the scanner universe.</span>`);
   }else{
     setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(search.query)} is ready to add.</span>`);
   }
@@ -1180,7 +1242,7 @@ function addTicker(rawTicker, meta){
     return;
   }
   if(state.tickers.includes(ticker)){
-    setStatus('tickerSearchStatus', `<span class="warntext">${escapeHtml(ticker)} is already in the watchlist.</span>`);
+    setStatus('tickerSearchStatus', `<span class="warntext">${escapeHtml(ticker)} is already in the scanner universe.</span>`);
     if(input) input.select();
     return;
   }
@@ -1195,7 +1257,7 @@ function addTicker(rawTicker, meta){
   renderTickerQuickLists();
   renderScannerResults();
   renderCards();
-  setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`);
+  setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the scanner universe.</span>`);
 }
 
 function addTickerFromSearch(){
@@ -2135,53 +2197,6 @@ function applyMarketDataToCard(card, data){
   card.rsi14 = numericOrNull(data.rsi14);
 }
 
-function ensureWatchTracking(card, days = DEFAULT_WATCH_TRADING_DAYS){
-  if(!card) return;
-  const safeDays = days === EXTENDED_WATCH_TRADING_DAYS ? EXTENDED_WATCH_TRADING_DAYS : DEFAULT_WATCH_TRADING_DAYS;
-  const firstFlaggedAt = card.watchTracking && /^\d{4}-\d{2}-\d{2}$/.test(card.watchTracking.firstFlaggedAt || '') ? card.watchTracking.firstFlaggedAt : todayIsoDate();
-  card.watchTracking = {
-    firstFlaggedAt,
-    expiryDate:tradingDaysFrom(firstFlaggedAt, safeDays),
-    extensionDays:safeDays,
-    pinned:!!(card.watchTracking && card.watchTracking.pinned),
-    manualRetain:!!(card.watchTracking && card.watchTracking.manualRetain),
-    dailyChecks:Array.isArray(card.watchTracking && card.watchTracking.dailyChecks) ? card.watchTracking.dailyChecks : [],
-    lastCheckedDate:String(card.watchTracking && card.watchTracking.lastCheckedDate || '')
-  };
-}
-
-function recordDailyWatchCheck(card){
-  if(!card || !card.watchTracking) return;
-  const date = todayIsoDate();
-  card.watchTracking.lastCheckedDate = date;
-  card.watchTracking.dailyChecks = (card.watchTracking.dailyChecks || []).filter(item => item && item.date !== date);
-  card.watchTracking.dailyChecks.unshift({date, status:card.status, score:card.score});
-  card.watchTracking.dailyChecks = card.watchTracking.dailyChecks.slice(0, EXTENDED_WATCH_TRADING_DAYS);
-}
-
-function updateWatchTracking(card){
-  if(!card) return;
-  const verdict = card.chartVerdict || card.status;
-  if(verdict === 'Watch'){
-    ensureWatchTracking(card, card.watchTracking && card.watchTracking.extensionDays === EXTENDED_WATCH_TRADING_DAYS ? EXTENDED_WATCH_TRADING_DAYS : DEFAULT_WATCH_TRADING_DAYS);
-    recordDailyWatchCheck(card);
-  }else if(card.watchTracking){
-    recordDailyWatchCheck(card);
-  }
-}
-
-function pruneExpiredWatches(){
-  const today = todayIsoDate();
-  state.cards = state.cards.filter(card => {
-    if(!card.watchTracking || !card.watchTracking.expiryDate) return true;
-    if((card.chartVerdict || card.status) !== 'Watch') return true;
-    if(card.watchTracking.pinned || card.watchTracking.manualRetain) return true;
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(card.watchTracking.expiryDate)) return true;
-    if(card.watchTracking.expiryDate >= today) return true;
-    return false;
-  });
-}
-
 async function refreshCardMarketData(ticker, options = {}){
   const existingCard = getCard(ticker);
   const existingResult = getScannerResult(ticker);
@@ -2311,7 +2326,6 @@ async function refreshCardMarketData(ticker, options = {}){
     rr_state:rewardRisk.rrState,
     position_size:riskFit.position_size
   });
-  if(existingCard) updateWatchTracking(card);
   return {card, scan};
 }
 
@@ -2405,11 +2419,11 @@ async function refreshMarketDataForTickers(tickers, options = {}){
   }else if(unique.length){
     setStatus('apiStatus', `<span class="ok">Scanner refreshed ${unique.length} ticker${unique.length === 1 ? '' : 's'}.</span>`);
   }
-  pruneExpiredWatches();
   persistState();
   renderTickerQuickLists();
   renderScannerResults();
   renderCards();
+  renderWatchlist();
   renderScannerRulesPanel();
   return {done, failed, rejected};
 }
@@ -2974,15 +2988,18 @@ function statusRank(status){
   return 3;
 }
 
-function watchTrackingText(card){
-  if(!card.watchTracking) return '';
-  const checks = Array.isArray(card.watchTracking.dailyChecks) ? card.watchTracking.dailyChecks.length : 0;
-  return `Watching from ${escapeHtml(card.watchTracking.firstFlaggedAt || '-')}, expires ${escapeHtml(card.watchTracking.expiryDate || '-')} (${checks} daily checks logged).`;
-}
-
 function openRankedResultInReview(ticker){
   const result = getScannerResult(ticker);
   if(!result){
+    let card = getCard(ticker);
+    if(!card){
+      card = baseCard(ticker);
+      const meta = getStoredTickerMeta(ticker);
+      if(meta) applyTickerMetaToCard(card, meta);
+      state.cards.push(card);
+      persistState();
+      renderCards();
+    }
     loadCard(ticker);
     return;
   }
@@ -3152,13 +3169,12 @@ function renderCards(){
     const companyLine = card.companyName ? `<div class="tiny">${escapeHtml(card.companyName)}${card.exchange ? ` • ${escapeHtml(card.exchange)}` : ''}</div>` : '';
     const marketDataLine = card.marketData ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} • 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} • 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} • 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} • Vol ${escapeHtml(formatPercent(card.volume && card.avgVolume30d ? ((card.volume / card.avgVolume30d) - 1) * 100 : null))} vs avg • RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>` : '<div class="tiny">Market data pending...</div>';
     const performanceLine = card.marketData ? `<div class="tiny">1W ${escapeHtml(formatPercent(card.perf1w))} • 1M ${escapeHtml(formatPercent(card.perf1m))} • 3M ${escapeHtml(formatPercent(card.perf3m))} • 6M ${escapeHtml(formatPercent(card.perf6m))} • YTD ${escapeHtml(formatPercent(card.perfYtd))}</div>` : '';
-    const watchLine = card.watchTracking ? `<div class="tiny">${watchTrackingText(card)}</div>` : '';
     const suitabilityLine = card.source === 'scanner' && card.analysis && card.analysis.suitability
       ? `<div class="tiny">Trend ${card.analysis.suitability.trend}/4 • Pullback ${card.analysis.suitability.pullback}/3 • Trade ${card.analysis.suitability.tradeQuality}/3</div>`
       : '';
     const freshnessAge = relativeAgeLabel(card.scannerUpdatedAt);
     const freshnessBadge = card.scannerUpdatedAt ? `<span class="badge ${isFreshScanTimestamp(card.scannerUpdatedAt) ? 'freshness-fresh' : 'freshness-stale'}">${isFreshScanTimestamp(card.scannerUpdatedAt) ? 'Fresh' : 'Stale'}${freshnessAge ? ` • ${escapeHtml(freshnessAge)}` : ''}</span>` : '';
-    const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>${freshnessBadge ? `<div class="inline-status">${freshnessBadge}</div>` : ''}${companyLine}${marketDataLine}${performanceLine}${suitabilityLine}${watchLine}`;
+    const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>${freshnessBadge ? `<div class="inline-status">${freshnessBadge}</div>` : ''}${companyLine}${marketDataLine}${performanceLine}${suitabilityLine}`;
     const scoreLabel = `${card.score}/10`;
     const combinedStatus = combinedStatusLabel(card.chartVerdict || card.status, card.riskStatus);
     const rrRatio = numericOrNull(card.rrRatio ?? (card.analysis && card.analysis.rr_ratio) ?? (card.analysis && card.analysis.reward_risk));
@@ -3168,7 +3184,7 @@ function renderCards(){
     const riskMeta = card.analysis ? `<div class="tiny">Risk ${escapeHtml(riskStatusLabel(card.riskStatus || card.analysis.risk_status || 'plan_missing'))} • Max Loss ${escapeHtml(card.analysis.max_loss || fmtPrice(currentMaxLoss()))} • Risk/Share ${escapeHtml(card.analysis.risk_per_share || '-')} • Reward/Share ${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')} • Position ${escapeHtml(String(card.analysis.position_size || '-'))}</div><div class="inline-status"><span class="badge ${rrStateClass(rrState)}">${escapeHtml(rrStateLabel(rrState))}</span><span class="tiny">R:R ${escapeHtml(Number.isFinite(rrRatio) ? rrRatio.toFixed(2) : '-')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>` : '';
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(card.chartVerdict || card.status)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button>${(card.chartVerdict || card.status) === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button></div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${card.ticker}">${renderCardStatusLine(card, loading, analysisBusy)}</div></div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(card.chartVerdict || card.status)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button></div><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button><button class="secondary" data-act="add-watchlist">Add to Watchlist</button></div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${card.ticker}">${renderCardStatusLine(card, loading, analysisBusy)}</div></div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(card.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeCard(card.ticker);
     div.querySelector('[data-act="analyse"]').onclick = () => { if(!uiState.loadingTicker) analyseSetup(card.ticker); };
@@ -3181,35 +3197,20 @@ function renderCards(){
       const statusBox = $(`cardStatus-${card.ticker}`);
       if(statusBox) statusBox.innerHTML = '<span class="ok">Trade record saved to the diary.</span>';
     };
-    const extendWatchBtn = div.querySelector('[data-act="extend-watch"]');
-    if(extendWatchBtn){
-      extendWatchBtn.onclick = () => {
-        const liveCard = upsertCard(card.ticker);
-        ensureWatchTracking(liveCard, EXTENDED_WATCH_TRADING_DAYS);
-        persistState();
-        renderCards();
-      };
-    }
-    const pinBtn = div.querySelector('[data-act="toggle-pin"]');
-    if(pinBtn){
-      pinBtn.onclick = () => {
-        const liveCard = upsertCard(card.ticker);
-        ensureWatchTracking(liveCard, liveCard.watchTracking && liveCard.watchTracking.extensionDays || DEFAULT_WATCH_TRADING_DAYS);
-        liveCard.watchTracking.pinned = !liveCard.watchTracking.pinned;
-        persistState();
-        renderCards();
-      };
-    }
-    const retainBtn = div.querySelector('[data-act="toggle-retain"]');
-    if(retainBtn){
-      retainBtn.onclick = () => {
-        const liveCard = upsertCard(card.ticker);
-        ensureWatchTracking(liveCard, liveCard.watchTracking && liveCard.watchTracking.extensionDays || DEFAULT_WATCH_TRADING_DAYS);
-        liveCard.watchTracking.manualRetain = !liveCard.watchTracking.manualRetain;
-        persistState();
-        renderCards();
-      };
-    }
+    div.querySelector('[data-act="add-watchlist"]').onclick = () => {
+      const liveCard = upsertCard(card.ticker);
+      const notesEl = $(`notes-${card.ticker}`);
+      if(notesEl) liveCard.notes = notesEl.value;
+      const entry = addToWatchlist({
+        ticker:liveCard.ticker,
+        dateAdded:todayIsoDate(),
+        scoreWhenAdded:liveCard.score,
+        verdictWhenAdded:liveCard.chartVerdict || liveCard.status || '',
+        expiryAfterTradingDays:5
+      });
+      const statusBox = $(`cardStatus-${card.ticker}`);
+      if(statusBox && entry) statusBox.innerHTML = '<span class="ok">Ticker saved to the watchlist for 5 trading days.</span>';
+    };
     const notesField = div.querySelector('[data-act="notes"]');
     notesField.addEventListener('input', event => {
       const liveCard = upsertCard(card.ticker);
@@ -3489,8 +3490,9 @@ click('clearBtn', () => {
   clearOcrReview();
   renderScannerResults();
   renderCards();
+  renderWatchlist();
   resetReview();
-  setStatus('inputStatus', 'Watchlist cleared.');
+  setStatus('inputStatus', 'Scanner universe cleared.');
   updateTickerSearchStatus();
 });
 click('resetAllBtn', resetAllData);
