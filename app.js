@@ -158,6 +158,24 @@ function evaluateRiskFit({entry, stop, account_size, risk_percent, max_loss_over
   return {max_loss, risk_per_share, position_size:whole_shares_only === false ? Number(position_size.toFixed(2)) : position_size, risk_status:'fits_risk'};
 }
 
+function evaluateRewardRisk(entry, stop, firstTarget){
+  const numericEntry = numericOrNull(entry);
+  const numericStop = numericOrNull(stop);
+  const numericFirstTarget = numericOrNull(firstTarget);
+  if(!Number.isFinite(numericEntry) || !Number.isFinite(numericStop) || !Number.isFinite(numericFirstTarget)){
+    return {valid:false, riskPerShare:null, rewardPerShare:null, rrRatio:null, rrState:'invalid'};
+  }
+  const riskPerShare = numericEntry - numericStop;
+  const rewardPerShare = numericFirstTarget - numericEntry;
+  if(!Number.isFinite(riskPerShare) || !Number.isFinite(rewardPerShare) || riskPerShare <= 0 || rewardPerShare <= 0){
+    return {valid:false, riskPerShare, rewardPerShare, rrRatio:null, rrState:'invalid'};
+  }
+  const rrRatio = rewardPerShare / riskPerShare;
+  if(rrRatio >= 2) return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'strong'};
+  if(rrRatio >= 1.5) return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'acceptable'};
+  return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'weak'};
+}
+
 function numericOrNull(value){
   if(value === null || value === undefined || value === '') return null;
   const number = Number(value);
@@ -557,6 +575,10 @@ function createTradeRecord(values){
     firstTarget:'',
     maxLoss:'',
     riskPerShare:'',
+    rewardPerShare:'',
+    rrRatio:'',
+    rrState:'',
+    firstTargetTooClose:false,
     positionSize:'',
     riskStatus:'',
     accountSize:'',
@@ -579,6 +601,10 @@ function normalizeTradeRecord(record){
   normalized.firstTarget = String(normalized.firstTarget || '');
   normalized.maxLoss = String(normalized.maxLoss || '');
   normalized.riskPerShare = String(normalized.riskPerShare || '');
+  normalized.rewardPerShare = String(normalized.rewardPerShare || '');
+  normalized.rrRatio = String(normalized.rrRatio || '');
+  normalized.rrState = String(normalized.rrState || '');
+  normalized.firstTargetTooClose = !!normalized.firstTargetTooClose;
   normalized.positionSize = String(normalized.positionSize || '');
   normalized.riskStatus = String(normalized.riskStatus || '');
   normalized.accountSize = String(normalized.accountSize || '');
@@ -623,6 +649,10 @@ function baseCard(ticker){
     trendStatus:'',
     pullbackStatus:'',
     pullbackType:'',
+    rewardPerShare:null,
+    rrRatio:null,
+    rrState:'',
+    firstTargetTooClose:false,
     perf1w:null,
     perf1m:null,
     perf3m:null,
@@ -664,6 +694,10 @@ function normalizeCard(card){
   normalized.riskStatus = String(normalized.riskStatus || 'plan_missing');
   normalized.manualReview = normalized.manualReview && typeof normalized.manualReview === 'object' ? normalized.manualReview : null;
   normalized.pullbackType = String(normalized.pullbackType || '');
+  normalized.rewardPerShare = numericOrNull(normalized.rewardPerShare);
+  normalized.rrRatio = numericOrNull(normalized.rrRatio);
+  normalized.rrState = String(normalized.rrState || '');
+  normalized.firstTargetTooClose = !!normalized.firstTargetTooClose;
   normalized.marketData = normalized.marketData && typeof normalized.marketData === 'object' ? normalized.marketData : null;
   normalized.watchTracking = normalized.watchTracking && typeof normalized.watchTracking === 'object' ? {
     firstFlaggedAt:String(normalized.watchTracking.firstFlaggedAt || ''),
@@ -942,6 +976,7 @@ function getCanonicalTradeSnapshot(cardOrTicker){
   const stop = normalized.lastAnalysis && normalized.lastAnalysis.stop ? normalized.lastAnalysis.stop : (normalized.stop || (Number.isFinite(derivedPlan.stop) ? derivedPlan.stop.toFixed(2) : ''));
   const firstTarget = normalized.lastAnalysis && normalized.lastAnalysis.first_target ? normalized.lastAnalysis.first_target : (normalized.target || (Number.isFinite(derivedPlan.target) ? derivedPlan.target.toFixed(2) : ''));
   const riskFit = evaluateRiskFit({entry, stop, ...currentRiskSettings()});
+  const rewardRisk = evaluateRewardRisk(entry, stop, firstTarget);
   return {
     ticker:normalized.ticker,
     chartVerdict:normalized.chartVerdict || normalized.status || 'Watch',
@@ -952,6 +987,10 @@ function getCanonicalTradeSnapshot(cardOrTicker){
     firstTarget:String(firstTarget || ''),
     maxLoss:Number.isFinite(riskFit.max_loss) ? String(Number(riskFit.max_loss.toFixed(2))) : '',
     riskPerShare:Number.isFinite(riskFit.risk_per_share) ? String(Number(riskFit.risk_per_share.toFixed(2))) : '',
+    rewardPerShare:Number.isFinite(rewardRisk.rewardPerShare) ? String(Number(rewardRisk.rewardPerShare.toFixed(2))) : '',
+    rrRatio:Number.isFinite(rewardRisk.rrRatio) ? String(Number(rewardRisk.rrRatio.toFixed(2))) : '',
+    rrState:rewardRisk.rrState,
+    firstTargetTooClose:rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false,
     positionSize:String(riskFit.position_size || ''),
     riskStatus:riskFit.risk_status,
     accountSize:String(state.accountSize || ''),
@@ -1010,7 +1049,7 @@ function renderTradeDiary(){
   state.tradeDiary.forEach(record => {
     const div = document.createElement('div');
     div.className = 'diarycard';
-    div.innerHTML = `<div class="diaryhead"><div class="diarymeta"><span class="badge ${statusClass(record.chartVerdict || record.verdict)}">${escapeHtml(record.chartVerdict || record.verdict)}</span><strong>${escapeHtml(record.ticker || 'Ticker')}</strong><span class="tiny">${escapeHtml(record.date || '')}</span></div><button class="danger" data-act="delete-trade">Delete</button></div><div class="tiny">Quality ${escapeHtml(record.qualityScore || '-')} • ${escapeHtml(riskStatusLabel(record.riskStatus || 'plan_missing'))} • Max Loss ${escapeHtml(record.maxLoss || '-')} • Position ${escapeHtml(record.positionSize || '-')} • Account ${escapeHtml(record.accountSize || '-')}</div><div class="diarygrid"><div><label>Date</label><input data-field="date" type="date" value="${escapeHtml(record.date)}" /></div><div><label>Ticker</label><input data-field="ticker" value="${escapeHtml(record.ticker)}" placeholder="AAPL" /></div><div><label>Verdict</label><select data-field="verdict"><option ${record.verdict === 'Watch' ? 'selected' : ''}>Watch</option><option ${record.verdict === 'Near Entry' ? 'selected' : ''}>Near Entry</option><option ${record.verdict === 'Entry' ? 'selected' : ''}>Entry</option><option ${record.verdict === 'Avoid' ? 'selected' : ''}>Avoid</option></select></div><div><label>Outcome</label><select data-field="outcome"><option value="" ${record.outcome === '' ? 'selected' : ''}>Not set</option><option ${record.outcome === 'Open' ? 'selected' : ''}>Open</option><option ${record.outcome === 'Win' ? 'selected' : ''}>Win</option><option ${record.outcome === 'Loss' ? 'selected' : ''}>Loss</option><option ${record.outcome === 'Scratch' ? 'selected' : ''}>Scratch</option><option ${record.outcome === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div></div><div class="diarygrid"><div><label>Entry</label><input data-field="entry" value="${escapeHtml(record.entry)}" placeholder="123.45" /></div><div><label>Stop</label><input data-field="stop" value="${escapeHtml(record.stop)}" placeholder="119.80" /></div><div><label>First Target</label><input data-field="firstTarget" value="${escapeHtml(record.firstTarget)}" placeholder="130.00" /></div><div><label>Lesson Learned</label><input data-field="lesson" value="${escapeHtml(record.lesson)}" placeholder="Wait for cleaner bounce" /></div></div><div><label>Notes</label><textarea data-field="notes" placeholder="Why this setup was worth tracking.">${escapeHtml(record.notes)}</textarea></div>`;
+    div.innerHTML = `<div class="diaryhead"><div class="diarymeta"><span class="badge ${statusClass(record.chartVerdict || record.verdict)}">${escapeHtml(record.chartVerdict || record.verdict)}</span><strong>${escapeHtml(record.ticker || 'Ticker')}</strong><span class="tiny">${escapeHtml(record.date || '')}</span></div><button class="danger" data-act="delete-trade">Delete</button></div><div class="tiny">Quality ${escapeHtml(record.qualityScore || '-')} • ${escapeHtml(riskStatusLabel(record.riskStatus || 'plan_missing'))} • ${escapeHtml(rrStateLabel(record.rrState || 'invalid'))} ${escapeHtml(record.rrRatio || '-')} • Max Loss ${escapeHtml(record.maxLoss || '-')} • Position ${escapeHtml(record.positionSize || '-')} • Account ${escapeHtml(record.accountSize || '-')}</div><div class="diarygrid"><div><label>Date</label><input data-field="date" type="date" value="${escapeHtml(record.date)}" /></div><div><label>Ticker</label><input data-field="ticker" value="${escapeHtml(record.ticker)}" placeholder="AAPL" /></div><div><label>Verdict</label><select data-field="verdict"><option ${record.verdict === 'Watch' ? 'selected' : ''}>Watch</option><option ${record.verdict === 'Near Entry' ? 'selected' : ''}>Near Entry</option><option ${record.verdict === 'Entry' ? 'selected' : ''}>Entry</option><option ${record.verdict === 'Avoid' ? 'selected' : ''}>Avoid</option></select></div><div><label>Outcome</label><select data-field="outcome"><option value="" ${record.outcome === '' ? 'selected' : ''}>Not set</option><option ${record.outcome === 'Open' ? 'selected' : ''}>Open</option><option ${record.outcome === 'Win' ? 'selected' : ''}>Win</option><option ${record.outcome === 'Loss' ? 'selected' : ''}>Loss</option><option ${record.outcome === 'Scratch' ? 'selected' : ''}>Scratch</option><option ${record.outcome === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div></div><div class="diarygrid"><div><label>Entry</label><input data-field="entry" value="${escapeHtml(record.entry)}" placeholder="123.45" /></div><div><label>Stop</label><input data-field="stop" value="${escapeHtml(record.stop)}" placeholder="119.80" /></div><div><label>First Target</label><input data-field="firstTarget" value="${escapeHtml(record.firstTarget)}" placeholder="130.00" /></div><div><label>Lesson Learned</label><input data-field="lesson" value="${escapeHtml(record.lesson)}" placeholder="Wait for cleaner bounce" /></div></div><div><label>Notes</label><textarea data-field="notes" placeholder="Why this setup was worth tracking.">${escapeHtml(record.notes)}</textarea></div>`;
     div.querySelector('[data-act="delete-trade"]').onclick = () => deleteTradeRecord(record.id);
     div.querySelectorAll('[data-field]').forEach(field => {
       field.addEventListener('change', event => updateTradeRecord(record.id, event.target.getAttribute('data-field'), event.target.value));
@@ -1250,6 +1289,19 @@ function riskStatusLabel(riskStatus){
   if(riskStatus === 'too_wide') return 'Too Wide';
   if(riskStatus === 'invalid_plan') return 'Invalid Plan';
   return 'Plan Missing';
+}
+
+function rrStateLabel(rrState){
+  if(rrState === 'strong') return 'Strong R:R';
+  if(rrState === 'acceptable') return 'Acceptable R:R';
+  if(rrState === 'weak') return 'Weak R:R';
+  return 'Invalid R:R';
+}
+
+function rrStateClass(rrState){
+  if(rrState === 'strong') return 's-hi';
+  if(rrState === 'acceptable') return 's-mid';
+  return 's-low';
 }
 
 function combinedStatusLabel(chartVerdict, riskStatus){
@@ -1596,13 +1648,16 @@ async function renderScannerRulesPanel(){
       '- Price below 200 MA',
       '- 50 MA below 200 MA',
       '- Structure clearly broken',
+      '- Plan missing or invalid',
+      '- Risk does not fit the current account rule',
+      '- Reward:risk to first target below 1.5R',
       '',
       '<strong>Soft ranking signals</strong>',
       '- 20 MA touch or bounce',
       '- Rising 50 MA structure',
       '- Room for a clean swing target',
       '- Pullback quality and stabilisation',
-      '- Risk fit for GBP 40 max loss'
+      '- Stronger reward:risk gets ranked higher'
     ].join('\n');
   }
   if(debugBox){
@@ -1726,7 +1781,7 @@ function deriveTradePlan(data, scanType = '20MA'){
   const price = numericOrNull(data.price);
   const sma20 = numericOrNull(data.sma20);
   const sma50 = numericOrNull(data.sma50);
-  if(!Number.isFinite(price) || !Number.isFinite(sma20) || !Number.isFinite(sma50)) return {entry:null, stop:null, target:null, riskPerShare:null, rr:null, positionSize:0};
+  if(!Number.isFinite(price) || !Number.isFinite(sma20) || !Number.isFinite(sma50)) return {entry:null, stop:null, target:null, riskPerShare:null, rewardPerShare:null, rr:null, rrState:'invalid', rrValid:false, firstTargetTooClose:false, positionSize:0};
   const support = scanType === '50MA' ? sma50 : sma20;
   const backupSupport = scanType === '50MA' ? sma20 : sma50;
   const entry = Math.max(price, support);
@@ -1739,13 +1794,18 @@ function deriveTradePlan(data, scanType = '20MA'){
   const riskPerShare = Number.isFinite(riskFit.risk_per_share) ? riskFit.risk_per_share : null;
   const priorHigh = priorHighTarget(data, scanType);
   const target = Number.isFinite(priorHigh) ? priorHigh : (Number.isFinite(riskPerShare) ? Math.max(entry + (riskPerShare * 2), entry * 1.05) : null);
-  const rr = Number.isFinite(riskPerShare) && target > entry ? (target - entry) / riskPerShare : null;
+  const rewardRisk = evaluateRewardRisk(entry, stop, target);
   return {
     entry,
     stop,
     target,
     riskPerShare,
-    rr,
+    rewardPerShare:rewardRisk.rewardPerShare,
+    rr:rewardRisk.rrRatio,
+    rrRatio:rewardRisk.rrRatio,
+    rrState:rewardRisk.rrState,
+    rrValid:rewardRisk.valid,
+    firstTargetTooClose:rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false,
     positionSize:riskFit.position_size,
     maxLoss:riskFit.max_loss,
     riskStatus:riskFit.risk_status
@@ -1822,6 +1882,35 @@ function rankedStatusFromScore(score){
   if(score >= 6) return 'Near Entry';
   if(score >= 4) return 'Watch';
   return 'Avoid';
+}
+
+function determineScannerVerdict({technicalValid, score, checks, riskFit, rewardRisk}){
+  if(!technicalValid || !Number.isFinite(score) || score < 4) return 'Avoid';
+  if(riskFit.risk_status !== 'fits_risk') return 'Avoid';
+  if(!rewardRisk.valid || rewardRisk.rrState === 'invalid' || rewardRisk.rrState === 'weak') return 'Avoid';
+  if(!(checks.stabilising || checks.bounce)) return 'Watch';
+  if(rewardRisk.rrState === 'strong') return 'Entry';
+  return 'Near Entry';
+}
+
+function resultSortScore(card){
+  const verdict = String(card && (card.chartVerdict || card.status) || 'Watch');
+  const riskStatus = String(card && card.riskStatus || '');
+  const rrRatio = numericOrNull(card && (card.rrRatio ?? (card.analysis && card.analysis.rr_ratio) ?? (card.analysis && card.analysis.reward_risk)));
+  const verdictRank = verdict === 'Entry' ? 4 : (verdict === 'Near Entry' ? 3 : (verdict === 'Watch' ? 2 : (verdict === 'Manual Review' ? 1 : 0)));
+  const riskRank = riskStatus === 'fits_risk' ? 2 : (riskStatus === 'too_wide' ? 1 : 0);
+  return (verdictRank * 1000) + (riskRank * 100) + (Number.isFinite(rrRatio) ? rrRatio : 0);
+}
+
+function buildVerdictReason({suitability, scan, riskFit, rewardRisk, checks}){
+  if(scan.status === 'Avoid') return scan.summary || 'Technical structure is invalid for this setup.';
+  if(riskFit.risk_status === 'plan_missing') return 'Trade plan is incomplete. Define entry, stop, and first target.';
+  if(riskFit.risk_status === 'invalid_plan') return 'Trade plan is invalid. Entry must sit above stop.';
+  if(riskFit.risk_status === 'too_wide') return 'Risk does not fit the current account rule.';
+  if(!rewardRisk.valid) return 'Reward:risk is invalid because the first target is not usable.';
+  if(rewardRisk.rrState === 'weak') return `First target is too close at ${rewardRisk.rrRatio.toFixed(2)}R.`;
+  if(!(checks.stabilising || checks.bounce)) return 'Technicals are promising, but stabilisation or bounce is not confirmed yet.';
+  return suitability ? suitability.summary : 'Candidate remains reviewable.';
 }
 
 function classifyPullbackType(data){
@@ -2001,7 +2090,8 @@ async function evaluateScannerForData(data){
     {passed:checks.near20 || checks.near50, label:checks.near20 ? 'Pullback is near the 20 MA.' : (checks.near50 ? 'Pullback is near the 50 MA.' : 'Pullback is not near the main support zone.')},
     {passed:checks.stabilising, label:checks.stabilising ? 'Setup is stabilising.' : 'Setup is still early.'},
     {passed:checks.bounce, label:checks.bounce ? 'Bounce is developing.' : 'Bounce is not confirmed yet.'},
-    {passed:tradePlan.positionSize >= 1, label:tradePlan.positionSize >= 1 ? `Risk fits at ${tradePlan.positionSize} share(s).` : 'Risk rule does not allow 1 share.'}
+    {passed:tradePlan.positionSize >= 1, label:tradePlan.positionSize >= 1 ? `Risk fits at ${tradePlan.positionSize} share(s).` : 'Risk rule does not allow 1 share.'},
+    {passed:tradePlan.rrValid && tradePlan.rr >= 1.5, label:tradePlan.rrValid ? `Reward:risk is ${tradePlan.rr.toFixed(2)}R.` : 'Reward:risk is invalid.'}
   ];
   const passedRules = breakdown.filter(item => item.passed).length;
   const hardFail = hardReasons.length > 0;
@@ -2105,17 +2195,38 @@ async function refreshCardMarketData(ticker, options = {}){
   const suitability = !data.__error && hasUsableScannerData(data) ? scoreSuitability(card, data, scan.checks) : null;
   const derivedStates = deriveSetupStates(card, data, scan.checks, suitability ? suitability.tradePlan : null);
   const tradePlan = suitability ? suitability.tradePlan : deriveTradePlan(data, derivedStates.scan_type === 'unknown' ? '20MA' : derivedStates.scan_type);
-  const chartVerdict = suitability && scan.status !== 'Avoid' ? rankedStatusFromScore(suitability.total) : scan.status;
   const riskFit = evaluateRiskFit({
     entry:tradePlan.entry,
     stop:tradePlan.stop,
     ...currentRiskSettings()
   });
+  const rewardRisk = evaluateRewardRisk(tradePlan.entry, tradePlan.stop, tradePlan.target);
+  const technicalValid = scan.status !== 'Avoid';
+  const chartVerdict = suitability
+    ? determineScannerVerdict({
+      technicalValid,
+      score:suitability.total,
+      checks:scan.checks,
+      riskFit,
+      rewardRisk
+    })
+    : scan.status;
+  const verdictReason = buildVerdictReason({
+    suitability,
+    scan,
+    riskFit,
+    rewardRisk,
+    checks:scan.checks
+  });
   card.score = suitability ? suitability.total : scan.score;
   card.chartVerdict = chartVerdict;
   card.riskStatus = riskFit.risk_status;
+  card.rewardPerShare = rewardRisk.rewardPerShare;
+  card.rrRatio = rewardRisk.rrRatio;
+  card.rrState = rewardRisk.rrState;
+  card.firstTargetTooClose = rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false;
   card.status = bucketStatusForCard({chartVerdict, riskStatus:riskFit.risk_status});
-  card.summary = suitability && scan.status !== 'Avoid' ? buildScannerSummary({status:chartVerdict, reason:suitability.summary}) : scan.summary;
+  card.summary = buildScannerSummary({status:chartVerdict, reason:verdictReason});
   card.pullbackType = suitability ? suitability.pullbackType : '';
   card.setupType = derivedStates.scan_type;
   card.trendStatus = derivedStates.trend_state;
@@ -2167,12 +2278,21 @@ async function refreshCardMarketData(ticker, options = {}){
     stop:Number.isFinite(tradePlan.stop) ? tradePlan.stop.toFixed(2) : '',
     first_target:Number.isFinite(tradePlan.target) ? tradePlan.target.toFixed(2) : '',
     risk_per_share:Number.isFinite(riskFit.risk_per_share) ? riskFit.risk_per_share.toFixed(2) : '',
+    reward_per_share:Number.isFinite(rewardRisk.rewardPerShare) ? rewardRisk.rewardPerShare.toFixed(2) : '',
+    rr_ratio:Number.isFinite(rewardRisk.rrRatio) ? rewardRisk.rrRatio.toFixed(2) : '',
+    rr_state:rewardRisk.rrState,
+    first_target_too_close:rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false,
     position_size:Number.isFinite(riskFit.position_size) ? riskFit.position_size : 0,
-    reward_risk:Number.isFinite(tradePlan.rr) ? tradePlan.rr.toFixed(2) : '',
+    reward_risk:Number.isFinite(rewardRisk.rrRatio) ? rewardRisk.rrRatio.toFixed(2) : '',
     quality_score:suitability ? suitability.total : scan.score,
     confidence_score:suitability ? clamp((suitability.total * 10) + (scan.checks.bounce ? 10 : 0) + (scan.checks.stabilising ? 5 : 0), 10, 100) : 35,
     key_reasons:suitability ? [suitability.summary] : [],
-    risks:hardListFromScan(scan)
+    risks:[
+      ...hardListFromScan(scan),
+      ...(riskFit.risk_status !== 'fits_risk' ? [riskStatusLabel(riskFit.risk_status)] : []),
+      ...(rewardRisk.valid && rewardRisk.rrState === 'weak' ? [`Reward:risk is only ${rewardRisk.rrRatio.toFixed(2)}R.`] : []),
+      ...(!rewardRisk.valid ? ['Reward:risk is invalid.'] : [])
+    ]
   };
   if(suitability){
     if(!card.entry && Number.isFinite(tradePlan.entry)) card.entry = tradePlan.entry.toFixed(2);
@@ -2186,6 +2306,9 @@ async function refreshCardMarketData(ticker, options = {}){
     risk_status:card.riskStatus,
     max_loss:riskFit.max_loss,
     risk_per_share:riskFit.risk_per_share,
+    reward_per_share:rewardRisk.rewardPerShare,
+    rr_ratio:rewardRisk.rrRatio,
+    rr_state:rewardRisk.rrState,
     position_size:riskFit.position_size
   });
   if(existingCard) updateWatchTracking(card);
@@ -2274,7 +2397,7 @@ async function refreshMarketDataForTickers(tickers, options = {}){
     });
     setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner... ${Math.min(index + batch.length, unique.length)} / ${unique.length} complete.</span>`);
   }
-  state.scannerResults = nextResults.sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker));
+  state.scannerResults = nextResults.sort((a, b) => resultSortScore(b) - resultSortScore(a) || b.score - a.score || a.ticker.localeCompare(b.ticker));
   state.scannerDebug = scannerDebug;
   const failedMarketData = scannerDebug.filter(item => (item.breakdown || []).some(entry => /market data unavailable|market data request|no historical market data|free tier|manual review|current provider|not covered/i.test(String(entry.label || '')))).length;
   if(failedMarketData){
@@ -2299,24 +2422,53 @@ function recomputeRiskContextForCard(card){
   const suitability = hasUsableScannerData(sourceData) ? scoreSuitability(normalized, sourceData, checks) : null;
   const tradePlan = suitability ? suitability.tradePlan : deriveTradePlan(sourceData, scanType === 'unknown' ? '20MA' : scanType);
   const hardReasons = hasUsableScannerData(sourceData) ? scannerHardFailReasons(sourceData, checks, tradePlan) : [];
-  const chartVerdict = hasUsableScannerData(sourceData)
-    ? (hardReasons.length ? 'Avoid' : rankedStatusFromScore(suitability ? suitability.total : normalized.score))
-    : (normalized.chartVerdict || normalized.status || 'Watch');
   const riskFit = evaluateRiskFit({
     entry:tradePlan.entry || normalized.entry,
     stop:tradePlan.stop || normalized.stop,
     ...currentRiskSettings()
   });
+  const rewardRisk = evaluateRewardRisk(tradePlan.entry || normalized.entry, tradePlan.stop || normalized.stop, tradePlan.target || normalized.target);
+  const chartVerdict = hasUsableScannerData(sourceData)
+    ? determineScannerVerdict({
+      technicalValid:hardReasons.length === 0,
+      score:suitability ? suitability.total : normalized.score,
+      checks,
+      riskFit,
+      rewardRisk
+    })
+    : (normalized.chartVerdict || normalized.status || 'Watch');
   normalized.chartVerdict = chartVerdict;
   if(suitability) normalized.score = suitability.total;
   normalized.riskStatus = riskFit.risk_status;
+  normalized.rewardPerShare = rewardRisk.rewardPerShare;
+  normalized.rrRatio = rewardRisk.rrRatio;
+  normalized.rrState = rewardRisk.rrState;
+  normalized.firstTargetTooClose = rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false;
   normalized.status = bucketStatusForCard({chartVerdict, riskStatus:riskFit.risk_status});
+  normalized.summary = buildScannerSummary({
+    status:chartVerdict,
+    reason:buildVerdictReason({
+      suitability,
+      scan:{
+        status:hardReasons.length ? 'Avoid' : chartVerdict,
+        summary:normalized.summary
+      },
+      riskFit,
+      rewardRisk,
+      checks
+    })
+  });
   if(normalized.analysis && typeof normalized.analysis === 'object'){
     normalized.analysis.chart_verdict = chartVerdict;
     normalized.analysis.quality_score = suitability ? suitability.total : normalized.analysis.quality_score;
     normalized.analysis.risk_status = riskFit.risk_status;
     normalized.analysis.max_loss = Number.isFinite(riskFit.max_loss) ? riskFit.max_loss.toFixed(2) : '';
     normalized.analysis.risk_per_share = Number.isFinite(riskFit.risk_per_share) ? riskFit.risk_per_share.toFixed(2) : '';
+    normalized.analysis.reward_per_share = Number.isFinite(rewardRisk.rewardPerShare) ? rewardRisk.rewardPerShare.toFixed(2) : '';
+    normalized.analysis.rr_ratio = Number.isFinite(rewardRisk.rrRatio) ? rewardRisk.rrRatio.toFixed(2) : '';
+    normalized.analysis.rr_state = rewardRisk.rrState;
+    normalized.analysis.first_target_too_close = rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false;
+    normalized.analysis.reward_risk = Number.isFinite(rewardRisk.rrRatio) ? rewardRisk.rrRatio.toFixed(2) : '';
     normalized.analysis.position_size = Number.isFinite(riskFit.position_size) ? riskFit.position_size : 0;
   }
   return normalized;
@@ -2809,7 +2961,7 @@ function renderAnalysisPanel(card){
     const risks = card.lastAnalysis.risks.length ? card.lastAnalysis.risks.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No risks returned.</li>';
     const quality = Number.isFinite(card.lastAnalysis.quality_score) ? `${card.lastAnalysis.quality_score}/10` : 'n/a';
     const confidence = Number.isFinite(card.lastAnalysis.confidence_score) ? `${card.lastAnalysis.confidence_score}/100` : 'n/a';
-    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(card.lastAnalysis.verdict)}">${escapeHtml(card.lastAnalysis.verdict)}</span><span class="score ${scoreClass(Number.isFinite(card.lastAnalysis.quality_score) ? card.lastAnalysis.quality_score : 0)}">${escapeHtml(quality)}</span><span class="badge ${statusClass(card.riskStatus || card.lastAnalysis.risk_status || 'Watch')}">${escapeHtml(riskStatusLabel(card.riskStatus || card.lastAnalysis.risk_status || 'plan_missing'))}</span></div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(card.lastAnalysis.setup_type || 'Not given')}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(card.lastAnalysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="row3"><div><strong>Entry</strong><div class="tiny">${escapeHtml(card.lastAnalysis.entry || 'Not given')}</div></div><div><strong>Stop</strong><div class="tiny">${escapeHtml(card.lastAnalysis.stop || 'Not given')}</div></div><div><strong>First Target</strong><div class="tiny">${escapeHtml(card.lastAnalysis.first_target || 'Not given')}</div></div></div><div class="row3"><div><strong>Max Loss</strong><div class="tiny">${escapeHtml(card.analysis && card.analysis.max_loss ? card.analysis.max_loss : 'Not given')}</div></div><div><strong>Risk / Share</strong><div class="tiny">${escapeHtml(card.lastAnalysis.risk_per_share || 'Not given')}</div></div><div><strong>Position Size</strong><div class="tiny">${escapeHtml(card.lastAnalysis.position_size || 'Not given')}</div></div></div><div class="row3"><div><strong>Risk Status</strong><div class="tiny">${escapeHtml(riskStatusLabel(card.riskStatus || card.lastAnalysis.risk_status || 'plan_missing'))}</div></div><div><strong>Reward / Risk</strong><div class="tiny">${escapeHtml(card.lastAnalysis.reward_risk || 'Not given')}</div></div><div><strong>Confidence</strong><div class="tiny">${escapeHtml(confidence)}</div></div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><div><strong>Final Verdict</strong><div class="tiny">${escapeHtml(card.lastAnalysis.final_verdict || 'No final verdict returned.')}</div></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
+    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(card.lastAnalysis.verdict)}">${escapeHtml(card.lastAnalysis.verdict)}</span><span class="score ${scoreClass(Number.isFinite(card.lastAnalysis.quality_score) ? card.lastAnalysis.quality_score : 0)}">${escapeHtml(quality)}</span><span class="badge ${statusClass(card.riskStatus || card.lastAnalysis.risk_status || 'Watch')}">${escapeHtml(riskStatusLabel(card.riskStatus || card.lastAnalysis.risk_status || 'plan_missing'))}</span><span class="badge ${rrStateClass(card.rrState || (card.analysis && card.analysis.rr_state) || 'invalid')}">${escapeHtml(rrStateLabel(card.rrState || (card.analysis && card.analysis.rr_state) || 'invalid'))}</span></div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(card.lastAnalysis.setup_type || 'Not given')}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(card.lastAnalysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="row3"><div><strong>Entry</strong><div class="tiny">${escapeHtml(card.lastAnalysis.entry || 'Not given')}</div></div><div><strong>Stop</strong><div class="tiny">${escapeHtml(card.lastAnalysis.stop || 'Not given')}</div></div><div><strong>First Target</strong><div class="tiny">${escapeHtml(card.lastAnalysis.first_target || 'Not given')}</div></div></div><div class="row3"><div><strong>Max Loss</strong><div class="tiny">${escapeHtml(card.analysis && card.analysis.max_loss ? card.analysis.max_loss : 'Not given')}</div></div><div><strong>Risk / Share</strong><div class="tiny">${escapeHtml(card.lastAnalysis.risk_per_share || (card.analysis && card.analysis.risk_per_share) || 'Not given')}</div></div><div><strong>Reward / Share</strong><div class="tiny">${escapeHtml((card.analysis && card.analysis.reward_per_share) || 'Not given')}</div></div></div><div class="row3"><div><strong>Risk Status</strong><div class="tiny">${escapeHtml(riskStatusLabel(card.riskStatus || card.lastAnalysis.risk_status || 'plan_missing'))}</div></div><div><strong>Reward / Risk</strong><div class="tiny">${escapeHtml((card.analysis && card.analysis.rr_ratio) || card.lastAnalysis.reward_risk || 'Not given')}</div></div><div><strong>Confidence</strong><div class="tiny">${escapeHtml(confidence)}</div></div></div>${(card.analysis && card.analysis.first_target_too_close) ? '<div class="tiny warntext">First target is too close for the current stop distance.</div>' : ''}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><div><strong>Final Verdict</strong><div class="tiny">${escapeHtml(card.lastAnalysis.final_verdict || 'No final verdict returned.')}</div></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
@@ -2935,15 +3087,20 @@ function renderScannerResults(){
     const div = document.createElement('div');
     const chartVerdict = card.chartVerdict || card.status;
     const combinedStatus = combinedStatusLabel(chartVerdict, card.riskStatus);
+    const rrRatio = numericOrNull(card.rrRatio ?? (card.analysis && card.analysis.rr_ratio) ?? (card.analysis && card.analysis.reward_risk));
+    const rewardPerShare = numericOrNull(card.rewardPerShare ?? (card.analysis && card.analysis.reward_per_share));
+    const rrState = String(card.rrState || (card.analysis && card.analysis.rr_state) || (Number.isFinite(rrRatio) ? (rrRatio >= 2 ? 'strong' : (rrRatio >= 1.5 ? 'acceptable' : 'weak')) : 'invalid'));
+    const targetWarning = !!(card.firstTargetTooClose || (card.analysis && card.analysis.first_target_too_close));
     const companyLine = card.companyName ? `<div class="tiny">${escapeHtml(card.companyName)}${card.exchange ? ` - ${escapeHtml(card.exchange)}` : ''}</div>` : '';
     const marketDataLine = card.marketData && !card.marketData.__error
       ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(card.price)))} - 20 ${escapeHtml(fmtPrice(Number(card.sma20)))} - 50 ${escapeHtml(fmtPrice(Number(card.sma50)))} - 200 ${escapeHtml(fmtPrice(Number(card.sma200)))} - RSI ${escapeHtml(fmtPrice(Number(card.rsi14)))}</div>`
       : `<div class="tiny">${escapeHtml(card.summary || 'Market data unavailable. Keep this ticker reviewable in the card workflow.')}</div>`;
     const setupLine = `<div class="tiny">Setup: ${escapeHtml(card.setupType || (card.analysis && card.analysis.setup_type) || '20MA')} - Trend: ${escapeHtml(card.trendStatus || (card.analysis && card.analysis.trend_status) || 'review')} - Pullback: ${escapeHtml(card.pullbackStatus || (card.analysis && card.analysis.pullback_status) || 'review')}</div>`;
     const pullbackLine = `<div class="tiny">Pullback Type: ${escapeHtml(card.pullbackType || (card.analysis && card.analysis.pullbackType) || 'Unclassified')} - Quality Score: ${escapeHtml(String(card.score || 0))}/10 - ${escapeHtml(riskStatusLabel(card.riskStatus || 'plan_missing'))}</div>`;
+    const rrLine = `<div class="inline-status"><span class="badge ${rrStateClass(rrState)}">${escapeHtml(rrStateLabel(rrState))}</span><span class="tiny">R:R ${escapeHtml(Number.isFinite(rrRatio) ? rrRatio.toFixed(2) : '-')} - Risk/Share ${escapeHtml(Number.isFinite(numericOrNull(card.analysis && card.analysis.risk_per_share)) ? Number(numericOrNull(card.analysis && card.analysis.risk_per_share)).toFixed(2) : '-')} - Reward/Share ${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>`;
     const suitabilityLine = `<div class="tiny">${escapeHtml(card.summary || 'Review this setup manually.')}</div>`;
     div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead rankedgrid"><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div><strong>${escapeHtml(combinedStatus)}</strong></div>${suitabilityLine}${companyLine}${marketDataLine}${setupLine}${pullbackLine}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/10`)}</div><div class="resultreview"><button class="primary" data-act="review">Review</button></div></div>`;
+    div.innerHTML = `<div class="resulthead rankedgrid"><div class="ticker">${escapeHtml(card.ticker)}</div><div class="resultsummary"><div><strong>${escapeHtml(combinedStatus)}</strong></div>${suitabilityLine}${companyLine}${marketDataLine}${setupLine}${pullbackLine}${rrLine}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(`${card.score}/10`)}</div><div class="resultreview"><button class="primary" data-act="review">Review</button></div></div>`;
     div.querySelector('[data-act="review"]').onclick = () => {
       openRankedResultInReview(card.ticker);
     };
@@ -2970,7 +3127,7 @@ function renderCards(){
     }
     return;
   }
-  const ordered = [...state.cards].sort((a, b) => statusRank(bucketStatusForCard(a)) - statusRank(bucketStatusForCard(b)) || b.score - a.score || a.ticker.localeCompare(b.ticker));
+  const ordered = [...state.cards].sort((a, b) => statusRank(bucketStatusForCard(a)) - statusRank(bucketStatusForCard(b)) || resultSortScore(b) - resultSortScore(a) || b.score - a.score || a.ticker.localeCompare(b.ticker));
   const groups = ['Entry', 'Too Wide', 'Near Entry', 'Watch', 'Manual Review', 'Avoid'];
   groups.forEach(group => {
     const items = ordered.filter(card => {
@@ -3004,7 +3161,11 @@ function renderCards(){
     const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>${freshnessBadge ? `<div class="inline-status">${freshnessBadge}</div>` : ''}${companyLine}${marketDataLine}${performanceLine}${suitabilityLine}${watchLine}`;
     const scoreLabel = `${card.score}/10`;
     const combinedStatus = combinedStatusLabel(card.chartVerdict || card.status, card.riskStatus);
-    const riskMeta = card.analysis ? `<div class="tiny">Risk ${escapeHtml(riskStatusLabel(card.riskStatus || card.analysis.risk_status || 'plan_missing'))} • Max Loss ${escapeHtml(card.analysis.max_loss || fmtPrice(currentMaxLoss()))} • Risk/Share ${escapeHtml(card.analysis.risk_per_share || '-')} • Position ${escapeHtml(String(card.analysis.position_size || '-'))}</div>` : '';
+    const rrRatio = numericOrNull(card.rrRatio ?? (card.analysis && card.analysis.rr_ratio) ?? (card.analysis && card.analysis.reward_risk));
+    const rewardPerShare = numericOrNull(card.rewardPerShare ?? (card.analysis && card.analysis.reward_per_share));
+    const rrState = String(card.rrState || (card.analysis && card.analysis.rr_state) || (Number.isFinite(rrRatio) ? (rrRatio >= 2 ? 'strong' : (rrRatio >= 1.5 ? 'acceptable' : 'weak')) : 'invalid'));
+    const targetWarning = !!(card.firstTargetTooClose || (card.analysis && card.analysis.first_target_too_close));
+    const riskMeta = card.analysis ? `<div class="tiny">Risk ${escapeHtml(riskStatusLabel(card.riskStatus || card.analysis.risk_status || 'plan_missing'))} • Max Loss ${escapeHtml(card.analysis.max_loss || fmtPrice(currentMaxLoss()))} • Risk/Share ${escapeHtml(card.analysis.risk_per_share || '-')} • Reward/Share ${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')} • Position ${escapeHtml(String(card.analysis.position_size || '-'))}</div><div class="inline-status"><span class="badge ${rrStateClass(rrState)}">${escapeHtml(rrStateLabel(rrState))}</span><span class="tiny">R:R ${escapeHtml(Number.isFinite(rrRatio) ? rrRatio.toFixed(2) : '-')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>` : '';
     const div = document.createElement('div');
     div.className = 'result';
     div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(card.ticker)}</div><div><div>${escapeHtml(card.summary)}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(card.score)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(card.chartVerdict || card.status)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${card.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${card.chartRef && card.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(card.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(card.ticker)}" /><div><div class="tiny">${escapeHtml(card.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${card.ticker}">Notes</label><textarea id="notes-${card.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(card.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button>${(card.chartVerdict || card.status) === 'Watch' && card.watchTracking && card.watchTracking.extensionDays < EXTENDED_WATCH_TRADING_DAYS ? '<button class="secondary" data-act="extend-watch">Extend to 5D</button>' : ''}${card.watchTracking ? `<button class="secondary" data-act="toggle-pin">${card.watchTracking.pinned ? 'Unpin' : 'Pin'}</button><button class="secondary" data-act="toggle-retain">${card.watchTracking.manualRetain ? 'Auto Drop On' : 'Keep Watch'}</button>` : ''}</div><details class="responsepanel" id="response-${card.ticker}" ${(((uiState.responseOpen[card.ticker] ?? !!card.lastResponse) || !!card.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanel(card)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button></div><details class="promptdetails" id="prompt-${card.ticker}" ${(uiState.promptOpen[card.ticker] ?? !!card.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${card.ticker}">${renderCardStatusLine(card, loading, analysisBusy)}</div></div></div>`;
@@ -3222,10 +3383,10 @@ function calculate(){
     $('calcNote').textContent = 'Entry must be above stop for a valid long plan.';
     return;
   }
-  const rr = Number.isFinite(target) && Number.isFinite(riskFit.risk_per_share) && target > entry ? (target - entry) / riskFit.risk_per_share : null;
+  const rewardRisk = evaluateRewardRisk(entry, stop, target);
   $('riskPerShare').textContent = Number.isFinite(riskFit.risk_per_share) ? riskFit.risk_per_share.toFixed(2) : '-';
   $('positionSize').textContent = riskFit.position_size > 0 ? `${riskFit.position_size} shares` : '0 shares';
-  $('rrValue').textContent = rr ? `${rr.toFixed(2)}R` : '-';
+  $('rrValue').textContent = rewardRisk.valid && Number.isFinite(rewardRisk.rrRatio) ? `${rewardRisk.rrRatio.toFixed(2)}R` : '-';
   $('calcNote').textContent = riskFit.risk_status === 'too_wide'
     ? `Current max loss is ${formatGbp(riskFit.max_loss)}. This setup is too wide right now.`
     : `Current max loss is ${formatGbp(riskFit.max_loss)}. Risk status: ${riskStatusLabel(riskFit.risk_status)}.`;
