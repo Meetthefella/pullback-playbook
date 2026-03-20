@@ -78,14 +78,11 @@
 
   <div class="card" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="alertsSection" style="margin-bottom:0">11) Alerts / Attention</h2>
-      <div class="actions" style="margin-top:0">
-        <span class="pill" id="newAlertsCount">0 new</span>
-        <button class="secondary" id="markAlertsSeenBtn" type="button">Mark Seen</button>
-      </div>
+      <h2 id="focusSection" style="margin-bottom:0">Today's Focus / Trading Queue</h2>
+      <span class="pill" id="focusCount">0 focus</span>
     </div>
-    <p class="tiny">Highlights setups that became more actionable, need review, are near expiry, or changed since your last visit.</p>
-    <div id="alertsList" class="list"></div>
+    <p class="tiny">Top actionable names surfaced from the current workflow without showing full alert noise.</p>
+    <div id="focusQueue" class="list"></div>
   </div>
 
   <div class="grid" style="margin-top:14px">
@@ -323,6 +320,18 @@
       <p class="tiny" style="margin-top:10px">Compact analytics from diary outcomes, setup tags, mistakes, market regime, and lifecycle paths.</p>
       <div id="patternAnalytics" class="list"></div>
     </details>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+      <h2 id="alertsSection" style="margin-bottom:0">11) Alerts / Attention</h2>
+      <div class="actions" style="margin-top:0">
+        <span class="pill" id="newAlertsCount">0 new</span>
+        <button class="secondary" id="markAlertsSeenBtn" type="button">Mark Seen</button>
+      </div>
+    </div>
+    <p class="tiny">Highlights setups that became more actionable, need review, are near expiry, or changed since your last visit.</p>
+    <div id="alertsList" class="list"></div>
   </div>
 </div>
 <script src="./app.js"></script>

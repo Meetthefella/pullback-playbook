@@ -75,6 +75,16 @@ const PLAN_EXPIRY_TRADING_DAYS = 3;
 const DIARY_SETUP_TAG_OPTIONS = ['20MA bounce', '50MA reclaim', 'first pullback', 'post-earnings continuation', 'weak-market exception', 'countertrend avoid'];
 const DIARY_MISTAKE_TAG_OPTIONS = ['early entry', 'chased breakout', 'ignored weak market', 'stop too tight', 'stop moved', 'oversize position', 'took subpar setup', 'sold too early', 'held too long'];
 const DIARY_LESSON_TAG_OPTIONS = ['wait for bounce confirmation', '50MA setups need extra patience', 'weak tape needs stricter filtering', 'best setups come from strong RS names', 'avoid loose structure under 20MA'];
+const ALERT_PRIORITY = {
+  closed:1,
+  entered:2,
+  became_ready:3,
+  plan_near_expiry:4,
+  needs_review:5,
+  regime_warning:6,
+  watchlist_progressed:7,
+  expired:8
+};
 const APP_FETCH_TIMEOUT_MS = 12000;
 const MARKET_CACHE_SCHEMA_VERSION = 3;
 const SCAN_BATCH_SIZE = 4;
@@ -2659,6 +2669,150 @@ function renderPatternAnalytics(){
   box.innerHTML = `<div class="analyticsgrid"><div class="analyticcard"><div><strong>Overview</strong></div><div class="analyticstats"><div class="analyticstat"><div class="tiny">Closed Trades</div><div class="big">${escapeHtml(String(overview.totalClosed))}</div></div><div class="analyticstat"><div class="tiny">Win Rate</div><div class="big">${escapeHtml(formatPercent(overview.winRate))}</div></div><div class="analyticstat"><div class="tiny">Average R</div><div class="big">${escapeHtml(formatDecimal(overview.averageR, 2, 'R'))}</div></div><div class="analyticstat"><div class="tiny">Median R</div><div class="big">${escapeHtml(formatDecimal(overview.medianR, 2, 'R'))}</div></div><div class="analyticstat"><div class="tiny">Wins / Losses</div><div class="big">${escapeHtml(`${overview.wins}/${overview.losses}`)}</div></div><div class="analyticstat"><div class="tiny">Net PnL</div><div class="big">${escapeHtml(Number.isFinite(overview.totalNetPnL) ? formatGbp(overview.totalNetPnL) : 'n/a')}</div></div></div><div class="tiny">Scratches ${escapeHtml(String(overview.scratches))} • Cancelled ${escapeHtml(String(overview.cancelled))}. Win rate excludes cancelled trades and open trades.</div></div><div class="analyticcard"><div><strong>Insight Callouts</strong></div>${analytics.insights.length ? `<div class="insightlist">${analytics.insights.map(item => `<div class="insightitem">${escapeHtml(item)}</div>`).join('')}</div>` : '<div class="summary">Need more closed-trade samples before the app can surface meaningful pattern callouts.</div>'}</div><div class="analyticcard"><div><strong>Setup Tags</strong></div>${renderAnalyticRows(analytics.setupTags.slice(0, 6), item => `<div class="analyticrow"><div class="analyticrowhead"><strong>${escapeHtml(item.key)}</strong><span class="tiny">n=${escapeHtml(String(item.count))}</span></div><div class="tiny">Win rate ${escapeHtml(formatPercent(item.winRate))} • Avg R ${escapeHtml(formatDecimal(item.averageR, 2, 'R'))} • Closed sample ${escapeHtml(String(item.sample))}</div></div>`)}</div><div class="analyticcard"><div><strong>Mistakes</strong></div>${renderAnalyticRows(analytics.mistakeTags.slice(0, 6), item => `<div class="analyticrow"><div class="analyticrowhead"><strong>${escapeHtml(item.key)}</strong><span class="tiny">n=${escapeHtml(String(item.count))}</span></div><div class="tiny">Avg R ${escapeHtml(formatDecimal(item.averageR, 2, 'R'))} • Loser rate ${escapeHtml(formatPercent(item.loserPct))} • Closed sample ${escapeHtml(String(item.sample))}</div></div>`)}</div><div class="analyticcard"><div><strong>Market Regime</strong></div>${renderAnalyticRows(analytics.marketRegime.slice(0, 6), item => `<div class="analyticrow"><div class="analyticrowhead"><strong>${escapeHtml(item.key)}</strong><span class="tiny">n=${escapeHtml(String(item.count))}</span></div><div class="tiny">Win rate ${escapeHtml(formatPercent(item.winRate))} • Avg R ${escapeHtml(formatDecimal(item.averageR, 2, 'R'))} • Closed sample ${escapeHtml(String(item.sample))}</div></div>`)}</div><div class="analyticcard"><div><strong>Process / Lifecycle</strong></div>${renderAnalyticRows(analytics.lifecycle, item => `<div class="analyticrow"><div class="analyticrowhead"><strong>${escapeHtml(item.path)}</strong><span class="tiny">count ${escapeHtml(String(item.count))}</span></div></div>`)}</div></div>`;
 }
 
+function currentRrThreshold(){
+  return 1.5;
+}
+
+function resultReasonForRecord(record){
+  const item = normalizeTickerRecord(record);
+  const rrValue = numericOrNull(recordRrValue(item));
+  if(Number.isFinite(item.marketData.price) && Number.isFinite(item.marketData.ma200) && item.marketData.price < item.marketData.ma200) return 'Trend broken';
+  if(Number.isFinite(item.marketData.ma50) && Number.isFinite(item.marketData.ma200) && item.marketData.ma50 < item.marketData.ma200) return 'Trend broken';
+  if(item.plan.firstTargetTooClose) return 'First target too close';
+  if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'Insufficient reward';
+  if(item.scan.verdict === 'Avoid') return item.scan.pullbackType && /broken/i.test(item.scan.pullbackType) ? 'Trend broken' : 'Weak structure';
+  if(item.plan.riskStatus === 'plan_missing') return 'Plan missing';
+  if(item.scan.verdict === 'Entry' || item.scan.verdict === 'Near Entry'){
+    return `Near ${escapeHtml(item.scan.scanType || '20MA')} with ${item.scan.pullbackStatus || 'acceptable structure'}`.replace(/&amp;/g, '&');
+  }
+  return item.scan.summary || 'Needs review';
+}
+
+function resultSupportLineForRecord(record){
+  const item = normalizeTickerRecord(record);
+  const rrValue = numericOrNull(recordRrValue(item));
+  if(item.scan.verdict === 'Avoid') return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
+  const marketCaution = /below 50 ma/i.test(String(state.marketStatus || '')) ? 'Weak market caution' : '';
+  const pieces = [
+    item.plan.hasValidPlan ? riskStatusLabel(item.plan.riskStatus) : '',
+    Number.isFinite(rrValue) ? `Est R:R ${rrValue.toFixed(2)}` : '',
+    marketCaution
+  ].filter(Boolean);
+  return pieces.join(' • ') || (item.meta.companyName || 'Review in Setup Review for full detail.');
+}
+
+function isFilteredResultRecord(record){
+  const item = normalizeTickerRecord(record);
+  const rrValue = numericOrNull(recordRrValue(item));
+  return item.scan.verdict === 'Avoid'
+    || item.lifecycle.stage === 'avoided'
+    || item.lifecycle.stage === 'expired'
+    || (Number.isFinite(rrValue) && rrValue < currentRrThreshold());
+}
+
+function renderCompactResultCard(record){
+  const item = normalizeTickerRecord(record);
+  const combinedStatus = combinedStatusLabel(item.scan.verdict || item.watchlist.status || 'Watch', item.plan.riskStatus || item.scan.riskStatus || 'plan_missing');
+  const scoreLabel = `${item.scan.score || 0}/10`;
+  const rrValue = numericOrNull(recordRrValue(item));
+  const detailMeta = [
+    item.meta.companyName ? `${item.meta.companyName}${item.meta.exchange ? ` • ${item.meta.exchange}` : ''}` : '',
+    Number.isFinite(item.marketData.price) ? `Price ${fmtPrice(Number(item.marketData.price))}` : '',
+    Number.isFinite(item.marketData.ma20) ? `20 ${fmtPrice(Number(item.marketData.ma20))}` : '',
+    Number.isFinite(item.marketData.ma50) ? `50 ${fmtPrice(Number(item.marketData.ma50))}` : '',
+    Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
+    Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
+    Number.isFinite(rrValue) ? `Est R:R ${rrValue.toFixed(2)}` : '',
+    item.lifecycle.stage ? `Status: ${item.lifecycle.stage}` : ''
+  ].filter(Boolean).join(' • ');
+  return `<div class="resultcompact"><div class="resulthead rankedgrid"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="resultmeta"><div class="resultreason">Reason: ${escapeHtml(resultReasonForRecord(item))}</div><div class="resultsupport">${escapeHtml(resultSupportLineForRecord(item))}</div></div><div class="score ${scoreClass(item.scan.score || 0)}">${escapeHtml(scoreLabel)}</div><div class="resultreview"><button class="primary" data-act="review">Review</button></div></div><div class="inline-status"><span class="badge ${statusClass(item.scan.verdict || item.watchlist.status || 'Watch')}">${escapeHtml(combinedStatus)}</span></div><details><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderEstimatedScannerPlanFromRecord(item)}</details></div>`;
+}
+
+function focusQueueAlerts(alerts){
+  return alerts.filter(alert => ['became_ready','plan_near_expiry','needs_review'].includes(alert.alertType)).slice(0, 4);
+}
+
+function renderFocusQueue(alerts){
+  const box = $('focusQueue');
+  const count = $('focusCount');
+  if(!box) return;
+  const items = focusQueueAlerts(alerts);
+  if(count) count.textContent = `${items.length} focus`;
+  if(!items.length){
+    box.innerHTML = '<div class="summary">No immediate focus items right now. Refresh the scanner or review the watchlist when the market changes.</div>';
+    return;
+  }
+  box.innerHTML = items.map(alert => `<div class="focuscard"><div class="focushead"><div><strong>${escapeHtml(alert.ticker)}</strong><div class="tiny">${escapeHtml(alert.message)}</div></div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(alert.ticker)}">Open Review</button></div></div>`).join('');
+  box.querySelectorAll('[data-act="focus-review"]').forEach(button => {
+    button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
+  });
+}
+
+function deriveWorkflowAlerts(){
+  const rawAlerts = [];
+  const hostileMarket = /below 50 ma/i.test(String(state.marketStatus || ''));
+  allTickerRecords().forEach(record => {
+    const item = normalizeTickerRecord(record);
+    const stage = String(item.lifecycle.stage || '');
+    const status = String(item.lifecycle.status || '');
+    const changedAt = String(item.lifecycle.stageUpdatedAt || item.meta.updatedAt || '');
+    const expiresAt = String(item.lifecycle.expiresAt || '');
+    const remainingTradingDays = expiresAt ? countTradingDaysBetween(todayIsoDate(), expiresAt) : null;
+    const hasValidPlan = !!item.plan.hasValidPlan;
+    const needsReview = ['watchlist','shortlisted','reviewed'].includes(stage) && !hasValidPlan && status !== 'closed' && stage !== 'expired';
+    if(stage === 'planned' && hasValidPlan) rawAlerts.push({id:alertIdForRecord(item, 'became_ready', changedAt, stage), ticker:item.ticker, alertType:'became_ready', severity:'action', createdAt:changedAt, message:'Ready for review.', stage, status});
+    if(needsReview) rawAlerts.push({id:alertIdForRecord(item, 'needs_review', changedAt, stage), ticker:item.ticker, alertType:'needs_review', severity:stage === 'reviewed' ? 'warning' : 'info', createdAt:changedAt, message:stage === 'reviewed' ? 'Reviewed setup still needs a plan.' : 'Still needs review.', stage, status});
+    if(stage === 'planned' && hasValidPlan && Number.isFinite(remainingTradingDays) && remainingTradingDays <= 1 && remainingTradingDays >= 0) rawAlerts.push({id:alertIdForRecord(item, 'plan_near_expiry', expiresAt, remainingTradingDays), ticker:item.ticker, alertType:'plan_near_expiry', severity:'warning', createdAt:expiresAt || changedAt, message:remainingTradingDays === 0 ? 'Plan expires today.' : 'Plan expires within 1 trading day.', stage, status});
+    const lifecycleStages = compressLifecycleStages(item);
+    if(item.watchlist.inWatchlist && ['shortlisted','reviewed','planned'].includes(stage) && lifecycleStages.includes('watchlist')) rawAlerts.push({id:alertIdForRecord(item, 'watchlist_progressed', changedAt, stage), ticker:item.ticker, alertType:'watchlist_progressed', severity:'info', createdAt:changedAt, message:`Watchlist progressed to ${stage}.`, stage, status});
+    if(stage === 'expired') rawAlerts.push({id:alertIdForRecord(item, 'expired', changedAt, stage), ticker:item.ticker, alertType:'expired', severity:'warning', createdAt:changedAt, message:'Setup expired.', stage, status});
+    if(stage === 'entered') rawAlerts.push({id:alertIdForRecord(item, 'entered', changedAt, stage), ticker:item.ticker, alertType:'entered', severity:'action', createdAt:changedAt, message:'Trade entered.', stage, status});
+    if(['exited','cancelled'].includes(stage) || (status === 'closed' && !isActionableAlertStage(stage))) rawAlerts.push({id:alertIdForRecord(item, 'closed', changedAt, stage), ticker:item.ticker, alertType:'closed', severity:'info', createdAt:changedAt, message:stage === 'cancelled' ? 'Trade cancelled.' : 'Trade closed.', stage, status});
+    if(hostileMarket && ['planned','reviewed'].includes(stage) && (item.scan.verdict === 'Entry' || item.scan.verdict === 'Near Entry')) rawAlerts.push({id:alertIdForRecord(item, 'regime_warning', String(state.marketStatus), `${stage}-${item.scan.verdict}`), ticker:item.ticker, alertType:'regime_warning', severity:'warning', createdAt:changedAt || new Date().toISOString(), message:'Hostile market.', stage, status});
+  });
+  const dismissed = new Set(Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds : []);
+  const filtered = rawAlerts.filter(alert => !dismissed.has(alert.id));
+  const byTicker = new Map();
+  filtered.forEach(alert => {
+    if(!byTicker.has(alert.ticker)) byTicker.set(alert.ticker, []);
+    byTicker.get(alert.ticker).push(alert);
+  });
+  return [...byTicker.values()].map(items => {
+    const sorted = items.slice().sort((a, b) => (ALERT_PRIORITY[a.alertType] || 999) - (ALERT_PRIORITY[b.alertType] || 999) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    const dominant = {...sorted[0]};
+    const regime = items.find(item => item.alertType === 'regime_warning');
+    if(regime && dominant.alertType !== 'regime_warning') dominant.message = `${dominant.message} Caution: hostile market.`;
+    return dominant;
+  }).sort((a, b) => (ALERT_PRIORITY[a.alertType] || 999) - (ALERT_PRIORITY[b.alertType] || 999) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || a.ticker.localeCompare(b.ticker));
+}
+
+function renderWorkflowAlerts(){
+  const box = $('alertsList');
+  const badge = $('newAlertsCount');
+  if(!box) return;
+  const alerts = deriveWorkflowAlerts();
+  const groups = alertGroups(alerts);
+  const newCount = alerts.filter(isAlertNew).length;
+  if(badge) badge.textContent = `${newCount} new`;
+  renderFocusQueue(alerts);
+  box.innerHTML = `<div class="alertsection"><strong>Action now</strong>${renderAlertRows(groups.actionNow, false)}</div><div class="alertsection"><strong>Needs review</strong>${renderAlertRows(groups.needsReview)}</div><div class="alertsection"><strong>Expiring soon</strong>${renderAlertRows(groups.expiringSoon)}</div><div class="alertsection"><strong>Recently changed</strong>${renderAlertRows(groups.recent)}</div>`;
+  box.querySelectorAll('[data-act="alert-review"]').forEach(button => {
+    button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
+  });
+  box.querySelectorAll('[data-act="alert-dismiss"]').forEach(button => {
+    button.onclick = () => dismissAlert(button.getAttribute('data-id') || '');
+  });
+}
+
+function renderPatternAnalytics(){
+  const box = $('patternAnalytics');
+  if(!box) return;
+  const analytics = computePatternAnalytics();
+  const overview = analytics.overview;
+  const lowSample = overview.totalClosed < 5;
+  box.innerHTML = `${lowSample ? '<div class="summary">Need at least 5 closed trades for meaningful pattern review. Counts are visible, but treat early stats cautiously.</div>' : ''}<div class="analyticsgrid"><div class="analyticcard"><div><strong>Overview</strong></div><div class="analyticstats"><div class="analyticstat"><div class="tiny">Closed Trades</div><div class="big">${escapeHtml(String(overview.totalClosed))}</div></div><div class="analyticstat"><div class="tiny">Win Rate</div><div class="big">${escapeHtml(formatPercent(overview.winRate))}</div></div><div class="analyticstat"><div class="tiny">Average R</div><div class="big">${escapeHtml(formatDecimal(overview.averageR, 2, 'R'))}</div></div><div class="analyticstat"><div class="tiny">Median R</div><div class="big">${escapeHtml(formatDecimal(overview.medianR, 2, 'R'))}</div></div><div class="analyticstat"><div class="tiny">Wins / Losses</div><div class="big">${escapeHtml(`${overview.wins}/${overview.losses}`)}</div></div><div class="analyticstat"><div class="tiny">Net PnL</div><div class="big">${escapeHtml(Number.isFinite(overview.totalNetPnL) ? formatGbp(overview.totalNetPnL) : 'n/a')}</div></div></div><div class="tiny">Scratches ${escapeHtml(String(overview.scratches))} • Cancelled ${escapeHtml(String(overview.cancelled))}. Win rate excludes cancelled trades and open trades.</div></div><div class="analyticcard ${lowSample ? 'mutedsection' : ''}"><div><strong>Insight Callouts</strong></div>${analytics.insights.length ? `<div class="insightlist">${analytics.insights.map(item => `<div class="insightitem">${escapeHtml(item)}</div>`).join('')}</div>` : '<div class="summary">Need more closed-trade samples before the app can surface meaningful pattern callouts.</div>'}</div><div class="analyticcard ${lowSample ? 'mutedsection' : ''}"><div><strong>Setup Tags</strong></div>${renderAnalyticRows(analytics.setupTags.slice(0, 6), item => `<div class="analyticrow"><div class="analyticrowhead"><strong>${escapeHtml(item.key)}</strong><span class="tiny">n=${escapeHtml(String(item.count))}</span></div><div class="tiny">Win rate ${escapeHtml(formatPercent(item.winRate))} • Avg R ${escapeHtml(formatDecimal(item.averageR, 2, 'R'))} • Closed sample ${escapeHtml(String(item.sample))}</div></div>`)}</div><div class="analyticcard ${lowSample ? 'mutedsection' : ''}"><div><strong>Mistakes</strong></div>${renderAnalyticRows(analytics.mistakeTags.slice(0, 6), item => `<div class="analyticrow"><div class="analyticrowhead"><strong>${escapeHtml(item.key)}</strong><span class="tiny">n=${escapeHtml(String(item.count))}</span></div><div class="tiny">Avg R ${escapeHtml(formatDecimal(item.averageR, 2, 'R'))} • Loser rate ${escapeHtml(formatPercent(item.loserPct))} • Closed sample ${escapeHtml(String(item.sample))}</div></div>`)}</div><div class="analyticcard ${lowSample ? 'mutedsection' : ''}"><div><strong>Market Regime</strong></div>${renderAnalyticRows(analytics.marketRegime.slice(0, 6), item => `<div class="analyticrow"><div class="analyticrowhead"><strong>${escapeHtml(item.key)}</strong><span class="tiny">n=${escapeHtml(String(item.count))}</span></div><div class="tiny">Win rate ${escapeHtml(formatPercent(item.winRate))} • Avg R ${escapeHtml(formatDecimal(item.averageR, 2, 'R'))} • Closed sample ${escapeHtml(String(item.sample))}</div></div>`)}</div><div class="analyticcard ${lowSample ? 'mutedsection' : ''}"><div><strong>Process / Lifecycle</strong></div>${renderAnalyticRows(analytics.lifecycle, item => `<div class="analyticrow"><div class="analyticrowhead"><strong>${escapeHtml(item.path)}</strong><span class="tiny">count ${escapeHtml(String(item.count))}</span></div></div>`)}</div></div>`;
+}
+
 function saveTradeFromCard(ticker){
   const tickerRecord = getTickerRecord(ticker);
   if(!tickerRecord) return;
@@ -5116,29 +5270,62 @@ function renderScannerResults(){
     renderWorkflowAlerts();
     return;
   }
+  const tradeable = [];
+  const filtered = [];
   records.forEach(record => {
-    const item = normalizeTickerRecord(record);
-    const div = document.createElement('div');
-    const chartVerdict = item.scan.verdict || item.watchlist.status || 'Watch';
-    const combinedStatus = combinedStatusLabel(chartVerdict, item.plan.riskStatus || item.scan.riskStatus || 'plan_missing');
-    const companyLine = item.meta.companyName ? `<div class="tiny">${escapeHtml(item.meta.companyName)}${item.meta.exchange ? ` - ${escapeHtml(item.meta.exchange)}` : ''}</div>` : '';
-    const marketDataAvailable = Number.isFinite(item.marketData.price) || Number.isFinite(item.marketData.ma20) || Number.isFinite(item.marketData.ma50) || Number.isFinite(item.marketData.ma200);
-    const marketDataLine = marketDataAvailable
-      ? `<div class="tiny">Price ${escapeHtml(fmtPrice(Number(item.marketData.price)))} - 20 ${escapeHtml(fmtPrice(Number(item.marketData.ma20)))} - 50 ${escapeHtml(fmtPrice(Number(item.marketData.ma50)))} - 200 ${escapeHtml(fmtPrice(Number(item.marketData.ma200)))} - RSI ${escapeHtml(fmtPrice(Number(item.marketData.rsi)))}</div>`
-      : `<div class="tiny">${escapeHtml(item.scan.summary || 'Market data unavailable. Keep this ticker reviewable in the card workflow.')}</div>`;
-    const projectedAnalysis = item.scan.analysisProjection || {};
-    const setupLine = `<div class="tiny">Setup: ${escapeHtml(item.scan.scanType || projectedAnalysis.setup_type || '20MA')} - Trend: ${escapeHtml(item.scan.trendStatus || projectedAnalysis.trend_status || 'review')} - Pullback: ${escapeHtml(item.scan.pullbackStatus || projectedAnalysis.pullback_status || 'review')}</div>`;
-    const pullbackLine = `<div class="tiny">Pullback Type: ${escapeHtml(item.scan.pullbackType || projectedAnalysis.pullbackType || 'Unclassified')} - Quality Score: ${escapeHtml(String(item.scan.score || 0))}/10 - ${escapeHtml(riskStatusLabel(item.plan.riskStatus || item.scan.riskStatus || 'plan_missing'))}</div>`;
-    const lifecycleLine = `<div class="tiny">Lifecycle: ${escapeHtml(item.lifecycle.stage || 'untracked')} - ${escapeHtml(item.lifecycle.status || 'inactive')}</div>`;
-    const estimateLine = renderEstimatedScannerPlanFromRecord(item);
-    const rrLine = `<div class="inline-status"><span class="badge watch">Scan Estimate</span><span class="tiny">Scanner values are review estimates only. Define entry, stop, and target in Setup Review before treating this as a trade plan.</span></div>`;
-    const suitabilityLine = `<div class="tiny">${escapeHtml(item.scan.summary || 'Review this setup manually.')}</div>`;
-    div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead rankedgrid"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="resultsummary"><div><strong>${escapeHtml(combinedStatus)}</strong></div>${suitabilityLine}${companyLine}${marketDataLine}${setupLine}${pullbackLine}${lifecycleLine}${estimateLine}${rrLine}</div><div class="score ${scoreClass(item.scan.score || 0)}">${escapeHtml(`${item.scan.score || 0}/10`)}</div><div class="resultreview"><button class="primary" data-act="review">Review</button></div></div>`;
-    div.querySelector('[data-act="review"]').onclick = () => {
-      openRankedResultInReview(item.ticker);
-    };
-    box.appendChild(div);
+    if(isFilteredResultRecord(record)){
+      filtered.push(record);
+    }else{
+      tradeable.push(record);
+    }
+  });
+  const sections = [
+    {
+      title:'Tradeable / Review-worthy',
+      summary: tradeable.length
+        ? `${tradeable.length} setup${tradeable.length === 1 ? '' : 's'} worth reviewing now.`
+        : 'No strong review candidates right now.',
+      items:tradeable,
+      collapsed:false,
+      empty:'No tradeable setups right now. Try refreshing the scanner or reviewing the watchlist.'
+    },
+    {
+      title:'Filtered Out',
+      summary: filtered.length
+        ? `${filtered.length} filtered setup${filtered.length === 1 ? '' : 's'} hidden by default.`
+        : 'No filtered setups right now.',
+      items:filtered,
+      collapsed:true,
+      empty:'No filtered setups.'
+    }
+  ];
+  sections.forEach(section => {
+    const wrap = document.createElement(section.collapsed ? 'details' : 'div');
+    if(section.collapsed){
+      wrap.className = 'resultsgroup';
+      wrap.innerHTML = `<summary class="summary"><strong>${escapeHtml(section.title)}</strong><div class="tiny">${escapeHtml(section.summary)}</div></summary><div class="list"></div>`;
+    }else{
+      wrap.className = 'resultsgroup';
+      wrap.innerHTML = `<div class="summary"><strong>${escapeHtml(section.title)}</strong><div class="tiny">${escapeHtml(section.summary)}</div></div><div class="list"></div>`;
+    }
+    const list = wrap.querySelector('.list');
+    if(section.items.length){
+      section.items.forEach(record => {
+        const card = document.createElement('div');
+        card.innerHTML = renderCompactResultCard(record);
+        const node = card.firstElementChild;
+        if(!node) return;
+        const reviewBtn = node.querySelector('[data-act="review"]');
+        if(reviewBtn){
+          const ticker = normalizeTickerRecord(record).ticker;
+          reviewBtn.onclick = () => openRankedResultInReview(ticker);
+        }
+        list.appendChild(node);
+      });
+    }else{
+      list.innerHTML = `<div class="summary">${escapeHtml(section.empty)}</div>`;
+    }
+    box.appendChild(wrap);
   });
   updateScannerSelectionStatus();
   renderWorkflowAlerts();
