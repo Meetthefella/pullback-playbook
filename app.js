@@ -3356,9 +3356,9 @@ function marketDataEndpoints(){
 
 function analysisEndpoints(){
   return uniqueStrings([
+    '/.netlify/functions/analyse-setup',
     state.aiEndpoint,
-    defaultAiEndpoint,
-    '/.netlify/functions/analyse-setup'
+    defaultAiEndpoint
   ]);
 }
 
@@ -5077,7 +5077,7 @@ async function analyseSetup(ticker){
   record.review.cardOpen = true;
   let card = tickerRecordToLegacyCard(record);
   const previousTickerState = normalizeCard(card);
-  const notesEl = $(`notes-${ticker}`);
+  const notesEl = $('reviewNotes') || $(`notes-${ticker}`);
   if(notesEl){
     record.review.notes = notesEl.value;
     card.notes = notesEl.value;
@@ -5085,6 +5085,10 @@ async function analyseSetup(ticker){
   card.lastPrompt = buildTickerPrompt(card);
   record.review.lastPrompt = card.lastPrompt;
   card.lastError = '';
+  card.lastResponse = '';
+  card.lastAnalysis = null;
+  record.review.aiAnalysisRaw = '';
+  record.review.normalizedAnalysis = null;
   record.review.lastError = '';
   uiState.loadingTicker = ticker;
   uiState.responseOpen[ticker] = true;
@@ -5116,6 +5120,7 @@ async function analyseSetup(ticker){
           })
         });
         data = await response.json().catch(() => ({}));
+        console.log('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data });
         if(!response.ok) throw new Error(buildAnalysisErrorMessage(response.status, data, 'Analysis request failed.'));
         lastError = '';
         break;
@@ -5129,6 +5134,9 @@ async function analyseSetup(ticker){
       }
     }
     if(!response) throw new Error(lastError);
+    if(!data || !data.analysis || typeof data.analysis !== 'object'){
+      throw new Error('The AI endpoint returned no analysis payload.');
+    }
     console.log('RAW_ANALYSIS_RESULT', data.analysis || null);
     console.log('PREVIOUS_TICKER_STATE', previousTickerState);
     const analysis = normalizeAnalysisResult(data.analysis, previousTickerState);
@@ -5143,7 +5151,22 @@ async function analyseSetup(ticker){
       card.stop = analysis.stop || '';
       card.target = analysis.first_target || '';
     }
+    record.review.lastPrompt = card.lastPrompt;
+    record.review.aiAnalysisRaw = card.lastResponse;
+    record.review.normalizedAnalysis = cloneData(analysis, null);
+    record.review.lastError = '';
+    record.review.lastReviewedAt = card.updatedAt;
+    record.review.cardOpen = true;
+    record.meta.marketStatus = state.marketStatus;
+    record.meta.updatedAt = card.updatedAt;
     mergeLegacyCardIntoRecord(record, card, {fromCards:true, cardOpen:true});
+    console.log('ANALYSIS_STATE_WRITE', {
+      ticker:record.ticker,
+      lastPrompt:record.review.lastPrompt,
+      aiAnalysisRaw:record.review.aiAnalysisRaw,
+      normalizedAnalysis:record.review.normalizedAnalysis,
+      lastError:record.review.lastError
+    });
     if(($('selectedTicker') && normalizeTicker($('selectedTicker').value) === card.ticker) || !normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '')){
       syncPlannerFromTicker(card.ticker);
     }
@@ -5153,7 +5176,21 @@ async function analyseSetup(ticker){
       ? 'The analysis request timed out. Retry the setup.'
       : String(err.message || 'Analysis request failed.');
     card.lastError = isAnalysisErrorMessage(baseMessage) ? baseMessage : `AI analysis failed: ${baseMessage}`;
+    card.lastResponse = '';
+    card.lastAnalysis = null;
+    record.review.aiAnalysisRaw = '';
+    record.review.normalizedAnalysis = null;
+    record.review.lastError = card.lastError;
+    record.review.lastPrompt = card.lastPrompt;
+    record.review.lastReviewedAt = new Date().toISOString();
     mergeLegacyCardIntoRecord(record, card, {fromCards:true, cardOpen:true});
+    console.log('ANALYSIS_STATE_WRITE', {
+      ticker:record.ticker,
+      lastPrompt:record.review.lastPrompt,
+      aiAnalysisRaw:record.review.aiAnalysisRaw,
+      normalizedAnalysis:record.review.normalizedAnalysis,
+      lastError:record.review.lastError
+    });
     commitTickerState();
   }finally{
     uiState.loadingTicker = '';
@@ -5192,7 +5229,9 @@ function renderAnalysisPanel(card){
 
 function renderAnalysisPanelFromRecord(record){
   const item = normalizeTickerRecord(record);
-  if(!item.review.aiAnalysisRaw) return '<div class="tiny">No AI response saved yet.</div>';
+  if(item.review.lastError){
+    return `<div class="mutebox badtext">${escapeHtml(item.review.lastError)}</div>`;
+  }
   if(item.review.normalizedAnalysis){
     const analysis = normalizeAnalysisResult(item.review.normalizedAnalysis, tickerRecordToLegacyCard(item));
     const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(entry => `<li>${escapeHtml(entry)}</li>`).join('') : '<li>No key reasons returned.</li>';
@@ -5212,8 +5251,9 @@ function renderAnalysisPanelFromRecord(record){
       risk_status:analysis.plan_metrics_valid ? riskStatusLabel(analysis.risk_status) : 'N/A',
       rr_badge:analysis.plan_metrics_valid ? analysis.rr_badge : ''
     };
-    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(analysis.verdict)}">${escapeHtml(analysis.verdict)}</span><span class="score ${scoreClass(Number.isFinite(analysis.quality_score) ? analysis.quality_score : 0)}">${escapeHtml(quality)}</span>${analysis.plan_metrics_valid ? `<span class="badge ${statusClass(analysis.risk_status || 'Watch')}">${escapeHtml(riskStatusLabel(analysis.risk_status || 'plan_missing'))}</span>` : ''}${analysis.plan_metrics_valid && analysis.rr_state ? `<span class="badge ${rrStateClass(analysis.rr_state)}">${escapeHtml(analysis.rr_badge)}</span>` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="row3"><div><strong>Planned Entry</strong><div class="tiny">${escapeHtml(renderModel.entry)}</div></div><div><strong>Planned Stop</strong><div class="tiny">${escapeHtml(renderModel.stop)}</div></div><div><strong>Planned First Target</strong><div class="tiny">${escapeHtml(renderModel.first_target)}</div></div></div><div class="row3"><div><strong>Max Loss</strong><div class="tiny">${escapeHtml(analysis.plan_metrics_valid ? (analysis.max_loss || 'Not given') : 'N/A')}</div></div><div><strong>Planned Risk / Share</strong><div class="tiny">${escapeHtml(renderModel.risk_per_share)}</div></div><div><strong>Planned Reward / Share</strong><div class="tiny">${escapeHtml(renderModel.reward_per_share)}</div></div></div><div class="row3"><div><strong>Risk Status</strong><div class="tiny">${escapeHtml(renderModel.risk_status)}</div></div><div><strong>Planned R:R</strong><div class="tiny">${escapeHtml(renderModel.reward_risk)}</div></div><div><strong>Planned Position Size</strong><div class="tiny">${escapeHtml(renderModel.position_size)}</div></div></div><div class="row3"><div><strong>Confidence</strong><div class="tiny">${escapeHtml(confidence)}</div></div><div><strong>Final Verdict</strong><div class="tiny">${escapeHtml(analysis.final_verdict || 'No final verdict returned.')}</div></div><div></div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(item.review.aiAnalysisRaw)}</div></details></div>`;
+    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(analysis.verdict)}">${escapeHtml(analysis.verdict)}</span><span class="score ${scoreClass(Number.isFinite(analysis.quality_score) ? analysis.quality_score : 0)}">${escapeHtml(quality)}</span>${analysis.plan_metrics_valid ? `<span class="badge ${statusClass(analysis.risk_status || 'Watch')}">${escapeHtml(riskStatusLabel(analysis.risk_status || 'plan_missing'))}</span>` : ''}${analysis.plan_metrics_valid && analysis.rr_state ? `<span class="badge ${rrStateClass(analysis.rr_state)}">${escapeHtml(analysis.rr_badge)}</span>` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="row3"><div><strong>Planned Entry</strong><div class="tiny">${escapeHtml(renderModel.entry)}</div></div><div><strong>Planned Stop</strong><div class="tiny">${escapeHtml(renderModel.stop)}</div></div><div><strong>Planned First Target</strong><div class="tiny">${escapeHtml(renderModel.first_target)}</div></div></div><div class="row3"><div><strong>Max Loss</strong><div class="tiny">${escapeHtml(analysis.plan_metrics_valid ? (analysis.max_loss || 'Not given') : 'N/A')}</div></div><div><strong>Planned Risk / Share</strong><div class="tiny">${escapeHtml(renderModel.risk_per_share)}</div></div><div><strong>Planned Reward / Share</strong><div class="tiny">${escapeHtml(renderModel.reward_per_share)}</div></div></div><div class="row3"><div><strong>Risk Status</strong><div class="tiny">${escapeHtml(renderModel.risk_status)}</div></div><div><strong>Planned R:R</strong><div class="tiny">${escapeHtml(renderModel.reward_risk)}</div></div><div><strong>Planned Position Size</strong><div class="tiny">${escapeHtml(renderModel.position_size)}</div></div></div><div class="row3"><div><strong>Confidence</strong><div class="tiny">${escapeHtml(confidence)}</div></div><div><strong>Final Verdict</strong><div class="tiny">${escapeHtml(analysis.final_verdict || 'No final verdict returned.')}</div></div><div></div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(item.review.aiAnalysisRaw || JSON.stringify(item.review.normalizedAnalysis || {}, null, 2))}</div></details></div>`;
   }
+  if(!item.review.aiAnalysisRaw) return '<div class="tiny">No AI analysis saved yet.</div>';
   console.debug('LEGACY_PATH_STILL_IN_USE', 'renderAnalysisPanelFromRecord-fallback', item.ticker);
   return `<div class="mutebox">${escapeHtml(item.review.aiAnalysisRaw)}</div>`;
 }
