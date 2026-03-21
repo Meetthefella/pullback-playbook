@@ -5105,6 +5105,7 @@ async function analyseSetup(ticker){
     let response = null;
     let data = {};
     let lastError = 'Analysis request failed.';
+    let lastFailureData = null;
     for(const endpoint of endpoints){
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
@@ -5123,8 +5124,10 @@ async function analyseSetup(ticker){
         console.log('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data });
         if(!response.ok) throw new Error(buildAnalysisErrorMessage(response.status, data, 'Analysis request failed.'));
         lastError = '';
+        lastFailureData = null;
         break;
       }catch(err){
+        lastFailureData = data && typeof data === 'object' ? data : null;
         lastError = err && err.name === 'AbortError'
           ? 'The analysis request timed out. Retry the setup.'
           : String(err.message || 'Analysis request failed.');
@@ -5176,9 +5179,11 @@ async function analyseSetup(ticker){
       ? 'The analysis request timed out. Retry the setup.'
       : String(err.message || 'Analysis request failed.');
     card.lastError = isAnalysisErrorMessage(baseMessage) ? baseMessage : `AI analysis failed: ${baseMessage}`;
-    card.lastResponse = '';
+    card.lastResponse = lastFailureData && typeof lastFailureData.raw === 'string' && lastFailureData.raw.trim()
+      ? lastFailureData.raw.trim()
+      : '';
     card.lastAnalysis = null;
-    record.review.aiAnalysisRaw = '';
+    record.review.aiAnalysisRaw = card.lastResponse;
     record.review.normalizedAnalysis = null;
     record.review.lastError = card.lastError;
     record.review.lastPrompt = card.lastPrompt;
@@ -5230,7 +5235,7 @@ function renderAnalysisPanel(card){
 function renderAnalysisPanelFromRecord(record){
   const item = normalizeTickerRecord(record);
   if(item.review.lastError){
-    return `<div class="mutebox badtext">${escapeHtml(item.review.lastError)}</div>`;
+    return `<div class="responsegrid"><div class="mutebox badtext">${escapeHtml(item.review.lastError)}</div>${item.review.aiAnalysisRaw ? `<details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(item.review.aiAnalysisRaw)}</div></details>` : ''}</div>`;
   }
   if(item.review.normalizedAnalysis){
     const analysis = normalizeAnalysisResult(item.review.normalizedAnalysis, tickerRecordToLegacyCard(item));

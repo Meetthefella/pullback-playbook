@@ -30,6 +30,9 @@ function extractOutputText(payload){
       if(typeof part?.text === 'string' && part.text.trim()){
         return part.text.trim();
       }
+      if(typeof part?.text?.value === 'string' && part.text.value.trim()){
+        return part.text.value.trim();
+      }
     }
   }
 
@@ -52,6 +55,11 @@ function buildRequestBody(model, instructions, content){
     model,
     instructions,
     input: [{ role: 'user', content }],
+    text: {
+      format: {
+        type: 'json_object'
+      }
+    },
     max_output_tokens: 300
   };
 }
@@ -338,6 +346,14 @@ exports.handler = async function handler(event){
 
   const rawText = extractOutputText(upstreamJson);
   const parsed = tryParseJson(rawText);
+
+  console.log('OPENAI_ANALYSIS_RESPONSE', JSON.stringify({
+    model,
+    ticker: String(payload.ticker || ''),
+    output_text_present: !!(typeof upstreamJson?.output_text === 'string' && upstreamJson.output_text.trim()),
+    extracted_text_length: rawText ? rawText.length : 0,
+    parsed: !!parsed
+  }));
 
   if(!parsed || typeof parsed !== 'object'){
     console.error('OpenAI returned unparsable analysis output', {
