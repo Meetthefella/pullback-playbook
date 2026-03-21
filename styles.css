@@ -98,6 +98,12 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
 .diarycard{display:grid;gap:12px;padding:14px;border:1px solid var(--line);border-radius:16px;background:#0f172a}
 .diaryhead{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
 .diarymeta{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.diarycard>summary{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.diarycard:not([open]){padding-bottom:10px}
+.hero .actions{align-items:center}
+.panelbox strong,.card strong{color:var(--text)}
+.card h2 + .tiny{margin-top:-2px}
+.summary + .list{margin-top:12px}
 .diarygrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .analyticsgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
 .analyticcard{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:16px;background:#0f172a}

@@ -62,7 +62,7 @@ function createDefaultState(){
 
 const state = createDefaultState();
 
-const uiState = {promptOpen:{},responseOpen:{},loadingTicker:'',selectedScanner:{}};
+const uiState = {promptOpen:{},responseOpen:{},loadingTicker:'',selectedScanner:{},activeReviewTicker:''};
 const MAX_CHART_BYTES = 4 * 1024 * 1024;
 const ANALYSIS_TIMEOUT_MS = 45000;
 const MARKET_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -143,6 +143,20 @@ function formatGbp(value){
 
 function currentSetupType(){
   return normalizeScanType(state.setupType) || 'unknown';
+}
+
+function activeReviewTicker(){
+  const selected = normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
+  return selected || normalizeTicker(uiState.activeReviewTicker || '');
+}
+
+function setActiveReviewTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  uiState.activeReviewTicker = symbol;
+  if($('selectedTicker')) $('selectedTicker').value = symbol;
+  Object.values(state.tickerRecords || {}).forEach(record => {
+    if(record && record.review) record.review.cardOpen = record.ticker === symbol;
+  });
 }
 
 function currentMaxLoss(){
@@ -2644,7 +2658,7 @@ function renderAlertRows(items, allowDismiss = true){
   return `<div class="alertgroup">${items.map(alert => `<div class="alertcard"><div class="alerthead"><div><div class="alertmeta"><span class="badge severity-${escapeHtml(alert.severity)}">${escapeHtml(alert.alertType.replaceAll('_', ' '))}</span><strong>${escapeHtml(alert.ticker)}</strong>${isAlertNew(alert) ? '<span class="pill">New</span>' : ''}</div><div class="tiny">${escapeHtml(alert.message)}</div><div class="tiny">Stage ${escapeHtml(alert.stage || 'untracked')} • ${escapeHtml(alert.status || 'inactive')}${alert.createdAt ? ` • ${escapeHtml(formatLocalTimestamp(alert.createdAt) || alert.createdAt)}` : ''}</div></div><div class="actions" style="margin-top:0"><button class="secondary compactbutton" type="button" data-act="alert-review" data-ticker="${escapeHtml(alert.ticker)}">Open Review</button>${allowDismiss && alert.severity !== 'action' ? `<button class="ghost compactbutton" type="button" data-act="alert-dismiss" data-id="${escapeHtml(alert.id)}">Dismiss</button>` : ''}</div></div></div>`).join('')}</div>`;
 }
 
-function renderWorkflowAlerts(){
+function legacyRenderWorkflowAlertsPrePriority(){
   const box = $('alertsList');
   const badge = $('newAlertsCount');
   if(!box) return;
@@ -2661,7 +2675,7 @@ function renderWorkflowAlerts(){
   });
 }
 
-function renderPatternAnalytics(){
+function legacyRenderPatternAnalyticsPreLowSample(){
   const box = $('patternAnalytics');
   if(!box) return;
   const analytics = computePatternAnalytics();
@@ -2930,7 +2944,7 @@ function legacyRenderTradeDiaryPreOutcomeEngine(){
   renderPatternAnalytics();
 }
 
-function renderTradeDiary(){
+function legacyRenderTradeDiaryExpanded(){
   const box = $('tradeDiary');
   if(!box) return;
   const diaryItems = diaryTradeRecords();
@@ -2949,6 +2963,38 @@ function renderTradeDiary(){
     const div = document.createElement('div');
     div.className = 'diarycard';
     div.innerHTML = `<div class="diaryhead"><div class="diarymeta"><span class="badge ${statusClass(record.chartVerdict || record.verdict)}">${escapeHtml(record.chartVerdict || record.verdict)}</span><strong>${escapeHtml(record.ticker || 'Ticker')}</strong><span class="tiny">${escapeHtml(record.date || '')}</span><span class="tiny">${escapeHtml(tickerRecord.lifecycle.stage || '')}</span></div><button class="danger" data-act="delete-trade">Delete</button></div><div class="tiny">Outcome ${escapeHtml(outcomeLabel)} • ${escapeHtml(resultRText)} • Gross ${escapeHtml(record.grossPnL || 'n/a')} • Net ${escapeHtml(record.netPnL || 'n/a')} • Held ${escapeHtml(record.heldDays || 'n/a')} day(s)</div><div class="tiny">Planned ${escapeHtml(plannedSummary)} • Actual ${escapeHtml(actualSummary)}</div><div class="tiny">Tags: ${escapeHtml(tagSummary)}</div><div class="diarygrid"><div><label>Opened</label><input data-field="openedAt" type="date" value="${escapeHtml(record.openedAt)}" /></div><div><label>Closed</label><input data-field="closedAt" type="date" value="${escapeHtml(record.closedAt)}" /></div><div><label>Verdict</label><select data-field="verdict"><option ${record.verdict === 'Watch' ? 'selected' : ''}>Watch</option><option ${record.verdict === 'Near Entry' ? 'selected' : ''}>Near Entry</option><option ${record.verdict === 'Entry' ? 'selected' : ''}>Entry</option><option ${record.verdict === 'Avoid' ? 'selected' : ''}>Avoid</option></select></div><div><label>Outcome</label><select data-field="outcome"><option value="" ${record.outcome === '' ? 'selected' : ''}>Not set</option><option ${record.outcome === 'Open' ? 'selected' : ''}>Open</option><option ${record.outcome === 'Win' ? 'selected' : ''}>Win</option><option ${record.outcome === 'Loss' ? 'selected' : ''}>Loss</option><option ${record.outcome === 'Scratch' ? 'selected' : ''}>Scratch</option><option ${record.outcome === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div></div><div class="diarygrid"><div><label>Planned Entry</label><input data-field="plannedEntry" value="${escapeHtml(record.plannedEntry)}" placeholder="123.45" /></div><div><label>Planned Stop</label><input data-field="plannedStop" value="${escapeHtml(record.plannedStop)}" placeholder="119.80" /></div><div><label>Planned Target</label><input data-field="plannedFirstTarget" value="${escapeHtml(record.plannedFirstTarget)}" placeholder="130.00" /></div><div><label>Planned Risk/Share</label><input data-field="plannedRiskPerShare" value="${escapeHtml(record.plannedRiskPerShare)}" placeholder="3.65" /></div></div><div class="diarygrid"><div><label>Actual Entry</label><input data-field="actualEntry" value="${escapeHtml(record.actualEntry)}" placeholder="123.60" /></div><div><label>Actual Exit</label><input data-field="actualExit" value="${escapeHtml(record.actualExit)}" placeholder="129.90" /></div><div><label>Actual Stop</label><input data-field="actualStop" value="${escapeHtml(record.actualStop)}" placeholder="119.80" /></div><div><label>Quantity</label><input data-field="actualQuantity" value="${escapeHtml(record.actualQuantity)}" placeholder="10" /></div></div><div class="diarygrid"><div><label>Outcome Reason</label><select data-field="outcomeReason"><option value="" ${record.outcomeReason === '' ? 'selected' : ''}>Not set</option><option ${record.outcomeReason === 'target hit' ? 'selected' : ''}>target hit</option><option ${record.outcomeReason === 'stop hit' ? 'selected' : ''}>stop hit</option><option ${record.outcomeReason === 'manual exit' ? 'selected' : ''}>manual exit</option><option ${record.outcomeReason === 'invalidation' ? 'selected' : ''}>invalidation</option><option ${record.outcomeReason === 'expired' ? 'selected' : ''}>expired</option></select></div><div><label>Execution Quality</label><select data-field="executionQuality"><option value="" ${record.executionQuality === '' ? 'selected' : ''}>Not set</option><option ${record.executionQuality === 'followed_plan' ? 'selected' : ''}>followed_plan</option><option ${record.executionQuality === 'early_entry' ? 'selected' : ''}>early_entry</option><option ${record.executionQuality === 'late_entry' ? 'selected' : ''}>late_entry</option><option ${record.executionQuality === 'early_exit' ? 'selected' : ''}>early_exit</option><option ${record.executionQuality === 'late_exit' ? 'selected' : ''}>late_exit</option><option ${record.executionQuality === 'partial' ? 'selected' : ''}>partial</option></select></div><div><label>Setup Quality</label><select data-field="setupQuality"><option value="" ${record.setupQuality === '' ? 'selected' : ''}>Not set</option><option ${record.setupQuality === 'A' ? 'selected' : ''}>A</option><option ${record.setupQuality === 'B' ? 'selected' : ''}>B</option><option ${record.setupQuality === 'C' ? 'selected' : ''}>C</option></select></div><div><label>Reviewed</label><input data-field="reviewedAt" type="date" value="${escapeHtml(record.reviewedAt)}" /></div></div><div class="diarygrid"><div><label>Setup Tags</label><input data-field="setupTags" value="${escapeHtml(formatTagList(record.setupTags))}" placeholder="20MA bounce, first pullback" /></div><div><label>Mistake Tags</label><input data-field="mistakeTags" value="${escapeHtml(formatTagList(record.mistakeTags))}" placeholder="early entry, stop moved" /></div><div><label>Lesson Tags</label><input data-field="lessonTags" value="${escapeHtml(formatTagList(record.lessonTags))}" placeholder="wait for bounce confirmation" /></div><div><label>Lesson Learned</label><input data-field="lesson" value="${escapeHtml(record.lesson)}" placeholder="Wait for cleaner bounce" /></div></div><div class="diarygrid"><div><label>Before Image Ref</label><input data-field="beforeImage" value="${escapeHtml(record.beforeImage)}" placeholder="stored chart / ref" /></div><div><label>After Image Ref</label><input data-field="afterImage" value="${escapeHtml(record.afterImage)}" placeholder="exit screenshot / ref" /></div><div><label>Gross PnL</label><input value="${escapeHtml(record.grossPnL || '')}" readonly /></div><div><label>Result in R</label><input value="${escapeHtml(record.resultR || '')}" readonly /></div></div><div><label>Notes</label><textarea data-field="notes" placeholder="Why this setup was worth tracking.">${escapeHtml(record.notes)}</textarea></div>`;
+    div.querySelector('[data-act="delete-trade"]').onclick = () => deleteTradeRecord(record.id);
+    div.querySelectorAll('[data-field]').forEach(field => {
+      field.addEventListener('change', event => updateTradeRecord(record.id, event.target.getAttribute('data-field'), event.target.value));
+      field.addEventListener('input', event => {
+        if(event.target.tagName === 'TEXTAREA' || ['lesson','setupTags','mistakeTags','lessonTags','notes','beforeImage','afterImage'].includes(event.target.getAttribute('data-field'))){
+          updateTradeRecord(record.id, event.target.getAttribute('data-field'), event.target.value);
+        }
+      });
+    });
+    box.appendChild(div);
+  });
+}
+
+function renderTradeDiary(){
+  const box = $('tradeDiary');
+  if(!box) return;
+  const diaryItems = diaryTradeRecords();
+  console.debug('RENDER_FROM_TICKER_RECORD', 'tradeDiary', diaryItems.length);
+  if(!diaryItems.length){
+    box.innerHTML = '<div class="summary">No trade records yet. Save an analysed setup from the review workspace.</div>';
+    return;
+  }
+  box.innerHTML = '';
+  diaryItems.forEach(({record: tickerRecord, trade: record}) => {
+    const outcomeLabel = record.outcome || 'Not set';
+    const resultRText = record.resultR ? `${record.resultR}R` : 'R n/a';
+    const plannedSummary = `${record.plannedEntry || 'n/a'} / ${record.plannedStop || 'n/a'} / ${record.plannedFirstTarget || 'n/a'}`;
+    const actualSummary = `${record.actualEntry || 'n/a'} / ${record.actualExit || 'n/a'} / ${record.actualQuantity || 'n/a'}`;
+    const tagSummary = [formatTagList(record.setupTags), formatTagList(record.mistakeTags), formatTagList(record.lessonTags)].filter(Boolean).join(' â€¢ ') || 'No tags yet';
+    const div = document.createElement('details');
+    div.className = 'diarycard';
+    div.innerHTML = `<summary class="diaryhead"><div class="diarymeta"><span class="badge ${statusClass(record.chartVerdict || record.verdict)}">${escapeHtml(record.chartVerdict || record.verdict)}</span><strong>${escapeHtml(record.ticker || 'Ticker')}</strong><span class="tiny">${escapeHtml(record.date || '')}</span><span class="tiny">${escapeHtml(tickerRecord.lifecycle.stage || '')}</span></div><div class="tiny">Outcome ${escapeHtml(outcomeLabel)} â€¢ ${escapeHtml(resultRText)}</div></summary><div class="tiny">Outcome ${escapeHtml(outcomeLabel)} â€¢ ${escapeHtml(resultRText)} â€¢ Gross ${escapeHtml(record.grossPnL || 'n/a')} â€¢ Net ${escapeHtml(record.netPnL || 'n/a')} â€¢ Held ${escapeHtml(record.heldDays || 'n/a')} day(s)</div><div class="tiny">Planned ${escapeHtml(plannedSummary)} â€¢ Actual ${escapeHtml(actualSummary)}</div><div class="tiny">Tags: ${escapeHtml(tagSummary)}</div><div class="actions"><button class="danger compactbutton" data-act="delete-trade" type="button">Delete</button></div><div class="diarygrid"><div><label>Opened</label><input data-field="openedAt" type="date" value="${escapeHtml(record.openedAt)}" /></div><div><label>Closed</label><input data-field="closedAt" type="date" value="${escapeHtml(record.closedAt)}" /></div><div><label>Verdict</label><select data-field="verdict"><option ${record.verdict === 'Watch' ? 'selected' : ''}>Watch</option><option ${record.verdict === 'Near Entry' ? 'selected' : ''}>Near Entry</option><option ${record.verdict === 'Entry' ? 'selected' : ''}>Entry</option><option ${record.verdict === 'Avoid' ? 'selected' : ''}>Avoid</option></select></div><div><label>Outcome</label><select data-field="outcome"><option value="" ${record.outcome === '' ? 'selected' : ''}>Not set</option><option ${record.outcome === 'Open' ? 'selected' : ''}>Open</option><option ${record.outcome === 'Win' ? 'selected' : ''}>Win</option><option ${record.outcome === 'Loss' ? 'selected' : ''}>Loss</option><option ${record.outcome === 'Scratch' ? 'selected' : ''}>Scratch</option><option ${record.outcome === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div></div><div class="diarygrid"><div><label>Planned Entry</label><input data-field="plannedEntry" value="${escapeHtml(record.plannedEntry)}" placeholder="123.45" /></div><div><label>Planned Stop</label><input data-field="plannedStop" value="${escapeHtml(record.plannedStop)}" placeholder="119.80" /></div><div><label>Planned Target</label><input data-field="plannedFirstTarget" value="${escapeHtml(record.plannedFirstTarget)}" placeholder="130.00" /></div><div><label>Planned Risk/Share</label><input data-field="plannedRiskPerShare" value="${escapeHtml(record.plannedRiskPerShare)}" placeholder="3.65" /></div></div><div class="diarygrid"><div><label>Actual Entry</label><input data-field="actualEntry" value="${escapeHtml(record.actualEntry)}" placeholder="123.60" /></div><div><label>Actual Exit</label><input data-field="actualExit" value="${escapeHtml(record.actualExit)}" placeholder="129.90" /></div><div><label>Actual Stop</label><input data-field="actualStop" value="${escapeHtml(record.actualStop)}" placeholder="119.80" /></div><div><label>Quantity</label><input data-field="actualQuantity" value="${escapeHtml(record.actualQuantity)}" placeholder="10" /></div></div><div class="diarygrid"><div><label>Outcome Reason</label><select data-field="outcomeReason"><option value="" ${record.outcomeReason === '' ? 'selected' : ''}>Not set</option><option ${record.outcomeReason === 'target hit' ? 'selected' : ''}>target hit</option><option ${record.outcomeReason === 'stop hit' ? 'selected' : ''}>stop hit</option><option ${record.outcomeReason === 'manual exit' ? 'selected' : ''}>manual exit</option><option ${record.outcomeReason === 'invalidation' ? 'selected' : ''}>invalidation</option><option ${record.outcomeReason === 'expired' ? 'selected' : ''}>expired</option></select></div><div><label>Execution Quality</label><select data-field="executionQuality"><option value="" ${record.executionQuality === '' ? 'selected' : ''}>Not set</option><option ${record.executionQuality === 'followed_plan' ? 'selected' : ''}>followed_plan</option><option ${record.executionQuality === 'early_entry' ? 'selected' : ''}>early_entry</option><option ${record.executionQuality === 'late_entry' ? 'selected' : ''}>late_entry</option><option ${record.executionQuality === 'early_exit' ? 'selected' : ''}>early_exit</option><option ${record.executionQuality === 'late_exit' ? 'selected' : ''}>late_exit</option><option ${record.executionQuality === 'partial' ? 'selected' : ''}>partial</option></select></div><div><label>Setup Quality</label><select data-field="setupQuality"><option value="" ${record.setupQuality === '' ? 'selected' : ''}>Not set</option><option ${record.setupQuality === 'A' ? 'selected' : ''}>A</option><option ${record.setupQuality === 'B' ? 'selected' : ''}>B</option><option ${record.setupQuality === 'C' ? 'selected' : ''}>C</option></select></div><div><label>Reviewed</label><input data-field="reviewedAt" type="date" value="${escapeHtml(record.reviewedAt)}" /></div></div><div class="diarygrid"><div><label>Setup Tags</label><input data-field="setupTags" value="${escapeHtml(formatTagList(record.setupTags))}" placeholder="20MA bounce, first pullback" /></div><div><label>Mistake Tags</label><input data-field="mistakeTags" value="${escapeHtml(formatTagList(record.mistakeTags))}" placeholder="early entry, stop moved" /></div><div><label>Lesson Tags</label><input data-field="lessonTags" value="${escapeHtml(formatTagList(record.lessonTags))}" placeholder="wait for bounce confirmation" /></div><div><label>Lesson Learned</label><input data-field="lesson" value="${escapeHtml(record.lesson)}" placeholder="Wait for cleaner bounce" /></div></div><div class="diarygrid"><div><label>Before Image Ref</label><input data-field="beforeImage" value="${escapeHtml(record.beforeImage)}" placeholder="stored chart / ref" /></div><div><label>After Image Ref</label><input data-field="afterImage" value="${escapeHtml(record.afterImage)}" placeholder="exit screenshot / ref" /></div><div><label>Gross PnL</label><input value="${escapeHtml(record.grossPnL || '')}" readonly /></div><div><label>Result in R</label><input value="${escapeHtml(record.resultR || '')}" readonly /></div></div><div><label>Notes</label><textarea data-field="notes" placeholder="Why this setup was worth tracking.">${escapeHtml(record.notes)}</textarea></div>`;
     div.querySelector('[data-act="delete-trade"]').onclick = () => deleteTradeRecord(record.id);
     div.querySelectorAll('[data-field]').forEach(field => {
       field.addEventListener('change', event => updateTradeRecord(record.id, event.target.getAttribute('data-field'), event.target.value));
@@ -3112,7 +3158,7 @@ function removeTicker(ticker){
   delete uiState.selectedScanner[ticker];
   delete uiState.promptOpen[ticker];
   delete uiState.responseOpen[ticker];
-  if($('selectedTicker').value === ticker) resetReview();
+  if(activeReviewTicker() === ticker) resetReview();
   updateTickerInputFromState();
   commitTickerState();
   renderTickerQuickLists();
@@ -3127,7 +3173,7 @@ function removeCard(ticker){
   if(record) record.review.cardOpen = false;
   delete uiState.promptOpen[ticker];
   delete uiState.responseOpen[ticker];
-  if($('selectedTicker').value === ticker) resetReview();
+  if(activeReviewTicker() === ticker) resetReview();
   commitTickerState();
   renderCards();
 }
@@ -5183,6 +5229,7 @@ function statusRank(status){
 function openRankedResultInReview(ticker){
   const symbol = normalizeTicker(ticker);
   const record = upsertTickerRecord(symbol);
+  setActiveReviewTicker(symbol);
   record.review.cardOpen = true;
   if(!state.tickers.includes(symbol)) state.tickers.push(symbol);
   delete uiState.selectedScanner[symbol];
@@ -5217,6 +5264,32 @@ async function reviewWatchlistTicker(ticker){
     const reviewSection = $('reviewSection');
     if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
   }
+}
+
+function analyseActiveReviewTicker(){
+  const ticker = activeReviewTicker();
+  if(!ticker || uiState.loadingTicker) return;
+  analyseSetup(ticker);
+}
+
+function addActiveReviewTickerToWatchlist(){
+  const ticker = activeReviewTicker();
+  if(!ticker) return;
+  const liveRecord = upsertTickerRecord(ticker);
+  const entry = addToWatchlist({
+    ticker:liveRecord.ticker,
+    dateAdded:todayIsoDate(),
+    scoreWhenAdded:liveRecord.scan.score,
+    verdictWhenAdded:liveRecord.scan.verdict || '',
+    expiryAfterTradingDays:5
+  });
+  if(entry) setStatus('inputStatus', `<span class="ok">${escapeHtml(ticker)} saved to the watchlist.</span>`);
+}
+
+function saveActiveReviewTickerTrade(){
+  const ticker = activeReviewTicker();
+  if(!ticker) return;
+  saveTradeFromCard(ticker);
 }
 
 function selectedScannerTickers(){
@@ -5319,6 +5392,10 @@ function renderScannerResults(){
         if(reviewBtn){
           const ticker = normalizeTickerRecord(record).ticker;
           reviewBtn.onclick = () => openRankedResultInReview(ticker);
+          node.onclick = event => {
+            if(event.target.closest('button') || event.target.closest('summary') || event.target.closest('details')) return;
+            openRankedResultInReview(ticker);
+          };
         }
         list.appendChild(node);
       });
@@ -5335,40 +5412,15 @@ function renderCards(){
   const box = $('cardsList');
   if(!box) return;
   box.innerHTML = '';
-  const records = openCardTickerRecords();
+  const records = activeReviewTicker() ? [getTickerRecord(activeReviewTicker())].filter(Boolean) : [];
   console.debug('RENDER_FROM_TICKER_RECORD', 'cards', records.length);
   if(!records.length){
     box.innerHTML = (state.tickers || []).length
-      ? '<div class="summary">No review cards yet. Open a ranked setup, or open the saved universe here when you want chart-by-chart supporting review.</div><div class="actions"><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a><button class="secondary" data-act="seed-cards">Open Universe In Cards</button></div>'
-      : '<div class="summary">No review cards yet. Start in Ranked Results, then open the best setups into Setup Review when you are ready.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>';
-    const seedBtn = box.querySelector('[data-act="seed-cards"]');
-    if(seedBtn){
-      seedBtn.onclick = () => {
-        seedCardsFromUniverse(6);
-        const reviewSection = $('reviewSection');
-        if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
-      };
-    }
+      ? '<div class="summary">Open one ranked result to load it into the review workspace.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>'
+      : '<div class="summary">Run a scan first, then open a shortlisted ticker here for review.</div><a class="helperbutton" href="#dailyInput">Go To Scan List</a>';
     return;
   }
-  const ordered = records.map(normalizeTickerRecord);
-  const groups = ['Entry', 'Too Wide', 'Near Entry', 'Watch', 'Manual Review', 'Avoid'];
-  groups.forEach(group => {
-    const items = ordered.filter(record => {
-      const bucket = bucketStatusForCard({
-        chartVerdict:record.scan.verdict || record.watchlist.status || 'Watch',
-        riskStatus:record.plan.riskStatus || record.scan.riskStatus || 'plan_missing'
-      });
-      return group === 'Near Entry'
-        ? (bucket === 'Near Entry' || bucket === 'Near Setup')
-        : bucket === group;
-    });
-    if(!items.length) return;
-    const header = document.createElement('div');
-    header.className = 'summary';
-    header.innerHTML = `<strong>${escapeHtml(group)}</strong><div class="tiny">${items.length} candidate${items.length === 1 ? '' : 's'} in this scanner bucket.</div>`;
-    box.appendChild(header);
-    items.forEach(record => {
+  records.map(normalizeTickerRecord).forEach(record => {
     const promptText = record.review.lastPrompt || buildTickerPromptFromRecord(record);
     const sourceLabel = record.review.source === 'openai' ? 'OpenAI' : (record.review.source === 'scanner' ? 'Scanner' : (record.review.source === 'ai' ? 'Imported AI' : 'Checklist'));
     const marketLabel = record.meta.marketStatus || state.marketStatus;
@@ -5456,7 +5508,6 @@ function renderCards(){
       };
     }
     box.appendChild(div);
-    });
   });
 }
 
@@ -5524,9 +5575,9 @@ function loadCard(ticker){
   const record = getTickerRecord(ticker);
   if(!record) return;
   console.debug('RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
+  setActiveReviewTicker(record.ticker);
   refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
   commitTickerState();
-  $('selectedTicker').value = record.ticker;
   const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : null;
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
   checklistIds.forEach(id => { $(id).checked = !!reviewChecks[id]; });
@@ -5548,7 +5599,7 @@ function refreshReview(){
 }
 
 function saveReview(){
-  const ticker = normalizeTicker($('selectedTicker').value);
+  const ticker = activeReviewTicker();
   if(!ticker){
     $('selectedTicker').focus();
     return;
@@ -5556,6 +5607,7 @@ function saveReview(){
   const checks = currentChecks();
   const result = scoreAndStatusFromChecks(checks);
   const record = upsertTickerRecord(ticker);
+  setActiveReviewTicker(ticker);
   record.review.cardOpen = true;
   if(!state.tickers.includes(ticker)) state.tickers.push(ticker);
   const manualReview = {
@@ -5587,6 +5639,7 @@ function saveReview(){
 }
 
 function resetReview(){
+  uiState.activeReviewTicker = '';
   ['selectedTicker','statusBox','scoreBox','entryPrice','stopPrice','targetPrice'].forEach(id => { $(id).value = ''; });
   checklistIds.forEach(id => { $(id).checked = false; });
   $('summaryBox').textContent = 'No setup reviewed yet.';
@@ -5596,10 +5649,11 @@ function resetReview(){
   ['riskPerShare','positionSize','rrValue'].forEach(id => { $(id).textContent = '-'; });
   renderPlannerPlanSummary('', '', '');
   renderReviewLifecycleSummary('');
+  renderCards();
 }
 
 function refreshSelectedTickerLifecycle(){
-  const ticker = normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
+  const ticker = activeReviewTicker();
   if(!ticker) return;
   const record = getTickerRecord(ticker);
   if(!record) return;
@@ -5613,7 +5667,7 @@ function refreshSelectedTickerLifecycle(){
 }
 
 function expireSelectedTickerLifecycle(){
-  const ticker = normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
+  const ticker = activeReviewTicker();
   if(!ticker) return;
   const record = getTickerRecord(ticker);
   if(!record) return;
@@ -5633,7 +5687,7 @@ function expireSelectedTickerLifecycle(){
 }
 
 function reactivateSelectedTickerLifecycle(){
-  const ticker = normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
+  const ticker = activeReviewTicker();
   if(!ticker) return;
   const record = getTickerRecord(ticker);
   if(!record) return;
@@ -5648,7 +5702,7 @@ function reactivateSelectedTickerLifecycle(){
 
 function calculate(){
   saveState();
-  const ticker = normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
+  const ticker = activeReviewTicker();
   const entry = numericOrNull($('entryPrice').value);
   const stop = numericOrNull($('stopPrice').value);
   const target = numericOrNull($('targetPrice').value);
@@ -5803,6 +5857,9 @@ click('jumpToDiaryBtn', () => {
 click('markAlertsSeenBtn', markAlertsSeen);
 click('exportDiaryBtn', exportTradeDiary);
 click('saveReviewBtn', saveReview);
+click('analyseActiveBtn', analyseActiveReviewTicker);
+click('addWatchlistActiveBtn', addActiveReviewTickerToWatchlist);
+click('saveTradeActiveBtn', saveActiveReviewTickerTrade);
 click('resetReviewBtn', resetReview);
 click('refreshLifecycleBtn', refreshSelectedTickerLifecycle);
 click('expireLifecycleBtn', expireSelectedTickerLifecycle);
@@ -5859,6 +5916,10 @@ on('dataProvider', 'change', () => {
   renderFinalUniversePreview();
   updateTickerSearchStatus();
   updateProviderStatusNote();
+});
+on('selectedTicker', 'change', () => {
+  const ticker = activeReviewTicker();
+  if(ticker && getTickerRecord(ticker)) loadCard(ticker);
 });
 document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', refreshReview));
 ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));

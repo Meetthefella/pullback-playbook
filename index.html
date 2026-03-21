@@ -26,312 +26,300 @@
   <div class="hero">
     <div class="card">
       <h1>Pullback Playbook v4.4.0</h1>
-      <p>Scanner-first Quality Pullback workflow with provider-backed market data, ranked shortlist automation, per-ticker chart upload, in-app OpenAI setup analysis, and risk planning built around your GBP 4,000 account and GBP 40 max risk.</p>
-      <div class="pillrow">
-        <span class="pill">Quality Pullback Scanner</span>
-        <span class="pill">Per-card analysis</span>
-        <span class="pill">Chart upload</span>
-        <span class="pill">Provider-backed market data</span>
-        <span class="pill">PWA ready</span>
+      <p>Scan candidates, open one, review it, decide, then track the outcome.</p>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label id="marketStatusSection">Market Status</label>
+          <select id="marketStatus">
+            <option>S&amp;P above 50 MA</option>
+            <option>S&amp;P near 50 MA</option>
+            <option>S&amp;P below 50 MA</option>
+          </select>
+        </div>
+        <div>
+          <label>Account Size (GBP)</label>
+          <input id="accountSize" type="number" value="4000" min="1" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label>Risk %</label>
+          <input id="riskPercent" type="number" value="0.01" min="0.001" step="0.001" />
+        </div>
+        <div>
+          <label>Max Loss Override (GBP)</label>
+          <input id="maxLossOverride" type="number" min="1" step="1" placeholder="Optional" />
+        </div>
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <label class="checkitem" style="padding:0"><input id="wholeSharesOnly" type="checkbox" checked> Whole shares only</label>
+        <span class="pill" id="focusCount">0 focus</span>
         <span class="pill" id="appVersion">v4.4.0</span>
       </div>
       <div class="navtabs">
         <a class="tablink" href="#dailyInput">Scan</a>
-        <a class="tablink" href="#apiSettings">API</a>
-        <a class="tablink" href="#resultsSection">Results</a>
+        <a class="tablink" href="#resultsSection">Shortlist</a>
         <a class="tablink" href="#reviewSection">Review</a>
         <a class="tablink" href="#watchlistSection">Watchlist</a>
-        <a class="tablink" href="#alertsSection">Alerts</a>
-        <a class="tablink" href="#plannerSection">Review Tools</a>
         <a class="tablink" href="#diarySection">Diary</a>
+        <a class="tablink" href="#alertsSection">Alerts</a>
+        <a class="tablink" href="#advancedSection">Advanced</a>
       </div>
     </div>
     <div class="card">
-      <h2>1) Trading Parameters</h2>
+      <h2>1) Header / Market Context</h2>
       <div class="stats">
         <div class="stat"><div>Account</div><div class="big" id="accountStat">GBP 4,000</div></div>
         <div class="stat"><div>Max Risk</div><div class="big" id="riskStat">GBP 40</div></div>
         <div class="stat"><div>Risk %</div><div class="big" id="riskPctStat">1.0%</div></div>
       </div>
       <div class="helpbox" style="margin-top:12px">
-        Every generated prompt and AI response includes market status plus your fixed risk rule of GBP 40 max loss per trade.
+        The top stays lightweight: market context, account context, and a quick focus count.
       </div>
-    </div>
-  </div>
-
-  <div class="grid" style="margin-top:14px">
-    <div class="card">
-      <h2 id="marketStatusSection">2) Market Status</h2>
-      <div><label>Market Status</label><select id="marketStatus"><option>S&amp;P above 50 MA</option><option>S&amp;P near 50 MA</option><option>S&amp;P below 50 MA</option></select></div>
-      <div class="tiny" style="margin-top:8px">Market status is included in scanner evaluation, prompts, and AI analysis.</div>
-    </div>
-
-    <div class="card">
-      <h2 id="watchlistSection">3) Watchlist</h2>
-      <p class="tiny">Add a ticker here only from a reviewed setup. Entries expire after 5 trading days unless refreshed.</p>
-      <div class="actions" style="margin-top:10px">
-        <label class="checkitem" style="padding:0"><input id="showExpiredWatchlist" type="checkbox"> Show expired</label>
-      </div>
-      <div id="watchlistList" class="list"></div>
     </div>
   </div>
 
   <div class="card" style="margin-top:14px">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="focusSection" style="margin-bottom:0">Today's Focus / Trading Queue</h2>
-      <span class="pill" id="focusCount">0 focus</span>
+    <h2 id="dailyInput">2) Scan List</h2>
+    <p class="tiny">Paste/import tickers, optionally add one manually, then run the scan.</p>
+    <div style="margin-top:10px">
+      <label>Paste or Import Tickers</label>
+      <textarea id="tvImportInput" placeholder="CAT,DE,UNP,GEV&#10;or&#10;CAT DE UNP GEV&#10;or one ticker per line"></textarea>
+      <div class="actions">
+        <button class="secondary" id="importTvBtn">Import Tickers</button>
+        <button class="primary" id="buildBtn">Run Scan</button>
+      </div>
+      <div id="tvImportPreview" class="mutebox" style="margin-top:10px">No imported ticker list yet.</div>
     </div>
-    <p class="tiny">Top actionable names surfaced from the current workflow without showing full alert noise.</p>
-    <div id="focusQueue" class="list"></div>
-  </div>
-
-  <div class="grid" style="margin-top:14px">
-    <div class="card">
-      <h2 id="dailyInput">6) Scanner Universe</h2>
-      <div class="row">
-        <div><label>Account Size (GBP)</label><input id="accountSize" type="number" value="4000" min="1" /></div>
-        <div><label>Risk %</label><input id="riskPercent" type="number" value="0.01" min="0.001" step="0.001" /></div>
+    <div style="margin-top:14px">
+      <label>Quick Manual Ticker Search</label>
+      <div class="searchaddrow" style="margin-top:10px">
+        <div class="searchaddinput">
+          <label>Ticker Search / Add</label>
+          <input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" />
+          <div id="tickerSuggestions" class="suggestions" hidden></div>
+        </div>
+        <div class="searchaddaction"><button class="primary compactbutton" id="addTickerBtn">Add Ticker</button></div>
       </div>
-      <div class="row" style="margin-top:10px">
-        <div><label>Max Loss Override (GBP)</label><input id="maxLossOverride" type="number" min="1" step="1" placeholder="Optional" /></div>
-        <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <label class="checkitem" style="padding:0"><input id="wholeSharesOnly" type="checkbox" checked> Whole shares only</label>
-        <div class="tiny" style="align-self:end">Max loss is computed from override if set, otherwise account size × risk %.</div>
-      </div>
-      <details open style="margin-top:10px">
-        <summary><strong>Manual Universe Edit</strong></summary>
+      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
+    </div>
+    <details style="margin-top:14px">
+      <summary><strong>Advanced Scanner Tools</strong></summary>
+      <div style="margin-top:10px">
+        <strong>Import From Screenshot</strong>
+        <div class="tiny" style="margin-top:6px">Upload a TradingView screenshot to extract tickers. OCR does not run the scan automatically.</div>
+        <div class="actions">
+          <button class="secondary" id="importScreenshotBtn">Import From Screenshot</button>
+        </div>
+        <input id="ocrImportFile" type="file" accept="image/*" style="display:none" />
+        <div class="statusline tiny" id="ocrImportStatus">OCR import is optional and runs fully in your browser.</div>
         <div style="margin-top:10px">
-          <strong>4) Import From Screenshot</strong>
-          <div class="tiny" style="margin-top:6px">Import TradingView names from pasted lists or screenshots before you manually add extra symbols.</div>
-          <label>Import TradingView Tickers</label>
-          <textarea id="tvImportInput" placeholder="CAT,DE,UNP,GEV&#10;or&#10;CAT DE UNP GEV&#10;or one ticker per line"></textarea>
+          <label>OCR Review / Edit</label>
+          <textarea id="ocrReviewInput" placeholder="Detected tickers will appear here for review before import."></textarea>
           <div class="actions">
-            <button class="secondary" id="importTvBtn">Import Tickers</button>
-            <button class="secondary" id="importScreenshotBtn">Import From Screenshot</button>
+            <button class="secondary" id="applyOcrBtn">Confirm OCR Tickers</button>
+            <button class="ghost" id="clearOcrBtn">Clear OCR Review</button>
           </div>
-          <input id="ocrImportFile" type="file" accept="image/*" style="display:none" />
-          <div class="tiny" style="margin-top:8px">Paste comma-separated, space-separated, or one ticker per line. Import replaces the current manual scanner universe but does not run the scanner.</div>
-          <div class="tiny" style="margin-top:8px">Upload a TradingView screenshot to extract tickers.</div>
-          <div class="statusline tiny" id="ocrImportStatus">OCR import is optional and runs fully in your browser.</div>
-          <div style="margin-top:10px">
-            <label>OCR Review / Edit</label>
-            <textarea id="ocrReviewInput" placeholder="Detected tickers will appear here for review before import."></textarea>
-            <div class="actions">
-              <button class="secondary" id="applyOcrBtn">Confirm OCR Tickers</button>
-              <button class="ghost" id="clearOcrBtn">Clear OCR Review</button>
-            </div>
-          </div>
-          <div id="tvImportPreview" class="mutebox" style="margin-top:10px">No imported ticker list yet.</div>
         </div>
-        <div style="margin-top:14px">
-          <strong>5) Manual Ticker Search</strong>
-          <div class="searchaddrow" style="margin-top:10px">
-            <div class="searchaddinput"><label>Ticker Search / Add</label><input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" /><div id="tickerSuggestions" class="suggestions" hidden></div></div>
-            <div class="searchaddaction"><button class="primary compactbutton" id="addTickerBtn">Add Ticker</button></div>
-          </div>
-          <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
+      </div>
+      <div class="panelbox" style="margin-top:12px">
+        <strong>Scanner Universe Controls</strong>
+        <div class="row" style="margin-top:10px">
+          <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
+          <div><label>Universe Mode</label><select id="universeMode"><option value="tradingview_only">TradingView Only</option><option value="core8">Curated Core 8</option><option value="combined">Combined</option></select></div>
         </div>
-        <div class="panelbox" style="margin-top:12px">
-          <strong>6) Scanner Universe</strong>
-          <div class="row" style="margin-top:10px">
-            <div><label>Universe Mode</label><select id="universeMode"><option value="tradingview_only">TradingView Only</option><option value="core8">Curated Core 8</option><option value="combined">Combined</option></select></div>
-            <div><label>Setup Type</label><select id="scannerSetupType"><option value="">Unknown</option><option value="20MA">20MA</option><option value="50MA">50MA</option></select></div>
-          </div>
-          <div class="tiny" style="margin-top:8px">This is the only active setup-type selector used by the scanner and AI prompt flow.</div>
-          <div id="finalUniversePreview" class="mutebox" style="margin-top:10px">Final scan universe will appear here.</div>
-          <div class="quicklisthead" style="margin-top:12px">
-            <strong>Scanner Universe</strong>
-            <span class="tiny">This is the live universe used for automatic scanning.</span>
-          </div>
-          <div class="summary saved-universe-summary" id="savedUniverseSummary" style="margin-top:10px">No saved scanner universe snapshot on this device.</div>
-          <div class="quicklist" id="scannerUniverseQuickList"></div>
+        <div class="row" style="margin-top:10px">
+          <div><label>Setup Type</label><select id="scannerSetupType"><option value="">Unknown</option><option value="20MA">20MA</option><option value="50MA">50MA</option></select></div>
+          <div class="tiny" style="align-self:end">Max loss uses the override if set, otherwise account size x risk %.</div>
         </div>
+        <div id="finalUniversePreview" class="mutebox" style="margin-top:10px">Final scan universe will appear here.</div>
+        <div class="quicklisthead" style="margin-top:12px">
+          <strong>Scanner Universe</strong>
+          <span class="tiny">This is the live universe used for the scan.</span>
+        </div>
+        <div class="summary saved-universe-summary" id="savedUniverseSummary" style="margin-top:10px">No saved scanner universe snapshot on this device.</div>
+        <div class="quicklist" id="scannerUniverseQuickList"></div>
         <div style="margin-top:10px">
           <label>Universe Text List</label>
           <textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea>
-          <div class="tiny" style="margin-top:8px">Use this only if you want to paste or bulk-edit the scanner universe directly. Scans use your manual tickers when present, otherwise the curated default list.</div>
+          <div class="tiny" style="margin-top:8px">Use this only for bulk editing. The scan uses your imported/manual tickers when present, otherwise the curated fallback list.</div>
         </div>
-      </details>
-      <div class="actions">
-        <button class="primary" id="buildBtn">Refresh Scanner Now</button>
-        <button class="secondary" id="saveBtn">Save List</button>
-        <button class="secondary" id="loadBtn">Load Saved</button>
-        <button class="ghost" id="clearBtn">Clear</button>
-        <button class="danger" id="resetAllBtn">Reset All</button>
+        <div class="actions">
+          <button class="secondary" id="saveBtn">Save List</button>
+          <button class="secondary" id="loadBtn">Load Saved</button>
+          <button class="ghost" id="clearBtn">Clear</button>
+          <button class="danger" id="resetAllBtn">Reset All</button>
+        </div>
       </div>
-      <div class="statusline tiny" id="inputStatus">Scans use your manual scanner universe when present, otherwise the curated default list. Manual refresh is optional.</div>
       <details style="margin-top:12px">
         <summary><strong>Active Scanner Rules</strong></summary>
         <div id="scannerRulesList" class="mutebox" style="margin-top:10px">Loading active scanner rules...</div>
         <div id="scannerDebugList" class="mutebox" style="margin-top:10px">No scan debug data yet.</div>
       </details>
-    </div>
-
-    <div class="card compact-card">
-      <details class="compact-details">
-        <summary><strong>Scanner Workflow Note</strong></summary>
-        <div class="helpbox" style="margin-top:10px">
-          The scanner shortlist is now the main workflow. Open a chart, save notes, upload a screenshot, and run <strong>Analyse Setup</strong> directly from each ticker card.
-        </div>
-      </details>
-    </div>
-  </div>
-
-  <div class="grid" style="margin-top:14px">
-    <div class="card">
-      <details>
-        <summary><strong id="apiSettings">API Settings Utility</strong></summary>
-        <div class="row" style="margin-top:10px">
-          <div><label>Data Provider</label><select id="dataProvider"><option value="fmp">Financial Modeling Prep</option><option value="marketdata">MarketData.app</option></select></div>
-          <div><label>Provider Plan</label><select id="apiPlan"><option value="scanner">Scanner Default</option></select></div>
-        </div>
-        <div style="margin-top:10px"><label>Market Data Key</label><input id="apiKey" type="text" value="Uses server-side provider API keys on Netlify" readonly /></div>
-        <div style="margin-top:10px"><label>AI Endpoint URL</label><input id="aiEndpoint" placeholder="/api/analyse-setup or full serverless URL" /></div>
-        <div class="tiny">Use `/api/analyse-setup` on Netlify for AI analysis. Market data runs through `/api/market-data` using the selected server-side provider adapter.</div>
-        <div class="tiny" style="margin-top:6px">`Analyse Setup` always uses the AI Endpoint URL above. The Data Provider selector only affects scanner market data.</div>
-        <div class="tiny" id="providerStatusNote" style="margin-top:8px">FMP: search + snapshot. MarketData.app: snapshot only for now.</div>
-        <div class="actions">
-          <button class="primary" id="saveApiBtn">Save Settings</button>
-          <button class="secondary" id="testApiBtn">Test Market Data</button>
-        </div>
-        <div id="apiStatus" class="subtle">No API test run yet.</div>
-      </details>
-    </div>
-
-    <div class="card">
-      <details>
-        <summary><strong>How In-App Analysis Works</strong></summary>
-        <div class="helpbox" style="margin-top:10px">
-          Each ticker card builds a structured setup payload with ticker, market status, saved checklist, notes, chart context, and your fixed risk rules.
-          <br><br>
-          The browser sends that payload to a lightweight serverless endpoint. The endpoint calls the OpenAI Responses API securely using your server-side `OPENAI_API_KEY`, then returns structured analysis back into the card.
-        </div>
-      </details>
-    </div>
-  </div>
-
-  <div class="grid" style="margin-top:14px">
-    <div class="card">
-      <h2 id="resultsSection">7) Ranked Results</h2>
-      <p class="tiny">The scanner now soft-ranks your TradingView shortlist for review. Open any ranked setup directly into the review workflow.</p>
-      <div class="statusline tiny" id="scannerSelectionStatus">Open any ranked setup to jump straight into review.</div>
-      <div id="results" class="list"></div>
-    </div>
-
-    <div class="card">
-      <details>
-        <summary><strong id="reviewSection">8) Setup Review</strong></summary>
-        <p class="tiny" style="margin-top:10px">Review the checklist first, then use the supporting utilities below only when you are ready to attach charts or define a real trade plan.</p>
-        <div class="row3" style="margin-top:10px">
-          <div><label>Ticker</label><input id="selectedTicker" placeholder="PWR" /></div>
-          <div><label>Status</label><input id="statusBox" readonly /></div>
-          <div><label>Score</label><input id="scoreBox" readonly /></div>
-        </div>
-        <div class="checks" style="margin-top:12px">
-          <div class="checkgroup">
-            <h3>Trend</h3>
-            <label class="checkitem"><input type="checkbox" class="logic" id="trendStrong"> Strong uptrend</label>
-            <label class="checkitem"><input type="checkbox" class="logic" id="above50"> Above 50 MA</label>
-            <label class="checkitem"><input type="checkbox" class="logic" id="above200"> Above 200 MA</label>
-            <label class="checkitem"><input type="checkbox" class="logic" id="ma50gt200"> 50 MA above 200 MA</label>
-          </div>
-          <div class="checkgroup">
-            <h3>Pullback + Confirmation</h3>
-            <label class="checkitem"><input type="checkbox" class="logic" id="near20"> Near 20 MA</label>
-            <label class="checkitem"><input type="checkbox" class="logic" id="near50"> Near 50 MA</label>
-            <label class="checkitem"><input type="checkbox" class="logic" id="stabilising"> Stabilising</label>
-            <label class="checkitem"><input type="checkbox" class="logic" id="bounce"> Bounce candle</label>
-            <label class="checkitem"><input type="checkbox" class="logic" id="volume"> Volume supportive</label>
-          </div>
-          <div class="checkgroup">
-            <h3>Trade Plan</h3>
-            <label class="checkitem"><input type="checkbox" class="logic" id="entryDefined"> Entry defined</label>
-            <label class="checkitem"><input type="checkbox" class="logic" id="stopDefined"> Stop defined</label>
-            <label class="checkitem"><input type="checkbox" class="logic" id="targetDefined"> Target defined</label>
-          </div>
-        </div>
-        <div style="margin-top:12px">
-          <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><strong>Setup Quality</strong><span id="progressText">0 / 10</span></div>
-          <div class="prog"><div class="fill" id="progressFill"></div></div>
-        </div>
-        <div style="margin-top:12px"><h3>Auto Summary</h3><div class="summary" id="summaryBox">No setup reviewed yet.</div></div>
-        <div class="summary" id="reviewLifecycleSummary" style="margin-top:12px">Lifecycle: Not tracked yet.</div>
-        <div class="actions">
-          <button class="primary" id="saveReviewBtn">Save Review to Card</button>
-          <button class="secondary" id="resetReviewBtn">Reset Review</button>
-          <button class="ghost" id="refreshLifecycleBtn" type="button">Refresh</button>
-          <button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button>
-          <button class="secondary" id="reactivateLifecycleBtn" type="button">Reactivate</button>
-        </div>
-      </details>
-    </div>
-  </div>
-
-  <div class="card" style="margin-top:14px">
-    <details>
-      <summary><strong>8A) Review Cards Utility</strong></summary>
-      <p class="tiny" style="margin-top:10px">Cards support Setup Review with chart upload, notes, AI analysis, watchlist actions, and diary logging. They are not a separate primary workflow.</p>
-      <div id="cardsList" class="list"></div>
     </details>
-  </div>
-
-  <div class="grid" style="margin-top:14px">
-    <div class="card">
-      <details>
-        <summary><strong id="plannerSection">8B) Planned Trade Calculator</strong></summary>
-        <p class="tiny" style="margin-top:10px">Use this only after Setup Review moves from scan estimate to a defined trade plan.</p>
-        <div class="summary" id="plannerPlanSummary" style="margin-top:10px">Entry: Not given • Stop: Not given • First Target: Not given • Planned R:R: N/A</div>
-        <div class="row3" style="margin-top:12px">
-          <div><label>Planned Entry</label><input id="entryPrice" type="number" step="0.01" /></div>
-          <div><label>Planned Stop</label><input id="stopPrice" type="number" step="0.01" /></div>
-          <div><label>Planned First Target</label><input id="targetPrice" type="number" step="0.01" /></div>
-        </div>
-        <div class="actions">
-          <button class="primary" id="calcBtn">Calculate</button>
-        </div>
-        <div class="stats" style="margin-top:10px">
-          <div class="stat"><div>Planned Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
-          <div class="stat"><div>Planned Position Size</div><div class="big" id="positionSize">-</div></div>
-          <div class="stat"><div>Planned R:R</div><div class="big" id="rrValue">-</div></div>
-        </div>
-        <div class="tiny" id="calcNote" style="margin-top:10px">Enter planned entry, stop, and first target to calculate size.</div>
-      </details>
-    </div>
+    <div class="statusline tiny" id="inputStatus">Scans use your imported/manual tickers when present, otherwise the curated default list.</div>
   </div>
 
   <div class="card" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="diarySection" style="margin-bottom:0">9) Trade Diary</h2>
+      <h2 id="focusSection" style="margin-bottom:0">Today's Focus / Trading Queue</h2>
+      <span class="pill">Actionable names only</span>
+    </div>
+    <p class="tiny">Quick queue of the names that need attention now.</p>
+    <div id="focusQueue" class="list"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2 id="resultsSection">3) Ranked Results</h2>
+    <p class="tiny">This is the shortlist. Tap a result to open one active review workspace.</p>
+    <div class="statusline tiny" id="scannerSelectionStatus">Open any ranked setup to jump straight into review.</div>
+    <div id="results" class="list"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2 id="reviewSection">4) Selected Ticker Review Workspace</h2>
+    <p class="tiny">One active ticker at a time. Review the chart, notes, checklist, and trade plan in one place.</p>
+    <div class="row3" style="margin-top:10px">
+      <div><label>Ticker</label><input id="selectedTicker" placeholder="PWR" /></div>
+      <div><label>Status</label><input id="statusBox" readonly /></div>
+      <div><label>Score</label><input id="scoreBox" readonly /></div>
+    </div>
+    <div class="checks" style="margin-top:12px">
+      <div class="checkgroup">
+        <h3>Trend</h3>
+        <label class="checkitem"><input type="checkbox" class="logic" id="trendStrong"> Strong uptrend</label>
+        <label class="checkitem"><input type="checkbox" class="logic" id="above50"> Above 50 MA</label>
+        <label class="checkitem"><input type="checkbox" class="logic" id="above200"> Above 200 MA</label>
+        <label class="checkitem"><input type="checkbox" class="logic" id="ma50gt200"> 50 MA above 200 MA</label>
+      </div>
+      <div class="checkgroup">
+        <h3>Pullback + Confirmation</h3>
+        <label class="checkitem"><input type="checkbox" class="logic" id="near20"> Near 20 MA</label>
+        <label class="checkitem"><input type="checkbox" class="logic" id="near50"> Near 50 MA</label>
+        <label class="checkitem"><input type="checkbox" class="logic" id="stabilising"> Stabilising</label>
+        <label class="checkitem"><input type="checkbox" class="logic" id="bounce"> Bounce candle</label>
+        <label class="checkitem"><input type="checkbox" class="logic" id="volume"> Volume supportive</label>
+      </div>
+      <div class="checkgroup">
+        <h3>Trade Plan</h3>
+        <label class="checkitem"><input type="checkbox" class="logic" id="entryDefined"> Entry defined</label>
+        <label class="checkitem"><input type="checkbox" class="logic" id="stopDefined"> Stop defined</label>
+        <label class="checkitem"><input type="checkbox" class="logic" id="targetDefined"> Target defined</label>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><strong>Setup Quality</strong><span id="progressText">0 / 10</span></div>
+      <div class="prog"><div class="fill" id="progressFill"></div></div>
+    </div>
+    <div style="margin-top:12px">
+      <h3>Auto Summary</h3>
+      <div class="summary" id="summaryBox">No setup reviewed yet.</div>
+    </div>
+    <div class="summary" id="reviewLifecycleSummary" style="margin-top:12px">Lifecycle: Not tracked yet.</div>
+    <div style="margin-top:14px">
+      <strong id="plannerSection">Trade Plan</strong>
+      <div class="summary" id="plannerPlanSummary" style="margin-top:10px">Entry: Not given • Stop: Not given • First Target: Not given • Planned R:R: N/A</div>
+      <div class="row3" style="margin-top:12px">
+        <div><label>Planned Entry</label><input id="entryPrice" type="number" step="0.01" /></div>
+        <div><label>Planned Stop</label><input id="stopPrice" type="number" step="0.01" /></div>
+        <div><label>Planned First Target</label><input id="targetPrice" type="number" step="0.01" /></div>
+      </div>
+      <div class="actions">
+        <button class="secondary" id="calcBtn">Recalculate Plan</button>
+      </div>
+      <div class="stats" style="margin-top:10px">
+        <div class="stat"><div>Planned Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
+        <div class="stat"><div>Planned Position Size</div><div class="big" id="positionSize">-</div></div>
+        <div class="stat"><div>Planned R:R</div><div class="big" id="rrValue">-</div></div>
+      </div>
+      <div class="tiny" id="calcNote" style="margin-top:10px">Enter planned entry, stop, and first target to calculate size.</div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="saveReviewBtn">Save Review</button>
+      <button class="secondary" id="analyseActiveBtn">Analyse Setup</button>
+      <button class="secondary" id="addWatchlistActiveBtn">Add to Watchlist</button>
+      <button class="secondary" id="saveTradeActiveBtn">Save to Diary</button>
+      <button class="ghost" id="resetReviewBtn">Reset Review</button>
+      <button class="ghost" id="refreshLifecycleBtn" type="button">Refresh</button>
+      <button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button>
+      <button class="secondary" id="reactivateLifecycleBtn" type="button">Reactivate</button>
+    </div>
+    <div id="cardsList" class="list" style="margin-top:14px"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2 id="watchlistSection">5) Watchlist</h2>
+    <p class="tiny">Decision output area for reviewed setups. Entries expire after 5 trading days unless refreshed.</p>
+    <div class="actions" style="margin-top:10px">
+      <label class="checkitem" style="padding:0"><input id="showExpiredWatchlist" type="checkbox"> Show expired</label>
+    </div>
+    <div id="watchlistList" class="list"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+      <h2 id="diarySection" style="margin-bottom:0">6) Trade Diary</h2>
       <div class="actions" style="margin-top:0">
         <button class="secondary" id="jumpToDiaryBtn">Diary Section</button>
         <button class="secondary" id="exportDiaryBtn">Export Diary JSON</button>
       </div>
     </div>
-    <p class="tiny">Save a planned trade snapshot first, then record actual fills, exits, result in R, mistakes, lessons, and before/after evidence later.</p>
+    <p class="tiny">Diary records stay compact by default. Expand a record only when you want to edit the full trade outcome.</p>
     <p class="tiny">Browser storage cannot expose a direct file path here, so use <strong>Export Diary JSON</strong> to save a local copy.</p>
     <div id="tradeDiary" class="list"></div>
   </div>
 
   <div class="card" style="margin-top:14px">
-    <details open>
-      <summary><strong id="analyticsSection">10) Pattern Review</strong></summary>
-      <p class="tiny" style="margin-top:10px">Compact analytics from diary outcomes, setup tags, mistakes, market regime, and lifecycle paths.</p>
-      <div id="patternAnalytics" class="list"></div>
-    </details>
-  </div>
-
-  <div class="card" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="alertsSection" style="margin-bottom:0">11) Alerts / Attention</h2>
+      <h2 id="alertsSection" style="margin-bottom:0">7) Alerts / Attention</h2>
       <div class="actions" style="margin-top:0">
         <span class="pill" id="newAlertsCount">0 new</span>
         <button class="secondary" id="markAlertsSeenBtn" type="button">Mark Seen</button>
       </div>
     </div>
-    <p class="tiny">Highlights setups that became more actionable, need review, are near expiry, or changed since your last visit.</p>
+    <p class="tiny">Alerts stay lower in the workflow so they support decisions instead of competing with scan and review.</p>
     <div id="alertsList" class="list"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <details open>
+      <summary><strong id="analyticsSection">8) Pattern Review</strong></summary>
+      <p class="tiny" style="margin-top:10px">Pattern review stays available, but secondary to the active trading workflow.</p>
+      <div id="patternAnalytics" class="list"></div>
+    </details>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <details>
+      <summary><strong id="advancedSection">9) Advanced / API Utilities</strong></summary>
+      <div class="grid" style="margin-top:12px">
+        <div class="panelbox">
+          <strong id="apiSettings">API Settings Utility</strong>
+          <div class="row" style="margin-top:10px">
+            <div><label>Data Provider</label><select id="dataProvider"><option value="fmp">Financial Modeling Prep</option><option value="marketdata">MarketData.app</option></select></div>
+            <div><label>Provider Plan</label><select id="apiPlan"><option value="scanner">Scanner Default</option></select></div>
+          </div>
+          <div style="margin-top:10px"><label>Market Data Key</label><input id="apiKey" type="text" value="Uses server-side provider API keys on Netlify" readonly /></div>
+          <div style="margin-top:10px"><label>AI Endpoint URL</label><input id="aiEndpoint" placeholder="/api/analyse-setup or full serverless URL" /></div>
+          <div class="tiny">Use `/api/analyse-setup` on Netlify for AI analysis. Market data runs through `/api/market-data` using the selected server-side provider adapter.</div>
+          <div class="tiny" style="margin-top:6px">`Analyse Setup` always uses the AI Endpoint URL above. The Data Provider selector only affects scanner market data.</div>
+          <div class="tiny" id="providerStatusNote" style="margin-top:8px">FMP: search + snapshot. MarketData.app: snapshot only for now.</div>
+          <div class="actions">
+            <button class="primary" id="saveApiBtn">Save Settings</button>
+            <button class="secondary" id="testApiBtn">Test Market Data</button>
+          </div>
+          <div id="apiStatus" class="subtle">No API test run yet.</div>
+        </div>
+        <div class="panelbox">
+          <strong>How In-App Analysis Works</strong>
+          <div class="helpbox" style="margin-top:10px">
+            Each active review card builds a structured setup payload with ticker, market status, saved checklist, notes, chart context, and your fixed risk rules.
+            <br><br>
+            The browser sends that payload to a lightweight serverless endpoint. The endpoint calls the OpenAI Responses API securely using your server-side `OPENAI_API_KEY`, then returns structured analysis back into the review workspace.
+          </div>
+        </div>
+      </div>
+    </details>
   </div>
 </div>
 <script src="./app.js"></script>
