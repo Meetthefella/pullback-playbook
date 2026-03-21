@@ -5873,24 +5873,23 @@ function resetAllData(){
 function registerPwa(){
   if(!('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
-    const buildVersion = String(window.__BUILD_VERSION__ || APP_VERSION || Date.now());
+    const buildVersion = String(window.__BUILD_VERSION__ || APP_VERSION || 'v4');
+    const reloadGuardKey = `pp_sw_reload_once_${buildVersion}`;
     let refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if(refreshing) return;
+      if(sessionStorage.getItem(reloadGuardKey)) return;
       refreshing = true;
+      sessionStorage.setItem(reloadGuardKey, '1');
       window.location.reload();
     });
     navigator.serviceWorker.register(`./service-worker.js?v=${encodeURIComponent(buildVersion)}`, {updateViaCache:'none'}).then(registration => {
-      const activateWaitingWorker = worker => {
-        if(worker) worker.postMessage({type:'SKIP_WAITING'});
-      };
-      if(registration.waiting) activateWaitingWorker(registration.waiting);
       registration.addEventListener('updatefound', () => {
         const worker = registration.installing;
         if(!worker) return;
         worker.addEventListener('statechange', () => {
           if(worker.state === 'installed' && navigator.serviceWorker.controller){
-            activateWaitingWorker(registration.waiting || worker);
+            console.info('PWA update installed and will apply on the next load.', {buildVersion});
           }
         });
       });

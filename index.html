@@ -7,14 +7,14 @@
   <meta name="theme-color" content="#0f172a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="build-version" content="" />
+  <meta name="build-version" content="v4.4.0" />
   <link id="appManifest" rel="manifest" href="./manifest.webmanifest" />
   <link rel="stylesheet" href="./styles.css" />
   <script>
     (function(){
-      var buildVersion = (document.lastModified || new Date().toISOString()).replace(/[^\dA-Za-z]+/g, '-');
-      window.__BUILD_VERSION__ = buildVersion;
       var meta = document.querySelector('meta[name="build-version"]');
+      var buildVersion = (meta && meta.getAttribute('content')) || 'v4.4.0';
+      window.__BUILD_VERSION__ = buildVersion;
       if(meta) meta.setAttribute('content', buildVersion);
       var manifest = document.getElementById('appManifest');
       if(manifest) manifest.setAttribute('href', './manifest.webmanifest?v=' + encodeURIComponent(buildVersion));
