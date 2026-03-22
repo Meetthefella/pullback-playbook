@@ -5127,11 +5127,11 @@ async function analyseSetup(ticker){
     renderCards();
     return;
   }
+  let lastFailureData = null;
   try{
     let response = null;
     let data = {};
     let lastError = 'Analysis request failed.';
-    let lastFailureData = null;
     for(const endpoint of endpoints){
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
