@@ -370,6 +370,13 @@ exports.handler = async function handler(event){
 
   const analysis = normaliseAnalysis(parsed);
 
+  console.log('OPENAI_ANALYSIS_SUCCESS_PAYLOAD', JSON.stringify({
+    ok: true,
+    model,
+    ticker: String(payload.ticker || ''),
+    analysis
+  }));
+
   return jsonResponse(200, {
     ok: true,
     model,
