@@ -1045,6 +1045,13 @@ function baseTickerRecord(ticker){
       chartRef:null,
       importedFromScreenshot:false,
       notes:'',
+      analysisState:{
+        raw:'',
+        normalized:null,
+        prompt:'',
+        error:'',
+        reviewedAt:''
+      },
       aiAnalysisRaw:'',
       normalizedAnalysis:null,
       lastReviewedAt:'',
@@ -1122,6 +1129,10 @@ function normalizeTickerRecord(record){
     lifecycle:{...base.lifecycle, ...(normalized.lifecycle || {})},
     meta:{...base.meta, ...(normalized.meta || {})}
   };
+  merged.review.analysisState = {
+    ...base.review.analysisState,
+    ...((merged.review.analysisState && typeof merged.review.analysisState === 'object') ? merged.review.analysisState : {})
+  };
   merged.marketData.price = numericOrNull(merged.marketData.price);
   merged.marketData.ma20 = numericOrNull(merged.marketData.ma20);
   merged.marketData.ma50 = numericOrNull(merged.marketData.ma50);
@@ -1145,9 +1156,23 @@ function normalizeTickerRecord(record){
   merged.scan.reasons = Array.isArray(merged.scan.reasons) ? merged.scan.reasons.map(item => String(item || '')).filter(Boolean) : [];
   merged.scan.flags = merged.scan.flags && typeof merged.scan.flags === 'object' ? merged.scan.flags : {};
   merged.review.notes = String(merged.review.notes || '');
+  merged.review.analysisState.raw = String(merged.review.analysisState.raw || '');
+  merged.review.analysisState.normalized = merged.review.analysisState.normalized && typeof merged.review.analysisState.normalized === 'object'
+    ? merged.review.analysisState.normalized
+    : null;
+  merged.review.analysisState.prompt = String(merged.review.analysisState.prompt || '');
+  merged.review.analysisState.error = String(merged.review.analysisState.error || '');
+  merged.review.analysisState.reviewedAt = String(merged.review.analysisState.reviewedAt || '');
   merged.review.aiAnalysisRaw = String(merged.review.aiAnalysisRaw || '');
   merged.review.lastPrompt = String(merged.review.lastPrompt || '');
   merged.review.lastError = String(merged.review.lastError || '');
+  if(!merged.review.analysisState.raw && merged.review.aiAnalysisRaw) merged.review.analysisState.raw = merged.review.aiAnalysisRaw;
+  if(!merged.review.analysisState.normalized && merged.review.normalizedAnalysis && typeof merged.review.normalizedAnalysis === 'object'){
+    merged.review.analysisState.normalized = merged.review.normalizedAnalysis;
+  }
+  if(!merged.review.analysisState.prompt && merged.review.lastPrompt) merged.review.analysisState.prompt = merged.review.lastPrompt;
+  if(!merged.review.analysisState.error && merged.review.lastError) merged.review.analysisState.error = merged.review.lastError;
+  if(!merged.review.analysisState.reviewedAt && merged.review.lastReviewedAt) merged.review.analysisState.reviewedAt = merged.review.lastReviewedAt;
   merged.review.cardOpen = !!merged.review.cardOpen;
   merged.review.chartAvailable = !!(merged.review.chartAvailable || (merged.review.chartRef && merged.review.chartRef.dataUrl));
   merged.review.importedFromScreenshot = !!merged.review.importedFromScreenshot;
@@ -3865,28 +3890,52 @@ function renderCardStatusLineFromRecord(record, loading, analysisBusy){
   return 'No AI analysis saved yet.';
 }
 
+function setReviewAnalysisState(record, nextState = {}){
+  if(!record) return;
+  const current = record.review && record.review.analysisState && typeof record.review.analysisState === 'object'
+    ? record.review.analysisState
+    : {raw:'', normalized:null, prompt:'', error:'', reviewedAt:''};
+  const merged = {
+    raw: nextState.raw == null ? current.raw : String(nextState.raw || ''),
+    normalized: nextState.normalized === undefined ? current.normalized : cloneData(nextState.normalized, null),
+    prompt: nextState.prompt == null ? current.prompt : String(nextState.prompt || ''),
+    error: nextState.error == null ? current.error : String(nextState.error || ''),
+    reviewedAt: nextState.reviewedAt == null ? current.reviewedAt : String(nextState.reviewedAt || '')
+  };
+  record.review.analysisState = merged;
+  record.review.aiAnalysisRaw = merged.raw;
+  record.review.normalizedAnalysis = merged.normalized;
+  record.review.lastPrompt = merged.prompt;
+  record.review.lastError = merged.error;
+  record.review.lastReviewedAt = merged.reviewedAt;
+}
+
 function getReviewAnalysisState(record){
   const item = normalizeTickerRecord(record);
-  const normalizedAnalysis = item.review.normalizedAnalysis
-    ? normalizeAnalysisResult(item.review.normalizedAnalysis, tickerRecordToLegacyCard(item))
+  const sourceState = item.review.analysisState && typeof item.review.analysisState === 'object'
+    ? item.review.analysisState
+    : {};
+  const normalizedAnalysis = sourceState.normalized
+    ? normalizeAnalysisResult(sourceState.normalized, tickerRecordToLegacyCard(item))
     : null;
-  const rawAnalysis = String(item.review.aiAnalysisRaw || (normalizedAnalysis ? JSON.stringify(item.review.normalizedAnalysis || {}, null, 2) : ''));
-  const promptPreview = String(item.review.lastPrompt || buildTickerPromptFromRecord(item));
-  const error = String(item.review.lastError || '');
+  const rawAnalysis = String(sourceState.raw || item.review.aiAnalysisRaw || (normalizedAnalysis ? JSON.stringify(sourceState.normalized || {}, null, 2) : ''));
+  const promptPreview = String(sourceState.prompt || item.review.lastPrompt || buildTickerPromptFromRecord(item));
+  const error = String(sourceState.error || item.review.lastError || '');
   const analysisState = {
     normalizedAnalysis,
     rawAnalysis,
     promptPreview,
     error,
+    reviewedAt: String(sourceState.reviewedAt || item.review.lastReviewedAt || ''),
     hasSavedAnalysis: !!(normalizedAnalysis || rawAnalysis)
   };
   console.log('REVIEW_WORKSPACE_READ', {
     ticker:item.ticker,
-    reviewFields:{
+        reviewFields:{
       aiAnalysisRawLength:analysisState.rawAnalysis.length,
       normalizedAnalysisExists:!!analysisState.normalizedAnalysis,
       lastError:analysisState.error,
-      lastReviewedAt:item.review.lastReviewedAt,
+      lastReviewedAt:analysisState.reviewedAt,
       lastPromptLength:analysisState.promptPreview.length
     },
     hasSavedAnalysis:analysisState.hasSavedAnalysis,
@@ -5116,13 +5165,11 @@ async function analyseSetup(ticker){
     card.notes = notesEl.value;
   }
   card.lastPrompt = buildTickerPrompt(card);
-  record.review.lastPrompt = card.lastPrompt;
+  setReviewAnalysisState(record, {prompt:card.lastPrompt});
   card.lastError = '';
   card.lastResponse = '';
   card.lastAnalysis = null;
-  record.review.aiAnalysisRaw = '';
-  record.review.normalizedAnalysis = null;
-  record.review.lastError = '';
+  setReviewAnalysisState(record, {raw:'', normalized:null, error:''});
   uiState.loadingTicker = ticker;
   uiState.responseOpen[ticker] = true;
   commitTickerState();
@@ -5187,11 +5234,13 @@ async function analyseSetup(ticker){
       card.stop = analysis.stop || '';
       card.target = analysis.first_target || '';
     }
-    record.review.lastPrompt = card.lastPrompt;
-    record.review.aiAnalysisRaw = card.lastResponse;
-    record.review.normalizedAnalysis = cloneData(analysis, null);
-    record.review.lastError = '';
-    record.review.lastReviewedAt = card.updatedAt;
+    setReviewAnalysisState(record, {
+      prompt:card.lastPrompt,
+      raw:card.lastResponse,
+      normalized:analysis,
+      error:'',
+      reviewedAt:card.updatedAt
+    });
     record.review.cardOpen = true;
     record.meta.marketStatus = state.marketStatus;
     record.meta.updatedAt = card.updatedAt;
@@ -5210,11 +5259,11 @@ async function analyseSetup(ticker){
     console.log('ANALYSIS_STATE_WRITE', {
       ticker:record.ticker,
       apiResponse:data,
-      lastPrompt:record.review.lastPrompt,
-      aiAnalysisRaw:record.review.aiAnalysisRaw,
-      normalizedAnalysis:record.review.normalizedAnalysis,
-      lastError:record.review.lastError,
-      lastReviewedAt:record.review.lastReviewedAt
+      lastPrompt:record.review.analysisState.prompt,
+      aiAnalysisRaw:record.review.analysisState.raw,
+      normalizedAnalysis:record.review.analysisState.normalized,
+      lastError:record.review.analysisState.error,
+      lastReviewedAt:record.review.analysisState.reviewedAt
     });
     if(($('selectedTicker') && normalizeTicker($('selectedTicker').value) === card.ticker) || !normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '')){
       syncPlannerFromTicker(card.ticker);
@@ -5229,21 +5278,23 @@ async function analyseSetup(ticker){
       ? lastFailureData.raw.trim()
       : '';
     card.lastAnalysis = null;
-    record.review.aiAnalysisRaw = card.lastResponse;
-    record.review.normalizedAnalysis = null;
-    record.review.lastError = card.lastError;
-    record.review.lastPrompt = card.lastPrompt;
-    record.review.lastReviewedAt = new Date().toISOString();
+    setReviewAnalysisState(record, {
+      raw:card.lastResponse,
+      normalized:null,
+      error:card.lastError,
+      prompt:card.lastPrompt,
+      reviewedAt:new Date().toISOString()
+    });
     record.review.cardOpen = true;
-    record.meta.updatedAt = record.review.lastReviewedAt;
+    record.meta.updatedAt = record.review.analysisState.reviewedAt;
     refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
     console.log('ANALYSIS_STATE_WRITE', {
       ticker:record.ticker,
-      lastPrompt:record.review.lastPrompt,
-      aiAnalysisRaw:record.review.aiAnalysisRaw,
-      normalizedAnalysis:record.review.normalizedAnalysis,
-      lastError:record.review.lastError,
-      lastReviewedAt:record.review.lastReviewedAt
+      lastPrompt:record.review.analysisState.prompt,
+      aiAnalysisRaw:record.review.analysisState.raw,
+      normalizedAnalysis:record.review.analysisState.normalized,
+      lastError:record.review.analysisState.error,
+      lastReviewedAt:record.review.analysisState.reviewedAt
     });
     commitTickerState();
   }finally{
