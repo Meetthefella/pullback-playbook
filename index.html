@@ -23,12 +23,14 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="hero">
-    <div class="card">
-      <h1>Pullback Playbook v4.4.0</h1>
-      <p>Scan candidates, open one, review it, decide, then track the outcome.</p>
-      <div class="row" style="margin-top:12px">
-        <div>
+  <div class="card contextstrip">
+    <div class="contextmain">
+      <div class="contexttitle">
+        <h1>Pullback Playbook v4.4.0</h1>
+        <p>Scan, shortlist, review, decide, then track.</p>
+      </div>
+      <div class="contextmeta">
+        <div class="contextpill">
           <label id="marketStatusSection">Market Status</label>
           <select id="marketStatus">
             <option>S&amp;P above 50 MA</option>
@@ -36,46 +38,46 @@
             <option>S&amp;P below 50 MA</option>
           </select>
         </div>
+        <div class="pillrow">
+          <span class="pill">Account <strong id="accountStat">GBP 4,000</strong></span>
+          <span class="pill">Max Risk <strong id="riskStat">GBP 40</strong></span>
+          <span class="pill">Risk % <strong id="riskPctStat">1.0%</strong></span>
+          <span class="pill" id="focusCount">0 focus</span>
+          <span class="pill" id="appVersion">v4.4.0</span>
+        </div>
+      </div>
+    </div>
+    <details class="compact-settings" style="margin-top:12px">
+      <summary><strong>1) Header / Market Context</strong> · Edit settings</summary>
+      <div class="row" style="margin-top:12px">
         <div>
           <label>Account Size (GBP)</label>
           <input id="accountSize" type="number" value="4000" min="1" />
         </div>
-      </div>
-      <div class="row" style="margin-top:10px">
         <div>
           <label>Risk %</label>
           <input id="riskPercent" type="number" value="0.01" min="0.001" step="0.001" />
         </div>
+      </div>
+      <div class="row" style="margin-top:10px">
         <div>
           <label>Max Loss Override (GBP)</label>
           <input id="maxLossOverride" type="number" min="1" step="1" placeholder="Optional" />
         </div>
+        <div class="panelbox">
+          <label class="checkitem" style="padding:0"><input id="wholeSharesOnly" type="checkbox" checked> Whole shares only</label>
+          <div class="tiny" style="margin-top:8px">Top context stays slim. Edit risk controls here when you need them.</div>
+        </div>
       </div>
-      <div class="actions" style="margin-top:10px">
-        <label class="checkitem" style="padding:0"><input id="wholeSharesOnly" type="checkbox" checked> Whole shares only</label>
-        <span class="pill" id="focusCount">0 focus</span>
-        <span class="pill" id="appVersion">v4.4.0</span>
-      </div>
-      <div class="navtabs">
-        <a class="tablink" href="#dailyInput">Scan</a>
-        <a class="tablink" href="#resultsSection">Shortlist</a>
-        <a class="tablink" href="#reviewSection">Review</a>
-        <a class="tablink" href="#watchlistSection">Watchlist</a>
-        <a class="tablink" href="#diarySection">Diary</a>
-        <a class="tablink" href="#alertsSection">Alerts</a>
-        <a class="tablink" href="#advancedSection">Advanced</a>
-      </div>
-    </div>
-    <div class="card">
-      <h2>1) Header / Market Context</h2>
-      <div class="stats">
-        <div class="stat"><div>Account</div><div class="big" id="accountStat">GBP 4,000</div></div>
-        <div class="stat"><div>Max Risk</div><div class="big" id="riskStat">GBP 40</div></div>
-        <div class="stat"><div>Risk %</div><div class="big" id="riskPctStat">1.0%</div></div>
-      </div>
-      <div class="helpbox" style="margin-top:12px">
-        The top stays lightweight: market context, account context, and a quick focus count.
-      </div>
+    </details>
+    <div class="navtabs">
+      <a class="tablink" href="#dailyInput">Scan</a>
+      <a class="tablink" href="#resultsSection">Shortlist</a>
+      <a class="tablink" href="#reviewSection">Review</a>
+      <a class="tablink" href="#watchlistSection">Watchlist</a>
+      <a class="tablink" href="#diarySection">Diary</a>
+      <a class="tablink" href="#alertsSection">Alerts</a>
+      <a class="tablink" href="#advancedSection">Advanced</a>
     </div>
   </div>
 
@@ -165,7 +167,7 @@
       <h2 id="focusSection" style="margin-bottom:0">Today's Focus / Trading Queue</h2>
       <span class="pill">Actionable names only</span>
     </div>
-    <p class="tiny">Quick queue of the names that need attention now.</p>
+    <p class="tiny">Compact queue of the names that need attention now.</p>
     <div id="focusQueue" class="list"></div>
   </div>
 
@@ -205,19 +207,21 @@
   </div>
 
   <div class="card" style="margin-top:14px">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="alertsSection" style="margin-bottom:0">7) Alerts / Attention</h2>
-      <div class="actions" style="margin-top:0">
-        <span class="pill" id="newAlertsCount">0 new</span>
-        <button class="secondary" id="markAlertsSeenBtn" type="button">Mark Seen</button>
+    <details>
+      <summary><strong id="alertsSection">7) Alerts / Attention</strong></summary>
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+        <p class="tiny" style="margin:0">Alerts stay lower in the workflow so they support decisions instead of competing with scan and review.</p>
+        <div class="actions" style="margin-top:0">
+          <span class="pill" id="newAlertsCount">0 new</span>
+          <button class="secondary" id="markAlertsSeenBtn" type="button">Mark Seen</button>
+        </div>
       </div>
-    </div>
-    <p class="tiny">Alerts stay lower in the workflow so they support decisions instead of competing with scan and review.</p>
-    <div id="alertsList" class="list"></div>
+      <div id="alertsList" class="list"></div>
+    </details>
   </div>
 
   <div class="card" style="margin-top:14px">
-    <details open>
+    <details>
       <summary><strong id="analyticsSection">8) Pattern Review</strong></summary>
       <p class="tiny" style="margin-top:10px">Pattern review stays available, but secondary to the active trading workflow.</p>
       <div id="patternAnalytics" class="list"></div>
