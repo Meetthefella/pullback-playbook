@@ -3391,12 +3391,23 @@ function setupScoreDisplayForRecord(record){
 }
 
 function displayStageForRecord(record){
-  const item = normalizeTickerRecord(record);
-  const analysisState = getReviewAnalysisState(item);
-  const finalVerdict = String(
-    analysisState && analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.final_verdict
-    || ''
-  ).trim();
+  const rawRecord = record && typeof record === 'object' ? record : {};
+  const ticker = normalizeTicker(rawRecord.ticker || '');
+  const review = rawRecord.review && typeof rawRecord.review === 'object' ? rawRecord.review : {};
+  const analysisState = review.analysisState && typeof review.analysisState === 'object' ? review.analysisState : {};
+  const cachedState = ticker && uiState.reviewAnalysisCache && typeof uiState.reviewAnalysisCache === 'object'
+    ? uiState.reviewAnalysisCache[ticker]
+    : null;
+  const normalizedAnalysis = (
+    analysisState.normalized && typeof analysisState.normalized === 'object'
+      ? analysisState.normalized
+      : (review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object' ? review.normalizedAnalysis : null)
+  ) || (
+    cachedState && cachedState.normalized && typeof cachedState.normalized === 'object'
+      ? cachedState.normalized
+      : null
+  );
+  const finalVerdict = String(normalizedAnalysis && normalizedAnalysis.final_verdict || '').trim();
   if(['Entry','Near Entry','Watch','Avoid'].includes(finalVerdict)) return finalVerdict;
   return 'Watch';
 }
