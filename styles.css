@@ -77,6 +77,7 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
 .plan-grid-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
 .reviewactions{display:flex;flex-wrap:wrap;gap:10px}
 .reviewactions-top{margin-top:-2px}
+.reviewactions-secondary{margin-top:10px}
 .reviewsecondary{display:grid;gap:10px}
 .reviewchecklist{display:grid;gap:10px}
 .reviewchecklist summary{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
@@ -84,8 +85,8 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
 .reviewworkspace .thumbwrap{margin-top:0}
 .reviewworkspace .mutebox{margin-top:0}
 .focuscard{display:grid;gap:8px;padding:12px;border:1px solid var(--line);border-radius:14px;background:#0f172a}
-.focusstrip{display:grid;gap:10px}
-.compactfocus{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px}
+.focusstrip{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(180px,220px);gap:10px;overflow-x:auto;overflow-y:hidden;padding:2px 2px 8px;scroll-snap-type:x mandatory;scrollbar-width:thin;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.compactfocus{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;scroll-snap-align:start;scroll-snap-stop:always}
 .focushead{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
 .resultselect{display:flex;align-items:flex-start;justify-content:flex-start}
 .resultselect input{width:18px;height:18px;margin-top:2px}
@@ -165,6 +166,9 @@ button[disabled]{opacity:.55;cursor:not-allowed}
 .promptdetails summary,.responsepanel summary{cursor:pointer;font-weight:700;color:var(--text);margin-bottom:8px}
 .responsegrid{display:grid;gap:10px}
 .responsechips{display:flex;gap:8px;flex-wrap:wrap}
+.analysislead{display:grid;gap:6px}
+.analysisplanmini{display:grid;gap:6px}
+.scrollbox{max-height:220px;overflow:auto}
 .inline-status{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .resultactions{justify-self:end}
 .rankedgrid{grid-template-columns:minmax(72px,max-content) minmax(0,1fr) auto auto}
@@ -198,4 +202,5 @@ details[open]{width:100%}
   .quickchip button{padding:8px 9px}
   .workflowmenu-inline{grid-template-columns:1fr 1fr}
   .resultactionsbar{flex-direction:column;align-items:stretch}
+  .focusstrip{grid-auto-columns:minmax(170px,84vw)}
 }
