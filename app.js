@@ -3522,6 +3522,44 @@ function planQualityForRecord(record){
   return null;
 }
 
+function planQualityForRr(rrRatio){
+  if(!Number.isFinite(rrRatio)) return null;
+  if(rrRatio >= 2) return 10;
+  if(rrRatio >= 1.5) return 7;
+  if(rrRatio > 0) return 4;
+  return null;
+}
+
+function deriveCurrentPlanState(entryValue, stopValue, targetValue){
+  const entry = numericOrNull(entryValue);
+  const stop = numericOrNull(stopValue);
+  const target = numericOrNull(targetValue);
+  const hasEntry = Number.isFinite(entry);
+  const hasStop = Number.isFinite(stop);
+  const hasTarget = Number.isFinite(target);
+  const allPresent = hasEntry && hasStop && hasTarget;
+  const rewardRisk = evaluateRewardRisk(entry, stop, target);
+  const riskFit = (hasEntry && hasStop)
+    ? evaluateRiskFit({entry, stop, ...currentRiskSettings()})
+    : {
+      max_loss:currentMaxLoss(),
+      risk_per_share:null,
+      position_size:0,
+      risk_status:'plan_missing'
+    };
+  const rewardPerShare = hasEntry && hasTarget && target > entry ? target - entry : null;
+  const status = !allPresent ? 'missing' : (rewardRisk.valid ? 'valid' : 'invalid');
+  return {
+    entry,
+    stop,
+    target,
+    status,
+    rewardRisk,
+    rewardPerShare,
+    riskFit
+  };
+}
+
 function formatScoreStage(scoreStage){
   if(scoreStage === 'final') return 'Final';
   if(scoreStage === 'reviewed') return 'Reviewed';
@@ -6128,15 +6166,16 @@ function renderReviewWorkspace(){
   const record = normalizeTickerRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker));
   const analysisState = getReviewAnalysisState(record);
   const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
+  const displayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget);
   const promptText = analysisState.promptPreview;
   const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : null;
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
-  const rrRatio = numericOrNull(record.plan.plannedRR);
-  const rewardPerShare = numericOrNull(record.plan.rewardPerShare);
+  const rrRatio = displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null;
+  const rewardPerShare = displayedPlan.rewardPerShare;
   const setupScore = setupScoreForRecord(record);
   const setupScoreDisplay = setupScoreDisplayForRecord(record);
   const displayStage = displayStageForRecord(record);
-  const planState = formatPlanState(planStateForRecord(record));
+  const planState = formatPlanState(displayedPlan.status);
   const nextActionText = nextActionTextForRecord(record);
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
@@ -6316,8 +6355,12 @@ function syncPlanDisplayMeta(){
   }
   const record = normalizeTickerRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker));
   const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
-  if(planStateBox) planStateBox.value = formatPlanState(planStateForRecord(record));
-  const planQuality = planQualityForRecord(record);
+  const entryValue = $('entryPrice') ? $('entryPrice').value : effectivePlan.entry;
+  const stopValue = $('stopPrice') ? $('stopPrice').value : effectivePlan.stop;
+  const targetValue = $('targetPrice') ? $('targetPrice').value : effectivePlan.firstTarget;
+  const displayedPlan = deriveCurrentPlanState(entryValue, stopValue, targetValue);
+  if(planStateBox) planStateBox.value = formatPlanState(displayedPlan.status);
+  const planQuality = planQualityForRr(displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null);
   if(planQualityBox) planQualityBox.value = Number.isFinite(planQuality) ? `${planQuality}/10` : 'N/A';
   if(planSourceBox) planSourceBox.value = String(record.plan.source || effectivePlan.source || '').trim() || 'manual';
 }
@@ -6377,6 +6420,7 @@ function calculate(options = {}){
   const entry = numericOrNull($('entryPrice').value);
   const stop = numericOrNull($('stopPrice').value);
   const target = numericOrNull($('targetPrice').value);
+  const displayedPlan = deriveCurrentPlanState($('entryPrice').value, $('stopPrice').value, $('targetPrice').value);
   renderPlannerPlanSummary($('entryPrice').value, $('stopPrice').value, $('targetPrice').value);
   if(ticker && persist){
     const record = upsertTickerRecord(ticker);
@@ -6388,32 +6432,28 @@ function calculate(options = {}){
     renderReviewLifecycleSummary(ticker);
   }
   syncPlanDisplayMeta();
-  const riskFit = evaluateRiskFit({
-    entry,
-    stop,
-    ...currentRiskSettings()
-  });
-  if(!Number.isFinite(entry) || !Number.isFinite(stop)){
+  $('rewardPerShareBox').textContent = Number.isFinite(displayedPlan.rewardPerShare) ? displayedPlan.rewardPerShare.toFixed(2) : '-';
+  $('riskFitBox').textContent = riskStatusLabel(displayedPlan.status === 'valid' ? displayedPlan.riskFit.risk_status : (displayedPlan.status === 'invalid' ? 'invalid_plan' : 'plan_missing'));
+  if(displayedPlan.status === 'missing'){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
     $('rrValue').textContent = '-';
-    $('calcNote').textContent = 'Add planned entry and stop to calculate current risk fit.';
+    $('calcNote').textContent = 'Add planned entry, stop, and first target to complete the trade plan.';
     return;
   }
-  if(riskFit.risk_status === 'invalid_plan'){
+  if(displayedPlan.status === 'invalid'){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
     $('rrValue').textContent = '-';
-    $('calcNote').textContent = 'Planned entry must be above stop for a valid long plan.';
+    $('calcNote').textContent = 'Planned entry, stop, and first target must form a valid long plan.';
     return;
   }
-  const rewardRisk = evaluateRewardRisk(entry, stop, target);
-  $('riskPerShare').textContent = Number.isFinite(riskFit.risk_per_share) ? riskFit.risk_per_share.toFixed(2) : '-';
-  $('positionSize').textContent = riskFit.position_size > 0 ? `${riskFit.position_size} shares` : '0 shares';
-  $('rrValue').textContent = rewardRisk.valid && Number.isFinite(rewardRisk.rrRatio) ? `${rewardRisk.rrRatio.toFixed(2)}R` : '-';
-  $('calcNote').textContent = riskFit.risk_status === 'too_wide'
-    ? `Current max loss is ${formatGbp(riskFit.max_loss)}. This setup is too wide right now.`
-    : `Current max loss is ${formatGbp(riskFit.max_loss)}. Planned trade status: ${riskStatusLabel(riskFit.risk_status)}.`;
+  $('riskPerShare').textContent = Number.isFinite(displayedPlan.riskFit.risk_per_share) ? displayedPlan.riskFit.risk_per_share.toFixed(2) : '-';
+  $('positionSize').textContent = displayedPlan.riskFit.position_size > 0 ? `${displayedPlan.riskFit.position_size} shares` : '0 shares';
+  $('rrValue').textContent = displayedPlan.rewardRisk.valid && Number.isFinite(displayedPlan.rewardRisk.rrRatio) ? `${displayedPlan.rewardRisk.rrRatio.toFixed(2)}R` : '-';
+  $('calcNote').textContent = displayedPlan.riskFit.risk_status === 'too_wide'
+    ? `Current max loss is ${formatGbp(displayedPlan.riskFit.max_loss)}. This setup is too wide right now.`
+    : `Current max loss is ${formatGbp(displayedPlan.riskFit.max_loss)}. Planned trade status: ${riskStatusLabel(displayedPlan.riskFit.risk_status)}.`;
 }
 
 async function copyText(text){
