@@ -2850,21 +2850,39 @@ function renderCompactResultCard(record){
   return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span><span class="score ${scoreClass(item.setup.score || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">Reason: ${escapeHtml(resultReasonForRecord(item))}</div><div class="resultsupport">${escapeHtml(resultSupportLineForRecord(item))}</div></div><div class="resultmetrics"><span class="pill">${escapeHtml(actionLabel)}</span><span class="pill">Plan ${escapeHtml(formatPlanState(item.plan.status))}</span><span class="pill">R:R ${escapeHtml(Number.isFinite(rrValue) ? rrValue.toFixed(2) : 'n/a')}</span><span class="pill">Size ${escapeHtml(Number.isFinite(positionSize) ? String(positionSize) : 'n/a')}</span></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderEstimatedScannerPlanFromRecord(item)}</details></div>`;
 }
 
+function hasAiStageForRecord(record){
+  const rawRecord = record && typeof record === 'object' ? record : {};
+  const review = rawRecord.review && typeof rawRecord.review === 'object' ? rawRecord.review : {};
+  const analysisState = review.analysisState && typeof review.analysisState === 'object' ? review.analysisState : {};
+  const normalized = (analysisState.normalized && typeof analysisState.normalized === 'object')
+    ? analysisState.normalized
+    : (review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object' ? review.normalizedAnalysis : null);
+  const finalVerdict = String(normalized && normalized.final_verdict || '').trim();
+  return ['Entry','Near Entry','Watch','Avoid'].includes(finalVerdict);
+}
+
 function focusQueueRecords(){
   return rankedTickerRecords()
     .filter(record => {
       const item = normalizeTickerRecord(record);
-      return ['action_now','near_entry','needs_plan'].includes(item.action.stage);
+      if(['action_now','near_entry','needs_plan'].includes(item.action.stage)) return true;
+      return !hasAiStageForRecord(item)
+        && item.scan.verdict !== 'Avoid'
+        && Number.isFinite(item.setup.score)
+        && item.setup.score >= 7;
     })
     .sort((a, b) => statusRankFromRecord(a) - statusRankFromRecord(b) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker))
     .slice(0, 35)
     .map(record => {
       const item = normalizeTickerRecord(record);
+      const aiStagePresent = hasAiStageForRecord(item);
+      const queueLabel = aiStagePresent ? formatActionState(item.action.stage) : 'Needs Review';
+      const queueVerdict = aiStagePresent ? displayStageForRecord(item) : String(item.scan.verdict || 'Watch');
       return {
         ticker:item.ticker,
-        label:formatActionState(item.action.stage),
+        label:queueLabel,
         score:Number(item.setup.score || 0),
-        verdict:displayStageForRecord(item),
+        verdict:queueVerdict,
         hasValidPlan:item.plan.status === 'valid'
       };
     });
@@ -2882,9 +2900,9 @@ function renderFocusQueue(){
   }
   box.innerHTML = `<div class="focusstrip">${items.map(item => {
     const record = normalizeTickerRecord(getTickerRecord(item.ticker) || item);
-    const displayStage = displayStageForRecord(record);
+    const displayStage = item.verdict || displayStageForRecord(record);
     const setupScore = setupScoreDisplayForRecord(record);
-    const actionState = formatActionState(actionStateForRecord(record));
+    const actionState = item.label || formatActionState(actionStateForRecord(record));
     const planState = formatPlanState(planStateForRecord(record));
     return `<div class="focuscard compactfocus"><div><strong>${escapeHtml(item.ticker)}</strong><div class="tiny">${escapeHtml(displayStage)} | ${escapeHtml(setupScore)} | ${escapeHtml(planState)} | ${escapeHtml(actionState)}</div></div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(item.ticker)}">Open Review</button></div>`;
   }).join('')}</div>`;
@@ -5315,6 +5333,17 @@ function normalizeAnalysisReasons(rawReasons, planValid, rewardRisk, previousSta
   return [...new Set(reasons)].slice(0, 4);
 }
 
+function fallbackPlanProposalForCard(cardLike){
+  const legacyCard = normalizeCard(cardLike || {});
+  const estimate = scannerEstimateForCard(legacyCard);
+  if(!(estimate && [estimate.entry, estimate.stop, estimate.target].some(Number.isFinite))) return null;
+  return {
+    entry:Number.isFinite(estimate.entry) ? String(Number(estimate.entry.toFixed(2))) : '',
+    stop:Number.isFinite(estimate.stop) ? String(Number(estimate.stop.toFixed(2))) : '',
+    first_target:Number.isFinite(estimate.target) ? String(Number(estimate.target.toFixed(2))) : ''
+  };
+}
+
 // Normalize server AI output into one render-safe object so cards never mix stale
 // planner/scanner fields with a fresh analysis response.
 function normalizeAnalysisResult(rawAnalysis, existingTickerState){
@@ -5335,10 +5364,10 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     risks:[],
     final_verdict:''
   };
-  const fallbackEstimate = scannerEstimateForCard(previousState);
-  const entry = normalizeAnalysisPlanField(parsed.entry || (fallbackEstimate && Number.isFinite(fallbackEstimate.entry) ? String(fallbackEstimate.entry) : ''));
-  const stop = normalizeAnalysisPlanField(parsed.stop || (fallbackEstimate && Number.isFinite(fallbackEstimate.stop) ? String(fallbackEstimate.stop) : ''));
-  const firstTarget = normalizeAnalysisPlanField(parsed.first_target || (fallbackEstimate && Number.isFinite(fallbackEstimate.target) ? String(fallbackEstimate.target) : ''));
+  const fallbackProposal = fallbackPlanProposalForCard(previousState);
+  const entry = normalizeAnalysisPlanField(parsed.entry || (fallbackProposal && fallbackProposal.entry) || '');
+  const stop = normalizeAnalysisPlanField(parsed.stop || (fallbackProposal && fallbackProposal.stop) || '');
+  const firstTarget = normalizeAnalysisPlanField(parsed.first_target || (fallbackProposal && fallbackProposal.first_target) || '');
   const hasPlanFields = !!(entry || stop || firstTarget);
   const numericEntry = numericOrNull(entry);
   const numericStop = numericOrNull(stop);
@@ -5519,16 +5548,30 @@ async function analyseSetup(ticker){
     record.review.cardOpen = true;
     record.meta.marketStatus = state.marketStatus;
     record.meta.updatedAt = card.updatedAt;
-    if(analysis && analysis.plan_fields_present){
-      applyPlanCandidateToRecord(record, {
+    const existingPlanPresent = [record.plan.entry, record.plan.stop, record.plan.firstTarget].some(Number.isFinite);
+    const proposedPlan = analysis && analysis.plan_fields_present
+      ? {
         entry:analysis.entry,
         stop:analysis.stop,
         firstTarget:analysis.first_target
-      }, {
+      }
+      : (!existingPlanPresent ? (() => {
+        const fallbackPlan = fallbackPlanProposalForCard(card);
+        return fallbackPlan ? {
+          entry:fallbackPlan.entry,
+          stop:fallbackPlan.stop,
+          firstTarget:fallbackPlan.first_target
+        } : null;
+      })() : null);
+    if(proposedPlan){
+      applyPlanCandidateToRecord(record, proposedPlan, {
         source:'analysis',
         updatedAt:card.updatedAt,
         lastPlannedAt:card.updatedAt
       });
+      card.entry = String(proposedPlan.entry || '');
+      card.stop = String(proposedPlan.stop || '');
+      card.target = String(proposedPlan.firstTarget || '');
     }
     refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
     console.log('ANALYSIS_STATE_WRITE', {
@@ -5540,10 +5583,10 @@ async function analyseSetup(ticker){
       lastError:record.review.analysisState.error,
       lastReviewedAt:record.review.analysisState.reviewedAt
     });
+    commitTickerState();
     if(($('selectedTicker') && normalizeTicker($('selectedTicker').value) === card.ticker) || !normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '')){
       syncPlannerFromTicker(card.ticker);
     }
-    commitTickerState();
   }catch(err){
     const baseMessage = err && err.name === 'AbortError'
       ? 'The analysis request timed out. Retry the setup.'
