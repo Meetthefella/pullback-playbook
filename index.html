@@ -84,26 +84,6 @@
   <div class="card" style="margin-top:14px">
     <h2 id="dailyInput">2) Scan List</h2>
     <p class="tiny">Paste/import tickers, optionally add one manually, then run the scan.</p>
-    <div style="margin-top:10px">
-      <label>Paste or Import Tickers</label>
-      <textarea id="tvImportInput" placeholder="CAT,DE,UNP,GEV&#10;or&#10;CAT DE UNP GEV&#10;or one ticker per line"></textarea>
-      <div class="actions">
-        <button class="secondary" id="importTvBtn">Import Tickers</button>
-      </div>
-      <div id="tvImportPreview" class="mutebox" style="margin-top:10px">No imported ticker list yet.</div>
-    </div>
-    <div style="margin-top:14px">
-      <label>Quick Manual Ticker Search</label>
-      <div class="searchaddrow" style="margin-top:10px">
-        <div class="searchaddinput">
-          <label>Ticker Search / Add</label>
-          <input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" />
-          <div id="tickerSuggestions" class="suggestions" hidden></div>
-        </div>
-        <div class="searchaddaction"><button class="primary compactbutton" id="addTickerBtn">Add Ticker</button></div>
-      </div>
-      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
-    </div>
     <details style="margin-top:14px">
       <summary><strong>Advanced Scanner Tools</strong></summary>
       <div style="margin-top:10px">
@@ -158,6 +138,26 @@
         <div id="scannerDebugList" class="mutebox" style="margin-top:10px">No scan debug data yet.</div>
       </details>
     </details>
+    <div style="margin-top:10px">
+      <label>Paste or Import Tickers</label>
+      <textarea id="tvImportInput" placeholder="CAT,DE,UNP,GEV&#10;or&#10;CAT DE UNP GEV&#10;or one ticker per line"></textarea>
+      <div class="actions">
+        <button class="secondary" id="importTvBtn">Import Tickers</button>
+      </div>
+      <div id="tvImportPreview" class="mutebox" style="margin-top:10px">No imported ticker list yet.</div>
+    </div>
+    <div style="margin-top:14px">
+      <label>Quick Manual Ticker Search</label>
+      <div class="searchaddrow" style="margin-top:10px">
+        <div class="searchaddinput">
+          <label>Ticker Search / Add</label>
+          <input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" />
+          <div id="tickerSuggestions" class="suggestions" hidden></div>
+        </div>
+        <div class="searchaddaction"><button class="primary compactbutton" id="addTickerBtn">Add Ticker</button></div>
+      </div>
+      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
+    </div>
     <div class="actions">
       <button class="primary" id="buildBtn">Run Scan</button>
     </div>
