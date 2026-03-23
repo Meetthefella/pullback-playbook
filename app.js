@@ -1454,6 +1454,13 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   record.review.chartRef = cloneData(card.chartRef || record.review.chartRef, null);
   record.review.chartAvailable = !!(record.review.chartRef && record.review.chartRef.dataUrl);
   record.review.importedFromScreenshot = !!(record.review.importedFromScreenshot || (record.review.chartRef && /latest-chart/i.test(String(record.review.chartRef.name || ''))));
+  record.review.analysisState = {
+    raw:String(card.lastResponse || (record.review.analysisState && record.review.analysisState.raw) || record.review.aiAnalysisRaw || ''),
+    normalized:cloneData(card.lastAnalysis || (record.review.analysisState && record.review.analysisState.normalized) || record.review.normalizedAnalysis, null),
+    prompt:String(card.lastPrompt || (record.review.analysisState && record.review.analysisState.prompt) || record.review.lastPrompt || ''),
+    error:String(card.lastError || (record.review.analysisState && record.review.analysisState.error) || record.review.lastError || ''),
+    reviewedAt:String(card.updatedAt || (record.review.analysisState && record.review.analysisState.reviewedAt) || record.review.lastReviewedAt || '')
+  };
   record.review.aiAnalysisRaw = String(card.lastResponse || record.review.aiAnalysisRaw || '');
   record.review.normalizedAnalysis = cloneData(card.lastAnalysis || record.review.normalizedAnalysis, null);
   record.review.lastReviewedAt = String(card.updatedAt || record.review.lastReviewedAt || '');
@@ -4074,15 +4081,23 @@ function setReviewAnalysisState(record, nextState = {}){
   record.review.lastPrompt = merged.prompt;
   record.review.lastError = merged.error;
   record.review.lastReviewedAt = merged.reviewedAt;
+  uiState.reviewAnalysisCache = uiState.reviewAnalysisCache && typeof uiState.reviewAnalysisCache === 'object' ? uiState.reviewAnalysisCache : {};
+  uiState.reviewAnalysisCache[record.ticker] = cloneData(merged, {raw:'', normalized:null, prompt:'', error:'', reviewedAt:''});
 }
 
 function getReviewAnalysisState(record){
   const item = normalizeTickerRecord(record);
-  const sourceState = item.review.analysisState && typeof item.review.analysisState === 'object'
+  const cachedState = uiState.reviewAnalysisCache && typeof uiState.reviewAnalysisCache === 'object'
+    ? uiState.reviewAnalysisCache[item.ticker]
+    : null;
+  const baseState = item.review.analysisState && typeof item.review.analysisState === 'object'
     ? item.review.analysisState
     : {};
-  const normalizedAnalysis = sourceState.normalized
-    ? normalizeAnalysisResult(sourceState.normalized, tickerRecordToLegacyCard(item))
+  const hasPersistedAnalysisPayload = !!(baseState.raw || baseState.normalized || baseState.error);
+  const sourceState = hasPersistedAnalysisPayload ? baseState : (cachedState || baseState);
+  const normalizedSource = sourceState.normalized || item.review.normalizedAnalysis || null;
+  const normalizedAnalysis = normalizedSource
+    ? normalizeAnalysisResult(normalizedSource, tickerRecordToLegacyCard(item))
     : null;
   const rawAnalysis = String(sourceState.raw || item.review.aiAnalysisRaw || (normalizedAnalysis ? JSON.stringify(sourceState.normalized || {}, null, 2) : ''));
   const promptPreview = String(sourceState.prompt || item.review.lastPrompt || buildTickerPromptFromRecord(item));
