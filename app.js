@@ -5257,6 +5257,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   const entry = normalizeAnalysisPlanField(parsed.entry);
   const stop = normalizeAnalysisPlanField(parsed.stop);
   const firstTarget = normalizeAnalysisPlanField(parsed.first_target);
+  const hasPlanFields = !!(entry || stop || firstTarget);
   const numericEntry = numericOrNull(entry);
   const numericStop = numericOrNull(stop);
   const numericFirstTarget = numericOrNull(firstTarget);
@@ -5266,30 +5267,30 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     max_loss:currentMaxLoss(),
     risk_per_share:null,
     position_size:0,
-    risk_status:'plan_missing'
+    risk_status:hasPlanFields ? 'invalid_plan' : 'plan_missing'
   };
-  const keyReasons = normalizeAnalysisReasons(parsed.key_reasons, planValid, rewardRisk, previousState, parsed.plain_english_chart_read);
+  const keyReasons = normalizeAnalysisReasons(parsed.key_reasons, hasPlanFields, rewardRisk, previousState, parsed.plain_english_chart_read);
   const safeRisks = (Array.isArray(parsed.risks) ? parsed.risks : []).map(item => String(item || '').trim()).filter(Boolean).filter(item => {
     const lower = item.toLowerCase();
-    return planValid || !(lower.includes('entry') || lower.includes('stop') || lower.includes('reward:risk') || lower.includes('r:r'));
+    return hasPlanFields || !(lower.includes('entry') || lower.includes('stop') || lower.includes('reward:risk') || lower.includes('r:r'));
   });
   return {
     setup_type:parsed.setup_type || previousState.setupType || '',
     verdict:parsed.verdict,
     plain_english_chart_read:parsed.plain_english_chart_read,
-    entry:planValid ? entry : '',
-    stop:planValid ? stop : '',
-    first_target:planValid ? firstTarget : '',
-    entryDefined:planValid,
-    stopDefined:planValid,
-    targetDefined:planValid,
+    entry,
+    stop,
+    first_target:firstTarget,
+    entryDefined:!!entry,
+    stopDefined:!!stop,
+    targetDefined:!!firstTarget,
     risk_per_share:planValid && Number.isFinite(rewardRisk.riskPerShare) ? rewardRisk.riskPerShare.toFixed(2) : '',
     reward_per_share:planValid && Number.isFinite(rewardRisk.rewardPerShare) ? rewardRisk.rewardPerShare.toFixed(2) : '',
     reward_risk:planValid && Number.isFinite(rewardRisk.rrRatio) ? rewardRisk.rrRatio.toFixed(2) : '',
     rr_state:planValid ? rewardRisk.rrState : '',
     rr_badge:planValid ? rrStateLabel(rewardRisk.rrState) : '',
     position_size:planValid && Number.isFinite(riskFit.position_size) && riskFit.position_size > 0 ? String(riskFit.position_size) : '',
-    risk_status:planValid ? riskFit.risk_status : 'plan_missing',
+    risk_status:planValid ? riskFit.risk_status : (hasPlanFields ? 'invalid_plan' : 'plan_missing'),
     max_loss:planValid && Number.isFinite(riskFit.max_loss) ? riskFit.max_loss.toFixed(2) : '',
     quality_score:parsed.quality_score,
     confidence_score:parsed.confidence_score,
@@ -5297,6 +5298,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     risks:safeRisks,
     final_verdict:parsed.final_verdict,
     plan_metrics_valid:planValid,
+    plan_fields_present:hasPlanFields,
     estimated_reward_risk:previousState.analysis && previousState.analysis.reward_risk ? String(previousState.analysis.reward_risk) : ''
   };
 }
@@ -5435,7 +5437,7 @@ async function analyseSetup(ticker){
     record.review.cardOpen = true;
     record.meta.marketStatus = state.marketStatus;
     record.meta.updatedAt = card.updatedAt;
-    if(analysis && analysis.plan_metrics_valid){
+    if(analysis && analysis.plan_fields_present){
       applyPlanCandidateToRecord(record, {
         entry:analysis.entry,
         stop:analysis.stop,
@@ -5504,9 +5506,9 @@ function renderAnalysisPanel(card){
     const renderModel = {
       verdict:analysis.verdict,
       setup_type:analysis.setup_type || 'Not given',
-      entry:analysis.plan_metrics_valid ? (analysis.entry || 'Not given') : 'Not given',
-      stop:analysis.plan_metrics_valid ? (analysis.stop || 'Not given') : 'Not given',
-      first_target:analysis.plan_metrics_valid ? (analysis.first_target || 'Not given') : 'Not given',
+      entry:analysis.entry || 'Not given',
+      stop:analysis.stop || 'Not given',
+      first_target:analysis.first_target || 'Not given',
       risk_per_share:analysis.plan_metrics_valid ? analysis.risk_per_share : 'N/A',
       reward_per_share:analysis.plan_metrics_valid ? analysis.reward_per_share : 'N/A',
       reward_risk:analysis.plan_metrics_valid ? analysis.reward_risk : 'N/A',
@@ -5549,9 +5551,9 @@ function renderAnalysisPanelFromRecord(record){
     const renderModel = {
       verdict:analysis.verdict,
       setup_type:analysis.setup_type || 'Not given',
-      entry:analysis.plan_metrics_valid ? (analysis.entry || 'Not given') : 'Not given',
-      stop:analysis.plan_metrics_valid ? (analysis.stop || 'Not given') : 'Not given',
-      first_target:analysis.plan_metrics_valid ? (analysis.first_target || 'Not given') : 'Not given',
+      entry:analysis.entry || 'Not given',
+      stop:analysis.stop || 'Not given',
+      first_target:analysis.first_target || 'Not given',
       reward_risk:analysis.plan_metrics_valid ? analysis.reward_risk : 'N/A',
       position_size:analysis.plan_metrics_valid ? analysis.position_size : 'N/A',
       risk_status:analysis.plan_metrics_valid ? riskStatusLabel(analysis.risk_status) : 'N/A',
