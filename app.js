@@ -2783,7 +2783,7 @@ function isFilteredResultRecord(record){
 function renderCompactResultCard(record){
   const item = normalizeTickerRecord(record);
   const actionLabel = formatActionState(item.action.stage);
-  const scoreLabel = `${item.setup.score || 0}/10`;
+  const scoreLabel = setupScoreDisplayForRecord(item);
   const rrValue = numericOrNull(recordRrValue(item));
   const positionSize = numericOrNull(item.plan.positionSize);
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
@@ -2833,11 +2833,11 @@ function renderFocusQueue(){
   }
   box.innerHTML = `<div class="focusstrip">${items.map(item => {
     const record = normalizeTickerRecord(getTickerRecord(item.ticker) || item);
-    const setupScore = setupScoreForRecord(record);
+    const setupScore = setupScoreDisplayForRecord(record);
     const scoreStage = formatScoreStage(scoreStageForRecord(record));
     const actionState = formatActionState(actionStateForRecord(record));
     const planState = formatPlanState(planStateForRecord(record));
-    return `<div class="focuscard compactfocus"><div><strong>${escapeHtml(item.ticker)}</strong><div class="tiny">${escapeHtml(item.verdict)} | ${escapeHtml(String(setupScore))}/10 ${escapeHtml(scoreStage)} | ${escapeHtml(actionState)} | Plan ${escapeHtml(planState)}</div></div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(item.ticker)}">Open Review</button></div>`;
+    return `<div class="focuscard compactfocus"><div><strong>${escapeHtml(item.ticker)}</strong><div class="tiny">${escapeHtml(item.verdict)} | ${escapeHtml(setupScore)} ${escapeHtml(scoreStage)} | ${escapeHtml(actionState)} | Plan ${escapeHtml(planState)}</div></div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(item.ticker)}">Open Review</button></div>`;
   }).join('')}</div>`;
   box.querySelectorAll('[data-act="focus-review"]').forEach(button => {
     button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
@@ -3382,6 +3382,10 @@ function scoreClass(score){
 function setupScoreForRecord(record){
   const score = Math.round(Number(record && record.scan && record.scan.score || 0));
   return Number.isFinite(score) ? Math.max(0, Math.min(10, score)) : 0;
+}
+
+function setupScoreDisplayForRecord(record){
+  return `${setupScoreForRecord(record)}/10`;
 }
 
 function scoreStageForRecord(record){
@@ -5496,7 +5500,6 @@ function renderAnalysisPanel(card){
     const analysis = normalizeAnalysisResult(card.lastAnalysis, card);
     const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No key reasons returned.</li>';
     const risks = analysis.risks.length ? analysis.risks.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No risks returned.</li>';
-    const quality = Number.isFinite(analysis.quality_score) ? `${analysis.quality_score}/10` : 'n/a';
     const confidence = Number.isFinite(analysis.confidence_score) ? `${analysis.confidence_score}/100` : 'n/a';
     const renderModel = {
       verdict:analysis.verdict,
@@ -5514,7 +5517,7 @@ function renderAnalysisPanel(card){
       risks:analysis.risks
     };
     console.log('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
-    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(analysis.verdict)}">${escapeHtml(analysis.verdict)}</span><span class="score ${scoreClass(Number.isFinite(analysis.quality_score) ? analysis.quality_score : 0)}">${escapeHtml(quality)}</span>${analysis.plan_metrics_valid ? `<span class="badge ${statusClass(analysis.risk_status || 'Watch')}">${escapeHtml(riskStatusLabel(analysis.risk_status || 'plan_missing'))}</span>` : ''}${analysis.plan_metrics_valid && analysis.rr_state ? `<span class="badge ${rrStateClass(analysis.rr_state)}">${escapeHtml(analysis.rr_badge)}</span>` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="row3"><div><strong>Planned Entry</strong><div class="tiny">${escapeHtml(renderModel.entry)}</div></div><div><strong>Planned Stop</strong><div class="tiny">${escapeHtml(renderModel.stop)}</div></div><div><strong>Planned First Target</strong><div class="tiny">${escapeHtml(renderModel.first_target)}</div></div></div><div class="row3"><div><strong>Max Loss</strong><div class="tiny">${escapeHtml(analysis.plan_metrics_valid ? (analysis.max_loss || 'Not given') : 'N/A')}</div></div><div><strong>Planned Risk / Share</strong><div class="tiny">${escapeHtml(renderModel.risk_per_share)}</div></div><div><strong>Planned Reward / Share</strong><div class="tiny">${escapeHtml(renderModel.reward_per_share)}</div></div></div><div class="row3"><div><strong>Risk Status</strong><div class="tiny">${escapeHtml(renderModel.risk_status)}</div></div><div><strong>Planned R:R</strong><div class="tiny">${escapeHtml(renderModel.reward_risk)}</div></div><div><strong>Planned Position Size</strong><div class="tiny">${escapeHtml(renderModel.position_size)}</div></div></div><div class="row3"><div><strong>Confidence</strong><div class="tiny">${escapeHtml(confidence)}</div></div><div><strong>Final Verdict</strong><div class="tiny">${escapeHtml(analysis.final_verdict || 'No final verdict returned.')}</div></div><div></div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
+    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(analysis.verdict)}">${escapeHtml(analysis.verdict)}</span>${analysis.plan_metrics_valid ? `<span class="badge ${statusClass(analysis.risk_status || 'Watch')}">${escapeHtml(riskStatusLabel(analysis.risk_status || 'plan_missing'))}</span>` : ''}${analysis.plan_metrics_valid && analysis.rr_state ? `<span class="badge ${rrStateClass(analysis.rr_state)}">${escapeHtml(analysis.rr_badge)}</span>` : ''}</div><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI suggested score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="row3"><div><strong>Planned Entry</strong><div class="tiny">${escapeHtml(renderModel.entry)}</div></div><div><strong>Planned Stop</strong><div class="tiny">${escapeHtml(renderModel.stop)}</div></div><div><strong>Planned First Target</strong><div class="tiny">${escapeHtml(renderModel.first_target)}</div></div></div><div class="row3"><div><strong>Max Loss</strong><div class="tiny">${escapeHtml(analysis.plan_metrics_valid ? (analysis.max_loss || 'Not given') : 'N/A')}</div></div><div><strong>Planned Risk / Share</strong><div class="tiny">${escapeHtml(renderModel.risk_per_share)}</div></div><div><strong>Planned Reward / Share</strong><div class="tiny">${escapeHtml(renderModel.reward_per_share)}</div></div></div><div class="row3"><div><strong>Risk Status</strong><div class="tiny">${escapeHtml(renderModel.risk_status)}</div></div><div><strong>Planned R:R</strong><div class="tiny">${escapeHtml(renderModel.reward_risk)}</div></div><div><strong>Planned Position Size</strong><div class="tiny">${escapeHtml(renderModel.position_size)}</div></div></div><div class="row3"><div><strong>Final Verdict</strong><div class="tiny">${escapeHtml(analysis.final_verdict || 'No final verdict returned.')}</div></div><div></div><div></div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
@@ -5542,7 +5545,6 @@ function renderAnalysisPanelFromRecord(record){
     const analysis = analysisState.normalizedAnalysis;
     const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(entry => `<li>${escapeHtml(entry)}</li>`).join('') : '<li>No key reasons returned.</li>';
     const risks = analysis.risks.length ? analysis.risks.map(entry => `<li>${escapeHtml(entry)}</li>`).join('') : '<li>No risks returned.</li>';
-    const quality = Number.isFinite(analysis.quality_score) ? `${analysis.quality_score}/10` : 'n/a';
     const confidence = Number.isFinite(analysis.confidence_score) ? `${analysis.confidence_score}/100` : 'n/a';
     const renderModel = {
       verdict:analysis.verdict,
@@ -5555,7 +5557,7 @@ function renderAnalysisPanelFromRecord(record){
       risk_status:analysis.plan_metrics_valid ? riskStatusLabel(analysis.risk_status) : 'N/A',
       rr_badge:analysis.plan_metrics_valid ? analysis.rr_badge : ''
     };
-    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(analysis.verdict)}">${escapeHtml(analysis.verdict)}</span><span class="score ${scoreClass(Number.isFinite(analysis.quality_score) ? analysis.quality_score : 0)}">${escapeHtml(quality)}</span>${analysis.plan_metrics_valid ? `<span class="badge ${statusClass(analysis.risk_status || 'Watch')}">${escapeHtml(riskStatusLabel(analysis.risk_status || 'plan_missing'))}</span>` : ''}${analysis.plan_metrics_valid && analysis.rr_state ? `<span class="badge ${rrStateClass(analysis.rr_state)}">${escapeHtml(analysis.rr_badge)}</span>` : ''}</div><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div><div class="tiny"><strong>Risk:</strong> ${escapeHtml(renderModel.risk_status)} | <strong>R:R</strong> ${escapeHtml(renderModel.reward_risk)} | <strong>Size</strong> ${escapeHtml(renderModel.position_size)}</div><div class="tiny"><strong>Confidence:</strong> ${escapeHtml(confidence)} | <strong>Final:</strong> ${escapeHtml(analysis.final_verdict || 'No final verdict returned.')}</div></div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
+    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(analysis.verdict)}">${escapeHtml(analysis.verdict)}</span>${analysis.plan_metrics_valid ? `<span class="badge ${statusClass(analysis.risk_status || 'Watch')}">${escapeHtml(riskStatusLabel(analysis.risk_status || 'plan_missing'))}</span>` : ''}${analysis.plan_metrics_valid && analysis.rr_state ? `<span class="badge ${rrStateClass(analysis.rr_state)}">${escapeHtml(analysis.rr_badge)}</span>` : ''}</div><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI suggested score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div><div class="tiny"><strong>Risk:</strong> ${escapeHtml(renderModel.risk_status)} | <strong>R:R</strong> ${escapeHtml(renderModel.reward_risk)} | <strong>Size</strong> ${escapeHtml(renderModel.position_size)}</div><div class="tiny"><strong>Final:</strong> ${escapeHtml(analysis.final_verdict || 'No final verdict returned.')}</div></div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
   }
   if(!analysisState.rawAnalysis) return '<div class="tiny">No AI analysis saved yet.</div>';
   console.debug('LEGACY_PATH_STILL_IN_USE', 'renderAnalysisPanelFromRecord-fallback', item.ticker);
@@ -6051,7 +6053,7 @@ function refreshReview(){
   const checks = currentChecks();
   const result = scoreAndStatusFromChecks(checks);
   $('summaryBox').textContent = buildSummary(checks, result.status);
-  $('progressText').textContent = `${result.score} / 10`;
+  $('progressText').textContent = `Checks met: ${result.score} / 10`;
   $('progressFill').style.width = `${result.score * 10}%`;
   syncPlanDisplayMeta();
 }
@@ -6105,7 +6107,7 @@ function resetReview(){
   ['selectedTicker','planStateBox','planQualityBox','entryPrice','stopPrice','targetPrice'].forEach(id => { if($(id)) $(id).value = ''; });
   checklistIds.forEach(id => { $(id).checked = false; });
   $('summaryBox').textContent = 'No setup reviewed yet.';
-  $('progressText').textContent = '0 / 10';
+  $('progressText').textContent = 'Checks met: 0 / 10';
   $('progressFill').style.width = '0%';
   $('calcNote').textContent = 'Enter planned entry, stop, and first target to calculate size.';
   ['riskPerShare','positionSize','rrValue'].forEach(id => { $(id).textContent = '-'; });
