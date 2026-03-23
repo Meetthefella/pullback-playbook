@@ -166,18 +166,20 @@
 
   <div class="card" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="focusSection" style="margin-bottom:0">Today's Focus / Trading Queue</h2>
-      <span class="pill">Actionable names only</span>
+      <h2 id="focusSection" style="margin-bottom:0">Today's Focus / Active Queue</h2>
+      <span class="pill">Primary working set</span>
     </div>
-    <p class="tiny">Compact queue of the names that need attention now.</p>
+    <p class="tiny">Top actionable setups from the latest scan. Use this as the main working layer before opening the full scan list.</p>
     <div id="focusQueue" class="list"></div>
   </div>
 
   <div class="card" style="margin-top:14px">
-    <h2 id="resultsSection">3) Ranked Results</h2>
-    <p class="tiny">This is the shortlist. Tap a result to open one active review workspace.</p>
-    <div class="statusline tiny" id="scannerSelectionStatus">Open any ranked setup to jump straight into review.</div>
-    <div id="results" class="list"></div>
+    <details id="resultsToggle">
+      <summary><strong id="resultsSection">3) All Scan Results</strong> <span class="tiny">- Show Ranked Results</span></summary>
+      <p class="tiny" style="margin-top:10px">Full scan output. This stays secondary to Today's Focus and is collapsed by default.</p>
+      <div class="statusline tiny" id="scannerSelectionStatus">Open any ranked setup to jump straight into review.</div>
+      <div id="results" class="list"></div>
+    </details>
   </div>
 
   <div class="card" style="margin-top:14px">

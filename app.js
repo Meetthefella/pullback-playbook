@@ -2769,21 +2769,46 @@ function renderCompactResultCard(record){
   return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusClass(item.scan.verdict || item.watchlist.status || 'Watch')}">${escapeHtml(combinedStatus)}</span><span class="score ${scoreClass(item.scan.score || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">Reason: ${escapeHtml(resultReasonForRecord(item))}</div><div class="resultsupport">${escapeHtml(resultSupportLineForRecord(item))}</div></div><div class="resultmetrics"><span class="pill">R:R ${escapeHtml(Number.isFinite(rrValue) ? rrValue.toFixed(2) : 'n/a')}</span><span class="pill">${escapeHtml(riskStatusLabel(item.plan.riskStatus || item.scan.riskStatus || 'plan_missing'))}</span><span class="pill">Size ${escapeHtml(Number.isFinite(positionSize) ? String(positionSize) : 'n/a')}</span></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderEstimatedScannerPlanFromRecord(item)}</details></div>`;
 }
 
-function focusQueueAlerts(alerts){
-  return alerts.filter(alert => ['became_ready','plan_near_expiry','needs_review'].includes(alert.alertType)).slice(0, 4);
+function focusQueueRecords(){
+  return rankedTickerRecords()
+    .filter(record => {
+      const item = normalizeTickerRecord(record);
+      const verdict = String(item.scan.verdict || '');
+      const score = Number(item.scan.score || 0);
+      const hasValidPlan = !!item.plan.hasValidPlan;
+      if(score < 7) return false;
+      if(verdict === 'Entry' || verdict === 'Near Entry') return true;
+      return verdict === 'Watch' && !hasValidPlan;
+    })
+    .slice(0, 5)
+    .map(record => {
+      const item = normalizeTickerRecord(record);
+      const verdict = String(item.scan.verdict || 'Watch');
+      const label = verdict === 'Entry'
+        ? 'Entry'
+        : verdict === 'Near Entry'
+          ? 'Near Entry'
+          : 'Needs Plan';
+      return {
+        ticker:item.ticker,
+        label,
+        score:Number(item.scan.score || 0),
+        verdict
+      };
+    });
 }
 
-function renderFocusQueue(alerts){
+function renderFocusQueue(){
   const box = $('focusQueue');
   const count = $('focusCount');
   if(!box) return;
-  const items = focusQueueAlerts(alerts);
+  const items = focusQueueRecords();
   if(count) count.textContent = `${items.length} focus`;
   if(!items.length){
-    box.innerHTML = '<div class="summary">No immediate focus items right now. Refresh the scanner or review the watchlist when the market changes.</div>';
+    box.innerHTML = '<div class="summary">No high-priority focus names right now. Run a scan or review the watchlist when the market changes.</div>';
     return;
   }
-  box.innerHTML = `<div class="focusstrip">${items.map(alert => `<div class="focuscard compactfocus"><div><strong>${escapeHtml(alert.ticker)}</strong><div class="tiny">${escapeHtml(alert.message)}</div></div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(alert.ticker)}">Open Review</button></div>`).join('')}</div>`;
+  box.innerHTML = `<div class="focusstrip">${items.map(item => `<div class="focuscard compactfocus"><div><strong>${escapeHtml(item.ticker)}</strong><div class="tiny">${escapeHtml(item.label)} | Score ${escapeHtml(String(item.score))}/10</div></div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(item.ticker)}">Open Review</button></div>`).join('')}</div>`;
   box.querySelectorAll('[data-act="focus-review"]').forEach(button => {
     button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
   });
@@ -2840,7 +2865,6 @@ function renderWorkflowAlerts(){
   };
   const newCount = alerts.filter(isAlertNew).length;
   if(badge) badge.textContent = `${newCount} new`;
-  renderFocusQueue(alerts);
   box.innerHTML = `<div class="alertsection"><strong>Action now</strong>${renderAlertRows(groups.actionNow, false)}</div><div class="alertsection"><strong>Near entry</strong>${renderAlertRows(groups.nearEntry)}</div><div class="alertsection"><strong>Needs plan</strong>${renderAlertRows(groups.needsPlan)}</div>${groups.recent.length ? `<div class="alertsection"><strong>Recently changed</strong>${renderAlertRows(groups.recent)}</div>` : ''}`;
   box.querySelectorAll('[data-act="alert-review"]').forEach(button => {
     button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
@@ -5504,6 +5528,7 @@ function renderScannerResults(){
         if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
       };
     }
+    renderFocusQueue();
     renderWorkflowAlerts();
     return;
   }
@@ -5584,6 +5609,7 @@ function renderScannerResults(){
     box.appendChild(wrap);
   });
   updateScannerSelectionStatus();
+  renderFocusQueue();
   renderWorkflowAlerts();
 }
 
@@ -6195,5 +6221,3 @@ registerPwa();
 loadState();
 updateTickerSearchStatus();
 updateProviderStatusNote();
-
-
