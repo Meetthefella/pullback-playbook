@@ -2774,16 +2774,29 @@ function focusQueueRecords(){
     .filter(record => {
       const item = normalizeTickerRecord(record);
       const verdict = String(item.scan.verdict || '');
-      const score = Number(item.scan.score || 0);
       const hasValidPlan = !!item.plan.hasValidPlan;
-      if(score < 7) return false;
+      if(verdict === 'Avoid') return false;
       if(verdict === 'Entry' || verdict === 'Near Entry') return true;
-      return verdict === 'Watch' && !hasValidPlan;
+      return !hasValidPlan;
     })
-    .slice(0, 5)
+    .sort((a, b) => {
+      const itemA = normalizeTickerRecord(a);
+      const itemB = normalizeTickerRecord(b);
+      const priority = record => {
+        const verdict = String(record.scan.verdict || '');
+        const hasValidPlan = !!record.plan.hasValidPlan;
+        if(!hasValidPlan) return 0;
+        if(verdict === 'Entry') return 1;
+        if(verdict === 'Near Entry') return 2;
+        return 3;
+      };
+      return priority(itemA) - priority(itemB) || Number(itemB.scan.score || 0) - Number(itemA.scan.score || 0) || itemA.ticker.localeCompare(itemB.ticker);
+    })
+    .slice(0, 35)
     .map(record => {
       const item = normalizeTickerRecord(record);
       const verdict = String(item.scan.verdict || 'Watch');
+      const hasValidPlan = !!item.plan.hasValidPlan;
       const label = verdict === 'Entry'
         ? 'Entry'
         : verdict === 'Near Entry'
@@ -2793,7 +2806,8 @@ function focusQueueRecords(){
         ticker:item.ticker,
         label,
         score:Number(item.scan.score || 0),
-        verdict
+        verdict,
+        hasValidPlan
       };
     });
 }
@@ -2812,6 +2826,13 @@ function renderFocusQueue(){
   box.querySelectorAll('[data-act="focus-review"]').forEach(button => {
     button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
   });
+}
+
+function syncResultsToggleLabel(){
+  const resultsToggle = $('resultsToggle');
+  const resultsToggleText = $('resultsToggleText');
+  if(!resultsToggle || !resultsToggleText) return;
+  resultsToggleText.textContent = resultsToggle.open ? '- Hide Ranked Results' : '- Show Ranked Results';
 }
 
 function deriveWorkflowAlerts(){
@@ -5509,9 +5530,15 @@ function seedCardsFromUniverse(limit){
 
 function renderScannerResults(){
   const box = $('results');
+  const resultsToggle = $('resultsToggle');
   if(!box) return;
   box.innerHTML = '';
   const records = rankedTickerRecords();
+  const focusItems = focusQueueRecords();
+  if(resultsToggle){
+    resultsToggle.open = !focusItems.length;
+    syncResultsToggleLabel();
+  }
   console.debug('RENDER_FROM_TICKER_RECORD', 'rankedResults', records.length);
   if(!records.length){
     updateScannerSelectionStatus();
@@ -6149,6 +6176,7 @@ click('jumpToDiaryBtn', () => {
 });
 click('markAlertsSeenBtn', markAlertsSeen);
 click('exportDiaryBtn', exportTradeDiary);
+on('resultsToggle', 'toggle', syncResultsToggleLabel);
 click('saveReviewBtn', saveReview);
 click('analyseActiveBtn', analyseActiveReviewTicker);
 click('addWatchlistActiveBtn', addActiveReviewTickerToWatchlist);
