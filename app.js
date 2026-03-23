@@ -1072,9 +1072,20 @@ function baseTickerRecord(ticker){
       positionSize:null,
       maxLoss:null,
       riskStatus:'plan_missing',
+      status:'missing',
       firstTargetTooClose:false,
       lastPlannedAt:'',
       source:''
+    },
+    setup:{
+      score:null,
+      verdict:'',
+      reasons:[],
+      marketCaution:false
+    },
+    action:{
+      stage:'watch',
+      priority:3
     },
     watchlist:{
       inWatchlist:false,
@@ -1187,6 +1198,7 @@ function normalizeTickerRecord(record){
   merged.plan.positionSize = numericOrNull(merged.plan.positionSize);
   merged.plan.maxLoss = numericOrNull(merged.plan.maxLoss);
   merged.plan.firstTargetTooClose = !!merged.plan.firstTargetTooClose;
+  merged.plan.status = String(merged.plan.status || '');
   merged.watchlist.inWatchlist = !!merged.watchlist.inWatchlist;
   merged.watchlist.addedScore = numericOrNull(merged.watchlist.addedScore);
   merged.watchlist.expiryAfterTradingDays = Number.isFinite(Number(merged.watchlist.expiryAfterTradingDays)) ? Math.max(1, Number(merged.watchlist.expiryAfterTradingDays)) : 5;
@@ -1210,6 +1222,17 @@ function normalizeTickerRecord(record){
   merged.meta.dataVersion = 2;
   merged.meta.updatedAt = String(merged.meta.updatedAt || merged.meta.createdAt || new Date().toISOString());
   merged.meta.createdAt = String(merged.meta.createdAt || merged.meta.updatedAt || new Date().toISOString());
+  const computedPlanStatus = merged.plan.hasValidPlan ? 'valid' : (hasAnyPlanFields(merged) ? 'invalid' : 'missing');
+  merged.plan.status = computedPlanStatus;
+  merged.setup = {
+    score:setupScoreForRecord(merged),
+    verdict:String(merged.scan.verdict || merged.watchlist.status || 'Watch'),
+    reasons:Array.isArray(merged.scan.reasons) && merged.scan.reasons.length
+      ? merged.scan.reasons
+      : [String(merged.scan.summary || '').trim()].filter(Boolean),
+    marketCaution:/below 50 ma/i.test(String(merged.meta.marketStatus || state.marketStatus || ''))
+  };
+  merged.action = deriveActionStateForRecord(merged);
   return merged;
 }
 
@@ -1653,31 +1676,33 @@ function recordRrValue(record){
 
 function statusRankFromRecord(record){
   const item = normalizeTickerRecord(record);
-  const verdict = item.scan.verdict || item.watchlist.status || 'Watch';
-  const riskStatus = item.plan.riskStatus || item.scan.riskStatus || 'plan_missing';
-  return statusRank(bucketStatusForCard({chartVerdict:verdict, riskStatus}));
+  return item.action.priority;
 }
 
 function resultSortScoreFromRecord(record){
   const item = normalizeTickerRecord(record);
-  const verdict = String(item.scan.verdict || item.watchlist.status || 'Watch');
-  const riskStatus = String(item.plan.riskStatus || item.scan.riskStatus || '');
   const rrRatio = numericOrNull(recordRrValue(item));
-  const verdictRank = verdict === 'Entry' ? 4 : (verdict === 'Near Entry' ? 3 : (verdict === 'Watch' ? 2 : (verdict === 'Manual Review' ? 1 : 0)));
-  const riskRank = riskStatus === 'fits_risk' ? 2 : (riskStatus === 'too_wide' ? 1 : 0);
-  return (verdictRank * 1000) + (riskRank * 100) + (Number.isFinite(rrRatio) ? rrRatio : 0);
+  const score = Number.isFinite(item.setup.score) ? item.setup.score : 0;
+  const cautionPenalty = item.setup.marketCaution ? 0.01 : 0;
+  return ((5 - item.action.priority) * 1000) + (score * 100) + (Number.isFinite(rrRatio) ? rrRatio : 0) - cautionPenalty;
 }
 
 function rankedTickerRecords(){
   return allTickerRecords()
     .filter(record => record.scan && (record.scan.lastScannedAt || record.scan.verdict || Number.isFinite(record.scan.score)))
-    .sort((a, b) => resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || (numericOrNull(b.scan.score) || 0) - (numericOrNull(a.scan.score) || 0) || a.ticker.localeCompare(b.ticker));
+    .sort((a, b) =>
+      statusRankFromRecord(a) - statusRankFromRecord(b)
+      || (Number.isFinite(b.setup.score) ? b.setup.score : setupScoreForRecord(b)) - (Number.isFinite(a.setup.score) ? a.setup.score : setupScoreForRecord(a))
+      || (numericOrNull(recordRrValue(b)) || -999) - (numericOrNull(recordRrValue(a)) || -999)
+      || ((a.setup && a.setup.marketCaution) ? 1 : 0) - ((b.setup && b.setup.marketCaution) ? 1 : 0)
+      || a.ticker.localeCompare(b.ticker)
+    );
 }
 
 function openCardTickerRecords(){
   return allTickerRecords()
     .filter(record => record.review && record.review.cardOpen)
-    .sort((a, b) => statusRankFromRecord(a) - statusRankFromRecord(b) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || (numericOrNull(b.scan.score) || 0) - (numericOrNull(a.scan.score) || 0) || a.ticker.localeCompare(b.ticker));
+    .sort((a, b) => statusRankFromRecord(a) - statusRankFromRecord(b) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker));
 }
 
 function syncTickerRecordsFromLegacyCollections(){
@@ -2719,23 +2744,22 @@ function resultReasonForRecord(record){
   if(Number.isFinite(item.marketData.ma50) && Number.isFinite(item.marketData.ma200) && item.marketData.ma50 < item.marketData.ma200) return 'Trend broken';
   if(item.plan.firstTargetTooClose) return 'First target too close';
   if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'Insufficient reward';
-  if(item.scan.verdict === 'Avoid') return item.scan.pullbackType && /broken/i.test(item.scan.pullbackType) ? 'Trend broken' : 'Weak structure';
-  if(item.plan.riskStatus === 'plan_missing') return 'Plan missing';
-  if(item.scan.verdict === 'Entry' || item.scan.verdict === 'Near Entry'){
+  if(item.setup.verdict === 'Avoid') return item.scan.pullbackType && /broken/i.test(item.scan.pullbackType) ? 'Trend broken' : 'Weak structure';
+  if(item.plan.status !== 'valid') return item.plan.status === 'invalid' ? 'Plan invalid' : 'Plan missing';
+  if(item.setup.verdict === 'Entry' || item.setup.verdict === 'Near Entry'){
     return `Near ${escapeHtml(item.scan.scanType || '20MA')} with ${item.scan.pullbackStatus || 'acceptable structure'}`.replace(/&amp;/g, '&');
   }
-  return item.scan.summary || 'Needs review';
+  return item.setup.reasons[0] || item.scan.summary || 'Needs review';
 }
 
 function resultSupportLineForRecord(record){
   const item = normalizeTickerRecord(record);
   const rrValue = numericOrNull(recordRrValue(item));
-  if(item.scan.verdict === 'Avoid') return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
-  const marketCaution = /below 50 ma/i.test(String(state.marketStatus || '')) ? 'Weak market caution' : '';
+  if(item.action.stage === 'avoid') return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
   const pieces = [
-    item.plan.hasValidPlan ? riskStatusLabel(item.plan.riskStatus) : '',
+    `Plan ${formatPlanState(item.plan.status)}`,
     Number.isFinite(rrValue) ? `Est R:R ${rrValue.toFixed(2)}` : '',
-    marketCaution
+    item.setup.marketCaution ? 'Weak market caution' : ''
   ].filter(Boolean);
   return pieces.join(' | ') || (item.meta.companyName || 'Review in Setup Review for full detail.');
 }
@@ -2743,7 +2767,7 @@ function resultSupportLineForRecord(record){
 function isFilteredResultRecord(record){
   const item = normalizeTickerRecord(record);
   const rrValue = numericOrNull(recordRrValue(item));
-  return item.scan.verdict === 'Avoid'
+  return item.action.stage === 'avoid'
     || item.lifecycle.stage === 'avoided'
     || item.lifecycle.stage === 'expired'
     || (Number.isFinite(rrValue) && rrValue < currentRrThreshold());
@@ -2751,8 +2775,8 @@ function isFilteredResultRecord(record){
 
 function renderCompactResultCard(record){
   const item = normalizeTickerRecord(record);
-  const combinedStatus = combinedStatusLabel(item.scan.verdict || item.watchlist.status || 'Watch', item.plan.riskStatus || item.scan.riskStatus || 'plan_missing');
-  const scoreLabel = `${item.scan.score || 0}/10`;
+  const actionLabel = formatActionState(item.action.stage);
+  const scoreLabel = `${item.setup.score || 0}/10`;
   const rrValue = numericOrNull(recordRrValue(item));
   const positionSize = numericOrNull(item.plan.positionSize);
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
@@ -2764,50 +2788,28 @@ function renderCompactResultCard(record){
     Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
     Number.isFinite(rrValue) ? `Est R:R ${rrValue.toFixed(2)}` : '',
-    item.lifecycle.stage ? `Status: ${item.lifecycle.stage}` : ''
+    item.lifecycle.stage ? `Status: ${item.lifecycle.stage}` : '',
+    item.setup.marketCaution ? 'Market caution' : ''
   ].filter(Boolean).join(' | ');
-  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusClass(item.scan.verdict || item.watchlist.status || 'Watch')}">${escapeHtml(combinedStatus)}</span><span class="score ${scoreClass(item.scan.score || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">Reason: ${escapeHtml(resultReasonForRecord(item))}</div><div class="resultsupport">${escapeHtml(resultSupportLineForRecord(item))}</div></div><div class="resultmetrics"><span class="pill">R:R ${escapeHtml(Number.isFinite(rrValue) ? rrValue.toFixed(2) : 'n/a')}</span><span class="pill">${escapeHtml(riskStatusLabel(item.plan.riskStatus || item.scan.riskStatus || 'plan_missing'))}</span><span class="pill">Size ${escapeHtml(Number.isFinite(positionSize) ? String(positionSize) : 'n/a')}</span></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderEstimatedScannerPlanFromRecord(item)}</details></div>`;
+  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusClass(item.setup.verdict || 'Watch')}">${escapeHtml(actionLabel)}</span><span class="score ${scoreClass(item.setup.score || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">Reason: ${escapeHtml(resultReasonForRecord(item))}</div><div class="resultsupport">${escapeHtml(resultSupportLineForRecord(item))}</div></div><div class="resultmetrics"><span class="pill">R:R ${escapeHtml(Number.isFinite(rrValue) ? rrValue.toFixed(2) : 'n/a')}</span><span class="pill">Plan ${escapeHtml(formatPlanState(item.plan.status))}</span><span class="pill">Size ${escapeHtml(Number.isFinite(positionSize) ? String(positionSize) : 'n/a')}</span></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderEstimatedScannerPlanFromRecord(item)}</details></div>`;
 }
 
 function focusQueueRecords(){
   return rankedTickerRecords()
     .filter(record => {
       const item = normalizeTickerRecord(record);
-      const verdict = String(item.scan.verdict || '');
-      const hasValidPlan = !!item.plan.hasValidPlan;
-      if(verdict === 'Avoid') return false;
-      if(verdict === 'Entry' || verdict === 'Near Entry') return true;
-      return !hasValidPlan;
+      return ['action_now','near_entry','needs_plan'].includes(item.action.stage);
     })
-    .sort((a, b) => {
-      const itemA = normalizeTickerRecord(a);
-      const itemB = normalizeTickerRecord(b);
-      const priority = record => {
-        const verdict = String(record.scan.verdict || '');
-        const hasValidPlan = !!record.plan.hasValidPlan;
-        if(!hasValidPlan) return 0;
-        if(verdict === 'Entry') return 1;
-        if(verdict === 'Near Entry') return 2;
-        return 3;
-      };
-      return priority(itemA) - priority(itemB) || Number(itemB.scan.score || 0) - Number(itemA.scan.score || 0) || itemA.ticker.localeCompare(itemB.ticker);
-    })
+    .sort((a, b) => statusRankFromRecord(a) - statusRankFromRecord(b) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker))
     .slice(0, 35)
     .map(record => {
       const item = normalizeTickerRecord(record);
-      const verdict = String(item.scan.verdict || 'Watch');
-      const hasValidPlan = !!item.plan.hasValidPlan;
-      const label = verdict === 'Entry'
-        ? 'Entry'
-        : verdict === 'Near Entry'
-          ? 'Near Entry'
-          : 'Needs Plan';
       return {
         ticker:item.ticker,
-        label,
-        score:Number(item.scan.score || 0),
-        verdict,
-        hasValidPlan
+        label:formatActionState(item.action.stage),
+        score:Number(item.setup.score || 0),
+        verdict:item.setup.verdict,
+        hasValidPlan:item.plan.status === 'valid'
       };
     });
 }
@@ -2822,7 +2824,14 @@ function renderFocusQueue(){
     box.innerHTML = '<div class="summary">No high-priority focus names right now. Run a scan or review the watchlist when the market changes.</div>';
     return;
   }
-  box.innerHTML = `<div class="focusstrip">${items.map(item => `<div class="focuscard compactfocus"><div><strong>${escapeHtml(item.ticker)}</strong><div class="tiny">${escapeHtml(item.label)} | Score ${escapeHtml(String(item.score))}/10</div></div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(item.ticker)}">Open Review</button></div>`).join('')}</div>`;
+  box.innerHTML = `<div class="focusstrip">${items.map(item => {
+    const record = normalizeTickerRecord(getTickerRecord(item.ticker) || item);
+    const setupScore = setupScoreForRecord(record);
+    const scoreStage = formatScoreStage(scoreStageForRecord(record));
+    const actionState = formatActionState(actionStateForRecord(record));
+    const planState = formatPlanState(planStateForRecord(record));
+    return `<div class="focuscard compactfocus"><div><strong>${escapeHtml(item.ticker)}</strong><div class="tiny">${escapeHtml(item.verdict)} | ${escapeHtml(String(setupScore))}/10 ${escapeHtml(scoreStage)} | ${escapeHtml(actionState)} | Plan ${escapeHtml(planState)}</div></div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(item.ticker)}">Open Review</button></div>`;
+  }).join('')}</div>`;
   box.querySelectorAll('[data-act="focus-review"]').forEach(button => {
     button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
   });
@@ -2836,41 +2845,48 @@ function syncResultsToggleLabel(){
 }
 
 function deriveWorkflowAlerts(){
-  const rawAlerts = [];
-  const hostileMarket = /below 50 ma/i.test(String(state.marketStatus || ''));
-  allTickerRecords().forEach(record => {
-    const item = normalizeTickerRecord(record);
-    const stage = String(item.lifecycle.stage || '');
-    const status = String(item.lifecycle.status || '');
-    const changedAt = String(item.lifecycle.stageUpdatedAt || item.meta.updatedAt || '');
-    const expiresAt = String(item.lifecycle.expiresAt || '');
-    const remainingTradingDays = expiresAt ? countTradingDaysBetween(todayIsoDate(), expiresAt) : null;
-    const hasValidPlan = !!item.plan.hasValidPlan;
-    const needsReview = ['watchlist','shortlisted','reviewed'].includes(stage) && !hasValidPlan && status !== 'closed' && stage !== 'expired';
-    if(stage === 'planned' && hasValidPlan) rawAlerts.push({id:alertIdForRecord(item, 'became_ready', changedAt, stage), ticker:item.ticker, alertType:'became_ready', severity:'action', createdAt:changedAt, message:'Ready for review.', stage, status});
-    if(needsReview) rawAlerts.push({id:alertIdForRecord(item, 'needs_review', changedAt, stage), ticker:item.ticker, alertType:'needs_review', severity:stage === 'reviewed' ? 'warning' : 'info', createdAt:changedAt, message:stage === 'reviewed' ? 'Reviewed setup still needs a plan.' : 'Still needs review.', stage, status});
-    if(stage === 'planned' && hasValidPlan && Number.isFinite(remainingTradingDays) && remainingTradingDays <= 1 && remainingTradingDays >= 0) rawAlerts.push({id:alertIdForRecord(item, 'plan_near_expiry', expiresAt, remainingTradingDays), ticker:item.ticker, alertType:'plan_near_expiry', severity:'warning', createdAt:expiresAt || changedAt, message:remainingTradingDays === 0 ? 'Plan expires today.' : 'Plan expires within 1 trading day.', stage, status});
-    const lifecycleStages = compressLifecycleStages(item);
-    if(item.watchlist.inWatchlist && ['shortlisted','reviewed','planned'].includes(stage) && lifecycleStages.includes('watchlist')) rawAlerts.push({id:alertIdForRecord(item, 'watchlist_progressed', changedAt, stage), ticker:item.ticker, alertType:'watchlist_progressed', severity:'info', createdAt:changedAt, message:`Watchlist progressed to ${stage}.`, stage, status});
-    if(stage === 'expired') rawAlerts.push({id:alertIdForRecord(item, 'expired', changedAt, stage), ticker:item.ticker, alertType:'expired', severity:'warning', createdAt:changedAt, message:'Setup expired.', stage, status});
-    if(stage === 'entered') rawAlerts.push({id:alertIdForRecord(item, 'entered', changedAt, stage), ticker:item.ticker, alertType:'entered', severity:'action', createdAt:changedAt, message:'Trade entered.', stage, status});
-    if(['exited','cancelled'].includes(stage) || (status === 'closed' && !isActionableAlertStage(stage))) rawAlerts.push({id:alertIdForRecord(item, 'closed', changedAt, stage), ticker:item.ticker, alertType:'closed', severity:'info', createdAt:changedAt, message:stage === 'cancelled' ? 'Trade cancelled.' : 'Trade closed.', stage, status});
-    if(hostileMarket && ['planned','reviewed'].includes(stage) && (item.scan.verdict === 'Entry' || item.scan.verdict === 'Near Entry')) rawAlerts.push({id:alertIdForRecord(item, 'regime_warning', String(state.marketStatus), `${stage}-${item.scan.verdict}`), ticker:item.ticker, alertType:'regime_warning', severity:'warning', createdAt:changedAt || new Date().toISOString(), message:'Hostile market.', stage, status});
-  });
   const dismissed = new Set(Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds : []);
-  const filtered = rawAlerts.filter(alert => !dismissed.has(alert.id));
-  const byTicker = new Map();
-  filtered.forEach(alert => {
-    if(!byTicker.has(alert.ticker)) byTicker.set(alert.ticker, []);
-    byTicker.get(alert.ticker).push(alert);
-  });
-  return [...byTicker.values()].map(items => {
-    const sorted = items.slice().sort((a, b) => (ALERT_PRIORITY[a.alertType] || 999) - (ALERT_PRIORITY[b.alertType] || 999) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-    const dominant = {...sorted[0]};
-    const regime = items.find(item => item.alertType === 'regime_warning');
-    if(regime && dominant.alertType !== 'regime_warning') dominant.message = `${dominant.message} Caution: hostile market.`;
-    return dominant;
-  }).sort((a, b) => (ALERT_PRIORITY[a.alertType] || 999) - (ALERT_PRIORITY[b.alertType] || 999) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || a.ticker.localeCompare(b.ticker));
+  return allTickerRecords()
+    .map(record => normalizeTickerRecord(record))
+    .filter(item => item.action.stage !== 'avoid')
+    .map(item => {
+      const stage = String(item.lifecycle.stage || '');
+      const status = String(item.lifecycle.status || '');
+      const createdAt = String(item.lifecycle.stageUpdatedAt || item.meta.updatedAt || new Date().toISOString());
+      const hostileMarket = item.setup.marketCaution ? ' Caution: hostile market.' : '';
+      let alertType = item.action.stage;
+      let severity = 'info';
+      let message = 'Watchlist or review candidate.';
+      if(item.action.stage === 'action_now'){
+        alertType = 'action_now';
+        severity = 'action';
+        message = `Ready to act.${hostileMarket}`;
+      }else if(item.action.stage === 'near_entry'){
+        alertType = 'near_entry';
+        severity = 'warning';
+        message = `Near entry.${hostileMarket}`;
+      }else if(item.action.stage === 'needs_plan'){
+        alertType = 'needs_plan';
+        severity = 'info';
+        message = `Needs a valid trade plan.${hostileMarket}`;
+      }else{
+        alertType = 'watch';
+        severity = 'info';
+        message = `Worth watching.${hostileMarket}`;
+      }
+      return {
+        id:alertIdForRecord(item, alertType, createdAt, item.action.stage),
+        ticker:item.ticker,
+        alertType,
+        severity,
+        createdAt,
+        message:message.trim(),
+        stage,
+        status
+      };
+    })
+    .filter(alert => !dismissed.has(alert.id))
+    .sort((a, b) => actionPriority(a.alertType) - actionPriority(b.alertType) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || a.ticker.localeCompare(b.ticker));
 }
 
 function renderWorkflowAlerts(){
@@ -2879,14 +2895,14 @@ function renderWorkflowAlerts(){
   if(!box) return;
   const alerts = deriveWorkflowAlerts();
   const groups = {
-    actionNow:alerts.filter(alert => ['became_ready','entered','plan_near_expiry'].includes(alert.alertType)),
-    nearEntry:alerts.filter(alert => alert.alertType === 'watchlist_progressed'),
-    needsPlan:alerts.filter(alert => alert.alertType === 'needs_review'),
-    recent:alerts.filter(alert => isAlertNew(alert) && !['became_ready','entered','plan_near_expiry','watchlist_progressed','needs_review'].includes(alert.alertType))
+    actionNow:alerts.filter(alert => alert.alertType === 'action_now'),
+    nearEntry:alerts.filter(alert => alert.alertType === 'near_entry'),
+    needsPlan:alerts.filter(alert => alert.alertType === 'needs_plan'),
+    watch:alerts.filter(alert => alert.alertType === 'watch')
   };
   const newCount = alerts.filter(isAlertNew).length;
   if(badge) badge.textContent = `${newCount} new`;
-  box.innerHTML = `<div class="alertsection"><strong>Action now</strong>${renderAlertRows(groups.actionNow, false)}</div><div class="alertsection"><strong>Near entry</strong>${renderAlertRows(groups.nearEntry)}</div><div class="alertsection"><strong>Needs plan</strong>${renderAlertRows(groups.needsPlan)}</div>${groups.recent.length ? `<div class="alertsection"><strong>Recently changed</strong>${renderAlertRows(groups.recent)}</div>` : ''}`;
+  box.innerHTML = `<div class="alertsection"><strong>Action now</strong>${renderAlertRows(groups.actionNow, false)}</div><div class="alertsection"><strong>Near entry</strong>${renderAlertRows(groups.nearEntry)}</div><div class="alertsection"><strong>Needs plan</strong>${renderAlertRows(groups.needsPlan)}</div><div class="alertsection"><strong>Watch</strong>${renderAlertRows(groups.watch)}</div>`;
   box.querySelectorAll('[data-act="alert-review"]').forEach(button => {
     button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
   });
@@ -3354,6 +3370,104 @@ function scoreClass(score){
   if(score >= 8) return 's-hi';
   if(score >= 5) return 's-mid';
   return 's-low';
+}
+
+function setupScoreForRecord(record){
+  const score = Math.round(Number(record && record.scan && record.scan.score || 0));
+  return Number.isFinite(score) ? Math.max(0, Math.min(10, score)) : 0;
+}
+
+function scoreStageForRecord(record){
+  if(record && record.review && record.review.manualReview && typeof record.review.manualReview === 'object') return 'final';
+  const analysisState = getReviewAnalysisState(record || {});
+  if((record && record.review && record.review.lastReviewedAt) || analysisState.normalizedAnalysis || analysisState.rawAnalysis) return 'reviewed';
+  return 'preliminary';
+}
+
+function hasAnyPlanFields(record){
+  const review = record && record.review && record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : null;
+  const candidates = [
+    record && record.plan && record.plan.entry,
+    record && record.plan && record.plan.stop,
+    record && record.plan && record.plan.firstTarget,
+    review && review.entry,
+    review && review.stop,
+    review && review.target
+  ];
+  return candidates.some(value => {
+    if(Number.isFinite(value)) return true;
+    return !!String(value || '').trim();
+  });
+}
+
+function planStateForRecord(record){
+  if(record && record.plan && typeof record.plan.status === 'string' && record.plan.status) return record.plan.status;
+  if(record && record.plan && record.plan.hasValidPlan) return 'valid';
+  return hasAnyPlanFields(record) ? 'invalid' : 'missing';
+}
+
+function actionStateForRecord(record){
+  const item = normalizeTickerRecord(record);
+  return String(item.action && item.action.stage || deriveActionStateForRecord(item).stage);
+}
+
+function planQualityForRecord(record){
+  if(!(record && record.plan && record.plan.hasValidPlan)) return null;
+  const rrRatio = numericOrNull(record.plan.plannedRR);
+  if(!Number.isFinite(rrRatio)) return null;
+  if(rrRatio >= 2) return 10;
+  if(rrRatio >= 1.5) return 7;
+  if(rrRatio > 0) return 4;
+  return null;
+}
+
+function formatScoreStage(scoreStage){
+  if(scoreStage === 'final') return 'Final';
+  if(scoreStage === 'reviewed') return 'Reviewed';
+  return 'Preliminary';
+}
+
+function formatPlanState(planState){
+  if(planState === 'valid') return 'Valid';
+  if(planState === 'invalid') return 'Invalid';
+  return 'Missing';
+}
+
+function formatActionState(actionState){
+  if(actionState === 'action_now') return 'Action Now';
+  if(actionState === 'near_entry') return 'Near Entry';
+  if(actionState === 'needs_plan') return 'Needs Plan';
+  if(actionState === 'watch') return 'Watch';
+  if(actionState === 'avoid') return 'Avoid';
+  return 'Watch';
+}
+
+function actionPriority(stage){
+  if(stage === 'action_now') return 0;
+  if(stage === 'near_entry') return 1;
+  if(stage === 'needs_plan') return 2;
+  if(stage === 'watch') return 3;
+  return 4;
+}
+
+function deriveActionStateForRecord(record){
+  const verdict = String(record && record.setup && record.setup.verdict || record && record.scan && record.scan.verdict || record && record.watchlist && record.watchlist.status || 'Watch');
+  const planState = planStateForRecord(record);
+  let stage = 'watch';
+  if(verdict === 'Avoid'){
+    stage = 'avoid';
+  }else if(verdict === 'Entry' && planState === 'valid'){
+    stage = 'action_now';
+  }else if(verdict === 'Near Entry' && planState === 'valid'){
+    stage = 'near_entry';
+  }else if(planState !== 'valid'){
+    stage = 'needs_plan';
+  }else if(verdict === 'Near Entry'){
+    stage = 'near_entry';
+  }else{
+    stage = 'watch';
+  }
+  return {stage, priority:actionPriority(stage)};
 }
 
 function fmtPrice(value){
@@ -4183,9 +4297,15 @@ function resultSortScore(card){
   const verdict = String(card && (card.chartVerdict || card.status) || 'Watch');
   const riskStatus = String(card && card.riskStatus || '');
   const rrRatio = numericOrNull(card && (card.rrRatio ?? (card.analysis && card.analysis.rr_ratio) ?? (card.analysis && card.analysis.reward_risk)));
-  const verdictRank = verdict === 'Entry' ? 4 : (verdict === 'Near Entry' ? 3 : (verdict === 'Watch' ? 2 : (verdict === 'Manual Review' ? 1 : 0)));
-  const riskRank = riskStatus === 'fits_risk' ? 2 : (riskStatus === 'too_wide' ? 1 : 0);
-  return (verdictRank * 1000) + (riskRank * 100) + (Number.isFinite(rrRatio) ? rrRatio : 0);
+  const actionStage = verdict === 'Avoid'
+    ? 'avoid'
+    : (verdict === 'Entry' && riskStatus === 'fits_risk'
+      ? 'action_now'
+      : (verdict === 'Near Entry' && riskStatus === 'fits_risk'
+        ? 'near_entry'
+        : ((riskStatus === 'plan_missing' || riskStatus === 'invalid_plan') ? 'needs_plan' : 'watch')));
+  const score = Number.isFinite(Number(card && card.score)) ? Number(card.score) : 0;
+  return ((5 - actionPriority(actionStage)) * 1000) + (score * 100) + (Number.isFinite(rrRatio) ? rrRatio : 0);
 }
 
 function buildVerdictReason({suitability, scan, riskFit, rewardRisk, checks}){
@@ -5811,6 +5931,9 @@ function renderReviewWorkspace(){
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
   const rrRatio = numericOrNull(record.plan.plannedRR);
   const rewardPerShare = numericOrNull(record.plan.rewardPerShare);
+  const setupScore = setupScoreForRecord(record);
+  const scoreStage = formatScoreStage(scoreStageForRecord(record));
+  const planState = formatPlanState(planStateForRecord(record));
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
   const analyseLabel = loading ? 'Analysing...' : (analysisState.error ? 'Retry Analysis' : 'Analyse Setup');
@@ -5820,7 +5943,7 @@ function renderReviewWorkspace(){
     ? `<div class="thumbwrap"><img class="thumb reviewthumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>`
     : '<div class="tiny">No chart attached yet.</div>';
   const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">aiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
-  box.innerHTML = `<div class="reviewworkspace ready"><div class="reviewhero reviewhero-compact"><div class="reviewherohead"><div class="reviewheadline"><div class="inline-status"><strong>${escapeHtml(record.ticker)}</strong><span class="badge ${statusClass(record.scan.verdict || record.watchlist.status || 'Watch')}">${escapeHtml(record.scan.verdict || record.watchlist.status || 'Watch')}</span><span class="score ${scoreClass(record.scan.score || 0)}">${escapeHtml(`${record.scan.score || 0}/10`)}</span><span class="pill">${escapeHtml(Number.isFinite(rrRatio) ? `R:R ${rrRatio.toFixed(2)}` : 'R:R n/a')}</span></div><div class="tiny">${escapeHtml(companyLine)}</div></div><div class="inline-status"><span class="badge ${statusClass(record.plan.riskStatus || 'plan_missing')}">${escapeHtml(riskStatusLabel(record.plan.riskStatus || 'plan_missing'))}</span></div></div><div class="tiny">${escapeHtml(marketLine)}</div></div><div class="panelbox reviewchartpanel"><div class="reviewsectionhead"><strong>Chart</strong><div class="workflowmenu workflowmenu-inline"><button class="secondary compactbutton" type="button" data-act="open-chart">Open Chart</button><button class="secondary compactbutton" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary compactbutton" type="button" data-act="import-latest">Import Latest</button><button class="ghost compactbutton" type="button" data-act="clear-chart">Remove Chart</button></div></div><input id="reviewChartFile" type="file" accept="image/png,image/jpeg,image/*" hidden />${chartPreview}</div><div class="panelbox"><div class="reviewsectionhead"><strong>AI Analysis + Notes</strong><span class="tiny">Prompt and debug stay collapsed until needed.</span></div><textarea id="reviewNotes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><details class="responsepanel compact-open-on-demand" id="reviewResponse" ${(((uiState.responseOpen[record.ticker] ?? false) || !!analysisState.error)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><details class="promptdetails compact-open-on-demand" id="reviewPrompt" ${(uiState.promptOpen[record.ticker] ?? false) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox scrollbox">${escapeHtml(promptText)}</div></details></div><div class="panelbox"><strong id="plannerSection">Trade Plan</strong><div class="summary" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div><input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden /><div class="reviewmeta-grid"><div><label>Status</label><input id="statusBox" readonly /></div><div><label>Score</label><input id="scoreBox" readonly /></div></div><div class="plan-grid plan-grid-inputs"><div><label>Planned Entry</label><input id="entryPrice" type="number" step="0.01" value="${escapeHtml(review && review.entry ? review.entry : (record.plan.entry ?? ''))}" /></div><div><label>Planned Stop</label><input id="stopPrice" type="number" step="0.01" value="${escapeHtml(review && review.stop ? review.stop : (record.plan.stop ?? ''))}" /></div><div><label>Planned First Target</label><input id="targetPrice" type="number" step="0.01" value="${escapeHtml(review && review.target ? review.target : (record.plan.firstTarget ?? ''))}" /></div></div><div class="reviewstats plan-grid plan-grid-stats"><div class="stat"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div><div class="stat"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div><div class="stat"><div>Planned R:R</div><div class="big" id="rrValue">-</div></div><div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div><div class="stat"><div>Max Loss</div><div class="big">${escapeHtml(formatGbp(currentMaxLoss()))}</div></div><div class="stat"><div>Risk Fit</div><div class="big" id="riskFitBox">${escapeHtml(riskStatusLabel(record.plan.riskStatus || 'plan_missing'))}</div></div></div><div class="tiny" id="calcNote">Enter planned entry, stop, and first target to calculate size.</div></div><details class="panelbox reviewchecklist"><summary><strong>Checklist</strong> <span id="progressText">0 / 10</span></summary><div class="prog"><div class="fill" id="progressFill"></div></div><div class="checks"><div class="checkgroup"><h3>Trend</h3><label class="checkitem"><input type="checkbox" class="logic" id="trendStrong" ${reviewChecks.trendStrong ? 'checked' : ''}> Strong uptrend</label><label class="checkitem"><input type="checkbox" class="logic" id="above50" ${reviewChecks.above50 ? 'checked' : ''}> Above 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="above200" ${reviewChecks.above200 ? 'checked' : ''}> Above 200 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="ma50gt200" ${reviewChecks.ma50gt200 ? 'checked' : ''}> 50 MA above 200 MA</label></div><div class="checkgroup"><h3>Pullback + Confirmation</h3><label class="checkitem"><input type="checkbox" class="logic" id="near20" ${reviewChecks.near20 ? 'checked' : ''}> Near 20 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="near50" ${reviewChecks.near50 ? 'checked' : ''}> Near 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="stabilising" ${reviewChecks.stabilising ? 'checked' : ''}> Stabilising</label><label class="checkitem"><input type="checkbox" class="logic" id="bounce" ${reviewChecks.bounce ? 'checked' : ''}> Bounce candle</label><label class="checkitem"><input type="checkbox" class="logic" id="volume" ${reviewChecks.volume ? 'checked' : ''}> Volume supportive</label></div><div class="checkgroup"><h3>Trade Plan</h3><label class="checkitem"><input type="checkbox" class="logic" id="entryDefined" ${reviewChecks.entryDefined ? 'checked' : ''}> Entry defined</label><label class="checkitem"><input type="checkbox" class="logic" id="stopDefined" ${reviewChecks.stopDefined ? 'checked' : ''}> Stop defined</label><label class="checkitem"><input type="checkbox" class="logic" id="targetDefined" ${reviewChecks.targetDefined ? 'checked' : ''}> Target defined</label></div></div><div class="summary" id="summaryBox">No setup reviewed yet.</div></details><div class="reviewactions"><button class="primary" id="analyseActiveBtn" ${analysisBusy && !loading ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="secondary" id="saveReviewBtn">Save Review</button><button class="secondary" id="addWatchlistActiveBtn">Add to Watchlist</button><button class="secondary" id="saveTradeActiveBtn">Save to Diary</button></div><details class="panelbox compact-details"><summary>Workspace Status</summary><div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div><div class="reviewactions reviewactions-secondary"><button class="ghost" id="refreshLifecycleBtn" type="button">Refresh</button><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button><button class="secondary" id="reactivateLifecycleBtn" type="button">Reactivate</button><button class="ghost" id="resetReviewBtn">Reset Review</button></div>${reviewDebug}<div class="statusline tiny" id="reviewWorkspaceStatus">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></details></div>`;
+  box.innerHTML = `<div class="reviewworkspace ready"><div class="reviewhero reviewhero-compact"><div class="reviewherohead"><div class="reviewheadline"><div class="inline-status"><strong>${escapeHtml(record.ticker)}</strong><span class="badge ${statusClass(record.setup.verdict || 'Watch')}">${escapeHtml(record.setup.verdict || 'Watch')}</span><span class="score ${scoreClass(setupScore)}">${escapeHtml(`${setupScore}/10 ${scoreStage}`)}</span><span class="pill">${escapeHtml(Number.isFinite(rrRatio) ? `R:R ${rrRatio.toFixed(2)}` : 'R:R n/a')}</span><span class="pill">Plan ${escapeHtml(planState)}</span></div><div class="tiny">${escapeHtml(companyLine)}</div></div></div><div class="tiny">${escapeHtml(marketLine)}</div></div><div class="panelbox reviewchartpanel"><div class="reviewsectionhead"><strong>Chart</strong><div class="workflowmenu workflowmenu-inline"><button class="secondary compactbutton" type="button" data-act="open-chart">Open Chart</button><button class="secondary compactbutton" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary compactbutton" type="button" data-act="import-latest">Import Latest</button><button class="ghost compactbutton" type="button" data-act="clear-chart">Remove Chart</button></div></div><input id="reviewChartFile" type="file" accept="image/png,image/jpeg,image/*" hidden />${chartPreview}</div><div class="panelbox"><div class="reviewsectionhead"><strong>AI Analysis + Notes</strong><span class="tiny">Prompt and debug stay collapsed until needed.</span></div><textarea id="reviewNotes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><details class="responsepanel compact-open-on-demand" id="reviewResponse" ${(((uiState.responseOpen[record.ticker] ?? false) || !!analysisState.error)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><details class="promptdetails compact-open-on-demand" id="reviewPrompt" ${(uiState.promptOpen[record.ticker] ?? false) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox scrollbox">${escapeHtml(promptText)}</div></details></div><div class="panelbox"><strong id="plannerSection">Trade Plan</strong><div class="summary" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div><input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden /><div class="reviewmeta-grid"><div><label>Plan State</label><input id="planStateBox" readonly value="${escapeHtml(planState)}" /></div><div><label>Plan Quality</label><input id="planQualityBox" readonly value="${escapeHtml(Number.isFinite(planQualityForRecord(record)) ? `${planQualityForRecord(record)}/10` : 'N/A')}" /></div></div><div class="plan-grid plan-grid-inputs"><div><label>Planned Entry</label><input id="entryPrice" type="number" step="0.01" value="${escapeHtml(review && review.entry ? review.entry : (record.plan.entry ?? ''))}" /></div><div><label>Planned Stop</label><input id="stopPrice" type="number" step="0.01" value="${escapeHtml(review && review.stop ? review.stop : (record.plan.stop ?? ''))}" /></div><div><label>Planned First Target</label><input id="targetPrice" type="number" step="0.01" value="${escapeHtml(review && review.target ? review.target : (record.plan.firstTarget ?? ''))}" /></div></div><div class="reviewstats plan-grid plan-grid-stats"><div class="stat"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div><div class="stat"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div><div class="stat"><div>Planned R:R</div><div class="big" id="rrValue">-</div></div><div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div><div class="stat"><div>Max Loss</div><div class="big">${escapeHtml(formatGbp(currentMaxLoss()))}</div></div><div class="stat"><div>Risk Fit</div><div class="big" id="riskFitBox">${escapeHtml(riskStatusLabel(record.plan.riskStatus || 'plan_missing'))}</div></div></div><div class="tiny" id="calcNote">Enter planned entry, stop, and first target to calculate size.</div></div><details class="panelbox reviewchecklist"><summary><strong>Checklist</strong> <span id="progressText">0 / 10</span></summary><div class="prog"><div class="fill" id="progressFill"></div></div><div class="checks"><div class="checkgroup"><h3>Trend</h3><label class="checkitem"><input type="checkbox" class="logic" id="trendStrong" ${reviewChecks.trendStrong ? 'checked' : ''}> Strong uptrend</label><label class="checkitem"><input type="checkbox" class="logic" id="above50" ${reviewChecks.above50 ? 'checked' : ''}> Above 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="above200" ${reviewChecks.above200 ? 'checked' : ''}> Above 200 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="ma50gt200" ${reviewChecks.ma50gt200 ? 'checked' : ''}> 50 MA above 200 MA</label></div><div class="checkgroup"><h3>Pullback + Confirmation</h3><label class="checkitem"><input type="checkbox" class="logic" id="near20" ${reviewChecks.near20 ? 'checked' : ''}> Near 20 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="near50" ${reviewChecks.near50 ? 'checked' : ''}> Near 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="stabilising" ${reviewChecks.stabilising ? 'checked' : ''}> Stabilising</label><label class="checkitem"><input type="checkbox" class="logic" id="bounce" ${reviewChecks.bounce ? 'checked' : ''}> Bounce candle</label><label class="checkitem"><input type="checkbox" class="logic" id="volume" ${reviewChecks.volume ? 'checked' : ''}> Volume supportive</label></div><div class="checkgroup"><h3>Trade Plan</h3><label class="checkitem"><input type="checkbox" class="logic" id="entryDefined" ${reviewChecks.entryDefined ? 'checked' : ''}> Entry defined</label><label class="checkitem"><input type="checkbox" class="logic" id="stopDefined" ${reviewChecks.stopDefined ? 'checked' : ''}> Stop defined</label><label class="checkitem"><input type="checkbox" class="logic" id="targetDefined" ${reviewChecks.targetDefined ? 'checked' : ''}> Target defined</label></div></div><div class="summary" id="summaryBox">No setup reviewed yet.</div></details><div class="reviewactions"><button class="primary" id="analyseActiveBtn" ${analysisBusy && !loading ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="secondary" id="saveReviewBtn">Save Review</button><button class="secondary" id="addWatchlistActiveBtn">Add to Watchlist</button><button class="secondary" id="saveTradeActiveBtn">Save to Diary</button></div><details class="panelbox compact-details"><summary>Workspace Status</summary><div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div><div class="reviewactions reviewactions-secondary"><button class="ghost" id="refreshLifecycleBtn" type="button">Refresh</button><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button><button class="secondary" id="reactivateLifecycleBtn" type="button">Reactivate</button><button class="ghost" id="resetReviewBtn">Reset Review</button></div>${reviewDebug}<div class="statusline tiny" id="reviewWorkspaceStatus">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></details></div>`;
   bindReviewWorkspaceActions(record);
   refreshReview();
   renderReviewLifecycleSummary(record.ticker);
@@ -5912,11 +6035,10 @@ function loadCard(ticker){
 function refreshReview(){
   const checks = currentChecks();
   const result = scoreAndStatusFromChecks(checks);
-  $('scoreBox').value = `${result.score}/10`;
-  $('statusBox').value = result.status;
   $('summaryBox').textContent = buildSummary(checks, result.status);
   $('progressText').textContent = `${result.score} / 10`;
   $('progressFill').style.width = `${result.score * 10}%`;
+  syncPlanDisplayMeta();
 }
 
 function saveReview(){
@@ -5943,6 +6065,10 @@ function saveReview(){
   };
   record.review.manualReview = manualReview;
   record.review.lastReviewedAt = manualReview.savedAt;
+  record.scan.score = result.score;
+  record.scan.verdict = result.status;
+  record.scan.summary = manualReview.summary;
+  record.scan.reasons = [manualReview.summary];
   refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Manual review saved.', 'review');
   applyPlanCandidateToRecord(record, {
     entry:manualReview.entry,
@@ -5961,7 +6087,7 @@ function saveReview(){
 
 function resetReview(){
   uiState.activeReviewTicker = '';
-  ['selectedTicker','statusBox','scoreBox','entryPrice','stopPrice','targetPrice'].forEach(id => { $(id).value = ''; });
+  ['selectedTicker','planStateBox','planQualityBox','entryPrice','stopPrice','targetPrice'].forEach(id => { if($(id)) $(id).value = ''; });
   checklistIds.forEach(id => { $(id).checked = false; });
   $('summaryBox').textContent = 'No setup reviewed yet.';
   $('progressText').textContent = '0 / 10';
@@ -5971,6 +6097,21 @@ function resetReview(){
   renderPlannerPlanSummary('', '', '');
   renderReviewLifecycleSummary('');
   renderCards();
+}
+
+function syncPlanDisplayMeta(){
+  const ticker = activeReviewTicker();
+  const planStateBox = $('planStateBox');
+  const planQualityBox = $('planQualityBox');
+  if(!ticker){
+    if(planStateBox) planStateBox.value = '';
+    if(planQualityBox) planQualityBox.value = '';
+    return;
+  }
+  const record = normalizeTickerRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker));
+  if(planStateBox) planStateBox.value = formatPlanState(planStateForRecord(record));
+  const planQuality = planQualityForRecord(record);
+  if(planQualityBox) planQualityBox.value = Number.isFinite(planQuality) ? `${planQuality}/10` : 'N/A';
 }
 
 function refreshSelectedTickerLifecycle(){
@@ -6037,6 +6178,7 @@ function calculate(){
     commitTickerState();
     renderReviewLifecycleSummary(ticker);
   }
+  syncPlanDisplayMeta();
   const riskFit = evaluateRiskFit({
     entry,
     stop,
