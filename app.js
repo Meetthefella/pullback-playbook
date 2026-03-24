@@ -3686,11 +3686,8 @@ function capitalUsageAdvisory({positionCostGbp, positionCost, quoteCurrency, acc
     const converted = convertQuoteValueToGbp(positionCost, quoteCurrency);
     reliableCostGbp = converted.gbpValue;
     if(!Number.isFinite(reliableCostGbp)){
-      const normalizedCurrency = normalizeQuoteCurrency(quoteCurrency);
-      if(!normalizedCurrency || normalizedCurrency === 'GBP' || normalizedCurrency === 'GBX'){
-        reliableCostGbp = numericOrNull(positionCost);
-        estimated = Number.isFinite(reliableCostGbp);
-      }
+      reliableCostGbp = numericOrNull(positionCost);
+      estimated = Number.isFinite(reliableCostGbp);
     }
   }
   if(!Number.isFinite(reliableCostGbp) || reliableCostGbp < 0){
