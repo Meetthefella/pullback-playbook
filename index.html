@@ -23,6 +23,11 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="card resetcard">
+    <div class="actions" style="margin-top:0">
+      <button class="danger" id="resetAllBtn">Reset All</button>
+    </div>
+  </div>
   <div class="card contextstrip">
     <div class="contextmain">
       <div class="contexttitle">
@@ -84,7 +89,7 @@
   <div class="card" style="margin-top:14px">
     <h2 id="dailyInput">2) Scan List</h2>
     <p class="tiny">Paste/import tickers, optionally add one manually, then run the scan.</p>
-    <details style="margin-top:14px">
+    <details id="advancedScannerTools" style="margin-top:14px">
       <summary><strong>Advanced Scanner Tools</strong></summary>
       <div style="margin-top:10px">
         <strong>Import From Screenshot</strong>
@@ -125,12 +130,6 @@
           <textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea>
           <div class="tiny" style="margin-top:8px">Use this only for bulk editing. The scan uses your imported/manual tickers when present, otherwise the curated fallback list.</div>
         </div>
-        <div class="actions">
-          <button class="secondary" id="saveBtn">Save List</button>
-          <button class="secondary" id="loadBtn">Load Saved</button>
-          <button class="ghost" id="clearBtn">Clear</button>
-          <button class="danger" id="resetAllBtn">Reset All</button>
-        </div>
       </div>
       <details style="margin-top:12px">
         <summary><strong>Active Scanner Rules</strong></summary>
@@ -159,6 +158,9 @@
       <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
     </div>
     <div class="actions">
+      <button class="secondary" id="saveBtn">Save List</button>
+      <button class="secondary" id="loadBtn">Load Saved</button>
+      <button class="ghost" id="clearBtn">Clear</button>
       <button class="primary" id="buildBtn">Run Scan</button>
     </div>
     <div class="statusline tiny" id="inputStatus">Scans use your imported/manual tickers when present, otherwise the curated default list.</div>
@@ -167,7 +169,10 @@
   <div class="card" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
       <h2 id="focusSection" style="margin-bottom:0">Today's Focus / Active Queue</h2>
-      <span class="pill">Primary working set</span>
+      <div class="inline-status">
+        <span class="pill">Primary working set</span>
+        <button class="ghost compactbutton" id="clearFocusBtn" type="button">Clear Queue</button>
+      </div>
     </div>
     <p class="tiny">Top actionable setups from the latest scan. Use this as the main working layer before opening the full scan list.</p>
     <div id="focusQueue" class="list"></div>

@@ -14,6 +14,7 @@ body{margin:0;background:linear-gradient(180deg,#0b1220,#09101d 45%,#0b1220);col
 .compact-settings{padding:0;border:0;background:transparent}
 .compact-settings>summary{display:inline-flex;align-items:center;min-height:40px;padding:8px 12px;border:1px solid var(--line);border-radius:999px;background:var(--chip)}
 .card{background:rgba(18,27,45,.95);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+.resetcard{padding:12px 16px}
 h1,h2,h3,p{margin:0 0 10px}
 h1{font-size:1.7rem}
 h2{font-size:1.05rem}
@@ -173,6 +174,9 @@ button[disabled]{opacity:.55;cursor:not-allowed}
 .resultactions{justify-self:end}
 .rankedgrid{grid-template-columns:minmax(72px,max-content) minmax(0,1fr) auto auto}
 .resultreview{display:flex;justify-content:flex-end;align-items:start}
+.watchlistgrid{grid-template-columns:minmax(72px,max-content) minmax(0,1fr) auto}
+.watchlistidentity{display:grid;gap:8px;align-content:start}
+.watchlistscore{justify-self:start;opacity:.9;font-size:.76rem;padding:5px 9px}
 .chartworkflow{margin-top:10px}
 .chartworkflow>summary{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 14px;border-radius:12px;background:#1b2742;border:1px solid var(--line)}
 .workflowmenu{display:grid;gap:8px;margin-top:10px}
