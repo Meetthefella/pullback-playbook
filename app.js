@@ -1207,6 +1207,29 @@ function baseTickerRecord(ticker){
   };
 }
 
+function analysisDerivedStatesFromRecord(record){
+  const rawRecord = record && typeof record === 'object' ? record : {};
+  const analysisProjection = rawRecord.scan && rawRecord.scan.analysisProjection && typeof rawRecord.scan.analysisProjection === 'object'
+    ? rawRecord.scan.analysisProjection
+    : {};
+  const normalizedAnalysis = rawRecord.review
+    && rawRecord.review.analysisState
+    && rawRecord.review.analysisState.normalized
+    && typeof rawRecord.review.analysisState.normalized === 'object'
+      ? rawRecord.review.analysisState.normalized
+      : (rawRecord.review && rawRecord.review.normalizedAnalysis && typeof rawRecord.review.normalizedAnalysis === 'object'
+        ? rawRecord.review.normalizedAnalysis
+        : {});
+  return {
+    trendState:String(analysisProjection.trend_state || analysisProjection.trend_status || normalizedAnalysis.trend_state || '').trim().toLowerCase(),
+    pullbackZone:String(analysisProjection.pullback_zone || analysisProjection.pullback_status || normalizedAnalysis.pullback_zone || '').trim().toLowerCase(),
+    structureState:String(analysisProjection.structure_state || normalizedAnalysis.structure_state || '').trim().toLowerCase(),
+    stabilisationState:String(analysisProjection.stabilisation_state || normalizedAnalysis.stabilisation_state || '').trim().toLowerCase(),
+    bounceState:String(analysisProjection.bounce_state || normalizedAnalysis.bounce_state || '').trim().toLowerCase(),
+    volumeState:String(analysisProjection.volume_state || normalizedAnalysis.volume_state || '').trim().toLowerCase()
+  };
+}
+
 function normalizeTickerRecord(record){
   const normalized = record && typeof record === 'object' ? record : {};
   const base = baseTickerRecord(normalizeTicker(normalized.ticker));
@@ -1331,7 +1354,7 @@ function normalizeTickerRecord(record){
     ? merged.plan.targetAlert.level
     : normalizedExecution.targetAlertLevel;
   merged.plan.targetAlert.lastState = normalizedExecution.targetReviewState;
-  const setupDerivedStates = analysisDerivedStates(tickerRecordToLegacyCard(merged));
+  const setupDerivedStates = analysisDerivedStatesFromRecord(merged);
   const setupWarningState = warningStateFromInputs(merged, null, setupDerivedStates);
   const displaySetupScore = deriveDisplaySetupScore(merged, {derivedStates:setupDerivedStates, warningState:setupWarningState});
   const convictionTier = convictionTierForRecord(merged, {
