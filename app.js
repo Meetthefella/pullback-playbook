@@ -2211,7 +2211,7 @@ function renderWatchlist(){
     const expired = record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
     const div = document.createElement('div');
     div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead rankedgrid watchlistgrid"><div class="watchlistidentity"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="score watchlistscore ${expired ? 's-low' : scoreClass(Number.isFinite(entry.scoreWhenAdded) ? entry.scoreWhenAdded : 0)}">${escapeHtml(expired ? 'Expired' : (entry.scoreWhenAdded == null ? '-' : `${entry.scoreWhenAdded}/10`))}</div></div><div class="resultsummary"><div><strong>${escapeHtml(entry.verdictWhenAdded || 'Watchlist')}</strong></div><div class="tiny">Added ${escapeHtml(entry.dateAdded)}</div><div class="tiny">Trading days remaining: ${escapeHtml(String(remaining))}</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div></div><div class="resultreview inline-status"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="ghost" data-act="expire-life">${expired ? 'Reactivate' : 'Expire Now'}</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
+    div.innerHTML = `<div class="resulthead rankedgrid watchlistgrid"><div class="watchlistidentity"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="score watchlistscore ${expired ? 's-low' : scoreClass(Number.isFinite(entry.scoreWhenAdded) ? entry.scoreWhenAdded : 0)}">${escapeHtml(expired ? 'Expired' : (entry.scoreWhenAdded == null ? '-' : `${entry.scoreWhenAdded}/10`))}</div></div><div class="resultsummary"><div><strong>${escapeHtml(entry.verdictWhenAdded || 'Watchlist')}</strong></div><div class="tiny">Added ${escapeHtml(entry.dateAdded)}</div><div class="tiny">Trading days remaining: ${escapeHtml(String(remaining))}</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div></div><div class="resultreview inline-status"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
     div.querySelector('[data-act="review"]').title = 'Send back to scanner for re-shortlisting';
     div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker).catch(() => {}); };
     div.querySelector('[data-act="refresh-life"]').onclick = () => {
@@ -2220,23 +2220,6 @@ function renderWatchlist(){
       requeueTickerForToday(entry.ticker);
       renderWatchlist();
       renderFocusQueue();
-    };
-    div.querySelector('[data-act="expire-life"]').onclick = () => {
-      if(expired){
-        refreshLifecycleStage(record, 'watchlist', WATCHLIST_EXPIRY_TRADING_DAYS, 'Watchlist reactivated manually.', 'system');
-      }else{
-        setLifecycleStage(record, {
-          stage:'expired',
-          status:'stale',
-          changedAt:new Date().toISOString(),
-          expiresAt:todayIsoDate(),
-          expiryReason:'Expired manually from watchlist.',
-          reason:'Expired manually from watchlist.',
-          source:'system'
-        });
-      }
-      commitTickerState();
-      renderWatchlist();
     };
     div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
     box.appendChild(div);
@@ -3684,26 +3667,53 @@ function capitalFitLabel(capitalFit){
   return 'Capital Unknown';
 }
 
+function capitalFitDisplayText(capitalFit, capitalNote){
+  const baseLabel = capitalFitLabel(capitalFit);
+  if(capitalFit !== 'unknown') return baseLabel;
+  return /conversion is not supported yet/i.test(String(capitalNote || ''))
+    ? 'Capital Unknown (FX not available)'
+    : baseLabel;
+}
+
 function capitalUsageAdvisory({positionCostGbp, positionCost, quoteCurrency, accountSizeGbp}){
   const accountSize = numericOrNull(accountSizeGbp) || currentAccountSizeGbp();
   if(!Number.isFinite(accountSize) || accountSize <= 0){
-    return {ratio:null, label:'', visible:false};
+    return {ratio:null, label:'', visible:false, estimated:false};
   }
   let reliableCostGbp = numericOrNull(positionCostGbp);
+  let estimated = false;
   if(!Number.isFinite(reliableCostGbp)){
     const converted = convertQuoteValueToGbp(positionCost, quoteCurrency);
     reliableCostGbp = converted.gbpValue;
+    if(!Number.isFinite(reliableCostGbp)){
+      const normalizedCurrency = normalizeQuoteCurrency(quoteCurrency);
+      if(!normalizedCurrency || normalizedCurrency === 'GBP' || normalizedCurrency === 'GBX'){
+        reliableCostGbp = numericOrNull(positionCost);
+        estimated = Number.isFinite(reliableCostGbp);
+      }
+    }
   }
   if(!Number.isFinite(reliableCostGbp) || reliableCostGbp < 0){
-    return {ratio:null, label:'', visible:false};
+    return {ratio:null, label:'', visible:false, estimated:false};
   }
   const ratio = reliableCostGbp / accountSize;
-  const label = ratio >= 0.75
-    ? 'Capital stretched'
-    : (ratio >= 0.5
-      ? 'High capital use'
-      : (ratio >= 0.25 ? 'Moderate capital use' : 'Low capital use'));
-  return {ratio, label, visible:label === 'High capital use' || label === 'Capital stretched'};
+  const label = estimated
+    ? (ratio >= 0.75
+      ? 'Very High (est.)'
+      : (ratio >= 0.5
+        ? 'High (est.)'
+        : (ratio >= 0.25 ? 'Moderate (est.)' : 'Low (est.)')))
+    : (ratio >= 0.75
+      ? 'Capital stretched'
+      : (ratio >= 0.5
+        ? 'High capital use'
+        : (ratio >= 0.25 ? 'Moderate capital use' : 'Low capital use')));
+  return {
+    ratio,
+    label,
+    visible:['High capital use','Capital stretched','High (est.)','Very High (est.)'].includes(label),
+    estimated
+  };
 }
 
 function tradeabilityLabel(tradeability){
@@ -3871,7 +3881,9 @@ function clearActiveQueueForToday(){
 function requeueTickerForToday(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
-  ensureActiveQueueCycle();
+  if(state.activeQueueLastRebuiltCycle !== currentQueueCycleKey()){
+    rebuildActiveQueueFromWatchlist({persist:false});
+  }
   state.activeQueueClearedCycle = '';
   state.activeQueueManualTickers = uniqueTickers([symbol, ...(state.activeQueueManualTickers || [])]);
   if(options.persist !== false) persistState();
@@ -6436,7 +6448,7 @@ function renderReviewWorkspace(){
   const setupScoreDisplay = setupScoreDisplayForRecord(record);
   const displayStage = displayStageForRecord(record);
   const planState = formatPlanState(displayedPlan.status);
-  const capitalFitText = capitalFitLabel(displayedPlan.capitalFit.capital_fit);
+  const capitalFitText = capitalFitDisplayText(displayedPlan.capitalFit.capital_fit, displayedPlan.capitalFit.capital_note);
   const positionCostText = Number.isFinite(displayedPlan.capitalFit.position_cost)
     ? `${Number(displayedPlan.capitalFit.position_cost.toFixed(2))}${displayedPlan.capitalFit.quote_currency ? ` ${displayedPlan.capitalFit.quote_currency}` : ''}`
     : 'N/A';
@@ -6705,7 +6717,7 @@ function calculate(options = {}){
   syncPlanDisplayMeta();
   $('rewardPerShareBox').textContent = Number.isFinite(displayedPlan.rewardPerShare) ? displayedPlan.rewardPerShare.toFixed(2) : '-';
   $('riskFitBox').textContent = riskStatusLabel(displayedPlan.status === 'valid' ? displayedPlan.riskFit.risk_status : (displayedPlan.status === 'invalid' ? 'invalid_plan' : 'plan_missing'));
-  if($('capitalFitBox')) $('capitalFitBox').textContent = capitalFitLabel(displayedPlan.status === 'valid' ? displayedPlan.capitalFit.capital_fit : 'unknown');
+  if($('capitalFitBox')) $('capitalFitBox').textContent = capitalFitDisplayText(displayedPlan.status === 'valid' ? displayedPlan.capitalFit.capital_fit : 'unknown', displayedPlan.capitalFit.capital_note);
   if($('capitalUsageBox')){
     const capitalUsage = capitalUsageAdvisory({
       positionCostGbp:displayedPlan.capitalFit.position_cost_gbp,
