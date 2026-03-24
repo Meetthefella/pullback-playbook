@@ -42,6 +42,7 @@ const DEFAULT_STATE = {
   lastAlertsSeenAt:'',
   dismissedAlertIds:[],
   activeQueueClearedCycle:'',
+  activeQueueClearedTickers:[],
   activeQueueManualTickers:[],
   activeQueueLastRebuiltCycle:'',
   showExpiredWatchlist:false,
@@ -2082,6 +2083,7 @@ function loadState(){
   state.lastAlertsSeenAt = String(state.lastAlertsSeenAt || '');
   state.dismissedAlertIds = Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds.slice(-200) : [];
   state.activeQueueClearedCycle = String(state.activeQueueClearedCycle || '');
+  state.activeQueueClearedTickers = uniqueTickers(state.activeQueueClearedTickers || []);
   state.activeQueueManualTickers = uniqueTickers(state.activeQueueManualTickers || []);
   state.activeQueueLastRebuiltCycle = String(state.activeQueueLastRebuiltCycle || '');
   state.watchlist = (state.watchlist || []).map(normalizeWatchlistEntry).filter(Boolean);
@@ -3055,7 +3057,10 @@ function hasAiStageForRecord(record){
 }
 
 function focusQueueRecords(){
-  if(state.activeQueueClearedCycle === currentQueueCycleKey() && !(state.activeQueueManualTickers || []).length){
+  const queueClearedForCycle = state.activeQueueClearedCycle === currentQueueCycleKey();
+  const clearedTickers = new Set(queueClearedForCycle ? uniqueTickers(state.activeQueueClearedTickers || []) : []);
+  const manualTickers = uniqueTickers(state.activeQueueManualTickers || []);
+  if(queueClearedForCycle && !manualTickers.length && !clearedTickers.size){
     return [];
   }
   const ranked = rankedTickerRecords()
@@ -3071,13 +3076,19 @@ function focusQueueRecords(){
     .sort((a, b) => focusQueuePriorityForRecord(a) - focusQueuePriorityForRecord(b) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker));
   const recordsByTicker = new Map();
   ranked.forEach(record => recordsByTicker.set(normalizeTickerRecord(record).ticker, record));
-  (state.activeQueueManualTickers || []).forEach(ticker => {
+  manualTickers.forEach(ticker => {
     const record = getTickerRecord(ticker);
     if(record && normalizeTickerRecord(record).watchlist.inWatchlist){
       recordsByTicker.set(normalizeTicker(ticker), record);
     }
   });
   return Array.from(recordsByTicker.values())
+    .filter(record => {
+      const ticker = normalizeTickerRecord(record).ticker;
+      if(!queueClearedForCycle) return true;
+      if(manualTickers.includes(ticker)) return true;
+      return !clearedTickers.has(ticker);
+    })
     .sort((a, b) => focusQueuePriorityForRecord(a) - focusQueuePriorityForRecord(b) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker))
     .slice(0, 35)
     .map(record => {
@@ -3749,9 +3760,10 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
 
 function deriveDisplaySetupScore(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
-  const derived = options.derivedStates || analysisDerivedStates(tickerRecordToLegacyCard(rawRecord));
+  const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
   const warningState = options.warningState || warningStateFromInputs(rawRecord, options.analysis || null, derived);
   const rawScore = rawSetupScoreForRecord(rawRecord);
+  const displayStage = normalizeAnalysisVerdict(options.displayStage || displayStageForRecord(rawRecord));
   const structureState = String(derived.structureState || '').toLowerCase();
   const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
   const bounceState = String(derived.bounceState || '').toLowerCase();
@@ -3776,12 +3788,17 @@ function deriveDisplaySetupScore(record, options = {}){
   if(['weak','weakening'].includes(structureState)) adjusted = Math.min(adjusted, 6);
   if(practicalSizeFlag === 'tiny_size') adjusted = Math.min(adjusted, 7);
 
-  return Math.max(0, Math.min(10, Math.round(adjusted)));
+  const rounded = Math.max(0, Math.min(10, Math.round(adjusted)));
+  if(displayStage === 'Entry') return Math.max(8, Math.min(10, rounded));
+  if(displayStage === 'Near Entry') return Math.max(6, Math.min(7, rounded));
+  if(displayStage === 'Watch') return Math.max(4, Math.min(5, rounded));
+  if(displayStage === 'Avoid') return Math.max(0, Math.min(3, rounded));
+  return rounded;
 }
 
 function convictionTierForRecord(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
-  const derived = options.derivedStates || analysisDerivedStates(tickerRecordToLegacyCard(rawRecord));
+  const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
   const warningState = options.warningState || warningStateFromInputs(rawRecord, options.analysis || null, derived);
   const displayScore = Number.isFinite(options.displayScore) ? options.displayScore : deriveDisplaySetupScore(rawRecord, {derivedStates:derived, warningState, analysis:options.analysis || null});
   const structureState = String(derived.structureState || '').toLowerCase();
@@ -4181,6 +4198,7 @@ function rebuildActiveQueueFromWatchlist(options = {}){
   const cycleKey = currentQueueCycleKey();
   state.activeQueueManualTickers = watchlistTickerRecords().map(record => record.ticker);
   state.activeQueueClearedCycle = '';
+  state.activeQueueClearedTickers = [];
   state.activeQueueLastRebuiltCycle = cycleKey;
   if(options.persist !== false) persistState();
   return cycleKey;
@@ -4193,6 +4211,7 @@ function ensureActiveQueueCycle(){
 }
 
 function clearActiveQueueForToday(){
+  state.activeQueueClearedTickers = focusQueueRecords().map(item => item.ticker);
   state.activeQueueClearedCycle = currentQueueCycleKey();
   state.activeQueueManualTickers = [];
   persistState();
@@ -4205,6 +4224,7 @@ function requeueTickerForToday(ticker, options = {}){
     rebuildActiveQueueFromWatchlist({persist:false});
   }
   state.activeQueueClearedCycle = '';
+  state.activeQueueClearedTickers = [];
   state.activeQueueManualTickers = uniqueTickers([symbol, ...(state.activeQueueManualTickers || [])]);
   if(options.persist !== false) persistState();
 }
@@ -6418,7 +6438,7 @@ function renderAnalysisPanel(card){
       risks:analysis.risks
     };
     console.log('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
-    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span></div>${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI suggested score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
+    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span></div>${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
@@ -6460,7 +6480,7 @@ function renderAnalysisPanelFromRecord(record){
       stop:analysis.stop || 'Not given',
       first_target:analysis.first_target || 'Not given',
     };
-    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span></div>${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI suggested score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
+    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span></div>${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
   }
   if(!analysisState.rawAnalysis) return '<div class="tiny">No AI analysis saved yet.</div>';
   console.debug('LEGACY_PATH_STILL_IN_USE', 'renderAnalysisPanelFromRecord-fallback', item.ticker);
