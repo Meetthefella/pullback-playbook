@@ -4339,6 +4339,7 @@ function planCheckStateForRecord(record, options = {}){
     stop:effectivePlan.stop,
     firstTarget:effectivePlan.firstTarget
   };
+  const hasCompleteDisplayedPlan = [currentPlan.entry, currentPlan.stop, currentPlan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
   const explicitState = String(item.plan && item.plan.planValidationState || '').trim();
   if(['invalidated','missed','stale','needs_replan'].includes(explicitState)){
     return explicitState;
@@ -4348,6 +4349,9 @@ function planCheckStateForRecord(record, options = {}){
   }
   if(displayedPlan.status === 'valid'){
     return savedPlanSnapshotForRecord(item) ? 'valid' : 'pending_validation';
+  }
+  if(hasCompleteDisplayedPlan){
+    return savedPlanSnapshotForRecord(item) ? 'pending_validation' : 'pending_validation';
   }
   return 'missing';
 }
