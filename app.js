@@ -1156,7 +1156,7 @@ function baseTickerRecord(ticker){
       capitalNote:'',
       affordability:'',
       status:'missing',
-      triggerState:'not_ready',
+      triggerState:'waiting_for_trigger',
       planValidationState:'',
       needsReplan:false,
       missedState:'',
@@ -1196,6 +1196,7 @@ function baseTickerRecord(ticker){
     lifecycle:{
       stage:'',
       status:'inactive',
+      lockReason:'',
       stageUpdatedAt:'',
       expiresAt:'',
       expiryReason:'',
@@ -1322,7 +1323,7 @@ function normalizeTickerRecord(record){
   merged.plan.maxLoss = numericOrNull(merged.plan.maxLoss);
   merged.plan.firstTargetTooClose = !!merged.plan.firstTargetTooClose;
   merged.plan.status = String(merged.plan.status || '');
-  merged.plan.triggerState = String(merged.plan.triggerState || 'not_ready');
+  merged.plan.triggerState = String(merged.plan.triggerState || 'waiting_for_trigger');
   merged.plan.planValidationState = String(merged.plan.planValidationState || '');
   merged.plan.needsReplan = !!merged.plan.needsReplan;
   merged.plan.missedState = String(merged.plan.missedState || '');
@@ -1340,6 +1341,7 @@ function normalizeTickerRecord(record){
   merged.diary.tradeOutcome = normalizeStoredTradeOutcome(merged.diary.tradeOutcome);
   merged.lifecycle.stage = String(merged.lifecycle.stage || '');
   merged.lifecycle.status = String(merged.lifecycle.status || 'inactive');
+  merged.lifecycle.lockReason = String(merged.lifecycle.lockReason || '');
   merged.lifecycle.stageUpdatedAt = String(merged.lifecycle.stageUpdatedAt || '');
   merged.lifecycle.expiresAt = String(merged.lifecycle.expiresAt || '');
   merged.lifecycle.expiryReason = String(merged.lifecycle.expiryReason || '');
@@ -1390,11 +1392,19 @@ function normalizeTickerRecord(record){
   const canonicalDisplayedPlan = deriveCurrentPlanState(merged.plan.entry, merged.plan.stop, merged.plan.firstTarget, merged.marketData.currency);
   const triggerState = evaluateEntryTrigger(merged, {derivedStates:setupDerivedStates, displayedPlan:canonicalDisplayedPlan});
   const planValidation = validateCurrentPlan(merged, {derivedStates:setupDerivedStates, displayedPlan:canonicalDisplayedPlan, triggerState});
-  merged.plan.triggerState = String(triggerState.triggerState || 'not_ready');
-  merged.plan.planValidationState = String(planValidation.state || '');
-  merged.plan.needsReplan = !!planValidation.needsReplan;
-  merged.plan.missedState = planValidation.missed ? 'missed' : '';
-  merged.plan.invalidatedState = planValidation.invalidated ? 'invalidated' : '';
+  if(hasLockedLifecycle(merged) || String(merged.lifecycle.status || '') === 'stale'){
+    merged.plan.triggerState = merged.plan.invalidatedState ? 'invalidated' : (merged.plan.missedState ? 'missed' : 'stale');
+    if(!['invalidated','missed'].includes(String(merged.plan.planValidationState || ''))){
+      merged.plan.planValidationState = 'stale';
+    }
+    merged.plan.needsReplan = false;
+  }else{
+    merged.plan.triggerState = String(triggerState.triggerState || 'waiting_for_trigger');
+    merged.plan.planValidationState = String(planValidation.state || '');
+    merged.plan.needsReplan = !!planValidation.needsReplan;
+    merged.plan.missedState = planValidation.missed ? 'missed' : '';
+    merged.plan.invalidatedState = planValidation.invalidated ? 'invalidated' : '';
+  }
   merged.action = deriveActionStateForRecord(merged);
   return merged;
 }
@@ -1427,7 +1437,7 @@ function appendLifecycleHistory(record, entry){
   ].slice(-24);
 }
 
-function setLifecycleStage(record, {stage, status, changedAt, expiresAt, expiryReason, reason, source, forceHistory = false}){
+function setLifecycleStage(record, {stage, status, changedAt, expiresAt, expiryReason, reason, source, forceHistory = false, lockReason}){
   if(!record) return;
   const nextStage = String(stage || record.lifecycle.stage || '');
   const nextStatus = String(status || record.lifecycle.status || 'inactive');
@@ -1435,6 +1445,7 @@ function setLifecycleStage(record, {stage, status, changedAt, expiresAt, expiryR
   const stageChanged = record.lifecycle.stage !== nextStage || record.lifecycle.status !== nextStatus;
   record.lifecycle.stage = nextStage;
   record.lifecycle.status = nextStatus;
+  record.lifecycle.lockReason = lockReason == null ? String(record.lifecycle.lockReason || '') : String(lockReason || '');
   record.lifecycle.stageUpdatedAt = nextChangedAt;
   record.lifecycle.expiresAt = expiresAt == null ? String(record.lifecycle.expiresAt || '') : String(expiresAt || '');
   record.lifecycle.expiryReason = expiryReason == null ? String(record.lifecycle.expiryReason || '') : String(expiryReason || '');
@@ -1451,16 +1462,23 @@ function setLifecycleStage(record, {stage, status, changedAt, expiresAt, expiryR
 
 function refreshLifecycleStage(record, stage, tradingDays, reason, source){
   if(!record) return;
+  const expiresAt = (record.lifecycle.stage === String(stage || '') && record.lifecycle.status === 'active' && record.lifecycle.expiresAt)
+    ? record.lifecycle.expiresAt
+    : (tradingDays > 0 ? businessDaysFromNow(tradingDays) : '');
   setLifecycleStage(record, {
     stage,
     status:'active',
     changedAt:new Date().toISOString(),
-    expiresAt:tradingDays > 0 ? businessDaysFromNow(tradingDays) : '',
+    expiresAt,
     expiryReason:'',
     reason,
     source,
     forceHistory:true
   });
+}
+
+function hasLockedLifecycle(record){
+  return !!(record && record.lifecycle && record.lifecycle.lockReason === 'manual_expired');
 }
 
 function maybeExpireTickerRecord(record){
@@ -1498,6 +1516,63 @@ function lifecycleLabel(record){
   const status = item.lifecycle.status || 'inactive';
   const expiry = item.lifecycle.expiresAt ? ` | Expires ${item.lifecycle.expiresAt}` : '';
   return `${stage} | ${status}${expiry}`;
+}
+
+function reevaluateTickerProgress(record){
+  if(!record || typeof record !== 'object') return null;
+  if(hasLockedLifecycle(record)){
+    record.plan.triggerState = 'stale';
+    if(!['invalidated','missed'].includes(String(record.plan.planValidationState || ''))){
+      record.plan.planValidationState = 'stale';
+    }
+    record.action = {stage:'watch', priority:actionPriority('watch')};
+    return record;
+  }
+  const evaluated = normalizeTickerRecord(record);
+  record.plan.triggerState = String(evaluated.plan.triggerState || 'waiting_for_trigger');
+  record.plan.planValidationState = String(evaluated.plan.planValidationState || '');
+  record.plan.needsReplan = !!evaluated.plan.needsReplan;
+  record.plan.missedState = String(evaluated.plan.missedState || '');
+  record.plan.invalidatedState = String(evaluated.plan.invalidatedState || '');
+  if(String(record.lifecycle.status || '') === 'stale' && !record.plan.invalidatedState && !record.plan.missedState && record.plan.triggerState !== 'triggered'){
+    record.plan.triggerState = 'stale';
+    if(!['missed','invalidated'].includes(record.plan.planValidationState)){
+      record.plan.planValidationState = 'stale';
+    }
+  }
+  if(record.plan.invalidatedState){
+    setLifecycleStage(record, {
+      stage:'avoided',
+      status:'inactive',
+      changedAt:new Date().toISOString(),
+      expiresAt:'',
+      expiryReason:'',
+      reason:'Setup invalidated during trigger reevaluation.',
+      source:'trigger'
+    });
+  }else if(record.plan.missedState){
+    setLifecycleStage(record, {
+      stage:'expired',
+      status:'stale',
+      changedAt:new Date().toISOString(),
+      expiresAt:todayIsoDate(),
+      expiryReason:'Setup missed after trigger progression.',
+      reason:'Setup missed after trigger progression.',
+      source:'trigger'
+    });
+  }else if(record.plan.triggerState === 'triggered' && record.plan.planValidationState === 'valid' && record.plan.status === 'valid' && !(record.lifecycle.stage === 'planned' && record.lifecycle.status === 'active' && record.lifecycle.expiresAt)){
+    setLifecycleStage(record, {
+      stage:'planned',
+      status:'active',
+      changedAt:new Date().toISOString(),
+      expiresAt:businessDaysFromNow(PLAN_EXPIRY_TRADING_DAYS),
+      expiryReason:'',
+      reason:'Trigger confirmed and reviewed plan still validates.',
+      source:'trigger'
+    });
+  }
+  record.action = cloneData(evaluated.action, {stage:'watch', priority:3});
+  return record;
 }
 
 function getTickerRecord(ticker){
@@ -1905,7 +1980,10 @@ function tickerRecordToWatchlistEntry(record){
 
 function allTickerRecords(){
   const records = Object.values(normalizeTickerRecordsMap(state.tickerRecords || {}));
-  records.forEach(maybeExpireTickerRecord);
+  records.forEach(record => {
+    maybeExpireTickerRecord(record);
+    reevaluateTickerProgress(record);
+  });
   state.tickerRecords = Object.fromEntries(records.map(record => [record.ticker, record]));
   return records;
 }
@@ -3938,7 +4016,7 @@ function evaluateEntryTrigger(record, options = {}){
   const extendedFromEntry = hasReviewedPlan && Number.isFinite(currentPrice) && Number.isFinite(entry) && currentPrice > (entry * 1.03);
   const clearlyMissed = hasReviewedPlan && Number.isFinite(currentPrice) && Number.isFinite(entry) && currentPrice > (entry * 1.06);
   return {
-    triggerState:hardFail ? 'invalidated' : (clearlyMissed ? 'missed' : (triggerReady ? 'triggered' : (nearReady ? 'near_ready' : 'not_ready'))),
+    triggerState:hardFail ? 'invalidated' : (clearlyMissed ? 'missed' : (triggerReady ? 'triggered' : (nearReady ? 'near_ready' : 'waiting_for_trigger'))),
     entryTriggerReady:triggerReady,
     nearReady,
     hardFail,
@@ -4193,20 +4271,23 @@ function executionModeLabel(exitMode){
 }
 
 function triggerStateLabel(triggerState){
+  if(triggerState === 'waiting_for_trigger') return 'Waiting';
   if(triggerState === 'triggered') return 'Triggered';
   if(triggerState === 'near_ready') return 'Near Ready';
   if(triggerState === 'missed') return 'Missed';
   if(triggerState === 'invalidated') return 'Invalidated';
-  return 'Not Ready';
+  if(triggerState === 'stale') return 'Stale';
+  return 'Waiting';
 }
 
 function planValidationStateLabel(planValidationState){
-  if(planValidationState === 'valid') return 'Plan Valid';
+  if(planValidationState === 'valid') return 'Valid';
   if(planValidationState === 'needs_replan') return 'Needs Replan';
+  if(planValidationState === 'stale') return 'Stale';
   if(planValidationState === 'missed') return 'Missed';
   if(planValidationState === 'invalidated') return 'Invalidated';
-  if(planValidationState === 'not_reviewed') return 'Not Reviewed';
-  return 'Check Pending';
+  if(planValidationState === 'not_reviewed') return 'Missing';
+  return 'Missing';
 }
 
 function normalizeTargetReviewState(targetReviewState){
@@ -4432,6 +4513,7 @@ function rankTickerForFocus(record){
   else if(view.convictionTier === 'Cautious') score += 10;
   if(view.warningState && view.warningState.showWarning) score -= 10;
   if(view.planState === 'valid') score += 8;
+  if(item.plan.planValidationState === 'stale' || item.plan.triggerState === 'stale') score -= 80;
   if(Number.isFinite(view.rrValue)) score += Math.min(view.rrValue, 5);
   if(item.setup.marketCaution) score -= 5;
   if(item.setup.practicalSizeFlag === 'tiny_size') score -= 8;
@@ -7227,7 +7309,10 @@ function renderReviewWorkspace(){
       : '<div class="summary">Run a scan first, then open a shortlisted ticker here for focused review.</div><a class="helperbutton" href="#dailyInput">Go To Scan List</a>';
     return;
   }
-  const record = normalizeTickerRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker));
+  const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
+  maybeExpireTickerRecord(liveRecord);
+  reevaluateTickerProgress(liveRecord);
+  const record = normalizeTickerRecord(liveRecord);
   const analysisState = getReviewAnalysisState(record);
   const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
     ? analysisState.normalizedAnalysis.warning_state
@@ -7507,6 +7592,7 @@ function expireSelectedTickerLifecycle(){
   setLifecycleStage(record, {
     stage:'expired',
     status:'stale',
+    lockReason:'manual_expired',
     changedAt:new Date().toISOString(),
     expiresAt:todayIsoDate(),
     expiryReason:'Expired manually.',
@@ -7526,6 +7612,7 @@ function reactivateSelectedTickerLifecycle(){
   if(!record) return;
   const stage = record.plan.hasValidPlan ? 'planned' : ((record.review.manualReview || record.review.cardOpen) ? 'reviewed' : (record.watchlist.inWatchlist ? 'watchlist' : 'shortlisted'));
   const days = stage === 'planned' ? PLAN_EXPIRY_TRADING_DAYS : (stage === 'reviewed' ? REVIEW_EXPIRY_TRADING_DAYS : WATCHLIST_EXPIRY_TRADING_DAYS);
+  record.lifecycle.lockReason = '';
   refreshLifecycleStage(record, stage, days, 'Lifecycle reactivated manually.', 'system');
   commitTickerState();
   renderReviewLifecycleSummary(ticker);
