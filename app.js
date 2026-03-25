@@ -2308,12 +2308,13 @@ function renderWatchlist(){
   records.forEach(record => {
     const entry = tickerRecordToWatchlistEntry(record);
     if(!entry) return;
+    const view = projectTickerForCard(record);
     const remaining = getTradingDaysRemaining(entry);
     const lifecycleText = lifecycleLabel(record);
     const expired = record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
     const div = document.createElement('div');
     div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead rankedgrid watchlistgrid"><div class="watchlistidentity"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="score watchlistscore ${expired ? 's-low' : scoreClass(Number.isFinite(entry.scoreWhenAdded) ? entry.scoreWhenAdded : 0)}">${escapeHtml(expired ? 'Expired' : (entry.scoreWhenAdded == null ? '-' : `${entry.scoreWhenAdded}/10`))}</div></div><div class="resultsummary"><div><strong>${escapeHtml(entry.verdictWhenAdded || 'Watchlist')}</strong></div><div class="tiny">Added ${escapeHtml(entry.dateAdded)}</div><div class="tiny">Trading days remaining: ${escapeHtml(String(remaining))}</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div></div><div class="resultreview inline-status"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
+    div.innerHTML = `<div class="resulthead rankedgrid watchlistgrid"><div class="watchlistidentity"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</div></div><div class="resultsummary"><div><strong>${escapeHtml(view.displayStage || 'Watchlist')}</strong></div><div class="tiny">${escapeHtml(view.convictionTier)} | ${escapeHtml(view.planStateLabel)}</div><div class="tiny">Added ${escapeHtml(entry.dateAdded)}</div><div class="tiny">Trading days remaining: ${escapeHtml(String(remaining))}</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div></div><div class="resultreview inline-status"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
     div.querySelector('[data-act="review"]').title = 'Send back to scanner for re-shortlisting';
     div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker).catch(() => {}); };
     div.querySelector('[data-act="refresh-life"]').onclick = () => {
@@ -2977,15 +2978,16 @@ function currentRrThreshold(){
 }
 
 function resultReasonForRecord(record){
-  const item = normalizeTickerRecord(record);
-  const rrValue = numericOrNull(recordRrValue(item));
-  const displayStage = displayStageForRecord(item);
+  const view = projectTickerForCard(record);
+  const item = view.item;
+  const rrValue = numericOrNull(view.rrValue);
+  const displayStage = view.displayStage;
   if(Number.isFinite(item.marketData.price) && Number.isFinite(item.marketData.ma200) && item.marketData.price < item.marketData.ma200) return 'Trend broken';
   if(Number.isFinite(item.marketData.ma50) && Number.isFinite(item.marketData.ma200) && item.marketData.ma50 < item.marketData.ma200) return 'Trend broken';
   if(item.plan.firstTargetTooClose) return 'First target too close';
   if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'Insufficient reward';
   if(displayStage === 'Avoid') return item.scan.pullbackType && /broken/i.test(item.scan.pullbackType) ? 'Trend broken' : 'Weak structure';
-  if(item.plan.status !== 'valid') return item.plan.status === 'invalid' ? 'Plan invalid' : 'Plan missing';
+  if(view.planState !== 'valid') return view.planState === 'invalid' ? 'Plan invalid' : 'Plan missing';
   if(displayStage === 'Entry' || displayStage === 'Near Entry'){
     return `Near ${escapeHtml(item.scan.scanType || '20MA')} with ${item.scan.pullbackStatus || 'acceptable structure'}`.replace(/&amp;/g, '&');
   }
@@ -2993,20 +2995,21 @@ function resultReasonForRecord(record){
 }
 
 function resultSupportLineForRecord(record){
-  const item = normalizeTickerRecord(record);
-  const rrValue = numericOrNull(recordRrValue(item));
-  const convictionTier = convictionTierLabel(item.setup.convictionTier || '');
+  const view = projectTickerForCard(record);
+  const item = view.item;
+  const rrValue = numericOrNull(view.rrValue);
+  const convictionTier = view.convictionTier;
   if(item.action.stage === 'avoid') return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
   const pieces = [
     convictionTier,
-    `Plan ${formatPlanState(item.plan.status)}`,
+    view.planStateLabel,
     Number.isFinite(rrValue) ? `Est R:R ${rrValue.toFixed(2)}` : '',
     item.setup && item.setup.practicalSizeFlag === 'tiny_size' ? 'Tiny Size' : '',
     item.setup && item.setup.practicalSizeFlag === 'low_impact' ? 'Low Impact' : '',
-    item.plan && item.plan.affordability === 'heavy_capital' ? 'Heavy Capital' : '',
-    item.plan && item.plan.affordability === 'not_affordable' ? 'Not Affordable' : '',
-    item.plan && item.plan.tradeability === 'too_expensive' ? 'Risk OK | Capital No' : '',
-    item.plan && item.plan.tradeability === 'risk_only' ? 'Capital check unavailable' : '',
+    view.affordability === 'heavy_capital' ? 'Heavy Capital' : '',
+    view.affordability === 'not_affordable' ? 'Not Affordable' : '',
+    view.displayedPlan.tradeability === 'too_expensive' ? 'Risk OK | Capital No' : '',
+    view.displayedPlan.tradeability === 'risk_only' ? 'Capital check unavailable' : '',
     item.setup.marketCaution ? 'Weak market caution' : ''
   ].filter(Boolean);
   return pieces.join(' | ') || (item.meta.companyName || 'Review in Setup Review for full detail.');
@@ -3022,14 +3025,15 @@ function isFilteredResultRecord(record){
 }
 
 function renderCompactResultCard(record){
-  const item = normalizeTickerRecord(record);
-  const displayStage = displayStageForRecord(item);
-  const actionLabel = actionDisplayLabelForRecord(item);
-  const scoreLabel = setupScoreDisplayForRecord(item);
-  const convictionTier = convictionTierLabel(item.setup.convictionTier || '');
-  const rrValue = numericOrNull(recordRrValue(item));
-  const positionSize = numericOrNull(item.plan.positionSize);
-  const affordability = String(item.plan.affordability || '');
+  const view = projectTickerForCard(record);
+  const item = view.item;
+  const displayStage = view.displayStage;
+  const actionLabel = view.actionLabel;
+  const scoreLabel = view.setupScoreDisplay;
+  const convictionTier = view.convictionTier;
+  const rrValue = numericOrNull(view.rrValue);
+  const positionSize = numericOrNull(view.positionSize);
+  const affordability = String(view.affordability || '');
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const detailMeta = [
     companyLine,
@@ -3039,10 +3043,10 @@ function renderCompactResultCard(record){
     Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
     Number.isFinite(rrValue) ? `Est R:R ${rrValue.toFixed(2)}` : '',
-    item.lifecycle.stage ? `Status: ${item.lifecycle.stage}` : '',
+    view.planStateLabel,
     item.setup.marketCaution ? 'Market caution' : ''
   ].filter(Boolean).join(' | ');
-  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span><span class="score ${scoreClass(item.setup.score || 0)}">${escapeHtml(scoreLabel)}</span><span class="pill">${escapeHtml(convictionTier)}</span></div></div><div class="resultsummary"><div class="resultreason">Reason: ${escapeHtml(resultReasonForRecord(item))}</div><div class="resultsupport">${escapeHtml(resultSupportLineForRecord(item))}</div></div><div class="resultmetrics"><span class="pill">${escapeHtml(actionLabel)}</span><span class="pill">Plan ${escapeHtml(formatPlanState(item.plan.status))}</span><span class="pill">R:R ${escapeHtml(Number.isFinite(rrValue) ? rrValue.toFixed(2) : 'n/a')}</span><span class="pill">Size ${escapeHtml(Number.isFinite(positionSize) ? String(positionSize) : 'n/a')}</span><span class="pill">${escapeHtml(capitalFitLabel(item.plan.capitalFit || 'unknown'))}</span>${['heavy_capital','not_affordable'].includes(affordability) ? `<span class="pill">${escapeHtml(affordabilityLabel(affordability))}</span>` : ''}</div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderEstimatedScannerPlanFromRecord(item)}</details></div>`;
+  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span><span class="pill">${escapeHtml(convictionTier)}</span></div></div><div class="resultsummary"><div class="resultreason">Reason: ${escapeHtml(resultReasonForRecord(item))}</div><div class="resultsupport">${escapeHtml(resultSupportLineForRecord(item))}</div></div><div class="resultmetrics"><span class="pill">${escapeHtml(actionLabel)}</span><span class="pill">${escapeHtml(view.planStateLabel)}</span><span class="pill">R:R ${escapeHtml(Number.isFinite(rrValue) ? rrValue.toFixed(2) : 'n/a')}</span><span class="pill">Size ${escapeHtml(Number.isFinite(positionSize) ? String(positionSize) : 'n/a')}</span><span class="pill">${escapeHtml(view.capitalFitText)}</span>${['heavy_capital','not_affordable'].includes(affordability) ? `<span class="pill">${escapeHtml(affordabilityLabel(affordability))}</span>` : ''}</div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderPlanProjectionFromRecord(item)}</details></div>`;
 }
 
 function hasAiStageForRecord(record){
@@ -3121,12 +3125,13 @@ function renderFocusQueue(){
   }
   box.innerHTML = `<div class="focusstrip">${items.map(item => {
     const record = normalizeTickerRecord(getTickerRecord(item.ticker) || item);
-    const displayStage = item.verdict || displayStageForRecord(record);
-    const setupScore = setupScoreDisplayForRecord(record);
-    const convictionTier = convictionTierLabel(record.setup.convictionTier || '');
-    const actionState = item.label || formatActionState(actionStateForRecord(record));
-    const planState = formatPlanState(planStateForRecord(record));
-    const affordability = String(record.plan.affordability || '');
+    const view = projectTickerForCard(record);
+    const displayStage = item.verdict || view.displayStage;
+    const setupScore = view.setupScoreDisplay;
+    const convictionTier = view.convictionTier;
+    const actionState = item.label || view.actionLabel;
+    const planState = view.planStateLabel;
+    const affordability = String(view.affordability || '');
     return `<div class="focuscard compactfocus"><div><strong>${escapeHtml(item.ticker)}</strong><div class="tiny">${escapeHtml(displayStage)} | ${escapeHtml(setupScore)} | ${escapeHtml(convictionTier)} | ${escapeHtml(planState)} | ${escapeHtml(actionState)}</div>${['heavy_capital','not_affordable'].includes(affordability) ? `<div class="pillrow"><span class="pill">${escapeHtml(affordabilityLabel(affordability))}</span></div>` : ''}</div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(item.ticker)}">Open Review</button></div>`;
   }).join('')}</div>`;
   box.querySelectorAll('[data-act="focus-review"]').forEach(button => {
@@ -4093,6 +4098,58 @@ function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrenc
     tradeability,
     affordability
   };
+}
+
+function projectTickerForCard(record, options = {}){
+  const item = normalizeTickerRecord(record);
+  const allowScannerFallback = options.allowScannerFallback !== false;
+  const analysisState = getReviewAnalysisState(item);
+  const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
+    ? analysisState.normalizedAnalysis.warning_state
+    : (item.setup.warning || evaluateWarningState(item, analysisState.normalizedAnalysis));
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback});
+  const displayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, item.marketData.currency);
+  const displayStage = displayStageForRecord(item);
+  const rrValue = displayedPlan.status === 'valid'
+    ? displayedPlan.rewardRisk.rrRatio
+    : numericOrNull(item.scan.estimatedRR);
+  const actionLabel = displayedPlan.affordability === 'not_affordable'
+    ? 'Not Affordable'
+    : (displayedPlan.tradeability === 'too_expensive'
+      ? 'Too Expensive'
+      : (displayedPlan.tradeability === 'risk_only'
+        ? 'Risk OK | Capital Unknown'
+        : formatActionState(item.action && item.action.stage)));
+  return {
+    item,
+    analysisState,
+    warningState,
+    effectivePlan,
+    displayedPlan,
+    displayStage,
+    setupScore:setupScoreForRecord(item),
+    setupScoreDisplay:setupScoreDisplayForRecord(item),
+    convictionTier:convictionTierLabel(item.setup.convictionTier || ''),
+    planState:displayedPlan.status,
+    planStateLabel:formatPlanState(displayedPlan.status),
+    rrValue,
+    positionSize:displayedPlan.status === 'valid' ? displayedPlan.riskFit.position_size : null,
+    capitalFit:displayedPlan.status === 'valid' ? displayedPlan.capitalFit.capital_fit : 'unknown',
+    capitalFitText:displayedPlan.status === 'valid'
+      ? capitalFitDisplayText(displayedPlan.capitalFit.capital_fit, displayedPlan.capitalFit.capital_note)
+      : 'Capital Unknown',
+    affordability:displayedPlan.status === 'valid' ? displayedPlan.affordability : '',
+    actionLabel
+  };
+}
+
+function renderPlanProjectionFromRecord(record, options = {}){
+  const view = projectTickerForCard(record, options);
+  if(view.displayedPlan.status === 'valid'){
+    const targetWarning = !!view.item.plan.firstTargetTooClose;
+    return `<div class="tiny">Planned Entry: ${escapeHtml(fmtPrice(view.displayedPlan.entry))} | Planned Stop: ${escapeHtml(fmtPrice(view.displayedPlan.stop))} | Planned First Target: ${escapeHtml(fmtPrice(view.displayedPlan.target))}</div><div class="tiny">Risk ${escapeHtml(riskStatusLabel(view.displayedPlan.riskFit.risk_status || 'plan_missing'))} | Max Loss ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.max_loss) ? view.displayedPlan.riskFit.max_loss.toFixed(2) : String(currentMaxLoss()))} | Planned Risk/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardRisk.riskPerShare) ? view.displayedPlan.rewardRisk.riskPerShare.toFixed(2) : 'N/A')} | Planned Reward/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardPerShare) ? view.displayedPlan.rewardPerShare.toFixed(2) : 'N/A')} | Planned Position ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.position_size) ? String(view.displayedPlan.riskFit.position_size) : 'N/A')}</div><div class="inline-status"><span class="badge ${rrStateClass(view.rrValue)}">${escapeHtml(rrStateLabel(view.rrValue))}</span><span class="tiny">Planned R:R ${escapeHtml(Number.isFinite(view.rrValue) ? view.rrValue.toFixed(2) : 'N/A')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>`;
+  }
+  return `<div class="inline-status"><span class="badge watch">Scan Estimate</span><span class="tiny">Use this card to review charts and define a real plan before acting on scanner estimates.</span></div>${renderEstimatedScannerPlanFromRecord(view.item)}`;
 }
 
 function formatScoreStage(scoreStage){
@@ -6714,6 +6771,7 @@ function legacyRenderCardsFromCardList(){
     return;
   }
   records.map(normalizeTickerRecord).forEach(record => {
+    const view = projectTickerForCard(record);
     const promptText = record.review.lastPrompt || buildTickerPromptFromRecord(record);
     const sourceLabel = record.review.source === 'openai' ? 'OpenAI' : (record.review.source === 'scanner' ? 'Scanner' : (record.review.source === 'ai' ? 'Imported AI' : 'Checklist'));
     const marketLabel = record.meta.marketStatus || state.marketStatus;
@@ -6731,18 +6789,12 @@ function legacyRenderCardsFromCardList(){
     const freshnessBadge = record.scan.lastScannedAt ? `<span class="badge ${isFreshScanTimestamp(record.scan.lastScannedAt) ? 'freshness-fresh' : 'freshness-stale'}">${isFreshScanTimestamp(record.scan.lastScannedAt) ? 'Fresh' : 'Stale'}${freshnessAge ? ` | ${escapeHtml(freshnessAge)}` : ''}</span>` : '';
     const lifecycleLine = `<div class="tiny">Lifecycle ${escapeHtml(record.lifecycle.stage || 'untracked')} | ${escapeHtml(record.lifecycle.status || 'inactive')}${record.lifecycle.expiresAt ? ` | Expires ${escapeHtml(record.lifecycle.expiresAt)}` : ''}</div>`;
     const meta = `<div class="tiny">${escapeHtml(sourceLabel)} - ${escapeHtml(marketLabel)}${updatedLabel ? ` - ${escapeHtml(updatedLabel)}` : ''}</div>${freshnessBadge ? `<div class="inline-status">${freshnessBadge}</div>` : ''}${companyLine}${marketDataLine}${performanceLine}${suitabilityLine}${lifecycleLine}`;
-    const scoreLabel = `${record.scan.score || 0}/10`;
-    const combinedStatus = combinedStatusLabel(record.scan.verdict || record.watchlist.status || 'Watch', record.plan.riskStatus || record.scan.riskStatus || 'plan_missing');
-    const rrRatio = numericOrNull(record.plan.plannedRR);
-    const rewardPerShare = numericOrNull(record.plan.rewardPerShare);
-    const targetWarning = !!record.plan.firstTargetTooClose;
-    const normalizedAnalysis = record.review.normalizedAnalysis;
-    const riskMeta = normalizedAnalysis
-      ? `<div class="tiny">Planned Entry: ${escapeHtml(normalizedAnalysis.entry || 'Not given')} | Planned Stop: ${escapeHtml(normalizedAnalysis.stop || 'Not given')} | Planned First Target: ${escapeHtml(normalizedAnalysis.first_target || 'Not given')}</div><div class="tiny">Risk ${escapeHtml(riskStatusLabel(record.plan.riskStatus || 'plan_missing'))} | Max Loss ${escapeHtml(Number.isFinite(record.plan.maxLoss) ? record.plan.maxLoss.toFixed(2) : String(currentMaxLoss()))} | Planned Risk/Share ${escapeHtml(Number.isFinite(record.plan.riskPerShare) ? record.plan.riskPerShare.toFixed(2) : 'N/A')} | Planned Reward/Share ${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : 'N/A')} | Planned Position ${escapeHtml(Number.isFinite(record.plan.positionSize) ? String(record.plan.positionSize) : 'N/A')}</div><div class="inline-status"><span class="badge ${rrStateClass(rrRatio)}">${escapeHtml(rrStateLabel(rrRatio))}</span><span class="tiny">Planned R:R ${escapeHtml(Number.isFinite(rrRatio) ? rrRatio.toFixed(2) : 'N/A')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>`
-      : `<div class="inline-status"><span class="badge watch">Scan Estimate</span><span class="tiny">Use this card to review charts and define a real plan before acting on scanner estimates.</span></div>${renderEstimatedScannerPlanFromRecord(record)}`;
+    const scoreLabel = view.setupScoreDisplay.replace('Setup ', '');
+    const combinedStatus = combinedStatusLabel(view.displayStage, view.displayedPlan.riskFit.risk_status || record.scan.riskStatus || 'plan_missing');
+    const riskMeta = renderPlanProjectionFromRecord(record);
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(record.ticker)}</div><div><div>${escapeHtml(record.scan.summary || 'No review saved yet.')}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(record.scan.score || 0)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(record.scan.verdict || record.watchlist.status || 'Watch')}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${record.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${record.review.chartRef && record.review.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${record.ticker}">Notes</label><textarea id="notes-${record.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button></div><details class="responsepanel" id="response-${record.ticker}" ${(((uiState.responseOpen[record.ticker] ?? !!record.review.aiAnalysisRaw) || !!record.review.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button><button class="secondary" data-act="add-watchlist">Add to Watchlist</button></div><details class="promptdetails" id="prompt-${record.ticker}" ${(uiState.promptOpen[record.ticker] ?? !!record.review.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${record.ticker}">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></div></div>`;
+    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(record.ticker)}</div><div><div>${escapeHtml(record.scan.summary || 'No review saved yet.')}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${record.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${record.review.chartRef && record.review.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${record.ticker}">Notes</label><textarea id="notes-${record.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button></div><details class="responsepanel" id="response-${record.ticker}" ${(((uiState.responseOpen[record.ticker] ?? !!record.review.aiAnalysisRaw) || !!record.review.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button><button class="secondary" data-act="add-watchlist">Add to Watchlist</button></div><details class="promptdetails" id="prompt-${record.ticker}" ${(uiState.promptOpen[record.ticker] ?? !!record.review.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${record.ticker}">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(record.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeCard(record.ticker);
     div.querySelector('[data-act="analyse"]').onclick = () => { if(!uiState.loadingTicker) analyseSetup(record.ticker); };
