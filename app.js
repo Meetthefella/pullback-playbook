@@ -41,6 +41,8 @@ const DEFAULT_STATE = {
   tickerRecords:{},
   lastAlertsSeenAt:'',
   dismissedAlertIds:[],
+  dismissedFocusTickers:[],
+  dismissedFocusCycle:'',
   activeQueueClearedCycle:'',
   activeQueueClearedTickers:[],
   activeQueueManualTickers:[],
@@ -2082,6 +2084,8 @@ function loadState(){
   state.tickerRecords = normalizeTickerRecordsMap(state.tickerRecords);
   state.lastAlertsSeenAt = String(state.lastAlertsSeenAt || '');
   state.dismissedAlertIds = Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds.slice(-200) : [];
+  state.dismissedFocusTickers = uniqueTickers(state.dismissedFocusTickers || []);
+  state.dismissedFocusCycle = String(state.dismissedFocusCycle || '');
   state.activeQueueClearedCycle = String(state.activeQueueClearedCycle || '');
   state.activeQueueClearedTickers = uniqueTickers(state.activeQueueClearedTickers || []);
   state.activeQueueManualTickers = uniqueTickers(state.activeQueueManualTickers || []);
@@ -2445,6 +2449,9 @@ async function runScannerWorkflow(options = {}){
   setStatus('inputStatus', `<span class="ok">${universe.length} ticker${universe.length === 1 ? '' : 's'} ready in the ${modeLabel}.</span>`);
   setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${universe.length} ticker${universe.length === 1 ? '' : 's'}...</span>`);
   const result = await refreshMarketDataForTickers(universe, options);
+  state.dismissedFocusTickers = [];
+  state.dismissedFocusCycle = '';
+  persistState();
   if($('advancedScannerTools')) $('advancedScannerTools').open = false;
   setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} ranked, ${result.rejected} avoid, ${result.failed} failed.`);
   return result;
@@ -3028,13 +3035,12 @@ function renderCompactResultCard(record){
   const view = projectTickerForCard(record);
   const item = view.item;
   const displayStage = view.displayStage;
-  const actionLabel = view.actionLabel;
   const scoreLabel = view.setupScoreDisplay;
   const convictionTier = view.convictionTier;
   const rrValue = numericOrNull(view.rrValue);
-  const positionSize = numericOrNull(view.positionSize);
-  const affordability = String(view.affordability || '');
+  const statusPills = scanCardStatusPills(view, 3);
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
+  const reasonLine = compactReasonLineForRecord(item, 3);
   const detailMeta = [
     companyLine,
     Number.isFinite(item.marketData.price) ? `Price ${fmtPrice(Number(item.marketData.price))}` : '',
@@ -3046,7 +3052,7 @@ function renderCompactResultCard(record){
     view.planStateLabel,
     item.setup.marketCaution ? 'Market caution' : ''
   ].filter(Boolean).join(' | ');
-  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span><span class="pill">${escapeHtml(convictionTier)}</span></div></div><div class="resultsummary"><div class="resultreason">Reason: ${escapeHtml(resultReasonForRecord(item))}</div><div class="resultsupport">${escapeHtml(resultSupportLineForRecord(item))}</div></div><div class="resultmetrics"><span class="pill">${escapeHtml(actionLabel)}</span><span class="pill">${escapeHtml(view.planStateLabel)}</span><span class="pill">R:R ${escapeHtml(Number.isFinite(rrValue) ? rrValue.toFixed(2) : 'n/a')}</span><span class="pill">Size ${escapeHtml(Number.isFinite(positionSize) ? String(positionSize) : 'n/a')}</span><span class="pill">${escapeHtml(view.capitalFitText)}</span>${['heavy_capital','not_affordable'].includes(affordability) ? `<span class="pill">${escapeHtml(affordabilityLabel(affordability))}</span>` : ''}</div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderPlanProjectionFromRecord(item)}</details></div>`;
+  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span><span class="pill">${escapeHtml(convictionTier)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultmetrics">${statusPills.map(pill => `<span class="pill">${escapeHtml(pill)}</span>`).join('')}</div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderPlanProjectionFromRecord(item)}</details></div>`;
 }
 
 function hasAiStageForRecord(record){
@@ -3060,53 +3066,57 @@ function hasAiStageForRecord(record){
   return ['Entry','Near Entry','Watch','Avoid'].includes(finalVerdict);
 }
 
-function focusQueueRecords(){
+function focusQueueRecords(options = {}){
+  const limit = options.limit == null ? 5 : options.limit;
   const queueClearedForCycle = state.activeQueueClearedCycle === currentQueueCycleKey();
   const clearedTickers = new Set(queueClearedForCycle ? uniqueTickers(state.activeQueueClearedTickers || []) : []);
   const manualTickers = uniqueTickers(state.activeQueueManualTickers || []);
+  const dismissedTickers = new Set(state.dismissedFocusCycle === currentQueueCycleKey() ? uniqueTickers(state.dismissedFocusTickers || []) : []);
   if(queueClearedForCycle && !manualTickers.length && !clearedTickers.size){
     return [];
   }
   const ranked = rankedTickerRecords()
     .filter(record => {
       const item = normalizeTickerRecord(record);
+      const stage = focusStageForRecord(item);
+      if(dismissedTickers.has(item.ticker)) return false;
+      if(stage === 'Avoid') return false;
+      if(item.lifecycle.stage === 'expired' || item.lifecycle.stage === 'avoided') return false;
       if(item.plan.status === 'valid' && targetReviewQueueLabel(item.plan.targetReviewState)) return true;
-      if(['action_now','near_entry','needs_plan'].includes(item.action.stage)) return true;
-      return !hasAiStageForRecord(item)
-        && item.scan.verdict !== 'Avoid'
-        && Number.isFinite(item.setup.score)
-        && item.setup.score >= 7;
+      return ['Entry','Near Entry','Watch'].includes(stage);
     })
-    .sort((a, b) => focusQueuePriorityForRecord(a) - focusQueuePriorityForRecord(b) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker));
+    .sort((a, b) => rankTickerForFocus(b) - rankTickerForFocus(a) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker));
   const recordsByTicker = new Map();
   ranked.forEach(record => recordsByTicker.set(normalizeTickerRecord(record).ticker, record));
   manualTickers.forEach(ticker => {
+    if(dismissedTickers.has(normalizeTicker(ticker))) return;
     const record = getTickerRecord(ticker);
     if(record && normalizeTickerRecord(record).watchlist.inWatchlist){
       recordsByTicker.set(normalizeTicker(ticker), record);
     }
   });
-  return Array.from(recordsByTicker.values())
+  let records = Array.from(recordsByTicker.values())
     .filter(record => {
       const ticker = normalizeTickerRecord(record).ticker;
+      if(dismissedTickers.has(ticker)) return false;
       if(!queueClearedForCycle) return true;
       if(manualTickers.includes(ticker)) return true;
       return !clearedTickers.has(ticker);
     })
-    .sort((a, b) => focusQueuePriorityForRecord(a) - focusQueuePriorityForRecord(b) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker))
-    .slice(0, 35)
-    .map(record => {
+    .sort((a, b) => rankTickerForFocus(b) - rankTickerForFocus(a) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker));
+  if(Number.isFinite(limit) && limit >= 0){
+    records = records.slice(0, limit);
+  }
+  return records.map(record => {
       const item = normalizeTickerRecord(record);
-      const aiStagePresent = hasAiStageForRecord(item);
-      const targetReviewLabel = item.plan.status === 'valid' ? targetReviewQueueLabel(item.plan.targetReviewState) : '';
-      const queueLabel = targetReviewLabel || (aiStagePresent ? actionDisplayLabelForRecord(item) : 'Needs Review');
-      const queueVerdict = aiStagePresent ? displayStageForRecord(item) : String(item.scan.verdict || 'Watch');
+      const view = projectTickerForCard(item);
+      const queueVerdict = focusStageForRecord(item);
       return {
         ticker:item.ticker,
-        label:queueLabel,
-        score:Number(item.setup.score || 0),
+        label:view.actionLabel,
+        score:Number(view.setupScore || 0),
         verdict:queueVerdict,
-        hasValidPlan:item.plan.status === 'valid'
+        hasValidPlan:view.planState === 'valid'
       };
     });
 }
@@ -3120,7 +3130,7 @@ function renderFocusQueue(){
   if(count) count.textContent = `${items.length} focus`;
   if(clearBtn) clearBtn.disabled = !items.length;
   if(!items.length){
-    box.innerHTML = '<div class="summary">No high-priority focus names right now. Run a scan or review the watchlist when the market changes.</div>';
+    box.innerHTML = '<div class="summary">No focus names right now. Run a scan to seed today&apos;s working queue.</div>';
     return;
   }
   box.innerHTML = `<div class="focusstrip">${items.map(item => {
@@ -3128,14 +3138,36 @@ function renderFocusQueue(){
     const view = projectTickerForCard(record);
     const displayStage = item.verdict || view.displayStage;
     const setupScore = view.setupScoreDisplay;
-    const convictionTier = view.convictionTier;
-    const actionState = item.label || view.actionLabel;
-    const planState = view.planStateLabel;
-    const affordability = String(view.affordability || '');
-    return `<div class="focuscard compactfocus"><div><strong>${escapeHtml(item.ticker)}</strong><div class="tiny">${escapeHtml(displayStage)} | ${escapeHtml(setupScore)} | ${escapeHtml(convictionTier)} | ${escapeHtml(planState)} | ${escapeHtml(actionState)}</div>${['heavy_capital','not_affordable'].includes(affordability) ? `<div class="pillrow"><span class="pill">${escapeHtml(affordabilityLabel(affordability))}</span></div>` : ''}</div><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(item.ticker)}">Open Review</button></div>`;
+    const reasonLine = compactReasonLineForRecord(record, 3);
+    const keepLabel = record.watchlist.inWatchlist ? 'Keep' : 'Add to Watchlist';
+    return `<div class="focuscard compactfocus"><div><strong>${escapeHtml(item.ticker)}</strong><div class="tiny">${escapeHtml(displayStage)} | ${escapeHtml(setupScore)}</div><div class="tiny">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar"><button class="primary compactbutton" type="button" data-act="focus-review" data-ticker="${escapeHtml(item.ticker)}">Open Review</button><button class="secondary compactbutton" type="button" data-act="focus-keep" data-ticker="${escapeHtml(item.ticker)}">${escapeHtml(keepLabel)}</button><button class="ghost compactbutton" type="button" data-act="focus-dismiss" data-ticker="${escapeHtml(item.ticker)}">Dismiss</button></div></div>`;
   }).join('')}</div>`;
   box.querySelectorAll('[data-act="focus-review"]').forEach(button => {
     button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
+  });
+  box.querySelectorAll('[data-act="focus-keep"]').forEach(button => {
+    button.onclick = () => {
+      const ticker = normalizeTicker(button.getAttribute('data-ticker') || '');
+      if(!ticker) return;
+      const record = upsertTickerRecord(ticker);
+      addToWatchlist({
+        ticker:record.ticker,
+        dateAdded:todayIsoDate(),
+        scoreWhenAdded:record.scan.score,
+        verdictWhenAdded:record.scan.verdict || ''
+      });
+      renderFocusQueue();
+    };
+  });
+  box.querySelectorAll('[data-act="focus-dismiss"]').forEach(button => {
+    button.onclick = () => {
+      const ticker = normalizeTicker(button.getAttribute('data-ticker') || '');
+      if(!ticker) return;
+      state.dismissedFocusCycle = currentQueueCycleKey();
+      state.dismissedFocusTickers = uniqueTickers([ticker, ...(state.dismissedFocusTickers || [])]);
+      persistState();
+      renderFocusQueue();
+    };
   });
 }
 
@@ -4143,6 +4175,79 @@ function projectTickerForCard(record, options = {}){
   };
 }
 
+function focusStageForRecord(record){
+  const item = normalizeTickerRecord(record);
+  return hasAiStageForRecord(item)
+    ? displayStageForRecord(item)
+    : normalizeImportedStatus(item.scan.verdict || item.watchlist.status || 'Watch');
+}
+
+function compactReasonLineForRecord(record, maxParts = 3){
+  const item = normalizeTickerRecord(record);
+  const derived = analysisDerivedStatesFromRecord(item);
+  const warningState = item.setup.warning || warningStateFromInputs(item, null, derived);
+  const parts = [];
+  const pushPart = value => {
+    if(value && !parts.includes(value) && parts.length < maxParts) parts.push(value);
+  };
+  if(derived.structureState === 'broken') pushPart('Broken structure');
+  else if(['weak','weakening'].includes(derived.structureState)) pushPart('Weak structure');
+  else if(derived.trendState === 'strong') pushPart('Strong trend');
+  else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
+  if(derived.pullbackZone === 'near_20ma') pushPart('Near 20MA');
+  if(derived.pullbackZone === 'near_50ma') pushPart('Near 50MA');
+  if(derived.bounceState === 'confirmed') pushPart('Bounce confirmed');
+  else if(derived.bounceState === 'attempt') pushPart('Bounce tentative');
+  else if(derived.bounceState === 'none') pushPart('No bounce');
+  if(derived.stabilisationState === 'early') pushPart('Early stabilisation');
+  if(derived.volumeState === 'weak') pushPart('Weak volume');
+  if(item.setup.marketCaution) pushPart('Weak market caution');
+  warningState.reasons.forEach(pushPart);
+  if(!parts.length) pushPart(resultReasonForRecord(item));
+  return parts.slice(0, maxParts).join(' | ');
+}
+
+function scanCardStatusPills(view, maxPills = 3){
+  const pills = [];
+  const pushPill = value => {
+    if(value && !pills.includes(value) && pills.length < maxPills) pills.push(value);
+  };
+  if(view.warningState && view.warningState.showWarning) pushPill('Warning');
+  pushPill(view.planState === 'valid' ? 'Plan Ready' : 'No Plan');
+  if(Number.isFinite(view.rrValue)) pushPill(`R:R ${view.rrValue.toFixed(2)}`);
+  if(Number.isFinite(view.positionSize)) pushPill(`Size ${view.positionSize}`);
+  if(view.displayedPlan.tradeability === 'risk_only') pushPill('Capital check unavailable');
+  if(['heavy_capital','not_affordable'].includes(view.affordability)) pushPill(affordabilityLabel(view.affordability));
+  return pills.slice(0, maxPills);
+}
+
+function rankTickerForFocus(record){
+  const item = normalizeTickerRecord(record);
+  const view = projectTickerForCard(item);
+  const stage = focusStageForRecord(item);
+  const targetReviewLabel = view.planState === 'valid' ? targetReviewQueueLabel(item.plan.targetReviewState) : '';
+  if(stage === 'Avoid' || item.lifecycle.stage === 'expired' || item.lifecycle.stage === 'avoided') return -9999;
+  let score = 0;
+  if(targetReviewLabel === 'At Target' || targetReviewLabel === 'Review Target') score += 1000;
+  else if(targetReviewLabel === 'Near Target') score += 900;
+  if(stage === 'Entry') score += 400;
+  else if(stage === 'Near Entry') score += 300;
+  else if(stage === 'Watch') score += 200;
+  score += (view.setupScore || 0) * 10;
+  if(view.convictionTier === 'Premium') score += 30;
+  else if(view.convictionTier === 'Good') score += 20;
+  else if(view.convictionTier === 'Cautious') score += 10;
+  if(view.warningState && view.warningState.showWarning) score -= 10;
+  if(view.planState === 'valid') score += 8;
+  if(Number.isFinite(view.rrValue)) score += Math.min(view.rrValue, 5);
+  if(item.setup.marketCaution) score -= 5;
+  if(item.setup.practicalSizeFlag === 'tiny_size') score -= 8;
+  else if(item.setup.practicalSizeFlag === 'low_impact') score -= 4;
+  if(['heavy_capital','not_affordable'].includes(view.affordability)) score -= 4;
+  if(item.scan.lastScannedAt && !isFreshScanTimestamp(item.scan.lastScannedAt)) score -= 6;
+  return score;
+}
+
 function renderPlanProjectionFromRecord(record, options = {}){
   const view = projectTickerForCard(record, options);
   if(view.displayedPlan.status === 'valid'){
@@ -4254,6 +4359,8 @@ function currentQueueCycleKey(now = new Date()){
 function rebuildActiveQueueFromWatchlist(options = {}){
   const cycleKey = currentQueueCycleKey();
   state.activeQueueManualTickers = watchlistTickerRecords().map(record => record.ticker);
+  state.dismissedFocusTickers = [];
+  state.dismissedFocusCycle = '';
   state.activeQueueClearedCycle = '';
   state.activeQueueClearedTickers = [];
   state.activeQueueLastRebuiltCycle = cycleKey;
@@ -4268,7 +4375,7 @@ function ensureActiveQueueCycle(){
 }
 
 function clearActiveQueueForToday(){
-  state.activeQueueClearedTickers = focusQueueRecords().map(item => item.ticker);
+  state.activeQueueClearedTickers = focusQueueRecords({limit:null}).map(item => item.ticker);
   state.activeQueueClearedCycle = currentQueueCycleKey();
   state.activeQueueManualTickers = [];
   persistState();
