@@ -3136,9 +3136,7 @@ function renderFocusQueue(){
   box.innerHTML = `<div class="focusstrip">${items.map(item => {
     const record = normalizeTickerRecord(getTickerRecord(item.ticker) || item);
     const view = projectTickerForCard(record);
-    const displayStage = hasAiStageForRecord(record)
-      ? view.displayStage
-      : (item.verdict || view.displayStage);
+    const displayStage = view.displayStage || item.verdict || 'Watch';
     const setupScore = view.setupScoreDisplay;
     const reasonLine = compactReasonLineForRecord(record, 3);
     const keepLabel = record.watchlist.inWatchlist ? 'Keep' : 'Add to Watchlist';
