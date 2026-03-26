@@ -1329,6 +1329,7 @@ function normalizeTickerRecord(record){
   merged.plan.missedState = String(merged.plan.missedState || '');
   merged.plan.invalidatedState = String(merged.plan.invalidatedState || '');
   merged.setup.rawScore = numericOrNull(merged.setup.rawScore);
+  merged.setup.baseScore = numericOrNull(merged.setup.baseScore);
   merged.setup.score = numericOrNull(merged.setup.score);
   merged.setup.convictionTier = String(merged.setup.convictionTier || '');
   merged.setup.practicalSizeFlag = String(merged.setup.practicalSizeFlag || '');
@@ -1373,6 +1374,7 @@ function normalizeTickerRecord(record){
     : normalizedExecution.targetAlertLevel;
   merged.plan.targetAlert.lastState = normalizedExecution.targetReviewState;
   const setupDerivedStates = analysisDerivedStatesFromRecord(merged);
+  const baseSetupScore = computeBaseSetupScoreForRecord(merged, {derivedStates:setupDerivedStates});
   const canonicalDisplayedPlan = deriveCurrentPlanState(merged.plan.entry, merged.plan.stop, merged.plan.firstTarget, merged.marketData.currency);
   const qualityAdjustments = evaluateSetupQualityAdjustments(merged, {
     derivedStates:setupDerivedStates,
@@ -1391,7 +1393,8 @@ function normalizeTickerRecord(record){
     qualityAdjustments
   });
   merged.setup = {
-    rawScore:rawSetupScoreForRecord(merged),
+    baseScore:baseSetupScore,
+    rawScore:baseSetupScore,
     score:displaySetupScore,
     convictionTier,
     practicalSizeFlag:practicalSizeFlagForPlan(merged.plan),
@@ -3837,7 +3840,32 @@ function scoreClass(score){
   return 's-low';
 }
 
-function fallbackBaseScoreForRecord(record){
+function derivedStatesBaseScore(record, derivedStates = null){
+  const item = record && typeof record === 'object' ? record : {};
+  const derived = derivedStates || analysisDerivedStatesFromRecord(item);
+  const trendState = String(derived.trendState || '').toLowerCase();
+  const pullbackZone = String(derived.pullbackZone || '').toLowerCase();
+  const structureState = String(derived.structureState || '').toLowerCase();
+  const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
+  const bounceState = String(derived.bounceState || '').toLowerCase();
+  const volumeState = String(derived.volumeState || '').toLowerCase();
+  if(trendState === 'broken' || structureState === 'broken') return 0;
+  let score = 0;
+  if(trendState === 'strong') score += 3;
+  else if(trendState === 'acceptable') score += 2;
+  else if(trendState === 'weak') score += 1;
+  if(pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') score += 2;
+  if(structureState === 'intact') score += 2;
+  else if(structureState === 'weakening') score += 1;
+  if(stabilisationState === 'clear') score += 1;
+  else if(stabilisationState === 'early') score += 1;
+  if(bounceState === 'confirmed') score += 1;
+  else if(bounceState === 'attempt') score += 1;
+  if(volumeState === 'supportive') score += 1;
+  return clamp(Math.round(score), 0, 10);
+}
+
+function computeBaseSetupScoreForRecord(record, options = {}){
   const safeRecord = record && typeof record === 'object' ? record : {};
   const manualChecks = safeRecord.review && safeRecord.review.manualReview && safeRecord.review.manualReview.checks && typeof safeRecord.review.manualReview.checks === 'object'
     ? safeRecord.review.manualReview.checks
@@ -3867,16 +3895,37 @@ function fallbackBaseScoreForRecord(record){
       rsi14:marketData.rsi
     }).score;
   }
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(safeRecord);
+  return derivedStatesBaseScore(safeRecord, derivedStates);
+}
+
+function fallbackBaseScoreForRecord(record, options = {}){
+  const score = computeBaseSetupScoreForRecord(record, options);
+  return Number.isFinite(score) ? score : null;
+}
+
+function canonicalBaseSetupScore(record, options = {}){
+  const storedBaseScore = numericOrNull(record && record.setup && record.setup.baseScore);
+  const storedRawScore = numericOrNull(record && record.setup && record.setup.rawScore);
+  const fallbackScore = numericOrNull(fallbackBaseScoreForRecord(record, options));
+  if(Number.isFinite(storedBaseScore)){
+    if(storedBaseScore === 0 && Number.isFinite(fallbackScore) && fallbackScore > 0) return Math.max(0, Math.min(10, Math.round(fallbackScore)));
+    return Math.max(0, Math.min(10, Math.round(storedBaseScore)));
+  }
+  if(Number.isFinite(storedRawScore)){
+    if(storedRawScore === 0 && Number.isFinite(fallbackScore) && fallbackScore > 0) return Math.max(0, Math.min(10, Math.round(fallbackScore)));
+    return Math.max(0, Math.min(10, Math.round(storedRawScore)));
+  }
+  if(Number.isFinite(fallbackScore)) return Math.max(0, Math.min(10, Math.round(fallbackScore)));
   return null;
 }
 
 function setupScoreForRecord(record){
   const displayScore = numericOrNull(record && record.setup && record.setup.score);
   if(Number.isFinite(displayScore)) return Math.max(0, Math.min(10, Math.round(displayScore)));
+  const baseScore = canonicalBaseSetupScore(record);
+  if(Number.isFinite(baseScore)) return Math.max(0, Math.min(10, Math.round(baseScore)));
   const scanScore = numericOrNull(record && record.scan && record.scan.score);
-  if(Number.isFinite(scanScore) && scanScore > 0) return Math.max(0, Math.min(10, Math.round(scanScore)));
-  const fallbackScore = numericOrNull(fallbackBaseScoreForRecord(record));
-  if(Number.isFinite(fallbackScore)) return Math.max(0, Math.min(10, Math.round(fallbackScore)));
   if(Number.isFinite(scanScore)) return Math.max(0, Math.min(10, Math.round(scanScore)));
   return 0;
 }
@@ -3886,12 +3935,9 @@ function setupScoreDisplayForRecord(record){
 }
 
 function rawSetupScoreForRecord(record){
-  const rawScore = numericOrNull(record && record.setup && record.setup.rawScore);
-  if(Number.isFinite(rawScore)) return Math.max(0, Math.min(10, Math.round(rawScore)));
+  const baseScore = canonicalBaseSetupScore(record);
+  if(Number.isFinite(baseScore)) return Math.max(0, Math.min(10, Math.round(baseScore)));
   const scanScore = numericOrNull(record && record.scan && record.scan.score);
-  if(Number.isFinite(scanScore) && scanScore > 0) return Math.max(0, Math.min(10, Math.round(scanScore)));
-  const fallbackScore = numericOrNull(fallbackBaseScoreForRecord(record));
-  if(Number.isFinite(fallbackScore)) return Math.max(0, Math.min(10, Math.round(fallbackScore)));
   if(Number.isFinite(scanScore)) return Math.max(0, Math.min(10, Math.round(scanScore)));
   return 0;
 }
