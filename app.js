@@ -3837,11 +3837,48 @@ function scoreClass(score){
   return 's-low';
 }
 
+function fallbackBaseScoreForRecord(record){
+  const safeRecord = record && typeof record === 'object' ? record : {};
+  const manualChecks = safeRecord.review && safeRecord.review.manualReview && safeRecord.review.manualReview.checks && typeof safeRecord.review.manualReview.checks === 'object'
+    ? safeRecord.review.manualReview.checks
+    : null;
+  if(manualChecks && Object.keys(manualChecks).length){
+    return scoreAndStatusFromChecks(manualChecks).score;
+  }
+  const scanChecks = safeRecord.scan && safeRecord.scan.flags && safeRecord.scan.flags.checks && typeof safeRecord.scan.flags.checks === 'object'
+    ? safeRecord.scan.flags.checks
+    : null;
+  if(scanChecks && Object.keys(scanChecks).length){
+    return scoreAndStatusFromChecks(scanChecks).score;
+  }
+  const marketData = safeRecord.marketData && typeof safeRecord.marketData === 'object' ? safeRecord.marketData : null;
+  if(marketData && [marketData.price, marketData.ma20, marketData.ma50, marketData.ma200].some(Number.isFinite)){
+    return scoreMarketData({
+      price:marketData.price,
+      sma20:marketData.ma20,
+      sma50:marketData.ma50,
+      sma200:marketData.ma200,
+      volume:marketData.volume,
+      avgVolume30d:marketData.avgVolume,
+      perf1m:marketData.perf1m,
+      perf3m:marketData.perf3m,
+      perf6m:marketData.perf6m,
+      perfYtd:marketData.perfYtd,
+      rsi14:marketData.rsi
+    }).score;
+  }
+  return null;
+}
+
 function setupScoreForRecord(record){
   const displayScore = numericOrNull(record && record.setup && record.setup.score);
   if(Number.isFinite(displayScore)) return Math.max(0, Math.min(10, Math.round(displayScore)));
-  const score = Math.round(Number(record && record.scan && record.scan.score || 0));
-  return Number.isFinite(score) ? Math.max(0, Math.min(10, score)) : 0;
+  const scanScore = numericOrNull(record && record.scan && record.scan.score);
+  if(Number.isFinite(scanScore) && scanScore > 0) return Math.max(0, Math.min(10, Math.round(scanScore)));
+  const fallbackScore = numericOrNull(fallbackBaseScoreForRecord(record));
+  if(Number.isFinite(fallbackScore)) return Math.max(0, Math.min(10, Math.round(fallbackScore)));
+  if(Number.isFinite(scanScore)) return Math.max(0, Math.min(10, Math.round(scanScore)));
+  return 0;
 }
 
 function setupScoreDisplayForRecord(record){
@@ -3851,8 +3888,12 @@ function setupScoreDisplayForRecord(record){
 function rawSetupScoreForRecord(record){
   const rawScore = numericOrNull(record && record.setup && record.setup.rawScore);
   if(Number.isFinite(rawScore)) return Math.max(0, Math.min(10, Math.round(rawScore)));
-  const score = Math.round(Number(record && record.scan && record.scan.score || 0));
-  return Number.isFinite(score) ? Math.max(0, Math.min(10, score)) : 0;
+  const scanScore = numericOrNull(record && record.scan && record.scan.score);
+  if(Number.isFinite(scanScore) && scanScore > 0) return Math.max(0, Math.min(10, Math.round(scanScore)));
+  const fallbackScore = numericOrNull(fallbackBaseScoreForRecord(record));
+  if(Number.isFinite(fallbackScore)) return Math.max(0, Math.min(10, Math.round(fallbackScore)));
+  if(Number.isFinite(scanScore)) return Math.max(0, Math.min(10, Math.round(scanScore)));
+  return 0;
 }
 
 function practicalSizeFlagForPlan(plan){
