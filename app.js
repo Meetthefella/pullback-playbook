@@ -3878,6 +3878,7 @@ function downgradeVerdict(verdict, steps = 1){
 function evaluateSetupQualityAdjustments(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
+  const baseVerdict = normalizeAnalysisVerdict(options.baseVerdict || analysisVerdictForRecord(rawRecord));
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     rawRecord.plan && rawRecord.plan.entry,
     rawRecord.plan && rawRecord.plan.stop,
@@ -3891,7 +3892,9 @@ function evaluateSetupQualityAdjustments(record, options = {}){
   const stopPercent = Number.isFinite(entry) && Number.isFinite(stop) && entry > 0
     ? Math.abs(entry - stop) / entry
     : null;
+  const trendState = String(derived.trendState || '').toLowerCase();
   const pullbackZone = String(derived.pullbackZone || '').toLowerCase();
+  const structureState = String(derived.structureState || '').toLowerCase();
   const bounceState = String(derived.bounceState || '').toLowerCase();
   const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
   const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
@@ -3902,7 +3905,30 @@ function evaluateSetupQualityAdjustments(record, options = {}){
   const tooWideForQualityPullback = Number.isFinite(stopPercent) && stopPercent > 0.05
     || (Number.isFinite(positionSize) && positionSize < 2)
     || (is50maSetup && Number.isFinite(rrRatio) && rrRatio < 1.6 && bounceState !== 'confirmed');
-  const weakRegimePenalty = hostileMarket && is50maSetup && (bounceState !== 'confirmed' || stabilisationState !== 'clear');
+  const strongBounceConfirmation = bounceState === 'confirmed';
+  const strongStabilisation = stabilisationState === 'clear' && bounceState === 'confirmed';
+  const structureClearlyStrong = trendState === 'strong' && !['weak','weakening','broken'].includes(structureState);
+  const strongEnoughToSurviveWeakRegime = is50maSetup
+    && structureClearlyStrong
+    && strongBounceConfirmation
+    && strongStabilisation
+    && Number.isFinite(stopPercent) && stopPercent < 0.02
+    && Number.isFinite(positionSize) && positionSize > 2
+    && Number.isFinite(rrRatio) && rrRatio >= 1.75
+    && !lowControlSetup
+    && !tooWideForQualityPullback;
+  const borderlineWeakMarketConfirmation = bounceState === 'attempt'
+    || bounceState === 'none'
+    || stabilisationState !== 'clear'
+    || (stabilisationState === 'clear' && bounceState !== 'confirmed');
+  const weakRegimePenalty = hostileMarket
+    && is50maSetup
+    && (
+      tooWideForQualityPullback
+      || lowControlSetup
+      || borderlineWeakMarketConfirmation
+      || (baseVerdict === 'Entry' && !strongEnoughToSurviveWeakRegime)
+    );
   const widthPenalty = tooWideForQualityPullback ? 2 : (lowControlSetup ? 1 : 0);
   const controlQuality = tooWideForQualityPullback ? 'Loose' : (lowControlSetup ? 'Moderate' : 'Tight');
   const capitalEfficiency = tooWideForQualityPullback || (Number.isFinite(positionSize) && positionSize <= 2) || (Number.isFinite(rrRatio) && rrRatio < 1.75)
