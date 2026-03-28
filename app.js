@@ -3401,13 +3401,14 @@ function currentRrThreshold(){
 }
 
 function getRankedDisplayBucket(record){
-  const item = normalizeTickerRecord(record);
-  const view = projectTickerForCard(item);
+  return buildFinalSetupView(record).bucket;
+}
+
+function getFinalBucketFromView(view){
+  const item = view.item;
   const rrValue = numericOrNull(view.rrValue);
   const targetReviewLabel = view.planUiState.state === 'valid' ? targetReviewQueueLabel(item.plan.targetReviewState) : '';
   if(item.lifecycle.stage === 'expired') return 'filtered';
-  if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'filtered';
-  if(view.planUiState.state === 'unrealistic_rr') return 'filtered';
   if(view.setupUiState.state === 'broken') return 'filtered';
   if(view.setupUiState.state === 'entry'){
     if(targetReviewLabel) return 'focus';
@@ -3417,11 +3418,86 @@ function getRankedDisplayBucket(record){
     if(targetReviewLabel || view.displayStage === 'Near Entry') return 'focus';
     return 'tradeable_secondary';
   }
+  if(view.setupUiState.state === 'developing') return 'tradeable_secondary';
+  if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'filtered';
+  if(view.planUiState.state === 'unrealistic_rr') return 'filtered';
   return 'tradeable_secondary';
+}
+
+function rrCategoryForView(view){
+  const rrValue = numericOrNull(view && view.rrValue);
+  if(view && view.planUiState && view.planUiState.state === 'unrealistic_rr') return 'unrealistic';
+  if(!Number.isFinite(rrValue)) return 'na';
+  if(rrValue > 12) return 'unrealistic';
+  if(rrValue > 8) return 'stretched';
+  if(rrValue < currentRrThreshold()) return 'low';
+  return 'normal';
+}
+
+function getFinalClassification(view){
+  const setupState = String(view && (view.setupState || (view.setupUiState && view.setupUiState.state)) || '');
+  const planValidation = String(view && ((view.planValidation && view.planValidation.state) || (view.planUiState && view.planUiState.state)) || '');
+  const positionSize = numericOrNull(view && view.positionSize);
+  const rrCategory = String(view && view.rrCategory || '');
+  if(setupState === 'broken') return 'filtered';
+  if(planValidation === 'invalid') return 'filtered';
+  if(planValidation === 'unrealistic_rr' || rrCategory === 'unrealistic') return 'filtered';
+  if(Number.isFinite(positionSize) && positionSize < 1) return 'filtered';
+  if(setupState === 'entry' && planValidation === 'valid') return 'tradeable';
+  if(setupState === 'watch') return 'review';
+  return 'filtered';
+}
+
+function buildFinalSetupView(record, options = {}){
+  // Phase 1 canonical ranked-card pipeline. This wraps the existing helpers
+  // rather than replacing them so the rest of the app can migrate safely later.
+  const view = projectTickerForCard(record, options);
+  const derivedStates = analysisDerivedStatesFromRecord(view.item);
+  const rrCategory = rrCategoryForView(view);
+  const finalClassification = getFinalClassification({
+    ...view,
+    rrCategory,
+    setupState:view.setupUiState.state,
+    planValidation:{state:view.planUiState.state}
+  });
+  const bucket = getFinalBucketFromView(view);
+  return {
+    ...view,
+    ticker:view.item.ticker,
+    companyName:view.item.meta.companyName || '',
+    setupStates:derivedStates,
+    tradePlan:{
+      effectivePlan:view.effectivePlan,
+      displayedPlan:view.displayedPlan
+    },
+    planValidation:{
+      state:view.planUiState.state,
+      label:view.planUiState.label
+    },
+    score:view.setupScore,
+    scoreLabel:view.setupScoreDisplay,
+    setupState:view.setupUiState.state,
+    setupLabel:view.setupUiState.label,
+    rrCategory,
+    finalClassification,
+    bucket,
+    rrDisplay:shouldShowActionableRR(view) && Number.isFinite(view.actionableRrValue)
+      ? `R:R ${view.actionableRrValue.toFixed(2)}`
+      : '',
+    structureLabel:structureLabelForRecord(view.item, derivedStates, {displayStage:view.displayStage}),
+    pullbackLabel:derivedStates.pullbackZone === 'near_20ma' ? 'Near 20MA' : (derivedStates.pullbackZone === 'near_50ma' ? 'Near 50MA' : ''),
+    bounceLabel:derivedStates.bounceState === 'confirmed' ? 'Bounce confirmed' : (derivedStates.bounceState === 'attempt' ? 'Bounce tentative' : (derivedStates.bounceState === 'none' ? 'No bounce' : '')),
+    canOpenReview:true,
+    canAddToWatchlist:true
+  };
 }
 
 function classifyRankedRecord(record){
   return getRankedDisplayBucket(record);
+}
+
+function classifyRankedView(view){
+  return view && view.bucket ? view.bucket : 'tradeable_secondary';
 }
 
 function buildRankedBuckets(records){
@@ -3440,8 +3516,27 @@ function buildRankedBuckets(records){
   return buckets;
 }
 
+function buildRankedBucketsFromViews(views){
+  const deduped = new Map();
+  (views || []).forEach(view => {
+    const ticker = normalizeTicker(view && view.ticker);
+    if(ticker && !deduped.has(ticker)) deduped.set(ticker, view);
+  });
+  const buckets = {focus:[], tradeableSecondary:[], filtered:[]};
+  Array.from(deduped.values()).forEach(view => {
+    const finalClassification = getFinalClassification(view);
+    if(finalClassification === 'filtered') buckets.filtered.push(view);
+    else buckets.tradeableSecondary.push(view);
+  });
+  return buckets;
+}
+
 function resultReasonForRecord(record){
   const view = projectTickerForCard(record);
+  return resultReasonForView(view);
+}
+
+function resultReasonForView(view){
   const item = view.item;
   const rrValue = numericOrNull(view.actionableRrValue);
   const estimatedRrValue = numericOrNull(view.rrValue);
@@ -3463,6 +3558,10 @@ function resultReasonForRecord(record){
 
 function resultSupportLineForRecord(record){
   const view = projectTickerForCard(record);
+  return resultSupportLineForView(view);
+}
+
+function resultSupportLineForView(view){
   const item = view.item;
   const rrValue = shouldShowActionableRR(view) ? numericOrNull(view.actionableRrValue) : null;
   const convictionTier = view.convictionTier;
@@ -3488,6 +3587,10 @@ function isFilteredResultRecord(record){
 
 function renderCompactResultCard(record){
   const view = projectTickerForCard(record);
+  return renderCompactResultCardFromView(view);
+}
+
+function renderCompactResultCardFromView(view){
   const item = view.item;
   const displayStage = view.setupUiState.label;
   const scoreLabel = view.setupScoreDisplay;
@@ -3495,7 +3598,7 @@ function renderCompactResultCard(record){
   const rrValue = shouldShowActionableRR(view) ? numericOrNull(view.actionableRrValue) : null;
   const statusPills = scanCardStatusPills(view, 3);
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
-  const reasonLine = compactReasonLineForRecord(item, 3);
+  const reasonLine = compactReasonLineForView(view, 3);
   const detailMeta = [
     companyLine,
     Number.isFinite(item.marketData.price) ? `Price ${fmtPrice(Number(item.marketData.price))}` : '',
@@ -3508,6 +3611,33 @@ function renderCompactResultCard(record){
     item.setup.marketCaution ? 'Market caution' : ''
   ].filter(Boolean).join(' | ');
   return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${view.setupUiState.className}">${escapeHtml(displayStage)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span><span class="pill">${escapeHtml(convictionTier)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultmetrics">${statusPills.map(pill => `<span class="pill">${escapeHtml(pill)}</span>`).join('')}</div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderPlanProjectionFromRecord(item)}</details></div>`;
+}
+
+function compactReasonLineForView(view, maxParts = 3){
+  const item = view.item;
+  const derived = view.setupStates || analysisDerivedStatesFromRecord(item);
+  const estimatedRrValue = item.plan && item.plan.hasValidPlan ? numericOrNull(item.plan.plannedRR) : numericOrNull(item.scan.estimatedRR);
+  const warningState = view.warningState || item.setup.warning || warningStateFromInputs(item, null, derived);
+  const parts = [];
+  const pushPart = value => {
+    if(value && !parts.includes(value) && parts.length < maxParts) parts.push(value);
+  };
+  const structureLabel = structureLabelForRecord(item, derived, {displayStage:view.displayStage});
+  if(structureLabel) pushPart(structureLabel);
+  else if(derived.trendState === 'strong') pushPart('Strong trend');
+  else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
+  if(derived.pullbackZone === 'near_20ma') pushPart('Near 20MA');
+  if(derived.pullbackZone === 'near_50ma') pushPart('Near 50MA');
+  if(derived.bounceState === 'confirmed') pushPart('Bounce confirmed');
+  else if(derived.bounceState === 'attempt') pushPart('Bounce tentative');
+  else if(derived.bounceState === 'none') pushPart('No bounce');
+  if(!item.plan.hasValidPlan && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) pushPart('Low est reward');
+  if(derived.stabilisationState === 'early') pushPart('Early stabilisation');
+  if(derived.volumeState === 'weak') pushPart('Weak volume');
+  if(item.setup.marketCaution) pushPart('Weak market caution');
+  warningState.reasons.forEach(pushPart);
+  if(!parts.length) pushPart(resultReasonForView(view));
+  return parts.slice(0, maxParts).join(' | ');
 }
 
 function hasAiStageForRecord(record){
@@ -4187,6 +4317,22 @@ function planUiClass(planValidity){
   return 'avoid';
 }
 
+// Re-declare the UI label helpers with explicit Unicode escapes so visible
+// labels stay exact even if the source file previously picked up mojibake.
+function setupUiLabel(setupState){
+  if(setupState === 'broken') return '\u26D4 Broken';
+  if(setupState === 'developing') return '\uD83C\uDF31 Developing';
+  if(setupState === 'entry') return '\uD83D\uDE80 Entry';
+  return '\uD83D\uDC40 Watch';
+}
+
+function planUiLabel(planValidity){
+  if(planValidity === 'valid') return '\u2705 Plan valid';
+  if(planValidity === 'needs_adjustment') return '\uD83D\uDEE0\uFE0F Needs adjustment';
+  if(planValidity === 'unrealistic_rr') return '\uD83D\uDEAB Unrealistic R:R';
+  return '\u274C Invalid plan';
+}
+
 function getPlanUiState(record, options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
@@ -4210,6 +4356,7 @@ function getPlanUiState(record, options = {}){
   const rewardRisk = displayedPlan.rewardRisk && typeof displayedPlan.rewardRisk === 'object' ? displayedPlan.rewardRisk : {};
   const rrRatio = actionableRrValueForPlan(displayedPlan);
   const setupState = options.setupState || '';
+  const positionSize = numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size);
   const firstTargetTooClose = rewardRisk.valid
     && Number.isFinite(rewardRisk.rewardPerShare)
     && Number.isFinite(rewardRisk.riskPerShare)
@@ -4219,6 +4366,8 @@ function getPlanUiState(record, options = {}){
   if(setupState === 'broken'){
     stateKey = 'invalid';
   }else if(displayedPlan.status !== 'valid'){
+    stateKey = 'invalid';
+  }else if(!Number.isFinite(positionSize) || positionSize <= 0){
     stateKey = 'invalid';
   }else if(!Number.isFinite(rrRatio)){
     stateKey = 'invalid';
@@ -4410,12 +4559,21 @@ function canonicalBaseSetupScore(record, options = {}){
 
 function setupScoreForRecord(record){
   const displayScore = numericOrNull(record && record.setup && record.setup.score);
-  if(Number.isFinite(displayScore)) return Math.max(0, Math.min(10, Math.round(displayScore)));
-  const baseScore = canonicalBaseSetupScore(record);
-  if(Number.isFinite(baseScore)) return Math.max(0, Math.min(10, Math.round(baseScore)));
-  const scanScore = numericOrNull(record && record.scan && record.scan.score);
-  if(Number.isFinite(scanScore)) return Math.max(0, Math.min(10, Math.round(scanScore)));
-  return 0;
+  const baseValue = Number.isFinite(displayScore)
+    ? Math.max(0, Math.min(10, Math.round(displayScore)))
+    : (Number.isFinite(canonicalBaseSetupScore(record))
+      ? Math.max(0, Math.min(10, Math.round(canonicalBaseSetupScore(record))))
+      : (Number.isFinite(numericOrNull(record && record.scan && record.scan.score))
+        ? Math.max(0, Math.min(10, Math.round(numericOrNull(record && record.scan && record.scan.score))))
+        : 0));
+  const safeRecord = record && typeof record === 'object' ? record : {};
+  const setupUiState = getSetupUiState(safeRecord, {
+    displayStage:displayStageForRecord(safeRecord)
+  });
+  if(setupUiState.state === 'broken') return Math.min(3, baseValue);
+  if(setupUiState.state === 'watch') return Math.max(4, Math.min(7, baseValue));
+  if(setupUiState.state === 'entry') return Math.max(8, Math.min(10, baseValue));
+  return baseValue;
 }
 
 function setupScoreDisplayForRecord(record){
@@ -7969,6 +8127,7 @@ function renderScannerResults(){
   if(!box) return;
   box.innerHTML = '';
   const records = rankedTickerRecords();
+  const finalViews = records.map(record => buildFinalSetupView(record));
   const focusItems = focusQueueRecords();
   if(resultsToggle){
     resultsToggle.open = !focusItems.length;
@@ -7994,7 +8153,7 @@ function renderScannerResults(){
     renderWorkflowAlerts();
     return;
   }
-  const buckets = buildRankedBuckets(records);
+  const buckets = buildRankedBucketsFromViews(finalViews);
   const tradeable = buckets.tradeableSecondary;
   const filtered = buckets.filtered;
   const sections = [
@@ -8028,14 +8187,14 @@ function renderScannerResults(){
     }
     const list = wrap.querySelector('.list');
     if(section.items.length){
-      section.items.forEach(record => {
+      section.items.forEach(view => {
         const card = document.createElement('div');
-        card.innerHTML = renderCompactResultCard(record);
+        card.innerHTML = renderCompactResultCardFromView(view);
         const node = card.firstElementChild;
         if(!node) return;
         const reviewBtn = node.querySelector('[data-act="review"]');
         if(reviewBtn){
-          const ticker = normalizeTickerRecord(record).ticker;
+          const ticker = view.ticker;
           reviewBtn.onclick = () => openRankedResultInReview(ticker);
           const watchlistBtn = node.querySelector('[data-act="watchlist"]');
           if(watchlistBtn){
