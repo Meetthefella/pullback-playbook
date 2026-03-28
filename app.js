@@ -2548,6 +2548,55 @@ function renderTickerQuickLists(){
   });
 }
 
+function queueDebugSnapshot(options = {}){
+  const includeFocus = options.includeFocus !== false;
+  const currentCycle = currentQueueCycleKey();
+  let focusTickers = [];
+  if(includeFocus && state.activeQueueLastRebuiltCycle === currentCycle){
+    try{
+      focusTickers = focusQueueRecords({limit:null}).map(item => item.ticker);
+    }catch(error){
+      focusTickers = ['<focus_unavailable>'];
+    }
+  }
+  return {
+    tickers:[...(state.tickers || [])],
+    activeQueueClearedCycle:String(state.activeQueueClearedCycle || ''),
+    activeQueueClearedTickers:uniqueTickers(state.activeQueueClearedTickers || []),
+    activeQueueManualTickers:uniqueTickers(state.activeQueueManualTickers || []),
+    dismissedFocusTickers:uniqueTickers(state.dismissedFocusTickers || []),
+    focusTickers
+  };
+}
+
+function logQueueMutation(action, beforeSnapshot, options = {}){
+  console.debug(action, {
+    before:beforeSnapshot,
+    after:queueDebugSnapshot(options)
+  });
+}
+
+function clearScannerProjectionState(record){
+  if(!record) return;
+  // Scanner-universe clear should drop scanner/card projections without wiping
+  // saved watchlist, review, plan, or diary data.
+  record.scan.lastScannedAt = '';
+  record.scan.scoreRaw = null;
+  record.scan.scoreDisplay = null;
+  record.scan.score = null;
+  record.scan.verdict = '';
+  record.scan.summary = '';
+  record.scan.reasons = [];
+  record.scan.reason = '';
+  record.scan.riskStatus = '';
+  record.scan.estimatedRR = null;
+  record.scan.checksMet = null;
+  record.scan.pullbackType = '';
+  record.scan.pullbackStatus = '';
+  record.scan.trendStatus = '';
+  record.review.cardOpen = false;
+}
+
 function normalizeWatchlistEntry(entry){
   const normalized = {
     ticker:normalizeTicker(entry && entry.ticker),
@@ -2816,6 +2865,8 @@ async function runScannerWorkflow(options = {}){
   const result = await refreshMarketDataForTickers(universe, options);
   state.dismissedFocusTickers = [];
   state.dismissedFocusCycle = '';
+  state.activeQueueClearedCycle = '';
+  state.activeQueueClearedTickers = [];
   persistState();
   if($('advancedScannerTools')) $('advancedScannerTools').open = false;
   setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} ranked, ${result.rejected} avoid, ${result.failed} failed.`);
@@ -3349,6 +3400,36 @@ function currentRrThreshold(){
   return 1.5;
 }
 
+function classifyRankedRecord(record){
+  const item = normalizeTickerRecord(record);
+  const view = projectTickerForCard(item);
+  const rrValue = numericOrNull(view.rrValue);
+  const stage = focusStageForRecord(item);
+  const targetReviewLabel = view.planState === 'valid' ? targetReviewQueueLabel(item.plan.targetReviewState) : '';
+  if(item.lifecycle.stage === 'avoided' || item.lifecycle.stage === 'expired') return 'filtered';
+  if(item.action.stage === 'avoid') return 'filtered';
+  if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'filtered';
+  if(targetReviewLabel) return 'focus';
+  if(stage === 'Entry' || stage === 'Near Entry') return 'focus';
+  return 'tradeable_secondary';
+}
+
+function buildRankedBuckets(records){
+  const deduped = new Map();
+  (records || []).forEach(record => {
+    const ticker = normalizeTickerRecord(record).ticker;
+    if(ticker && !deduped.has(ticker)) deduped.set(ticker, record);
+  });
+  const buckets = {focus:[], tradeableSecondary:[], filtered:[]};
+  Array.from(deduped.values()).forEach(record => {
+    const bucket = classifyRankedRecord(record);
+    if(bucket === 'filtered') buckets.filtered.push(record);
+    else if(bucket === 'tradeable_secondary') buckets.tradeableSecondary.push(record);
+    else buckets.focus.push(record);
+  });
+  return buckets;
+}
+
 function resultReasonForRecord(record){
   const view = projectTickerForCard(record);
   const item = view.item;
@@ -3388,12 +3469,7 @@ function resultSupportLineForRecord(record){
 }
 
 function isFilteredResultRecord(record){
-  const item = normalizeTickerRecord(record);
-  const rrValue = numericOrNull(recordRrValue(item));
-  return item.action.stage === 'avoid'
-    || item.lifecycle.stage === 'avoided'
-    || item.lifecycle.stage === 'expired'
-    || (Number.isFinite(rrValue) && rrValue < currentRrThreshold());
+  return classifyRankedRecord(record) === 'filtered';
 }
 
 function renderCompactResultCard(record){
@@ -3440,23 +3516,15 @@ function focusQueueRecords(options = {}){
   if(queueClearedForCycle && !manualTickers.length && !clearedTickers.size){
     return [];
   }
-  const ranked = rankedTickerRecords()
-    .filter(record => {
-      const item = normalizeTickerRecord(record);
-      const stage = focusStageForRecord(item);
-      if(dismissedTickers.has(item.ticker)) return false;
-      if(stage === 'Avoid') return false;
-      if(item.lifecycle.stage === 'expired' || item.lifecycle.stage === 'avoided') return false;
-      if(item.plan.status === 'valid' && targetReviewQueueLabel(item.plan.targetReviewState)) return true;
-      return ['Entry','Near Entry','Watch'].includes(stage);
-    })
+  const ranked = buildRankedBuckets(rankedTickerRecords()).focus
+    .filter(record => !dismissedTickers.has(normalizeTickerRecord(record).ticker))
     .sort((a, b) => rankTickerForFocus(b) - rankTickerForFocus(a) || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a) || a.ticker.localeCompare(b.ticker));
   const recordsByTicker = new Map();
   ranked.forEach(record => recordsByTicker.set(normalizeTickerRecord(record).ticker, record));
   manualTickers.forEach(ticker => {
     if(dismissedTickers.has(normalizeTicker(ticker))) return;
     const record = getTickerRecord(ticker);
-    if(record && normalizeTickerRecord(record).watchlist.inWatchlist){
+    if(record && normalizeTickerRecord(record).watchlist.inWatchlist && classifyRankedRecord(record) === 'focus'){
       recordsByTicker.set(normalizeTicker(ticker), record);
     }
   });
@@ -5223,40 +5291,64 @@ function currentQueueCycleKey(now = new Date()){
 }
 
 function rebuildActiveQueueFromWatchlist(options = {}){
+  const before = queueDebugSnapshot({includeFocus:false});
   const cycleKey = currentQueueCycleKey();
+  const preserveDismissedState = options.preserveDismissedState !== false;
+  const preserveClearedState = options.preserveClearedState !== false;
   state.activeQueueManualTickers = watchlistTickerRecords().map(record => record.ticker);
-  state.dismissedFocusTickers = [];
-  state.dismissedFocusCycle = '';
-  state.activeQueueClearedCycle = '';
-  state.activeQueueClearedTickers = [];
+  // Queue clears/dismissals are intentional user actions for the current cycle
+  // and should survive routine rebuilds and render-time maintenance.
+  if(!preserveDismissedState){
+    state.dismissedFocusTickers = [];
+    state.dismissedFocusCycle = '';
+  }
+  if(!preserveClearedState){
+    state.activeQueueClearedCycle = '';
+    state.activeQueueClearedTickers = [];
+  }
   state.activeQueueLastRebuiltCycle = cycleKey;
   if(options.persist !== false) persistState();
+  logQueueMutation('REBUILD_ACTIVE_QUEUE_FROM_WATCHLIST', before);
   return cycleKey;
 }
 
 function ensureActiveQueueCycle(){
   const cycleKey = currentQueueCycleKey();
   if(state.activeQueueLastRebuiltCycle === cycleKey) return cycleKey;
-  return rebuildActiveQueueFromWatchlist();
+  return rebuildActiveQueueFromWatchlist({
+    preserveDismissedState:true,
+    preserveClearedState:true
+  });
 }
 
 function clearActiveQueueForToday(){
-  state.activeQueueClearedTickers = focusQueueRecords({limit:null}).map(item => item.ticker);
+  const before = queueDebugSnapshot();
+  state.activeQueueClearedTickers = uniqueTickers(focusQueueRecords({limit:null}).map(item => item.ticker));
   state.activeQueueClearedCycle = currentQueueCycleKey();
   state.activeQueueManualTickers = [];
   persistState();
+  logQueueMutation('CLEAR_ACTIVE_QUEUE_FOR_TODAY', before);
 }
 
 function requeueTickerForToday(ticker, options = {}){
+  const before = queueDebugSnapshot({includeFocus:false});
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   if(state.activeQueueLastRebuiltCycle !== currentQueueCycleKey()){
-    rebuildActiveQueueFromWatchlist({persist:false});
+    rebuildActiveQueueFromWatchlist({
+      persist:false,
+      preserveDismissedState:true,
+      preserveClearedState:true
+    });
   }
-  state.activeQueueClearedCycle = '';
-  state.activeQueueClearedTickers = [];
+  // Requeueing one ticker should not restore the whole cleared queue.
+  if(state.activeQueueClearedCycle === currentQueueCycleKey()){
+    state.activeQueueClearedTickers = uniqueTickers((state.activeQueueClearedTickers || []).filter(item => normalizeTicker(item) !== symbol));
+    if(!state.activeQueueClearedTickers.length) state.activeQueueClearedCycle = '';
+  }
   state.activeQueueManualTickers = uniqueTickers([symbol, ...(state.activeQueueManualTickers || [])]);
   if(options.persist !== false) persistState();
+  logQueueMutation('REQUEUE_TICKER_FOR_TODAY', before);
 }
 
 function formatLocalTimestamp(timestamp){
@@ -7650,21 +7742,15 @@ function renderScannerResults(){
     renderWorkflowAlerts();
     return;
   }
-  const tradeable = [];
-  const filtered = [];
-  records.forEach(record => {
-    if(isFilteredResultRecord(record)){
-      filtered.push(record);
-    }else{
-      tradeable.push(record);
-    }
-  });
+  const buckets = buildRankedBuckets(records);
+  const tradeable = buckets.tradeableSecondary;
+  const filtered = buckets.filtered;
   const sections = [
     {
       title:'Tradeable / Review-worthy',
       summary: tradeable.length
         ? `${tradeable.length} setup${tradeable.length === 1 ? '' : 's'} worth reviewing now.`
-        : 'No strong review candidates right now.',
+        : (buckets.focus.length ? 'No additional ranked setups beyond Today\'s Focus.' : 'No strong review candidates right now.'),
       items:tradeable,
       collapsed:false,
       empty:'No tradeable setups right now. Try refreshing the scanner or reviewing the watchlist.'
@@ -8381,6 +8467,7 @@ click('importScreenshotBtn', () => { if($('ocrImportFile')) $('ocrImportFile').c
 click('applyOcrBtn', applyOcrTickers);
 click('clearOcrBtn', () => clearOcrReview('OCR review cleared.'));
 click('clearBtn', () => {
+  const before = queueDebugSnapshot();
   $('tickerInput').value = '';
   if($('tvImportInput')) $('tvImportInput').value = '';
   if($('ocrReviewInput')) $('ocrReviewInput').value = '';
@@ -8393,7 +8480,10 @@ click('clearBtn', () => {
   uiState.promptOpen = {};
   uiState.responseOpen = {};
   uiState.selectedScanner = {};
+  Object.values(state.tickerRecords || {}).forEach(clearScannerProjectionState);
   renderTickerSuggestions([]);
+  // Scanner clear should remain isolated from canonical watchlist/review records.
+  // Clear the canonical scanner/card projections first, then persist.
   commitTickerState();
   renderTickerQuickLists();
   renderTvImportPreview([], 'default');
@@ -8406,6 +8496,7 @@ click('clearBtn', () => {
   resetReview();
   setStatus('inputStatus', 'Scanner universe cleared.');
   updateTickerSearchStatus();
+  logQueueMutation('CLEAR_SCANNER_UNIVERSE', before);
 });
 click('resetAllBtn', () => {
   if(!window.confirm('Are you sure? This resets the app and clears locally saved data on this device.')) return;
