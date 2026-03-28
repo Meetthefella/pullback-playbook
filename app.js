@@ -3400,18 +3400,21 @@ function currentRrThreshold(){
   return 1.5;
 }
 
-function classifyRankedRecord(record){
+function getRankedDisplayBucket(record){
   const item = normalizeTickerRecord(record);
   const view = projectTickerForCard(item);
   const rrValue = numericOrNull(view.rrValue);
-  const stage = focusStageForRecord(item);
   const targetReviewLabel = view.planState === 'valid' ? targetReviewQueueLabel(item.plan.targetReviewState) : '';
   if(item.lifecycle.stage === 'avoided' || item.lifecycle.stage === 'expired') return 'filtered';
-  if(item.action.stage === 'avoid') return 'filtered';
   if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'filtered';
+  if(view.displayStage === 'Avoid') return 'filtered';
   if(targetReviewLabel) return 'focus';
-  if(stage === 'Entry' || stage === 'Near Entry') return 'focus';
+  if(view.displayStage === 'Entry' || view.displayStage === 'Near Entry') return 'focus';
   return 'tradeable_secondary';
+}
+
+function classifyRankedRecord(record){
+  return getRankedDisplayBucket(record);
 }
 
 function buildRankedBuckets(records){

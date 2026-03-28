@@ -16,6 +16,7 @@ function normalizeRecordVersions(record){
   // userUpdatedAt tracks user-authored state. Scheduler-only market refreshes
   // must not advance the version used for merge/delete conflict resolution.
   if(!meta.userUpdatedAt && fallbackUpdatedAt) meta.userUpdatedAt = fallbackUpdatedAt;
+  if(!('marketUpdatedAt' in meta)) meta.marketUpdatedAt = String(meta.marketUpdatedAt || '');
   return {
     ...safe,
     meta

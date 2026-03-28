@@ -73,6 +73,7 @@ exports.handler = async function handler(){
     try{
       const snapshot = await fetchSnapshot(ticker, settings);
       const marketUpdatedAt = snapshot.fetchedAt || new Date().toISOString();
+      const existingMeta = record.meta && typeof record.meta === 'object' ? record.meta : {};
       record.marketData = {
         ...record.marketData,
         price:snapshot.price,
@@ -113,9 +114,9 @@ exports.handler = async function handler(){
       // market polls and trigger progression cannot overwrite newer unsynced
       // local notes/checklist/plan edits on the client.
       record.meta = {
-        ...(record.meta || {}),
-        userUpdatedAt:priorUserUpdatedAt || String(record.meta && record.meta.userUpdatedAt || ''),
-        updatedAt:priorUserUpdatedAt || String(record.meta && record.meta.updatedAt || ''),
+        ...existingMeta,
+        userUpdatedAt:priorUserUpdatedAt || String(existingMeta.userUpdatedAt || existingMeta.updatedAt || ''),
+        updatedAt:priorUserUpdatedAt || String(existingMeta.updatedAt || ''),
         marketUpdatedAt
       };
       nextRecords[ticker] = record;
