@@ -3603,8 +3603,8 @@ function resultReasonForView(view){
   const item = view.item;
   const rrValue = numericOrNull(view.actionableRrValue);
   const estimatedRrValue = numericOrNull(view.rrValue);
-  const displayStage = view.setupUiState.label;
-  const structureLabel = structureLabelForRecord(item, analysisDerivedStatesFromRecord(item), {displayStage});
+  const structureBadge = shortlistStructureBadgeForView(view);
+  const structureLabel = `${structureBadge.label} structure`;
   if(Number.isFinite(item.marketData.price) && Number.isFinite(item.marketData.ma200) && item.marketData.price < item.marketData.ma200) return 'Trend broken';
   if(Number.isFinite(item.marketData.ma50) && Number.isFinite(item.marketData.ma200) && item.marketData.ma50 < item.marketData.ma200) return 'Trend broken';
   if(item.plan.firstTargetTooClose) return 'First target too close';
@@ -3629,6 +3629,14 @@ function resultSupportLineForView(view){
   const rrValue = shouldShowActionableRR(view) ? numericOrNull(view.actionableRrValue) : null;
   const convictionTier = view.convictionTier;
   if(view.setupUiState.state === 'broken') return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
+  if(view.bucket === 'filtered' || view.finalClassification === 'filtered'){
+    const pieces = [
+      convictionTier,
+      item.setup.marketCaution ? 'Weak market caution' : '',
+      item.meta.companyName || item.meta.exchange || ''
+    ].filter(Boolean);
+    return pieces.join(' | ') || 'Filtered from the main review queue.';
+  }
   const pieces = [
     convictionTier,
     view.planUiState.label,
@@ -3648,6 +3656,39 @@ function isFilteredResultRecord(record){
   return classifyRankedRecord(record) === 'filtered';
 }
 
+function shortlistStructureBadgeForView(view){
+  const item = view && view.item ? view.item : {};
+  const derived = view && view.setupStates ? view.setupStates : analysisDerivedStatesFromRecord(item);
+  const trendState = String(derived.trendState || '').toLowerCase();
+  const structureState = String(derived.structureState || '').toLowerCase();
+  const structureQuality = String(view && view.structureQuality || finalStructureQualityForView({
+    ...view,
+    item,
+    setupStates:derived
+  }));
+  const price = numericOrNull(item.marketData && item.marketData.price);
+  const ma50 = numericOrNull(item.marketData && item.marketData.ma50);
+  const ma200 = numericOrNull(item.marketData && item.marketData.ma200);
+  const brokenTrend = trendState === 'broken'
+    || structureState === 'broken'
+    || (Number.isFinite(price) && Number.isFinite(ma200) && price < ma200)
+    || (Number.isFinite(ma50) && Number.isFinite(ma200) && ma50 < ma200);
+  if(brokenTrend) return {state:'broken', label:'Broken', className:'avoid'};
+  if(structureQuality === 'strong') return {state:'strong', label:'Strong', className:'ready'};
+  if(structureQuality === 'developing_clean' || structureState === 'developing') return {state:'developing', label:'Developing', className:'near'};
+  return {state:'weak', label:'Weak', className:'near'};
+}
+
+function shortlistStatusPills(view, maxPills = 3){
+  if(view.bucket === 'filtered' || view.finalClassification === 'filtered'){
+    const pills = [];
+    if(view.warningState && view.warningState.showWarning) pills.push('Warning');
+    if(view.item && view.item.setup && view.item.setup.marketCaution) pills.push('Weak market caution');
+    return pills.slice(0, maxPills);
+  }
+  return scanCardStatusPills(view, maxPills);
+}
+
 function renderCompactResultCard(record){
   const view = projectTickerForCard(record);
   return renderCompactResultCardFromView(view);
@@ -3655,11 +3696,13 @@ function renderCompactResultCard(record){
 
 function renderCompactResultCardFromView(view){
   const item = view.item;
-  const displayStage = view.setupUiState.label;
+  const structureBadge = shortlistStructureBadgeForView(view);
+  const displayStage = structureBadge.label;
   const scoreLabel = view.setupScoreDisplay;
   const convictionTier = view.convictionTier;
   const rrValue = shouldShowActionableRR(view) ? numericOrNull(view.actionableRrValue) : null;
-  const statusPills = scanCardStatusPills(view, 3);
+  const statusPills = shortlistStatusPills(view, 3);
+  const filteredCard = view.bucket === 'filtered' || view.finalClassification === 'filtered';
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const reasonLine = compactReasonLineForView(view, 3);
   const detailMeta = [
@@ -3669,11 +3712,11 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(item.marketData.ma50) ? `50 ${fmtPrice(Number(item.marketData.ma50))}` : '',
     Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
-    Number.isFinite(rrValue) ? `R:R ${rrValue.toFixed(2)}` : '',
-    view.planUiState.label,
+    (!filteredCard && Number.isFinite(rrValue)) ? `R:R ${rrValue.toFixed(2)}` : '',
+    !filteredCard ? view.planUiState.label : '',
     item.setup.marketCaution ? 'Market caution' : ''
   ].filter(Boolean).join(' | ');
-  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${view.setupUiState.className}">${escapeHtml(displayStage)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span><span class="pill">${escapeHtml(convictionTier)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultmetrics">${statusPills.map(pill => `<span class="pill">${escapeHtml(pill)}</span>`).join('')}</div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderPlanProjectionFromRecord(item)}</details></div>`;
+  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${structureBadge.className}">${escapeHtml(displayStage)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span><span class="pill">${escapeHtml(convictionTier)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultmetrics">${statusPills.map(pill => `<span class="pill">${escapeHtml(pill)}</span>`).join('')}</div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button><button class="secondary compactbutton" data-act="watchlist">Add to Watchlist</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${renderPlanProjectionFromRecord(item)}</details></div>`;
 }
 
 function compactReasonLineForView(view, maxParts = 3){
@@ -3685,7 +3728,7 @@ function compactReasonLineForView(view, maxParts = 3){
   const pushPart = value => {
     if(value && !parts.includes(value) && parts.length < maxParts) parts.push(value);
   };
-  const structureLabel = structureLabelForRecord(item, derived, {displayStage:view.displayStage});
+  const structureLabel = `${shortlistStructureBadgeForView(view).label} structure`;
   if(structureLabel) pushPart(structureLabel);
   else if(derived.trendState === 'strong') pushPart('Strong trend');
   else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
