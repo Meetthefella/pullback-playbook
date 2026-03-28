@@ -3455,22 +3455,26 @@ function getFinalClassification(view){
   const planValidation = String(view && ((view.planValidation && view.planValidation.state) || (view.planUiState && view.planUiState.state)) || '');
   const positionSize = numericOrNull(view && view.positionSize);
   const rrCategory = String(view && view.rrCategory || '');
-  const isNotReadySetup = !!(view && view.isNotReadySetup);
+  const hasPlanAdjustmentBlock = !!(view && view.hasPlanAdjustmentBlock);
   const structureQuality = String(view && view.structureQuality || finalStructureQualityForView(view));
   const bounceState = String(view && view.bounceState || (view && view.setupStates && view.setupStates.bounceState) || '').toLowerCase();
   if(setupState === 'broken') return 'filtered';
   if(planValidation === 'invalid') return 'filtered';
   if(planValidation === 'unrealistic_rr' || rrCategory === 'unrealistic') return 'filtered';
   if(Number.isFinite(positionSize) && positionSize < 1) return 'filtered';
+  if(hasPlanAdjustmentBlock || planValidation === 'needs_adjustment') return 'filtered';
   if(structureQuality === 'weak') return 'filtered';
   if(structureQuality === 'developing_loose') return 'filtered';
   if(structureQuality === 'developing_clean' && bounceState !== 'confirmed') return 'filtered';
-  if(structureQuality === 'developing_clean' && bounceState === 'confirmed') return 'review';
+  if(structureQuality === 'developing_clean' && bounceState === 'confirmed') return 'early';
+  if(structureQuality === 'strong' && ['none','attempt'].includes(bounceState)) return 'early';
   if(structureQuality === 'strong' && bounceState === 'confirmed' && planValidation === 'valid') return 'tradeable';
-  if(structureQuality === 'strong' && bounceState === 'none') return 'review';
-  if(isNotReadySetup) return 'filtered';
-  if(setupState === 'entry' && planValidation === 'valid') return 'tradeable';
-  if(setupState === 'watch') return 'review';
+  return 'filtered';
+}
+
+function legacyBucketForFinalClassification(finalClassification){
+  if(finalClassification === 'tradeable') return 'focus';
+  if(finalClassification === 'early') return 'tradeable_secondary';
   return 'filtered';
 }
 
@@ -3487,10 +3491,13 @@ function buildFinalSetupView(record, options = {}){
   const isStructureValid = ['strong','developing_clean'].includes(structureQuality);
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const hasPlanAdjustmentBlock = view.planUiState.state === 'needs_adjustment'
+    || rrCategory === 'stretched'
+    || !!(view.item && view.item.plan && view.item.plan.firstTargetTooClose);
   const isNotReadySetup = view.setupUiState.state === 'developing'
     || !isStructureValid
     || bounceState === 'none'
-    || view.planUiState.state === 'needs_adjustment';
+    || hasPlanAdjustmentBlock;
   const finalSetupState = view.setupUiState.state === 'broken'
     ? 'broken'
     : (isNotReadySetup ? 'developing' : view.setupUiState.state);
@@ -3504,12 +3511,13 @@ function buildFinalSetupView(record, options = {}){
     rrCategory,
     structureQuality,
     isStructureValid,
+    hasPlanAdjustmentBlock,
     isNotReadySetup,
     bounceState,
     setupState:finalSetupState,
     planValidation:{state:view.planUiState.state}
   });
-  const bucket = getFinalBucketFromView(view);
+  const bucket = legacyBucketForFinalClassification(finalClassification);
   return {
     ...view,
     ticker:view.item.ticker,
@@ -3531,6 +3539,7 @@ function buildFinalSetupView(record, options = {}){
     rrCategory,
     structureQuality,
     isStructureValid,
+    hasPlanAdjustmentBlock,
     isNotReadySetup,
     finalClassification,
     bucket,
@@ -3550,7 +3559,7 @@ function classifyRankedRecord(record){
 }
 
 function classifyRankedView(view){
-  return view && view.bucket ? view.bucket : 'tradeable_secondary';
+  return view && view.bucket ? view.bucket : 'filtered';
 }
 
 function buildRankedBuckets(records){
@@ -3577,9 +3586,10 @@ function buildRankedBucketsFromViews(views){
   });
   const buckets = {focus:[], tradeableSecondary:[], filtered:[]};
   Array.from(deduped.values()).forEach(view => {
-    const finalClassification = getFinalClassification(view);
-    if(finalClassification === 'filtered') buckets.filtered.push(view);
-    else buckets.tradeableSecondary.push(view);
+    const bucket = classifyRankedView(view);
+    if(bucket === 'focus') buckets.focus.push(view);
+    else if(bucket === 'tradeable_secondary') buckets.tradeableSecondary.push(view);
+    else buckets.filtered.push(view);
   });
   return buckets;
 }
@@ -8207,17 +8217,27 @@ function renderScannerResults(){
     return;
   }
   const buckets = buildRankedBucketsFromViews(finalViews);
-  const tradeable = buckets.tradeableSecondary;
+  const tradeable = buckets.focus;
+  const early = buckets.tradeableSecondary;
   const filtered = buckets.filtered;
   const sections = [
     {
-      title:'Tradeable / Review-worthy',
+      title:'Tradeable',
       summary: tradeable.length
-        ? `${tradeable.length} setup${tradeable.length === 1 ? '' : 's'} worth reviewing now.`
-        : (buckets.focus.length ? 'No additional ranked setups beyond Today\'s Focus.' : 'No strong review candidates right now.'),
+        ? `${tradeable.length} high-quality setup${tradeable.length === 1 ? '' : 's'} ready for review now.`
+        : 'No high-quality tradeable setups right now.',
       items:tradeable,
       collapsed:false,
       empty:'No tradeable setups right now. Try refreshing the scanner or reviewing the watchlist.'
+    },
+    {
+      title:'Early / Monitor',
+      summary: early.length
+        ? `${early.length} early setup${early.length === 1 ? '' : 's'} worth monitoring.`
+        : 'No early setups right now.',
+      items:early,
+      collapsed:true,
+      empty:'No early setups.'
     },
     {
       title:'Filtered Out',
