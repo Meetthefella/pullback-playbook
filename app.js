@@ -3444,13 +3444,14 @@ function resultReasonForRecord(record){
   const rrValue = numericOrNull(view.actionableRrValue);
   const estimatedRrValue = numericOrNull(view.rrValue);
   const displayStage = view.displayStage;
+  const structureLabel = structureLabelForRecord(item, analysisDerivedStatesFromRecord(item), {displayStage});
   if(Number.isFinite(item.marketData.price) && Number.isFinite(item.marketData.ma200) && item.marketData.price < item.marketData.ma200) return 'Trend broken';
   if(Number.isFinite(item.marketData.ma50) && Number.isFinite(item.marketData.ma200) && item.marketData.ma50 < item.marketData.ma200) return 'Trend broken';
   if(item.plan.firstTargetTooClose) return 'First target too close';
   if(view.planState !== 'valid' && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) return 'Low estimated reward';
   if(view.planState !== 'valid') return view.planState === 'invalid' ? 'Plan invalid' : 'Plan missing';
   if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'Insufficient reward';
-  if(displayStage === 'Avoid') return item.scan.pullbackType && /broken/i.test(item.scan.pullbackType) ? 'Trend broken' : 'Weak structure';
+  if(displayStage === 'Avoid') return item.scan.pullbackType && /broken/i.test(item.scan.pullbackType) ? 'Trend broken' : (structureLabel || 'Not actionable');
   if(displayStage === 'Entry' || displayStage === 'Near Entry'){
     return `Near ${escapeHtml(item.scan.scanType || '20MA')} with ${item.scan.pullbackStatus || 'acceptable structure'}`.replace(/&amp;/g, '&');
   }
@@ -4397,6 +4398,33 @@ function evaluateSetupQualityAdjustments(record, options = {}){
   };
 }
 
+function structureLabelForRecord(record, derivedStates = null, options = {}){
+  const rawRecord = record && typeof record === 'object' ? record : {};
+  const derived = derivedStates || analysisDerivedStatesFromRecord(rawRecord);
+  const displayStage = normalizeAnalysisVerdict(options.displayStage || '');
+  const trendState = String(derived.trendState || '').toLowerCase();
+  const pullbackZone = String(derived.pullbackZone || '').toLowerCase();
+  const structureState = String(derived.structureState || '').toLowerCase();
+  const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
+  const bounceState = String(derived.bounceState || '').toLowerCase();
+  const price = numericOrNull(rawRecord.marketData && rawRecord.marketData.price);
+  const ma50 = numericOrNull(rawRecord.marketData && rawRecord.marketData.ma50);
+  const ma200 = numericOrNull(rawRecord.marketData && rawRecord.marketData.ma200);
+  const brokenTrend = trendState === 'broken'
+    || (Number.isFinite(price) && Number.isFinite(ma200) && price < ma200)
+    || (Number.isFinite(ma50) && Number.isFinite(ma200) && ma50 < ma200);
+  const brokenStructure = structureState === 'broken';
+  const constructiveDeveloping = ['near_20ma','near_50ma'].includes(pullbackZone)
+    && !brokenTrend
+    && !brokenStructure
+    && (bounceState === 'confirmed' || stabilisationState === 'clear' || stabilisationState === 'early');
+
+  if(brokenTrend || brokenStructure) return 'Broken structure';
+  if(displayStage !== 'Avoid' && ['weak','weakening'].includes(structureState) && constructiveDeveloping) return 'Developing structure';
+  if(['weak','weakening'].includes(structureState)) return 'Weak structure';
+  return '';
+}
+
 function warningStateFromInputs(record, analysis = null, derivedStates = null){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : null;
@@ -4415,7 +4443,9 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
     if(reason && !cautionReasons.includes(reason)) cautionReasons.push(reason);
   };
 
-  if(['weak','weakening','broken'].includes(structureState)) pushReason('Weak structure');
+  const displayStage = displayStageForRecord(rawRecord);
+  const structureLabel = structureLabelForRecord(rawRecord, derived, {displayStage});
+  if(structureLabel) pushReason(structureLabel);
   if(bounceState !== 'confirmed') pushReason(bounceState === 'none' ? 'No bounce' : 'Bounce unconfirmed');
   if(stabilisationState === 'early') pushReason('Early stabilisation only');
   if(volumeState === 'weak') pushReason('Weak volume');
@@ -5172,8 +5202,8 @@ function compactReasonLineForRecord(record, maxParts = 3){
   const pushPart = value => {
     if(value && !parts.includes(value) && parts.length < maxParts) parts.push(value);
   };
-  if(derived.structureState === 'broken') pushPart('Broken structure');
-  else if(['weak','weakening'].includes(derived.structureState)) pushPart('Weak structure');
+  const structureLabel = structureLabelForRecord(item, derived, {displayStage:displayStageForRecord(item)});
+  if(structureLabel) pushPart(structureLabel);
   else if(derived.trendState === 'strong') pushPart('Strong trend');
   else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
   if(derived.pullbackZone === 'near_20ma') pushPart('Near 20MA');
