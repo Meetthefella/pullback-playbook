@@ -4188,7 +4188,7 @@ function planUiClass(planValidity){
 }
 
 function getPlanUiState(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     item.plan && item.plan.entry,
     item.plan && item.plan.stop,
@@ -4239,7 +4239,7 @@ function getPlanUiState(record, options = {}){
 }
 
 function getSetupUiState(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const derived = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const displayStage = normalizeAnalysisVerdict(options.displayStage || displayStageForRecord(item));
   const planUiState = options.planUiState || null;
