@@ -4200,7 +4200,13 @@ function getPlanUiState(record, options = {}){
     stop:displayedPlan.stop,
     firstTarget:displayedPlan.target
   };
-  const planCheckState = String(options.planCheckState || planCheckStateForRecord(item, {effectivePlan, displayedPlan}) || '').trim();
+  // Default to the persisted plan-check state here so normalization and action
+  // derivation do not recurse back through planCheckStateForRecord().
+  const planCheckState = String(
+    options.planCheckState != null
+      ? options.planCheckState
+      : (item.plan && item.plan.planValidationState || '')
+  ).trim();
   const rewardRisk = displayedPlan.rewardRisk && typeof displayedPlan.rewardRisk === 'object' ? displayedPlan.rewardRisk : {};
   const rrRatio = actionableRrValueForPlan(displayedPlan);
   const setupState = options.setupState || '';
