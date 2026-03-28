@@ -4656,8 +4656,15 @@ function displayStageForRecord(record){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const baseVerdict = analysisVerdictForRecord(rawRecord);
   const derivedStates = analysisDerivedStatesFromRecord(rawRecord);
+  const rawScore = rawSetupScoreForRecord(rawRecord);
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
   const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const stabilisationState = String(derivedStates.stabilisationState || '').toLowerCase();
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const pullbackZone = String(derivedStates.pullbackZone || '').toLowerCase();
+  const price = numericOrNull(rawRecord.marketData && rawRecord.marketData.price);
+  const ma50 = numericOrNull(rawRecord.marketData && rawRecord.marketData.ma50);
+  const ma200 = numericOrNull(rawRecord.marketData && rawRecord.marketData.ma200);
   const displayedPlan = deriveCurrentPlanState(
     rawRecord.plan && rawRecord.plan.entry,
     rawRecord.plan && rawRecord.plan.stop,
@@ -4667,10 +4674,17 @@ function displayStageForRecord(record){
   const trigger = evaluateEntryTrigger(rawRecord, {derivedStates, displayedPlan});
   const planValidation = validateCurrentPlan(rawRecord, {derivedStates, displayedPlan, triggerState:trigger});
   const qualityAdjustments = evaluateSetupQualityAdjustments(rawRecord, {derivedStates, displayedPlan});
+  const constructiveDeveloping = ['near_20ma','near_50ma'].includes(pullbackZone)
+    && trendState !== 'broken'
+    && !(Number.isFinite(price) && Number.isFinite(ma200) && price < ma200)
+    && !(Number.isFinite(ma50) && Number.isFinite(ma200) && ma50 < ma200)
+    && !['broken'].includes(structureState)
+    && (bounceState === 'confirmed' || stabilisationState === 'clear' || stabilisationState === 'early');
   let stage = 'Watch';
   if(trigger.hardFail || planValidation.invalidated) return 'Avoid';
-  if(baseVerdict === 'Avoid') return 'Avoid';
-  if(trigger.entryTriggerReady && planValidation.state === 'valid' && baseVerdict !== 'Avoid'){
+  if(baseVerdict === 'Avoid'){
+    stage = 'Avoid';
+  }else if(trigger.entryTriggerReady && planValidation.state === 'valid' && baseVerdict !== 'Avoid'){
     stage = 'Entry';
   }else if(baseVerdict === 'Entry'){
     if(planValidation.state === 'missed') return 'Watch';
@@ -4687,6 +4701,9 @@ function displayStageForRecord(record){
   }
   if(stage !== 'Avoid' && qualityAdjustments.weakRegimePenalty){
     stage = downgradeVerdict(stage, 1);
+  }
+  if(stage === 'Avoid' && constructiveDeveloping && Number.isFinite(rawScore) && rawScore >= 4){
+    stage = 'Watch';
   }
   return stage;
 }
@@ -7173,23 +7190,24 @@ function tightenPlaybookVerdict(rawVerdict, derivedStates, marketStatus){
   const weakVolume = volumeState === 'weak';
   const validPullback = ['near_20ma','near_50ma'].includes(pullbackZone);
   const strongConfirmation = bounceState === 'confirmed' || clearStabilisation;
+  const constructiveDeveloping = validPullback && !brokenTrend && (bounceState === 'confirmed' || clearStabilisation || stabilisationState === 'early');
 
   if(brokenTrend || brokenStructure) return 'Avoid';
-  if(weakStructure && noBounce && hostileMarket) return 'Avoid';
-  if(weakStructure && noBounce && (weakVolume || weakTrend)) return 'Avoid';
+  if(weakStructure && noBounce && hostileMarket && !constructiveDeveloping) return 'Avoid';
+  if(weakStructure && noBounce && (weakVolume || weakTrend) && !constructiveDeveloping) return 'Avoid';
   if(!validPullback && verdict !== 'Avoid') return 'Watch';
 
   if(verdict === 'Entry'){
     if(noBounce && !clearStabilisation) return 'Watch';
     if(earlyOnly) return 'Watch';
     if(tentativeBounce && hostileMarket) return 'Watch';
-    if(weakStructure) return hostileMarket ? 'Avoid' : 'Watch';
+    if(weakStructure) return hostileMarket && !constructiveDeveloping ? 'Avoid' : 'Watch';
     if(hostileMarket && (!strongConfirmation || weakVolume || weakTrend)) return 'Watch';
     return 'Entry';
   }
 
   if(verdict === 'Near Entry'){
-    if(weakStructure && noBounce) return hostileMarket ? 'Avoid' : 'Watch';
+    if(weakStructure && noBounce) return hostileMarket && !constructiveDeveloping ? 'Avoid' : 'Watch';
     if(earlyOnly && weakVolume) return 'Watch';
     if(hostileMarket && (noBounce || earlyOnly || weakStructure || weakTrend || tentativeBounce)) return 'Watch';
     if(noBounce && !clearStabilisation) return 'Watch';
@@ -7197,8 +7215,8 @@ function tightenPlaybookVerdict(rawVerdict, derivedStates, marketStatus){
   }
 
   if(verdict === 'Watch'){
-    if(weakStructure && noBounce && hostileMarket) return 'Avoid';
-    if(weakStructure && noBounce && weakVolume) return 'Avoid';
+    if(weakStructure && noBounce && hostileMarket && !constructiveDeveloping) return 'Avoid';
+    if(weakStructure && noBounce && weakVolume && !constructiveDeveloping) return 'Avoid';
   }
 
   return verdict;
