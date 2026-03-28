@@ -3433,14 +3433,16 @@ function buildRankedBuckets(records){
 function resultReasonForRecord(record){
   const view = projectTickerForCard(record);
   const item = view.item;
-  const rrValue = numericOrNull(view.rrValue);
+  const rrValue = numericOrNull(view.actionableRrValue);
+  const estimatedRrValue = numericOrNull(view.rrValue);
   const displayStage = view.displayStage;
   if(Number.isFinite(item.marketData.price) && Number.isFinite(item.marketData.ma200) && item.marketData.price < item.marketData.ma200) return 'Trend broken';
   if(Number.isFinite(item.marketData.ma50) && Number.isFinite(item.marketData.ma200) && item.marketData.ma50 < item.marketData.ma200) return 'Trend broken';
   if(item.plan.firstTargetTooClose) return 'First target too close';
+  if(view.planState !== 'valid' && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) return 'Low estimated reward';
+  if(view.planState !== 'valid') return view.planState === 'invalid' ? 'Plan invalid' : 'Plan missing';
   if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'Insufficient reward';
   if(displayStage === 'Avoid') return item.scan.pullbackType && /broken/i.test(item.scan.pullbackType) ? 'Trend broken' : 'Weak structure';
-  if(view.planState !== 'valid') return view.planState === 'invalid' ? 'Plan invalid' : 'Plan missing';
   if(displayStage === 'Entry' || displayStage === 'Near Entry'){
     return `Near ${escapeHtml(item.scan.scanType || '20MA')} with ${item.scan.pullbackStatus || 'acceptable structure'}`.replace(/&amp;/g, '&');
   }
@@ -3450,13 +3452,13 @@ function resultReasonForRecord(record){
 function resultSupportLineForRecord(record){
   const view = projectTickerForCard(record);
   const item = view.item;
-  const rrValue = numericOrNull(view.rrValue);
+  const rrValue = numericOrNull(view.actionableRrValue);
   const convictionTier = view.convictionTier;
   if(item.action.stage === 'avoid') return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
   const pieces = [
     convictionTier,
     view.planStateLabel,
-    Number.isFinite(rrValue) ? `Est R:R ${rrValue.toFixed(2)}` : '',
+    Number.isFinite(rrValue) ? `R:R ${rrValue.toFixed(2)}` : '',
     item.setup && item.setup.practicalSizeFlag === 'tiny_size' ? 'Tiny Size' : '',
     item.setup && item.setup.practicalSizeFlag === 'low_impact' ? 'Low Impact' : '',
     view.affordability === 'heavy_capital' ? 'Heavy Capital' : '',
@@ -3478,7 +3480,7 @@ function renderCompactResultCard(record){
   const displayStage = view.displayStage;
   const scoreLabel = view.setupScoreDisplay;
   const convictionTier = view.convictionTier;
-  const rrValue = numericOrNull(view.rrValue);
+  const rrValue = numericOrNull(view.actionableRrValue);
   const statusPills = scanCardStatusPills(view, 3);
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const reasonLine = compactReasonLineForRecord(item, 3);
@@ -3489,7 +3491,7 @@ function renderCompactResultCard(record){
     Number.isFinite(item.marketData.ma50) ? `50 ${fmtPrice(Number(item.marketData.ma50))}` : '',
     Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
-    Number.isFinite(rrValue) ? `Est R:R ${rrValue.toFixed(2)}` : '',
+    Number.isFinite(rrValue) ? `R:R ${rrValue.toFixed(2)}` : '',
     view.planStateLabel,
     item.setup.marketCaution ? 'Market caution' : ''
   ].filter(Boolean).join(' | ');
@@ -4442,14 +4444,17 @@ function deriveDisplaySetupScore(record, options = {}){
   const volumeState = String(derived.volumeState || '').toLowerCase();
   const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
   const practicalSizeFlag = practicalSizeFlagForPlan(rawRecord.plan);
+  const noBounce = bounceState === 'none';
+  const confirmedBounce = bounceState === 'confirmed';
   let adjusted = rawScore;
 
   if(warningState.showWarning) adjusted -= 1;
   if(volumeState === 'weak') adjusted -= 1;
-  if(hostileMarket) adjusted -= 1;
+  if(hostileMarket) adjusted -= 0.5;
   if(['weak','weakening'].includes(structureState)) adjusted -= 1;
   if(structureState === 'broken') adjusted -= 4;
-  if(bounceState !== 'confirmed' && stabilisationState === 'early') adjusted -= 1;
+  if(!confirmedBounce && stabilisationState === 'early') adjusted -= 1;
+  if(confirmedBounce) adjusted += 1;
   if(practicalSizeFlag === 'tiny_size') adjusted -= 2;
   if(practicalSizeFlag === 'low_impact') adjusted -= 1;
   if(qualityAdjustments.widthPenalty > 0) adjusted -= qualityAdjustments.widthPenalty;
@@ -4459,11 +4464,15 @@ function deriveDisplaySetupScore(record, options = {}){
   if(volumeState === 'weak') adjusted = Math.min(adjusted, 8);
   if(hostileMarket) adjusted = Math.min(adjusted, 8);
   if(volumeState === 'weak' && hostileMarket) adjusted = Math.min(adjusted, 7);
-  if(['weak','weakening'].includes(structureState)) adjusted = Math.min(adjusted, 7);
+  if(['weak','weakening'].includes(structureState)) adjusted = Math.min(adjusted, 5);
   if(practicalSizeFlag === 'tiny_size') adjusted = Math.min(adjusted, 7);
   if(qualityAdjustments.widthPenalty >= 1) adjusted = Math.min(adjusted, 7);
   if(qualityAdjustments.widthPenalty >= 2) adjusted = Math.min(adjusted, 6);
   if(qualityAdjustments.weakRegimePenalty) adjusted = Math.min(adjusted, 6);
+  if(noBounce && !confirmedBounce) adjusted = Math.min(adjusted, 4);
+  if(confirmedBounce){
+    adjusted = Math.max(adjusted, ['weak','weakening'].includes(structureState) ? 4 : 5);
+  }
 
   const rounded = Math.max(0, Math.min(10, Math.round(adjusted)));
   if(displayStage === 'Entry') return Math.max(8, Math.min(10, rounded));
@@ -4647,6 +4656,8 @@ function displayStageForRecord(record){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const baseVerdict = analysisVerdictForRecord(rawRecord);
   const derivedStates = analysisDerivedStatesFromRecord(rawRecord);
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
   const displayedPlan = deriveCurrentPlanState(
     rawRecord.plan && rawRecord.plan.entry,
     rawRecord.plan && rawRecord.plan.stop,
@@ -5053,6 +5064,21 @@ function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrenc
   };
 }
 
+function actionableRrValueForPlan(displayedPlan){
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  if(plan.status !== 'valid') return null;
+  if(!Number.isFinite(plan.entry) || !Number.isFinite(plan.stop) || !Number.isFinite(plan.target)) return null;
+  if(!(plan.target > plan.entry) || !(plan.entry > plan.stop)) return null;
+  if(!(plan.rewardRisk && plan.rewardRisk.valid) || !Number.isFinite(plan.rewardRisk.rrRatio)) return null;
+  if(!Number.isFinite(plan.rewardRisk.riskPerShare) || plan.rewardRisk.riskPerShare <= 0) return null;
+  if(!Number.isFinite(plan.rewardPerShare) || plan.rewardPerShare <= 0) return null;
+  return plan.rewardRisk.rrRatio;
+}
+
+function canDisplayActionableRR(view){
+  return Number.isFinite(actionableRrValueForPlan(view && view.displayedPlan));
+}
+
 function projectTickerForCard(record, options = {}){
   const item = normalizeTickerRecord(record);
   const allowScannerFallback = options.allowScannerFallback !== false;
@@ -5066,6 +5092,7 @@ function projectTickerForCard(record, options = {}){
   const rrValue = displayedPlan.status === 'valid'
     ? displayedPlan.rewardRisk.rrRatio
     : numericOrNull(item.scan.estimatedRR);
+  const actionableRrValue = actionableRrValueForPlan(displayedPlan);
   const actionLabel = displayedPlan.affordability === 'not_affordable'
     ? 'Not Affordable'
     : (displayedPlan.tradeability === 'too_expensive'
@@ -5086,6 +5113,7 @@ function projectTickerForCard(record, options = {}){
     planState:displayedPlan.status,
     planStateLabel:formatPlanState(displayedPlan.status, item),
     rrValue,
+    actionableRrValue,
     positionSize:displayedPlan.status === 'valid' ? displayedPlan.riskFit.position_size : null,
     capitalFit:displayedPlan.status === 'valid' ? displayedPlan.capitalFit.capital_fit : 'unknown',
     capitalFitText:displayedPlan.status === 'valid'
@@ -5106,6 +5134,7 @@ function focusStageForRecord(record){
 function compactReasonLineForRecord(record, maxParts = 3){
   const item = normalizeTickerRecord(record);
   const derived = analysisDerivedStatesFromRecord(item);
+  const estimatedRrValue = item.plan && item.plan.hasValidPlan ? numericOrNull(item.plan.plannedRR) : numericOrNull(item.scan.estimatedRR);
   const warningState = item.setup.warning || warningStateFromInputs(item, null, derived);
   const parts = [];
   const pushPart = value => {
@@ -5120,6 +5149,7 @@ function compactReasonLineForRecord(record, maxParts = 3){
   if(derived.bounceState === 'confirmed') pushPart('Bounce confirmed');
   else if(derived.bounceState === 'attempt') pushPart('Bounce tentative');
   else if(derived.bounceState === 'none') pushPart('No bounce');
+  if(!item.plan.hasValidPlan && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) pushPart('Low est reward');
   if(derived.stabilisationState === 'early') pushPart('Early stabilisation');
   if(derived.volumeState === 'weak') pushPart('Weak volume');
   if(item.setup.marketCaution) pushPart('Weak market caution');
@@ -5135,7 +5165,7 @@ function scanCardStatusPills(view, maxPills = 3){
   };
   if(view.warningState && view.warningState.showWarning) pushPill('Warning');
   pushPill(view.planStateLabel === 'Plan Missing' ? 'No Plan' : view.planStateLabel);
-  if(Number.isFinite(view.rrValue)) pushPill(`R:R ${view.rrValue.toFixed(2)}`);
+  if(Number.isFinite(view.actionableRrValue)) pushPill(`R:R ${view.actionableRrValue.toFixed(2)}`);
   if(Number.isFinite(view.positionSize)) pushPill(`Size ${view.positionSize}`);
   if(view.displayedPlan.tradeability === 'risk_only') pushPill('Capital check unavailable');
   if(['heavy_capital','not_affordable'].includes(view.affordability)) pushPill(affordabilityLabel(view.affordability));
@@ -5174,7 +5204,7 @@ function renderPlanProjectionFromRecord(record, options = {}){
   const view = projectTickerForCard(record, options);
   if(view.displayedPlan.status === 'valid'){
     const targetWarning = !!view.item.plan.firstTargetTooClose;
-    return `<div class="tiny">Planned Entry: ${escapeHtml(fmtPrice(view.displayedPlan.entry))} | Planned Stop: ${escapeHtml(fmtPrice(view.displayedPlan.stop))} | Planned First Target: ${escapeHtml(fmtPrice(view.displayedPlan.target))}</div><div class="tiny">Risk ${escapeHtml(riskStatusLabel(view.displayedPlan.riskFit.risk_status || 'plan_missing'))} | Max Loss ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.max_loss) ? view.displayedPlan.riskFit.max_loss.toFixed(2) : String(currentMaxLoss()))} | Planned Risk/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardRisk.riskPerShare) ? view.displayedPlan.rewardRisk.riskPerShare.toFixed(2) : 'N/A')} | Planned Reward/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardPerShare) ? view.displayedPlan.rewardPerShare.toFixed(2) : 'N/A')} | Planned Position ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.position_size) ? String(view.displayedPlan.riskFit.position_size) : 'N/A')}</div><div class="inline-status"><span class="badge ${rrStateClass(view.rrValue)}">${escapeHtml(rrStateLabel(view.rrValue))}</span><span class="tiny">Planned R:R ${escapeHtml(Number.isFinite(view.rrValue) ? view.rrValue.toFixed(2) : 'N/A')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>`;
+    return `<div class="tiny">Planned Entry: ${escapeHtml(fmtPrice(view.displayedPlan.entry))} | Planned Stop: ${escapeHtml(fmtPrice(view.displayedPlan.stop))} | Planned First Target: ${escapeHtml(fmtPrice(view.displayedPlan.target))}</div><div class="tiny">Risk ${escapeHtml(riskStatusLabel(view.displayedPlan.riskFit.risk_status || 'plan_missing'))} | Max Loss ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.max_loss) ? view.displayedPlan.riskFit.max_loss.toFixed(2) : String(currentMaxLoss()))} | Planned Risk/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardRisk.riskPerShare) ? view.displayedPlan.rewardRisk.riskPerShare.toFixed(2) : 'N/A')} | Planned Reward/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardPerShare) ? view.displayedPlan.rewardPerShare.toFixed(2) : 'N/A')} | Planned Position ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.position_size) ? String(view.displayedPlan.riskFit.position_size) : 'N/A')}</div><div class="inline-status"><span class="badge ${rrStateClass(view.actionableRrValue)}">${escapeHtml(rrStateLabel(view.actionableRrValue))}</span><span class="tiny">Planned R:R ${escapeHtml(Number.isFinite(view.actionableRrValue) ? view.actionableRrValue.toFixed(2) : 'N/A')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>`;
   }
   return `<div class="inline-status"><span class="badge watch">Scan Estimate</span><span class="tiny">Use this card to review charts and define a real plan before acting on scanner estimates.</span></div>${renderEstimatedScannerPlanFromRecord(view.item)}`;
 }
@@ -5852,7 +5882,7 @@ function renderEstimatedScannerPlan(card){
 
 function renderEstimatedScannerPlanFromRecord(record){
   const item = normalizeTickerRecord(record);
-  return `<div class="tiny">Estimated entry zone: ${escapeHtml(Number.isFinite(item.scan.estimatedEntryZone) ? fmtPrice(item.scan.estimatedEntryZone) : 'Not available')} | Estimated stop area: ${escapeHtml(Number.isFinite(item.scan.estimatedStopArea) ? fmtPrice(item.scan.estimatedStopArea) : 'Not available')} | Estimated target area: ${escapeHtml(Number.isFinite(item.scan.estimatedTargetArea) ? fmtPrice(item.scan.estimatedTargetArea) : 'Not available')} | Estimated R:R: ${escapeHtml(Number.isFinite(item.scan.estimatedRR) ? `${item.scan.estimatedRR.toFixed(2)}R` : 'N/A')}</div>`;
+  return `<div class="tiny">Estimated entry zone: ${escapeHtml(Number.isFinite(item.scan.estimatedEntryZone) ? fmtPrice(item.scan.estimatedEntryZone) : 'Not available')} | Estimated stop area: ${escapeHtml(Number.isFinite(item.scan.estimatedStopArea) ? fmtPrice(item.scan.estimatedStopArea) : 'Not available')} | Estimated target area: ${escapeHtml(Number.isFinite(item.scan.estimatedTargetArea) ? fmtPrice(item.scan.estimatedTargetArea) : 'Not available')}</div>`;
 }
 
 function buildSuitabilitySummary(parts){
