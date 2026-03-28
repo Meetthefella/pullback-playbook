@@ -3439,10 +3439,12 @@ function getFinalClassification(view){
   const planValidation = String(view && ((view.planValidation && view.planValidation.state) || (view.planUiState && view.planUiState.state)) || '');
   const positionSize = numericOrNull(view && view.positionSize);
   const rrCategory = String(view && view.rrCategory || '');
+  const isNotReadySetup = !!(view && view.isNotReadySetup);
   if(setupState === 'broken') return 'filtered';
   if(planValidation === 'invalid') return 'filtered';
   if(planValidation === 'unrealistic_rr' || rrCategory === 'unrealistic') return 'filtered';
   if(Number.isFinite(positionSize) && positionSize < 1) return 'filtered';
+  if(isNotReadySetup) return 'filtered';
   if(setupState === 'entry' && planValidation === 'valid') return 'tradeable';
   if(setupState === 'watch') return 'review';
   return 'filtered';
@@ -3454,10 +3456,25 @@ function buildFinalSetupView(record, options = {}){
   const view = projectTickerForCard(record, options);
   const derivedStates = analysisDerivedStatesFromRecord(view.item);
   const rrCategory = rrCategoryForView(view);
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const isNotReadySetup = view.setupUiState.state === 'developing'
+    || structureState === 'weak'
+    || bounceState === 'none'
+    || view.planUiState.state === 'needs_adjustment';
+  const finalSetupState = view.setupUiState.state === 'broken'
+    ? 'broken'
+    : (isNotReadySetup ? 'developing' : view.setupUiState.state);
+  const finalSetupUiState = {
+    state:finalSetupState,
+    label:setupUiLabel(finalSetupState),
+    className:setupUiClass(finalSetupState)
+  };
   const finalClassification = getFinalClassification({
     ...view,
     rrCategory,
-    setupState:view.setupUiState.state,
+    isNotReadySetup,
+    setupState:finalSetupState,
     planValidation:{state:view.planUiState.state}
   });
   const bucket = getFinalBucketFromView(view);
@@ -3476,9 +3493,11 @@ function buildFinalSetupView(record, options = {}){
     },
     score:view.setupScore,
     scoreLabel:view.setupScoreDisplay,
-    setupState:view.setupUiState.state,
-    setupLabel:view.setupUiState.label,
+    setupUiState:finalSetupUiState,
+    setupState:finalSetupState,
+    setupLabel:finalSetupUiState.label,
     rrCategory,
+    isNotReadySetup,
     finalClassification,
     bucket,
     rrDisplay:shouldShowActionableRR(view) && Number.isFinite(view.actionableRrValue)
