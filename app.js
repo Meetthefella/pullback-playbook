@@ -3434,16 +3434,40 @@ function rrCategoryForView(view){
   return 'normal';
 }
 
+function finalStructureQualityForView(view){
+  const derivedStates = view && view.setupStates ? view.setupStates : null;
+  const structureState = String(view && view.structureState || (derivedStates && derivedStates.structureState) || '').toLowerCase();
+  const stabilisationState = String(view && view.stabilisationState || (derivedStates && derivedStates.stabilisationState) || '').toLowerCase();
+  const bounceState = String(view && view.bounceState || (derivedStates && derivedStates.bounceState) || '').toLowerCase();
+  if(['broken','weak','developing_loose'].includes(structureState)) return 'weak';
+  if(['strong','intact'].includes(structureState)) return 'strong';
+  if(structureState === 'developing_clean') return 'developing_clean';
+  if(['developing','weakening'].includes(structureState)){
+    return bounceState === 'confirmed' && ['clear','early'].includes(stabilisationState)
+      ? 'developing_clean'
+      : 'developing_loose';
+  }
+  return 'developing_loose';
+}
+
 function getFinalClassification(view){
   const setupState = String(view && (view.setupState || (view.setupUiState && view.setupUiState.state)) || '');
   const planValidation = String(view && ((view.planValidation && view.planValidation.state) || (view.planUiState && view.planUiState.state)) || '');
   const positionSize = numericOrNull(view && view.positionSize);
   const rrCategory = String(view && view.rrCategory || '');
   const isNotReadySetup = !!(view && view.isNotReadySetup);
+  const structureQuality = String(view && view.structureQuality || finalStructureQualityForView(view));
+  const bounceState = String(view && view.bounceState || (view && view.setupStates && view.setupStates.bounceState) || '').toLowerCase();
   if(setupState === 'broken') return 'filtered';
   if(planValidation === 'invalid') return 'filtered';
   if(planValidation === 'unrealistic_rr' || rrCategory === 'unrealistic') return 'filtered';
   if(Number.isFinite(positionSize) && positionSize < 1) return 'filtered';
+  if(structureQuality === 'weak') return 'filtered';
+  if(structureQuality === 'developing_loose') return 'filtered';
+  if(structureQuality === 'developing_clean' && bounceState !== 'confirmed') return 'filtered';
+  if(structureQuality === 'developing_clean' && bounceState === 'confirmed') return 'review';
+  if(structureQuality === 'strong' && bounceState === 'confirmed' && planValidation === 'valid') return 'tradeable';
+  if(structureQuality === 'strong' && bounceState === 'none') return 'review';
   if(isNotReadySetup) return 'filtered';
   if(setupState === 'entry' && planValidation === 'valid') return 'tradeable';
   if(setupState === 'watch') return 'review';
@@ -3456,10 +3480,15 @@ function buildFinalSetupView(record, options = {}){
   const view = projectTickerForCard(record, options);
   const derivedStates = analysisDerivedStatesFromRecord(view.item);
   const rrCategory = rrCategoryForView(view);
+  const structureQuality = finalStructureQualityForView({
+    ...view,
+    setupStates:derivedStates
+  });
+  const isStructureValid = ['strong','developing_clean'].includes(structureQuality);
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
   const isNotReadySetup = view.setupUiState.state === 'developing'
-    || structureState === 'weak'
+    || !isStructureValid
     || bounceState === 'none'
     || view.planUiState.state === 'needs_adjustment';
   const finalSetupState = view.setupUiState.state === 'broken'
@@ -3473,7 +3502,10 @@ function buildFinalSetupView(record, options = {}){
   const finalClassification = getFinalClassification({
     ...view,
     rrCategory,
+    structureQuality,
+    isStructureValid,
     isNotReadySetup,
+    bounceState,
     setupState:finalSetupState,
     planValidation:{state:view.planUiState.state}
   });
@@ -3497,6 +3529,8 @@ function buildFinalSetupView(record, options = {}){
     setupState:finalSetupState,
     setupLabel:finalSetupUiState.label,
     rrCategory,
+    structureQuality,
+    isStructureValid,
     isNotReadySetup,
     finalClassification,
     bucket,
