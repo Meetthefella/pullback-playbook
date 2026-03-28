@@ -4189,7 +4189,7 @@ function derivedStatesBaseScore(record, derivedStates = null){
   else if(trendState === 'weak') score += 1;
   if(pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') score += 2;
   if(structureState === 'intact') score += 2;
-  else if(structureState === 'weakening' || structureState === 'weak') score += 1;
+  else if(structureState && !['weakening','weak','broken'].includes(structureState)) score += 1;
   if(stabilisationState === 'clear') score += 1;
   else if(stabilisationState === 'early') score += 1;
   if(bounceState === 'confirmed') score += 1;
@@ -4489,7 +4489,6 @@ function deriveDisplaySetupScore(record, options = {}){
   if(warningState.showWarning) adjusted -= 1;
   if(volumeState === 'weak') adjusted -= 1;
   if(hostileMarket) adjusted -= 0.5;
-  if(['weak','weakening'].includes(structureState)) adjusted -= 1;
   if(structureState === 'broken') adjusted -= 4;
   if(!confirmedBounce && stabilisationState === 'early') adjusted -= 1;
   if(confirmedBounce) adjusted += 1;
@@ -4502,14 +4501,13 @@ function deriveDisplaySetupScore(record, options = {}){
   if(volumeState === 'weak') adjusted = Math.min(adjusted, 8);
   if(hostileMarket) adjusted = Math.min(adjusted, 8);
   if(volumeState === 'weak' && hostileMarket) adjusted = Math.min(adjusted, 7);
-  if(['weak','weakening'].includes(structureState)) adjusted = Math.min(adjusted, 5);
   if(practicalSizeFlag === 'tiny_size') adjusted = Math.min(adjusted, 7);
   if(qualityAdjustments.widthPenalty >= 1) adjusted = Math.min(adjusted, 7);
   if(qualityAdjustments.widthPenalty >= 2) adjusted = Math.min(adjusted, 6);
   if(qualityAdjustments.weakRegimePenalty) adjusted = Math.min(adjusted, 6);
   if(noBounce && !confirmedBounce) adjusted = Math.min(adjusted, 4);
   if(confirmedBounce){
-    adjusted = Math.max(adjusted, ['weak','weakening'].includes(structureState) ? 4 : 5);
+    adjusted = Math.max(adjusted, 5);
   }
 
   const rounded = Math.max(0, Math.min(10, Math.round(adjusted)));
@@ -7246,7 +7244,6 @@ function tightenPlaybookVerdict(rawVerdict, derivedStates, marketStatus){
     if(noBounce && !clearStabilisation) return 'Watch';
     if(earlyOnly) return 'Watch';
     if(tentativeBounce && hostileMarket) return 'Watch';
-    if(weakStructure) return hostileMarket && !constructiveDeveloping ? 'Avoid' : 'Watch';
     if(hostileMarket && (!strongConfirmation || weakVolume || weakTrend)) return 'Watch';
     return 'Entry';
   }
@@ -7254,7 +7251,7 @@ function tightenPlaybookVerdict(rawVerdict, derivedStates, marketStatus){
   if(verdict === 'Near Entry'){
     if(weakStructure && noBounce) return hostileMarket && !constructiveDeveloping ? 'Avoid' : 'Watch';
     if(earlyOnly && weakVolume) return 'Watch';
-    if(hostileMarket && (noBounce || earlyOnly || weakStructure || weakTrend || tentativeBounce)) return 'Watch';
+    if(hostileMarket && (noBounce || earlyOnly || weakTrend || tentativeBounce)) return 'Watch';
     if(noBounce && !clearStabilisation) return 'Watch';
     return 'Near Entry';
   }
