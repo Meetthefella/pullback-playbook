@@ -3405,9 +3405,14 @@ function getRankedDisplayBucket(record){
   const view = projectTickerForCard(item);
   const rrValue = numericOrNull(view.rrValue);
   const targetReviewLabel = view.planState === 'valid' ? targetReviewQueueLabel(item.plan.targetReviewState) : '';
-  if(item.lifecycle.stage === 'avoided' || item.lifecycle.stage === 'expired') return 'filtered';
+  if(item.lifecycle.stage === 'expired') return 'filtered';
   if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'filtered';
   if(view.displayStage === 'Avoid') return 'filtered';
+  if(view.planState === 'valid' && ['Watch','Near Entry','Entry'].includes(view.displayStage)){
+    if(targetReviewLabel) return 'focus';
+    if(view.displayStage === 'Entry' || view.displayStage === 'Near Entry') return 'focus';
+    return 'tradeable_secondary';
+  }
   if(targetReviewLabel) return 'focus';
   if(view.displayStage === 'Entry' || view.displayStage === 'Near Entry') return 'focus';
   return 'tradeable_secondary';
@@ -3455,9 +3460,9 @@ function resultReasonForRecord(record){
 function resultSupportLineForRecord(record){
   const view = projectTickerForCard(record);
   const item = view.item;
-  const rrValue = numericOrNull(view.actionableRrValue);
+  const rrValue = shouldShowActionableRR(view) ? numericOrNull(view.actionableRrValue) : null;
   const convictionTier = view.convictionTier;
-  if(item.action.stage === 'avoid') return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
+  if(view.displayStage === 'Avoid') return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
   const pieces = [
     convictionTier,
     view.planStateLabel,
@@ -3483,7 +3488,7 @@ function renderCompactResultCard(record){
   const displayStage = view.displayStage;
   const scoreLabel = view.setupScoreDisplay;
   const convictionTier = view.convictionTier;
-  const rrValue = numericOrNull(view.actionableRrValue);
+  const rrValue = shouldShowActionableRR(view) ? numericOrNull(view.actionableRrValue) : null;
   const statusPills = scanCardStatusPills(view, 3);
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const reasonLine = compactReasonLineForRecord(item, 3);
@@ -5099,6 +5104,13 @@ function canDisplayActionableRR(view){
   return Number.isFinite(actionableRrValueForPlan(view && view.displayedPlan));
 }
 
+function shouldShowActionableRR(view){
+  const safeView = view && typeof view === 'object' ? view : {};
+  return canDisplayActionableRR(safeView)
+    && safeView.displayStage !== 'Avoid'
+    && safeView.planState === 'valid';
+}
+
 function projectTickerForCard(record, options = {}){
   const item = normalizeTickerRecord(record);
   const allowScannerFallback = options.allowScannerFallback !== false;
@@ -5185,7 +5197,7 @@ function scanCardStatusPills(view, maxPills = 3){
   };
   if(view.warningState && view.warningState.showWarning) pushPill('Warning');
   pushPill(view.planStateLabel === 'Plan Missing' ? 'No Plan' : view.planStateLabel);
-  if(Number.isFinite(view.actionableRrValue)) pushPill(`R:R ${view.actionableRrValue.toFixed(2)}`);
+  if(shouldShowActionableRR(view) && Number.isFinite(view.actionableRrValue)) pushPill(`R:R ${view.actionableRrValue.toFixed(2)}`);
   if(Number.isFinite(view.positionSize)) pushPill(`Size ${view.positionSize}`);
   if(view.displayedPlan.tradeability === 'risk_only') pushPill('Capital check unavailable');
   if(['heavy_capital','not_affordable'].includes(view.affordability)) pushPill(affordabilityLabel(view.affordability));
