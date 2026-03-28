@@ -5,6 +5,9 @@ const key = 'pullbackPlaybookV3';
 const APP_VERSION = 'v4.4.0';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
+const defaultTrackedStateEndpoint = '/api/tracked-state';
+const defaultPushConfigEndpoint = '/api/push-config';
+const defaultPushSubscribeEndpoint = '/api/push-subscribe';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
 const savedScannerUniverseKey = 'pp_scanner_universe_saved';
 const savedScannerUniverseMetaKey = 'pp_scanner_universe_saved_meta';
@@ -39,6 +42,8 @@ const DEFAULT_STATE = {
   tickers:[],
   recentTickers:[],
   tickerRecords:{},
+  backendTrackedVersions:{},
+  backendLocalTrackedTickers:[],
   lastAlertsSeenAt:'',
   dismissedAlertIds:[],
   dismissedFocusTickers:[],
@@ -92,6 +97,7 @@ const ALERT_PRIORITY = {
   expired:8
 };
 const APP_FETCH_TIMEOUT_MS = 12000;
+const BACKEND_REVIEW_POLL_MS = 10 * 60 * 1000;
 const MARKET_CACHE_SCHEMA_VERSION = 3;
 const SCAN_BATCH_SIZE = 4;
 const TESSERACT_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
@@ -142,6 +148,9 @@ let scannerPresetPromise = null;
 let suggestionTimer = null;
 let suggestionRequestToken = 0;
 let tesseractLoaderPromise = null;
+let backendSyncTimer = null;
+let backendRefreshTimer = null;
+let pushConfigPromise = null;
 
 function formatGbp(value){
   return `GBP ${Number(value || 0).toLocaleString()}`;
@@ -343,6 +352,243 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = APP_FETCH_TIM
     }
   }
   throw new Error('Request failed.');
+}
+
+function trackedStateEndpoint(){
+  return defaultTrackedStateEndpoint;
+}
+
+function pushConfigEndpoint(){
+  return defaultPushConfigEndpoint;
+}
+
+function pushSubscribeEndpoint(){
+  return defaultPushSubscribeEndpoint;
+}
+
+function shouldSyncTickerRecordToBackend(record){
+  const item = normalizeTickerRecord(record || {});
+  return !!(
+    item.watchlist.inWatchlist
+    || item.review.manualReview
+    || item.plan.hasValidPlan
+    || ['watchlist','reviewed','planned','shortlisted'].includes(String(item.lifecycle.stage || ''))
+  );
+}
+
+function trackedTickerRecordsPayload(){
+  const records = {};
+  Object.values(normalizeTickerRecordsMap(state.tickerRecords || {})).forEach(record => {
+    if(shouldSyncTickerRecordToBackend(record)) records[record.ticker] = record;
+  });
+  const removedRecords = {};
+  const currentTickers = new Set(Object.keys(records));
+  const localTrackedTickers = uniqueTickers(state.backendLocalTrackedTickers || []);
+  const knownVersions = state.backendTrackedVersions && typeof state.backendTrackedVersions === 'object' ? state.backendTrackedVersions : {};
+  localTrackedTickers.forEach(ticker => {
+    if(!currentTickers.has(ticker)) removedRecords[ticker] = String(knownVersions[ticker] || '');
+  });
+  return {
+    settings:{
+      accountSize:currentAccountSizeGbp(),
+      riskPercent:numericOrNull(state.riskPercent) || 0.01,
+      maxLossOverride:numericOrNull(state.maxLossOverride),
+      wholeSharesOnly:state.wholeSharesOnly !== false,
+      marketStatus:String(state.marketStatus || ''),
+      dataProvider:normalizeDataProvider(state.dataProvider),
+      apiPlan:String(state.apiPlan || DEFAULT_API_PLAN)
+    },
+    records,
+    removedRecords
+  };
+}
+
+function updateBackendTrackedVersions(records){
+  const next = {};
+  Object.entries(records && typeof records === 'object' ? records : {}).forEach(([ticker, record]) => {
+    next[normalizeTicker(ticker)] = String(record && record.meta && record.meta.updatedAt || '');
+  });
+  state.backendTrackedVersions = next;
+}
+
+function syncBackendTrackedOwnership(remoteRecords){
+  const remoteTickers = uniqueTickers(Object.keys(remoteRecords && typeof remoteRecords === 'object' ? remoteRecords : {}));
+  const backendOwned = new Set(uniqueTickers(state.backendLocalTrackedTickers || []));
+  const remoteTickerSet = new Set(remoteTickers);
+  let changed = false;
+  backendOwned.forEach(ticker => {
+    if(remoteTickerSet.has(ticker)) return;
+    const localRecord = state.tickerRecords && state.tickerRecords[ticker] ? normalizeTickerRecord(state.tickerRecords[ticker]) : null;
+    const syncedUpdatedAt = String((state.backendTrackedVersions && state.backendTrackedVersions[ticker]) || '');
+    const localUpdatedAt = String(localRecord && localRecord.meta && localRecord.meta.updatedAt || '');
+    const hasNewerLocalWork = !!(localRecord && localUpdatedAt && syncedUpdatedAt && localUpdatedAt > syncedUpdatedAt);
+    if(localRecord && !hasNewerLocalWork){
+      delete state.tickerRecords[ticker];
+      changed = true;
+      backendOwned.delete(ticker);
+      return;
+    }
+    if(!localRecord){
+      backendOwned.delete(ticker);
+    }
+  });
+  remoteTickers.forEach(ticker => backendOwned.add(ticker));
+  state.backendLocalTrackedTickers = [...backendOwned];
+  return changed;
+}
+
+async function pushTrackedRecordsToBackend(){
+  const payload = trackedTickerRecordsPayload();
+  const localTrackedTickers = Object.keys(payload.records).map(normalizeTicker);
+  try{
+    const response = await fetchJsonWithTimeout(trackedStateEndpoint(), {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    const body = await response.json().catch(() => ({}));
+    if(response.ok && body && body.trackedState){
+      updateBackendTrackedVersions(body.trackedState.records);
+      state.backendLocalTrackedTickers = localTrackedTickers;
+      persistState();
+    }
+  }catch(error){}
+}
+
+function scheduleTrackedRecordsSync(delayMs = 800){
+  clearTimeout(backendSyncTimer);
+  backendSyncTimer = setTimeout(() => {
+    pushTrackedRecordsToBackend();
+  }, delayMs);
+}
+
+async function pullTrackedRecordsFromBackend(options = {}){
+  try{
+    const response = await fetchJsonWithTimeout(trackedStateEndpoint(), {method:'GET'});
+    const payload = await response.json().catch(() => ({}));
+    if(!response.ok || !payload || payload.ok === false || !payload.trackedState) return false;
+    const trackedState = payload.trackedState;
+    let changed = syncBackendTrackedOwnership(trackedState.records);
+    Object.entries((trackedState.records && typeof trackedState.records === 'object') ? trackedState.records : {}).forEach(([ticker, incoming]) => {
+      const symbol = normalizeTicker(ticker);
+      if(!symbol || !incoming || typeof incoming !== 'object') return;
+      const local = getTickerRecord(symbol);
+      const incomingUpdatedAt = String(incoming.meta && incoming.meta.updatedAt || '');
+      const localUpdatedAt = String(local && local.meta && local.meta.updatedAt || '');
+      if(!local || !localUpdatedAt || (incomingUpdatedAt && incomingUpdatedAt >= localUpdatedAt)){
+        state.tickerRecords[symbol] = normalizeTickerRecord({...incoming, ticker:symbol});
+        changed = true;
+      }
+    });
+    if(changed){
+      syncLegacyCollectionsFromTickerRecords();
+      if(options.render !== false){
+        renderScannerResults();
+        renderWatchlist();
+        renderFocusQueue();
+        renderReviewWorkspace();
+        renderWorkflowAlerts();
+      }
+    }
+    updateBackendTrackedVersions(trackedState.records);
+    persistState();
+    return changed;
+  }catch(error){
+    return false;
+  }
+}
+
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for(let i = 0; i < rawData.length; i += 1){
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function fetchPushConfig(){
+  if(pushConfigPromise) return pushConfigPromise;
+  pushConfigPromise = fetchJsonWithTimeout(pushConfigEndpoint(), {method:'GET'})
+    .then(response => response.json().catch(() => ({})))
+    .then(payload => {
+      if(!payload || payload.ok === false) throw new Error('push_config_unavailable');
+      return payload;
+    })
+    .catch(error => {
+      pushConfigPromise = null;
+      throw error;
+    });
+  return pushConfigPromise;
+}
+
+function pushPermissionSummary(){
+  if(!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)){
+    return 'Alerts unavailable on this browser';
+  }
+  if(Notification.permission === 'granted') return 'Entry alerts enabled';
+  if(Notification.permission === 'denied') return 'Alerts blocked in browser settings';
+  return 'Entry alerts off';
+}
+
+async function ensurePushSubscription(registration, options = {}){
+  if(!registration || !('PushManager' in window) || !('Notification' in window)) return;
+  let config;
+  try{
+    config = await fetchPushConfig();
+  }catch(error){
+    return;
+  }
+  if(!config || !config.enabled || !config.publicKey) return;
+  let permission = Notification.permission;
+  if(permission === 'default' && options.allowPermissionRequest){
+    try{
+      permission = await Notification.requestPermission();
+    }catch(error){
+      permission = 'denied';
+    }
+  }
+  if(permission !== 'granted') return;
+  try{
+    let subscription = await registration.pushManager.getSubscription();
+    if(!subscription){
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly:true,
+        applicationServerKey:urlBase64ToUint8Array(config.publicKey)
+      });
+    }
+    await fetchJsonWithTimeout(pushSubscribeEndpoint(), {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({subscription})
+    });
+  }catch(error){}
+}
+
+async function enableEntryAlerts(){
+  if(!('serviceWorker' in navigator) || !('Notification' in window)){
+    setStatus('apiStatus', '<span class="warntext">Entry alerts are not available in this browser.</span>');
+    renderWorkflowAlerts();
+    return false;
+  }
+  try{
+    const registration = await navigator.serviceWorker.ready;
+    await ensurePushSubscription(registration, {allowPermissionRequest:true});
+  }catch(error){
+    setStatus('apiStatus', '<span class="warntext">Could not enable entry alerts right now. Please retry.</span>');
+  }
+  renderWorkflowAlerts();
+  return Notification.permission === 'granted';
+}
+
+function bootstrapBackgroundMonitoring(){
+  pullTrackedRecordsFromBackend();
+  clearInterval(backendRefreshTimer);
+  backendRefreshTimer = setInterval(() => {
+    pullTrackedRecordsFromBackend();
+  }, BACKEND_REVIEW_POLL_MS);
 }
 
 function escapeHtml(value){
@@ -2142,6 +2388,7 @@ function commitTickerState(){
   console.debug('PROJECTION_FROM_TICKER_RECORD', 'syncLegacyCollections');
   syncLegacyCollectionsFromTickerRecords();
   persistState();
+  scheduleTrackedRecordsSync();
 }
 
 function syncCardDraftsFromDom(){
@@ -2174,6 +2421,7 @@ function saveState(){
   state.showExpiredWatchlist = $('showExpiredWatchlist') ? !!$('showExpiredWatchlist').checked : !!state.showExpiredWatchlist;
   state.dismissedAlertIds = Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds.slice(-200) : [];
   commitTickerState();
+  scheduleTrackedRecordsSync();
   renderStats();
   renderFinalUniversePreview();
 }
@@ -2197,6 +2445,8 @@ function loadState(){
   state.recentTickers = uniqueTickers(state.recentTickers || []);
   state.tickerRecords = normalizeTickerRecordsMap(state.tickerRecords);
   state.lastAlertsSeenAt = String(state.lastAlertsSeenAt || '');
+  state.backendTrackedVersions = state.backendTrackedVersions && typeof state.backendTrackedVersions === 'object' ? state.backendTrackedVersions : {};
+  state.backendLocalTrackedTickers = uniqueTickers(state.backendLocalTrackedTickers || []);
   state.dismissedAlertIds = Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds.slice(-200) : [];
   state.dismissedFocusTickers = uniqueTickers(state.dismissedFocusTickers || []);
   state.dismissedFocusCycle = String(state.dismissedFocusCycle || '');
@@ -2214,6 +2464,7 @@ function loadState(){
   syncTickerRecordsFromLegacyCollections();
   syncLegacyCollectionsFromTickerRecords();
   ensureActiveQueueCycle();
+  scheduleTrackedRecordsSync(200);
   persistState();
   $('accountSize').value = state.accountSize;
   if($('riskPercent')) $('riskPercent').value = state.riskPercent;
@@ -3350,7 +3601,10 @@ function renderWorkflowAlerts(){
   };
   const newCount = alerts.filter(isAlertNew).length;
   if(badge) badge.textContent = `${newCount} new`;
-  box.innerHTML = `<div class="alertsection"><strong>Action now</strong>${renderAlertRows(groups.actionNow, false)}</div><div class="alertsection"><strong>Near entry</strong>${renderAlertRows(groups.nearEntry)}</div><div class="alertsection"><strong>Needs plan</strong>${renderAlertRows(groups.needsPlan)}</div><div class="alertsection"><strong>Watch</strong>${renderAlertRows(groups.watch)}</div>`;
+  box.innerHTML = `<div class="summary"><button class="secondary compactbutton" type="button" data-act="enable-alerts">Enable Entry Alerts</button> <span class="tiny">${escapeHtml(pushPermissionSummary())}</span></div><div class="alertsection"><strong>Action now</strong>${renderAlertRows(groups.actionNow, false)}</div><div class="alertsection"><strong>Near entry</strong>${renderAlertRows(groups.nearEntry)}</div><div class="alertsection"><strong>Needs plan</strong>${renderAlertRows(groups.needsPlan)}</div><div class="alertsection"><strong>Watch</strong>${renderAlertRows(groups.watch)}</div>`;
+  box.querySelectorAll('[data-act="enable-alerts"]').forEach(button => {
+    button.onclick = () => enableEntryAlerts();
+  });
   box.querySelectorAll('[data-act="alert-review"]').forEach(button => {
     button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
   });
@@ -3856,13 +4110,39 @@ function derivedStatesBaseScore(record, derivedStates = null){
   else if(trendState === 'weak') score += 1;
   if(pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') score += 2;
   if(structureState === 'intact') score += 2;
-  else if(structureState === 'weakening') score += 1;
+  else if(structureState === 'weakening' || structureState === 'weak') score += 1;
   if(stabilisationState === 'clear') score += 1;
   else if(stabilisationState === 'early') score += 1;
   if(bounceState === 'confirmed') score += 1;
   else if(bounceState === 'attempt') score += 1;
   if(volumeState === 'supportive') score += 1;
   return clamp(Math.round(score), 0, 10);
+}
+
+function isTrueHardFailForRecord(record, derivedStates = null, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const derived = derivedStates || analysisDerivedStatesFromRecord(item);
+  const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
+  const price = numericOrNull(marketData.price);
+  const ma50 = numericOrNull(marketData.ma50);
+  const ma200 = numericOrNull(marketData.ma200);
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    marketData.currency
+  );
+  const trendBroken = String(derived.trendState || '').toLowerCase() === 'broken'
+    || (Number.isFinite(price) && Number.isFinite(ma200) && price < ma200)
+    || (Number.isFinite(ma50) && Number.isFinite(ma200) && ma50 < ma200);
+  const brokenStructure = String(derived.structureState || '').toLowerCase() === 'broken';
+  const invalidPlan = hasAnyPlanFields(item) && displayedPlan.status === 'invalid';
+  const tooWidePlan = displayedPlan.status === 'valid'
+    && (
+      displayedPlan.riskFit.risk_status === 'too_wide'
+      || numericOrNull(displayedPlan.riskFit.position_size) < 1
+    );
+  return trendBroken || brokenStructure || invalidPlan || tooWidePlan;
 }
 
 function computeBaseSetupScoreForRecord(record, options = {}){
@@ -4087,6 +4367,7 @@ function deriveDisplaySetupScore(record, options = {}){
   const rawScore = rawSetupScoreForRecord(rawRecord);
   const displayStage = normalizeAnalysisVerdict(options.displayStage || displayStageForRecord(rawRecord));
   const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(rawRecord, {derivedStates:derived});
+  const hardFail = isTrueHardFailForRecord(rawRecord, derived, {displayedPlan:options.displayedPlan});
   const structureState = String(derived.structureState || '').toLowerCase();
   const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
   const bounceState = String(derived.bounceState || '').toLowerCase();
@@ -4098,8 +4379,8 @@ function deriveDisplaySetupScore(record, options = {}){
   if(warningState.showWarning) adjusted -= 1;
   if(volumeState === 'weak') adjusted -= 1;
   if(hostileMarket) adjusted -= 1;
-  if(['weak','weakening'].includes(structureState)) adjusted -= 2;
-  if(structureState === 'broken') adjusted -= 3;
+  if(['weak','weakening'].includes(structureState)) adjusted -= 1;
+  if(structureState === 'broken') adjusted -= 4;
   if(bounceState !== 'confirmed' && stabilisationState === 'early') adjusted -= 1;
   if(practicalSizeFlag === 'tiny_size') adjusted -= 2;
   if(practicalSizeFlag === 'low_impact') adjusted -= 1;
@@ -4110,7 +4391,7 @@ function deriveDisplaySetupScore(record, options = {}){
   if(volumeState === 'weak') adjusted = Math.min(adjusted, 8);
   if(hostileMarket) adjusted = Math.min(adjusted, 8);
   if(volumeState === 'weak' && hostileMarket) adjusted = Math.min(adjusted, 7);
-  if(['weak','weakening'].includes(structureState)) adjusted = Math.min(adjusted, 6);
+  if(['weak','weakening'].includes(structureState)) adjusted = Math.min(adjusted, 7);
   if(practicalSizeFlag === 'tiny_size') adjusted = Math.min(adjusted, 7);
   if(qualityAdjustments.widthPenalty >= 1) adjusted = Math.min(adjusted, 7);
   if(qualityAdjustments.widthPenalty >= 2) adjusted = Math.min(adjusted, 6);
@@ -4120,7 +4401,7 @@ function deriveDisplaySetupScore(record, options = {}){
   if(displayStage === 'Entry') return Math.max(8, Math.min(10, rounded));
   if(displayStage === 'Near Entry') return Math.max(6, Math.min(7, rounded));
   if(displayStage === 'Watch') return Math.max(4, Math.min(5, rounded));
-  if(displayStage === 'Avoid') return Math.max(0, Math.min(3, rounded));
+  if(displayStage === 'Avoid') return hardFail ? Math.max(0, Math.min(3, rounded)) : Math.max(2, Math.min(4, rounded));
   return rounded;
 }
 
@@ -4735,7 +5016,7 @@ function projectTickerForCard(record, options = {}){
     setupScoreDisplay:setupScoreDisplayForRecord(item),
     convictionTier:convictionTierLabel(item.setup.convictionTier || ''),
     planState:displayedPlan.status,
-    planStateLabel:formatPlanState(displayedPlan.status),
+    planStateLabel:formatPlanState(displayedPlan.status, item),
     rrValue,
     positionSize:displayedPlan.status === 'valid' ? displayedPlan.riskFit.position_size : null,
     capitalFit:displayedPlan.status === 'valid' ? displayedPlan.capitalFit.capital_fit : 'unknown',
@@ -4785,7 +5066,7 @@ function scanCardStatusPills(view, maxPills = 3){
     if(value && !pills.includes(value) && pills.length < maxPills) pills.push(value);
   };
   if(view.warningState && view.warningState.showWarning) pushPill('Warning');
-  pushPill(view.planState === 'valid' ? 'Plan Ready' : 'No Plan');
+  pushPill(view.planStateLabel === 'Plan Missing' ? 'No Plan' : view.planStateLabel);
   if(Number.isFinite(view.rrValue)) pushPill(`R:R ${view.rrValue.toFixed(2)}`);
   if(Number.isFinite(view.positionSize)) pushPill(`Size ${view.positionSize}`);
   if(view.displayedPlan.tradeability === 'risk_only') pushPill('Capital check unavailable');
@@ -4836,7 +5117,8 @@ function formatScoreStage(scoreStage){
   return 'Preliminary';
 }
 
-function formatPlanState(planState){
+function formatPlanState(planState, record = null){
+  if(record && displayStageForRecord(record) === 'Avoid') return 'Not Actionable';
   if(planState === 'valid') return 'Plan Ready';
   if(planState === 'invalid') return 'Invalid Plan';
   return 'Plan Missing';
@@ -7636,7 +7918,7 @@ function renderReviewWorkspace(){
   });
   const adjustmentSummary = qualityAdjustments.adjustmentReasons.join(' | ');
   const displayStage = displayStageForRecord(record);
-  const planState = formatPlanState(displayedPlan.status);
+  const planState = formatPlanState(displayedPlan.status, record);
   const executionModeText = executionModeLabel(executionState.exitMode);
   const targetReviewText = targetReviewStateLabel(executionState.targetReviewState);
   const targetActionText = executionState.targetActionRecommendation || 'Hold / monitor';
@@ -7869,7 +8151,7 @@ function syncPlanDisplayMeta(){
     exitMode:record.plan.exitMode,
     targetLevel:targetValue
   });
-  if(planStateBox) planStateBox.value = formatPlanState(displayedPlan.status);
+  if(planStateBox) planStateBox.value = formatPlanState(displayedPlan.status, record);
   const planQuality = planQualityForRr(displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null);
   if(planQualityBox) planQualityBox.value = planQuality || 'N/A';
   if(planSourceBox) planSourceBox.value = String(record.plan.source || effectivePlan.source || '').trim() || 'manual';
@@ -8208,5 +8490,6 @@ document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', 
 
 registerPwa();
 loadState();
+bootstrapBackgroundMonitoring();
 updateTickerSearchStatus();
 updateProviderStatusNote();

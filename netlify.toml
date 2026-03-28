@@ -31,3 +31,18 @@
   from = "/api/market-data"
   to = "/.netlify/functions/market-data"
   status = 200
+
+[[redirects]]
+  from = "/api/tracked-state"
+  to = "/.netlify/functions/tracked-state"
+  status = 200
+
+[[redirects]]
+  from = "/api/push-config"
+  to = "/.netlify/functions/push-config"
+  status = 200
+
+[[redirects]]
+  from = "/api/push-subscribe"
+  to = "/.netlify/functions/push-subscribe"
+  status = 200
