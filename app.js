@@ -73,7 +73,7 @@ function createDefaultState(){
 
 const state = createDefaultState();
 
-const uiState = {promptOpen:{},responseOpen:{},loadingTicker:'',selectedScanner:{},activeReviewTicker:'',activeReviewAddsToScannerUniverse:true,scannerShortlistSuppressed:false};
+const uiState = {promptOpen:{},responseOpen:{},loadingTicker:'',selectedScanner:{},activeReviewTicker:'',activeReviewAddsToScannerUniverse:true,activeReviewVerdictOverride:'',scannerShortlistSuppressed:false};
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -2471,6 +2471,7 @@ function saveState(){
 function loadState(){
   Object.assign(state, createDefaultState(), safeStorageGet(key, {}) || {});
   uiState.activeReviewAddsToScannerUniverse = true;
+  uiState.activeReviewVerdictOverride = '';
   uiState.scannerShortlistSuppressed = false;
   delete state.lastImportRaw;
   state.aiEndpoint = state.aiEndpoint || defaultAiEndpoint;
@@ -3752,6 +3753,15 @@ function primaryShortlistStatusChip(view){
   if(view.bucket === 'tradeable_secondary') return {label:'👀 Watch', className:'watch'};
   if(structureBadge.state === 'developing') return {label:'🌱 Developing', className:'near'};
   return {label:'👀 Watch', className:'watch'};
+}
+
+function reviewVerdictOverrideFromView(view){
+  const shortlistChip = primaryShortlistStatusChip(view);
+  const label = String(shortlistChip && shortlistChip.label || '');
+  if(/Entry/i.test(label)) return 'Entry';
+  if(/Broken/i.test(label)) return 'Avoid';
+  if(/Watch/i.test(label) || /Developing/i.test(label) || /Weak/i.test(label)) return 'Watch';
+  return '';
 }
 
 function shortlistStatusPills(view, maxPills = 3){
@@ -8165,7 +8175,11 @@ function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   const record = upsertTickerRecord(symbol);
+  const sourceView = buildFinalSetupView(record);
   uiState.activeReviewAddsToScannerUniverse = options.includeInScannerUniverse !== false;
+  uiState.activeReviewVerdictOverride = options.useSourceVerdict !== false
+    ? reviewVerdictOverrideFromView(sourceView)
+    : '';
   setActiveReviewTicker(symbol);
   record.review.cardOpen = true;
   if(options.includeInScannerUniverse === true && !state.tickers.includes(symbol)) state.tickers.push(symbol);
@@ -8197,6 +8211,7 @@ async function refreshWatchlistTicker(ticker){
   if(!symbol) return;
   setStatus('scannerSelectionStatus', `Refreshing ${escapeHtml(symbol)}...`);
   const record = upsertTickerRecord(symbol);
+  if(activeReviewTicker() === symbol) uiState.activeReviewVerdictOverride = '';
   try{
     const {card} = await refreshCardMarketData(symbol, {force:true});
     mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
@@ -8223,6 +8238,7 @@ async function refreshWatchlistTicker(ticker){
 function analyseActiveReviewTicker(){
   const ticker = activeReviewTicker();
   if(!ticker || uiState.loadingTicker) return;
+  uiState.activeReviewVerdictOverride = '';
   analyseSetup(ticker);
 }
 
@@ -8594,7 +8610,8 @@ function renderReviewWorkspace(options = {}){
     derivedStates:analysisDerivedStatesFromRecord(record)
   });
   const adjustmentSummary = qualityAdjustments.adjustmentReasons.join(' | ');
-  const displayStage = displayStageForRecord(record);
+  const initialVerdictOverride = activeReviewTicker() === record.ticker ? String(uiState.activeReviewVerdictOverride || '').trim() : '';
+  const displayStage = initialVerdictOverride || displayStageForRecord(record);
   const effectivePlanSnapshot = {
     entry:effectivePlan.entry,
     stop:effectivePlan.stop,
@@ -8636,7 +8653,9 @@ function renderReviewWorkspace(options = {}){
     controlQuality:qualityAdjustments.controlQuality,
     capitalEfficiency:qualityAdjustments.capitalEfficiency
   });
-  const nextActionText = nextActionTextForRecord(record);
+  const nextActionText = initialVerdictOverride === 'Watch'
+    ? '\uD83D\uDC40 Monitor only - no entry yet'
+    : nextActionTextForRecord(record);
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
   const analyseLabel = loading ? 'Analysing...' : (analysisState.error ? 'Retry Analysis' : 'Analyse Setup');
@@ -8800,6 +8819,7 @@ function saveReview(){
 function resetReview(){
   uiState.activeReviewTicker = '';
   uiState.activeReviewAddsToScannerUniverse = true;
+  uiState.activeReviewVerdictOverride = '';
   ['selectedTicker','planStateBox','planQualityBox','planSourceBox','exitModeBox','targetReviewStateBox','targetAlertBox','entryPrice','stopPrice','targetPrice'].forEach(id => { if($(id)) $(id).value = ''; });
   checklistIds.forEach(id => { $(id).checked = false; });
   $('summaryBox').textContent = 'No setup reviewed yet.';
@@ -8881,6 +8901,7 @@ function syncPlanDisplayMeta(){
 function refreshSelectedTickerLifecycle(){
   const ticker = activeReviewTicker();
   if(!ticker) return;
+  uiState.activeReviewVerdictOverride = '';
   const record = getTickerRecord(ticker);
   if(!record) return;
   const stage = record.plan.hasValidPlan ? 'planned' : ((record.review.manualReview || record.review.cardOpen) ? 'reviewed' : (record.watchlist.inWatchlist ? 'watchlist' : (record.scan.verdict && record.scan.verdict !== 'Avoid' ? 'shortlisted' : 'reviewed')));
@@ -9041,6 +9062,7 @@ function resetAllData(){
   marketDataCache.clear();
   Object.assign(state, createDefaultState());
   uiState.activeReviewAddsToScannerUniverse = true;
+  uiState.activeReviewVerdictOverride = '';
   uiState.scannerShortlistSuppressed = false;
   uiState.promptOpen = {};
   uiState.responseOpen = {};
@@ -9094,6 +9116,7 @@ function clearTransientSessionState(options = {}){
   const preserveSavedReviewCards = options.preserveSavedReviewCards === true;
   uiState.activeReviewTicker = '';
   uiState.activeReviewAddsToScannerUniverse = true;
+  uiState.activeReviewVerdictOverride = '';
   uiState.loadingTicker = '';
   uiState.selectedScanner = {};
   uiState.promptOpen = {};
