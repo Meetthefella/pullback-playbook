@@ -188,6 +188,10 @@ function currentMaxLoss(){
   return numericOrNull(state.maxRisk) || 0;
 }
 
+function riskSettingsValid(){
+  return currentMaxLoss() > 0;
+}
+
 function currentRiskSettings(){
   return {
     account_size:numericOrNull(state.accountSize) || 0,
@@ -234,6 +238,7 @@ function evaluateRiskFit({entry, stop, account_size, risk_percent, max_loss_over
   if(!Number.isFinite(numericEntry) || !Number.isFinite(numericStop)) return {max_loss, risk_per_share:null, position_size:0, risk_status:'plan_missing'};
   const risk_per_share = numericEntry - numericStop;
   if(!Number.isFinite(risk_per_share) || risk_per_share <= 0) return {max_loss, risk_per_share, position_size:0, risk_status:'invalid_plan'};
+  if(!(max_loss > 0)) return {max_loss, risk_per_share, position_size:0, risk_status:'settings_missing'};
   let position_size = max_loss > 0 ? (whole_shares_only === false ? (max_loss / risk_per_share) : Math.floor(max_loss / risk_per_share)) : 0;
   if(!Number.isFinite(position_size)) position_size = 0;
   if(position_size < 1) return {max_loss, risk_per_share, position_size:whole_shares_only === false ? Number(position_size.toFixed(2)) : 0, risk_status:'too_wide'};
@@ -2184,12 +2189,12 @@ function tickerRecordToLegacyCard(record){
   // tickerRecords; this function is a read-only projection layer.
   const item = normalizeTickerRecord(record);
   const fallbackReview = item.review.manualReview && typeof item.review.manualReview === 'object' ? item.review.manualReview : null;
-  const reviewVerdict = normalizeImportedStatus(item.review.savedVerdict || (fallbackReview && fallbackReview.status) || '');
+  const reviewVerdict = savedReviewVerdictForRecord(item);
   const reviewSummary = String(item.review.savedSummary || (fallbackReview && fallbackReview.summary) || '').trim();
   const reviewScore = numericOrNull(item.review.savedScore ?? (fallbackReview && fallbackReview.score));
-  const currentVerdict = currentRuntimeVerdictForRecord(item);
-  const currentSummary = currentRuntimeSummaryForRecord(item);
-  const currentScore = currentRuntimeScoreForRecord(item);
+  const currentVerdict = preferredVerdictForRecord(item);
+  const currentSummary = preferredSummaryForRecord(item);
+  const currentScore = preferredScoreForRecord(item);
   const card = normalizeCard({
     ticker:item.ticker,
     status:currentVerdict || reviewVerdict || 'Watch',
@@ -4423,6 +4428,7 @@ function statusClass(status){
 function riskStatusLabel(riskStatus){
   if(riskStatus === 'fits_risk') return 'Fits Risk';
   if(riskStatus === 'too_wide') return 'Too Wide';
+  if(riskStatus === 'settings_missing') return 'Settings Missing';
   if(riskStatus === 'invalid_plan') return 'Invalid Plan';
   return 'Plan Missing';
 }
@@ -5022,7 +5028,7 @@ function savedReviewVerdictForRecord(record){
   const item = normalizeTickerRecord(record);
   const manualReview = item.review.manualReview && typeof item.review.manualReview === 'object' ? item.review.manualReview : null;
   const rawVerdict = String(item.review.savedVerdict || (manualReview && manualReview.status) || '').trim();
-  return rawVerdict ? normalizeImportedStatus(rawVerdict) : '';
+  return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
 }
 
 function savedReviewSummaryForRecord(record){
@@ -5040,9 +5046,15 @@ function savedReviewScoreForRecord(record){
 function currentRuntimeVerdictForRecord(record){
   const item = normalizeTickerRecord(record);
   const scanVerdict = String((item.scan && item.scan.verdict) || '').trim();
+  return scanVerdict ? normalizeImportedStatus(scanVerdict, {preserveEmpty:true}) : '';
+}
+
+function runtimeFallbackVerdictForRecord(record){
+  const item = normalizeTickerRecord(record);
+  const scanVerdict = String((item.scan && item.scan.verdict) || '').trim();
   const watchlistVerdict = String((item.watchlist && item.watchlist.status) || '').trim();
-  const rawVerdict = scanVerdict || (!savedReviewVerdictForRecord(item) ? watchlistVerdict : '');
-  return rawVerdict ? normalizeImportedStatus(rawVerdict) : '';
+  const rawVerdict = scanVerdict || watchlistVerdict;
+  return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
 }
 
 function currentRuntimeSummaryForRecord(record){
@@ -5056,7 +5068,7 @@ function currentRuntimeScoreForRecord(record){
 }
 
 function preferredVerdictForRecord(record){
-  return currentRuntimeVerdictForRecord(record) || savedReviewVerdictForRecord(record) || 'Watch';
+  return currentRuntimeVerdictForRecord(record) || savedReviewVerdictForRecord(record) || runtimeFallbackVerdictForRecord(record) || 'Watch';
 }
 
 function preferredScoreForRecord(record){
@@ -5085,7 +5097,7 @@ function currentRuntimeTimestampForRecord(record){
     item.scan && item.scan.updatedAt,
     item.watchlist && item.watchlist.updatedAt
   ].map(value => String(value || '').trim()).filter(Boolean);
-  return candidates[0] || '';
+  return candidates.sort().slice(-1)[0] || '';
 }
 
 function analysisVerdictForRecord(record){
@@ -5106,12 +5118,14 @@ function analysisVerdictForRecord(record){
       : null
   );
   const finalVerdict = normalizeAnalysisVerdict(normalizedAnalysis && (normalizedAnalysis.final_verdict || normalizedAnalysis.verdict) || '');
-  if(['Entry','Near Entry','Watch','Avoid'].includes(finalVerdict)) return finalVerdict;
   const currentVerdict = currentRuntimeVerdictForRecord(rawRecord);
   if(['Entry','Near Entry','Watch','Avoid'].includes(currentVerdict)) return normalizeAnalysisVerdict(currentVerdict);
+  if(['Entry','Near Entry','Watch','Avoid'].includes(finalVerdict)) return finalVerdict;
   const savedVerdict = savedReviewVerdictForRecord(rawRecord);
   if(savedVerdict) return normalizeAnalysisVerdict(savedVerdict);
-  return normalizeAnalysisVerdict(savedVerdict || 'Watch');
+  const fallbackVerdict = runtimeFallbackVerdictForRecord(rawRecord);
+  if(fallbackVerdict) return normalizeAnalysisVerdict(fallbackVerdict);
+  return 'Watch';
 }
 
 function evaluateEntryTrigger(record, options = {}){
@@ -5263,6 +5277,9 @@ function displayStageForRecord(record){
     stage = trigger.nearReady ? 'Near Entry' : 'Watch';
   }else if(baseVerdict === 'Watch' && trigger.nearReady){
     stage = 'Near Entry';
+  }
+  if(stage === 'Entry' && executionCapitalBlocked(displayedPlan)){
+    stage = 'Avoid';
   }
   if(stage !== 'Avoid' && qualityAdjustments.widthPenalty > 0){
     stage = downgradeVerdict(stage, qualityAdjustments.widthPenalty);
@@ -5885,6 +5902,8 @@ function deriveActionStateForRecord(record){
     stage = 'avoid';
   }else if(verdict === 'Avoid'){
     stage = 'avoid';
+  }else if(executionCapitalBlocked(displayedPlan)){
+    stage = 'avoid';
   }else if(planUiState.state === 'unrealistic_rr' || planUiState.state === 'needs_adjustment'){
     stage = 'needs_plan';
   }else if(planValidationState === 'needs_replan'){
@@ -5916,8 +5935,8 @@ function nextActionTextForRecord(record){
       return item.plan.targetActionRecommendation || 'Review now';
     }
   }
-  if(item.plan && item.plan.affordability === 'not_affordable') return 'Review affordability';
-  if(item.plan && item.plan.affordability === 'heavy_capital') return 'Review capital use';
+  if(item.plan && item.plan.affordability === 'not_affordable') return 'Ignore - capital does not fit';
+  if(item.plan && item.plan.affordability === 'heavy_capital') return 'Pass - capital burden is too high';
   const actionStage = actionStateForRecord(record);
   if(actionStage === 'action_now') return 'Execute trade plan';
   if(actionStage === 'needs_plan') return 'Define trade plan';
@@ -6526,11 +6545,12 @@ function deriveTradePlan(data, scanType = '20MA'){
   const price = numericOrNull(data.price);
   const sma20 = numericOrNull(data.sma20);
   const sma50 = numericOrNull(data.sma50);
-  if(!Number.isFinite(price) || !Number.isFinite(sma20) || !Number.isFinite(sma50)) return {entry:null, stop:null, target:null, riskPerShare:null, rewardPerShare:null, rr:null, rrState:'invalid', rrValid:false, firstTargetTooClose:false, positionSize:0};
+  if(!Number.isFinite(price) || !Number.isFinite(sma20) || !Number.isFinite(sma50)) return {entry:null, stop:null, target:null, riskPerShare:null, rewardPerShare:null, rr:null, rrState:'invalid', rrValid:false, firstTargetTooClose:false, positionSize:0, stopBufferPct:null};
   const support = scanType === '50MA' ? sma50 : sma20;
   const backupSupport = scanType === '50MA' ? sma20 : sma50;
   const entry = Math.max(price, support);
-  const stop = Math.min(price, Math.min(support, backupSupport) * 0.99);
+  const stopBufferPct = price < 50 ? 0.02 : (price <= 200 ? 0.015 : 0.01);
+  const stop = Math.min(price, Math.min(support, backupSupport) * (1 - stopBufferPct));
   const riskFit = evaluateRiskFit({
     entry,
     stop,
@@ -6550,6 +6570,7 @@ function deriveTradePlan(data, scanType = '20MA'){
     rrRatio:rewardRisk.rrRatio,
     rrState:rewardRisk.rrState,
     rrValid:rewardRisk.valid,
+    stopBufferPct,
     firstTargetTooClose:rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false,
     positionSize:riskFit.position_size,
     maxLoss:riskFit.max_loss,
@@ -6751,115 +6772,14 @@ function buildTickerPromptFromRecord(record){
     compactChecklist:compactChecklistText(checks),
     chartAttached:item.review.chartAvailable ? 'yes' : 'no',
     chartFileName:item.review.chartRef ? item.review.chartRef.name : '',
+    chartMatchStatus:'unclear',
+    chartMatchWarning:'',
     entry:formatPlanFieldValue(item.plan.entry),
     stop:formatPlanFieldValue(item.plan.stop),
     target:formatPlanFieldValue(item.plan.firstTarget),
     marketData
   };
-  return [
-    'Quality Pullback setup. Return JSON only.',
-    '',
-    'You are analysing a stock for a swing-trading Quality Pullback strategy.',
-    '',
-    'Goal:',
-    'Identify strong stocks in uptrends that are pulling back toward support (20MA or 50MA) and assess whether they are Watch, Near Entry, Entry, or Avoid.',
-    '',
-    'Context:',
-    `ticker=${payload.ticker}`,
-    `market_status=${payload.marketStatus}`,
-    `scan_type=${payload.scanType}`,
-    `account_size_gbp=${payload.accountSize}`,
-    `max_loss_gbp=${payload.maxRisk}`,
-    '',
-    'Inputs:',
-    `trend_state=${payload.trendState}`,
-    `pullback_zone=${payload.pullbackZone}`,
-    `structure_state=${payload.structureState}`,
-    `stabilisation_state=${payload.stabilisationState}`,
-    `bounce_state=${payload.bounceState}`,
-    `volume_state=${payload.volumeState}`,
-    `entry_defined=${payload.entryDefined}`,
-    `stop_defined=${payload.stopDefined}`,
-    `target_defined=${payload.targetDefined}`,
-    '',
-    'Guidance:',
-    '',
-    'Trend:',
-    '- Prefer strong or acceptable trends',
-    '- Avoid weak or broken trends',
-    '',
-    'Pullback:',
-    '- Prefer price near 20MA (shallow) or 50MA (deeper)',
-    '- Avoid extended or broken pullbacks',
-    '',
-    'Stabilisation:',
-    '- none = still falling / volatile',
-    '- early = momentum slowing, smaller candles',
-    '- clear = base forming / higher lows',
-    '',
-    'Bounce:',
-    '- attempt = first reaction / wick / green candle',
-    '- confirmed = follow-through move',
-    '',
-    'Scan-type rules:',
-    '',
-    'If scan_type=20MA:',
-    '- Expect shallow pullbacks near 20MA',
-    '- Require stabilisation or bounce for Near Entry',
-    '- Require bounce or confirmation for Entry',
-    '',
-    'If scan_type=50MA:',
-    '- Expect deeper pullbacks near 50MA',
-    '- Allow Watch without stabilisation',
-    '- Require stabilisation for Near Entry',
-    '- Require bounce or confirmation for Entry',
-    '',
-    'Hard fail -> Avoid if:',
-    '- structure_state = broken',
-    '- trend_state = broken',
-    '- stop_defined = no',
-    '- target_defined = no',
-    '',
-    'Do NOT automatically mark Avoid just because stabilisation is missing.',
-    '',
-    'Trade plan:',
-    '- Always propose entry, stop, and first_target for any analyzable setup, even for Watch or Near Entry',
-    '- Use conditional trigger levels when the setup is early rather than leaving plan fields blank',
-    '- Entry should be logical (reclaim, bounce, breakout, or continuation trigger)',
-    '- Stop should sit below support, the pullback low, or the invalidation level',
-    '- First target should be prior swing high or logical resistance',
-    '- Must respect GBP 40 max loss',
-    '',
-    'Output keys:',
-    'setup_type',
-    'plain_english_chart_read',
-    'entry',
-    'stop',
-    'first_target',
-    'risk_per_share',
-    'position_size',
-    'reward_risk',
-    'quality_score',
-    'confidence_score',
-    'key_reasons',
-    'risks',
-    'verdict',
-    'final_verdict',
-    '',
-    'Rules:',
-    '- verdict must be: Watch | Near Entry | Entry | Avoid',
-    '- quality_score = integer 1-10',
-    '- confidence_score = integer 1-100',
-    '- If unknown -> null',
-    '- Do not leave entry, stop, and first_target blank just because the setup is not yet Entry',
-    '- Keep explanations short and practical',
-    '',
-    payload.notes ? `Notes:\n${payload.notes}` : 'Notes: none',
-    payload.chartAttached === 'yes' ? `Chart attached: ${payload.chartFileName || 'yes'}` : 'Chart attached: no',
-    payload.marketData ? `Market data: ${JSON.stringify(payload.marketData)}` : 'Market data: none',
-    '',
-    'Return valid JSON only.'
-  ].join('\n');
+  return buildPromptBody(payload).join('\n');
 }
 
 function scannerHardFailReasons(data, checks, tradePlan){
@@ -6910,6 +6830,7 @@ function buildVerdictReason({suitability, scan, riskFit, rewardRisk, checks}){
   if(scan.status === 'Avoid') return scan.summary || 'Technical structure is invalid for this setup.';
   if(riskFit.risk_status === 'plan_missing') return 'Trade plan is incomplete. Define entry, stop, and first target.';
   if(riskFit.risk_status === 'invalid_plan') return 'Trade plan is invalid. Entry must sit above stop.';
+  if(riskFit.risk_status === 'settings_missing') return 'Account size or risk % is not configured. Check Settings before sizing any trade.';
   if(riskFit.risk_status === 'too_wide') return 'Risk does not fit the current account rule.';
   if(!rewardRisk.valid) return 'Reward:risk is invalid because the first target is not usable.';
   if(rewardRisk.rrState === 'weak') return `First target is too close at ${rewardRisk.rrRatio.toFixed(2)}R.`;
@@ -6979,7 +6900,7 @@ function scoreSuitability(card, data, checks){
     (entryDefined ? 1 : 0) +
     (stopDefined ? 1 : 0) +
     (targetDefined ? 1 : 0);
-  let total = trend + pullback + tradeQuality;
+  let total = trend + pullback + tradeQuality + (Number.isFinite(pullbackType.scoreAdjustment) ? pullbackType.scoreAdjustment : 0);
   const marketBelow50 = /below 50 ma/i.test(String(state.marketStatus || ''));
   if(marketBelow50){
     if(total >= 8 && !checks.bounce) total = 7;
@@ -7002,6 +6923,7 @@ function scoreSuitability(card, data, checks){
       pullbackStatus,
       scanType,
       pullbackType:pullbackType.type,
+      scoreAdjustment:pullbackType.scoreAdjustment,
       distance20:pullbackType.distance20,
       distance50:pullbackType.distance50,
       extended:pullbackType.extended,
@@ -7026,6 +6948,7 @@ function buildScannerChecks(data){
   const sma20 = numericOrNull(data.sma20);
   const sma50 = numericOrNull(data.sma50);
   const sma200 = numericOrNull(data.sma200);
+  const perf1w = numericOrNull(data.perf1w);
   const volume = numericOrNull(data.volume);
   const avgVolume30d = numericOrNull(data.avgVolume30d);
   const near20 = isNearLevel(price, sma20, 0.025);
@@ -7040,7 +6963,10 @@ function buildScannerChecks(data){
     near20,
     near50,
     stabilising:near20 || near50,
-    bounce:Number.isFinite(data.perf1w) && data.perf1w > 0,
+    bounce:Number.isFinite(perf1w) && perf1w >= 1,
+    bounceStrength:Number.isFinite(perf1w)
+      ? (perf1w >= 3 ? 'strong' : (perf1w >= 1 ? 'moderate' : (perf1w > 0 ? 'weak' : 'none')))
+      : 'none',
     volume:Number.isFinite(volume) && Number.isFinite(avgVolume30d) && volume >= avgVolume30d,
     mediumTermStrength:Number.isFinite(numericOrNull(data.perf3m)) && numericOrNull(data.perf3m) > 0,
     structureBroken,
@@ -7624,6 +7550,8 @@ function buildAnalysisPayload(card){
     maxRisk:state.maxRisk,
     chartAttached:!!(safeCard.chartRef && safeCard.chartRef.dataUrl),
     chartFileName:safeCard.chartRef ? safeCard.chartRef.name : '',
+    chartMatchStatus:'unclear',
+    chartMatchWarning:'',
     entry:safeCard.entry || '',
     stop:safeCard.stop || '',
     target:safeCard.target || '',
@@ -7648,118 +7576,12 @@ function buildAnalysisPayload(card){
 
 function buildTickerPrompt(card){
   const payload = buildAnalysisPayload(card);
-  return [
-    'Quality Pullback setup. Return JSON only.',
-    '',
-    'You are analysing a stock for a swing-trading Quality Pullback strategy.',
-    '',
-    'Goal:',
-    'Identify strong stocks in uptrends that are pulling back toward support (20MA or 50MA) and assess whether they are Watch, Near Entry, Entry, or Avoid.',
-    '',
-    'Context:',
-    `ticker=${payload.ticker}`,
-    `market_status=${payload.marketStatus}`,
-    `scan_type=${payload.scanType}`,
-    `account_size_gbp=${payload.accountSize}`,
-    `max_loss_gbp=${payload.maxRisk}`,
-    `chart_attached=${payload.chartAttached ? 'yes' : 'no'}`,
-    `chart_filename=${payload.chartFileName || 'none'}`,
-    '',
-    'Inputs:',
-    `trend_state=${payload.trendState}`,
-    `pullback_zone=${payload.pullbackZone}`,
-    `structure_state=${payload.structureState}`,
-    `stabilisation_state=${payload.stabilisationState}`,
-    `bounce_state=${payload.bounceState}`,
-    `volume_state=${payload.volumeState}`,
-    `entry_defined=${payload.entryDefined}`,
-    `stop_defined=${payload.stopDefined}`,
-    `target_defined=${payload.targetDefined}`,
-    '',
-    'Guidance:',
-    '',
-    'Trend:',
-    '- Prefer strong or acceptable trends',
-    '- Avoid weak or broken trends',
-    '',
-    'Pullback:',
-    '- Prefer price near 20MA (shallow) or 50MA (deeper)',
-    '- Avoid extended or broken pullbacks',
-    '',
-    'Stabilisation:',
-    '- none = still falling / volatile',
-    '- early = momentum slowing, smaller candles',
-    '- clear = base forming / higher lows',
-    '',
-    'Bounce:',
-    '- attempt = first reaction / wick / green candle',
-    '- confirmed = follow-through move',
-    '',
-    'Scan-type rules:',
-    '',
-    'If scan_type=20MA:',
-    '- Expect shallow pullbacks near 20MA',
-    '- Require stabilisation or bounce for Near Entry',
-    '- Require bounce or confirmation for Entry',
-    '',
-    'If scan_type=50MA:',
-    '- Expect deeper pullbacks near 50MA',
-    '- Allow Watch without stabilisation',
-    '- Require stabilisation for Near Entry',
-    '- Require bounce or confirmation for Entry',
-    '',
-    'Hard fail -> Avoid if:',
-    '- structure_state = broken',
-    '- trend_state = broken',
-    '- stop_defined = no',
-    '- target_defined = no',
-    '',
-    'Do NOT automatically mark Avoid just because stabilisation is missing.',
-    '',
-    'Trade plan:',
-    '- Entry should be logical (reclaim, bounce, or breakout)',
-    '- Stop should sit below support',
-    '- First target should be prior swing high',
-    '- Must respect GBP 40 max loss',
-    '',
-    'Chart verification:',
-    '- If a chart image is attached, first check whether it plausibly matches the supplied ticker',
-    '- If the uploaded chart looks like a different ticker/symbol, flag that strongly',
-    '- A likely ticker/chart mismatch should be treated as Avoid until corrected',
-    '',
-    'Output keys:',
-    'setup_type',
-    'plain_english_chart_read',
-    'chart_match_status',
-    'chart_match_warning',
-    'entry',
-    'stop',
-    'first_target',
-    'risk_per_share',
-    'position_size',
-    'reward_risk',
-    'quality_score',
-    'confidence_score',
-    'key_reasons',
-    'risks',
-    'verdict',
-    'final_verdict',
-    '',
-    'Rules:',
-    '- verdict must be: Watch | Near Entry | Entry | Avoid',
-    '- quality_score = integer 1-10',
-    '- confidence_score = integer 1-100',
-    '- chart_match_status must be: match | mismatch | unclear',
-    '- if chart_match_status = mismatch, final_verdict should be Avoid',
-    '- If unknown -> null',
-    '- Keep explanations short and practical',
-    '',
-    'Return valid JSON only.'
-  ].join('\n');
+  return buildPromptBody(payload).join('\n');
 }
 
-function normalizeImportedStatus(value){
+function normalizeImportedStatus(value, options = {}){
   const v = String(value || '').trim().toLowerCase();
+  if(!v) return options.preserveEmpty ? '' : 'Watch';
   if(v === 'ready') return 'Ready';
   if(v === 'entry') return 'Entry';
   if(v === 'near pullback' || v === 'near setup') return 'Near Setup';
@@ -8339,26 +8161,34 @@ function statusRank(status){
   return 3;
 }
 
-function openRankedResultInReview(ticker, options = {}){
+function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
   const record = upsertTickerRecord(symbol);
   uiState.activeReviewAddsToScannerUniverse = options.includeInScannerUniverse !== false;
   setActiveReviewTicker(symbol);
   record.review.cardOpen = true;
-  if(options.includeInScannerUniverse !== false && !state.tickers.includes(symbol)) state.tickers.push(symbol);
+  if(options.includeInScannerUniverse === true && !state.tickers.includes(symbol)) state.tickers.push(symbol);
   delete uiState.selectedScanner[symbol];
   updateTickerInputFromState();
   commitTickerState();
   renderTickerQuickLists();
   renderScannerResults();
   renderCards();
-  loadCard(symbol);
+  loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true});
+}
+
+function openRankedResultInReview(ticker, options = {}){
+  loadTickerIntoReview(ticker, {
+    includeInScannerUniverse:options.includeInScannerUniverse === true,
+    recompute:options.recompute === true
+  });
 }
 
 function reviewWatchlistTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
-  openRankedResultInReview(symbol, {includeInScannerUniverse:false});
+  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false});
   setStatus('scannerSelectionStatus', `<span class="ok">Loaded saved ${escapeHtml(symbol)} review state.</span>`);
 }
 
@@ -8715,7 +8545,7 @@ function bindReviewWorkspaceActions(record){
   ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));
 }
 
-function renderReviewWorkspace(){
+function renderReviewWorkspace(options = {}){
   const box = $('reviewWorkspace');
   if(!box) return;
   box.innerHTML = '';
@@ -8735,8 +8565,10 @@ function renderReviewWorkspace(){
     return;
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
-  maybeExpireTickerRecord(liveRecord);
-  reevaluateTickerProgress(liveRecord);
+  if(options.recompute === true){
+    maybeExpireTickerRecord(liveRecord);
+    reevaluateTickerProgress(liveRecord);
+  }
   const record = normalizeTickerRecord(liveRecord);
   const analysisState = getReviewAnalysisState(record);
   const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
@@ -8893,14 +8725,16 @@ async function importLatestChart(ticker){
   }
 }
 
-function loadCard(ticker){
+function loadCard(ticker, options = {}){
   const record = getTickerRecord(ticker);
   if(!record) return;
   console.debug('RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
   setActiveReviewTicker(record.ticker);
-  refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
-  commitTickerState();
-  renderReviewWorkspace();
+  if(options.touchLifecycle === true){
+    refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
+    commitTickerState();
+  }
+  renderReviewWorkspace({recompute:options.recompute === true});
   const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : null;
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
   checklistIds.forEach(id => { $(id).checked = !!reviewChecks[id]; });
@@ -9360,6 +9194,139 @@ function captureActiveReviewWorkspaceDraft(){
     stop:$('stopPrice') ? $('stopPrice').value : '',
     target:$('targetPrice') ? $('targetPrice').value : ''
   };
+}
+
+function buildPromptBody(payload){
+  const chartAttached = payload.chartAttached === true || payload.chartAttached === 'yes';
+  const chartStatus = ['match','mismatch','unclear'].includes(String(payload.chartMatchStatus || '').trim().toLowerCase())
+    ? String(payload.chartMatchStatus || '').trim().toLowerCase()
+    : 'unclear';
+  const chartWarning = String(payload.chartMatchWarning || '').trim();
+  const lines = [
+    'Quality Pullback setup. Return JSON only.',
+    '',
+    'You are analysing a stock for a swing-trading Quality Pullback strategy.',
+    '',
+    'Goal:',
+    'Identify strong stocks in uptrends that are pulling back toward support (20MA or 50MA) and assess whether they are Watch, Near Entry, Entry, or Avoid.',
+    '',
+    'Context:',
+    `ticker=${payload.ticker}`,
+    `market_status=${payload.marketStatus}`,
+    `scan_type=${payload.scanType}`,
+    `account_size_gbp=${payload.accountSize}`,
+    `max_loss_gbp=${payload.maxRisk}`,
+    `chart_attached=${chartAttached ? 'yes' : 'no'}`,
+    `chart_filename=${payload.chartFileName || 'none'}`,
+    '',
+    'Inputs:',
+    `trend_state=${payload.trendState}`,
+    `pullback_zone=${payload.pullbackZone}`,
+    `structure_state=${payload.structureState}`,
+    `stabilisation_state=${payload.stabilisationState}`,
+    `bounce_state=${payload.bounceState}`,
+    `volume_state=${payload.volumeState}`,
+    `entry_defined=${payload.entryDefined}`,
+    `stop_defined=${payload.stopDefined}`,
+    `target_defined=${payload.targetDefined}`,
+    '',
+    'Guidance:',
+    '',
+    'Trend:',
+    '- Prefer strong or acceptable trends',
+    '- Avoid weak or broken trends',
+    '',
+    'Pullback:',
+    '- Prefer price near 20MA (shallow) or 50MA (deeper)',
+    '- Avoid extended or broken pullbacks',
+    '',
+    'Stabilisation:',
+    '- none = still falling / volatile',
+    '- early = momentum slowing, smaller candles',
+    '- clear = base forming / higher lows',
+    '',
+    'Bounce:',
+    '- attempt = first reaction / wick / green candle',
+    '- confirmed = follow-through move',
+    '',
+    'Scan-type rules:',
+    '',
+    'If scan_type=20MA:',
+    '- Expect shallow pullbacks near 20MA',
+    '- Require stabilisation or bounce for Near Entry',
+    '- Require bounce or confirmation for Entry',
+    '',
+    'If scan_type=50MA:',
+    '- Expect deeper pullbacks near 50MA',
+    '- Allow Watch without stabilisation',
+    '- Require stabilisation for Near Entry',
+    '- Require bounce or confirmation for Entry',
+    '',
+    'Hard fail -> Avoid if:',
+    '- structure_state = broken',
+    '- trend_state = broken',
+    '- stop_defined = no',
+    '- target_defined = no',
+    '',
+    'Do NOT automatically mark Avoid just because stabilisation is missing.',
+    '',
+    'Trade plan:',
+    '- Always propose entry, stop, and first_target for any analyzable setup, even for Watch or Near Entry',
+    '- Use conditional trigger levels when the setup is early rather than leaving plan fields blank',
+    '- Entry should be logical (reclaim, bounce, breakout, or continuation trigger)',
+    '- Stop should sit below support, the pullback low, or the invalidation level',
+    '- First target should be prior swing high or logical resistance',
+    '- Must respect GBP 40 max loss',
+    '',
+    'Chart verification:',
+    '- If a chart image is attached, first check whether it plausibly matches the supplied ticker',
+    '- If the uploaded chart looks like a different ticker/symbol, flag that strongly',
+    '- A likely ticker/chart mismatch should be treated as Avoid until corrected',
+    `- Current chart_match_status context: ${chartStatus}`,
+    `- Current chart_match_warning context: ${chartWarning || 'none'}`,
+    '',
+    'Output keys:',
+    'setup_type',
+    'plain_english_chart_read',
+    'chart_match_status',
+    'chart_match_warning',
+    'entry',
+    'stop',
+    'first_target',
+    'risk_per_share',
+    'position_size',
+    'reward_risk',
+    'quality_score',
+    'confidence_score',
+    'key_reasons',
+    'risks',
+    'verdict',
+    'final_verdict',
+    '',
+    'Rules:',
+    '- verdict must be: Watch | Near Entry | Entry | Avoid',
+    '- quality_score = integer 1-10',
+    '- confidence_score = integer 1-100',
+    '- chart_match_status must be: match | mismatch | unclear',
+    '- if chart_match_status = mismatch, final_verdict should be Avoid',
+    '- If unknown -> null',
+    '- Keep explanations short and practical'
+  ];
+  if(payload.notes !== undefined){
+    lines.push('', payload.notes ? `Notes:\n${payload.notes}` : 'Notes: none');
+  }
+  if(payload.marketData !== undefined){
+    lines.push(payload.marketData ? `Market data: ${JSON.stringify(payload.marketData)}` : 'Market data: none');
+  }
+  lines.push('', 'Return valid JSON only.');
+  return lines;
+}
+
+function executionCapitalBlocked(displayedPlan){
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  return plan.affordability === 'heavy_capital'
+    || plan.affordability === 'not_affordable'
+    || plan.tradeability === 'too_expensive';
 }
 
 function restoreActiveReviewWorkspaceDraft(draft){
