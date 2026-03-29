@@ -5107,13 +5107,10 @@ function analysisVerdictForRecord(record){
   );
   const finalVerdict = normalizeAnalysisVerdict(normalizedAnalysis && (normalizedAnalysis.final_verdict || normalizedAnalysis.verdict) || '');
   if(['Entry','Near Entry','Watch','Avoid'].includes(finalVerdict)) return finalVerdict;
-  const savedVerdict = savedReviewVerdictForRecord(rawRecord);
   const currentVerdict = currentRuntimeVerdictForRecord(rawRecord);
-  const savedReviewedAt = reviewSnapshotTimestampForRecord(rawRecord);
-  const currentUpdatedAt = currentRuntimeTimestampForRecord(rawRecord);
-  const runtimeIsNewer = savedReviewedAt && currentUpdatedAt && currentUpdatedAt > savedReviewedAt;
-  if(savedVerdict && !runtimeIsNewer) return normalizeAnalysisVerdict(savedVerdict);
   if(['Entry','Near Entry','Watch','Avoid'].includes(currentVerdict)) return normalizeAnalysisVerdict(currentVerdict);
+  const savedVerdict = savedReviewVerdictForRecord(rawRecord);
+  if(savedVerdict) return normalizeAnalysisVerdict(savedVerdict);
   return normalizeAnalysisVerdict(savedVerdict || 'Watch');
 }
 
@@ -8426,6 +8423,10 @@ function selectedScannerTickers(){
 function updateScannerSelectionStatus(){
   const resultCount = rankedTickerRecords().length;
   if(!$('scannerSelectionStatus')) return;
+  if(uiState.scannerShortlistSuppressed){
+    setStatus('scannerSelectionStatus', 'Session shortlist cleared. Run a new scan to rebuild ranked results.');
+    return;
+  }
   if(!resultCount){
     setStatus('scannerSelectionStatus', (state.tickers || []).length
       ? 'Refresh the scanner to rank your imported TradingView tickers.'
@@ -8461,6 +8462,10 @@ function renderScannerResults(){
   console.debug('RENDER_FROM_TICKER_RECORD', 'rankedResults', records.length);
   if(!records.length){
     updateScannerSelectionStatus();
+    if(uiState.scannerShortlistSuppressed){
+      box.innerHTML = '<div class="summary">Session shortlist cleared. Run a new scan to rebuild Tradeable, Early / Monitor, and Focus results.</div>';
+      return;
+    }
     box.innerHTML = !(state.tickers || []).length
       ? '<div class="summary">Scanning the Curated Core 8 fallback universe. Add your own tickers any time to switch into manual mode.</div>'
       : (state.scannerDebug && state.scannerDebug.length
@@ -8942,10 +8947,6 @@ function saveReview(){
   record.review.savedVerdict = result.status;
   record.review.savedSummary = manualReview.summary;
   record.review.savedScore = result.score;
-  record.scan.score = result.score;
-  record.scan.verdict = result.status;
-  record.scan.summary = manualReview.summary;
-  record.scan.reasons = [manualReview.summary];
   refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Manual review saved.', 'review');
   applyPlanCandidateToRecord(record, {
     entry:manualReview.entry,
@@ -9289,6 +9290,12 @@ function clearTransientSessionState(options = {}){
           || Number.isFinite(numericOrNull(record.review.savedScore))
         );
         record.review.cardOpen = preserveSavedReviewCards && hasSavedReview;
+      }
+    });
+  }else{
+    Object.values(state.tickerRecords || {}).forEach(record => {
+      if(record && record.review){
+        record.review.cardOpen = false;
       }
     });
   }
