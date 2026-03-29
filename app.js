@@ -3764,6 +3764,14 @@ function reviewVerdictOverrideFromView(view){
   return '';
 }
 
+function reviewVerdictOverrideFromLabel(label){
+  const text = String(label || '');
+  if(/Entry/i.test(text)) return 'Entry';
+  if(/Broken/i.test(text)) return 'Avoid';
+  if(/Watch/i.test(text) || /Developing/i.test(text) || /Weak/i.test(text)) return 'Watch';
+  return '';
+}
+
 function shortlistStatusPills(view, maxPills = 3){
   if(view.bucket === 'filtered' || view.finalClassification === 'filtered'){
     const pills = [];
@@ -3782,6 +3790,7 @@ function renderCompactResultCard(record){
 function renderCompactResultCardFromView(view){
   const item = view.item;
   const statusChip = primaryShortlistStatusChip(view);
+  const sourceVerdict = reviewVerdictOverrideFromView(view);
   const scoreLabel = view.setupScoreDisplay;
   const filteredCard = view.bucket === 'filtered' || view.finalClassification === 'filtered';
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
@@ -3795,7 +3804,7 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
     item.setup.marketCaution ? 'Market caution' : ''
   ].filter(Boolean).join(' | ');
-  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div></details></div>`;
+  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div></details></div>`;
 }
 
 function compactReasonLineForView(view, maxParts = 3){
@@ -8175,10 +8184,9 @@ function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   const record = upsertTickerRecord(symbol);
-  const sourceView = buildFinalSetupView(record);
   uiState.activeReviewAddsToScannerUniverse = options.includeInScannerUniverse !== false;
   uiState.activeReviewVerdictOverride = options.useSourceVerdict !== false
-    ? reviewVerdictOverrideFromView(sourceView)
+    ? reviewVerdictOverrideFromLabel(options.sourceVerdict || '')
     : '';
   setActiveReviewTicker(symbol);
   record.review.cardOpen = true;
@@ -8195,14 +8203,17 @@ function loadTickerIntoReview(ticker, options = {}){
 function openRankedResultInReview(ticker, options = {}){
   loadTickerIntoReview(ticker, {
     includeInScannerUniverse:options.includeInScannerUniverse === true,
-    recompute:options.recompute === true
+    recompute:options.recompute === true,
+    sourceVerdict:options.sourceVerdict || ''
   });
 }
 
 function reviewWatchlistTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
-  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false});
+  const record = getTickerRecord(symbol) || upsertTickerRecord(symbol);
+  const sourceVerdict = reviewVerdictOverrideFromLabel(projectTickerForCard(record).setupUiState.label);
+  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false, sourceVerdict});
   setStatus('scannerSelectionStatus', `<span class="ok">Loaded saved ${escapeHtml(symbol)} review state.</span>`);
 }
 
@@ -8381,7 +8392,8 @@ function renderScannerResults(){
         const reviewBtn = node.querySelector('[data-act="review"]');
         if(reviewBtn){
           const ticker = view.ticker;
-          reviewBtn.onclick = () => openRankedResultInReview(ticker);
+          const sourceVerdict = reviewBtn.getAttribute('data-source-verdict') || '';
+          reviewBtn.onclick = () => openRankedResultInReview(ticker, {sourceVerdict});
           const watchlistBtn = node.querySelector('[data-act="watchlist"]');
           if(watchlistBtn){
             watchlistBtn.onclick = event => {
