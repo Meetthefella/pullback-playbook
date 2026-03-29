@@ -5044,46 +5044,55 @@ function convictionTierLabel(tier){
 }
 
 function savedReviewVerdictForRecord(record){
-  const item = normalizeTickerRecord(record);
-  const manualReview = item.review.manualReview && typeof item.review.manualReview === 'object' ? item.review.manualReview : null;
-  const rawVerdict = String(item.review.savedVerdict || (manualReview && manualReview.status) || '').trim();
+  const item = record && typeof record === 'object' ? record : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const manualReview = review.manualReview && typeof review.manualReview === 'object' ? review.manualReview : null;
+  const rawVerdict = String(review.savedVerdict || (manualReview && manualReview.status) || '').trim();
   return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
 }
 
 function savedReviewSummaryForRecord(record){
-  const item = normalizeTickerRecord(record);
-  const manualReview = item.review.manualReview && typeof item.review.manualReview === 'object' ? item.review.manualReview : null;
-  return String(item.review.savedSummary || (manualReview && manualReview.summary) || '').trim();
+  const item = record && typeof record === 'object' ? record : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const manualReview = review.manualReview && typeof review.manualReview === 'object' ? review.manualReview : null;
+  return String(review.savedSummary || (manualReview && manualReview.summary) || '').trim();
 }
 
 function savedReviewScoreForRecord(record){
-  const item = normalizeTickerRecord(record);
-  const manualReview = item.review.manualReview && typeof item.review.manualReview === 'object' ? item.review.manualReview : null;
-  return numericOrNull(item.review.savedScore ?? (manualReview && manualReview.score));
+  const item = record && typeof record === 'object' ? record : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const manualReview = review.manualReview && typeof review.manualReview === 'object' ? review.manualReview : null;
+  return numericOrNull(review.savedScore ?? (manualReview && manualReview.score));
 }
 
 function currentRuntimeVerdictForRecord(record){
-  const item = normalizeTickerRecord(record);
-  const scanVerdict = String((item.scan && item.scan.verdict) || '').trim();
+  const item = record && typeof record === 'object' ? record : {};
+  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
+  const scanVerdict = String(scan.verdict || '').trim();
   return scanVerdict ? normalizeImportedStatus(scanVerdict, {preserveEmpty:true}) : '';
 }
 
 function runtimeFallbackVerdictForRecord(record){
-  const item = normalizeTickerRecord(record);
-  const scanVerdict = String((item.scan && item.scan.verdict) || '').trim();
-  const watchlistVerdict = String((item.watchlist && item.watchlist.status) || '').trim();
+  const item = record && typeof record === 'object' ? record : {};
+  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
+  const watchlist = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : {};
+  const scanVerdict = String(scan.verdict || '').trim();
+  const watchlistVerdict = String(watchlist.status || '').trim();
   const rawVerdict = scanVerdict || watchlistVerdict;
   return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
 }
 
 function currentRuntimeSummaryForRecord(record){
-  const item = normalizeTickerRecord(record);
-  return String((item.scan && item.scan.summary) || ((item.scan && item.scan.reasons && item.scan.reasons[0]) || '')).trim();
+  const item = record && typeof record === 'object' ? record : {};
+  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
+  const reasons = Array.isArray(scan.reasons) ? scan.reasons : [];
+  return String(scan.summary || reasons[0] || '').trim();
 }
 
 function currentRuntimeScoreForRecord(record){
-  const item = normalizeTickerRecord(record);
-  return numericOrNull(item.scan && item.scan.score);
+  const item = record && typeof record === 'object' ? record : {};
+  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
+  return numericOrNull(scan.score);
 }
 
 function preferredVerdictForRecord(record){
@@ -5104,17 +5113,20 @@ function preferredSummaryForRecord(record){
 }
 
 function reviewSnapshotTimestampForRecord(record){
-  const item = normalizeTickerRecord(record);
-  const manualReview = item.review.manualReview && typeof item.review.manualReview === 'object' ? item.review.manualReview : null;
-  const savedAt = String((manualReview && manualReview.savedAt) || item.review.lastReviewedAt || '').trim();
+  const item = record && typeof record === 'object' ? record : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const manualReview = review.manualReview && typeof review.manualReview === 'object' ? review.manualReview : null;
+  const savedAt = String((manualReview && manualReview.savedAt) || review.lastReviewedAt || '').trim();
   return savedAt || '';
 }
 
 function currentRuntimeTimestampForRecord(record){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
+  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
+  const watchlist = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : {};
   const candidates = [
-    item.scan && item.scan.updatedAt,
-    item.watchlist && item.watchlist.updatedAt
+    scan.updatedAt,
+    watchlist.updatedAt
   ].map(value => String(value || '').trim()).filter(Boolean);
   return candidates.sort().slice(-1)[0] || '';
 }
