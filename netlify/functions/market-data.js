@@ -89,7 +89,12 @@ exports.handler = async function handler(event){
   const symbol = String(params.symbol || params.ticker || '').trim().toUpperCase();
   const query = String(params.query || params.q || '').trim();
 
-  if(!apiKey){
+  if(mode === 'fx'){
+    const fxApiKey = process.env.FMP_API_KEY;
+    if(!fxApiKey){
+      return jsonResponse(500, {ok:false, error:'Financial Modeling Prep is not configured on the server.'});
+    }
+  }else if(!apiKey){
     return jsonResponse(500, {ok:false, error:providerNotConfiguredMessage(providerConfig)});
   }
 
@@ -100,6 +105,27 @@ exports.handler = async function handler(event){
   }
 
   try{
+    if(mode === 'fx'){
+      const base = String(params.base || '').trim().toUpperCase();
+      const quote = String(params.quote || '').trim().toUpperCase();
+      if(!base || !quote) return jsonResponse(400, {ok:false, error:'Missing FX base/quote.'});
+      const fxQuote = await fmpProvider.getFxRate(base, quote, {
+        apiKey:process.env.FMP_API_KEY,
+        providerConfig:getProviderConfig('fmp', normalizePlanId('fmp', params.plan)),
+        log:(level, details) => logEndpointEvent(level, {...details, provider:'fmp', symbol:`${base}${quote}`})
+      });
+      return jsonResponse(200, {
+        ok:true,
+        error:null,
+        provider:'fmp',
+        providerLabel:'Financial Modeling Prep',
+        data:{
+          ...fxQuote,
+          fetchedAt:new Date().toISOString()
+        }
+      });
+    }
+
     if(mode === 'search' || query){
       if(query.length < 1) return jsonResponse(400, {error:'Missing search query.'});
       if(!providerConfig.planConfig.supportsSearch){

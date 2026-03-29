@@ -97,6 +97,26 @@ async function searchSymbols(query, config){
   return normalizeFmpSearchResults(results).slice(0, SEARCH_LIMIT);
 }
 
+async function getFxRate(baseCurrency, quoteCurrency, config){
+  const base = String(baseCurrency || '').trim().toUpperCase();
+  const quote = String(quoteCurrency || '').trim().toUpperCase();
+  if(!base || !quote) throw new Error('Missing FX pair.');
+  const pair = `${base}${quote}`;
+  const endpoint = `${FMP_BASE_URL}/quote?symbol=${encodeURIComponent(pair)}`;
+  const payload = await fetchJsonWithContext(endpoint, config.apiKey, 'fx_quote', pair, config.log);
+  const quoteRow = Array.isArray(payload) ? payload[0] : payload;
+  const rate = Number(quoteRow && quoteRow.price);
+  if(!Number.isFinite(rate) || rate <= 0){
+    throw new Error(`FMP FX quote unavailable for ${pair}.`);
+  }
+  return {
+    base,
+    quote,
+    pair,
+    rate
+  };
+}
+
 async function getSnapshot(symbol, config){
   const profileEndpoint = `${FMP_BASE_URL}/profile?symbol=${encodeURIComponent(symbol)}`;
   const historyEndpoint = `${FMP_BASE_URL}/historical-price-eod/light?symbol=${encodeURIComponent(symbol)}`;
@@ -120,6 +140,7 @@ async function getSnapshot(symbol, config){
 
 module.exports = {
   classifyError,
+  getFxRate,
   getSnapshot,
   searchSymbols
 };
