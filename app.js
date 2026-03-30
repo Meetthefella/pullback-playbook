@@ -3567,10 +3567,13 @@ function buildFinalSetupView(record, options = {}){
   const finalSetupState = view.setupUiState.state === 'broken'
     ? 'broken'
     : (isNotReadySetup ? 'developing' : view.setupUiState.state);
+  const finalVerdictBadge = primaryVerdictBadge(view.displayStage);
   const finalSetupUiState = {
     state:finalSetupState,
-    label:setupUiLabel(finalSetupState),
-    className:setupUiClass(finalSetupState)
+    label:finalVerdictBadge.label,
+    className:finalVerdictBadge.className,
+    setupLabel:setupUiLabel(finalSetupState),
+    setupClassName:setupUiClass(finalSetupState)
   };
   const finalClassification = getFinalClassification({
     ...view,
@@ -3768,6 +3771,30 @@ function reviewVerdictOverrideFromLabel(label){
   const text = String(label || '');
   if(/Entry/i.test(text)) return 'Entry';
   if(/Broken/i.test(text)) return 'Avoid';
+  if(/Watch/i.test(text) || /Developing/i.test(text) || /Weak/i.test(text)) return 'Watch';
+  return '';
+}
+
+// Override the older shortlist chip/review-label mapping so every primary UI
+// surface uses the same final displayed verdict instead of bucket/structure mix.
+function primaryShortlistStatusChip(view){
+  const verdict = normalizeAnalysisVerdict(view && (view.displayStage || view.finalVerdict || (view.item && displayStageForRecord(view.item))) || '');
+  if(verdict === 'Entry') return {label:'🚀 Entry', className:'ready'};
+  if(verdict === 'Near Entry') return {label:'🎯 Near Entry', className:'near'};
+  if(verdict === 'Avoid') return {label:'⛔ Avoid', className:'avoid'};
+  return {label:'👀 Watch', className:'watch'};
+}
+
+function reviewVerdictOverrideFromView(view){
+  const shortlistChip = primaryShortlistStatusChip(view);
+  return reviewVerdictOverrideFromLabel(shortlistChip && shortlistChip.label || '');
+}
+
+function reviewVerdictOverrideFromLabel(label){
+  const text = String(label || '');
+  if(/Near Entry/i.test(text)) return 'Near Entry';
+  if(/Entry/i.test(text)) return 'Entry';
+  if(/Broken/i.test(text) || /Avoid/i.test(text)) return 'Avoid';
   if(/Watch/i.test(text) || /Developing/i.test(text) || /Weak/i.test(text)) return 'Watch';
   return '';
 }
@@ -4616,10 +4643,14 @@ function getSetupUiState(record, options = {}){
     stateKey = 'broken';
   }
 
+  const verdictBadge = primaryVerdictBadge(displayStage);
+
   return {
     state:stateKey,
-    label:setupUiLabel(stateKey),
-    className:setupUiClass(stateKey)
+    label:verdictBadge.label,
+    className:verdictBadge.className,
+    setupLabel:setupUiLabel(stateKey),
+    setupClassName:setupUiClass(stateKey)
   };
 }
 
@@ -4762,13 +4793,6 @@ function setupScoreForRecord(record){
       : (Number.isFinite(numericOrNull(record && record.scan && record.scan.score))
         ? Math.max(0, Math.min(10, Math.round(numericOrNull(record && record.scan && record.scan.score))))
         : 0));
-  const safeRecord = record && typeof record === 'object' ? record : {};
-  const setupUiState = getSetupUiState(safeRecord, {
-    displayStage:displayStageForRecord(safeRecord)
-  });
-  if(setupUiState.state === 'broken') return Math.min(3, baseValue);
-  if(setupUiState.state === 'watch') return Math.max(4, Math.min(7, baseValue));
-  if(setupUiState.state === 'entry') return Math.max(8, Math.min(10, baseValue));
   return baseValue;
 }
 
@@ -5096,16 +5120,17 @@ function currentRuntimeScoreForRecord(record){
 }
 
 function preferredVerdictForRecord(record){
-  return currentRuntimeVerdictForRecord(record) || savedReviewVerdictForRecord(record) || runtimeFallbackVerdictForRecord(record) || 'Watch';
+  return displayStageForRecord(record);
 }
 
 function preferredScoreForRecord(record){
+  const setupScore = setupScoreForRecord(record);
+  if(Number.isFinite(setupScore)) return setupScore;
   const currentScore = currentRuntimeScoreForRecord(record);
   if(Number.isFinite(currentScore)) return currentScore;
   const savedScore = savedReviewScoreForRecord(record);
   if(Number.isFinite(savedScore)) return savedScore;
-  const item = normalizeTickerRecord(record);
-  return Number.isFinite(numericOrNull(item.setup && item.setup.score)) ? numericOrNull(item.setup && item.setup.score) : null;
+  return null;
 }
 
 function preferredSummaryForRecord(record){
@@ -5149,14 +5174,84 @@ function analysisVerdictForRecord(record){
       : null
   );
   const finalVerdict = normalizeAnalysisVerdict(normalizedAnalysis && (normalizedAnalysis.final_verdict || normalizedAnalysis.verdict) || '');
-  const currentVerdict = currentRuntimeVerdictForRecord(rawRecord);
-  if(['Entry','Near Entry','Watch','Avoid'].includes(currentVerdict)) return normalizeAnalysisVerdict(currentVerdict);
   if(['Entry','Near Entry','Watch','Avoid'].includes(finalVerdict)) return finalVerdict;
   const savedVerdict = savedReviewVerdictForRecord(rawRecord);
   if(savedVerdict) return normalizeAnalysisVerdict(savedVerdict);
   const fallbackVerdict = runtimeFallbackVerdictForRecord(rawRecord);
   if(fallbackVerdict) return normalizeAnalysisVerdict(fallbackVerdict);
-  return 'Watch';
+  return '';
+}
+
+function verdictRank(verdict){
+  const safeVerdict = normalizeAnalysisVerdict(verdict || '');
+  if(safeVerdict === 'Avoid') return 0;
+  if(safeVerdict === 'Watch') return 1;
+  if(safeVerdict === 'Near Entry') return 2;
+  if(safeVerdict === 'Entry') return 3;
+  return null;
+}
+
+function verdictFromScore(score){
+  const roundedScore = Number.isFinite(Number(score)) ? Math.max(0, Math.min(10, Math.round(Number(score)))) : null;
+  if(!Number.isFinite(roundedScore)) return 'Watch';
+  if(roundedScore <= 3) return 'Avoid';
+  if(roundedScore <= 5) return 'Watch';
+  if(roundedScore <= 7) return 'Near Entry';
+  return 'Entry';
+}
+
+function mostConservativeVerdict(...verdicts){
+  const normalized = verdicts
+    .map(value => normalizeAnalysisVerdict(value || ''))
+    .filter(value => verdictRank(value) != null);
+  if(!normalized.length) return 'Watch';
+  return normalized.reduce((lowest, current) => verdictRank(current) < verdictRank(lowest) ? current : lowest);
+}
+
+function executionDowngradeVerdictForRecord(record, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan});
+  const positionSize = numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size);
+  const riskStatus = String(displayedPlan.riskFit && displayedPlan.riskFit.risk_status || '');
+  const planValidationState = String(item.plan && item.plan.planValidationState || '');
+
+  if(item.plan && (item.plan.invalidatedState || item.plan.missedState)) return 'Avoid';
+  if(executionCapitalBlocked(displayedPlan)) return 'Avoid';
+  if(['too_wide','settings_missing'].includes(riskStatus)) return 'Avoid';
+  if(planUiState.state === 'invalid' || planUiState.state === 'unrealistic_rr') return 'Avoid';
+  if(!Number.isFinite(positionSize) || positionSize < 1) return 'Avoid';
+  if(displayedPlan.tradeability === 'too_expensive' || displayedPlan.affordability === 'not_affordable' || displayedPlan.affordability === 'heavy_capital') return 'Avoid';
+  if(planUiState.state === 'needs_adjustment' || displayedPlan.status !== 'valid' || planValidationState === 'needs_replan') return 'Watch';
+  return '';
+}
+
+function finalVerdictForRecord(record, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan});
+  const baseVerdict = verdictFromScore(setupScoreForRecord(item));
+  const advisoryVerdict = analysisVerdictForRecord(item);
+  const executionVerdict = executionDowngradeVerdictForRecord(item, {displayedPlan, planUiState});
+  return mostConservativeVerdict(baseVerdict, advisoryVerdict, executionVerdict);
+}
+
+function primaryVerdictBadge(verdict){
+  const safeVerdict = normalizeAnalysisVerdict(verdict || '');
+  if(safeVerdict === 'Entry') return {label:'🚀 Entry', className:'ready'};
+  if(safeVerdict === 'Near Entry') return {label:'🎯 Near Entry', className:'near'};
+  if(safeVerdict === 'Avoid') return {label:'⛔ Avoid', className:'avoid'};
+  return {label:'👀 Watch', className:'watch'};
 }
 
 function evaluateEntryTrigger(record, options = {}){
@@ -5266,62 +5361,7 @@ function validateCurrentPlan(record, options = {}){
 }
 
 function displayStageForRecord(record){
-  const rawRecord = record && typeof record === 'object' ? record : {};
-  const baseVerdict = analysisVerdictForRecord(rawRecord);
-  const derivedStates = analysisDerivedStatesFromRecord(rawRecord);
-  const rawScore = rawSetupScoreForRecord(rawRecord);
-  const trendState = String(derivedStates.trendState || '').toLowerCase();
-  const structureState = String(derivedStates.structureState || '').toLowerCase();
-  const stabilisationState = String(derivedStates.stabilisationState || '').toLowerCase();
-  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
-  const pullbackZone = String(derivedStates.pullbackZone || '').toLowerCase();
-  const price = numericOrNull(rawRecord.marketData && rawRecord.marketData.price);
-  const ma50 = numericOrNull(rawRecord.marketData && rawRecord.marketData.ma50);
-  const ma200 = numericOrNull(rawRecord.marketData && rawRecord.marketData.ma200);
-  const displayedPlan = deriveCurrentPlanState(
-    rawRecord.plan && rawRecord.plan.entry,
-    rawRecord.plan && rawRecord.plan.stop,
-    rawRecord.plan && rawRecord.plan.firstTarget,
-    rawRecord.marketData && rawRecord.marketData.currency
-  );
-  const trigger = evaluateEntryTrigger(rawRecord, {derivedStates, displayedPlan});
-  const planValidation = validateCurrentPlan(rawRecord, {derivedStates, displayedPlan, triggerState:trigger});
-  const qualityAdjustments = evaluateSetupQualityAdjustments(rawRecord, {derivedStates, displayedPlan});
-  const constructiveDeveloping = ['near_20ma','near_50ma'].includes(pullbackZone)
-    && trendState !== 'broken'
-    && !(Number.isFinite(price) && Number.isFinite(ma200) && price < ma200)
-    && !(Number.isFinite(ma50) && Number.isFinite(ma200) && ma50 < ma200)
-    && !['broken'].includes(structureState)
-    && (bounceState === 'confirmed' || stabilisationState === 'clear' || stabilisationState === 'early');
-  let stage = 'Watch';
-  if(trigger.hardFail || planValidation.invalidated) return 'Avoid';
-  if(baseVerdict === 'Avoid'){
-    stage = 'Avoid';
-  }else if(trigger.entryTriggerReady && planValidation.state === 'valid' && baseVerdict !== 'Avoid'){
-    stage = 'Entry';
-  }else if(baseVerdict === 'Entry'){
-    if(planValidation.state === 'missed') return 'Watch';
-    if(planValidation.state === 'needs_replan') return 'Near Entry';
-    stage = trigger.nearReady ? 'Near Entry' : 'Watch';
-  }else if(baseVerdict === 'Near Entry'){
-    if(planValidation.state === 'missed') return 'Watch';
-    stage = trigger.nearReady ? 'Near Entry' : 'Watch';
-  }else if(baseVerdict === 'Watch' && trigger.nearReady){
-    stage = 'Near Entry';
-  }
-  if(stage === 'Entry' && executionCapitalBlocked(displayedPlan)){
-    stage = 'Avoid';
-  }
-  if(stage !== 'Avoid' && qualityAdjustments.widthPenalty > 0){
-    stage = downgradeVerdict(stage, qualityAdjustments.widthPenalty);
-  }
-  if(stage !== 'Avoid' && qualityAdjustments.weakRegimePenalty){
-    stage = downgradeVerdict(stage, 1);
-  }
-  if(stage === 'Avoid' && constructiveDeveloping && Number.isFinite(rawScore) && rawScore >= 4){
-    stage = 'Watch';
-  }
-  return stage;
+  return finalVerdictForRecord(record);
 }
 
 function scoreStageForRecord(record){
@@ -5761,6 +5801,7 @@ function projectTickerForCard(record, options = {}){
     effectivePlan,
     displayedPlan,
     displayStage,
+    finalVerdict:displayStage,
     setupUiState,
     planUiState,
     setupScore:setupScoreForRecord(item),
@@ -5781,10 +5822,7 @@ function projectTickerForCard(record, options = {}){
 }
 
 function focusStageForRecord(record){
-  const item = normalizeTickerRecord(record);
-  return hasAiStageForRecord(item)
-    ? displayStageForRecord(item)
-    : normalizeImportedStatus(item.scan.verdict || item.watchlist.status || 'Watch');
+  return displayStageForRecord(record);
 }
 
 function compactReasonLineForRecord(record, maxParts = 3){
