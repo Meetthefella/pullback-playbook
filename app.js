@@ -5173,13 +5173,27 @@ function analysisVerdictForRecord(record){
       ? cachedState.normalized
       : null
   );
-  const finalVerdict = normalizeAnalysisVerdict(normalizedAnalysis && (normalizedAnalysis.final_verdict || normalizedAnalysis.verdict) || '');
-  if(['Entry','Near Entry','Watch','Avoid'].includes(finalVerdict)) return finalVerdict;
-  const savedVerdict = savedReviewVerdictForRecord(rawRecord);
-  if(savedVerdict) return normalizeAnalysisVerdict(savedVerdict);
-  const fallbackVerdict = runtimeFallbackVerdictForRecord(rawRecord);
-  if(fallbackVerdict) return normalizeAnalysisVerdict(fallbackVerdict);
-  return '';
+  const baseVerdict = baseVerdictForRecord(rawRecord);
+
+  const aiVerdict = normalizeAnalysisVerdict(
+    normalizedAnalysis && (normalizedAnalysis.final_verdict || normalizedAnalysis.verdict) || ''
+  );
+  const savedVerdict = normalizeAnalysisVerdict(savedReviewVerdictForRecord(rawRecord) || '');
+  const fallbackVerdict = normalizeAnalysisVerdict(runtimeFallbackVerdictForRecord(rawRecord) || '');
+
+  const candidates = [];
+  if(['Entry','Near Entry','Watch','Avoid'].includes(aiVerdict)){
+    candidates.push(mostConservativeVerdict(baseVerdict, aiVerdict));
+  }
+  if(['Entry','Near Entry','Watch','Avoid'].includes(savedVerdict)){
+    candidates.push(mostConservativeVerdict(baseVerdict, savedVerdict));
+  }
+  if(['Entry','Near Entry','Watch','Avoid'].includes(fallbackVerdict)){
+    candidates.push(mostConservativeVerdict(baseVerdict, fallbackVerdict));
+  }
+
+  if(!candidates.length) return '';
+  return mostConservativeVerdict(...candidates);
 }
 
 function verdictRank(verdict){
@@ -5206,6 +5220,13 @@ function mostConservativeVerdict(...verdicts){
     .filter(value => verdictRank(value) != null);
   if(!normalized.length) return 'Watch';
   return normalized.reduce((lowest, current) => verdictRank(current) < verdictRank(lowest) ? current : lowest);
+}
+
+function baseVerdictForRecord(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const scoreVerdict = verdictFromScore(setupScoreForRecord(item));
+  const runtimeVerdict = normalizeAnalysisVerdict(runtimeFallbackVerdictForRecord(item) || '');
+  return mostConservativeVerdict(scoreVerdict, runtimeVerdict);
 }
 
 function executionDowngradeVerdictForRecord(record, options = {}){
@@ -5240,13 +5261,21 @@ function finalVerdictForRecord(record, options = {}){
     item.marketData && item.marketData.currency
   );
   const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan});
-  const baseVerdict = verdictFromScore(setupScoreForRecord(item));
+  const baseVerdict = baseVerdictForRecord(item);
   const advisoryVerdict = analysisVerdictForRecord(item);
   const includeExecutionDowngrade = options.includeExecutionDowngrade !== false;
   const executionVerdict = includeExecutionDowngrade
     ? executionDowngradeVerdictForRecord(item, {displayedPlan, planUiState})
     : '';
-  return mostConservativeVerdict(baseVerdict, advisoryVerdict, executionVerdict);
+  const finalVerdict = mostConservativeVerdict(baseVerdict, advisoryVerdict, executionVerdict);
+  console.debug('FINAL_VERDICT_TRACE', {
+    ticker:item.ticker,
+    baseVerdict,
+    advisoryVerdict,
+    executionVerdict,
+    finalVerdict
+  });
+  return finalVerdict;
 }
 
 function primaryVerdictBadge(verdict){
