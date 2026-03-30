@@ -7974,6 +7974,8 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   });
   if(mismatchStatus === 'mismatch' && mismatchWarning && !safeRisks.includes(mismatchWarning)) safeRisks.unshift(mismatchWarning);
   if(mismatchStatus === 'unclear' && mismatchWarning && !safeRisks.includes(mismatchWarning)) safeRisks.unshift(mismatchWarning);
+  const inferredRisks = safeRisks.length ? [] : inferRisksFromAnalysisText(parsed.plain_english_chart_read, keyReasons);
+  const finalRisks = safeRisks.length ? safeRisks : inferredRisks;
   return {
     setup_type:parsed.setup_type || previousState.setupType || '',
     verdict:parsed.verdict,
@@ -7997,7 +7999,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     quality_score:parsed.quality_score,
     confidence_score:parsed.confidence_score,
     key_reasons:keyReasons,
-    risks:safeRisks,
+    risks:finalRisks,
     final_verdict:tightenedVerdict,
     warning_state:evaluateWarningState({
       ...existingTickerState,
@@ -9358,6 +9360,17 @@ function captureActiveReviewWorkspaceDraft(){
   };
 }
 
+function inferRisksFromAnalysisText(chartRead, reasons = []){
+  const text = `${chartRead || ''} ${(reasons || []).join(' ')}`.toLowerCase();
+  const risks = [];
+  if(text.includes('weakening structure')) risks.push('Structure is weakening');
+  if(text.includes('low volume') || text.includes('volume is low') || text.includes('weak volume')) risks.push('Weak volume may indicate lack of conviction');
+  if(text.includes('market below 50ma') || text.includes('hostile market')) risks.push('Overall market below 50MA');
+  if(text.includes('deeper than preferred')) risks.push('Pullback is deeper than preferred');
+  if(text.includes('cautious')) risks.push('Setup requires caution');
+  return [...new Set(risks)].slice(0, 3);
+}
+
 function buildPromptBody(payload){
   const chartAttached = payload.chartAttached === true || payload.chartAttached === 'yes';
   const chartStatus = ['match','mismatch','unclear'].includes(String(payload.chartMatchStatus || '').trim().toLowerCase())
@@ -9445,6 +9458,19 @@ function buildPromptBody(payload){
     '- High reward:risk does NOT justify upgrading a weak setup',
     '- Structure and confirmation take priority over reward',
     '',
+    'Structured output discipline:',
+    '- If your chart read contains cautionary language, you must include corresponding bullet items in risks',
+    '- Do not return an empty risks array when you have described meaningful concerns in the chart read',
+    '- weakening structure -> include a risk about weakening structure',
+    '- low volume -> include a risk about weak volume / low conviction',
+    '- market below 50MA -> include a risk about hostile market regime',
+    '- pullback deeper than preferred -> include a risk about setup quality / depth of pullback',
+    '- key_reasons explains what is constructive',
+    '- risks explains what could go wrong or why caution is warranted',
+    '- If the setup is cautious overall, at least one item should appear in risks',
+    '- High reward:risk does not erase risks; meaningful concerns must still appear in risks',
+    '- Keep risks concise, factual, and non-duplicative',
+    '',
     'Chart verification:',
     '- If a chart image is attached, first check whether it plausibly matches the supplied ticker',
     '- If the uploaded chart looks like a different ticker/symbol, flag that strongly',
@@ -9480,6 +9506,10 @@ function buildPromptBody(payload){
     '- confidence_score = integer 1-100',
     '- chart_match_status must be: match | mismatch | unclear',
     '- if chart_match_status = mismatch, final_verdict should be Avoid',
+    '- risks must always be present as an array',
+    '- risks: array of concise risk items that match the cautionary content in the chart read',
+    '- Do not output an empty risks array if you mention caution, weak structure, weak volume, hostile market, deeper-than-preferred pullback, incomplete confirmation, or similar concerns anywhere else in the response',
+    '- Only use an empty risks array if the setup is genuinely clean and low-risk relative to the strategy',
     '- If unknown -> null',
     '- Keep explanations short and practical'
   ];
