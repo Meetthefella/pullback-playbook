@@ -53,7 +53,7 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
   position:relative;
   overflow:hidden;
   --card-tint-rgb:56,189,248;
-  --card-tint-opacity:.12;
+  --card-tint-opacity:.1667;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.02), 0 10px 22px rgba(0,0,0,.16);
 }
 .result-card::after{
@@ -62,7 +62,7 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
   inset:0;
   pointer-events:none;
   z-index:0;
-  opacity:var(--card-tint-opacity,.12);
+  opacity:var(--card-tint-opacity,.1667);
   background:linear-gradient(
     to top,
     rgba(var(--card-tint-rgb,56,189,248),1) 0%,
@@ -77,11 +77,11 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
 .resultcompact.result-card--near-entry{--card-tint-rgb:234,179,8;border-color:rgba(214,172,58,.42);box-shadow:inset 0 1px 0 rgba(255,255,255,.02), 0 10px 22px rgba(0,0,0,.16), 0 0 0 1px rgba(234,179,8,.05)}
 .resultcompact.result-card--success{--card-tint-rgb:34,197,94;border-color:rgba(76,166,109,.4);box-shadow:inset 0 1px 0 rgba(255,255,255,.02), 0 10px 22px rgba(0,0,0,.16), 0 0 0 1px rgba(34,197,94,.05)}
 .resultcompact.result-card--danger{--card-tint-rgb:239,68,68;border-color:rgba(167,82,96,.42);box-shadow:inset 0 1px 0 rgba(255,255,255,.02), 0 10px 22px rgba(0,0,0,.16), 0 0 0 1px rgba(239,68,68,.04)}
-.resultcompact.result-card--intensity-low{--card-tint-opacity:.08}
-.resultcompact.result-card--intensity-med-low{--card-tint-opacity:.11}
-.resultcompact.result-card--intensity-medium{--card-tint-opacity:.14}
-.resultcompact.result-card--intensity-med-high{--card-tint-opacity:.17}
-.resultcompact.result-card--intensity-high{--card-tint-opacity:.20}
+.resultcompact.result-card--intensity-low{--card-tint-opacity:.10}
+.resultcompact.result-card--intensity-med-low{--card-tint-opacity:.15}
+.resultcompact.result-card--intensity-medium{--card-tint-opacity:.20}
+.resultcompact.result-card--intensity-med-high{--card-tint-opacity:.25}
+.resultcompact.result-card--intensity-high{--card-tint-opacity:.30}
 .resultcompact .resulthead{grid-template-columns:minmax(72px,max-content) minmax(0,1fr) auto auto}
 .resultcompacthead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap}
 .resultidentity{display:grid;gap:4px;min-width:0}
