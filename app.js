@@ -3518,6 +3518,8 @@ function finalStructureQualityForView(view){
 
 function getFinalClassification(view){
   const setupState = String(view && (view.setupState || (view.setupUiState && view.setupUiState.state)) || '');
+  const displayStage = normalizeAnalysisVerdict(view && (view.displayStage || view.finalVerdict || '') || '');
+  const setupScore = numericOrNull(view && (view.setupScore ?? view.score));
   const planValidation = String(view && ((view.planValidation && view.planValidation.state) || (view.planUiState && view.planUiState.state)) || '');
   const positionSize = numericOrNull(view && view.positionSize);
   const rrCategory = String(view && view.rrCategory || '');
@@ -3534,6 +3536,8 @@ function getFinalClassification(view){
   if(structureQuality === 'developing_clean' && bounceState !== 'confirmed') return 'filtered';
   if(structureQuality === 'developing_clean' && bounceState === 'confirmed') return 'early';
   if(structureQuality === 'strong' && ['none','attempt'].includes(bounceState)) return 'early';
+  if(Number.isFinite(setupScore) && setupScore < 6) return 'early';
+  if(displayStage === 'Watch') return 'early';
   if(structureQuality === 'strong' && bounceState === 'confirmed' && planValidation === 'valid') return 'tradeable';
   return 'filtered';
 }
@@ -8233,9 +8237,11 @@ function renderAnalysisPanel(card){
     const chartMismatch = analysis.chart_match_status === 'mismatch';
     const chartUnclear = analysis.chart_match_status === 'unclear';
     const chartWarning = analysis.chart_match_warning || '';
+    const staleAnalysis = isAnalysisStaleForRecord(card);
     const displayStage = ['Entry','Near Entry','Watch','Avoid'].includes(String(analysis.final_verdict || ''))
       ? String(analysis.final_verdict)
       : String(analysis.verdict || 'Watch');
+    const aiBadgeLabel = staleAnalysis ? `Prior AI: ${displayStage}` : displayStage;
     const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No key reasons returned.</li>';
     const risks = analysis.risks.length ? analysis.risks.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No risks returned.</li>';
     const confidence = Number.isFinite(analysis.confidence_score) ? `${analysis.confidence_score}/100` : 'n/a';
@@ -8249,7 +8255,7 @@ function renderAnalysisPanel(card){
       risks:analysis.risks
     };
     console.log('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
-    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span></div>${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
+    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(displayStage)}">${escapeHtml(aiBadgeLabel)}</span></div>${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
@@ -8278,9 +8284,11 @@ function renderAnalysisPanelFromRecord(record){
     const chartMismatch = analysis.chart_match_status === 'mismatch';
     const chartUnclear = analysis.chart_match_status === 'unclear';
     const chartWarning = analysis.chart_match_warning || '';
+    const staleAnalysis = isAnalysisStaleForRecord(item);
     const displayStage = ['Entry','Near Entry','Watch','Avoid'].includes(String(analysis.final_verdict || ''))
       ? String(analysis.final_verdict)
       : String(analysis.verdict || 'Watch');
+    const aiBadgeLabel = staleAnalysis ? `Prior AI: ${displayStage}` : displayStage;
     const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(entry => `<li>${escapeHtml(entry)}</li>`).join('') : '<li>No key reasons returned.</li>';
     const risks = analysis.risks.length ? analysis.risks.map(entry => `<li>${escapeHtml(entry)}</li>`).join('') : '<li>No risks returned.</li>';
     const confidence = Number.isFinite(analysis.confidence_score) ? `${analysis.confidence_score}/100` : 'n/a';
@@ -8291,11 +8299,26 @@ function renderAnalysisPanelFromRecord(record){
       stop:analysis.stop || 'Not given',
       first_target:analysis.first_target || 'Not given',
     };
-    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(displayStage)}">${escapeHtml(displayStage)}</span></div>${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
+    return `<div class="responsegrid"><div class="responsechips"><span class="badge ${statusClass(displayStage)}">${escapeHtml(aiBadgeLabel)}</span></div>${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
   }
   if(!analysisState.rawAnalysis) return '<div class="tiny">No AI analysis saved yet.</div>';
   console.debug('LEGACY_PATH_STILL_IN_USE', 'renderAnalysisPanelFromRecord-fallback', item.ticker);
   return `<div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div>`;
+}
+
+function isAnalysisStaleForRecord(record){
+  const item = normalizeTickerRecord(record);
+  if(item.plan && item.plan.invalidatedState) return true;
+  if(item.plan && item.plan.missedState) return true;
+
+  const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const stop = numericOrNull(item.plan && item.plan.stop);
+
+  if(Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop){
+    return true;
+  }
+
+  return false;
 }
 
 function statusRank(status){
