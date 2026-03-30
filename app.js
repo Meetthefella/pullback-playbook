@@ -2773,7 +2773,7 @@ function renderWatchlist(){
   records.forEach(record => {
     const entry = tickerRecordToWatchlistEntry(record);
     if(!entry) return;
-    const view = projectTickerForCard(record);
+    const view = buildFinalSetupView(record);
     const warningState = evaluateWarningState(record, getReviewAnalysisState(record).normalizedAnalysis);
     const remaining = getTradingDaysRemaining(entry);
     const lifecycleText = lifecycleLabel(record);
@@ -3547,7 +3547,7 @@ function legacyBucketForFinalClassification(finalClassification){
 function buildFinalSetupView(record, options = {}){
   // Phase 1 canonical ranked-card pipeline. This wraps the existing helpers
   // rather than replacing them so the rest of the app can migrate safely later.
-  const view = projectTickerForCard(record, options);
+  const view = projectTickerForCard(record, {...options, includeExecutionDowngrade:false});
   const derivedStates = analysisDerivedStatesFromRecord(view.item);
   const rrCategory = rrCategoryForView(view);
   const structureQuality = finalStructureQualityForView({
@@ -5242,7 +5242,10 @@ function finalVerdictForRecord(record, options = {}){
   const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan});
   const baseVerdict = verdictFromScore(setupScoreForRecord(item));
   const advisoryVerdict = analysisVerdictForRecord(item);
-  const executionVerdict = executionDowngradeVerdictForRecord(item, {displayedPlan, planUiState});
+  const includeExecutionDowngrade = options.includeExecutionDowngrade !== false;
+  const executionVerdict = includeExecutionDowngrade
+    ? executionDowngradeVerdictForRecord(item, {displayedPlan, planUiState})
+    : '';
   return mostConservativeVerdict(baseVerdict, advisoryVerdict, executionVerdict);
 }
 
@@ -5360,8 +5363,8 @@ function validateCurrentPlan(record, options = {}){
   };
 }
 
-function displayStageForRecord(record){
-  return finalVerdictForRecord(record);
+function displayStageForRecord(record, options = {}){
+  return finalVerdictForRecord(record, options);
 }
 
 function scoreStageForRecord(record){
@@ -5776,7 +5779,7 @@ function projectTickerForCard(record, options = {}){
     : (item.setup.warning || evaluateWarningState(item, analysisState.normalizedAnalysis));
   const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback});
   const displayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, item.marketData.currency);
-  const displayStage = displayStageForRecord(item);
+  const displayStage = displayStageForRecord(item, {includeExecutionDowngrade:options.includeExecutionDowngrade !== false});
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const provisionalSetupUiState = getSetupUiState(item, {displayStage, derivedStates});
   const planCheckState = planCheckStateForRecord(item, {effectivePlan, displayedPlan});
