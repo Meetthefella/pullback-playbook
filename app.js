@@ -5470,6 +5470,64 @@ function actionStateForRecord(record){
   return String(item.action && item.action.stage || deriveActionStateForRecord(item).stage);
 }
 
+function actionPresentationForRecord(record){
+  const item = normalizeTickerRecord(record);
+  const reviewVerdict = typeof reviewHeaderVerdictForRecord === 'function'
+    ? reviewHeaderVerdictForRecord(item)
+    : displayStageForRecord(item);
+  const setupScore = numericOrNull(item.setupScore ?? (item.review && item.review.setupScore) ?? (item.scan && item.scan.score));
+  const nextAction = nextActionTextForRecord(item);
+  const invalidated = !!(item.plan && (item.plan.invalidatedState || item.plan.missedState));
+  const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const stop = numericOrNull(item.plan && item.plan.stop);
+  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop;
+
+  if(invalidated || brokenBelowStop || reviewVerdict === 'Avoid'){
+    return {
+      label:' Ignore',
+      tone:'danger',
+      shortLabel:'Ignore'
+    };
+  }
+
+  if(reviewVerdict === 'Entry'){
+    return {
+      label:'🚀 Review entry',
+      tone:'success',
+      shortLabel:'Review entry'
+    };
+  }
+
+  if(reviewVerdict === 'Near Entry'){
+    return {
+      label:' Near entry - wait for trigger',
+      tone:'warning',
+      shortLabel:'Near entry'
+    };
+  }
+
+  if(reviewVerdict === 'Watch'){
+    if(Number.isFinite(setupScore) && setupScore <= 4){
+      return {
+        label:' Monitor cautiously',
+        tone:'warning-soft',
+        shortLabel:'Monitor cautiously'
+      };
+    }
+    return {
+      label:'👀 Monitor only - no entry yet',
+      tone:'watch',
+      shortLabel:'Monitor only'
+    };
+  }
+
+  return {
+    label:nextAction || '👀 Monitor only - no entry yet',
+    tone:'watch',
+    shortLabel:'Monitor only'
+  };
+}
+
 function planQualityForRecord(record){
   if(!(record && record.plan && record.plan.hasValidPlan)) return null;
   const rrRatio = numericOrNull(record.plan.plannedRR);
@@ -8813,9 +8871,7 @@ function renderReviewWorkspace(options = {}){
     controlQuality:qualityAdjustments.controlQuality,
     capitalEfficiency:qualityAdjustments.capitalEfficiency
   });
-  const nextActionText = initialVerdictOverride === 'Watch'
-    ? '\uD83D\uDC40 Monitor only - no entry yet'
-    : nextActionTextForRecord(record);
+  const nextActionText = actionPresentationForRecord(record).label;
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
   const analyseLabel = loading ? 'Analysing...' : (analysisState.error ? 'Retry Analysis' : 'Analyse Setup');
