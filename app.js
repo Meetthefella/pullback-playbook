@@ -8148,6 +8148,7 @@ async function analyseSetup(ticker){
     });
     commitTickerState();
   }finally{
+    if(activeReviewTicker() === ticker) uiState.activeReviewVerdictOverride = '';
     uiState.loadingTicker = '';
     renderCards();
   }
@@ -8302,7 +8303,9 @@ async function refreshWatchlistTicker(ticker){
 function analyseActiveReviewTicker(){
   const ticker = activeReviewTicker();
   if(!ticker || uiState.loadingTicker) return;
-  uiState.activeReviewVerdictOverride = '';
+  if(!String(uiState.activeReviewVerdictOverride || '').trim()){
+    uiState.activeReviewVerdictOverride = displayStageForRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker), {includeExecutionDowngrade:false});
+  }
   analyseSetup(ticker);
 }
 
