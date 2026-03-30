@@ -47,7 +47,6 @@
           <span class="pill">Account <strong id="accountStat">GBP 4,000</strong></span>
           <span class="pill">Max Risk <strong id="riskStat">GBP 40</strong></span>
           <span class="pill">Risk % <strong id="riskPctStat">1.0%</strong></span>
-          <span class="pill" id="focusCount">0 focus</span>
           <span class="pill" id="appVersion">v4.4.0</span>
         </div>
       </div>
@@ -167,21 +166,9 @@
   </div>
 
   <div class="card" style="margin-top:14px">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="focusSection" style="margin-bottom:0">Today's Focus / Active Queue</h2>
-      <div class="inline-status">
-        <span class="pill">Primary working set</span>
-        <button class="ghost compactbutton" id="clearFocusBtn" type="button">Clear Queue</button>
-      </div>
-    </div>
-    <p class="tiny">Top actionable setups from the latest scan. Use this as the main working layer before opening the full scan list.</p>
-    <div id="focusQueue" class="list"></div>
-  </div>
-
-  <div class="card" style="margin-top:14px">
     <details id="resultsToggle">
       <summary><strong id="resultsSection">3) All Scan Results</strong> <span class="tiny" id="resultsToggleText">- Show Ranked Results</span></summary>
-      <p class="tiny" style="margin-top:10px">Full scan output. This stays secondary to Today's Focus and is collapsed by default.</p>
+      <p class="tiny" style="margin-top:10px">Primary scan output for review. Use this list to open a ticker into the review workspace.</p>
       <div class="statusline tiny" id="scannerSelectionStatus">Open any ranked setup to jump straight into review.</div>
       <div id="results" class="list"></div>
     </details>
@@ -265,6 +252,16 @@
             <br><br>
             The browser sends that payload to a lightweight serverless endpoint. The endpoint calls the OpenAI Responses API securely using your server-side `OPENAI_API_KEY`, then returns structured analysis back into the review workspace.
           </div>
+        </div>
+        <div class="panelbox">
+          <strong>Reset / Cache Controls</strong>
+          <div class="tiny" style="margin-top:10px">Use these when the shortlist or review workspace feels stale. They do not change ranking rules.</div>
+          <div class="actions">
+            <button class="secondary" id="refreshViewBtn" type="button">Refresh View</button>
+            <button class="secondary" id="clearSessionBtn" type="button">Clear Session State</button>
+            <button class="danger" id="hardResetAppBtn" type="button">Hard Reset App Data</button>
+          </div>
+          <div id="resetStatus" class="subtle">Refresh rerenders only. Session clear drops shortlist/review working state. Hard reset also clears scanner caches and reloads.</div>
         </div>
       </div>
     </details>

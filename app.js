@@ -8462,9 +8462,7 @@ function renderScannerResults(){
   box.innerHTML = '';
   const records = rankedTickerRecords();
   const finalViews = records.map(record => buildFinalSetupView(record));
-  const focusItems = focusQueueRecords();
   if(resultsToggle){
-    resultsToggle.open = !focusItems.length;
     syncResultsToggleLabel();
   }
   console.debug('RENDER_FROM_TICKER_RECORD', 'rankedResults', records.length);
@@ -8487,7 +8485,6 @@ function renderScannerResults(){
         if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
       };
     }
-    renderFocusQueue();
     renderWorkflowAlerts();
     return;
   }
@@ -8573,7 +8570,6 @@ function renderScannerResults(){
     box.appendChild(wrap);
   });
   updateScannerSelectionStatus();
-  renderFocusQueue();
   renderWorkflowAlerts();
 }
 
