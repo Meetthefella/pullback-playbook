@@ -3818,12 +3818,43 @@ function renderCompactResultCard(record){
   return renderCompactResultCardFromView(view);
 }
 
+function scanCardToneForView(view){
+  const verdict = view && view.displayStage ? String(view.displayStage) : '';
+  const setupScore = Number.isFinite(Number(view && view.setupScore)) ? Number(view.setupScore) : null;
+  const nextAction = view && view.nextAction
+    ? String(view.nextAction)
+    : (view && view.item ? String(actionPresentationForRecord(view.item).label || '') : '');
+
+  if(verdict === 'Avoid') return 'danger';
+  if(verdict === 'Entry') return 'success';
+  if(verdict === 'Near Entry') return 'near-entry';
+  if(verdict === 'Watch'){
+    if(setupScore !== null && setupScore <= 4) return 'watch-caution';
+    if(/caution|cautious|low quality|lower quality|needs stronger confirmation/i.test(nextAction || '')) return 'watch-caution';
+    return 'watch';
+  }
+  return 'watch';
+}
+
+function scanCardIntensityForView(view){
+  const score = Number.isFinite(Number(view && view.setupScore)) ? Number(view.setupScore) : 0;
+  if(score >= 8) return 'high';
+  if(score >= 7) return 'med-high';
+  if(score >= 6) return 'medium';
+  if(score >= 5) return 'med-low';
+  return 'low';
+}
+
 function renderCompactResultCardFromView(view){
   const item = view.item;
   const statusChip = primaryShortlistStatusChip(view);
   const sourceVerdict = reviewVerdictOverrideFromView(view);
   const scoreLabel = view.setupScoreDisplay;
   const filteredCard = view.bucket === 'filtered' || view.finalClassification === 'filtered';
+  const tone = scanCardToneForView(view);
+  const intensity = scanCardIntensityForView(view);
+  const toneClass = `result-card--${tone}`;
+  const intensityClass = `result-card--intensity-${intensity}`;
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const reasonLine = compactReasonLineForView(view, 3);
   const detailMeta = [
@@ -3835,7 +3866,7 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
     item.setup.marketCaution ? 'Market caution' : ''
   ].filter(Boolean).join(' | ');
-  return `<div class="resultcompact"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div></details></div>`;
+  return `<div class="resultcompact result-card ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div></details></div>`;
 }
 
 function compactReasonLineForView(view, maxParts = 3){
