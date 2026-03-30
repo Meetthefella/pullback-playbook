@@ -3547,7 +3547,7 @@ function legacyBucketForFinalClassification(finalClassification){
 function buildFinalSetupView(record, options = {}){
   // Phase 1 canonical ranked-card pipeline. This wraps the existing helpers
   // rather than replacing them so the rest of the app can migrate safely later.
-  const view = projectTickerForCard(record, {...options, includeExecutionDowngrade:false});
+  const view = projectTickerForCard(record, {...options, includeExecutionDowngrade:false, includeRuntimeFallback:false});
   const derivedStates = analysisDerivedStatesFromRecord(view.item);
   const rrCategory = rrCategoryForView(view);
   const structureQuality = finalStructureQualityForView({
@@ -5156,7 +5156,7 @@ function currentRuntimeTimestampForRecord(record){
   return candidates.sort().slice(-1)[0] || '';
 }
 
-function analysisVerdictForRecord(record){
+function analysisVerdictForRecord(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const ticker = normalizeTicker(rawRecord.ticker || '');
   const review = rawRecord.review && typeof rawRecord.review === 'object' ? rawRecord.review : {};
@@ -5173,13 +5173,15 @@ function analysisVerdictForRecord(record){
       ? cachedState.normalized
       : null
   );
-  const baseVerdict = baseVerdictForRecord(rawRecord);
+  const baseVerdict = baseVerdictForRecord(rawRecord, options);
 
   const aiVerdict = normalizeAnalysisVerdict(
     normalizedAnalysis && (normalizedAnalysis.final_verdict || normalizedAnalysis.verdict) || ''
   );
   const savedVerdict = normalizeAnalysisVerdict(savedReviewVerdictForRecord(rawRecord) || '');
-  const fallbackVerdict = normalizeAnalysisVerdict(runtimeFallbackVerdictForRecord(rawRecord) || '');
+  const fallbackVerdict = options.includeRuntimeFallback === false
+    ? ''
+    : normalizeAnalysisVerdict(runtimeFallbackVerdictForRecord(rawRecord) || '');
 
   const candidates = [];
   if(['Entry','Near Entry','Watch','Avoid'].includes(aiVerdict)){
@@ -5222,11 +5224,34 @@ function mostConservativeVerdict(...verdicts){
   return normalized.reduce((lowest, current) => verdictRank(current) < verdictRank(lowest) ? current : lowest);
 }
 
-function baseVerdictForRecord(record){
+function currentHardFailVerdictForRecord(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const price = numericOrNull(item.marketData && item.marketData.price);
+  const ma50 = numericOrNull(item.marketData && item.marketData.ma50);
+  const ma200 = numericOrNull(item.marketData && item.marketData.ma200);
+  const brokenTrend = trendState === 'broken'
+    || structureState === 'broken'
+    || (Number.isFinite(price) && Number.isFinite(ma200) && price < ma200)
+    || (Number.isFinite(ma50) && Number.isFinite(ma200) && ma50 < ma200);
+  if(brokenTrend) return 'Avoid';
+  if(item.plan && (item.plan.invalidatedState || item.plan.missedState)) return 'Avoid';
+  return '';
+}
+
+function baseVerdictForRecord(record, options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const scoreVerdict = verdictFromScore(setupScoreForRecord(item));
-  const runtimeVerdict = normalizeAnalysisVerdict(runtimeFallbackVerdictForRecord(item) || '');
-  return mostConservativeVerdict(scoreVerdict, runtimeVerdict);
+  const hardFailVerdict = currentHardFailVerdictForRecord(item);
+  const candidates = [scoreVerdict];
+  if(hardFailVerdict) candidates.push(hardFailVerdict);
+  if(options.includeRuntimeFallback !== false){
+    const runtimeVerdict = normalizeAnalysisVerdict(runtimeFallbackVerdictForRecord(item) || '');
+    if(runtimeVerdict) candidates.push(runtimeVerdict);
+  }
+  return mostConservativeVerdict(...candidates);
 }
 
 function executionDowngradeVerdictForRecord(record, options = {}){
@@ -5261,8 +5286,8 @@ function finalVerdictForRecord(record, options = {}){
     item.marketData && item.marketData.currency
   );
   const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan});
-  const baseVerdict = baseVerdictForRecord(item);
-  const advisoryVerdict = analysisVerdictForRecord(item);
+  const baseVerdict = baseVerdictForRecord(item, options);
+  const advisoryVerdict = analysisVerdictForRecord(item, options);
   const includeExecutionDowngrade = options.includeExecutionDowngrade !== false;
   const executionVerdict = includeExecutionDowngrade
     ? executionDowngradeVerdictForRecord(item, {displayedPlan, planUiState})
@@ -5808,7 +5833,10 @@ function projectTickerForCard(record, options = {}){
     : (item.setup.warning || evaluateWarningState(item, analysisState.normalizedAnalysis));
   const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback});
   const displayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, item.marketData.currency);
-  const displayStage = displayStageForRecord(item, {includeExecutionDowngrade:options.includeExecutionDowngrade !== false});
+  const displayStage = displayStageForRecord(item, {
+    includeExecutionDowngrade:options.includeExecutionDowngrade !== false,
+    includeRuntimeFallback:options.includeRuntimeFallback !== false
+  });
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const provisionalSetupUiState = getSetupUiState(item, {displayStage, derivedStates});
   const planCheckState = planCheckStateForRecord(item, {effectivePlan, displayedPlan});
