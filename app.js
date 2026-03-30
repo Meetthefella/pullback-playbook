@@ -5421,6 +5421,17 @@ function displayStageForRecord(record, options = {}){
   return finalVerdictForRecord(record, options);
 }
 
+function reviewHeaderVerdictForRecord(record){
+  return finalVerdictForRecord(record, {
+    includeExecutionDowngrade:false,
+    includeRuntimeFallback:false
+  });
+}
+
+function aiVerdictCeilingForRecord(record){
+  return reviewHeaderVerdictForRecord(record);
+}
+
 function scoreStageForRecord(record){
   if(record && record.review && record.review.manualReview && typeof record.review.manualReview === 'object') return 'final';
   const analysisState = getReviewAnalysisState(record || {});
@@ -6863,6 +6874,7 @@ function buildTickerPromptFromRecord(record){
   const projected = item.scan.analysisProjection || {};
   const manualReview = item.review.manualReview || {};
   const checks = (manualReview && manualReview.checks) || (item.scan.flags && item.scan.flags.checks) || {};
+  const appVerdictCeiling = aiVerdictCeilingForRecord(item);
   const marketData = Number.isFinite(item.marketData.price) || Number.isFinite(item.marketData.ma20) || Number.isFinite(item.marketData.ma50) || Number.isFinite(item.marketData.ma200)
     ? {
       price:item.marketData.price,
@@ -6901,6 +6913,7 @@ function buildTickerPromptFromRecord(record){
     compactChecklist:compactChecklistText(checks),
     chartAttached:item.review.chartAvailable ? 'yes' : 'no',
     chartFileName:item.review.chartRef ? item.review.chartRef.name : '',
+    appVerdictCeiling,
     chartMatchStatus:'unclear',
     chartMatchWarning:'',
     entry:formatPlanFieldValue(item.plan.entry),
@@ -8736,7 +8749,8 @@ function renderReviewWorkspace(options = {}){
   });
   const adjustmentSummary = qualityAdjustments.adjustmentReasons.join(' | ');
   const initialVerdictOverride = activeReviewTicker() === record.ticker ? String(uiState.activeReviewVerdictOverride || '').trim() : '';
-  const displayStage = initialVerdictOverride || displayStageForRecord(record);
+  const reviewHeaderVerdict = reviewHeaderVerdictForRecord(record);
+  const displayStage = initialVerdictOverride || reviewHeaderVerdict;
   const effectivePlanSnapshot = {
     entry:effectivePlan.entry,
     stop:effectivePlan.stop,
@@ -9366,6 +9380,7 @@ function buildPromptBody(payload){
     `max_loss_gbp=${payload.maxRisk}`,
     `chart_attached=${chartAttached ? 'yes' : 'no'}`,
     `chart_filename=${payload.chartFileName || 'none'}`,
+    `app_verdict_ceiling=${payload.appVerdictCeiling || 'Watch'}`,
     '',
     'Inputs:',
     `trend_state=${payload.trendState}`,
@@ -9425,6 +9440,10 @@ function buildPromptBody(payload){
     '- Stop should sit below support, the pullback low, or the invalidation level',
     '- First target should be prior swing high or logical resistance',
     '- Must respect GBP 40 max loss',
+    '- Respect entry / stop / target values as constraints',
+    '- If plan is invalid, too wide, heavy, or unaffordable, do NOT promote setup',
+    '- High reward:risk does NOT justify upgrading a weak setup',
+    '- Structure and confirmation take priority over reward',
     '',
     'Chart verification:',
     '- If a chart image is attached, first check whether it plausibly matches the supplied ticker',
@@ -9453,6 +9472,10 @@ function buildPromptBody(payload){
     '',
     'Rules:',
     '- verdict must be: Watch | Near Entry | Entry | Avoid',
+    '- Do NOT return a verdict above app_verdict_ceiling',
+    '- If app_verdict_ceiling = Watch, only Watch or Avoid are allowed',
+    '- If app_verdict_ceiling = Near Entry, only Near Entry, Watch, or Avoid are allowed',
+    '- If app_verdict_ceiling = Entry, downgrade if needed but do not exceed Entry',
     '- quality_score = integer 1-10',
     '- confidence_score = integer 1-100',
     '- chart_match_status must be: match | mismatch | unclear',
