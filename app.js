@@ -2296,7 +2296,35 @@ function allTickerRecords(){
 function watchlistTickerRecords(){
   return allTickerRecords()
     .filter(record => record.watchlist && record.watchlist.inWatchlist)
-    .sort((a, b) => String(b.watchlist.addedAt || '').localeCompare(String(a.watchlist.addedAt || '')) || a.ticker.localeCompare(b.ticker));
+    .sort((a, b) => watchlistPriorityForRecord(b).score - watchlistPriorityForRecord(a).score || String(b.watchlist.addedAt || '').localeCompare(String(a.watchlist.addedAt || '')) || a.ticker.localeCompare(b.ticker));
+}
+
+function watchlistPriorityForRecord(record){
+  const item = normalizeTickerRecord(record);
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const rrResolution = resolveScannerStateWithTrace(item);
+  const setupScore = setupScoreForRecord(item);
+  let score = Number.isFinite(setupScore) ? setupScore : 0;
+  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+  const pullbackZone = String(derivedStates.pullbackZone || '').toLowerCase();
+  const hostileMarket = isHostileMarketStatus((item.meta && item.meta.marketStatus) || state.marketStatus);
+  if(bounceState === 'confirmed') score += 2;
+  else if(bounceState === 'early' || bounceState === 'attempt') score += 1;
+  else if(bounceState === 'none') score -= 2;
+  if(volumeState === 'supportive' || volumeState === 'strong') score += 1;
+  else if(volumeState === 'weak') score -= 1;
+  if(rrResolution.rr_reliability === 'low') score -= 2;
+  if(hostileMarket && pullbackZone === 'near_50ma') score -= 1;
+  score = Math.max(0, Math.min(10, Math.round(score)));
+  const bucket = score >= 7 && ['confirmed','early','attempt'].includes(bounceState)
+    ? 'ready_soon'
+    : (score >= 4 ? 'developing' : 'waiting_confirmation');
+  if(record && record.watchlist && typeof record.watchlist === 'object'){
+    record.watchlist.watchlist_priority_score = score;
+    record.watchlist.watchlist_priority_bucket = bucket;
+  }
+  return {score, bucket};
 }
 
 function diaryTradeRecords(){
@@ -2770,6 +2798,52 @@ function renderWatchlist(){
     return;
   }
   box.innerHTML = '';
+  const groups = [
+    {key:'ready_soon', title:'Ready Soon', hint:'Higher-priority setups with confirmed or near-confirmed behaviour.'},
+    {key:'developing', title:'Developing', hint:'Structurally alive setups with mixed signals or early confirmation.'},
+    {key:'waiting_confirmation', title:'Waiting for Confirmation', hint:'Low-priority setups still missing bounce or confirmation.'}
+  ];
+  groups.forEach(group => {
+    const groupRecords = records.filter(record => watchlistPriorityForRecord(record).bucket === group.key);
+    if(!groupRecords.length) return;
+    const section = document.createElement('div');
+    section.className = 'watchlistgroup';
+    section.innerHTML = `<div class="summary" style="margin:12px 0 8px"><strong>${escapeHtml(group.title)}</strong> <span class="tiny">${escapeHtml(group.hint)}</span></div>`;
+    groupRecords.forEach(record => {
+      const entry = tickerRecordToWatchlistEntry(record);
+      if(!entry) return;
+      const view = buildFinalSetupView(record);
+      const warningState = evaluateWarningState(record, getReviewAnalysisState(record).normalizedAnalysis);
+      const remaining = getTradingDaysRemaining(entry);
+      const lifecycleText = lifecycleLabel(record);
+      const expired = record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
+      const cautionChip = warningState.showWarning
+        ? 'Warning'
+        : (record.setup.marketCaution ? 'Weak market' : view.convictionTier);
+      const expiryDate = record.lifecycle.expiresAt || 'Not set';
+      const priority = watchlistPriorityForRecord(record);
+      const avoidSubtype = avoidSubtypeForRecord(record);
+      const watchlistBadgeLabel = view.displayStage === 'Avoid'
+        ? (avoidSubtype === 'conditional' ? '🧐 Avoid' : '💩 Avoid')
+        : view.setupUiState.label;
+      const reasoning = decisionReasoningForRecord(record, {
+        reviewVerdict:view.displayStage,
+        avoidSubtype
+      });
+      const div = document.createElement('div');
+      div.className = 'resultcompact';
+      div.innerHTML = `<div class="resulthead"><div class="watchlistidentity inline-status" style="justify-content:space-between;align-items:flex-start"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="inline-status"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span></div></div><div class="tiny">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div><div class="inline-status" style="margin-top:8px"><span class="pill">Priority ${escapeHtml(String(priority.score))}/10</span><span class="pill">${escapeHtml(cautionChip)}</span><span class="pill">${escapeHtml(view.planStateLabel)}</span></div>${reasoning.headline ? `<div class="tiny" style="margin-top:8px"><strong>${escapeHtml(reasoning.headline)}</strong></div>` : ''}${reasoning.detail ? `<div class="tiny">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny" style="margin-top:8px">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div><div class="resultreview inline-status" style="margin-top:10px"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save to Diary</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
+      div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
+      div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
+      div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
+      div.querySelector('[data-act="refresh-life"]').onclick = () => { refreshWatchlistTicker(entry.ticker).catch(() => {}); };
+      div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
+      section.appendChild(div);
+    });
+    box.appendChild(section);
+  });
+  renderWorkflowAlerts();
+  return;
   records.forEach(record => {
     const entry = tickerRecordToWatchlistEntry(record);
     if(!entry) return;
@@ -5726,19 +5800,120 @@ function actionStateForRecord(record){
   return String(item.action && item.action.stage || deriveActionStateForRecord(item).stage);
 }
 
+function avoidSubtypeForRecord(record, options = {}){
+  const item = normalizeTickerRecord(record);
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan});
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+  const rrValue = numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
+  const setupScore = setupScoreForRecord(item);
+  const structureAlive = !['broken','weak'].includes(structureState) && trendState !== 'broken';
+
+  if(
+    structureState === 'broken'
+    || trendState === 'broken'
+    || planUiState.state === 'invalid'
+    || planUiState.state === 'unrealistic_rr'
+    || (Number.isFinite(rrValue) && rrValue < currentRrThreshold())
+    || (setupScore <= 3 && !structureAlive)
+    || !!(item.plan && (item.plan.invalidatedState || item.plan.missedState))
+  ) return 'terminal';
+
+  if(
+    structureAlive
+    && (
+      ['none','attempt'].includes(bounceState)
+      || volumeState === 'weak'
+      || qualityAdjustments.weakRegimePenalty
+      || qualityAdjustments.lowControlSetup
+      || qualityAdjustments.tooWideForQualityPullback
+    )
+  ) return 'conditional';
+
+  return '';
+}
+
+function decisionReasoningForRecord(record, options = {}){
+  const item = normalizeTickerRecord(record);
+  const reviewVerdict = normalizeAnalysisVerdict(options.reviewVerdict || displayStageForRecord(item));
+  const scannerStatus = normalizeAnalysisVerdict(options.scannerStatus || '');
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const warningState = options.warningState || warningStateFromInputs(item, null, derivedStates);
+  const avoidSubtype = options.avoidSubtype || avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments});
+  const parts = [];
+  const pushPart = value => {
+    if(value && !parts.includes(value)) parts.push(value);
+  };
+  if(item.plan && item.plan.invalidatedState) pushPart('Setup invalidated');
+  if(item.plan && item.plan.missedState) pushPart('Missed entry window');
+  (qualityAdjustments.adjustmentReasons || []).forEach(pushPart);
+  (warningState.reasons || []).forEach(pushPart);
+  if(displayedPlan.riskFit && displayedPlan.riskFit.risk_status === 'too_wide') pushPart('Stop too wide');
+  if(executionCapitalBlocked(displayedPlan)) pushPart('Capital burden too high');
+  if(!parts.length && item.scan && item.scan.reasons) item.scan.reasons.forEach(pushPart);
+
+  let headline = reviewVerdict === 'Entry'
+    ? 'Ready: review entry conditions'
+    : (reviewVerdict === 'Near Entry'
+      ? 'Prepare: setup is close'
+      : (reviewVerdict === 'Avoid'
+        ? (avoidSubtype === 'terminal' ? 'Avoid: terminal failure' : 'Avoid: needs confirmation')
+        : 'Monitor: setup still developing'));
+
+  if(reviewVerdict === 'Avoid' && avoidSubtype === 'terminal'){
+    if(item.plan && item.plan.invalidatedState) headline = 'Avoid: setup invalidated';
+    else if(item.plan && item.plan.missedState) headline = 'Avoid: missed setup';
+    else if(String(derivedStates.structureState || '').toLowerCase() === 'broken' || String(derivedStates.trendState || '').toLowerCase() === 'broken') headline = 'Avoid: broken structure';
+    else if(getPlanUiState(item, {displayedPlan}).state === 'invalid') headline = 'Avoid: invalid plan';
+  }
+  if(scannerStatus && verdictRank(reviewVerdict) != null && verdictRank(scannerStatus) != null && verdictRank(reviewVerdict) < verdictRank(scannerStatus)){
+    headline = `Downgraded: ${parts[0] ? parts[0].toLowerCase() : 'review found weaker conditions'}`;
+  }
+
+  return {
+    headline:headline.slice(0, 80),
+    detail:parts.slice(0, 3).join(' | '),
+    avoidSubtype
+  };
+}
+
 function actionPresentationForRecord(record){
   const item = normalizeTickerRecord(record);
   const reviewVerdict = typeof reviewHeaderVerdictForRecord === 'function'
     ? reviewHeaderVerdictForRecord(item)
     : displayStageForRecord(item);
-  const setupScore = numericOrNull(item.setupScore ?? (item.review && item.review.setupScore) ?? (item.scan && item.scan.score));
-  const nextAction = nextActionTextForRecord(item);
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const displayedPlan = deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const qualityAdjustments = evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const avoidSubtype = avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments});
   const invalidated = !!(item.plan && (item.plan.invalidatedState || item.plan.missedState));
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stop = numericOrNull(item.plan && item.plan.stop);
   const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop;
 
-  if(invalidated || brokenBelowStop || reviewVerdict === 'Avoid'){
+  if(invalidated || brokenBelowStop || (reviewVerdict === 'Avoid' && avoidSubtype !== 'conditional')){
     return {
       label:' Ignore',
       tone:'danger',
@@ -5746,11 +5921,64 @@ function actionPresentationForRecord(record){
     };
   }
 
+  if(reviewVerdict === 'Avoid' && avoidSubtype === 'conditional'){
+    const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+    if(bounceState === 'none'){
+      return {
+        label:' Wait for bounce confirmation',
+        tone:'warning',
+        shortLabel:'Wait for bounce confirmation'
+      };
+    }
+    if(bounceState === 'attempt' || bounceState === 'early'){
+      return {
+        label:' Monitor for stronger confirmation',
+        tone:'warning-soft',
+        shortLabel:'Monitor for stronger confirmation'
+      };
+    }
+    return {
+      label:' Add to watchlist and wait for confirmation',
+      tone:'warning',
+      shortLabel:'Add to watchlist and wait for confirmation'
+    };
+  }
+
+  if(reviewVerdict === 'Entry'){
+    return {
+      label:'Act',
+      tone:'success',
+      shortLabel:'Act'
+    };
+  }
+
+  if(reviewVerdict === 'Near Entry'){
+    return {
+      label:'Prepare',
+      tone:'warning',
+      shortLabel:'Prepare'
+    };
+  }
+
+  if(reviewVerdict === 'Watch'){
+    return {
+      label:'Monitor',
+      tone:'watch',
+      shortLabel:'Monitor'
+    };
+  }
+
+  return {
+    label:'Monitor',
+    tone:'watch',
+    shortLabel:'Monitor'
+  };
+
   if(reviewVerdict === 'Entry'){
     return {
       label:'🚀 Review entry',
       tone:'success',
-      shortLabel:'Review entry'
+      shortLabel:'Act'
     };
   }
 
@@ -5758,7 +5986,7 @@ function actionPresentationForRecord(record){
     return {
       label:' Near entry - wait for trigger',
       tone:'warning',
-      shortLabel:'Near entry'
+      shortLabel:'Prepare'
     };
   }
 
@@ -6395,12 +6623,21 @@ function nextActionTextForRecord(record){
   }
   if(item.plan && item.plan.affordability === 'not_affordable') return 'Ignore - capital does not fit';
   if(item.plan && item.plan.affordability === 'heavy_capital') return 'Pass - capital burden is too high';
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const displayedPlan = deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const qualityAdjustments = evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const avoidSubtype = avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments});
   const actionStage = actionStateForRecord(record);
-  if(actionStage === 'action_now') return 'Execute trade plan';
-  if(actionStage === 'needs_plan') return 'Define trade plan';
-  if(actionStage === 'near_entry') return 'Wait for confirmation';
-  if(actionStage === 'avoid') return 'Ignore';
-  return '\uD83D\uDC40 Monitor only - no entry yet';
+  if(actionStage === 'action_now') return 'Act';
+  if(actionStage === 'needs_plan') return avoidSubtype === 'conditional' ? 'Add to watchlist and wait for confirmation' : 'Define trade plan';
+  if(actionStage === 'near_entry') return 'Prepare';
+  if(actionStage === 'avoid') return avoidSubtype === 'conditional' ? 'Add to watchlist and wait for confirmation' : 'Ignore';
+  return 'Monitor';
 }
 
 function fmtPrice(value){
@@ -8714,6 +8951,10 @@ function addActiveReviewTickerToWatchlist(){
   const ticker = activeReviewTicker();
   if(!ticker) return;
   const liveRecord = upsertTickerRecord(ticker);
+  if(avoidSubtypeForRecord(liveRecord) === 'terminal'){
+    setStatus('inputStatus', `<span class="warntext">${escapeHtml(ticker)} is a terminal avoid and should not be tracked on the watchlist.</span>`);
+    return;
+  }
   const entry = addToWatchlist({
     ticker:liveRecord.ticker,
     dateAdded:todayIsoDate(),
@@ -9095,6 +9336,23 @@ function renderReviewWorkspace(options = {}){
     planCheckState:currentPlanCheckState
   });
   const setupUiState = getSetupUiState(record, {displayStage, planUiState});
+  const avoidSubtype = avoidSubtypeForRecord(record, {
+    derivedStates:analysisDerivedStatesFromRecord(record),
+    displayedPlan,
+    qualityAdjustments
+  });
+  const decisionReasoning = decisionReasoningForRecord(record, {
+    scannerStatus,
+    reviewVerdict:displayStage,
+    derivedStates:analysisDerivedStatesFromRecord(record),
+    displayedPlan,
+    qualityAdjustments,
+    warningState,
+    avoidSubtype
+  });
+  const reviewBadgeLabel = displayStage === 'Avoid'
+    ? (avoidSubtype === 'conditional' ? '🧐 Avoid' : '💩 Avoid')
+    : setupUiState.label;
   const planState = planUiState.label;
   const executionModeText = executionModeLabel(executionState.exitMode);
   const targetReviewText = targetReviewStateLabel(executionState.targetReviewState);
@@ -9147,7 +9405,7 @@ function renderReviewWorkspace(options = {}){
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate();
   });
-  box.innerHTML = `<div class="reviewworkspace ready"><div class="reviewhero reviewhero-compact"><div class="reviewherohead"><div class="reviewheadline"><div class="inline-status"><strong>${escapeHtml(record.ticker)}</strong><span class="badge ${setupUiState.className}">${escapeHtml(setupUiState.label)}</span><span class="score ${scoreClass(setupScore)}">${escapeHtml(setupScoreDisplay)}</span>${headerContextMarkup}</div><div class="tiny">${escapeHtml(companyLine)}</div>${downgradeSummary ? `<div class="tiny"><span class="badge avoid">${escapeHtml(downgradeSummary.label)}</span> ${escapeHtml(downgradeSummary.transition)}</div>` : ''}${downgradeSummary && downgradeSummary.summary ? `<div class="tiny">${escapeHtml(downgradeSummary.summary)}</div>` : ''}<div class="tiny">Next action: ${escapeHtml(nextActionText)}</div>${adjustmentSummary ? `<div class="tiny">${escapeHtml(adjustmentSummary)}</div>` : ''}</div></div>${marketMetaLine}</div><div class="panelbox reviewchartpanel"><div class="reviewsectionhead"><strong>Chart</strong><div class="workflowmenu workflowmenu-inline"><button class="secondary compactbutton" type="button" data-act="open-chart">Open Chart</button><button class="secondary compactbutton" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary compactbutton" type="button" data-act="import-latest">Import Latest</button><button class="ghost compactbutton" type="button" data-act="clear-chart">Remove Chart</button></div></div><input id="reviewChartFile" type="file" accept="image/png,image/jpeg,image/*" hidden />${chartPreview}</div><div class="panelbox"><div class="reviewsectionhead"><strong>AI Analysis + Notes</strong><span class="tiny">Prompt and debug stay collapsed until needed.</span></div><textarea id="reviewNotes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><details class="responsepanel compact-open-on-demand" id="reviewResponse" ${(((uiState.responseOpen[record.ticker] ?? false) || !!analysisState.error)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><details class="promptdetails compact-open-on-demand" id="reviewPrompt" ${(uiState.promptOpen[record.ticker] ?? false) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox scrollbox">${escapeHtml(promptText)}</div></details></div><div class="panelbox"><strong id="plannerSection">Trade Plan</strong><div class="summary" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div><input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden /><div class="plan-grid plan-grid-inputs"><div><label>Planned Entry</label><input id="entryPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.entry || '')}" /></div><div><label>Planned Stop</label><input id="stopPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.stop || '')}" /></div><div><label>${escapeHtml(executionState.exitMode === 'dynamic_exit' ? 'Target Review Level' : 'Planned First Target')}</label><input id="targetPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.firstTarget || '')}" /></div></div><div class="reviewstats plan-grid plan-grid-stats"><div class="stat"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div><div class="stat"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div><div class="stat"><div>Planned R:R</div><div class="big" id="rrValue">-</div></div><div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div><div class="stat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(positionCostText)}</div></div><div class="stat"><div>Max Loss</div><div class="big">${escapeHtml(formatGbp(currentMaxLoss()))}</div></div><div class="stat"><div>Risk / Capital</div><div class="big" id="riskFitBox">${escapeHtml(`${riskStatusLabel(record.plan.riskStatus || 'plan_missing')} / ${capitalComfort.label}`)}</div></div><div class="stat"><div>Capital Check</div><div class="big" id="capitalCheckBox">${escapeHtml(capitalComfort.note || 'Clear')}</div></div></div><details class="compact-details"><summary>Plan Diagnostics</summary><div class="reviewmeta-grid"><div><label>Plan State</label><input id="planStateBox" readonly value="${escapeHtml(planState)}" /></div><div><label>Plan Math</label><input id="planQualityBox" readonly value="${escapeHtml(planQualityForRr(rrRatio) || 'N/A')}" /></div><div><label>Plan Source</label><input id="planSourceBox" readonly value="${escapeHtml(String(record.plan.source || effectivePlan.source || ''))}" /></div><div><label>Trigger State</label><input id="triggerStateBox" readonly value="${escapeHtml(triggerStateLabel(record.plan.triggerState))}" /></div><div><label>Plan Check</label><input id="planValidationBox" readonly value="${escapeHtml(planValidationStateLabel(planCheckState))}" /></div><div><label>Execution Mode</label><input id="exitModeBox" readonly value="${escapeHtml(executionModeText)}" /></div><div><label>Target Review</label><input id="targetReviewStateBox" readonly value="${escapeHtml(targetReviewText)}" /></div><div><label>Target Alert</label><input id="targetAlertBox" readonly value="${escapeHtml(targetAlertText)}" /></div><div><label>Capital Comfort</label><input id="capitalComfortBox" readonly value="${escapeHtml(capitalComfort.label)}" /></div></div></details><div class="summary">${escapeHtml(executionState.exitMode === 'dynamic_exit' ? `${targetGuidance} | ${targetReviewText} | ${targetActionText}` : 'Target order can be managed as a fixed exit.')}</div><div class="tiny" id="calcNote">Enter planned entry, stop, and first target to calculate size.</div></div><details class="panelbox reviewchecklist"><summary><strong>Checklist</strong> <span id="progressText">Checks met: 0 / 10</span></summary><div class="prog"><div class="fill" id="progressFill"></div></div><div class="checks"><div class="checkgroup"><h3>Trend</h3><label class="checkitem"><input type="checkbox" class="logic" id="trendStrong" ${reviewChecks.trendStrong ? 'checked' : ''}> Strong uptrend</label><label class="checkitem"><input type="checkbox" class="logic" id="above50" ${reviewChecks.above50 ? 'checked' : ''}> Above 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="above200" ${reviewChecks.above200 ? 'checked' : ''}> Above 200 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="ma50gt200" ${reviewChecks.ma50gt200 ? 'checked' : ''}> 50 MA above 200 MA</label></div><div class="checkgroup"><h3>Pullback + Confirmation</h3><label class="checkitem"><input type="checkbox" class="logic" id="near20" ${reviewChecks.near20 ? 'checked' : ''}> Near 20 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="near50" ${reviewChecks.near50 ? 'checked' : ''}> Near 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="stabilising" ${reviewChecks.stabilising ? 'checked' : ''}> Stabilising</label><label class="checkitem"><input type="checkbox" class="logic" id="bounce" ${reviewChecks.bounce ? 'checked' : ''}> Bounce candle</label><label class="checkitem"><input type="checkbox" class="logic" id="volume" ${reviewChecks.volume ? 'checked' : ''}> Volume supportive</label></div><div class="checkgroup"><h3>Trade Plan</h3><label class="checkitem"><input type="checkbox" class="logic" id="entryDefined" ${reviewChecks.entryDefined ? 'checked' : ''}> Entry defined</label><label class="checkitem"><input type="checkbox" class="logic" id="stopDefined" ${reviewChecks.stopDefined ? 'checked' : ''}> Stop defined</label><label class="checkitem"><input type="checkbox" class="logic" id="targetDefined" ${reviewChecks.targetDefined ? 'checked' : ''}> Target defined</label></div></div><div class="summary" id="summaryBox">No setup reviewed yet.</div></details><div class="reviewactions"><button class="primary" id="analyseActiveBtn" ${analysisBusy && !loading ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="secondary" id="saveReviewBtn">Save Review</button><button class="secondary" id="addWatchlistActiveBtn">Add to Watchlist</button></div><details class="panelbox compact-details"><summary>Workspace Status</summary><div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div><div class="reviewactions reviewactions-secondary"><button class="secondary" id="saveTradeActiveBtn" type="button">Save to Diary</button><button class="ghost" id="refreshLifecycleBtn" type="button">Refresh</button><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button><button class="secondary" id="reactivateLifecycleBtn" type="button">Reactivate</button><button class="ghost" id="resetReviewBtn">Reset Review</button></div>${reviewDebug}<div class="statusline tiny" id="reviewWorkspaceStatus">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></details></div>`;
+  box.innerHTML = `<div class="reviewworkspace ready"><div class="reviewhero reviewhero-compact"><div class="reviewherohead"><div class="reviewheadline"><div class="inline-status"><strong>${escapeHtml(record.ticker)}</strong><span class="badge ${setupUiState.className}">${escapeHtml(reviewBadgeLabel)}</span><span class="score ${scoreClass(setupScore)}">${escapeHtml(setupScoreDisplay)}</span>${headerContextMarkup}</div><div class="tiny">${escapeHtml(companyLine)}</div>${downgradeSummary ? `<div class="tiny"><span class="badge avoid">${escapeHtml(downgradeSummary.label)}</span> ${escapeHtml(downgradeSummary.transition)}</div>` : ''}${decisionReasoning.headline ? `<div class="tiny"><strong>${escapeHtml(decisionReasoning.headline)}</strong></div>` : ''}${decisionReasoning.detail ? `<div class="tiny">${escapeHtml(decisionReasoning.detail)}</div>` : ''}<div class="tiny">Next action: ${escapeHtml(nextActionText)}</div></div></div>${marketMetaLine}</div><div class="panelbox reviewchartpanel"><div class="reviewsectionhead"><strong>Chart</strong><div class="workflowmenu workflowmenu-inline"><button class="secondary compactbutton" type="button" data-act="open-chart">Open Chart</button><button class="secondary compactbutton" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary compactbutton" type="button" data-act="import-latest">Import Latest</button><button class="ghost compactbutton" type="button" data-act="clear-chart">Remove Chart</button></div></div><input id="reviewChartFile" type="file" accept="image/png,image/jpeg,image/*" hidden />${chartPreview}</div><div class="panelbox"><div class="reviewsectionhead"><strong>AI Analysis + Notes</strong><span class="tiny">Prompt and debug stay collapsed until needed.</span></div><textarea id="reviewNotes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><details class="responsepanel compact-open-on-demand" id="reviewResponse" ${(((uiState.responseOpen[record.ticker] ?? false) || !!analysisState.error)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><details class="promptdetails compact-open-on-demand" id="reviewPrompt" ${(uiState.promptOpen[record.ticker] ?? false) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox scrollbox">${escapeHtml(promptText)}</div></details></div><div class="panelbox"><strong id="plannerSection">Trade Plan</strong><div class="summary" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div><input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden /><div class="plan-grid plan-grid-inputs"><div><label>Planned Entry</label><input id="entryPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.entry || '')}" /></div><div><label>Planned Stop</label><input id="stopPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.stop || '')}" /></div><div><label>${escapeHtml(executionState.exitMode === 'dynamic_exit' ? 'Target Review Level' : 'Planned First Target')}</label><input id="targetPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.firstTarget || '')}" /></div></div><div class="reviewstats plan-grid plan-grid-stats"><div class="stat"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div><div class="stat"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div><div class="stat"><div>Planned R:R</div><div class="big" id="rrValue">-</div></div><div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div><div class="stat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(positionCostText)}</div></div><div class="stat"><div>Max Loss</div><div class="big">${escapeHtml(formatGbp(currentMaxLoss()))}</div></div><div class="stat"><div>Risk / Capital</div><div class="big" id="riskFitBox">${escapeHtml(`${riskStatusLabel(record.plan.riskStatus || 'plan_missing')} / ${capitalComfort.label}`)}</div></div><div class="stat"><div>Capital Check</div><div class="big" id="capitalCheckBox">${escapeHtml(capitalComfort.note || 'Clear')}</div></div></div><details class="compact-details"><summary>Plan Diagnostics</summary><div class="reviewmeta-grid"><div><label>Plan State</label><input id="planStateBox" readonly value="${escapeHtml(planState)}" /></div><div><label>Plan Math</label><input id="planQualityBox" readonly value="${escapeHtml(planQualityForRr(rrRatio) || 'N/A')}" /></div><div><label>Plan Source</label><input id="planSourceBox" readonly value="${escapeHtml(String(record.plan.source || effectivePlan.source || ''))}" /></div><div><label>Trigger State</label><input id="triggerStateBox" readonly value="${escapeHtml(triggerStateLabel(record.plan.triggerState))}" /></div><div><label>Plan Check</label><input id="planValidationBox" readonly value="${escapeHtml(planValidationStateLabel(planCheckState))}" /></div><div><label>Execution Mode</label><input id="exitModeBox" readonly value="${escapeHtml(executionModeText)}" /></div><div><label>Target Review</label><input id="targetReviewStateBox" readonly value="${escapeHtml(targetReviewText)}" /></div><div><label>Target Alert</label><input id="targetAlertBox" readonly value="${escapeHtml(targetAlertText)}" /></div><div><label>Capital Comfort</label><input id="capitalComfortBox" readonly value="${escapeHtml(capitalComfort.label)}" /></div></div></details><div class="summary">${escapeHtml(executionState.exitMode === 'dynamic_exit' ? `${targetGuidance} | ${targetReviewText} | ${targetActionText}` : 'Target order can be managed as a fixed exit.')}</div><div class="tiny" id="calcNote">Enter planned entry, stop, and first target to calculate size.</div></div><details class="panelbox reviewchecklist"><summary><strong>Checklist</strong> <span id="progressText">Checks met: 0 / 10</span></summary><div class="prog"><div class="fill" id="progressFill"></div></div><div class="checks"><div class="checkgroup"><h3>Trend</h3><label class="checkitem"><input type="checkbox" class="logic" id="trendStrong" ${reviewChecks.trendStrong ? 'checked' : ''}> Strong uptrend</label><label class="checkitem"><input type="checkbox" class="logic" id="above50" ${reviewChecks.above50 ? 'checked' : ''}> Above 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="above200" ${reviewChecks.above200 ? 'checked' : ''}> Above 200 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="ma50gt200" ${reviewChecks.ma50gt200 ? 'checked' : ''}> 50 MA above 200 MA</label></div><div class="checkgroup"><h3>Pullback + Confirmation</h3><label class="checkitem"><input type="checkbox" class="logic" id="near20" ${reviewChecks.near20 ? 'checked' : ''}> Near 20 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="near50" ${reviewChecks.near50 ? 'checked' : ''}> Near 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="stabilising" ${reviewChecks.stabilising ? 'checked' : ''}> Stabilising</label><label class="checkitem"><input type="checkbox" class="logic" id="bounce" ${reviewChecks.bounce ? 'checked' : ''}> Bounce candle</label><label class="checkitem"><input type="checkbox" class="logic" id="volume" ${reviewChecks.volume ? 'checked' : ''}> Volume supportive</label></div><div class="checkgroup"><h3>Trade Plan</h3><label class="checkitem"><input type="checkbox" class="logic" id="entryDefined" ${reviewChecks.entryDefined ? 'checked' : ''}> Entry defined</label><label class="checkitem"><input type="checkbox" class="logic" id="stopDefined" ${reviewChecks.stopDefined ? 'checked' : ''}> Stop defined</label><label class="checkitem"><input type="checkbox" class="logic" id="targetDefined" ${reviewChecks.targetDefined ? 'checked' : ''}> Target defined</label></div></div><div class="summary" id="summaryBox">No setup reviewed yet.</div></details><div class="reviewactions"><button class="primary" id="analyseActiveBtn" ${analysisBusy && !loading ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="secondary" id="saveReviewBtn">Save Review</button><button class="secondary" id="addWatchlistActiveBtn">Add to Watchlist</button></div><details class="panelbox compact-details"><summary>Workspace Status</summary><div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div><div class="reviewactions reviewactions-secondary"><button class="secondary" id="saveTradeActiveBtn" type="button">Save to Diary</button><button class="ghost" id="refreshLifecycleBtn" type="button">Refresh</button><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button><button class="secondary" id="reactivateLifecycleBtn" type="button">Reactivate</button><button class="ghost" id="resetReviewBtn">Reset Review</button></div>${reviewDebug}<div class="statusline tiny" id="reviewWorkspaceStatus">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></details></div>`;
   bindReviewWorkspaceActions(record);
   refreshReview();
   renderReviewLifecycleSummary(record.ticker);
