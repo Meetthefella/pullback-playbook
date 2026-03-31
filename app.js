@@ -3978,7 +3978,7 @@ function resultSupportLineForView(view){
   if(view.bucket === 'filtered' || view.finalClassification === 'filtered'){
     const pieces = [
       convictionTier,
-      item.setup.marketCaution ? 'Weak market caution' : '',
+      item.setup.marketCaution ? 'Weak market' : '',
       item.meta.companyName || item.meta.exchange || ''
     ].filter(Boolean);
     return pieces.join(' | ') || 'Filtered from the main review queue.';
@@ -3993,7 +3993,7 @@ function resultSupportLineForView(view){
     view.affordability === 'not_affordable' ? 'Not Affordable' : '',
     view.displayedPlan.tradeability === 'too_expensive' ? 'Risk OK | Capital Heavy' : '',
     view.displayedPlan.tradeability === 'risk_only' ? 'Capital check estimated' : '',
-    item.setup.marketCaution ? 'Weak market caution' : ''
+    item.setup.marketCaution ? 'Weak market' : ''
   ].filter(Boolean);
   return pieces.join(' | ') || (item.meta.companyName || 'Review in Setup Review for full detail.');
 }
@@ -4060,7 +4060,7 @@ function shortlistStatusPills(view, maxPills = 3){
   if(view.bucket === 'filtered' || view.finalClassification === 'filtered'){
     const pills = [];
     if(view.warningState && view.warningState.showWarning) pills.push('Weak conditions');
-    if(view.item && view.item.setup && view.item.setup.marketCaution) pills.push('Weak market caution');
+    if(view.item && view.item.setup && view.item.setup.marketCaution && !pills.includes('Weak conditions')) pills.push('Weak conditions');
     return pills.slice(0, maxPills);
   }
   return scanCardStatusPills(view, maxPills);
@@ -4143,7 +4143,7 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(item.marketData.ma50) ? `50 ${fmtPrice(Number(item.marketData.ma50))}` : '',
     Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
-    item.setup.marketCaution ? 'Market caution' : '',
+    item.setup.marketCaution ? 'Weak market' : '',
     rrLine ? `${rrLine} | ${resolution.rr_reliability || 'n/a'}` : ''
   ].filter(Boolean).join(' | ');
   const traceMarkup = renderScannerDecisionTrace(view);
@@ -4171,7 +4171,7 @@ function compactReasonLineForView(view, maxParts = 3){
   if(!item.plan.hasValidPlan && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) pushPart('Low est reward');
   if(derived.stabilisationState === 'early') pushPart('Early stabilisation');
   if(derived.volumeState === 'weak') pushPart('Weak volume');
-  if(item.setup.marketCaution) pushPart('Weak market caution');
+  if(item.setup.marketCaution) pushPart('Weak market');
   warningState.reasons.forEach(pushPart);
   if(!parts.length) pushPart(resultReasonForView(view));
   return parts.slice(0, maxParts).join(' | ');
@@ -4317,7 +4317,7 @@ function deriveWorkflowAlerts(){
       const stage = String(item.lifecycle.stage || '');
       const status = String(item.lifecycle.status || '');
       const createdAt = String(item.lifecycle.stageUpdatedAt || item.meta.updatedAt || new Date().toISOString());
-      const hostileMarket = item.setup.marketCaution ? ' Caution: hostile market.' : '';
+      const hostileMarket = item.setup.marketCaution ? ' Weak market conditions.' : '';
       let alertType = item.action.stage;
       let severity = 'info';
       let message = 'Watchlist or review candidate.';
@@ -4793,9 +4793,9 @@ function buildSummary(checks, status){
 
 function statusClass(status){
   if(status === 'Too Wide') return 'near';
-  if(status === '⛔ Broken') return 'avoid';
-  if(status === '🟠 Developing') return 'near';
-  if(status === '👀 Watch') return 'watch';
+  if(status === '💀 Dead' || status === '⛔ Broken') return 'avoid';
+  if(status === '🌱 Developing' || status === '🟠 Developing') return 'near';
+  if(status === '🧐 Monitor' || status === '👀 Watch') return 'watch';
   if(status === '🚀 Entry') return 'ready';
   if(status === '✅ Plan valid') return 'ready';
   if(status === '🟠 Needs adjustment') return 'near';
@@ -4849,10 +4849,10 @@ function rrStateClass(rrValue){
 }
 
 function setupUiLabel(setupState){
-  if(setupState === 'broken') return '⛔ Broken';
-  if(setupState === 'developing') return '🟠 Developing';
+  if(setupState === 'broken') return '💀 Dead';
+  if(setupState === 'developing') return '🌱 Developing';
   if(setupState === 'entry') return '🚀 Entry';
-  return '👀 Watch';
+  return '🧐 Monitor';
 }
 
 function setupUiClass(setupState){
@@ -4879,10 +4879,10 @@ function planUiClass(planValidity){
 // Re-declare the UI label helpers with explicit Unicode escapes so visible
 // labels stay exact even if the source file previously picked up mojibake.
 function setupUiLabel(setupState){
-  if(setupState === 'broken') return '\u26D4 Broken';
+  if(setupState === 'broken') return '\uD83D\uDC80 Dead';
   if(setupState === 'developing') return '\uD83C\uDF31 Developing';
   if(setupState === 'entry') return '\uD83D\uDE80 Entry';
-  return '\uD83D\uDC40 Watch';
+  return '\uD83E\uDDD0 Monitor';
 }
 
 function planUiLabel(planValidity){
@@ -5644,7 +5644,7 @@ function primaryVerdictBadge(verdict){
   if(safeVerdict === 'Entry') return {label:'🚀 Entry', className:'ready'};
   if(safeVerdict === 'Near Entry') return {label:'🎯 Near Entry', className:'near'};
   if(safeVerdict === 'Avoid') return {label:'⛔ Avoid', className:'avoid'};
-  return {label:'👀 Watch', className:'watch'};
+  return {label:'🧐 Monitor', className:'watch'};
 }
 
 function resolveEmojiPresentation(record, options = {}){
@@ -5674,6 +5674,22 @@ function resolveEmojiPresentation(record, options = {}){
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stop = numericOrNull(item.plan && item.plan.stop);
   const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop;
+  const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+  const warningReasons = warningState && Array.isArray(warningState.reasons) ? warningState.reasons : [];
+  const weakConditionsPresent = !!(
+    qualityAdjustments.weakRegimePenalty
+    || item.setup.marketCaution
+    || warningReasons.some(reason => /hostile market|weak market|borderline setup in weak market/i.test(String(reason || '')))
+  );
+  const weakVolumePresent = volumeState === 'weak'
+    || warningReasons.some(reason => /weak volume/i.test(String(reason || '')));
+  const hasReviewState = !!(
+    hasAiStageForRecord(item)
+    || String(item.review && item.review.savedVerdict || '').trim()
+    || String(item.review && item.review.lastReviewedAt || '').trim()
+    || (item.review && item.review.manualReview && Object.keys(item.review.manualReview).length)
+    || (item.watchlist && item.watchlist.inWatchlist)
+  );
   let primaryState = 'monitor';
   let primaryEmoji = '🧐';
   let primaryLabel = 'Monitor';
@@ -5706,24 +5722,24 @@ function resolveEmojiPresentation(record, options = {}){
     if(!emoji || !label || modifiers.some(item => item.code === code) || modifiers.length >= 2) return;
     modifiers.push({emoji, label, code, className});
   };
+  if(context === 'scanner' && !hasReviewState){
+    addModifier('👀', 'Scan candidate', 'scan_candidate', 'watch');
+  }
   if(
     qualityAdjustments.lowControlSetup
     || qualityAdjustments.tooWideForQualityPullback
     || ['weakening','developing_loose'].includes(String(derivedStates.structureState || '').toLowerCase())
   ){
-    addModifier('🧊', 'Low control', 'low_control', 'near');
+    addModifier('🪫', 'Weak control', 'low_control', 'near');
   }
-  if(
-    qualityAdjustments.weakRegimePenalty
-    || String(derivedStates.volumeState || '').toLowerCase() === 'weak'
-    || !!item.setup.marketCaution
-    || !!(warningState && warningState.showWarning)
-  ){
+  if(weakVolumePresent){
+    addModifier('🫗', 'Weak volume', 'weak_volume', 'near');
+  }
+  if(weakConditionsPresent){
     addModifier('⚠️', 'Weak conditions', 'weak_conditions', 'near');
   }
 
   const primaryText = `${primaryEmoji} ${primaryLabel}`;
-  const combinedShortLabel = [primaryText].concat(modifiers.map(modifier => `${modifier.emoji} ${modifier.label}`)).join(' | ');
 
   if(['monitor','developing'].includes(primaryState) && primaryEmoji === '💀'){
     console.warn('EMOJI_STATE_MISMATCH', {ticker:item.ticker, finalVerdict, primaryState, primaryEmoji});
@@ -5746,6 +5762,7 @@ function resolveEmojiPresentation(record, options = {}){
     seenModifierKeys.add(key);
     uniqueModifiers.push(modifier);
   });
+  const combinedShortLabel = [primaryText].concat(uniqueModifiers.slice(0, 2).map(modifier => `${modifier.emoji} ${modifier.label}`)).join(' | ');
 
   return {
     primaryState,
@@ -6661,7 +6678,7 @@ function compactReasonLineForRecord(record, maxParts = 3){
   if(!item.plan.hasValidPlan && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) pushPart('Low est reward');
   if(derived.stabilisationState === 'early') pushPart('Early stabilisation');
   if(derived.volumeState === 'weak') pushPart('Weak volume');
-  if(item.setup.marketCaution) pushPart('Weak market caution');
+  if(item.setup.marketCaution) pushPart('Weak market');
   warningState.reasons.forEach(pushPart);
   if(!parts.length) pushPart(resultReasonForRecord(item));
   return parts.slice(0, maxParts).join(' | ');
