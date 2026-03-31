@@ -73,7 +73,20 @@ function createDefaultState(){
 
 const state = createDefaultState();
 
-const uiState = {promptOpen:{},responseOpen:{},loadingTicker:'',selectedScanner:{},activeReviewTicker:'',activeReviewAddsToScannerUniverse:true,activeReviewVerdictOverride:'',scannerShortlistSuppressed:false};
+const uiState = {
+  promptOpen:{},
+  responseOpen:{},
+  loadingTicker:'',
+  selectedScanner:{},
+  activeReviewTicker:'',
+  activeReviewAddsToScannerUniverse:true,
+  activeReviewVerdictOverride:'',
+  scannerShortlistSuppressed:false,
+  watchlistLifecycleRunning:false,
+  watchlistLifecycleLastRunAt:'',
+  watchlistLifecycleLastSource:'',
+  watchlistLifecyclePendingSource:''
+};
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -87,6 +100,8 @@ const EXTENDED_WATCH_TRADING_DAYS = 5;
 const WATCHLIST_EXPIRY_TRADING_DAYS = 5;
 const REVIEW_EXPIRY_TRADING_DAYS = 5;
 const PLAN_EXPIRY_TRADING_DAYS = 3;
+const WATCHLIST_LIFECYCLE_INTERVAL_MS = 5 * 60 * 1000;
+const WATCHLIST_LIFECYCLE_FRESHNESS_MS = 24 * 60 * 60 * 1000;
 const DIARY_SETUP_TAG_OPTIONS = ['20MA bounce', '50MA reclaim', 'first pullback', 'post-earnings continuation', 'weak-market exception', 'countertrend avoid'];
 const DIARY_MISTAKE_TAG_OPTIONS = ['early entry', 'chased breakout', 'ignored weak market', 'stop too tight', 'stop moved', 'oversize position', 'took subpar setup', 'sold too early', 'held too long'];
 const DIARY_LESSON_TAG_OPTIONS = ['wait for bounce confirmation', '50MA setups need extra patience', 'weak tape needs stricter filtering', 'best setups come from strong RS names', 'avoid loose structure under 20MA'];
@@ -154,6 +169,8 @@ let tesseractLoaderPromise = null;
 let backendSyncTimer = null;
 let backendRefreshTimer = null;
 let pushConfigPromise = null;
+let watchlistLifecycleTimer = null;
+let watchlistLifecycleListenersBound = false;
 
 function formatGbp(value){
   return `GBP ${Number(value || 0).toLocaleString()}`;
@@ -1459,7 +1476,24 @@ function baseTickerRecord(ticker){
       expiryAt:'',
       status:'',
       expiryAfterTradingDays:5,
-      updatedAt:''
+      updatedAt:'',
+      lifecycleState:'',
+      lifecycleLabel:'',
+      watchlist_priority_score:null,
+      watchlist_priority_bucket:'',
+      debug:{
+        lastEvaluatedAt:'',
+        lastSource:'',
+        hadFreshInputs:false,
+        previousState:'',
+        currentState:'',
+        changeType:'',
+        reason:'',
+        nextPossibleState:'',
+        mainBlocker:'',
+        warnings:[],
+        auditTrail:[]
+      }
     },
     diary:{
       hasDiary:false,
@@ -1630,6 +1664,31 @@ function normalizeTickerRecord(record){
   merged.watchlist.addedScore = numericOrNull(merged.watchlist.addedScore);
   merged.watchlist.expiryAfterTradingDays = Number.isFinite(Number(merged.watchlist.expiryAfterTradingDays)) ? Math.max(1, Number(merged.watchlist.expiryAfterTradingDays)) : 5;
   merged.watchlist.updatedAt = String(merged.watchlist.updatedAt || '');
+  merged.watchlist.lifecycleState = String(merged.watchlist.lifecycleState || '');
+  merged.watchlist.lifecycleLabel = String(merged.watchlist.lifecycleLabel || '');
+  merged.watchlist.watchlist_priority_score = numericOrNull(merged.watchlist.watchlist_priority_score);
+  merged.watchlist.watchlist_priority_bucket = String(merged.watchlist.watchlist_priority_bucket || '');
+  merged.watchlist.debug = merged.watchlist.debug && typeof merged.watchlist.debug === 'object' ? merged.watchlist.debug : {};
+  merged.watchlist.debug.lastEvaluatedAt = String(merged.watchlist.debug.lastEvaluatedAt || '');
+  merged.watchlist.debug.lastSource = String(merged.watchlist.debug.lastSource || '');
+  merged.watchlist.debug.hadFreshInputs = !!merged.watchlist.debug.hadFreshInputs;
+  merged.watchlist.debug.previousState = String(merged.watchlist.debug.previousState || '');
+  merged.watchlist.debug.currentState = String(merged.watchlist.debug.currentState || '');
+  merged.watchlist.debug.changeType = String(merged.watchlist.debug.changeType || '');
+  merged.watchlist.debug.reason = String(merged.watchlist.debug.reason || '');
+  merged.watchlist.debug.nextPossibleState = String(merged.watchlist.debug.nextPossibleState || '');
+  merged.watchlist.debug.mainBlocker = String(merged.watchlist.debug.mainBlocker || '');
+  merged.watchlist.debug.warnings = Array.isArray(merged.watchlist.debug.warnings) ? merged.watchlist.debug.warnings.map(item => String(item || '').trim()).filter(Boolean).slice(0, 5) : [];
+  merged.watchlist.debug.auditTrail = Array.isArray(merged.watchlist.debug.auditTrail)
+    ? merged.watchlist.debug.auditTrail
+      .map(item => ({
+        at:String(item && item.at || ''),
+        source:String(item && item.source || ''),
+        result:String(item && item.result || '')
+      }))
+      .filter(item => item.at || item.source || item.result)
+      .slice(0, 5)
+    : [];
   merged.diary.records = Array.isArray(merged.diary.records) ? merged.diary.records.map(normalizeTradeRecord) : [];
   merged.diary.diaryIds = uniqueStrings(merged.diary.diaryIds && merged.diary.diaryIds.length ? merged.diary.diaryIds : merged.diary.records.map(item => item.id));
   merged.diary.hasDiary = !!(merged.diary.hasDiary || merged.diary.records.length);
@@ -2309,8 +2368,9 @@ function tickerRecordToWatchlistEntry(record){
 function allTickerRecords(){
   const records = Object.values(normalizeTickerRecordsMap(state.tickerRecords || {}));
   records.forEach(record => {
-    maybeExpireTickerRecord(record);
     reevaluateTickerProgress(record);
+    syncWatchlistLifecycle(record);
+    maybeExpireTickerRecord(record);
   });
   state.tickerRecords = Object.fromEntries(records.map(record => [record.ticker, record]));
   return records;
@@ -2319,11 +2379,19 @@ function allTickerRecords(){
 function watchlistTickerRecords(){
   return allTickerRecords()
     .filter(record => record.watchlist && record.watchlist.inWatchlist)
-    .sort((a, b) => watchlistPriorityForRecord(b).score - watchlistPriorityForRecord(a).score || String(b.watchlist.addedAt || '').localeCompare(String(a.watchlist.addedAt || '')) || a.ticker.localeCompare(b.ticker));
+    .sort((a, b) => {
+      const lifecycleA = syncWatchlistLifecycle(a) || watchlistLifecycleSnapshot(a);
+      const lifecycleB = syncWatchlistLifecycle(b) || watchlistLifecycleSnapshot(b);
+      return lifecycleA.rank - lifecycleB.rank
+        || watchlistPriorityForRecord(b).score - watchlistPriorityForRecord(a).score
+        || String(b.watchlist.addedAt || '').localeCompare(String(a.watchlist.addedAt || ''))
+        || a.ticker.localeCompare(b.ticker);
+    });
 }
 
 function watchlistPriorityForRecord(record){
   const item = normalizeTickerRecord(record);
+  const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(item);
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const rrResolution = resolveScannerStateWithTrace(item);
   const setupScore = setupScoreForRecord(item);
@@ -2339,10 +2407,15 @@ function watchlistPriorityForRecord(record){
   else if(volumeState === 'weak') score -= 1;
   if(rrResolution.rr_reliability === 'low') score -= 2;
   if(hostileMarket && pullbackZone === 'near_50ma') score -= 1;
+  if(lifecycle.state === 'entry') score += 3;
+  else if(lifecycle.state === 'near_entry') score += 2;
+  else if(lifecycle.state === 'developing') score -= 1;
+  else if(lifecycle.state === 'dead') score -= 4;
+  else if(lifecycle.state === 'expired') score -= 5;
   score = Math.max(0, Math.min(10, Math.round(score)));
-  const bucket = score >= 7 && ['confirmed','early','attempt'].includes(bounceState)
+  const bucket = lifecycle.bucket || (score >= 7 && ['confirmed','early','attempt'].includes(bounceState)
     ? 'ready_soon'
-    : (score >= 4 ? 'developing' : 'waiting_confirmation');
+    : (score >= 4 ? 'developing' : 'waiting_confirmation'));
   if(record && record.watchlist && typeof record.watchlist === 'object'){
     record.watchlist.watchlist_priority_score = score;
     record.watchlist.watchlist_priority_bucket = bucket;
@@ -2756,13 +2829,449 @@ function getTradingDaysRemaining(entry){
   return countTradingDaysBetween(todayIsoDate(), expiryDate);
 }
 
+function watchlistLifecycleStateRank(state){
+  if(state === 'entry') return 0;
+  if(state === 'near_entry') return 1;
+  if(state === 'monitor') return 2;
+  if(state === 'developing') return 3;
+  if(state === 'dead') return 4;
+  if(state === 'expired') return 5;
+  return 6;
+}
+
+function watchlistLifecycleSnapshot(record){
+  const item = normalizeTickerRecord(record);
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const displayedPlan = deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const qualityAdjustments = evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const avoidSubtype = avoidSubtypeForRecord(item, {
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    finalVerdict:displayStageForRecord(item)
+  });
+  const emojiPresentation = resolveEmojiPresentation(item, {
+    context:'watchlist',
+    finalVerdict:displayStageForRecord(item),
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    avoidSubtype
+  });
+  const primaryState = String(emojiPresentation.primaryState || 'monitor').toLowerCase();
+  const planUiState = getPlanUiState(item, {displayedPlan});
+  const actionState = deriveActionStateForRecord(item).stage;
+  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const expiryTradingDays = item.watchlist.expiryAfterTradingDays || WATCHLIST_EXPIRY_TRADING_DAYS;
+  const addedAt = item.watchlist.addedAt || todayIsoDate();
+  const expiryAt = item.watchlist.expiryAt || tradingDaysFrom(addedAt, expiryTradingDays);
+  const remainingTradingDays = expiryAt ? countTradingDaysBetween(todayIsoDate(), expiryAt) : expiryTradingDays;
+  const activeExpiryAt = remainingTradingDays <= 0 ? businessDaysFromNow(expiryTradingDays) : expiryAt;
+  const hasMeaningfulImprovement = ['entry','near_entry'].includes(primaryState)
+    || actionState === 'action_now'
+    || (bounceState === 'confirmed' && volumeState !== 'weak' && !qualityAdjustments.weakRegimePenalty && !qualityAdjustments.lowControlSetup);
+  let state = primaryState;
+  let bucket = 'developing';
+  let stage = 'watchlist';
+  let status = 'active';
+  let nextExpiryAt = expiryAt;
+  let expiryReason = '';
+  let reason = 'Still progressing on the watchlist.';
+
+  if(primaryState === 'dead' || avoidSubtype === 'terminal' || ['broken','weak'].includes(structureState) || trendState === 'broken'){
+    state = 'dead';
+    bucket = 'inactive';
+    stage = 'avoided';
+    status = 'inactive';
+    nextExpiryAt = '';
+    reason = 'Setup failed technically and is no longer actionable.';
+  }else if(remainingTradingDays <= 0 && !hasMeaningfulImprovement){
+    state = 'expired';
+    bucket = 'inactive';
+    stage = 'expired';
+    status = 'stale';
+    nextExpiryAt = expiryAt || todayIsoDate();
+    expiryReason = 'Watchlist setup expired without meaningful improvement.';
+    reason = expiryReason;
+  }else if(primaryState === 'entry' || actionState === 'action_now'){
+    state = 'entry';
+    bucket = 'ready_soon';
+    stage = 'planned';
+    status = 'active';
+    nextExpiryAt = businessDaysFromNow(PLAN_EXPIRY_TRADING_DAYS);
+    reason = 'Watchlist setup is fully actionable.';
+  }else if(primaryState === 'near_entry' || actionState === 'near_entry'){
+    state = 'near_entry';
+    bucket = 'ready_soon';
+    stage = 'watchlist';
+    status = 'active';
+    nextExpiryAt = activeExpiryAt;
+    reason = 'Watchlist setup is close to entry conditions.';
+  }else if(primaryState === 'developing'){
+    state = 'developing';
+    bucket = 'waiting_confirmation';
+    stage = 'watchlist';
+    status = 'active';
+    nextExpiryAt = activeExpiryAt;
+    reason = 'Watchlist setup is still developing.';
+  }else{
+    state = 'monitor';
+    bucket = ['confirmed','early','attempt'].includes(bounceState) ? 'developing' : 'waiting_confirmation';
+    stage = 'watchlist';
+    status = 'active';
+    nextExpiryAt = activeExpiryAt;
+    reason = bounceState === 'confirmed'
+      ? 'Watchlist setup is alive but still needs cleaner conditions.'
+      : 'Watchlist setup still needs confirmation.';
+  }
+
+  return {
+    state,
+    label:emojiPresentation.primaryText,
+    badgeClass:emojiPresentation.badgeClass,
+    bucket,
+    stage,
+    status,
+    expiresAt:nextExpiryAt,
+    expiryReason,
+    reason,
+    remainingTradingDays,
+    rank:watchlistLifecycleStateRank(state),
+    hasMeaningfulImprovement
+  };
+}
+
+function syncWatchlistLifecycle(record){
+  if(!record || !record.watchlist || !record.watchlist.inWatchlist) return null;
+  if(hasLockedLifecycle(record)) return watchlistLifecycleSnapshot(record);
+  const snapshot = watchlistLifecycleSnapshot(record);
+  record.watchlist.lifecycleState = snapshot.state;
+  record.watchlist.lifecycleLabel = snapshot.label;
+  record.watchlist.watchlist_priority_bucket = snapshot.bucket;
+  if(snapshot.expiresAt) record.watchlist.expiryAt = snapshot.expiresAt;
+  const lifecycleNeedsUpdate = String(record.lifecycle.stage || '') !== String(snapshot.stage || '')
+    || String(record.lifecycle.status || '') !== String(snapshot.status || '')
+    || String(record.lifecycle.expiresAt || '') !== String(snapshot.expiresAt || '')
+    || String(record.lifecycle.expiryReason || '') !== String(snapshot.expiryReason || '');
+  if(lifecycleNeedsUpdate){
+    setLifecycleStage(record, {
+      stage:snapshot.stage,
+      status:snapshot.status,
+      changedAt:new Date().toISOString(),
+      expiresAt:snapshot.expiresAt,
+      expiryReason:snapshot.expiryReason,
+      reason:snapshot.reason,
+      source:'watchlist'
+    });
+  }
+  return snapshot;
+}
+
+function watchlistLifecycleStateSignature(record){
+  const item = normalizeTickerRecord(record);
+  return JSON.stringify({
+    stage:item.lifecycle.stage || '',
+    status:item.lifecycle.status || '',
+    expiresAt:item.lifecycle.expiresAt || '',
+    expiryReason:item.lifecycle.expiryReason || '',
+    watchlistState:item.watchlist.lifecycleState || '',
+    watchlistLabel:item.watchlist.lifecycleLabel || '',
+    watchlistBucket:item.watchlist.watchlist_priority_bucket || '',
+    watchlistPriority:item.watchlist.watchlist_priority_score
+  });
+}
+
+function hasFreshLifecycleInputs(record){
+  const item = normalizeTickerRecord(record);
+  const timestamps = [
+    item.watchlist.updatedAt,
+    item.scan.updatedAt,
+    item.scan.lastScannedAt,
+    item.review.lastReviewedAt,
+    item.meta.updatedAt
+  ].map(value => String(value || '').trim()).filter(Boolean);
+  if(!timestamps.length){
+    return !!(
+      Number.isFinite(numericOrNull(item.scan.score))
+      || String(item.scan.verdict || '').trim()
+      || String(item.review.savedVerdict || '').trim()
+      || item.review.manualReview
+    );
+  }
+  const newest = timestamps
+    .map(value => Date.parse(value))
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+  if(!Number.isFinite(newest)) return true;
+  return (Date.now() - newest) <= WATCHLIST_LIFECYCLE_FRESHNESS_MS;
+}
+
+function shouldEvaluateWatchlistLifecycleRecord(record, options = {}){
+  const source = String(options.source || 'system');
+  if(!record || !record.watchlist || !record.watchlist.inWatchlist) return false;
+  if(options.force === true) return true;
+  if(['manual_refresh','review','review_save','scan'].includes(source)) return true;
+  return hasFreshLifecycleInputs(record);
+}
+
+function runWatchlistLifecycleEvaluation(options = {}){
+  const source = String(options.source || 'system');
+  if(uiState.watchlistLifecycleRunning){
+    const requestedTickers = Array.isArray(options.tickers)
+      ? new Set(options.tickers.map(normalizeTicker).filter(Boolean))
+      : null;
+    allTickerRecords().forEach(record => {
+      if(!record.watchlist || !record.watchlist.inWatchlist) return;
+      if(requestedTickers && !requestedTickers.has(record.ticker)) return;
+      record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+      const warnings = new Set(Array.isArray(record.watchlist.debug.warnings) ? record.watchlist.debug.warnings : []);
+      warnings.add('Duplicate evaluation suppressed');
+      record.watchlist.debug.warnings = [...warnings].slice(0, 4);
+      appendWatchlistDebugEvent(record, {
+        at:new Date().toISOString(),
+        source,
+        result:'suppressed'
+      });
+    });
+    uiState.watchlistLifecyclePendingSource = source;
+    return {changed:false, skipped:true, source};
+  }
+  uiState.watchlistLifecycleRunning = true;
+  uiState.watchlistLifecycleLastSource = source;
+  uiState.watchlistLifecycleLastRunAt = new Date().toISOString();
+  const requestedTickers = Array.isArray(options.tickers)
+    ? new Set(options.tickers.map(normalizeTicker).filter(Boolean))
+    : null;
+  let changed = false;
+  try{
+    allTickerRecords().forEach(record => {
+      if(!record.watchlist || !record.watchlist.inWatchlist) return;
+      if(requestedTickers && !requestedTickers.has(record.ticker)) return;
+      const hadFreshInputs = hasFreshLifecycleInputs(record);
+      const before = watchlistLifecycleStateSignature(record);
+      const previousState = String(record.watchlist.lifecycleState || '');
+      const previousLabel = String(record.watchlist.lifecycleLabel || '');
+      if(shouldEvaluateWatchlistLifecycleRecord(record, options)){
+        reevaluateTickerProgress(record);
+        const snapshot = syncWatchlistLifecycle(record);
+        const derivedStates = analysisDerivedStatesFromRecord(record);
+        const displayedPlan = deriveCurrentPlanState(
+          record.plan && record.plan.entry,
+          record.plan && record.plan.stop,
+          record.plan && record.plan.firstTarget,
+          record.marketData && record.marketData.currency
+        );
+        const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
+        const rrResolution = resolveScannerStateWithTrace(record);
+        const nextStep = watchlistNextStateGuidance(record, snapshot, {
+          derivedStates,
+          displayedPlan,
+          qualityAdjustments,
+          rrResolution,
+          planUiState:getPlanUiState(record, {displayedPlan})
+        });
+        const actionPresentation = actionPresentationForRecord(record);
+        const changeType = watchlistLifecycleChangeType(previousState, snapshot.state);
+        const warnings = watchlistDebugWarnings(record, snapshot, actionPresentation, {
+          hadFreshInputs,
+          duplicateSuppressed:false
+        });
+        record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+        record.watchlist.debug.lastEvaluatedAt = new Date().toISOString();
+        record.watchlist.debug.lastSource = source;
+        record.watchlist.debug.hadFreshInputs = hadFreshInputs;
+        record.watchlist.debug.previousState = previousLabel || previousState || '(none)';
+        record.watchlist.debug.currentState = snapshot.label || snapshot.state || '(none)';
+        record.watchlist.debug.changeType = changeType;
+        record.watchlist.debug.reason = snapshot.reason || '';
+        record.watchlist.debug.nextPossibleState = nextStep.nextPossibleState || '';
+        record.watchlist.debug.mainBlocker = nextStep.mainBlocker || '';
+        record.watchlist.debug.warnings = warnings;
+        appendWatchlistDebugEvent(record, {
+          at:record.watchlist.debug.lastEvaluatedAt,
+          source,
+          result:`${changeType}: ${snapshot.state}`
+        });
+      }
+      maybeExpireTickerRecord(record);
+      const after = watchlistLifecycleStateSignature(record);
+      if(before !== after) changed = true;
+    });
+    if(changed && options.persist !== false) commitTickerState();
+    if(options.render !== false && (changed || options.forceRender === true)){
+      renderWatchlist();
+      renderWorkflowAlerts();
+      renderFocusQueue();
+      if(activeReviewTicker()) renderReviewLifecycleSummary(activeReviewTicker());
+    }
+    return {changed, skipped:false, source};
+  }finally{
+    uiState.watchlistLifecycleRunning = false;
+    const pendingSource = String(uiState.watchlistLifecyclePendingSource || '').trim();
+    uiState.watchlistLifecyclePendingSource = '';
+    if(pendingSource && pendingSource !== source){
+      runWatchlistLifecycleEvaluation({
+        source:pendingSource,
+        persist:options.persist,
+        render:options.render
+      });
+    }
+  }
+}
+
+function appendWatchlistDebugEvent(record, event){
+  if(!record || !record.watchlist || typeof record.watchlist !== 'object') return;
+  record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+  const nextEvent = {
+    at:String(event && event.at || new Date().toISOString()),
+    source:String(event && event.source || ''),
+    result:String(event && event.result || '')
+  };
+  const trail = Array.isArray(record.watchlist.debug.auditTrail) ? record.watchlist.debug.auditTrail : [];
+  record.watchlist.debug.auditTrail = [nextEvent, ...trail].slice(0, 5);
+}
+
+function watchlistLifecycleChangeType(previousState, currentState){
+  if(previousState === currentState) return 'unchanged';
+  if(currentState === 'expired') return 'expired';
+  const previousRank = watchlistLifecycleStateRank(previousState);
+  const currentRank = watchlistLifecycleStateRank(currentState);
+  if(!Number.isFinite(previousRank) || !Number.isFinite(currentRank)) return 'changed';
+  return currentRank < previousRank ? 'promoted' : 'downgraded';
+}
+
+function watchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
+  const derivedStates = context.derivedStates || analysisDerivedStatesFromRecord(record);
+  const displayedPlan = context.displayedPlan || deriveCurrentPlanState(
+    record.plan && record.plan.entry,
+    record.plan && record.plan.stop,
+    record.plan && record.plan.firstTarget,
+    record.marketData && record.marketData.currency
+  );
+  const qualityAdjustments = context.qualityAdjustments || evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
+  const rrResolution = context.rrResolution || resolveScannerStateWithTrace(record);
+  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const hostileMarket = !!qualityAdjustments.weakRegimePenalty;
+  const lowControl = !!(qualityAdjustments.lowControlSetup || qualityAdjustments.tooWideForQualityPullback);
+  const planValidity = String((context.planUiState && context.planUiState.state) || getPlanUiState(record, {displayedPlan}).state || '');
+
+  if(['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || ''))){
+    return {nextPossibleState:'None', mainBlocker:'Setup is no longer active'};
+  }
+  if(['broken','weak'].includes(structureState)) return {nextPossibleState:'💀 Dead', mainBlocker:'Structure is broken'};
+  if(['none','unconfirmed','early','attempt'].includes(bounceState)) return {nextPossibleState:'🎯 Near Entry', mainBlocker:'Needs stronger bounce'};
+  if(volumeState === 'weak') return {nextPossibleState:'🎯 Near Entry', mainBlocker:'Needs stronger volume'};
+  if(hostileMarket) return {nextPossibleState:'🎯 Near Entry', mainBlocker:'Needs better market conditions'};
+  if(lowControl) return {nextPossibleState:'🎯 Near Entry', mainBlocker:'Needs tighter structure'};
+  if(['needs_adjustment','too_wide','invalid'].includes(planValidity)) return {nextPossibleState:'🎯 Near Entry', mainBlocker:'Needs a cleaner plan'};
+  if(rrResolution && rrResolution.rr_reliability === 'low') return {nextPossibleState:'🎯 Near Entry', mainBlocker:'RR is low confidence'};
+  if(String(lifecycleSnapshot && lifecycleSnapshot.state || '') === 'near_entry') return {nextPossibleState:'🚀 Entry', mainBlocker:'Needs trigger confirmation'};
+  if(String(lifecycleSnapshot && lifecycleSnapshot.state || '') === 'entry') return {nextPossibleState:'🚀 Entry', mainBlocker:'Ready if trigger is met'};
+  return {nextPossibleState:'🧐 Monitor', mainBlocker:'Needs better confirmation'};
+}
+
+function watchlistDebugWarnings(record, lifecycleSnapshot, actionPresentation, options = {}){
+  const warnings = [];
+  const state = String(lifecycleSnapshot && lifecycleSnapshot.state || '');
+  const actionLabel = String(actionPresentation && actionPresentation.label || '');
+  const freshInputs = options.hadFreshInputs !== false;
+  if(['monitor','developing'].includes(state) && /ignore|💀|💩/i.test(actionLabel)){
+    warnings.push('Monitor/developing state produced terminal action');
+  }
+  if(state === 'expired' && String(record.lifecycle.status || '') === 'active'){
+    warnings.push('Expired setup still marked active');
+  }
+  if(options.duplicateSuppressed) warnings.push('Duplicate evaluation suppressed');
+  if(!freshInputs) warnings.push('Stale data used');
+  return warnings.slice(0, 4);
+}
+
+function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options = {}){
+  const item = normalizeTickerRecord(record);
+  const debug = item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const rrResolution = options.rrResolution || resolveScannerStateWithTrace(item);
+  const capitalComfort = capitalComfortSummary({
+    capitalFit:displayedPlan.capitalFit.capital_fit,
+    capitalNote:displayedPlan.capitalFit.capital_note,
+    affordability:displayedPlan.affordability,
+    capitalUsage:capitalUsageAdvisory({
+      positionCostGbp:displayedPlan.capitalFit.position_cost_gbp,
+      positionCost:displayedPlan.capitalFit.position_cost,
+      quoteCurrency:displayedPlan.capitalFit.quote_currency,
+      accountSizeGbp:currentAccountSizeGbp(),
+      fxStatus:displayedPlan.capitalFit.fx_status
+    }),
+    controlQuality:qualityAdjustments.controlQuality,
+    capitalEfficiency:qualityAdjustments.capitalEfficiency
+  });
+  const age = countTradingDaysBetween(item.watchlist.addedAt || todayIsoDate(), todayIsoDate());
+  const auditTrail = Array.isArray(debug.auditTrail) ? debug.auditTrail : [];
+  const warnings = Array.isArray(debug.warnings) ? debug.warnings : [];
+  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>State</strong><div>${escapeHtml(lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(qualityAdjustments.weakRegimePenalty ? 'Weak conditions' : 'Supportive')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(getPlanUiState(item, {displayedPlan}).label || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(rrResolution.rr_label || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || 'n/a')}</div></div></div>${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
+}
+
+function stopWatchlistLifecycleAutomation(){
+  clearInterval(watchlistLifecycleTimer);
+  watchlistLifecycleTimer = null;
+}
+
+function startWatchlistLifecycleAutomation(){
+  stopWatchlistLifecycleAutomation();
+  if(typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+  watchlistLifecycleTimer = setInterval(() => {
+    if(document.visibilityState !== 'visible') return;
+    runWatchlistLifecycleEvaluation({source:'interval'});
+  }, WATCHLIST_LIFECYCLE_INTERVAL_MS);
+}
+
+function handleWatchlistLifecycleVisibility(){
+  if(document.visibilityState === 'visible'){
+    runWatchlistLifecycleEvaluation({source:'focus'});
+    startWatchlistLifecycleAutomation();
+    return;
+  }
+  stopWatchlistLifecycleAutomation();
+}
+
+function bootstrapWatchlistLifecycleAutomation(){
+  if(!watchlistLifecycleListenersBound){
+    document.addEventListener('visibilitychange', handleWatchlistLifecycleVisibility);
+    window.addEventListener('focus', () => {
+      if(document.visibilityState !== 'visible') return;
+      runWatchlistLifecycleEvaluation({source:'focus'});
+      startWatchlistLifecycleAutomation();
+    });
+    watchlistLifecycleListenersBound = true;
+  }
+  handleWatchlistLifecycleVisibility();
+}
+
 function purgeExpiredWatchlistEntries(){
   let changed = false;
   allTickerRecords().forEach(record => {
-    if(!record.watchlist.inWatchlist || !record.watchlist.expiryAt) return;
-    if(countTradingDaysBetween(todayIsoDate(), record.watchlist.expiryAt) <= 0){
-      record.watchlist.inWatchlist = false;
-      record.watchlist.status = '';
+    if(!record.watchlist.inWatchlist) return;
+    const beforeStage = String(record.lifecycle.stage || '');
+    const beforeStatus = String(record.lifecycle.status || '');
+    syncWatchlistLifecycle(record);
+    if(beforeStage !== String(record.lifecycle.stage || '') || beforeStatus !== String(record.lifecycle.status || '')){
       changed = true;
     }
   });
@@ -2811,7 +3320,11 @@ function renderWatchlist(){
   const box = $('watchlistList');
   if(!box) return;
   const showExpired = !!state.showExpiredWatchlist;
-  const records = watchlistTickerRecords().filter(record => showExpired || record.lifecycle.stage !== 'expired');
+  const records = watchlistTickerRecords().filter(record => {
+    const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+    if(showExpired) return true;
+    return !['dead','expired'].includes(lifecycle.state);
+  });
   console.debug('RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
   if(!records.length){
     box.innerHTML = showExpired
@@ -2826,6 +3339,9 @@ function renderWatchlist(){
     {key:'developing', title:'Developing', hint:'Structurally alive setups with mixed signals or early confirmation.'},
     {key:'waiting_confirmation', title:'Waiting for Confirmation', hint:'Low-priority setups still missing bounce or confirmation.'}
   ];
+  if(showExpired){
+    groups.push({key:'inactive', title:'Dead / Expired', hint:'Technically failed or aged-out watchlist records.'});
+  }
   groups.forEach(group => {
     const groupRecords = records.filter(record => watchlistPriorityForRecord(record).bucket === group.key);
     if(!groupRecords.length) return;
@@ -2838,10 +3354,20 @@ function renderWatchlist(){
       const view = buildFinalSetupView(record);
       const remaining = getTradingDaysRemaining(entry);
       const lifecycleText = lifecycleLabel(record);
-      const expired = record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
+      const lifecycleSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+      const expired = lifecycleSnapshot.state === 'expired' || record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
       const expiryDate = record.lifecycle.expiresAt || 'Not set';
       const priority = watchlistPriorityForRecord(record);
       const avoidSubtype = avoidSubtypeForRecord(record);
+      const derivedStates = analysisDerivedStatesFromRecord(record);
+      const displayedPlan = deriveCurrentPlanState(
+        record.plan && record.plan.entry,
+        record.plan && record.plan.stop,
+        record.plan && record.plan.firstTarget,
+        record.marketData && record.marketData.currency
+      );
+      const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
+      const rrResolution = resolveScannerStateWithTrace(record);
       const watchlistPresentation = resolveEmojiPresentation(record, {
         context:'watchlist',
         finalVerdict:view.displayStage,
@@ -2851,7 +3377,10 @@ function renderWatchlist(){
         warningState:view.warningState,
         avoidSubtype
       });
-      const watchlistBadgeLabel = watchlistPresentation.primaryText;
+      const watchlistBadgeClass = ['expired','dead'].includes(lifecycleSnapshot.state) ? 'avoid' : watchlistPresentation.badgeClass;
+      const watchlistBadgeLabel = lifecycleSnapshot.state === 'expired'
+        ? 'Expired'
+        : (lifecycleSnapshot.state === 'dead' ? '💀 Dead' : watchlistPresentation.primaryText);
       const watchlistSignalMarkup = emojiModifierMarkup({
         ...watchlistPresentation,
         modifiers:prioritizedSignalModifiers(watchlistPresentation, 2)
@@ -2865,10 +3394,17 @@ function renderWatchlist(){
         avoidSubtype
       });
       const actionPresentation = actionPresentationForRecord(record);
-      const shortAction = actionPresentation.shortLabel || actionPresentation.label || 'Monitor';
+      const shortAction = watchlistActionSummary(actionPresentation);
+      const shortReason = watchlistReasonSummary(reasoning, shortAction);
+      const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
+        derivedStates,
+        displayedPlan,
+        qualityAdjustments,
+        rrResolution
+      });
       const div = document.createElement('div');
       div.className = 'resultcompact watchlist-card';
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge ${watchlistPresentation.badgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row"><span class="pill">Priority ${escapeHtml(String(priority.score))}/10</span>${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(shortAction)}</div>${reasoning.headline ? `<div class="tiny watchlist-card__reason">${escapeHtml(reasoning.headline)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save</button><button class="danger" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(view.planStateLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div><div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge ${watchlistBadgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save</button><button class="danger" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(view.planStateLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -5729,7 +6265,7 @@ function resolveEmojiPresentation(record, options = {}){
     || qualityAdjustments.tooWideForQualityPullback
     || ['weakening','developing_loose'].includes(String(derivedStates.structureState || '').toLowerCase())
   ){
-    addModifier('🪫', 'Weak control', 'low_control', 'near');
+    addModifier('🔋', 'Weak control', 'low_control', 'near');
   }
   if(weakVolumePresent){
     addModifier('🫗', 'Weak volume', 'weak_volume', 'near');
@@ -5818,6 +6354,38 @@ function prioritizedSignalModifiers(presentation, maxModifiers = 2){
   return uniqueModifiers
     .sort((a, b) => (priorityOrder[String(a && a.code || '').trim()] ?? 99) - (priorityOrder[String(b && b.code || '').trim()] ?? 99))
     .slice(0, Math.min(Math.max(maxModifiers, 0), 3));
+}
+
+function watchlistActionSummary(actionPresentation){
+  const label = String(actionPresentation && (actionPresentation.shortLabel || actionPresentation.label) || '').trim();
+  if(!label) return 'Monitor';
+  if(/stronger volume/i.test(label)) return '🫗 Volume weak - monitor for expansion';
+  if(/bounce confirmation/i.test(label)) return 'Wait for bounce confirmation';
+  if(/better market conditions/i.test(label)) return 'Weak conditions - wait for better conditions';
+  if(/tighter structure|control is not good enough/i.test(label)) return '🔋 Weak control - wait for tighter structure';
+  return label;
+}
+
+function watchlistReasonSummary(reasoning, actionText){
+  const actionLower = String(actionText || '').toLowerCase();
+  const detailParts = String(reasoning && reasoning.detail || '')
+    .split('|')
+    .map(part => String(part || '').trim())
+    .filter(Boolean);
+  const filteredParts = detailParts.filter(part => {
+    const text = part.toLowerCase();
+    if(!text) return false;
+    if(actionLower.includes(text)) return false;
+    if(text.includes('volume') && actionLower.includes('volume')) return false;
+    if(text.includes('bounce') && actionLower.includes('bounce')) return false;
+    if(text.includes('market') && actionLower.includes('market')) return false;
+    if(text.includes('control') && actionLower.includes('control')) return false;
+    return true;
+  });
+  if(filteredParts.length) return filteredParts.slice(0, 2).join(' + ');
+  return String(reasoning && reasoning.headline || '')
+    .replace(/^(Monitor|Downgraded|Avoid|Ready|Prepare):\s*/i, '')
+    .trim();
 }
 
 function evaluateEntryTrigger(record, options = {}){
@@ -6170,25 +6738,43 @@ function actionPresentationForRecord(record){
   );
   const qualityAdjustments = evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
   const avoidSubtype = avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments, finalVerdict:reviewVerdict});
+  const emojiPresentation = resolveEmojiPresentation(item, {
+    context:'review',
+    finalVerdict:reviewVerdict,
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    avoidSubtype
+  });
+  const primaryState = String(emojiPresentation.primaryState || '').toLowerCase();
   const invalidated = !!(item.plan && (item.plan.invalidatedState || item.plan.missedState));
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stop = numericOrNull(item.plan && item.plan.stop);
   const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop;
+  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+  const monitorAction = ['none','unconfirmed','early','attempt'].includes(bounceState)
+    ? {label:'Monitor for bounce confirmation', tone:'warning', shortLabel:'Monitor for bounce confirmation'}
+    : (volumeState === 'weak'
+      ? {label:'Monitor for stronger volume', tone:'warning-soft', shortLabel:'Monitor for stronger volume'}
+      : (qualityAdjustments.weakRegimePenalty
+        ? {label:'Wait for better market conditions', tone:'warning', shortLabel:'Wait for better market conditions'}
+        : ((qualityAdjustments.tooWideForQualityPullback || qualityAdjustments.lowControlSetup)
+          ? {label:'Monitor - needs tighter structure', tone:'warning-soft', shortLabel:'Needs tighter structure'}
+          : {label:'Monitor for confirmation', tone:'watch', shortLabel:'Monitor for confirmation'})));
   if(reviewVerdict === 'Watch' && avoidSubtype === 'terminal'){
     console.warn('REVIEW_STATE_MISMATCH', {ticker:item.ticker, finalVerdict:reviewVerdict, avoidSubtype});
   }
 
-  if(reviewVerdict === 'Avoid' && (invalidated || brokenBelowStop || avoidSubtype !== 'conditional')){
+  if(reviewVerdict === 'Avoid' && primaryState === 'dead' && (invalidated || brokenBelowStop || avoidSubtype !== 'conditional')){
     return {
-      label:'💩 Ignore - low quality / broken setup',
+      label:'💀 Ignore - low quality / broken setup',
       tone:'danger',
       shortLabel:'Ignore'
     };
   }
 
   if(reviewVerdict === 'Avoid' && avoidSubtype === 'conditional'){
-    const bounceState = String(derivedStates.bounceState || '').toLowerCase();
-    const volumeState = String(derivedStates.volumeState || '').toLowerCase();
     if(['none','unconfirmed','early','attempt'].includes(bounceState)){
       return {
         label:'Monitor for bounce confirmation',
@@ -6227,21 +6813,19 @@ function actionPresentationForRecord(record){
   }
 
   if(reviewVerdict === 'Watch'){
-    const bounceState = String(derivedStates.bounceState || '').toLowerCase();
-    const volumeState = String(derivedStates.volumeState || '').toLowerCase();
-    const watchAction = ['none','unconfirmed','early','attempt'].includes(bounceState)
-      ? {label:'Monitor for bounce confirmation', tone:'warning', shortLabel:'Monitor for bounce confirmation'}
-      : (volumeState === 'weak'
-        ? {label:'Monitor for stronger volume', tone:'warning-soft', shortLabel:'Monitor for stronger volume'}
-        : (qualityAdjustments.weakRegimePenalty
-          ? {label:'Monitor - market conditions not supportive', tone:'warning', shortLabel:'Monitor market conditions'}
-          : ((qualityAdjustments.tooWideForQualityPullback || qualityAdjustments.lowControlSetup)
-            ? {label:'Monitor - needs tighter structure', tone:'warning-soft', shortLabel:'Needs tighter structure'}
-            : {label:'Monitor for confirmation', tone:'watch', shortLabel:'Monitor for confirmation'})));
-    if(/ignore/i.test(String(watchAction.label || ''))){
-      console.warn('Invalid: Watch cannot produce Ignore action', {ticker:item.ticker, finalVerdict:reviewVerdict, watchAction});
+    if(/ignore|💀|💩/i.test(String(monitorAction.label || ''))){
+      console.warn('Invalid: Watch cannot produce terminal action', {ticker:item.ticker, finalVerdict:reviewVerdict, monitorAction});
+      return {label:'Monitor for confirmation', tone:'watch', shortLabel:'Monitor for confirmation'};
     }
-    return watchAction;
+    return monitorAction;
+  }
+
+  if(primaryState === 'monitor' || primaryState === 'developing'){
+    if(/ignore|💀|💩/i.test(String(monitorAction.label || ''))){
+      console.warn('REVIEW_ACTION_TERMINAL_LEAK', {ticker:item.ticker, finalVerdict:reviewVerdict, primaryState, monitorAction});
+      return {label:'Monitor for confirmation', tone:'watch', shortLabel:'Monitor for confirmation'};
+    }
+    return monitorAction;
   }
 
   return {label:'Monitor for confirmation', tone:'watch', shortLabel:'Monitor for confirmation'};
@@ -8206,6 +8790,12 @@ async function refreshMarketDataForTickers(tickers, options = {}){
   }else if(unique.length){
     setStatus('apiStatus', `<span class="ok">Scanner refreshed ${unique.length} ticker${unique.length === 1 ? '' : 's'}.</span>`);
   }
+  runWatchlistLifecycleEvaluation({
+    source:'scan',
+    persist:false,
+    render:false,
+    force:true
+  });
   commitTickerState();
   renderTickerQuickLists();
   renderScannerResults();
@@ -8981,6 +9571,13 @@ async function analyseSetup(ticker){
       lastError:record.review.analysisState.error,
       lastReviewedAt:record.review.analysisState.reviewedAt
     });
+    runWatchlistLifecycleEvaluation({
+      source:'review',
+      tickers:[record.ticker],
+      persist:false,
+      render:false,
+      force:true
+    });
     commitTickerState();
     if(($('selectedTicker') && normalizeTicker($('selectedTicker').value) === card.ticker) || !normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '')){
       syncPlannerFromTicker(card.ticker);
@@ -9011,6 +9608,13 @@ async function analyseSetup(ticker){
       normalizedAnalysis:record.review.analysisState.normalized,
       lastError:record.review.analysisState.error,
       lastReviewedAt:record.review.analysisState.reviewedAt
+    });
+    runWatchlistLifecycleEvaluation({
+      source:'review',
+      tickers:[record.ticker],
+      persist:false,
+      render:false,
+      force:true
     });
     commitTickerState();
   }finally{
@@ -9158,14 +9762,21 @@ async function refreshWatchlistTicker(ticker){
     const {card} = await refreshCardMarketData(symbol, {force:true});
     mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
     record.watchlist.updatedAt = String(card.scannerUpdatedAt || card.updatedAt || new Date().toISOString());
-    maybeExpireTickerRecord(record);
-    reevaluateTickerProgress(record);
-    if(record.scan.verdict !== 'Avoid' && String(record.lifecycle.stage || '') !== 'avoided'){
-      refreshLifecycleStage(record, 'watchlist', WATCHLIST_EXPIRY_TRADING_DAYS, 'Watchlist refreshed manually.', 'system');
-    }
+    runWatchlistLifecycleEvaluation({
+      source:'manual_refresh',
+      tickers:[symbol],
+      persist:false,
+      render:false,
+      force:true
+    });
     setStatus('scannerSelectionStatus', `<span class="ok">${escapeHtml(symbol)} refreshed from saved market data.</span>`);
   }catch(error){
-    refreshLifecycleStage(record, 'watchlist', WATCHLIST_EXPIRY_TRADING_DAYS, 'Watchlist kept active after manual refresh.', 'system');
+    runWatchlistLifecycleEvaluation({
+      source:'manual_refresh',
+      tickers:[symbol],
+      persist:false,
+      render:false
+    });
     setStatus('scannerSelectionStatus', `<span class="warntext">Could not refresh ${escapeHtml(symbol)} right now. Kept the watchlist entry active locally.</span>`);
   }
   commitTickerState();
@@ -9812,6 +10423,13 @@ function saveReview(){
   }, {
     source:'review',
     lastPlannedAt:manualReview.savedAt
+  });
+  runWatchlistLifecycleEvaluation({
+    source:'review_save',
+    tickers:[ticker],
+    persist:false,
+    render:false,
+    force:true
   });
   updateTickerInputFromState();
   commitTickerState();
@@ -10607,6 +11225,7 @@ registerPwa();
 loadState();
 consumeResetNotice();
 bootstrapBackgroundMonitoring();
+bootstrapWatchlistLifecycleAutomation();
 updateTickerSearchStatus();
 updateProviderStatusNote();
 

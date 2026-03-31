@@ -222,15 +222,22 @@ button[disabled]{opacity:.55;cursor:not-allowed}
 .watchlist-card__company{width:100%}
 .watchlist-signal-row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;min-width:0}
 .watchlist-signal-row .pill{max-width:100%}
+.watchlist-card__priority{color:var(--muted);font-size:.78rem;white-space:nowrap}
 .watchlist-card__action{color:var(--text);font-weight:700}
 .watchlist-card__reason{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.45}
 .watchlist-plan-meta{margin-top:0}
 .watchlist-card__detail{margin-top:6px}
 .watchlist-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .watchlist-actions button{flex:0 0 auto}
+.watchlist-actions .primary{box-shadow:0 8px 18px rgba(124,156,255,.18)}
+.watchlist-actions .danger{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.22);color:var(--muted)}
 .watchlist-actions--detail{margin-top:10px}
 .watchlist-card__details{width:100%}
 .watchlist-card__details > summary{width:fit-content}
+.watchlist-debug-pane{margin-top:10px;width:100%}
+.watchlist-debug-pane[open]{width:100%}
+.watchlist-debug-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px 12px;width:100%;word-break:break-word}
+.watchlist-debug-block{margin-top:10px;padding-top:8px;border-top:1px solid var(--line);width:100%;word-break:break-word}
 .chartworkflow{margin-top:10px}
 .chartworkflow>summary{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 14px;border-radius:12px;background:#1b2742;border:1px solid var(--line)}
 .workflowmenu{display:grid;gap:8px;margin-top:10px}
@@ -261,4 +268,9 @@ details[open]{width:100%}
   .workflowmenu-inline{grid-template-columns:1fr 1fr}
   .resultactionsbar{flex-direction:column;align-items:stretch}
   .focusstrip{grid-auto-columns:minmax(170px,84vw)}
+  .watchlist-debug-grid{grid-template-columns:1fr 1fr}
+}
+@media (max-width:480px){
+  .watchlist-debug-grid{grid-template-columns:1fr}
+  .watchlist-debug-pane > summary{max-width:100%}
 }
