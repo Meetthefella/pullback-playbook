@@ -1305,7 +1305,10 @@ function normalizeCard(card){
   normalized.tradingViewSymbol = String(normalized.tradingViewSymbol || '');
   normalized.marketDataUpdatedAt = String(normalized.marketDataUpdatedAt || '');
   normalized.scannerUpdatedAt = String(normalized.scannerUpdatedAt || '');
-  normalized.scanType = normalizeScanType(normalized.scanType);
+  normalized.scanType = normalizeScanType(
+    normalized.scanType
+    || (normalized.analysis && typeof normalized.analysis === 'object' ? (normalized.analysis.scan_type || normalized.analysis.setup_type || '') : '')
+  );
   normalized.scanSetupType = normalizeScanType(normalized.scanSetupType || normalized.scanType || normalized.setupType);
   if(!normalized.scanType) normalized.scanType = normalized.scanSetupType;
   normalized.setupType = String(normalized.setupType || '');
@@ -1527,6 +1530,13 @@ function normalizeTickerRecord(record){
     lifecycle:{...base.lifecycle, ...(normalized.lifecycle || {})},
     meta:{...base.meta, ...(normalized.meta || {})}
   };
+  const projectionScanType = normalizeScanType(
+    merged.scan
+    && merged.scan.analysisProjection
+    && typeof merged.scan.analysisProjection === 'object'
+      ? (merged.scan.analysisProjection.scan_type || merged.scan.analysisProjection.setup_type || '')
+      : ''
+  );
   merged.review.analysisState = {
     ...base.review.analysisState,
     ...((merged.review.analysisState && typeof merged.review.analysisState === 'object') ? merged.review.analysisState : {})
@@ -1545,8 +1555,8 @@ function normalizeTickerRecord(record){
   merged.marketData.perfYtd = numericOrNull(merged.marketData.perfYtd);
   merged.marketData.marketCap = numericOrNull(merged.marketData.marketCap);
   merged.marketData.history = Array.isArray(merged.marketData.history) ? merged.marketData.history : [];
-  merged.scan.scanType = normalizeScanType(merged.scan.scanType);
-  merged.scan.scanSetupType = normalizeScanType(merged.scan.scanSetupType || merged.scan.scanType);
+  merged.scan.scanType = normalizeScanType(merged.scan.scanType || projectionScanType);
+  merged.scan.scanSetupType = normalizeScanType(merged.scan.scanSetupType || merged.scan.scanType || projectionScanType);
   if(!merged.scan.scanType) merged.scan.scanType = merged.scan.scanSetupType;
   merged.scan.setupOrigin = String(merged.scan.setupOrigin || '');
   merged.scan.estimatedEntryZone = numericOrNull(merged.scan.estimatedEntryZone);
