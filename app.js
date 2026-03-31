@@ -6037,55 +6037,24 @@ function actionPresentationForRecord(record){
   }
 
   if(reviewVerdict === 'Watch'){
-    return {
-      label:'👀 Add to watchlist and monitor',
-      tone:'watch',
-      shortLabel:'Add to watchlist and monitor'
-    };
-  }
-
-  return {
-    label:'👀 Add to watchlist and monitor',
-    tone:'watch',
-    shortLabel:'Add to watchlist and monitor'
-  };
-
-  if(reviewVerdict === 'Entry'){
-    return {
-      label:'🚀 Review entry',
-      tone:'success',
-      shortLabel:'Act'
-    };
-  }
-
-  if(reviewVerdict === 'Near Entry'){
-    return {
-      label:' Near entry - wait for trigger',
-      tone:'warning',
-      shortLabel:'Prepare'
-    };
-  }
-
-  if(reviewVerdict === 'Watch'){
-    if(Number.isFinite(setupScore) && setupScore <= 4){
-      return {
-        label:' Monitor cautiously',
-        tone:'warning-soft',
-        shortLabel:'Monitor cautiously'
-      };
+    const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+    const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+    const watchAction = ['none','unconfirmed','early','attempt'].includes(bounceState)
+      ? {label:'Monitor for bounce confirmation', tone:'warning', shortLabel:'Monitor for bounce confirmation'}
+      : (volumeState === 'weak'
+        ? {label:'Monitor for stronger volume', tone:'warning-soft', shortLabel:'Monitor for stronger volume'}
+        : (qualityAdjustments.weakRegimePenalty
+          ? {label:'Monitor - market conditions not supportive', tone:'warning', shortLabel:'Monitor market conditions'}
+          : ((qualityAdjustments.tooWideForQualityPullback || qualityAdjustments.lowControlSetup)
+            ? {label:'Monitor - needs tighter structure', tone:'warning-soft', shortLabel:'Needs tighter structure'}
+            : {label:'Monitor for confirmation', tone:'watch', shortLabel:'Monitor for confirmation'})));
+    if(/ignore/i.test(String(watchAction.label || ''))){
+      console.warn('Invalid: Watch cannot produce Ignore action', {ticker:item.ticker, finalVerdict:reviewVerdict, watchAction});
     }
-    return {
-      label:'👀 Monitor only - no entry yet',
-      tone:'watch',
-      shortLabel:'Monitor only'
-    };
+    return watchAction;
   }
 
-  return {
-    label:nextAction || '👀 Monitor only - no entry yet',
-    tone:'watch',
-    shortLabel:'Monitor only'
-  };
+  return {label:'Monitor for confirmation', tone:'watch', shortLabel:'Monitor for confirmation'};
 }
 
 function planQualityForRecord(record){
@@ -10427,3 +10396,6 @@ consumeResetNotice();
 bootstrapBackgroundMonitoring();
 updateTickerSearchStatus();
 updateProviderStatusNote();
+
+
+
