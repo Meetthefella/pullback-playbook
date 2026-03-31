@@ -102,6 +102,9 @@ button{border:0;padding:12px 14px;border-radius:12px;cursor:pointer;font:inherit
 .reviewhero-compact{padding-bottom:2px}
 .reviewherohead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap}
 .reviewheadline{display:grid;gap:4px}
+.review-downgrade-badge{margin-bottom:10px}
+.review-decision-headline{margin-top:4px;margin-bottom:6px;line-height:1.3;font-weight:600;color:var(--text)}
+.review-decision-detail{margin-top:0;margin-bottom:12px;opacity:.85;font-weight:400}
 .reviewworkspace .panelbox{display:grid;gap:10px}
 .reviewsectionhead{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
 .reviewstats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
