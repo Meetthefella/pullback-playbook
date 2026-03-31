@@ -2857,6 +2857,8 @@ function renderWatchlist(){
       });
       const watchlistBadgeLabel = watchlistPresentation.primaryText;
       const watchlistModifierMarkup = emojiModifierMarkup(watchlistPresentation);
+      const suppressCautionChip = !!(watchlistPresentation.modifiers || []).some(modifier => modifier.code === 'weak_conditions')
+        && /weak conditions/i.test(String(cautionChip || ''));
       const reviewPresentation = resolveEmojiPresentation(record, {context:'review'});
       if(reviewPresentation.primaryText !== watchlistPresentation.primaryText){
         console.warn('EMOJI_SURFACE_DISAGREEMENT', {ticker:record.ticker, watchlist:watchlistPresentation.primaryText, review:reviewPresentation.primaryText});
@@ -2867,7 +2869,7 @@ function renderWatchlist(){
       });
       const div = document.createElement('div');
       div.className = 'resultcompact';
-      div.innerHTML = `<div class="resulthead"><div class="watchlistidentity inline-status" style="justify-content:space-between;align-items:flex-start"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="inline-status"><span class="badge ${watchlistPresentation.badgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span></div></div><div class="tiny">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div><div class="inline-status" style="margin-top:8px"><span class="pill">Priority ${escapeHtml(String(priority.score))}/10</span>${watchlistModifierMarkup}<span class="pill">${escapeHtml(cautionChip)}</span><span class="pill">${escapeHtml(view.planStateLabel)}</span></div>${reasoning.headline ? `<div class="tiny" style="margin-top:8px"><strong>${escapeHtml(reasoning.headline)}</strong></div>` : ''}${reasoning.detail ? `<div class="tiny">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny" style="margin-top:8px">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div><div class="resultreview inline-status" style="margin-top:10px"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save to Diary</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
+      div.innerHTML = `<div class="resulthead"><div class="watchlistidentity inline-status" style="justify-content:space-between;align-items:flex-start"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="inline-status"><span class="badge ${watchlistPresentation.badgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span></div></div><div class="tiny">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div><div class="inline-status" style="margin-top:8px"><span class="pill">Priority ${escapeHtml(String(priority.score))}/10</span>${watchlistModifierMarkup}${suppressCautionChip ? '' : `<span class="pill">${escapeHtml(cautionChip)}</span>`}<span class="pill">${escapeHtml(view.planStateLabel)}</span></div>${reasoning.headline ? `<div class="tiny" style="margin-top:8px"><strong>${escapeHtml(reasoning.headline)}</strong></div>` : ''}${reasoning.detail ? `<div class="tiny">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny" style="margin-top:8px">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div><div class="resultreview inline-status" style="margin-top:10px"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save to Diary</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -5730,21 +5732,55 @@ function resolveEmojiPresentation(record, options = {}){
     console.warn('EMOJI_STATE_MISMATCH', {ticker:item.ticker, finalVerdict, avoidSubtype, primaryEmoji});
   }
 
+  const seenModifierCodes = new Set();
+  const seenModifierKeys = new Set();
+  const uniqueModifiers = [];
+  modifiers.forEach(modifier => {
+    const code = String(modifier && modifier.code || '').trim();
+    const key = `${String(modifier && modifier.emoji || '').trim()}|${String(modifier && modifier.label || '').trim()}`;
+    if((code && seenModifierCodes.has(code)) || seenModifierKeys.has(key)){
+      console.warn('EMOJI_MODIFIER_DUPLICATE', {ticker:item.ticker, code, key});
+      return;
+    }
+    if(code) seenModifierCodes.add(code);
+    seenModifierKeys.add(key);
+    uniqueModifiers.push(modifier);
+  });
+
   return {
     primaryState,
     primaryEmoji,
     primaryLabel,
     primaryText,
     badgeClass,
-    modifiers,
+    modifiers:uniqueModifiers.slice(0, 2),
     combinedShortLabel
   };
 }
 
 function emojiModifierMarkup(presentation){
-  const modifiers = presentation && Array.isArray(presentation.modifiers) ? presentation.modifiers.slice(0, 2) : [];
-  if(!modifiers.length) return '';
-  return modifiers.map(modifier => `<span class="pill ${escapeHtml(modifier.className || 'near')}">${escapeHtml(`${modifier.emoji} ${modifier.label}`)}</span>`).join('');
+  const sourceModifiers = presentation && Array.isArray(presentation.modifiers) ? presentation.modifiers : [];
+  const seenCodes = new Set();
+  const seenKeys = new Set();
+  const modifiers = [];
+  sourceModifiers.forEach(modifier => {
+    const code = String(modifier && modifier.code || '').trim();
+    const key = `${String(modifier && modifier.emoji || '').trim()}|${String(modifier && modifier.label || '').trim()}`;
+    if((code && seenCodes.has(code)) || seenKeys.has(key)){
+      console.warn('EMOJI_RENDER_DUPLICATE', {code, key});
+      return;
+    }
+    if(code) seenCodes.add(code);
+    seenKeys.add(key);
+    modifiers.push(modifier);
+  });
+  const limitedModifiers = modifiers.slice(0, 2);
+  const duplicateCodes = limitedModifiers.map(modifier => modifier.code).filter(Boolean);
+  if(new Set(duplicateCodes).size !== duplicateCodes.length){
+    console.warn('EMOJI_RENDER_DUPLICATE', {duplicateCodes});
+  }
+  if(!limitedModifiers.length) return '';
+  return limitedModifiers.map(modifier => `<span class="pill ${escapeHtml(modifier.className || 'near')}">${escapeHtml(`${modifier.emoji} ${modifier.label}`)}</span>`).join('');
 }
 
 function evaluateEntryTrigger(record, options = {}){
@@ -9595,7 +9631,9 @@ function renderReviewWorkspace(options = {}){
     : '<div class="tiny">No chart attached yet.</div>';
   const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">scanner_status: ${escapeHtml(scannerStatus || '(none)')}\nreview_status: ${escapeHtml(displayStage || '(none)')}\naiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
   const headerContextChip = reviewHeaderContextChip(record, warningState);
+  const hasWeakConditionsModifier = !!(emojiPresentation.modifiers || []).some(modifier => modifier.code === 'weak_conditions');
   const headerContextMarkup = headerContextChip
+    && !(hasWeakConditionsModifier && /weak conditions|caution|weak market/i.test(String(headerContextChip.label || '')))
     ? `<span class="pill ${headerContextChip.className}" title="${escapeHtml(headerContextChip.title || '')}">${escapeHtml(headerContextChip.label)}</span>`
     : '';
   const marketMetaLine = headerContextChip ? '' : `<div class="tiny">${escapeHtml(marketLine)}</div>`;
