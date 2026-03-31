@@ -2841,8 +2841,8 @@ function renderWatchlist(){
       const lifecycleText = lifecycleLabel(record);
       const expired = record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
       const cautionChip = warningState.showWarning
-        ? 'Warning'
-        : (record.setup.marketCaution ? 'Weak market' : view.convictionTier);
+        ? 'Weak conditions'
+        : (record.setup.marketCaution ? 'Weak conditions' : view.convictionTier);
       const expiryDate = record.lifecycle.expiresAt || 'Not set';
       const priority = watchlistPriorityForRecord(record);
       const avoidSubtype = avoidSubtypeForRecord(record);
@@ -2888,8 +2888,8 @@ function renderWatchlist(){
     const lifecycleText = lifecycleLabel(record);
     const expired = record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
     const cautionChip = warningState.showWarning
-      ? '⚠️ Caution'
-      : (record.setup.marketCaution ? '⚠️ Weak market' : view.convictionTier);
+      ? '⚠️ Weak conditions'
+      : (record.setup.marketCaution ? '⚠️ Weak conditions' : view.convictionTier);
     const expiryDate = record.lifecycle.expiresAt || 'Not set';
     const div = document.createElement('div');
     div.className = 'resultcompact';
@@ -2907,14 +2907,14 @@ function renderWatchlist(){
 function reviewHeaderContextChip(record, warningState){
   if(warningState && warningState.showWarning){
     return {
-      label:'⚠️ Caution',
+      label:'⚠️ Weak conditions',
       className:'near',
       title:warningState.reasons.join(' | ')
     };
   }
   if(record && (record.setup.marketCaution || isHostileMarketStatus(record.meta && record.meta.marketStatus || state.marketStatus))){
     return {
-      label:'⚠️ Weak market',
+      label:'⚠️ Weak conditions',
       className:'near',
       title:'Market regime is weaker than ideal.'
     };
@@ -3705,7 +3705,7 @@ function resolveScannerStateWithTrace(record, options = {}){
     rrLabel = 'Invalid plan';
   }else if(structureState !== 'strong'){
     rrReliability = 'low';
-    rrLabel = 'Unreliable';
+    rrLabel = 'Low confidence';
   }else if(bounceState === 'none'){
     rrReliability = 'conditional';
     rrLabel = 'Needs bounce';
@@ -4057,7 +4057,7 @@ function reviewVerdictOverrideFromLabel(label){
 function shortlistStatusPills(view, maxPills = 3){
   if(view.bucket === 'filtered' || view.finalClassification === 'filtered'){
     const pills = [];
-    if(view.warningState && view.warningState.showWarning) pills.push('Warning');
+    if(view.warningState && view.warningState.showWarning) pills.push('Weak conditions');
     if(view.item && view.item.setup && view.item.setup.marketCaution) pills.push('Weak market caution');
     return pills.slice(0, maxPills);
   }
@@ -5719,9 +5719,6 @@ function resolveEmojiPresentation(record, options = {}){
   ){
     addModifier('⚠️', 'Weak conditions', 'weak_conditions', 'near');
   }
-  if(context === 'scanner' && !item.watchlist.inWatchlist && !item.review.manualReview && !hasAiStageForRecord(item)){
-    addModifier('👀', 'Scan candidate', 'scan_candidate', 'watch');
-  }
 
   const primaryText = `${primaryEmoji} ${primaryLabel}`;
   const combinedShortLabel = [primaryText].concat(modifiers.map(modifier => `${modifier.emoji} ${modifier.label}`)).join(' | ');
@@ -6030,6 +6027,8 @@ function decisionReasoningForRecord(record, options = {}){
 
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
   const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const structureIntact = ['strong','intact','developing_clean'].includes(structureState);
+  const bounceConfirmed = bounceState === 'confirmed';
   const weakMarket = !!qualityAdjustments.weakRegimePenalty || /weak market|hostile market/i.test(parts.join(' | '));
   let headline = reviewVerdict === 'Entry'
     ? 'Ready: review entry conditions'
@@ -6037,7 +6036,7 @@ function decisionReasoningForRecord(record, options = {}){
       ? 'Prepare: near trigger'
       : (reviewVerdict === 'Avoid'
         ? (avoidSubtype === 'terminal' ? 'Avoid: terminal failure' : 'Avoid: needs confirmation')
-        : 'Monitor: setup still developing'));
+        : ((bounceConfirmed && structureIntact) ? 'Monitor: conditions not supportive' : 'Monitor: setup still developing')));
 
   if(reviewVerdict === 'Avoid' && avoidSubtype === 'terminal'){
     if(item.plan && item.plan.invalidatedState){
@@ -6637,7 +6636,7 @@ function scanCardStatusPills(view, maxPills = 3){
   const pushPill = value => {
     if(value && !pills.includes(value) && pills.length < maxPills) pills.push(value);
   };
-  if(view.warningState && view.warningState.showWarning) pushPill('Warning');
+  if(view.warningState && view.warningState.showWarning) pushPill('Weak conditions');
   pushPill(view.planUiState.label);
   if(shouldShowActionableRR(view) && Number.isFinite(view.actionableRrValue)) pushPill(`R:R ${view.actionableRrValue.toFixed(2)}`);
   if(Number.isFinite(view.positionSize)) pushPill(`Size ${view.positionSize}`);
@@ -10535,6 +10534,11 @@ consumeResetNotice();
 bootstrapBackgroundMonitoring();
 updateTickerSearchStatus();
 updateProviderStatusNote();
+
+
+
+
+
 
 
 
