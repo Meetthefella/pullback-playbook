@@ -5829,6 +5829,8 @@ function actionStateForRecord(record){
 
 function avoidSubtypeForRecord(record, options = {}){
   const item = normalizeTickerRecord(record);
+  const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || reviewHeaderVerdictForRecord(item));
+  if(finalVerdict !== 'Avoid') return '';
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     item.plan && item.plan.entry,
@@ -5977,13 +5979,16 @@ function actionPresentationForRecord(record){
     item.marketData && item.marketData.currency
   );
   const qualityAdjustments = evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
-  const avoidSubtype = avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments});
+  const avoidSubtype = avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments, finalVerdict:reviewVerdict});
   const invalidated = !!(item.plan && (item.plan.invalidatedState || item.plan.missedState));
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stop = numericOrNull(item.plan && item.plan.stop);
   const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop;
+  if(reviewVerdict === 'Watch' && avoidSubtype === 'terminal'){
+    console.warn('REVIEW_STATE_MISMATCH', {ticker:item.ticker, finalVerdict:reviewVerdict, avoidSubtype});
+  }
 
-  if(invalidated || brokenBelowStop || (reviewVerdict === 'Avoid' && avoidSubtype !== 'conditional')){
+  if(reviewVerdict === 'Avoid' && (invalidated || brokenBelowStop || avoidSubtype !== 'conditional')){
     return {
       label:'💩 Ignore - low quality / broken setup',
       tone:'danger',
@@ -9414,7 +9419,8 @@ function renderReviewWorkspace(options = {}){
   const avoidSubtype = avoidSubtypeForRecord(record, {
     derivedStates:analysisDerivedStatesFromRecord(record),
     displayedPlan,
-    qualityAdjustments
+    qualityAdjustments,
+    finalVerdict:displayStage
   });
   const decisionReasoning = decisionReasoningForRecord(record, {
     scannerStatus,
@@ -9463,6 +9469,15 @@ function renderReviewWorkspace(options = {}){
     warningState
   });
   const nextActionText = actionPresentationForRecord(record).label;
+  if(displayStage === 'Watch' && /ignore/i.test(nextActionText)){
+    console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:nextActionText});
+  }
+  if(displayStage === 'Watch' && avoidSubtype === 'terminal'){
+    console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, avoidSubtype});
+  }
+  if((displayStage !== 'Avoid' && /avoid/i.test(reviewBadgeLabel)) || (displayStage === 'Avoid' && !/avoid/i.test(reviewBadgeLabel))){
+    console.warn('REVIEW_HEADER_DISAGREEMENT', {ticker:record.ticker, finalVerdict:displayStage, reviewBadgeLabel, headline:decisionReasoning.headline, nextAction:nextActionText});
+  }
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
   const analyseLabel = loading ? 'Analysing...' : (analysisState.error ? 'Retry Analysis' : 'Analyse Setup');
