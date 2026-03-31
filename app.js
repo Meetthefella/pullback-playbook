@@ -2784,6 +2784,13 @@ function addToWatchlist(tickerData){
   if(!entry) return null;
   const record = upsertTickerRecord(entry.ticker);
   mergeWatchlistIntoRecord(record, entry);
+  runWatchlistLifecycleEvaluation({
+    source:'watchlist_add',
+    tickers:[entry.ticker],
+    persist:false,
+    render:false,
+    force:true
+  });
   commitTickerState();
   requeueTickerForToday(entry.ticker);
   renderWatchlist();
@@ -3034,12 +3041,13 @@ function shouldEvaluateWatchlistLifecycleRecord(record, options = {}){
   const source = String(options.source || 'system');
   if(!record || !record.watchlist || !record.watchlist.inWatchlist) return false;
   if(options.force === true) return true;
-  if(['manual_refresh','review','review_save','scan'].includes(source)) return true;
+  if(['manual_refresh','review','review_save','analyse_setup','scan','watchlist_add','market_status','plan_update','automatic'].includes(source)) return true;
   return hasFreshLifecycleInputs(record);
 }
 
 function runWatchlistLifecycleEvaluation(options = {}){
   const source = String(options.source || 'system');
+  const logUnchanged = options.logUnchanged !== false;
   if(uiState.watchlistLifecycleRunning){
     const requestedTickers = Array.isArray(options.tickers)
       ? new Set(options.tickers.map(normalizeTicker).filter(Boolean))
@@ -3111,11 +3119,13 @@ function runWatchlistLifecycleEvaluation(options = {}){
         record.watchlist.debug.nextPossibleState = nextStep.nextPossibleState || '';
         record.watchlist.debug.mainBlocker = nextStep.mainBlocker || '';
         record.watchlist.debug.warnings = warnings;
-        appendWatchlistDebugEvent(record, {
-          at:record.watchlist.debug.lastEvaluatedAt,
-          source,
-          result:`${changeType}: ${snapshot.state}`
-        });
+        if(logUnchanged || changeType !== 'unchanged'){
+          appendWatchlistDebugEvent(record, {
+            at:record.watchlist.debug.lastEvaluatedAt,
+            source,
+            result:`${changeType}: ${snapshot.state}`
+          });
+        }
       }
       maybeExpireTickerRecord(record);
       const after = watchlistLifecycleStateSignature(record);
@@ -3141,6 +3151,17 @@ function runWatchlistLifecycleEvaluation(options = {}){
       });
     }
   }
+}
+
+function syncWatchlistLifecycleBeforeRender(source = 'automatic'){
+  if(uiState.watchlistLifecycleRunning) return false;
+  const result = runWatchlistLifecycleEvaluation({
+    source,
+    persist:true,
+    render:false,
+    logUnchanged:false
+  });
+  return !!(result && result.changed);
 }
 
 function appendWatchlistDebugEvent(record, event){
@@ -3332,6 +3353,7 @@ function clearSavedScannerUniverseList(){
 }
 
 function renderWatchlist(){
+  syncWatchlistLifecycleBeforeRender('automatic');
   purgeExpiredWatchlistEntries();
   const box = $('watchlistList');
   if(!box) return;
@@ -8894,13 +8916,21 @@ function recomputeRiskContextForRecord(record){
   return record;
 }
 
-function refreshRiskContextForActiveSetups(){
+function refreshRiskContextForActiveSetups(options = {}){
   state.maxRisk = currentMaxLoss();
   allTickerRecords().forEach(recomputeRiskContextForRecord);
+  runWatchlistLifecycleEvaluation({
+    source:String(options.source || 'risk_context'),
+    persist:false,
+    render:false,
+    force:options.force === true
+  });
   commitTickerState();
   renderStats();
   renderScannerResults();
   renderCards();
+  renderWatchlist();
+  renderFocusQueue();
 }
 
 async function testApiConnection(){
@@ -9591,7 +9621,7 @@ async function analyseSetup(ticker){
       lastReviewedAt:record.review.analysisState.reviewedAt
     });
     runWatchlistLifecycleEvaluation({
-      source:'review',
+      source:'analyse_setup',
       tickers:[record.ticker],
       persist:false,
       render:false,
@@ -9629,7 +9659,7 @@ async function analyseSetup(ticker){
       lastReviewedAt:record.review.analysisState.reviewedAt
     });
     runWatchlistLifecycleEvaluation({
-      source:'review',
+      source:'analyse_setup',
       tickers:[record.ticker],
       persist:false,
       render:false,
@@ -9639,6 +9669,8 @@ async function analyseSetup(ticker){
   }finally{
     if(activeReviewTicker() === ticker) uiState.activeReviewVerdictOverride = '';
     uiState.loadingTicker = '';
+    renderWatchlist();
+    renderFocusQueue();
     renderCards();
   }
 }
@@ -10473,6 +10505,8 @@ function saveReview(){
   });
   updateTickerInputFromState();
   commitTickerState();
+  renderWatchlist();
+  renderFocusQueue();
   renderCards();
   renderReviewLifecycleSummary(ticker);
   setStatus('inputStatus', '<span class="ok">Manual review saved as optional notes only. Scanner ranking stays unchanged.</span>');
@@ -10635,7 +10669,20 @@ function calculate(options = {}){
       source:'planner',
       lastPlannedAt:new Date().toISOString()
     });
+    if(record.watchlist && record.watchlist.inWatchlist){
+      runWatchlistLifecycleEvaluation({
+        source:'plan_update',
+        tickers:[ticker],
+        persist:false,
+        render:false,
+        force:true
+      });
+    }
     commitTickerState();
+    if(record.watchlist && record.watchlist.inWatchlist){
+      renderWatchlist();
+      renderFocusQueue();
+    }
     renderReviewLifecycleSummary(ticker);
   }
   syncPlanDisplayMeta();
@@ -11234,10 +11281,17 @@ on('universeMode', 'change', () => {
   renderFinalUniversePreview();
 });
 
-['accountSize','riskPercent','maxLossOverride','marketStatus'].forEach(id => on(id, 'change', () => {
+['accountSize','riskPercent','maxLossOverride'].forEach(id => on(id, 'change', () => {
   saveState();
   refreshRiskContextForActiveSetups();
 }));
+on('marketStatus', 'change', () => {
+  saveState();
+  refreshRiskContextForActiveSetups({
+    source:'market_status',
+    force:true
+  });
+});
 on('scannerSetupType', 'change', () => {
   saveState();
   renderFinalUniversePreview();
