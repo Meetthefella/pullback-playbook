@@ -10379,10 +10379,15 @@ on('universeMode', 'change', () => {
   renderFinalUniversePreview();
 });
 
-['accountSize','riskPercent','maxLossOverride','marketStatus','scannerSetupType'].forEach(id => on(id, 'change', () => {
+['accountSize','riskPercent','maxLossOverride','marketStatus'].forEach(id => on(id, 'change', () => {
   saveState();
   refreshRiskContextForActiveSetups();
 }));
+on('scannerSetupType', 'change', () => {
+  saveState();
+  renderFinalUniversePreview();
+  setStatus('inputStatus', 'Setup mode updated for future scans only. Existing results keep their stored scan context until rescanned.');
+});
 on('wholeSharesOnly', 'change', () => {
   saveState();
   refreshRiskContextForActiveSetups();
