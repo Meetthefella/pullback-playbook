@@ -3041,7 +3041,7 @@ function shouldEvaluateWatchlistLifecycleRecord(record, options = {}){
   const source = String(options.source || 'system');
   if(!record || !record.watchlist || !record.watchlist.inWatchlist) return false;
   if(options.force === true) return true;
-  if(['manual_refresh','review','review_save','analyse_setup','scan','watchlist_add','market_status','plan_update','automatic'].includes(source)) return true;
+  if(['manual_refresh','review','review_save','analyse_setup','scan','watchlist_add','market_status','plan_update','auto_recompute'].includes(source)) return true;
   return hasFreshLifecycleInputs(record);
 }
 
@@ -3153,7 +3153,7 @@ function runWatchlistLifecycleEvaluation(options = {}){
   }
 }
 
-function syncWatchlistLifecycleBeforeRender(source = 'automatic'){
+function syncWatchlistLifecycleBeforeRender(source = 'auto_recompute'){
   if(uiState.watchlistLifecycleRunning) return false;
   const result = runWatchlistLifecycleEvaluation({
     source,
@@ -3353,7 +3353,7 @@ function clearSavedScannerUniverseList(){
 }
 
 function renderWatchlist(){
-  syncWatchlistLifecycleBeforeRender('automatic');
+  syncWatchlistLifecycleBeforeRender('auto_recompute');
   purgeExpiredWatchlistEntries();
   const box = $('watchlistList');
   if(!box) return;
@@ -10458,6 +10458,19 @@ function refreshReview(){
   $('progressText').textContent = `Checks met: ${result.score} / 10`;
   $('progressFill').style.width = `${result.score * 10}%`;
   syncPlanDisplayMeta();
+  const ticker = activeReviewTicker();
+  const record = ticker ? getTickerRecord(ticker) : null;
+  if(record && record.watchlist && record.watchlist.inWatchlist){
+    runWatchlistLifecycleEvaluation({
+      source:'auto_recompute',
+      tickers:[ticker],
+      persist:false,
+      render:false,
+      force:true
+    });
+    renderWatchlist();
+    renderFocusQueue();
+  }
 }
 
 function saveReview(){
