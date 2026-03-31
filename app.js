@@ -3550,6 +3550,8 @@ function resolveScannerStateWithTrace(record, options = {}){
   const planValidation = String(baseView.planUiState.state || '');
   const setupScore = numericOrNull(baseView.setupScore);
   const positionSize = numericOrNull(baseView.positionSize);
+  const rrValue = numericOrNull(baseView.rrValue);
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trace = [];
   const reasonCodes = [];
   const warnings = [];
@@ -3582,6 +3584,20 @@ function resolveScannerStateWithTrace(record, options = {}){
   addStep('structure quality', structureQuality);
   addStep('plan validation', planValidation || '(none)');
   addStep('plan adjustment block', hasPlanAdjustmentBlock ? 'true' : 'false');
+
+  let rrReliability = 'high';
+  let rrLabel = 'High confidence';
+  if(planValidation === 'needs_adjustment' || hasPlanAdjustmentBlock){
+    rrReliability = 'low';
+    rrLabel = 'Invalid plan';
+  }else if(structureState !== 'strong'){
+    rrReliability = 'low';
+    rrLabel = 'Unreliable';
+  }else if(bounceState === 'none'){
+    rrReliability = 'conditional';
+    rrLabel = 'Needs bounce';
+  }
+  addStep('rr reliability', `${Number.isFinite(rrValue) ? Number(rrValue).toFixed(2) : 'n/a'} | ${rrLabel}`);
 
   let bucket = 'filtered';
   let status = 'Avoid';
@@ -3635,6 +3651,9 @@ function resolveScannerStateWithTrace(record, options = {}){
     bucket,
     reason_codes:reasonCodes,
     score:setupScore,
+    rr_value:rrValue,
+    rr_reliability:rrReliability,
+    rr_label:rrLabel,
     trace,
     warnings,
     derivedStates,
@@ -3998,16 +4017,27 @@ function renderScannerDecisionTrace(view){
   return `<details class="compact-result-details"><summary>Decision Trace</summary><div class="mutebox scrollbox">${escapeHtml(lines.join('\n') || 'No trace available.')}</div></details>`;
 }
 
+function rrReliabilityClass(rrReliability){
+  if(rrReliability === 'high') return 'ready';
+  if(rrReliability === 'conditional') return 'near';
+  return 'avoid';
+}
+
 function renderCompactResultCardFromView(view){
   const item = view.item;
   const statusChip = primaryShortlistStatusChip(view);
   const sourceVerdict = reviewVerdictOverrideFromView(view);
   const scoreLabel = view.setupScoreDisplay;
   const filteredCard = view.bucket === 'filtered' || view.finalClassification === 'filtered';
+  const resolution = view.scannerResolution || {};
   const tone = scanCardToneForView(view);
   const intensity = scanCardIntensityForView(view);
   const toneClass = `result-card--${tone}`;
   const intensityClass = `result-card--intensity-${intensity}`;
+  const rrLine = Number.isFinite(resolution.rr_value)
+    ? `RR ${Number(resolution.rr_value).toFixed(1)} (${resolution.rr_label || 'n/a'})`
+    : '';
+  const rrClass = rrReliabilityClass(resolution.rr_reliability);
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const reasonLine = compactReasonLineForView(view, 3);
   const detailMeta = [
@@ -4017,10 +4047,11 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(item.marketData.ma50) ? `50 ${fmtPrice(Number(item.marketData.ma50))}` : '',
     Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
-    item.setup.marketCaution ? 'Market caution' : ''
+    item.setup.marketCaution ? 'Market caution' : '',
+    rrLine ? `${rrLine} | ${resolution.rr_reliability || 'n/a'}` : ''
   ].filter(Boolean).join(' | ');
   const traceMarkup = renderScannerDecisionTrace(view);
-  return `<div class="resultcompact result-card ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div></details>${traceMarkup}</div>`;
+  return `<div class="resultcompact result-card ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div>${rrLine ? `<div class="tiny"><span class="badge ${rrClass}">${escapeHtml(rrLine)}</span></div>` : ''}</div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div></details>${traceMarkup}</div>`;
 }
 
 function compactReasonLineForView(view, maxParts = 3){
