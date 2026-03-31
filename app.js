@@ -3516,30 +3516,150 @@ function finalStructureQualityForView(view){
   return 'developing_loose';
 }
 
+function resolveScannerStateWithTrace(record, options = {}){
+  const item = normalizeTickerRecord(record);
+  const baseView = options.baseView || projectTickerForCard(item, {
+    includeExecutionDowngrade:false,
+    includeRuntimeFallback:false
+  });
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(baseView.item);
+  const rrCategory = options.rrCategory || rrCategoryForView(baseView);
+  const structureQuality = options.structureQuality || finalStructureQualityForView({
+    ...baseView,
+    setupStates:derivedStates
+  });
+  const isStructureValid = ['strong','developing_clean'].includes(structureQuality);
+  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const hasPlanAdjustmentBlock = options.hasPlanAdjustmentBlock != null
+    ? !!options.hasPlanAdjustmentBlock
+    : (
+      baseView.planUiState.state === 'needs_adjustment'
+      || rrCategory === 'stretched'
+      || !!(baseView.item && baseView.item.plan && baseView.item.plan.firstTargetTooClose)
+    );
+  const finalSetupState = baseView.setupUiState.state === 'broken'
+    ? 'broken'
+    : (
+      baseView.setupUiState.state === 'developing'
+      || !isStructureValid
+      || bounceState === 'none'
+      || hasPlanAdjustmentBlock
+        ? 'developing'
+        : baseView.setupUiState.state
+    );
+  const planValidation = String(baseView.planUiState.state || '');
+  const setupScore = numericOrNull(baseView.setupScore);
+  const positionSize = numericOrNull(baseView.positionSize);
+  const trace = [];
+  const reasonCodes = [];
+  const warnings = [];
+  const addStep = (label, value) => trace.push(`${label}: ${value}`);
+  const addReason = code => {
+    if(code && !reasonCodes.includes(code)) reasonCodes.push(code);
+  };
+
+  addStep('scan source', item.scan.scanType || 'unknown');
+  addStep('active setup mode', item.scan.scanType || 'unknown');
+  addStep('setup origin', item.scan.scanType || 'manual');
+  addStep('price vs 20/50/200 MA', [
+    Number.isFinite(item.marketData.price) ? `price=${fmtPrice(item.marketData.price)}` : 'price=n/a',
+    Number.isFinite(item.marketData.ma20) ? `20=${fmtPrice(item.marketData.ma20)}` : '20=n/a',
+    Number.isFinite(item.marketData.ma50) ? `50=${fmtPrice(item.marketData.ma50)}` : '50=n/a',
+    Number.isFinite(item.marketData.ma200) ? `200=${fmtPrice(item.marketData.ma200)}` : '200=n/a'
+  ].join(' | '));
+  addStep('structure state', derivedStates.structureState || '(none)');
+  addStep('pullback zone', derivedStates.pullbackZone || '(none)');
+  addStep('stabilisation state', derivedStates.stabilisationState || '(none)');
+  addStep('bounce state', derivedStates.bounceState || '(none)');
+  addStep('volume state', derivedStates.volumeState || '(none)');
+  addStep('market regime / caution', item.setup.marketCaution ? 'market caution' : 'normal');
+  addStep('estimated RR / tradeability', [
+    Number.isFinite(baseView.rrValue) ? `rr=${Number(baseView.rrValue).toFixed(2)}` : 'rr=n/a',
+    baseView.displayedPlan && baseView.displayedPlan.tradeability ? `tradeability=${baseView.displayedPlan.tradeability}` : 'tradeability=n/a'
+  ].join(' | '));
+  addStep('raw setup score', Number.isFinite(setupScore) ? `${setupScore}/10` : 'n/a');
+  addStep('setup state', finalSetupState);
+  addStep('structure quality', structureQuality);
+  addStep('plan validation', planValidation || '(none)');
+  addStep('plan adjustment block', hasPlanAdjustmentBlock ? 'true' : 'false');
+
+  let bucket = 'filtered';
+  let status = 'Avoid';
+
+  if(finalSetupState === 'broken'){
+    addReason('broken_setup');
+  }else if(planValidation === 'invalid'){
+    addReason('plan_invalid');
+  }else if(planValidation === 'unrealistic_rr' || rrCategory === 'unrealistic'){
+    addReason('rr_unrealistic');
+  }else if(Number.isFinite(positionSize) && positionSize < 1){
+    addReason('size_below_one');
+  }else if(hasPlanAdjustmentBlock || planValidation === 'needs_adjustment'){
+    addReason('needs_adjustment');
+  }else if(structureQuality === 'weak'){
+    addReason('weak_structure');
+  }else if(structureQuality === 'developing_loose'){
+    addReason('loose_structure');
+  }else if(structureQuality === 'developing_clean' && bounceState !== 'confirmed'){
+    addReason('developing_no_bounce');
+  }else if(structureQuality === 'developing_clean' && bounceState === 'confirmed'){
+    bucket = 'early';
+    status = 'Watch';
+    addReason('developing_confirmed_bounce');
+  }else if(structureQuality === 'strong' && ['none','attempt'].includes(bounceState)){
+    bucket = 'early';
+    status = 'Watch';
+    addReason(bounceState === 'attempt' ? 'bounce_attempt' : 'no_bounce');
+  }else if(Number.isFinite(setupScore) && setupScore < 6){
+    bucket = 'early';
+    status = 'Watch';
+    addReason('score_below_tradeable_floor');
+  }else if(structureQuality === 'strong' && bounceState === 'confirmed' && planValidation === 'valid'){
+    bucket = 'tradeable';
+    status = Number.isFinite(setupScore) && setupScore >= 8 ? 'Entry' : 'Near Entry';
+    addReason(status === 'Entry' ? 'high_score_tradeable' : 'tradeable_not_elite');
+  }else{
+    addReason('filtered_default');
+  }
+
+  addStep('resulting status', status);
+  addStep('resulting bucket', bucket);
+
+  const legacyStatus = normalizeAnalysisVerdict(baseView.displayStage || '');
+  if(legacyStatus && legacyStatus !== status){
+    warnings.push(`WARNING: status mismatch resolved. legacy=${legacyStatus}, resolved=${status}`);
+  }
+
+  return {
+    status,
+    bucket,
+    reason_codes:reasonCodes,
+    score:setupScore,
+    trace,
+    warnings,
+    derivedStates,
+    rrCategory,
+    structureQuality,
+    isStructureValid,
+    hasPlanAdjustmentBlock,
+    setupState:finalSetupState
+  };
+}
+
+function resolveScannerState(record, options = {}){
+  const resolved = resolveScannerStateWithTrace(record, options);
+  return {
+    status:resolved.status,
+    bucket:resolved.bucket,
+    reason_codes:resolved.reason_codes
+  };
+}
+
 function getFinalClassification(view){
-  const setupState = String(view && (view.setupState || (view.setupUiState && view.setupUiState.state)) || '');
-  const displayStage = normalizeAnalysisVerdict(view && (view.displayStage || view.finalVerdict || '') || '');
-  const setupScore = numericOrNull(view && (view.setupScore ?? view.score));
-  const planValidation = String(view && ((view.planValidation && view.planValidation.state) || (view.planUiState && view.planUiState.state)) || '');
-  const positionSize = numericOrNull(view && view.positionSize);
-  const rrCategory = String(view && view.rrCategory || '');
-  const hasPlanAdjustmentBlock = !!(view && view.hasPlanAdjustmentBlock);
-  const structureQuality = String(view && view.structureQuality || finalStructureQualityForView(view));
-  const bounceState = String(view && view.bounceState || (view && view.setupStates && view.setupStates.bounceState) || '').toLowerCase();
-  if(setupState === 'broken') return 'filtered';
-  if(planValidation === 'invalid') return 'filtered';
-  if(planValidation === 'unrealistic_rr' || rrCategory === 'unrealistic') return 'filtered';
-  if(Number.isFinite(positionSize) && positionSize < 1) return 'filtered';
-  if(hasPlanAdjustmentBlock || planValidation === 'needs_adjustment') return 'filtered';
-  if(structureQuality === 'weak') return 'filtered';
-  if(structureQuality === 'developing_loose') return 'filtered';
-  if(structureQuality === 'developing_clean' && bounceState !== 'confirmed') return 'filtered';
-  if(structureQuality === 'developing_clean' && bounceState === 'confirmed') return 'early';
-  if(structureQuality === 'strong' && ['none','attempt'].includes(bounceState)) return 'early';
-  if(Number.isFinite(setupScore) && setupScore < 6) return 'early';
-  if(displayStage === 'Watch') return 'early';
-  if(structureQuality === 'strong' && bounceState === 'confirmed' && planValidation === 'valid') return 'tradeable';
-  return 'filtered';
+  const resolved = view && view.scannerResolution
+    ? view.scannerResolution
+    : resolveScannerStateWithTrace(view && view.item ? view.item : view, {baseView:view});
+  return resolved.bucket;
 }
 
 function legacyBucketForFinalClassification(finalClassification){
@@ -3579,6 +3699,14 @@ function buildFinalSetupView(record, options = {}){
     setupLabel:setupUiLabel(finalSetupState),
     setupClassName:setupUiClass(finalSetupState)
   };
+  const scannerResolution = resolveScannerStateWithTrace(view.item, {
+    baseView:view,
+    derivedStates,
+    rrCategory,
+    structureQuality,
+    isStructureValid,
+    hasPlanAdjustmentBlock
+  });
   const finalClassification = getFinalClassification({
     ...view,
     rrCategory,
@@ -3587,8 +3715,9 @@ function buildFinalSetupView(record, options = {}){
     hasPlanAdjustmentBlock,
     isNotReadySetup,
     bounceState,
-    setupState:finalSetupState,
-    planValidation:{state:view.planUiState.state}
+    setupState:scannerResolution.setupState,
+    planValidation:{state:view.planUiState.state},
+    scannerResolution
   });
   const bucket = legacyBucketForFinalClassification(finalClassification);
   return {
@@ -3606,16 +3735,26 @@ function buildFinalSetupView(record, options = {}){
     },
     score:view.setupScore,
     scoreLabel:view.setupScoreDisplay,
-    setupUiState:finalSetupUiState,
-    setupState:finalSetupState,
-    setupLabel:finalSetupUiState.label,
+    setupUiState:{
+      ...finalSetupUiState,
+      label:scannerResolution.status,
+      className:primaryVerdictBadge(scannerResolution.status).className
+    },
+    setupState:scannerResolution.setupState,
+    setupLabel:scannerResolution.status,
     rrCategory,
     structureQuality,
     isStructureValid,
     hasPlanAdjustmentBlock,
     isNotReadySetup,
+    scannerResolution,
+    displayStage:scannerResolution.status,
+    finalVerdict:scannerResolution.status,
     finalClassification,
     bucket,
+    reasonCodes:scannerResolution.reason_codes,
+    decisionTrace:scannerResolution.trace,
+    decisionWarnings:scannerResolution.warnings,
     rrDisplay:shouldShowActionableRR(view) && Number.isFinite(view.actionableRrValue)
       ? `R:R ${view.actionableRrValue.toFixed(2)}`
       : '',
@@ -3845,6 +3984,20 @@ function scanCardIntensityForView(view){
   return 'low';
 }
 
+function renderScannerDecisionTrace(view){
+  const resolution = view && view.scannerResolution ? view.scannerResolution : null;
+  if(!resolution) return '';
+  const lines = [];
+  (resolution.trace || []).forEach(line => lines.push(String(line)));
+  if(Array.isArray(resolution.reason_codes) && resolution.reason_codes.length){
+    lines.push(`reason codes: ${resolution.reason_codes.join(', ')}`);
+  }
+  if(Array.isArray(resolution.warnings) && resolution.warnings.length){
+    resolution.warnings.forEach(line => lines.push(String(line)));
+  }
+  return `<details class="compact-result-details"><summary>Decision Trace</summary><div class="mutebox scrollbox">${escapeHtml(lines.join('\n') || 'No trace available.')}</div></details>`;
+}
+
 function renderCompactResultCardFromView(view){
   const item = view.item;
   const statusChip = primaryShortlistStatusChip(view);
@@ -3866,7 +4019,8 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
     item.setup.marketCaution ? 'Market caution' : ''
   ].filter(Boolean).join(' | ');
-  return `<div class="resultcompact result-card ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div></details></div>`;
+  const traceMarkup = renderScannerDecisionTrace(view);
+  return `<div class="resultcompact result-card ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div></details>${traceMarkup}</div>`;
 }
 
 function compactReasonLineForView(view, maxParts = 3){
