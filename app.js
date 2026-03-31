@@ -1260,6 +1260,7 @@ function baseCard(ticker){
     marketDataUpdatedAt:'',
     scannerUpdatedAt:'',
     scanType:'',
+    scanSetupType:'',
     setupType:'',
     trendStatus:'',
     pullbackStatus:'',
@@ -1305,6 +1306,8 @@ function normalizeCard(card){
   normalized.marketDataUpdatedAt = String(normalized.marketDataUpdatedAt || '');
   normalized.scannerUpdatedAt = String(normalized.scannerUpdatedAt || '');
   normalized.scanType = normalizeScanType(normalized.scanType);
+  normalized.scanSetupType = normalizeScanType(normalized.scanSetupType || normalized.scanType || normalized.setupType);
+  if(!normalized.scanType) normalized.scanType = normalized.scanSetupType;
   normalized.setupType = String(normalized.setupType || '');
   normalized.trendStatus = String(normalized.trendStatus || '');
   normalized.pullbackStatus = String(normalized.pullbackStatus || '');
@@ -1354,6 +1357,8 @@ function baseTickerRecord(ticker){
   },
     scan:{
       scanType:'',
+      scanSetupType:'',
+      setupOrigin:'',
       estimatedEntryZone:null,
       estimatedStopArea:null,
       estimatedTargetArea:null,
@@ -1541,6 +1546,9 @@ function normalizeTickerRecord(record){
   merged.marketData.marketCap = numericOrNull(merged.marketData.marketCap);
   merged.marketData.history = Array.isArray(merged.marketData.history) ? merged.marketData.history : [];
   merged.scan.scanType = normalizeScanType(merged.scan.scanType);
+  merged.scan.scanSetupType = normalizeScanType(merged.scan.scanSetupType || merged.scan.scanType);
+  if(!merged.scan.scanType) merged.scan.scanType = merged.scan.scanSetupType;
+  merged.scan.setupOrigin = String(merged.scan.setupOrigin || '');
   merged.scan.estimatedEntryZone = numericOrNull(merged.scan.estimatedEntryZone);
   merged.scan.estimatedStopArea = numericOrNull(merged.scan.estimatedStopArea);
   merged.scan.estimatedTargetArea = numericOrNull(merged.scan.estimatedTargetArea);
@@ -2025,7 +2033,10 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   const card = normalizeCard(legacyCard);
   mergeMarketDataIntoRecord(record, card);
   const estimate = hasUsableScannerData(card.marketData || card) ? scannerEstimateForCard(card) : null;
-  record.scan.scanType = normalizeScanType(card.scanType || card.setupType || record.scan.scanType);
+  const resolvedScanType = normalizeScanType(card.scanType || card.scanSetupType || card.setupType || record.scan.scanSetupType || record.scan.scanType);
+  record.scan.scanType = resolvedScanType;
+  record.scan.scanSetupType = resolvedScanType;
+  record.scan.setupOrigin = String(card.source || (options.fromScanner ? 'scanner' : (options.fromCards ? 'cards' : record.scan.setupOrigin || 'manual')));
   if(estimate){
     record.scan.estimatedEntryZone = numericOrNull(estimate.entry);
     record.scan.estimatedStopArea = numericOrNull(estimate.stop);
@@ -2245,7 +2256,9 @@ function tickerRecordToLegacyCard(record){
     marketDataUpdatedAt:item.marketData.asOf || '',
     scannerUpdatedAt:item.scan.lastScannedAt || '',
     scanType:item.scan.scanType || '',
+    scanSetupType:item.scan.scanSetupType || item.scan.scanType || '',
     setupType:item.scan.scanType || '',
+    setupOrigin:item.scan.setupOrigin || '',
     trendStatus:item.scan.trendStatus || '',
     pullbackStatus:item.scan.pullbackStatus || '',
     pullbackType:item.scan.pullbackType || '',
@@ -3633,10 +3646,14 @@ function resolveScannerStateWithTrace(record, options = {}){
   const addReason = code => {
     if(code && !reasonCodes.includes(code)) reasonCodes.push(code);
   };
+  const recordScanSetupType = normalizeScanType(item.scan.scanSetupType || item.scan.scanType || '');
+  const resolverSetupType = recordScanSetupType || currentSetupType() || 'unknown';
 
-  addStep('scan source', item.scan.scanType || 'unknown');
-  addStep('active setup mode', item.scan.scanType || 'unknown');
-  addStep('setup origin', item.scan.scanType || 'manual');
+  addStep('scan source', item.scan.setupOrigin || 'unknown');
+  addStep('current global setup type', currentSetupType() || 'unknown');
+  addStep('record scan_setup_type', recordScanSetupType || 'unknown');
+  addStep('resolver setup type used', resolverSetupType);
+  addStep('setup origin', item.scan.setupOrigin || 'manual');
   addStep('price vs 20/50/200 MA', [
     Number.isFinite(item.marketData.price) ? `price=${fmtPrice(item.marketData.price)}` : 'price=n/a',
     Number.isFinite(item.marketData.ma20) ? `20=${fmtPrice(item.marketData.ma20)}` : '20=n/a',
@@ -7852,6 +7869,7 @@ async function refreshCardMarketData(ticker, options = {}){
   card.summary = buildScannerSummary({status:chartVerdict, reason:verdictReason});
   card.pullbackType = suitability ? suitability.pullbackType : '';
   card.setupType = derivedStates.scan_type;
+  card.scanSetupType = derivedStates.scan_type;
   card.trendStatus = derivedStates.trend_state;
   card.pullbackStatus = derivedStates.pullback_zone;
   card.source = 'scanner';
@@ -8145,10 +8163,13 @@ function compactChecklistText(checks){
 }
 
 function resolveScanType(card, data, checks){
+  const explicit = normalizeScanType(
+    (card && (card.scanSetupType || card.scanType || card.setupType))
+    || (data && (data.scanSetupType || data.scanType || data.setupType))
+  );
+  if(explicit) return explicit;
   const globalType = currentSetupType();
   if(globalType !== 'unknown') return globalType;
-  const explicit = normalizeScanType((card && card.scanType) || (data && data.scanType));
-  if(explicit) return explicit;
   if(checks && checks.near20 && !checks.near50) return '20MA';
   if(checks && checks.near50 && !checks.near20) return '50MA';
   return 'unknown';
