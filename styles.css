@@ -213,6 +213,9 @@ button[disabled]{opacity:.55;cursor:not-allowed}
 .watchlistgrid{grid-template-columns:minmax(72px,max-content) minmax(0,1fr) auto}
 .watchlistidentity{display:grid;gap:8px;align-content:start}
 .watchlistscore{justify-self:start;opacity:.9;font-size:.76rem;padding:5px 9px}
+.watchlist-signal-row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-top:8px;min-width:0}
+.watchlist-signal-row .pill{max-width:100%}
+.watchlist-plan-meta{margin-top:6px}
 .chartworkflow{margin-top:10px}
 .chartworkflow>summary{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 14px;border-radius:12px;background:#1b2742;border:1px solid var(--line)}
 .workflowmenu{display:grid;gap:8px;margin-top:10px}

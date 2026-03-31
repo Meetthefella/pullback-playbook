@@ -2836,13 +2836,9 @@ function renderWatchlist(){
       const entry = tickerRecordToWatchlistEntry(record);
       if(!entry) return;
       const view = buildFinalSetupView(record);
-      const warningState = evaluateWarningState(record, getReviewAnalysisState(record).normalizedAnalysis);
       const remaining = getTradingDaysRemaining(entry);
       const lifecycleText = lifecycleLabel(record);
       const expired = record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
-      const cautionChip = warningState.showWarning
-        ? 'Weak conditions'
-        : (record.setup.marketCaution ? 'Weak conditions' : view.convictionTier);
       const expiryDate = record.lifecycle.expiresAt || 'Not set';
       const priority = watchlistPriorityForRecord(record);
       const avoidSubtype = avoidSubtypeForRecord(record);
@@ -2856,9 +2852,10 @@ function renderWatchlist(){
         avoidSubtype
       });
       const watchlistBadgeLabel = watchlistPresentation.primaryText;
-      const watchlistModifierMarkup = emojiModifierMarkup(watchlistPresentation);
-      const suppressCautionChip = !!(watchlistPresentation.modifiers || []).some(modifier => modifier.code === 'weak_conditions')
-        && /weak conditions/i.test(String(cautionChip || ''));
+      const watchlistSignalMarkup = emojiModifierMarkup({
+        ...watchlistPresentation,
+        modifiers:prioritizedSignalModifiers(watchlistPresentation, 2)
+      });
       const reviewPresentation = resolveEmojiPresentation(record, {context:'review'});
       if(reviewPresentation.primaryText !== watchlistPresentation.primaryText){
         console.warn('EMOJI_SURFACE_DISAGREEMENT', {ticker:record.ticker, watchlist:watchlistPresentation.primaryText, review:reviewPresentation.primaryText});
@@ -2869,7 +2866,7 @@ function renderWatchlist(){
       });
       const div = document.createElement('div');
       div.className = 'resultcompact';
-      div.innerHTML = `<div class="resulthead"><div class="watchlistidentity inline-status" style="justify-content:space-between;align-items:flex-start"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="inline-status"><span class="badge ${watchlistPresentation.badgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span></div></div><div class="tiny">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div><div class="inline-status" style="margin-top:8px"><span class="pill">Priority ${escapeHtml(String(priority.score))}/10</span>${watchlistModifierMarkup}${suppressCautionChip ? '' : `<span class="pill">${escapeHtml(cautionChip)}</span>`}<span class="pill">${escapeHtml(view.planStateLabel)}</span></div>${reasoning.headline ? `<div class="tiny" style="margin-top:8px"><strong>${escapeHtml(reasoning.headline)}</strong></div>` : ''}${reasoning.detail ? `<div class="tiny">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny" style="margin-top:8px">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div><div class="resultreview inline-status" style="margin-top:10px"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save to Diary</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
+      div.innerHTML = `<div class="resulthead"><div class="watchlistidentity inline-status" style="justify-content:space-between;align-items:flex-start"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="inline-status"><span class="badge ${watchlistPresentation.badgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span></div></div><div class="tiny">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div><div class="watchlist-signal-row"><span class="pill">Priority ${escapeHtml(String(priority.score))}/10</span>${watchlistSignalMarkup}</div><div class="tiny watchlist-plan-meta">${escapeHtml(view.planStateLabel)}</div>${reasoning.headline ? `<div class="tiny" style="margin-top:8px"><strong>${escapeHtml(reasoning.headline)}</strong></div>` : ''}${reasoning.detail ? `<div class="tiny">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny" style="margin-top:8px">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div><div class="resultreview inline-status" style="margin-top:10px"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save to Diary</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -5798,6 +5795,27 @@ function emojiModifierMarkup(presentation){
   }
   if(!limitedModifiers.length) return '';
   return limitedModifiers.map(modifier => `<span class="pill ${escapeHtml(modifier.className || 'near')}">${escapeHtml(`${modifier.emoji} ${modifier.label}`)}</span>`).join('');
+}
+
+function prioritizedSignalModifiers(presentation, maxModifiers = 2){
+  const sourceModifiers = presentation && Array.isArray(presentation.modifiers) ? presentation.modifiers : [];
+  const allowedCodes = new Set(['weak_conditions', 'weak_volume', 'low_control']);
+  const priorityOrder = {weak_conditions:0, weak_volume:1, low_control:2};
+  const seenCodes = new Set();
+  const seenKeys = new Set();
+  const uniqueModifiers = [];
+  sourceModifiers.forEach(modifier => {
+    const code = String(modifier && modifier.code || '').trim();
+    const key = `${String(modifier && modifier.emoji || '').trim()}|${String(modifier && modifier.label || '').trim()}`;
+    if(!allowedCodes.has(code)) return;
+    if(seenCodes.has(code) || seenKeys.has(key)) return;
+    seenCodes.add(code);
+    seenKeys.add(key);
+    uniqueModifiers.push(modifier);
+  });
+  return uniqueModifiers
+    .sort((a, b) => (priorityOrder[String(a && a.code || '').trim()] ?? 99) - (priorityOrder[String(b && b.code || '').trim()] ?? 99))
+    .slice(0, Math.min(Math.max(maxModifiers, 0), 3));
 }
 
 function evaluateEntryTrigger(record, options = {}){
