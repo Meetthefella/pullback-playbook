@@ -2870,6 +2870,7 @@ function watchlistLifecycleSnapshot(record){
   const volumeState = String(derivedStates.volumeState || '').toLowerCase();
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const rrValue = numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
   const expiryTradingDays = item.watchlist.expiryAfterTradingDays || WATCHLIST_EXPIRY_TRADING_DAYS;
   const addedAt = item.watchlist.addedAt || todayIsoDate();
   const expiryAt = item.watchlist.expiryAt || tradingDaysFrom(addedAt, expiryTradingDays);
@@ -2885,14 +2886,29 @@ function watchlistLifecycleSnapshot(record){
   let nextExpiryAt = expiryAt;
   let expiryReason = '';
   let reason = 'Still progressing on the watchlist.';
+  const technicalDead = primaryState === 'dead'
+    || ['broken','weak'].includes(structureState)
+    || trendState === 'broken';
+  const planBlockedTerminal = avoidSubtype === 'terminal' && !technicalDead;
 
-  if(primaryState === 'dead' || avoidSubtype === 'terminal' || ['broken','weak'].includes(structureState) || trendState === 'broken'){
+  if(technicalDead){
     state = 'dead';
     bucket = 'inactive';
     stage = 'avoided';
     status = 'inactive';
     nextExpiryAt = '';
     reason = 'Setup failed technically and is no longer actionable.';
+  }else if(planBlockedTerminal){
+    state = primaryState === 'developing' ? 'developing' : 'monitor';
+    bucket = ['confirmed','early','attempt'].includes(bounceState) ? 'developing' : 'waiting_confirmation';
+    stage = 'watchlist';
+    status = 'active';
+    nextExpiryAt = activeExpiryAt;
+    reason = planUiState.state === 'invalid'
+      ? 'Plan invalid and needs rebuilding.'
+      : ((planUiState.state === 'unrealistic_rr' || (Number.isFinite(rrValue) && rrValue < currentRrThreshold()))
+        ? 'RR too weak to keep active as a trade plan.'
+        : 'Setup is alive structurally but not currently actionable.');
   }else if(remainingTradingDays <= 0 && !hasMeaningfulImprovement){
     state = 'expired';
     bucket = 'inactive';
