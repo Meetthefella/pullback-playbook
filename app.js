@@ -2862,13 +2862,15 @@ function watchlistLifecycleSnapshot(record){
     qualityAdjustments,
     finalVerdict:displayStageForRecord(item)
   });
+  const deadCheck = isTerminalDeadSetup(item, {derivedStates, displayedPlan});
   const emojiPresentation = resolveEmojiPresentation(item, {
     context:'watchlist',
     finalVerdict:displayStageForRecord(item),
     derivedStates,
     displayedPlan,
     qualityAdjustments,
-    avoidSubtype
+    avoidSubtype,
+    deadCheck
   });
   const primaryState = String(emojiPresentation.primaryState || 'monitor').toLowerCase();
   const planUiState = getPlanUiState(item, {displayedPlan});
@@ -2895,11 +2897,7 @@ function watchlistLifecycleSnapshot(record){
   let nextExpiryAt = expiryAt;
   let expiryReason = '';
   let reason = 'Still progressing on the watchlist.';
-  const technicalFailure = ['broken','weak'].includes(structureState)
-    || trendState === 'broken'
-    || !!(item.plan && item.plan.invalidatedState)
-    || !!(item.plan && item.plan.missedState)
-    || (Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice);
+  const technicalFailure = deadCheck.dead;
   const technicalDead = technicalFailure
     || (primaryState === 'dead' && technicalFailure);
   const nonActionableButAlive = !technicalDead && (
@@ -6265,6 +6263,7 @@ function resolveEmojiPresentation(record, options = {}){
     qualityAdjustments,
     finalVerdict
   });
+  const deadCheck = options.deadCheck || isTerminalDeadSetup(item, {derivedStates, displayedPlan});
   const context = String(options.context || 'generic').toLowerCase();
   const invalidated = !!(item.plan && (item.plan.invalidatedState || item.plan.missedState));
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
@@ -6301,11 +6300,21 @@ function resolveEmojiPresentation(record, options = {}){
     primaryEmoji = '🎯';
     primaryLabel = 'Near Entry';
     badgeClass = 'near';
-  }else if(finalVerdict === 'Avoid' && (avoidSubtype === 'terminal' || setupUiState.state === 'broken' || invalidated || brokenBelowStop)){
+  }else if(finalVerdict === 'Avoid' && deadCheck.dead){
     primaryState = 'dead';
     primaryEmoji = '💀';
     primaryLabel = 'Dead';
     badgeClass = 'avoid';
+  }else if(finalVerdict === 'Avoid'){
+    const structureState = String(derivedStates.structureState || '').toLowerCase();
+    const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+    const developingSoftState = setupUiState.state === 'developing'
+      || ['weak','weakening','developing_loose'].includes(structureState)
+      || ['none','attempt','early'].includes(bounceState);
+    primaryState = developingSoftState ? 'developing' : 'monitor';
+    primaryEmoji = developingSoftState ? '🌱' : '🧐';
+    primaryLabel = developingSoftState ? 'Developing' : 'Monitor';
+    badgeClass = developingSoftState ? 'near' : 'watch';
   }else if(setupUiState.state === 'developing'){
     primaryState = 'developing';
     primaryEmoji = '🌱';
@@ -6340,8 +6349,24 @@ function resolveEmojiPresentation(record, options = {}){
   if(['monitor','developing'].includes(primaryState) && primaryEmoji === '💀'){
     console.warn('EMOJI_STATE_MISMATCH', {ticker:item.ticker, finalVerdict, primaryState, primaryEmoji});
   }
-  if(finalVerdict === 'Avoid' && avoidSubtype === 'terminal' && primaryEmoji !== '💀'){
-    console.warn('EMOJI_STATE_MISMATCH', {ticker:item.ticker, finalVerdict, avoidSubtype, primaryEmoji});
+  if(finalVerdict === 'Avoid' && deadCheck.dead && primaryEmoji !== '💀'){
+    console.warn('EMOJI_STATE_MISMATCH', {ticker:item.ticker, finalVerdict, avoidSubtype, primaryEmoji, deadReasonCode:deadCheck.reasonCode});
+  }
+  if(primaryState === 'dead' && !deadCheck.dead){
+    console.warn('DEAD_CLASSIFICATION_SOFT_BLOCKER', {
+      ticker:item.ticker,
+      finalVerdict,
+      avoidSubtype,
+      deadReasonCode:deadCheck.reasonCode,
+      terminalTriggerUsed:deadCheck.terminalTriggerUsed,
+      fallbackStateIfNotDead:deadCheck.fallbackStateIfNotDead || 'monitor',
+      weakVolumePresent,
+      weakConditionsPresent,
+      lowControl:!!qualityAdjustments.lowControlSetup,
+      tooWide:!!qualityAdjustments.tooWideForQualityPullback,
+      invalidated,
+      brokenBelowStop
+    });
   }
 
   const seenModifierCodes = new Set();
@@ -6616,6 +6641,26 @@ function aiVerdictCeilingForRecord(record){
   return reviewHeaderVerdictForRecord(record);
 }
 
+function isTerminalDeadSetup(record, options = {}){
+  const item = normalizeTickerRecord(record);
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const stopPrice = numericOrNull(item.plan && item.plan.stop);
+  const invalidated = !!(item.plan && item.plan.invalidatedState);
+  const missed = !!(item.plan && item.plan.missedState);
+  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
+
+  if(structureState === 'broken') return {dead:true, reasonCode:'broken_structure', terminalTriggerUsed:'structure_state'};
+  if(trendState === 'broken') return {dead:true, reasonCode:'broken_trend', terminalTriggerUsed:'trend_state'};
+  if(invalidated) return {dead:true, reasonCode:'invalidated', terminalTriggerUsed:'plan_invalidated'};
+  if(missed) return {dead:true, reasonCode:'missed_state', terminalTriggerUsed:'plan_missed'};
+  if(brokenBelowStop) return {dead:true, reasonCode:'stop_breach', terminalTriggerUsed:'price_below_stop'};
+
+  return {dead:false, reasonCode:'', terminalTriggerUsed:'', fallbackStateIfNotDead:'monitor'};
+}
+
 function scoreStageForRecord(record){
   if(record && record.review && record.review.manualReview && typeof record.review.manualReview === 'object') return 'final';
   const analysisState = getReviewAnalysisState(record || {});
@@ -6670,25 +6715,27 @@ function avoidSubtypeForRecord(record, options = {}){
   const rrValue = numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
   const setupScore = setupScoreForRecord(item);
   const structureAlive = !['broken','weak'].includes(structureState) && trendState !== 'broken';
+  const deadCheck = isTerminalDeadSetup(item, {derivedStates, displayedPlan});
 
   if(
-    structureState === 'broken'
-    || trendState === 'broken'
-    || planUiState.state === 'invalid'
-    || planUiState.state === 'unrealistic_rr'
-    || (Number.isFinite(rrValue) && rrValue < currentRrThreshold())
+    deadCheck.dead
     || (setupScore <= 3 && !structureAlive)
-    || !!(item.plan && (item.plan.invalidatedState || item.plan.missedState))
   ) return 'terminal';
 
   if(
-    structureAlive
+    (structureAlive || structureState === 'weak')
     && (
-      ['none','attempt'].includes(bounceState)
+      ['none','attempt','early'].includes(bounceState)
       || volumeState === 'weak'
       || qualityAdjustments.weakRegimePenalty
       || qualityAdjustments.lowControlSetup
       || qualityAdjustments.tooWideForQualityPullback
+      || planUiState.state === 'invalid'
+      || planUiState.state === 'unrealistic_rr'
+      || (Number.isFinite(rrValue) && rrValue < currentRrThreshold())
+      || displayedPlan.affordability === 'heavy_capital'
+      || displayedPlan.affordability === 'not_affordable'
+      || displayedPlan.tradeability === 'too_expensive'
     )
   ) return 'conditional';
 
@@ -6808,13 +6855,15 @@ function actionPresentationForRecord(record, options = {}){
   );
   const qualityAdjustments = evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
   const avoidSubtype = avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments, finalVerdict:reviewVerdict});
+  const deadCheck = isTerminalDeadSetup(item, {derivedStates, displayedPlan});
   const emojiPresentation = resolveEmojiPresentation(item, {
     context:'review',
     finalVerdict:reviewVerdict,
     derivedStates,
     displayedPlan,
     qualityAdjustments,
-    avoidSubtype
+    avoidSubtype,
+    deadCheck
   });
   const primaryState = String(options.primaryState || emojiPresentation.primaryState || '').toLowerCase();
   const invalidated = !!(item.plan && (item.plan.invalidatedState || item.plan.missedState));
@@ -6836,7 +6885,7 @@ function actionPresentationForRecord(record, options = {}){
     console.warn('REVIEW_STATE_MISMATCH', {ticker:item.ticker, finalVerdict:reviewVerdict, avoidSubtype});
   }
 
-  if(reviewVerdict === 'Avoid' && primaryState === 'dead' && (invalidated || brokenBelowStop || avoidSubtype !== 'conditional')){
+  if(reviewVerdict === 'Avoid' && primaryState === 'dead' && deadCheck.dead){
     return {
       label:'💀 Ignore - low quality / broken setup',
       tone:'danger',
@@ -11231,7 +11280,6 @@ click('clearBtn', () => {
   const before = queueDebugSnapshot();
   $('tickerInput').value = '';
   if($('tvImportInput')) $('tvImportInput').value = '';
-  if($('ocrReviewInput')) $('ocrReviewInput').value = '';
   $('tickerSearch').value = '';
   state.tickers = [];
   state.scannerResults = [];
@@ -11251,7 +11299,7 @@ click('clearBtn', () => {
   renderFinalUniversePreview();
   renderSavedScannerUniverseSnapshot();
   renderScannerDebug();
-  clearOcrReview();
+  clearOcrReview('OCR review cleared. Scanner universe is ready for repopulation.');
   renderScannerResults();
   renderCards();
   resetReview();
