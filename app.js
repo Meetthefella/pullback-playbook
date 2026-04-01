@@ -9782,7 +9782,9 @@ function addActiveReviewTickerToWatchlist(){
   const ticker = activeReviewTicker();
   if(!ticker) return;
   const liveRecord = upsertTickerRecord(ticker);
-  if(avoidSubtypeForRecord(liveRecord) === 'terminal'){
+  const emojiPresentation = resolveEmojiPresentation(liveRecord, {context:'review'});
+  const deadCheck = isTerminalDeadSetup(liveRecord);
+  if(deadCheck.dead || String(emojiPresentation.primaryState || '').toLowerCase() === 'dead'){
     setStatus('inputStatus', `<span class="warntext">${escapeHtml(ticker)} is a terminal avoid and should not be tracked on the watchlist.</span>`);
     return;
   }
