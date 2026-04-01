@@ -5925,7 +5925,7 @@ function evaluateSetupQualityAdjustments(record, options = {}){
 }
 
 function evaluatePlanRealism(record, options = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = record && typeof record === 'object' ? record : {};
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     item.plan && item.plan.entry,
