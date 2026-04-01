@@ -9532,11 +9532,27 @@ function bindReviewWorkspaceActions(record){
       renderReviewWorkspace();
     };
   }
-  click('analyseActiveBtn', analyseActiveReviewTicker);
-  click('saveReviewBtn', saveReview);
-  click('addWatchlistActiveBtn', addActiveReviewTickerToWatchlist);
-  click('resetReviewBtn', resetReview);
-  click('expireLifecycleBtn', expireSelectedTickerLifecycle);
+  const analyseBtn = box.querySelector('#analyseActiveBtn');
+  if(analyseBtn) analyseBtn.onclick = analyseActiveReviewTicker;
+  const saveReviewBtn = box.querySelector('#saveReviewBtn');
+  if(saveReviewBtn) saveReviewBtn.onclick = saveReview;
+  const addWatchlistBtn = box.querySelector('#addWatchlistActiveBtn');
+  if(addWatchlistBtn){
+    addWatchlistBtn.onclick = () => {
+      uiState.watchlistAddDebug[record.ticker] = {
+        ...(uiState.watchlistAddDebug[record.ticker] || {}),
+        source:'review_workspace',
+        at:new Date().toISOString(),
+        result:'clicked',
+        message:`Add to Watchlist clicked for ${record.ticker}.`
+      };
+      addActiveReviewTickerToWatchlist();
+    };
+  }
+  const resetBtn = box.querySelector('#resetReviewBtn');
+  if(resetBtn) resetBtn.onclick = resetReview;
+  const expireBtn = box.querySelector('#expireLifecycleBtn');
+  if(expireBtn) expireBtn.onclick = expireSelectedTickerLifecycle;
   document.querySelectorAll('#reviewWorkspace .logic').forEach(el => el.addEventListener('change', refreshReview));
   ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));
 }
