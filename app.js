@@ -5845,12 +5845,17 @@ function downgradeVerdict(verdict, steps = 1){
 function evaluateSetupQualityAdjustments(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
-  const baseVerdict = normalizeAnalysisVerdict(options.baseVerdict || analysisVerdictForRecord(rawRecord));
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     rawRecord.plan && rawRecord.plan.entry,
     rawRecord.plan && rawRecord.plan.stop,
     rawRecord.plan && rawRecord.plan.firstTarget,
     rawRecord.marketData && rawRecord.marketData.currency
+  );
+  const baseVerdict = normalizeAnalysisVerdict(
+    options.baseVerdict
+    || options.displayStage
+    || options.rawVerdict
+    || baseVerdictForRecord(rawRecord, {includeRuntimeFallback:false})
   );
   const entry = numericOrNull(displayedPlan.entry);
   const stop = numericOrNull(displayedPlan.stop);
@@ -5928,8 +5933,13 @@ function evaluatePlanRealism(record, options = {}){
     item.plan && item.plan.firstTarget,
     item.marketData && item.marketData.currency
   );
-  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
   const displayStage = normalizeAnalysisVerdict(options.displayStage || item.scan && item.scan.verdict || item.review && item.review.savedVerdict || 'Watch');
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {
+    displayedPlan,
+    derivedStates,
+    displayStage,
+    baseVerdict:displayStage
+  });
   const setupUiState = options.setupUiState || (options.setupState ? {state:options.setupState} : getSetupUiState(item, {displayStage}));
   const rawRr = actionableRrValueForPlan(displayedPlan);
   const structureState = String(derivedStates.structureState || '').toLowerCase();
