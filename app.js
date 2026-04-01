@@ -118,6 +118,47 @@ const ALERT_PRIORITY = {
 const APP_FETCH_TIMEOUT_MS = 12000;
 const BACKEND_REVIEW_POLL_MS = 10 * 60 * 1000;
 const MARKET_CACHE_SCHEMA_VERSION = 3;
+
+const {
+  numericOrNull,
+  escapeHtml,
+  validateTickerSymbol,
+  normalizeTicker,
+  normalizeScanType,
+  parseImportedTickerEntries,
+  parseTickersDetailed,
+  parseTickers,
+  uniqueTickers,
+  clamp,
+  scoreRange
+} = window.PullbackCore;
+
+const {
+  evaluateRiskFit,
+  evaluateRewardRisk,
+  targetReviewStateLabel,
+  deriveTargetReviewState,
+  dynamicExitRecommendation,
+  targetReviewQueueLabel,
+  deriveTradeability
+} = window.PullbackPlanner;
+
+const {
+  scannerFieldLabel,
+  formatRuleNumber,
+  formatScannerRule,
+  compareValues,
+  isUsExchange,
+  evaluateScannerRuleDetailed,
+  evaluateScannerRule,
+  isNearLevel,
+  buildScannerChecks,
+  priorHighTarget,
+  nearestPivotTargets,
+  realisticFirstTarget,
+  deriveTradePlan: deriveTradePlanFromModule,
+  deriveSetupStates: deriveSetupStatesFromModule
+} = window.PullbackScanner;
 const SCAN_BATCH_SIZE = 4;
 const TESSERACT_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
 const OCR_STOPWORDS = new Set(['OPEN','HIGH','LOW','CLOSE','VOLUME','VOL','CHANGE','PRICE','PERCENT','PCT','CHG','DATE','TIME','WATCH','LIST','SCREEN','SCREENER','TRADINGVIEW','SYMBOL','STOCK','STOCKS','NAME','LAST','USD','USDT','BUY','SELL','LONG','SHORT','NYSE','NASDAQ','AMEX','LSE','TOTAL','AVG','RSI','SMA','EMA']);
@@ -245,23 +286,6 @@ function convertQuoteValueToGbp(value, quoteCurrency){
   return {gbpValue:null, conversion:'unsupported'};
 }
 
-function evaluateRiskFit({entry, stop, account_size, risk_percent, max_loss_override, whole_shares_only}){
-  const numericEntry = numericOrNull(entry);
-  const numericStop = numericOrNull(stop);
-  const accountSize = numericOrNull(account_size) || 0;
-  const riskPercent = numericOrNull(risk_percent) || 0;
-  const override = numericOrNull(max_loss_override);
-  const max_loss = Number.isFinite(override) && override > 0 ? override : (accountSize > 0 && riskPercent > 0 ? accountSize * riskPercent : 0);
-  if(!Number.isFinite(numericEntry) || !Number.isFinite(numericStop)) return {max_loss, risk_per_share:null, position_size:0, risk_status:'plan_missing'};
-  const risk_per_share = numericEntry - numericStop;
-  if(!Number.isFinite(risk_per_share) || risk_per_share <= 0) return {max_loss, risk_per_share, position_size:0, risk_status:'invalid_plan'};
-  if(!(max_loss > 0)) return {max_loss, risk_per_share, position_size:0, risk_status:'settings_missing'};
-  let position_size = max_loss > 0 ? (whole_shares_only === false ? (max_loss / risk_per_share) : Math.floor(max_loss / risk_per_share)) : 0;
-  if(!Number.isFinite(position_size)) position_size = 0;
-  if(position_size < 1) return {max_loss, risk_per_share, position_size:whole_shares_only === false ? Number(position_size.toFixed(2)) : 0, risk_status:'too_wide'};
-  return {max_loss, risk_per_share, position_size:whole_shares_only === false ? Number(position_size.toFixed(2)) : position_size, risk_status:'fits_risk'};
-}
-
 function evaluateCapitalFit({entry, position_size, account_size_gbp, quote_currency}){
   const numericEntry = numericOrNull(entry);
   const positionSize = numericOrNull(position_size);
@@ -302,30 +326,6 @@ function evaluateCapitalFit({entry, position_size, account_size_gbp, quote_curre
         ? 'Position cost fits account size.'
         : 'Position cost is above current account size.')
   };
-}
-
-function evaluateRewardRisk(entry, stop, firstTarget){
-  const numericEntry = numericOrNull(entry);
-  const numericStop = numericOrNull(stop);
-  const numericFirstTarget = numericOrNull(firstTarget);
-  if(!Number.isFinite(numericEntry) || !Number.isFinite(numericStop) || !Number.isFinite(numericFirstTarget)){
-    return {valid:false, riskPerShare:null, rewardPerShare:null, rrRatio:null, rrState:'invalid'};
-  }
-  const riskPerShare = numericEntry - numericStop;
-  const rewardPerShare = numericFirstTarget - numericEntry;
-  if(!Number.isFinite(riskPerShare) || !Number.isFinite(rewardPerShare) || riskPerShare <= 0 || rewardPerShare <= 0){
-    return {valid:false, riskPerShare, rewardPerShare, rrRatio:null, rrState:'invalid'};
-  }
-  const rrRatio = rewardPerShare / riskPerShare;
-  if(rrRatio >= 2) return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'strong'};
-  if(rrRatio >= 1.5) return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'acceptable'};
-  return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'weak'};
-}
-
-function numericOrNull(value){
-  if(value === null || value === undefined || value === '') return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
 }
 
 function safeJsonParse(value, fallback){
@@ -624,73 +624,8 @@ function bootstrapBackgroundMonitoring(){
   }, BACKEND_REVIEW_POLL_MS);
 }
 
-function escapeHtml(value){
-  return String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-}
-
-function validateTickerSymbol(value){
-  return /^[A-Z][A-Z0-9.-]{0,9}$/.test(String(value || '').trim().toUpperCase());
-}
-
-function normalizeTicker(value){
-  return String(value || '').trim().toUpperCase();
-}
-
-function normalizeScanType(value){
-  const text = String(value || '').trim().toUpperCase();
-  if(text === '20MA' || text === '50MA') return text;
-  return '';
-}
-
 function selectedQuickScanType(){
   return normalizeScanType($('scannerSetupType') && $('scannerSetupType').value);
-}
-
-function parseImportedTickerEntries(text){
-  const rawText = String(text || '').trim();
-  if(!rawText) return [];
-  const entries = [];
-  rawText.split(/\n+/).map(line => line.trim()).filter(Boolean).forEach(line => {
-    const explicit = line.match(/^([A-Z][A-Z0-9.-]{0,9})\s*(?:\||,|:|\s)\s*(20MA|50MA)$/i);
-    if(explicit){
-      entries.push({ticker:normalizeTicker(explicit[1]), scanType:normalizeScanType(explicit[2])});
-      return;
-    }
-    line.split(/[\s,]+/).map(token => token.trim()).filter(Boolean).forEach(token => {
-      const pair = token.match(/^([A-Z][A-Z0-9.-]{0,9})[:|](20MA|50MA)$/i);
-      if(pair){
-        entries.push({ticker:normalizeTicker(pair[1]), scanType:normalizeScanType(pair[2])});
-        return;
-      }
-      entries.push({ticker:normalizeTicker(token), scanType:''});
-    });
-  });
-  return entries;
-}
-
-function parseTickersDetailed(text){
-  const rawItems = parseImportedTickerEntries(text).map(item => item.ticker).filter(Boolean);
-  const valid = [];
-  const invalid = [];
-  const duplicates = [];
-  const seen = new Set();
-  rawItems.forEach(item => {
-    if(!validateTickerSymbol(item)){
-      invalid.push(item);
-      return;
-    }
-    if(seen.has(item)){
-      duplicates.push(item);
-      return;
-    }
-    seen.add(item);
-    valid.push(item);
-  });
-  return {valid, invalid, duplicates};
-}
-
-function parseTickers(text){
-  return parseTickersDetailed(text).valid;
 }
 
 function renderTickerListWithScanTypes(tickers){
@@ -699,18 +634,6 @@ function renderTickerListWithScanTypes(tickers){
     const scanType = normalizeScanType(meta && meta.scanType);
     return scanType ? `${ticker} | ${scanType}` : ticker;
   }).join('\n');
-}
-
-function uniqueTickers(values){
-  const out = [];
-  const seen = new Set();
-  (values || []).forEach(value => {
-    const ticker = normalizeTicker(value);
-    if(!ticker || seen.has(ticker) || !validateTickerSymbol(ticker)) return;
-    seen.add(ticker);
-    out.push(ticker);
-  });
-  return out;
 }
 
 function syncUniverseFromInputs(preferExisting = false){
@@ -7380,44 +7303,9 @@ function normalizeTargetReviewState(targetReviewState){
   return 'not_near_target';
 }
 
-function targetReviewStateLabel(targetReviewState){
-  if(targetReviewState === 'near_target') return 'Near Target';
-  if(targetReviewState === 'at_target') return 'At Target';
-  if(targetReviewState === 'beyond_target') return 'Beyond Target';
-  return 'Not Near Target';
-}
-
-function deriveTargetReviewState(currentPrice, firstTarget){
-  const price = numericOrNull(currentPrice);
-  const target = numericOrNull(firstTarget);
-  if(!Number.isFinite(price) || !Number.isFinite(target) || target <= 0) return 'not_near_target';
-  if(price >= target * 1.01) return 'beyond_target';
-  if(price >= target * 0.995) return 'at_target';
-  if(price >= target * 0.98) return 'near_target';
-  return 'not_near_target';
-}
-
-function dynamicExitRecommendation(targetReviewState, displayStage, setupScore){
-  if(targetReviewState === 'beyond_target') return 'Consider trailing stop';
-  if(targetReviewState === 'at_target'){
-    return (displayStage === 'Entry' || (Number.isFinite(setupScore) && setupScore >= 8))
-      ? 'Consider trailing stop'
-      : 'Consider taking profit';
-  }
-  if(targetReviewState === 'near_target') return 'Review now';
-  return 'Hold / monitor';
-}
-
 function dynamicExitGuidance(exitMode){
   if(normalizeExitMode(exitMode) !== 'dynamic_exit') return '';
   return 'Hard stop active | Target by alert | Review at target';
-}
-
-function targetReviewQueueLabel(targetReviewState){
-  if(targetReviewState === 'near_target') return 'Near Target';
-  if(targetReviewState === 'at_target') return 'At Target';
-  if(targetReviewState === 'beyond_target') return 'Review Target';
-  return '';
 }
 
 function deriveExecutionPlanState(record, options = {}){
@@ -7439,14 +7327,6 @@ function deriveExecutionPlanState(record, options = {}){
     targetActionRecommendation,
     targetAlertLevel:targetLevel
   };
-}
-
-function deriveTradeability(planStatus, riskStatus, capitalFit){
-  if(planStatus !== 'valid') return 'invalid';
-  if(riskStatus !== 'fits_risk') return 'invalid';
-  if(capitalFit === 'fits_capital') return 'tradable';
-  if(capitalFit === 'too_expensive') return 'too_expensive';
-  return 'risk_only';
 }
 
 function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrency = ''){
@@ -8194,37 +8074,6 @@ async function getActiveScannerPreset(){
   return list.find(item => item.name === state.scannerPresetName) || list[0];
 }
 
-function scannerFieldLabel(field){
-  return {
-    exchange:'Exchange',
-    perf1w:'Perf 1W',
-    price:'Price',
-    sma20:'SMA 20',
-    sma50:'SMA 50',
-    sma200:'SMA 200',
-    avgVolume30d:'Avg Volume 30D',
-    marketCap:'Market Cap',
-    rsi14:'RSI 14',
-    perf1m:'Perf 1M',
-    perf3m:'Perf 3M',
-    perf6m:'Perf 6M',
-    perfYtd:'Perf YTD'
-  }[field] || field;
-}
-
-function formatRuleNumber(value){
-  if(!Number.isFinite(value)) return 'missing';
-  if(Math.abs(value) >= 1000000) return Number(value).toLocaleString(undefined, {maximumFractionDigits:0});
-  return Number(value).toLocaleString(undefined, {maximumFractionDigits:2});
-}
-
-function formatScannerRule(rule){
-  if(!rule || typeof rule !== 'object') return 'Unknown rule';
-  if(rule.label) return rule.label;
-  const right = rule.valueField ? scannerFieldLabel(rule.valueField) : Number(rule.value || 0).toLocaleString();
-  return `${scannerFieldLabel(rule.field)} ${rule.operator} ${right}`;
-}
-
 async function renderScannerRulesPanel(){
   const rulesBox = $('scannerRulesList');
   const debugBox = $('scannerDebugList');
@@ -8264,56 +8113,6 @@ async function renderScannerRulesPanel(){
   }
 }
 
-function compareValues(left, operator, right){
-  if(!Number.isFinite(left) || !Number.isFinite(right)) return false;
-  if(operator === '>') return left > right;
-  if(operator === '>=') return left >= right;
-  if(operator === '<') return left < right;
-  if(operator === '<=') return left <= right;
-  if(operator === '===') return left === right;
-  return false;
-}
-
-function isUsExchange(exchange){
-  return ['NASDAQ', 'NYSE', 'AMEX'].includes(String(exchange || '').trim().toUpperCase());
-}
-
-function evaluateScannerRuleDetailed(rule, data){
-  if(!rule || typeof rule !== 'object') return {passed:false, label:'Invalid rule'};
-  if(rule.rules && Array.isArray(rule.rules)){
-    const details = rule.rules.map(item => evaluateScannerRuleDetailed(item, data));
-    const mode = rule.mode === 'any' ? 'any' : 'all';
-    const passed = mode === 'any' ? details.some(item => item.passed) : details.every(item => item.passed);
-    return {passed, label:rule.label || 'Rule group', details};
-  }
-  const left = numericOrNull(data && data[rule.field]);
-  const right = rule.valueField ? numericOrNull(data && data[rule.valueField]) : numericOrNull(rule.value);
-  const passed = compareValues(left, rule.operator, right);
-  const leftLabel = `${scannerFieldLabel(rule.field)} ${formatRuleNumber(left)}`;
-  const rightLabel = rule.valueField
-    ? `${scannerFieldLabel(rule.valueField)} ${formatRuleNumber(right)}`
-    : formatRuleNumber(right);
-  return {
-    passed,
-    label:`${leftLabel} ${rule.operator} ${rightLabel} = ${passed ? 'PASS' : 'FAIL'}`,
-    left,
-    right
-  };
-}
-
-function evaluateScannerRule(rule, data){
-  if(!rule || typeof rule !== 'object') return false;
-  if(rule.rules && Array.isArray(rule.rules)){
-    const mode = rule.mode === 'any' ? 'any' : 'all';
-    const results = rule.rules.map(item => evaluateScannerRule(item, data));
-    return mode === 'any' ? results.some(Boolean) : results.every(Boolean);
-  }
-  if(!data || typeof data !== 'object' || !rule.field || !rule.operator) return false;
-  const left = numericOrNull(data && data[rule.field]);
-  const right = rule.valueField ? numericOrNull(data && data[rule.valueField]) : numericOrNull(rule.value);
-  return compareValues(left, rule.operator, right);
-}
-
 function tradingDaysFrom(startDate, count){
   // Weekday-based trading-day approximation for lifecycle expiry. This excludes
   // weekends but does not model exchange holidays in this pass.
@@ -8325,11 +8124,6 @@ function tradingDaysFrom(startDate, count){
     if(day !== 0 && day !== 6) added += 1;
   }
   return base.toISOString().slice(0, 10);
-}
-
-function isNearLevel(price, level, tolerance){
-  if(!Number.isFinite(price) || !Number.isFinite(level) || level === 0) return false;
-  return Math.abs(price - level) / level <= tolerance;
 }
 
 function buildScannerSummary(result){
@@ -8349,115 +8143,15 @@ function hardListFromScan(scan){
   return failed;
 }
 
-function clamp(value, min, max){
-  return Math.max(min, Math.min(max, value));
-}
-
-function scoreRange(value, min, max, points){
-  if(!Number.isFinite(value)) return 0;
-  if(max <= min) return 0;
-  return clamp(((value - min) / (max - min)) * points, 0, points);
-}
-
-function priorHighTarget(data, scanType){
-  const rows = Array.isArray(data && data.history) ? data.history : [];
-  const price = numericOrNull(data && data.price);
-  if(!rows.length || !Number.isFinite(price)) return null;
-  const lookback = scanType === '50MA' ? 84 : 42;
-  const windowRows = rows.slice(1, lookback);
-  const highs = windowRows.map(row => numericOrNull(row.high ?? row.close)).filter(Number.isFinite).filter(value => value > price);
-  if(!highs.length) return null;
-  return Math.max(...highs);
-}
-
-function nearestPivotTargets(data, price, lookback = 42){
-  const rows = Array.isArray(data && data.history) ? data.history : [];
-  if(!rows.length || !Number.isFinite(price)) return [];
-  const windowRows = rows.slice(1, Math.max(lookback, 6));
-  const pivots = [];
-  for(let index = 1; index < windowRows.length - 1; index += 1){
-    const prevHigh = numericOrNull(windowRows[index - 1] && (windowRows[index - 1].high ?? windowRows[index - 1].close));
-    const currentHigh = numericOrNull(windowRows[index] && (windowRows[index].high ?? windowRows[index].close));
-    const nextHigh = numericOrNull(windowRows[index + 1] && (windowRows[index + 1].high ?? windowRows[index + 1].close));
-    if(!Number.isFinite(prevHigh) || !Number.isFinite(currentHigh) || !Number.isFinite(nextHigh)) continue;
-    if(currentHigh >= prevHigh && currentHigh > nextHigh && currentHigh > price){
-      pivots.push(currentHigh);
-    }
-  }
-  return [...new Set(pivots.map(value => Number(value.toFixed(2))))].sort((a, b) => a - b);
-}
-
-function realisticFirstTarget(data, scanType, options = {}){
-  const price = numericOrNull(data && data.price);
-  const entry = numericOrNull(options.entry);
-  const riskPerShare = numericOrNull(options.riskPerShare);
-  const sma20 = numericOrNull(data && data.sma20);
-  const sma50 = numericOrNull(data && data.sma50);
-  const checks = options.checks || buildScannerChecks(data || {});
-  const perf1w = numericOrNull(data && data.perf1w);
-  if(!Number.isFinite(price) || !Number.isFinite(entry)) return null;
-  const scanStyle = scanType === '50MA' ? '50MA' : '20MA';
-  const pivots = nearestPivotTargets(data, price, scanStyle === '50MA' ? 84 : 42);
-  const nearestPivot = pivots.find(level => level > entry);
-  const priorHigh = priorHighTarget(data, scanStyle);
-  const above20 = Number.isFinite(price) && Number.isFinite(sma20) && price >= sma20;
-  const above50 = Number.isFinite(price) && Number.isFinite(sma50) && price >= sma50;
-  const strongStructure = !!(checks.trendStrong && above20 && above50 && Number.isFinite(perf1w) && perf1w >= 2);
-  const confirmationStrong = !!(checks.bounce && above20 && Number.isFinite(perf1w) && perf1w >= 2);
-  const weakOrEarly = !strongStructure || !confirmationStrong || !!checks.structureBroken;
-  const conservativeCap = Number.isFinite(riskPerShare) ? entry + (riskPerShare * (weakOrEarly ? 2 : 3)) : null;
-  const modestRecovery = Number.isFinite(riskPerShare) ? entry + (riskPerShare * 2) : (entry * (weakOrEarly ? 1.03 : 1.05));
-  if(weakOrEarly){
-    if(Number.isFinite(nearestPivot)) return nearestPivot;
-    if(Number.isFinite(conservativeCap)) return conservativeCap;
-    if(Number.isFinite(priorHigh)) return Math.min(priorHigh, Number.isFinite(modestRecovery) ? modestRecovery : priorHigh);
-    return modestRecovery;
-  }
-  if(Number.isFinite(nearestPivot)) return nearestPivot;
-  if(Number.isFinite(priorHigh)) return priorHigh;
-  if(Number.isFinite(conservativeCap)) return conservativeCap;
-  return modestRecovery;
-}
-
 function deriveTradePlan(data, scanType = '20MA'){
-  const price = numericOrNull(data.price);
-  const sma20 = numericOrNull(data.sma20);
-  const sma50 = numericOrNull(data.sma50);
-  if(!Number.isFinite(price) || !Number.isFinite(sma20) || !Number.isFinite(sma50)) return {entry:null, stop:null, target:null, riskPerShare:null, rewardPerShare:null, rr:null, rrState:'invalid', rrValid:false, firstTargetTooClose:false, positionSize:0, stopBufferPct:null};
-  const support = scanType === '50MA' ? sma50 : sma20;
-  const backupSupport = scanType === '50MA' ? sma20 : sma50;
-  const entry = Math.max(price, support);
-  const stopBufferPct = price < 50 ? 0.02 : (price <= 200 ? 0.015 : 0.01);
-  const stop = Math.min(price, Math.min(support, backupSupport) * (1 - stopBufferPct));
-  const riskFit = evaluateRiskFit({
-    entry,
-    stop,
-    ...currentRiskSettings()
+  return deriveTradePlanFromModule(data, scanType, {
+    numericOrNull,
+    currentRiskSettings,
+    evaluateRiskFit,
+    evaluateRewardRisk,
+    buildScannerChecks,
+    realisticFirstTarget
   });
-  const riskPerShare = Number.isFinite(riskFit.risk_per_share) ? riskFit.risk_per_share : null;
-  const checks = buildScannerChecks(data);
-  const target = realisticFirstTarget(data, scanType, {
-    entry,
-    riskPerShare,
-    checks
-  });
-  const rewardRisk = evaluateRewardRisk(entry, stop, target);
-  return {
-    entry,
-    stop,
-    target,
-    riskPerShare,
-    rewardPerShare:rewardRisk.rewardPerShare,
-    rr:rewardRisk.rrRatio,
-    rrRatio:rewardRisk.rrRatio,
-    rrState:rewardRisk.rrState,
-    rrValid:rewardRisk.valid,
-    stopBufferPct,
-    firstTargetTooClose:rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false,
-    positionSize:riskFit.position_size,
-    maxLoss:riskFit.max_loss,
-    riskStatus:riskFit.risk_status
-  };
 }
 
 function scannerEstimateForCard(card){
@@ -8824,42 +8518,6 @@ function scoreSuitability(card, data, checks){
       bounceReady:checks.stabilising || checks.bounce
     }),
     pullbackType:pullbackType.type
-  };
-}
-
-function buildScannerChecks(data){
-  const price = numericOrNull(data.price);
-  const sma20 = numericOrNull(data.sma20);
-  const sma50 = numericOrNull(data.sma50);
-  const sma200 = numericOrNull(data.sma200);
-  const perf1w = numericOrNull(data.perf1w);
-  const volume = numericOrNull(data.volume);
-  const avgVolume30d = numericOrNull(data.avgVolume30d);
-  const near20 = isNearLevel(price, sma20, 0.025);
-  const near50 = isNearLevel(price, sma50, 0.035);
-  const trendStrong = Number.isFinite(price) && Number.isFinite(sma50) && Number.isFinite(sma200) && Number.isFinite(sma20) && price > sma50 && price > sma200 && sma20 > sma50 && sma50 > sma200;
-  const structureBroken = Number.isFinite(price) && Number.isFinite(sma50) && Number.isFinite(sma20) && price < sma50 && sma20 < sma50;
-  const relevantReclaim = near50 && Number.isFinite(sma50) ? sma50 : sma20;
-  const reclaimedSupport = Number.isFinite(price) && Number.isFinite(relevantReclaim) && price >= relevantReclaim * 0.998;
-  const bounceReady = Number.isFinite(perf1w) && perf1w >= 2 && reclaimedSupport && !structureBroken;
-  return {
-    trendStrong,
-    above50:Number.isFinite(price) && Number.isFinite(sma50) && price > sma50,
-    above200:Number.isFinite(price) && Number.isFinite(sma200) && price > sma200,
-    ma50gt200:Number.isFinite(sma50) && Number.isFinite(sma200) && sma50 > sma200,
-    near20,
-    near50,
-    stabilising:(near20 || near50) && (!Number.isFinite(perf1w) || perf1w > -1.5),
-    bounce:bounceReady,
-    bounceStrength:Number.isFinite(perf1w)
-      ? (perf1w >= 3 ? 'strong' : (perf1w >= 1 ? 'moderate' : (perf1w > 0 ? 'weak' : 'none')))
-      : 'none',
-    volume:Number.isFinite(volume) && Number.isFinite(avgVolume30d) && volume >= avgVolume30d,
-    mediumTermStrength:Number.isFinite(numericOrNull(data.perf3m)) && numericOrNull(data.perf3m) > 0,
-    structureBroken,
-    entryDefined:false,
-    stopDefined:false,
-    targetDefined:false
   };
 }
 
@@ -9339,129 +8997,16 @@ function mergeDerivedChecks(cardChecks, dataChecks, tradePlan){
 
 // Derive richer setup states from market data and current card context.
 function deriveSetupStates(card, data, checks, tradePlan){
-  const safeCard = card || {};
-  const safeData = data || {};
-  const baseChecks = buildScannerChecks(safeData);
-  const preflightChecks = mergeDerivedChecks((safeCard && safeCard.checks) || {}, checks || baseChecks, null);
-  const initialScanType = resolveScanType(safeCard, safeData, preflightChecks);
-  const plan = tradePlan || deriveTradePlan(safeData, initialScanType === 'unknown' ? '20MA' : initialScanType);
-  const safeChecks = mergeDerivedChecks((safeCard && safeCard.checks) || {}, checks || baseChecks, plan);
-  const scanType = resolveScanType(safeCard, safeData, safeChecks);
-  const price = numericOrNull(safeData.price ?? safeCard.price);
-  const sma20 = numericOrNull(safeData.sma20 ?? safeCard.sma20);
-  const sma50 = numericOrNull(safeData.sma50 ?? safeCard.sma50);
-  const sma200 = numericOrNull(safeData.sma200 ?? safeCard.sma200);
-  const perf1w = numericOrNull(safeData.perf1w ?? safeCard.perf1w);
-  const perf3m = numericOrNull(safeData.perf3m ?? safeCard.perf3m);
-  const volume = numericOrNull(safeData.volume ?? safeCard.volume);
-  const avgVolume30d = numericOrNull(safeData.avgVolume30d ?? safeCard.avgVolume30d);
-  const rows = Array.isArray(safeData.history) ? safeData.history : [];
-  const recentRows = rows.slice(0, 5);
-  const dist20 = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0 ? (price - sma20) / sma20 : null;
-  const dist50 = Number.isFinite(price) && Number.isFinite(sma50) && sma50 > 0 ? (price - sma50) / sma50 : null;
-  const entryDefined = !!(safeCard.entry || safeChecks.entryDefined || Number.isFinite(plan.entry));
-  const stopDefined = !!(safeCard.stop || safeChecks.stopDefined || Number.isFinite(plan.stop)) && Number.isFinite(plan.riskPerShare) && plan.riskPerShare > 0;
-  const targetDefined = !!(safeCard.target || safeChecks.targetDefined || Number.isFinite(plan.target)) && Number.isFinite(plan.rr) && plan.rr > 0;
-
-  let trendState = 'weak';
-  if((Number.isFinite(price) && Number.isFinite(sma200) && price < sma200) || (Number.isFinite(sma50) && Number.isFinite(sma200) && sma50 < sma200)){
-    trendState = 'broken';
-  }else if(Number.isFinite(price) && Number.isFinite(sma50) && Number.isFinite(sma200) && price > sma50 && price > sma200 && sma50 > sma200){
-    trendState = 'strong';
-  }else if(Number.isFinite(price) && Number.isFinite(sma200) && Number.isFinite(sma50) && price > sma200 && sma50 > sma200){
-    trendState = 'acceptable';
-  }else if(Number.isFinite(price) && Number.isFinite(sma200) && price > sma200){
-    trendState = 'weak';
-  }
-  if(trendState === 'acceptable' && Number.isFinite(perf3m) && perf3m < 2) trendState = 'weak';
-
-  let pullbackZone = 'none';
-  if(Number.isFinite(dist20) && dist20 >= -0.03 && dist20 <= 0.02 && (!Number.isFinite(dist50) || Math.abs(dist20) <= Math.abs(dist50))){
-    pullbackZone = 'near_20ma';
-  }else if(Number.isFinite(dist50) && dist50 >= -0.05 && dist50 <= 0.02){
-    pullbackZone = 'near_50ma';
-  }else if((scanType === '20MA' && Number.isFinite(dist20) && dist20 < -0.06) || (scanType === '50MA' && Number.isFinite(dist50) && dist50 < -0.07) || safeChecks.structureBroken){
-    pullbackZone = 'extended';
-  }
-
-  let structureState = 'weakening';
-  if(safeChecks.structureBroken || trendState === 'broken'){
-    structureState = 'broken';
-  }else if(safeChecks.trendStrong && (pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') && Number.isFinite(perf1w) && perf1w > -4){
-    structureState = 'intact';
-  }else{
-    structureState = 'weakening';
-  }
-
-  const recentHighs = recentRows.map(row => numericOrNull(row && (row.high ?? row.close))).filter(Number.isFinite);
-  const recentLows = recentRows.map(row => numericOrNull(row && (row.low ?? row.close))).filter(Number.isFinite);
-  const recentCloses = recentRows.map(row => numericOrNull(row && row.close)).filter(Number.isFinite);
-  const reclaimArea = scanType === '50MA'
-    ? Math.max(...[sma50, sma20].filter(Number.isFinite))
-    : Math.max(...[sma20, sma50].filter(Number.isFinite));
-  const localPivotHigh = recentHighs.length >= 3 ? Math.max(...recentHighs.slice(1, 3)) : null;
-  const localPivotLow = recentLows.length >= 3 ? Math.min(...recentLows.slice(1, 3)) : null;
-  const reclaimConfirmed = Number.isFinite(price)
-    && (
-      (Number.isFinite(reclaimArea) && price >= reclaimArea * 0.998)
-      || (Number.isFinite(localPivotHigh) && price >= localPivotHigh * 0.998)
-    );
-  const worseningHighs = recentHighs.length >= 3 && recentHighs[0] < recentHighs[1] && recentHighs[1] < recentHighs[2];
-  const worseningCloses = recentCloses.length >= 3 && recentCloses[0] < recentCloses[1] && recentCloses[1] < recentCloses[2];
-  const pullbackStoppedWorsening = (recentCloses.length >= 2 && recentCloses[0] >= recentCloses[1] * 0.995)
-    || (Number.isFinite(localPivotLow) && Number.isFinite(price) && price >= localPivotLow);
-  const strongStructureContext = structureState === 'intact' && trendState !== 'broken';
-  const supportiveVolume = safeChecks.volume || (Number.isFinite(volume) && Number.isFinite(avgVolume30d) && volume >= avgVolume30d * 0.95);
-  if(structureState !== 'broken' && (trendState === 'weak' || worseningHighs || worseningCloses || (Number.isFinite(perf1w) && perf1w < -2))){
-    structureState = 'weak';
-  }
-
-  let stabilisationState = 'none';
-  if((pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') && pullbackStoppedWorsening && !worseningCloses && !worseningHighs && reclaimConfirmed){
-    stabilisationState = 'clear';
-  }else if((pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') && (pullbackStoppedWorsening || safeChecks.stabilising || (Number.isFinite(perf1w) && perf1w > -1.5))){
-    stabilisationState = 'early';
-  }
-
-  let bounceState = 'none';
-  if(
-    strongStructureContext
-    && safeChecks.bounce
-    && reclaimConfirmed
-    && pullbackStoppedWorsening
-    && !worseningHighs
-    && stabilisationState === 'clear'
-    && supportiveVolume
-    && Number.isFinite(perf1w) && perf1w >= 2
-  ){
-    bounceState = 'confirmed';
-  }else if(
-    (safeChecks.bounce || stabilisationState === 'early' || (Number.isFinite(perf1w) && perf1w >= 0))
-    && !safeChecks.structureBroken
-  ){
-    bounceState = 'attempt';
-  }
-
-  let volumeState = 'normal';
-  if(safeChecks.volume && bounceState !== 'none'){
-    volumeState = 'supportive';
-  }else if(Number.isFinite(volume) && Number.isFinite(avgVolume30d) && avgVolume30d > 0){
-    if(volume >= avgVolume30d * 1.1 && bounceState !== 'none') volumeState = 'supportive';
-    else if(volume < avgVolume30d * 0.8) volumeState = 'weak';
-  }
-
-  return {
-    trend_state:trendState,
-    pullback_zone:pullbackZone,
-    structure_state:structureState,
-    stabilisation_state:stabilisationState,
-    bounce_state:bounceState,
-    volume_state:volumeState,
-    scan_type:scanType,
-    entry_defined:entryDefined ? 'yes' : 'no',
-    stop_defined:stopDefined ? 'yes' : 'no',
-    target_defined:targetDefined ? 'yes' : 'no'
-  };
+  return deriveSetupStatesFromModule(card, data, checks, tradePlan, {
+    numericOrNull,
+    buildScannerChecks,
+    mergeDerivedChecks,
+    resolveScanType,
+    currentRiskSettings,
+    evaluateRiskFit,
+    evaluateRewardRisk,
+    realisticFirstTarget
+  });
 }
 
 function buildAnalysisPayload(card){
