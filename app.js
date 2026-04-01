@@ -2877,6 +2877,8 @@ function watchlistLifecycleSnapshot(record){
   const volumeState = String(derivedStates.volumeState || '').toLowerCase();
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const stopPrice = numericOrNull(item.plan && item.plan.stop);
   const rrValue = numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
   const expiryTradingDays = item.watchlist.expiryAfterTradingDays || WATCHLIST_EXPIRY_TRADING_DAYS;
   const addedAt = item.watchlist.addedAt || todayIsoDate();
@@ -2893,10 +2895,23 @@ function watchlistLifecycleSnapshot(record){
   let nextExpiryAt = expiryAt;
   let expiryReason = '';
   let reason = 'Still progressing on the watchlist.';
-  const technicalDead = primaryState === 'dead'
-    || ['broken','weak'].includes(structureState)
-    || trendState === 'broken';
-  const planBlockedTerminal = avoidSubtype === 'terminal' && !technicalDead;
+  const technicalFailure = ['broken','weak'].includes(structureState)
+    || trendState === 'broken'
+    || !!(item.plan && item.plan.invalidatedState)
+    || !!(item.plan && item.plan.missedState)
+    || (Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice);
+  const technicalDead = technicalFailure
+    || (primaryState === 'dead' && technicalFailure);
+  const nonActionableButAlive = !technicalDead && (
+    avoidSubtype === 'terminal'
+    || qualityAdjustments.weakRegimePenalty
+    || planUiState.state === 'invalid'
+    || planUiState.state === 'unrealistic_rr'
+    || (Number.isFinite(rrValue) && rrValue < currentRrThreshold())
+    || displayedPlan.affordability === 'heavy_capital'
+    || displayedPlan.affordability === 'not_affordable'
+    || displayedPlan.tradeability === 'too_expensive'
+  );
 
   if(technicalDead){
     state = 'dead';
@@ -2905,17 +2920,21 @@ function watchlistLifecycleSnapshot(record){
     status = 'inactive';
     nextExpiryAt = '';
     reason = 'Setup failed technically and is no longer actionable.';
-  }else if(planBlockedTerminal){
+  }else if(nonActionableButAlive){
     state = primaryState === 'developing' ? 'developing' : 'monitor';
     bucket = ['confirmed','early','attempt'].includes(bounceState) ? 'developing' : 'waiting_confirmation';
     stage = 'watchlist';
     status = 'active';
     nextExpiryAt = activeExpiryAt;
-    reason = planUiState.state === 'invalid'
+    reason = qualityAdjustments.weakRegimePenalty
+      ? 'Weak market conditions are not supportive enough yet.'
+      : (planUiState.state === 'invalid'
       ? 'Plan invalid and needs rebuilding.'
       : ((planUiState.state === 'unrealistic_rr' || (Number.isFinite(rrValue) && rrValue < currentRrThreshold()))
         ? 'RR too weak to keep active as a trade plan.'
-        : 'Setup is alive structurally but not currently actionable.');
+        : ((displayedPlan.affordability === 'heavy_capital' || displayedPlan.affordability === 'not_affordable' || displayedPlan.tradeability === 'too_expensive')
+          ? 'Capital fit is too weak to keep this actionable right now.'
+          : 'Setup is alive structurally but not currently actionable.')));
   }else if(remainingTradingDays <= 0 && !hasMeaningfulImprovement){
     state = 'expired';
     bucket = 'inactive';
