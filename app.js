@@ -5637,6 +5637,7 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
     baseVerdictForRecord,
     isHostileMarketStatus,
     marketStatus:state.marketStatus,
+    currentMaxLoss,
     practicalSizeFlagForPlan,
     displayStageForRecord,
     structureLabelForRecord,
@@ -5658,6 +5659,7 @@ function deriveDisplaySetupScore(record, options = {}){
     numericOrNull,
     isHostileMarketStatus,
     marketStatus:state.marketStatus,
+    currentMaxLoss,
     practicalSizeFlagForPlan
   });
 }
