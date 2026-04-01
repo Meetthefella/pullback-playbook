@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
-const APP_VERSION = 'v4.4.0';
+const APP_VERSION = 'v4.4.1';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';

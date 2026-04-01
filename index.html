@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pullback Playbook v4.4.0</title>
+  <title>Pullback Playbook v4.4.1</title>
   <meta name="theme-color" content="#0f172a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="build-version" content="v4.4.0" />
+  <meta name="build-version" content="v4.4.1" />
   <link id="appManifest" rel="manifest" href="./manifest.webmanifest" />
   <link rel="stylesheet" href="./styles.css" />
   <script>
     (function(){
       var meta = document.querySelector('meta[name="build-version"]');
-      var buildVersion = (meta && meta.getAttribute('content')) || 'v4.4.0';
+      var buildVersion = (meta && meta.getAttribute('content')) || 'v4.4.1';
       window.__BUILD_VERSION__ = buildVersion;
       if(meta) meta.setAttribute('content', buildVersion);
       var manifest = document.getElementById('appManifest');
@@ -31,7 +31,7 @@
   <div class="card contextstrip">
     <div class="contextmain">
       <div class="contexttitle">
-        <h1>Pullback Playbook v4.4.0</h1>
+        <h1>Pullback Playbook v4.4.1</h1>
         <p>Scan, shortlist, review, decide, then track.</p>
       </div>
       <div class="contextmeta">
@@ -47,7 +47,7 @@
           <span class="pill">Account <strong id="accountStat">GBP 4,000</strong></span>
           <span class="pill">Max Risk <strong id="riskStat">GBP 40</strong></span>
           <span class="pill">Risk % <strong id="riskPctStat">1.0%</strong></span>
-          <span class="pill" id="appVersion">v4.4.0</span>
+          <span class="pill" id="appVersion">v4.4.1</span>
         </div>
       </div>
     </div>
@@ -267,10 +267,10 @@
     </details>
   </div>
 </div>
-<script src="./modules/core-utils.js"></script>
-<script src="./modules/planner-logic.js"></script>
-<script src="./modules/scanner-logic.js"></script>
-<script src="./modules/setup-resolver.js"></script>
-<script src="./app.js"></script>
+<script src="./modules/core-utils.js?v=4.4.1"></script>
+<script src="./modules/planner-logic.js?v=4.4.1"></script>
+<script src="./modules/scanner-logic.js?v=4.4.1"></script>
+<script src="./modules/setup-resolver.js?v=4.4.1"></script>
+<script src="./app.js?v=4.4.1"></script>
 </body>
 </html>
