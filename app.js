@@ -2725,9 +2725,20 @@ function normalizeWatchlistEntry(entry){
 
 function addToWatchlist(tickerData){
   const entry = normalizeWatchlistEntry(tickerData);
-  if(!entry) return null;
+  if(!entry) return {entry:null, record:null, added:false, updated:false, error:'invalid_ticker'};
   const record = upsertTickerRecord(entry.ticker);
-  mergeWatchlistIntoRecord(record, entry);
+  const wasInWatchlist = !!(record.watchlist && record.watchlist.inWatchlist);
+  const entryToPersist = wasInWatchlist
+    ? {
+      ...entry,
+      dateAdded:String(record.watchlist.addedAt || entry.dateAdded || todayIsoDate()).slice(0, 10),
+      expiryAfterTradingDays:Number.isFinite(Number(record.watchlist.expiryAfterTradingDays))
+        ? Math.max(1, Number(record.watchlist.expiryAfterTradingDays))
+        : entry.expiryAfterTradingDays
+    }
+    : entry;
+  mergeWatchlistIntoRecord(record, entryToPersist);
+  record.watchlist.updatedAt = new Date().toISOString();
   runWatchlistLifecycleEvaluation({
     source:'watchlist_add',
     tickers:[entry.ticker],
@@ -2739,7 +2750,13 @@ function addToWatchlist(tickerData){
   requeueTickerForToday(entry.ticker);
   renderWatchlist();
   renderFocusQueue();
-  return entry;
+  return {
+    entry:entryToPersist,
+    record,
+    added:!wasInWatchlist,
+    updated:wasInWatchlist,
+    error:''
+  };
 }
 
 function removeFromWatchlist(ticker){
@@ -9160,14 +9177,15 @@ function analyseActiveReviewTicker(){
 
 function addActiveReviewTickerToWatchlist(){
   const ticker = activeReviewTicker();
-  if(!ticker) return;
-  const liveRecord = upsertTickerRecord(ticker);
-  const emojiPresentation = resolveEmojiPresentation(liveRecord, {context:'review'});
-  const deadCheck = isTerminalDeadSetup(liveRecord);
-  if(deadCheck.dead || String(emojiPresentation.primaryState || '').toLowerCase() === 'dead'){
-    setStatus('inputStatus', `<span class="warntext">${escapeHtml(ticker)} is a terminal avoid and should not be tracked on the watchlist.</span>`);
+  if(!ticker){
+    setStatus('reviewWorkspaceStatus', '<span class="warntext">Select a ticker in the review workspace first.</span>');
     return;
   }
+  const liveRecord = upsertTickerRecord(ticker);
+  const reviewNotes = $('reviewNotes');
+  if(reviewNotes) liveRecord.review.notes = reviewNotes.value;
+  const reviewChecks = currentChecks();
+  if(reviewChecks && typeof reviewChecks === 'object') liveRecord.review.checks = cloneData(reviewChecks, {});
   const entry = addToWatchlist({
     ticker:liveRecord.ticker,
     dateAdded:todayIsoDate(),
@@ -9175,7 +9193,16 @@ function addActiveReviewTickerToWatchlist(){
     verdictWhenAdded:preferredVerdictForRecord(liveRecord),
     expiryAfterTradingDays:5
   });
-  if(entry) setStatus('inputStatus', `<span class="ok">${escapeHtml(ticker)} saved to the watchlist.</span>`);
+  renderReviewLifecycleSummary(ticker);
+  if(entry && entry.error){
+    setStatus('reviewWorkspaceStatus', `<span class="warntext">Could not add ${escapeHtml(ticker)} to the watchlist.</span>`);
+    return;
+  }
+  const statusMarkup = entry && entry.updated
+    ? `<span class="ok">${escapeHtml(ticker)} is already in the watchlist. Review metadata updated.</span>`
+    : `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`;
+  setStatus('reviewWorkspaceStatus', statusMarkup);
+  setStatus('inputStatus', statusMarkup);
 }
 
 function saveActiveReviewTickerTrade(){
@@ -9307,14 +9334,17 @@ function renderScannerResults(){
             watchlistBtn.onclick = event => {
               event.stopPropagation();
               const liveRecord = upsertTickerRecord(ticker);
-              addToWatchlist({
+              const result = addToWatchlist({
                 ticker:liveRecord.ticker,
                 dateAdded:todayIsoDate(),
                 scoreWhenAdded:preferredScoreForRecord(liveRecord),
                 verdictWhenAdded:preferredVerdictForRecord(liveRecord),
                 expiryAfterTradingDays:5
               });
-              setStatus('scannerSelectionStatus', `<span class="ok">${escapeHtml(ticker)} saved to the watchlist.</span>`);
+              const message = result && result.updated
+                ? `${escapeHtml(ticker)} is already in the watchlist. Review metadata updated.`
+                : `${escapeHtml(ticker)} saved to the watchlist.`;
+              setStatus('scannerSelectionStatus', `<span class="ok">${message}</span>`);
             };
           }
           node.onclick = event => {
@@ -9386,7 +9416,7 @@ function legacyRenderCardsFromCardList(){
       const liveRecord = upsertTickerRecord(record.ticker);
       const notesEl = $(`notes-${record.ticker}`);
       if(notesEl) liveRecord.review.notes = notesEl.value;
-      const entry = addToWatchlist({
+      const result = addToWatchlist({
         ticker:liveRecord.ticker,
         dateAdded:todayIsoDate(),
         scoreWhenAdded:preferredScoreForRecord(liveRecord),
@@ -9394,7 +9424,11 @@ function legacyRenderCardsFromCardList(){
         expiryAfterTradingDays:5
       });
       const statusBox = $(`cardStatus-${record.ticker}`);
-      if(statusBox && entry) statusBox.innerHTML = '<span class="ok">Ticker saved to the watchlist for 5 trading days.</span>';
+      if(statusBox && result && !result.error){
+        statusBox.innerHTML = result.updated
+          ? '<span class="ok">Ticker already in the watchlist. Review metadata updated.</span>'
+          : '<span class="ok">Ticker saved to the watchlist for 5 trading days.</span>';
+      }
     };
     const notesField = div.querySelector('[data-act="notes"]');
     notesField.addEventListener('input', event => {
