@@ -5612,6 +5612,8 @@ function evaluatePlanRealism(record, options = {}){
     normalizeAnalysisVerdict,
     getSetupUiState,
     actionableRrValueForPlan,
+    baseVerdictForRecord,
+    numericOrNull,
     isHostileMarketStatus,
     marketStatus:state.marketStatus
   });
@@ -5629,8 +5631,10 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
   return warningStateFromInputsFromModule(record, analysis, derivedStates, {
     analysisDerivedStates,
     tickerRecordToLegacyCard,
+    deriveCurrentPlanState,
     evaluateSetupQualityAdjustments,
     numericOrNull,
+    baseVerdictForRecord,
     isHostileMarketStatus,
     marketStatus:state.marketStatus,
     practicalSizeFlagForPlan,
@@ -5643,12 +5647,15 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
 function deriveDisplaySetupScore(record, options = {}){
   return deriveDisplaySetupScoreFromModule(record, options, {
     analysisDerivedStatesFromRecord,
+    deriveCurrentPlanState,
     warningStateFromInputs,
     rawSetupScoreForRecord,
     normalizeAnalysisVerdict,
     displayStageForRecord,
     evaluateSetupQualityAdjustments,
     isTrueHardFailForRecord,
+    baseVerdictForRecord,
+    numericOrNull,
     isHostileMarketStatus,
     marketStatus:state.marketStatus,
     practicalSizeFlagForPlan
