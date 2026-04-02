@@ -3199,7 +3199,15 @@ function appendWatchlistDebugEvent(record, event){
   };
   const trail = Array.isArray(record.watchlist.debug.auditTrail) ? record.watchlist.debug.auditTrail : [];
   const latest = trail[0];
-  if(latest && latest.source === nextEvent.source && latest.result === nextEvent.result) return;
+  const timestampDeltaMs = Math.abs(Date.parse(nextEvent.at) - Date.parse(String(latest && latest.at || '')));
+  const dedupeUnchanged = latest
+    && latest.source === nextEvent.source
+    && latest.result === nextEvent.result
+    && /^unchanged:/i.test(nextEvent.result)
+    && ['auto_recompute','manual_refresh'].includes(nextEvent.source)
+    && Number.isFinite(timestampDeltaMs)
+    && timestampDeltaMs < 60000;
+  if(dedupeUnchanged) return;
   record.watchlist.debug.auditTrail = [nextEvent, ...trail].slice(0, 5);
 }
 
@@ -6046,6 +6054,8 @@ function resolveFinalStateContract(record, options = {}){
     primaryLabel = 'Dead';
     badgeClass = 'avoid';
   }
+  const effectivePlanStatusKey = primaryState === 'dead' ? 'rebuild_required' : planUiState.state;
+  const effectivePlanStatusLabel = primaryState === 'dead' ? 'Rebuild required' : planStatusLabel;
 
   const reasonParts = [];
   const addReason = value => {
@@ -6205,8 +6215,8 @@ function resolveFinalStateContract(record, options = {}){
     modifiers:baseEmoji.modifiers || [],
     marketRegimeLabel:marketWeak ? 'Weak market' : 'Supportive',
     marketRegimeWeak:marketWeak,
-    planStatusLabel,
-    planStatusKey:planUiState.state,
+    planStatusLabel:effectivePlanStatusLabel,
+    planStatusKey:effectivePlanStatusKey,
     rrConfidenceLabel,
     tradeabilityLabel:finalVerdict || 'Watch',
     actionLabel,
