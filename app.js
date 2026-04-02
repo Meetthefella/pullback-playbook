@@ -2934,6 +2934,13 @@ function watchlistLifecycleSnapshot(record){
     status = 'inactive';
     nextExpiryAt = '';
     reason = resolved.blockerReason || 'Setup failed technically and is no longer actionable.';
+  }else if(primaryState === 'inactive'){
+    state = 'inactive';
+    bucket = 'inactive';
+    stage = 'avoided';
+    status = 'inactive';
+    nextExpiryAt = '';
+    reason = resolved.reasonSummary || resolved.blockerReason || 'Setup needs rebuilding before it can be reconsidered.';
   }else if(nonActionableButAlive){
     state = primaryState === 'developing' ? 'developing' : 'monitor';
     bucket = ['confirmed','early','attempt'].includes(bounceState) ? 'developing' : 'waiting_confirmation';
@@ -3238,7 +3245,7 @@ function watchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
     rrResolution,
     planUiState:context.planUiState
   });
-  if(['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || ''))){
+  if(['dead','expired','inactive'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || ''))){
     return {nextPossibleState:'None', mainBlocker:'Setup is no longer active'};
   }
   return {
@@ -4424,11 +4431,13 @@ function resolveScannerStateWithTrace(record, options = {}){
     addReason('filtered_default');
   }
 
+  const finalPrimaryState = String(emojiPresentation.primaryState || '').toLowerCase();
+  const invalidAvoidGuard = planValidation === 'invalid' && status === 'Avoid';
   const finalDisplayState = String(emojiPresentation.primaryLabel || 'Monitor');
-  const finalDisplayBucket = emojiPresentation.primaryState === 'dead'
+  const finalDisplayBucket = ['dead','inactive'].includes(finalPrimaryState)
     ? 'filtered'
-    : (['developing','monitor'].includes(String(emojiPresentation.primaryState || '').toLowerCase()) ? 'early' : bucket);
-  const remapReason = status === 'Avoid' && ['developing','monitor'].includes(String(emojiPresentation.primaryState || '').toLowerCase())
+    : (['developing','monitor'].includes(finalPrimaryState) ? 'early' : bucket);
+  const remapReason = !invalidAvoidGuard && status === 'Avoid' && ['developing','monitor'].includes(finalPrimaryState)
     ? 'weak but still technically alive'
     : '';
 
@@ -4441,7 +4450,7 @@ function resolveScannerStateWithTrace(record, options = {}){
   if(legacyStatus && legacyStatus !== status){
     warnings.push(`WARNING: status mismatch resolved. legacy=${legacyStatus}, resolved=${status}`);
   }
-  if(status === 'Avoid' && ['developing','monitor'].includes(String(emojiPresentation.primaryState || '').toLowerCase())){
+  if(!invalidAvoidGuard && status === 'Avoid' && ['developing','monitor'].includes(finalPrimaryState)){
     warnings.push(`INFO: raw Avoid softened to ${finalDisplayState} because the setup is still technically alive`);
   }
 
@@ -4490,7 +4499,7 @@ function getFinalClassification(view){
     warningState:view && view.warningState
   });
   const primaryState = String(presentation.primaryState || '').toLowerCase();
-  if(primaryState === 'dead') return 'filtered';
+  if(primaryState === 'dead' || primaryState === 'inactive') return 'filtered';
   if(primaryState === 'entry' || primaryState === 'near_entry') return 'tradeable';
   if(primaryState === 'monitor' || primaryState === 'developing') return 'early';
   return resolved.bucket;
@@ -6054,8 +6063,17 @@ function resolveFinalStateContract(record, options = {}){
     primaryLabel = 'Dead';
     badgeClass = 'avoid';
   }
-  const effectivePlanStatusKey = primaryState === 'dead' ? 'rebuild_required' : planUiState.state;
-  const effectivePlanStatusLabel = primaryState === 'dead' ? 'Rebuild required' : planStatusLabel;
+  const invalidAvoidGuard = !hardStructureBroken
+    && (planUiState.state === 'invalid' || planUiState.state === 'missing')
+    && (tradeability === 'avoid' || finalVerdict === 'Avoid' || String(rrResolution.rawResolverVerdict || '').toLowerCase() === 'avoid');
+  if(invalidAvoidGuard && primaryState !== 'inactive'){
+    primaryState = 'inactive';
+    primaryEmoji = '⛔';
+    primaryLabel = 'Needs rebuild';
+    badgeClass = 'avoid';
+  }
+  const effectivePlanStatusKey = ['dead','inactive'].includes(primaryState) ? 'rebuild_required' : planUiState.state;
+  const effectivePlanStatusLabel = ['dead','inactive'].includes(primaryState) ? 'Rebuild required' : planStatusLabel;
 
   const reasonParts = [];
   const addReason = value => {
@@ -6067,7 +6085,7 @@ function resolveFinalStateContract(record, options = {}){
   let actionLabel = 'Monitor for confirmation';
   let actionShortLabel = 'Monitor for confirmation';
   let actionTone = 'watch';
-  let nextPossibleState = primaryState === 'entry' ? '🚀 Entry' : '🧐 Monitor';
+  let nextPossibleState = primaryState === 'entry' ? '🚀 Entry' : '🧰 Rebuild';
   let remapReason = rrResolution.remapReason || '';
 
   if(hardStructureBroken){
@@ -6100,7 +6118,7 @@ function resolveFinalStateContract(record, options = {}){
     actionLabel = 'Rebuild plan before considering entry';
     actionShortLabel = actionLabel;
     actionTone = 'warning';
-    nextPossibleState = '🧐 Monitor';
+    nextPossibleState = invalidAvoidGuard ? '🧰 Rebuild' : '🧐 Monitor';
     addReason(blockerReason);
   }else if(planMissing){
     blockerCode = 'plan_missing';
@@ -6108,7 +6126,7 @@ function resolveFinalStateContract(record, options = {}){
     actionLabel = 'Build a trade plan before considering entry';
     actionShortLabel = actionLabel;
     actionTone = 'warning';
-    nextPossibleState = '🧐 Monitor';
+    nextPossibleState = invalidAvoidGuard ? '🧰 Rebuild' : '🧐 Monitor';
     addReason(blockerReason);
   }else if(riskTooWide){
     blockerCode = 'risk_too_wide';
@@ -6199,9 +6217,13 @@ function resolveFinalStateContract(record, options = {}){
   if(rrConfidenceLabel === 'Low confidence' && !planInvalid && !planUnrealistic) addReason('Low-confidence RR');
 
   const reasonSummary = reasonParts.slice(0, 2).join(' + ');
-  const nonActionableButAlive = !hardStructureBroken && ['plan_invalid','plan_missing','risk_too_wide','capital_blocked','rr_unrealistic','plan_adjustment','bounce_not_confirmed','weak_volume','weak_market','weak_control'].includes(blockerCode);
+  const nonActionableButAlive = !hardStructureBroken
+    && !invalidAvoidGuard
+    && ['plan_invalid','plan_missing','risk_too_wide','capital_blocked','rr_unrealistic','plan_adjustment','bounce_not_confirmed','weak_volume','weak_market','weak_control'].includes(blockerCode);
 
-  if(!remapReason && rrResolution.rawResolverVerdict === 'Avoid' && ['developing','monitor'].includes(primaryState)){
+  if(invalidAvoidGuard || primaryState === 'inactive'){
+    remapReason = '';
+  }else if(!remapReason && rrResolution.rawResolverVerdict === 'Avoid' && ['developing','monitor'].includes(primaryState)){
     remapReason = hardStructureBroken ? '' : 'weak but still technically alive';
   }
 
@@ -6218,7 +6240,7 @@ function resolveFinalStateContract(record, options = {}){
     planStatusLabel:effectivePlanStatusLabel,
     planStatusKey:effectivePlanStatusKey,
     rrConfidenceLabel,
-    tradeabilityLabel:finalVerdict || 'Watch',
+    tradeabilityLabel:primaryState === 'inactive' ? 'Avoid' : (finalVerdict || 'Watch'),
     actionLabel,
     actionShortLabel,
     actionTone,
@@ -6764,6 +6786,10 @@ function resolveEmojiPresentation(record, options = {}){
   );
   const weakVolumePresent = volumeState === 'weak'
     || warningReasons.some(reason => /weak volume/i.test(String(reason || '')));
+  const tradeability = String(displayedPlan.tradeability || '').toLowerCase();
+  const invalidAvoidGuard = !deadCheck.dead
+    && (planUiState.state === 'invalid' || planUiState.state === 'missing')
+    && (tradeability === 'avoid' || finalVerdict === 'Avoid');
   const hasReviewState = !!(
     hasAiStageForRecord(item)
     || String(item.review && item.review.savedVerdict || '').trim()
@@ -6790,6 +6816,11 @@ function resolveEmojiPresentation(record, options = {}){
     primaryState = 'dead';
     primaryEmoji = '💀';
     primaryLabel = 'Dead';
+    badgeClass = 'avoid';
+  }else if(invalidAvoidGuard){
+    primaryState = 'inactive';
+    primaryEmoji = '⛔';
+    primaryLabel = 'Needs rebuild';
     badgeClass = 'avoid';
   }else if(finalVerdict === 'Avoid'){
     const structureState = String(derivedStates.structureState || '').toLowerCase();
