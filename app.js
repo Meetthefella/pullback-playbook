@@ -168,13 +168,13 @@ const PullbackCoreLeaf = window.PullbackCoreLeaf || {
     return entries;
   },
   parseTickersDetailed(text){
-    const rawItems = this.parseImportedTickerEntries(text).map(item => item.ticker).filter(Boolean);
+    const rawItems = PullbackCoreLeaf.parseImportedTickerEntries(text).map(item => item.ticker).filter(Boolean);
     const valid = [];
     const invalid = [];
     const duplicates = [];
     const seen = new Set();
     rawItems.forEach(item => {
-      if(!this.validateTickerSymbol(item)){
+      if(!PullbackCoreLeaf.validateTickerSymbol(item)){
         invalid.push(item);
         return;
       }
@@ -188,14 +188,14 @@ const PullbackCoreLeaf = window.PullbackCoreLeaf || {
     return {valid, invalid, duplicates};
   },
   parseTickers(text){
-    return this.parseTickersDetailed(text).valid;
+    return PullbackCoreLeaf.parseTickersDetailed(text).valid;
   },
   uniqueTickers(values){
     const out = [];
     const seen = new Set();
     (values || []).forEach(value => {
-      const ticker = this.normalizeTicker(value);
-      if(!ticker || seen.has(ticker) || !this.validateTickerSymbol(ticker)) return;
+      const ticker = PullbackCoreLeaf.normalizeTicker(value);
+      if(!ticker || seen.has(ticker) || !PullbackCoreLeaf.validateTickerSymbol(ticker)) return;
       seen.add(ticker);
       out.push(ticker);
     });
@@ -210,7 +210,7 @@ const PullbackCoreLeaf = window.PullbackCoreLeaf || {
   scoreRange(value, min, max, points){
     if(!Number.isFinite(value)) return 0;
     if(max <= min) return 0;
-    return this.clamp(((value - min) / (max - min)) * points, 0, points);
+    return PullbackCoreLeaf.clamp(((value - min) / (max - min)) * points, 0, points);
   },
   normalizeImportedStatus(value, options = {}){
     const v = String(value || '').trim().toLowerCase();
