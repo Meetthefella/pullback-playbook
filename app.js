@@ -118,6 +118,22 @@ const ALERT_PRIORITY = {
 const APP_FETCH_TIMEOUT_MS = 12000;
 const BACKEND_REVIEW_POLL_MS = 10 * 60 * 1000;
 const MARKET_CACHE_SCHEMA_VERSION = 3;
+const {
+  numericOrNull,
+  safeJsonParse,
+  escapeHtml,
+  validateTickerSymbol,
+  normalizeTicker,
+  normalizeScanType,
+  parseImportedTickerEntries,
+  parseTickersDetailed,
+  parseTickers,
+  uniqueTickers,
+  fmtPrice,
+  clamp,
+  scoreRange,
+  normalizeImportedStatus
+} = window.PullbackCoreLeaf;
 const SCAN_BATCH_SIZE = 4;
 const TESSERACT_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
 const OCR_STOPWORDS = new Set(['OPEN','HIGH','LOW','CLOSE','VOLUME','VOL','CHANGE','PRICE','PERCENT','PCT','CHG','DATE','TIME','WATCH','LIST','SCREEN','SCREENER','TRADINGVIEW','SYMBOL','STOCK','STOCKS','NAME','LAST','USD','USDT','BUY','SELL','LONG','SHORT','NYSE','NASDAQ','AMEX','LSE','TOTAL','AVG','RSI','SMA','EMA']);
@@ -320,21 +336,6 @@ function evaluateRewardRisk(entry, stop, firstTarget){
   if(rrRatio >= 2) return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'strong'};
   if(rrRatio >= 1.5) return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'acceptable'};
   return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'weak'};
-}
-
-function numericOrNull(value){
-  if(value === null || value === undefined || value === '') return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function safeJsonParse(value, fallback){
-  try{
-    const parsed = JSON.parse(value);
-    return parsed == null ? fallback : parsed;
-  }catch(error){
-    return fallback;
-  }
 }
 
 function safeStorageGet(storageKey, fallback){
@@ -624,73 +625,8 @@ function bootstrapBackgroundMonitoring(){
   }, BACKEND_REVIEW_POLL_MS);
 }
 
-function escapeHtml(value){
-  return String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-}
-
-function validateTickerSymbol(value){
-  return /^[A-Z][A-Z0-9.-]{0,9}$/.test(String(value || '').trim().toUpperCase());
-}
-
-function normalizeTicker(value){
-  return String(value || '').trim().toUpperCase();
-}
-
-function normalizeScanType(value){
-  const text = String(value || '').trim().toUpperCase();
-  if(text === '20MA' || text === '50MA') return text;
-  return '';
-}
-
 function selectedQuickScanType(){
   return normalizeScanType($('scannerSetupType') && $('scannerSetupType').value);
-}
-
-function parseImportedTickerEntries(text){
-  const rawText = String(text || '').trim();
-  if(!rawText) return [];
-  const entries = [];
-  rawText.split(/\n+/).map(line => line.trim()).filter(Boolean).forEach(line => {
-    const explicit = line.match(/^([A-Z][A-Z0-9.-]{0,9})\s*(?:\||,|:|\s)\s*(20MA|50MA)$/i);
-    if(explicit){
-      entries.push({ticker:normalizeTicker(explicit[1]), scanType:normalizeScanType(explicit[2])});
-      return;
-    }
-    line.split(/[\s,]+/).map(token => token.trim()).filter(Boolean).forEach(token => {
-      const pair = token.match(/^([A-Z][A-Z0-9.-]{0,9})[:|](20MA|50MA)$/i);
-      if(pair){
-        entries.push({ticker:normalizeTicker(pair[1]), scanType:normalizeScanType(pair[2])});
-        return;
-      }
-      entries.push({ticker:normalizeTicker(token), scanType:''});
-    });
-  });
-  return entries;
-}
-
-function parseTickersDetailed(text){
-  const rawItems = parseImportedTickerEntries(text).map(item => item.ticker).filter(Boolean);
-  const valid = [];
-  const invalid = [];
-  const duplicates = [];
-  const seen = new Set();
-  rawItems.forEach(item => {
-    if(!validateTickerSymbol(item)){
-      invalid.push(item);
-      return;
-    }
-    if(seen.has(item)){
-      duplicates.push(item);
-      return;
-    }
-    seen.add(item);
-    valid.push(item);
-  });
-  return {valid, invalid, duplicates};
-}
-
-function parseTickers(text){
-  return parseTickersDetailed(text).valid;
 }
 
 function renderTickerListWithScanTypes(tickers){
@@ -699,18 +635,6 @@ function renderTickerListWithScanTypes(tickers){
     const scanType = normalizeScanType(meta && meta.scanType);
     return scanType ? `${ticker} | ${scanType}` : ticker;
   }).join('\n');
-}
-
-function uniqueTickers(values){
-  const out = [];
-  const seen = new Set();
-  (values || []).forEach(value => {
-    const ticker = normalizeTicker(value);
-    if(!ticker || seen.has(ticker) || !validateTickerSymbol(ticker)) return;
-    seen.add(ticker);
-    out.push(ticker);
-  });
-  return out;
 }
 
 function syncUniverseFromInputs(preferExisting = false){
@@ -7791,10 +7715,6 @@ function nextActionTextForRecord(record){
   return 'Monitor';
 }
 
-function fmtPrice(value){
-  return Number.isFinite(value) ? Number(value).toFixed(2) : '-';
-}
-
 function sleep(ms){
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -8364,16 +8284,6 @@ function hardListFromScan(scan){
     ? scan.breakdown.filter(item => item && item.passed === false).map(item => String(item.label || '')).filter(Boolean)
     : [];
   return failed;
-}
-
-function clamp(value, min, max){
-  return Math.max(min, Math.min(max, value));
-}
-
-function scoreRange(value, min, max, points){
-  if(!Number.isFinite(value)) return 0;
-  if(max <= min) return 0;
-  return clamp(((value - min) / (max - min)) * points, 0, points);
 }
 
 function priorHighTarget(data, scanType){
@@ -9536,17 +9446,6 @@ function buildAnalysisPayload(card){
 function buildTickerPrompt(card){
   const payload = buildAnalysisPayload(card);
   return buildPromptBody(payload).join('\n');
-}
-
-function normalizeImportedStatus(value, options = {}){
-  const v = String(value || '').trim().toLowerCase();
-  if(!v) return options.preserveEmpty ? '' : 'Watch';
-  if(v === 'ready') return 'Ready';
-  if(v === 'entry') return 'Entry';
-  if(v === 'near pullback' || v === 'near setup') return 'Near Setup';
-  if(v === 'near entry') return 'Near Entry';
-  if(v === 'avoid') return 'Avoid';
-  return 'Watch';
 }
 
 function normalizeAnalysisVerdict(value){
