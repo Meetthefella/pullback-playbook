@@ -298,6 +298,25 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   opacity:.85;
   background:linear-gradient(180deg, rgba(36,24,28,.86), rgba(20,28,38,.85));
 }
+.result-feed-card.card-dead,
+.watchlist-card.card-dead{
+  border-left:4px solid #ef4444;
+}
+.result-feed-card.card-dead{
+  background:linear-gradient(
+    to top,
+    rgba(239, 68, 68, 0.08),
+    rgba(239, 68, 68, 0.02)
+  );
+}
+.watchlist-card.card-dead{
+  background:linear-gradient(
+    to top,
+    rgba(239, 68, 68, 0.08),
+    rgba(239, 68, 68, 0.02)
+  );
+  opacity:.9;
+}
 .resultcompact .resulthead{grid-template-columns:minmax(72px,max-content) minmax(0,1fr) auto auto}
 .resultcompact .ticker,
 .result .ticker{
