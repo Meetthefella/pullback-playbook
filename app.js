@@ -4681,9 +4681,12 @@ function rankedDecisionBucketForView(view){
   });
   const primaryState = String(presentation.primaryState || '').toLowerCase();
   const fallbackVerdict = normalizeAnalysisVerdict(view && (view.displayStage || view.finalVerdict || (view.scannerResolution && view.scannerResolution.status) || ''));
+  const planState = String(view && view.planUiState && view.planUiState.state || '').toLowerCase();
 
   if(primaryState === 'entry') return 'tradeable_entry';
-  if(['near_entry','monitor','developing'].includes(primaryState)) return 'near_entry_monitor';
+  if(planState === 'invalid' || planState === 'unrealistic_rr') return 'lower_priority';
+  if(primaryState === 'near_entry' || fallbackVerdict === 'Near Entry') return 'near_entry_monitor';
+  if(primaryState === 'monitor' || primaryState === 'developing' || fallbackVerdict === 'Watch') return 'near_entry_monitor';
   if(primaryState === 'dead' || primaryState === 'inactive') return 'lower_priority';
   if(fallbackVerdict === 'Entry') return 'tradeable_entry';
   if(['Near Entry','Watch','Avoid'].includes(fallbackVerdict)) return 'lower_priority';
@@ -4871,21 +4874,16 @@ function rrReliabilityClass(rrReliability){
 function renderCompactResultCardFromView(view){
   const item = view.item;
   const statusChip = primaryShortlistStatusChip(view);
-  const modifiersMarkup = emojiModifierMarkup(statusChip);
   const sourceVerdict = reviewVerdictOverrideFromView(view);
   const scoreLabel = view.setupScoreDisplay;
-  const filteredCard = view.bucket === 'filtered' || view.finalClassification === 'filtered';
   const resolution = view.scannerResolution || {};
   const tone = scanCardToneForView(view);
   const intensity = scanCardIntensityForView(view);
   const toneClass = `result-card--${tone}`;
   const intensityClass = `result-card--intensity-${intensity}`;
-  const rrLine = Number.isFinite(resolution.rr_value)
-    ? `RR ${Number(resolution.rr_value).toFixed(1)} (${resolution.rr_label || 'n/a'})`
-    : '';
-  const rrClass = rrReliabilityClass(resolution.rr_reliability);
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
-  const reasonLine = compactReasonLineForView(view, 3);
+  const reasonLine = compactReasonLineForView(view, 1);
+  const modifiersMarkup = emojiModifierMarkup(statusChip);
   const detailMeta = [
     companyLine,
     Number.isFinite(item.marketData.price) ? `Price ${fmtPrice(Number(item.marketData.price))}` : '',
@@ -4894,10 +4892,11 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
     Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
     item.setup.marketCaution ? 'Weak market' : '',
-    rrLine ? `${rrLine} | ${resolution.rr_reliability || 'n/a'}` : ''
+    view.planUiState && view.planUiState.label ? `Plan ${view.planUiState.label}` : '',
+    Number.isFinite(resolution.rr_value) ? `RR ${Number(resolution.rr_value).toFixed(1)} (${resolution.rr_label || 'n/a'})` : ''
   ].filter(Boolean).join(' | ');
   const traceMarkup = renderScannerDecisionTrace(view);
-  return `<div class="resultcompact result-card ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:6px">${modifiersMarkup}</div>` : ''}${rrLine ? `<div class="tiny"><span class="badge ${rrClass}">${escapeHtml(rrLine)}</span></div>` : ''}</div><div class="resultactionsbar"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div></details>${traceMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar result-feed-card__actions"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}</details>${traceMarkup}</div>`;
 }
 
 function compactReasonLineForView(view, maxParts = 3){
@@ -10550,7 +10549,7 @@ function renderScannerResults(){
       key:'tradeable-entry',
       title:'Tradeable / Entry',
       summary: tradeable.length
-        ? `${tradeable.length} higher-priority setup${tradeable.length === 1 ? '' : 's'} ready for immediate review.`
+        ? `${tradeable.length} setup${tradeable.length === 1 ? '' : 's'} currently looks entry-ready from the existing scanner verdict.`
         : 'No tradeable or entry-ready setups right now.',
       items:tradeable,
       collapsed:false,
@@ -10560,7 +10559,7 @@ function renderScannerResults(){
       key:'near-entry-monitor',
       title:'Near Entry / Monitor',
       summary: nearEntryMonitor.length
-        ? `${nearEntryMonitor.length} setup${nearEntryMonitor.length === 1 ? '' : 's'} still worth monitoring for better timing.`
+        ? `${nearEntryMonitor.length} setup${nearEntryMonitor.length === 1 ? '' : 's'} still needs timing, confirmation, or review.`
         : 'No near-entry or monitor setups right now.',
       items:nearEntryMonitor,
       collapsed:false,
@@ -10570,7 +10569,7 @@ function renderScannerResults(){
       key:'lower-priority',
       title:'Watch / Avoid / Lower Priority',
       summary: lowerPriority.length
-        ? `${lowerPriority.length} lower-priority setup${lowerPriority.length === 1 ? '' : 's'} still visible for context and manual review.`
+        ? `${lowerPriority.length} setup${lowerPriority.length === 1 ? '' : 's'} currently sits in avoid, invalid-plan, or lower-priority territory.`
         : 'No lower-priority setups right now.',
       items:lowerPriority,
       collapsed:false,
