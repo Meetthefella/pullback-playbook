@@ -3520,8 +3520,8 @@ function renderWatchlist(){
         resolvedContract
       });
       const div = document.createElement('div');
-      div.className = 'resultcompact watchlist-card';
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge ${watchlistBadgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save</button><button class="danger" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.className = `resultcompact watchlist-card ${escapeHtml(matteStateClassForPrimaryState(watchlistPresentation.primaryState))}`;
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${watchlistBadgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save</button><button class="danger" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -4796,6 +4796,14 @@ function primaryShortlistStatusChip(view){
   };
 }
 
+function matteStateClassForPrimaryState(primaryState){
+  const state = String(primaryState || '').toLowerCase();
+  if(state === 'entry') return 'state-ready';
+  if(state === 'near_entry' || state === 'developing') return 'state-developing';
+  if(state === 'dead' || state === 'inactive') return 'state-dead';
+  return 'state-waiting';
+}
+
 function reviewVerdictOverrideFromView(view){
   return normalizeAnalysisVerdict(view && (view.displayStage || view.finalVerdict || (view.item && displayStageForRecord(view.item))) || '');
 }
@@ -4881,8 +4889,9 @@ function renderCompactResultCardFromView(view){
   const intensity = scanCardIntensityForView(view);
   const toneClass = `result-card--${tone}`;
   const intensityClass = `result-card--intensity-${intensity}`;
+  const matteStateClass = matteStateClassForPrimaryState(statusChip.primaryState);
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
-  const reasonLine = compactReasonLineForView(view, 1);
+  const reasonLine = scanDecisionSummaryLineForView(view);
   const modifiersMarkup = emojiModifierMarkup(statusChip);
   const detailMeta = [
     companyLine,
@@ -4896,7 +4905,35 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(resolution.rr_value) ? `RR ${Number(resolution.rr_value).toFixed(1)} (${resolution.rr_label || 'n/a'})` : ''
   ].filter(Boolean).join(' | ');
   const traceMarkup = renderScannerDecisionTrace(view);
-  return `<div class="resultcompact result-card result-feed-card ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar result-feed-card__actions"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}</details>${traceMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card ${escapeHtml(matteStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(reasonLine)}</div></div><div class="resultactionsbar result-feed-card__actions"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}</details>${traceMarkup}</div>`;
+}
+
+function scanDecisionSummaryLineForView(view){
+  const item = view.item;
+  const derived = view.setupStates || analysisDerivedStatesFromRecord(item);
+  const structureBadge = shortlistStructureBadgeForView(view);
+  const parts = [];
+  const pushPart = value => {
+    const text = String(value || '').trim();
+    if(text && !parts.includes(text) && parts.length < 2) parts.push(text);
+  };
+  if(structureBadge && structureBadge.label){
+    pushPart(`${structureBadge.label} structure`);
+  }else if(String(derived.trendState || '').toLowerCase() === 'strong'){
+    pushPart('Strong structure');
+  }else{
+    pushPart('Developing structure');
+  }
+  if(item.setup.marketCaution){
+    pushPart('Weak market');
+  }else if(String(derived.bounceState || '').toLowerCase() === 'confirmed'){
+    pushPart('Bounce confirmed');
+  }else if(String(derived.bounceState || '').toLowerCase() === 'attempt'){
+    pushPart('Bounce tentative');
+  }else if(String(derived.bounceState || '').toLowerCase() === 'none'){
+    pushPart('No bounce');
+  }
+  return parts.join(' | ');
 }
 
 function compactReasonLineForView(view, maxParts = 3){
