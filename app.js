@@ -118,6 +118,111 @@ const ALERT_PRIORITY = {
 const APP_FETCH_TIMEOUT_MS = 12000;
 const BACKEND_REVIEW_POLL_MS = 10 * 60 * 1000;
 const MARKET_CACHE_SCHEMA_VERSION = 3;
+const PullbackCoreLeaf = window.PullbackCoreLeaf || {
+  numericOrNull(value){
+    if(value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  },
+  safeJsonParse(value, fallback){
+    try{
+      const parsed = JSON.parse(value);
+      return parsed == null ? fallback : parsed;
+    }catch(error){
+      return fallback;
+    }
+  },
+  escapeHtml(value){
+    return String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  },
+  validateTickerSymbol(value){
+    return /^[A-Z][A-Z0-9.-]{0,9}$/.test(String(value || '').trim().toUpperCase());
+  },
+  normalizeTicker(value){
+    return String(value || '').trim().toUpperCase();
+  },
+  normalizeScanType(value){
+    const text = String(value || '').trim().toUpperCase();
+    if(text === '20MA' || text === '50MA') return text;
+    return '';
+  },
+  parseImportedTickerEntries(text){
+    const rawText = String(text || '').trim();
+    if(!rawText) return [];
+    const entries = [];
+    rawText.split(/\n+/).map(line => line.trim()).filter(Boolean).forEach(line => {
+      const explicit = line.match(/^([A-Z][A-Z0-9.-]{0,9})\s*(?:\||,|:|\s)\s*(20MA|50MA)$/i);
+      if(explicit){
+        entries.push({ticker:String(explicit[1] || '').trim().toUpperCase(), scanType:String(explicit[2] || '').trim().toUpperCase()});
+        return;
+      }
+      line.split(/[\s,]+/).map(token => token.trim()).filter(Boolean).forEach(token => {
+        const pair = token.match(/^([A-Z][A-Z0-9.-]{0,9})[:|](20MA|50MA)$/i);
+        if(pair){
+          entries.push({ticker:String(pair[1] || '').trim().toUpperCase(), scanType:String(pair[2] || '').trim().toUpperCase()});
+          return;
+        }
+        entries.push({ticker:String(token || '').trim().toUpperCase(), scanType:''});
+      });
+    });
+    return entries;
+  },
+  parseTickersDetailed(text){
+    const rawItems = this.parseImportedTickerEntries(text).map(item => item.ticker).filter(Boolean);
+    const valid = [];
+    const invalid = [];
+    const duplicates = [];
+    const seen = new Set();
+    rawItems.forEach(item => {
+      if(!this.validateTickerSymbol(item)){
+        invalid.push(item);
+        return;
+      }
+      if(seen.has(item)){
+        duplicates.push(item);
+        return;
+      }
+      seen.add(item);
+      valid.push(item);
+    });
+    return {valid, invalid, duplicates};
+  },
+  parseTickers(text){
+    return this.parseTickersDetailed(text).valid;
+  },
+  uniqueTickers(values){
+    const out = [];
+    const seen = new Set();
+    (values || []).forEach(value => {
+      const ticker = this.normalizeTicker(value);
+      if(!ticker || seen.has(ticker) || !this.validateTickerSymbol(ticker)) return;
+      seen.add(ticker);
+      out.push(ticker);
+    });
+    return out;
+  },
+  fmtPrice(value){
+    return Number.isFinite(value) ? Number(value).toFixed(2) : '-';
+  },
+  clamp(value, min, max){
+    return Math.max(min, Math.min(max, value));
+  },
+  scoreRange(value, min, max, points){
+    if(!Number.isFinite(value)) return 0;
+    if(max <= min) return 0;
+    return this.clamp(((value - min) / (max - min)) * points, 0, points);
+  },
+  normalizeImportedStatus(value, options = {}){
+    const v = String(value || '').trim().toLowerCase();
+    if(!v) return options.preserveEmpty ? '' : 'Watch';
+    if(v === 'ready') return 'Ready';
+    if(v === 'entry') return 'Entry';
+    if(v === 'near pullback' || v === 'near setup') return 'Near Setup';
+    if(v === 'near entry') return 'Near Entry';
+    if(v === 'avoid') return 'Avoid';
+    return 'Watch';
+  }
+};
 const {
   numericOrNull,
   safeJsonParse,
@@ -133,7 +238,7 @@ const {
   clamp,
   scoreRange,
   normalizeImportedStatus
-} = window.PullbackCoreLeaf;
+} = PullbackCoreLeaf;
 const SCAN_BATCH_SIZE = 4;
 const TESSERACT_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
 const OCR_STOPWORDS = new Set(['OPEN','HIGH','LOW','CLOSE','VOLUME','VOL','CHANGE','PRICE','PERCENT','PCT','CHG','DATE','TIME','WATCH','LIST','SCREEN','SCREENER','TRADINGVIEW','SYMBOL','STOCK','STOCKS','NAME','LAST','USD','USDT','BUY','SELL','LONG','SHORT','NYSE','NASDAQ','AMEX','LSE','TOTAL','AVG','RSI','SMA','EMA']);
