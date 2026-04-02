@@ -3520,8 +3520,21 @@ function renderWatchlist(){
         resolvedContract
       });
       const div = document.createElement('div');
-      const isDeadCard = ['dead','expired_dead'].includes(String(lifecycleSnapshot.state || watchlistPresentation.primaryState || '').toLowerCase())
-        || String(watchlistPresentation.primaryState || '').toLowerCase() === 'inactive';
+      const failedStates = ['dead','expired_dead','needs_rebuild','invalid_plan'];
+      const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
+      const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
+      const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
+      const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
+      console.log('STATE DEBUG:', {
+        ticker: entry.ticker,
+        state: watchlistState || primaryState || finalDisplayState || '(none)',
+        watchlist_lifecycle_state: watchlistState || '(none)'
+      });
+      const isDeadCard = failedStates.includes(watchlistState)
+        || failedStates.includes(primaryState)
+        || failedStates.includes(finalDisplayState)
+        || failedStates.includes(planState)
+        || primaryState === 'inactive';
       div.className = `resultcompact watchlist-card ${escapeHtml(matteStateClassForPrimaryState(watchlistPresentation.primaryState))} ${isDeadCard ? 'card-dead' : ''}`.trim();
       div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${watchlistBadgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save</button><button class="danger" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
