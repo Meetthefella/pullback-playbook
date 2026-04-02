@@ -4669,6 +4669,27 @@ function buildRankedBucketsFromViews(views){
   return buckets;
 }
 
+function rankedDecisionBucketForView(view){
+  const item = view && view.item ? view.item : view;
+  const presentation = resolveEmojiPresentation(item, {
+    context:'scanner',
+    finalVerdict:view && (view.displayStage || view.finalVerdict),
+    setupUiState:view && view.setupUiState,
+    displayedPlan:view && view.displayedPlan,
+    derivedStates:view && view.setupStates,
+    warningState:view && view.warningState
+  });
+  const primaryState = String(presentation.primaryState || '').toLowerCase();
+  const fallbackVerdict = normalizeAnalysisVerdict(view && (view.displayStage || view.finalVerdict || (view.scannerResolution && view.scannerResolution.status) || ''));
+
+  if(primaryState === 'entry') return 'tradeable_entry';
+  if(['near_entry','monitor','developing'].includes(primaryState)) return 'near_entry_monitor';
+  if(primaryState === 'dead' || primaryState === 'inactive') return 'lower_priority';
+  if(fallbackVerdict === 'Entry') return 'tradeable_entry';
+  if(['Near Entry','Watch','Avoid'].includes(fallbackVerdict)) return 'lower_priority';
+  return 'lower_priority';
+}
+
 function resultReasonForRecord(record){
   const view = projectTickerForCard(record);
   return resultReasonForView(view);
@@ -10514,47 +10535,56 @@ function renderScannerResults(){
     renderWorkflowAlerts();
     return;
   }
-  const buckets = buildRankedBucketsFromViews(finalViews);
-  const tradeable = buckets.focus;
-  const early = buckets.tradeableSecondary;
-  const filtered = buckets.filtered;
+  const grouped = {tradeableEntry:[], nearEntryMonitor:[], lowerPriority:[]};
+  finalViews.forEach(view => {
+    const bucket = rankedDecisionBucketForView(view);
+    if(bucket === 'tradeable_entry') grouped.tradeableEntry.push(view);
+    else if(bucket === 'near_entry_monitor') grouped.nearEntryMonitor.push(view);
+    else grouped.lowerPriority.push(view);
+  });
+  const tradeable = grouped.tradeableEntry;
+  const nearEntryMonitor = grouped.nearEntryMonitor;
+  const lowerPriority = grouped.lowerPriority;
   const sections = [
     {
-      title:'Tradeable',
+      key:'tradeable-entry',
+      title:'Tradeable / Entry',
       summary: tradeable.length
-        ? `${tradeable.length} high-quality setup${tradeable.length === 1 ? '' : 's'} ready for review now.`
-        : 'No high-quality tradeable setups right now.',
+        ? `${tradeable.length} higher-priority setup${tradeable.length === 1 ? '' : 's'} ready for immediate review.`
+        : 'No tradeable or entry-ready setups right now.',
       items:tradeable,
       collapsed:false,
-      empty:'No tradeable setups right now. Try refreshing the scanner or reviewing the watchlist.'
+      empty:'No tradeable or entry-ready setups right now. Try refreshing the scanner or reviewing the watchlist.'
     },
     {
-      title:'Early / Monitor',
-      summary: early.length
-        ? `${early.length} early setup${early.length === 1 ? '' : 's'} worth monitoring.`
-        : 'No early setups right now.',
-      items:early,
+      key:'near-entry-monitor',
+      title:'Near Entry / Monitor',
+      summary: nearEntryMonitor.length
+        ? `${nearEntryMonitor.length} setup${nearEntryMonitor.length === 1 ? '' : 's'} still worth monitoring for better timing.`
+        : 'No near-entry or monitor setups right now.',
+      items:nearEntryMonitor,
       collapsed:false,
-      empty:'No early setups.'
+      empty:'No near-entry or monitor setups right now.'
     },
     {
-      title:'Filtered Out',
-      summary: filtered.length
-        ? `${filtered.length} filtered setup${filtered.length === 1 ? '' : 's'} hidden by default.`
-        : 'No filtered setups right now.',
-      items:filtered,
-      collapsed:true,
-      empty:'No filtered setups.'
+      key:'lower-priority',
+      title:'Watch / Avoid / Lower Priority',
+      summary: lowerPriority.length
+        ? `${lowerPriority.length} lower-priority setup${lowerPriority.length === 1 ? '' : 's'} still visible for context and manual review.`
+        : 'No lower-priority setups right now.',
+      items:lowerPriority,
+      collapsed:false,
+      empty:'No lower-priority setups right now.'
     }
   ];
   sections.forEach(section => {
     const wrap = document.createElement(section.collapsed ? 'details' : 'div');
     if(section.collapsed){
-      wrap.className = 'resultsgroup';
+      wrap.className = `resultsgroup resultsgroup--${section.key}`;
       wrap.innerHTML = `<summary class="summary"><strong>${escapeHtml(section.title)}</strong><div class="tiny">${escapeHtml(section.summary)}</div></summary><div class="list"></div>`;
     }else{
-      wrap.className = 'resultsgroup';
-      wrap.innerHTML = `<div class="summary"><strong>${escapeHtml(section.title)}</strong><div class="tiny">${escapeHtml(section.summary)}</div></div><div class="list"></div>`;
+      wrap.className = `resultsgroup resultsgroup--${section.key}`;
+      wrap.innerHTML = `<div class="summary resultsgroup__summary"><strong>${escapeHtml(section.title)}</strong><div class="tiny">${escapeHtml(section.summary)}</div></div><div class="list"></div>`;
     }
     const list = wrap.querySelector('.list');
     if(section.items.length){
