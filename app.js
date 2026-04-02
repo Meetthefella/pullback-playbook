@@ -9201,6 +9201,20 @@ async function testApiConnection(){
   }
 }
 
+function saveApiSettingsFromUi(){
+  saveState();
+  setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>');
+  return false;
+}
+
+async function testApiConnectionFromUi(){
+  await testApiConnection();
+  return false;
+}
+
+window.saveApiSettingsFromUi = saveApiSettingsFromUi;
+window.testApiConnectionFromUi = testApiConnectionFromUi;
+
 async function autoAnalyseWatchlist(options = {}){
   return runScannerWorkflow(options);
 }
