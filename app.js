@@ -2795,6 +2795,9 @@ function ensureControlFocusDefault(){
   if(!['market','account','mode','setup'].includes(String(uiState.controlStripPanel || ''))){
     uiState.controlStripPanel = 'market';
   }
+  if(!Number.isFinite(uiState.controlRailActiveIndex)){
+    uiState.controlRailActiveIndex = 0;
+  }
 }
 
 function focusRailButtonForKey(focusKey){
@@ -2808,6 +2811,22 @@ function focusRailButtonForKey(focusKey){
 function controlFocusRailItems(container){
   if(!container) return [];
   return [...container.querySelectorAll('.focus-rail-item[data-control-strip]')];
+}
+
+function controlFocusKeyForIndex(index, container){
+  const rail = container || $('controlFocusRail');
+  const items = controlFocusRailItems(rail);
+  if(!items.length) return 'market';
+  const clamped = Math.max(0, Math.min(items.length - 1, Number.isFinite(index) ? index : 0));
+  return items[clamped].getAttribute('data-control-strip') || 'market';
+}
+
+function controlFocusIndexForKey(focusKey, container){
+  const rail = container || $('controlFocusRail');
+  const items = controlFocusRailItems(rail);
+  if(!items.length) return 0;
+  const match = items.findIndex(item => String(item.getAttribute('data-control-strip') || '') === String(focusKey || ''));
+  return match >= 0 ? match : 0;
 }
 
 function centeredScrollLeftForRailItem(container, item){
@@ -2854,13 +2873,39 @@ function updateControlFocusRailVisuals(container){
   });
 }
 
+function applyRailFocus(index, options = {}){
+  const rail = $('controlFocusRail');
+  if(!rail) return;
+  const items = controlFocusRailItems(rail);
+  if(!items.length) return;
+  const clamped = Math.max(0, Math.min(items.length - 1, Number.isFinite(index) ? index : 0));
+  const item = items[clamped];
+  if(!item) return;
+  uiState.controlRailActiveIndex = clamped;
+  uiState.controlStripPanel = item.getAttribute('data-control-strip') || 'market';
+  if(options.resetGesture !== false){
+    uiState.controlRailGestureStartIndex = null;
+    uiState.controlRailGestureStartLeft = null;
+  }
+  if(options.scroll !== false){
+    rail.scrollTo({
+      left:centeredScrollLeftForRailItem(rail, item),
+      behavior:options.instant ? 'auto' : 'smooth'
+    });
+  }
+  renderControlStripSelector();
+  updateControlFocusRailVisuals(rail);
+}
+
 function snapControlFocusRail(container, options = {}){
   const rail = container || $('controlFocusRail');
   if(!rail) return;
   const items = controlFocusRailItems(rail);
   if(!items.length) return;
-  const currentIndex = currentControlFocusRailIndex(rail);
   const hasGestureStart = Number.isFinite(uiState.controlRailGestureStartIndex);
+  const currentIndex = Number.isFinite(uiState.controlRailActiveIndex)
+    ? uiState.controlRailActiveIndex
+    : currentControlFocusRailIndex(rail);
   const startIndex = hasGestureStart ? uiState.controlRailGestureStartIndex : currentIndex;
   const startLeft = Number.isFinite(uiState.controlRailGestureStartLeft) ? uiState.controlRailGestureStartLeft : rail.scrollLeft;
   const delta = rail.scrollLeft - startLeft;
@@ -2868,73 +2913,24 @@ function snapControlFocusRail(container, options = {}){
   const targetIndex = hasGestureStart && direction !== 0
     ? Math.max(0, Math.min(items.length - 1, startIndex + direction))
     : currentIndex;
-  const targetItem = items[targetIndex];
-  if(!targetItem) return;
-  const targetLeft = centeredScrollLeftForRailItem(rail, targetItem);
-  const shouldScroll = Math.abs(rail.scrollLeft - targetLeft) > 1;
-  if(shouldScroll){
-    rail.scrollTo({
-      left:targetLeft,
-      behavior:options.instant ? 'auto' : 'smooth'
-    });
-  }
-  uiState.controlRailActiveIndex = targetIndex;
-  uiState.controlRailGestureStartIndex = null;
-  uiState.controlRailGestureStartLeft = null;
-  const nextKey = targetItem.getAttribute('data-control-strip') || '';
-  if(nextKey && nextKey !== uiState.controlStripPanel){
-    uiState.controlStripPanel = nextKey;
-    renderControlStripSelector();
-  }
-  updateControlFocusRailVisuals(rail);
+  applyRailFocus(targetIndex, {scroll:true, instant:options.instant});
 }
 
 function setControlFocus(focusKey, options = {}){
   const nextFocus = ['market','account','mode','setup'].includes(String(focusKey || '')) ? String(focusKey) : 'market';
-  uiState.controlStripPanel = nextFocus;
-  renderControlStripSelector();
-  if(options.scroll !== false){
-    const rail = $('controlFocusRail');
-    const button = focusRailButtonForKey(nextFocus);
-    if(rail && button){
-      uiState.controlRailActiveIndex = controlFocusRailItems(rail).indexOf(button);
-      uiState.controlRailGestureStartIndex = null;
-      uiState.controlRailGestureStartLeft = null;
-      rail.scrollTo({
-        left:centeredScrollLeftForRailItem(rail, button),
-        behavior:options.instant ? 'auto' : 'smooth'
-      });
-    }
-  }
-  updateControlFocusRailVisuals($('controlFocusRail'));
+  applyRailFocus(controlFocusIndexForKey(nextFocus), options);
 }
 
 function detectFocusedRailItem(){
   const rail = $('controlFocusRail');
   if(!rail) return;
-  const buttons = controlFocusRailItems(rail);
-  if(!buttons.length) return;
-  const railCenter = rail.scrollLeft + (rail.clientWidth / 2);
-  let bestKey = '';
-  let bestDistance = Infinity;
-  buttons.forEach(button => {
-    const center = button.offsetLeft + (button.offsetWidth / 2);
-    const distance = Math.abs(center - railCenter);
-    if(distance < bestDistance){
-      bestDistance = distance;
-      bestKey = button.getAttribute('data-control-strip') || '';
-      uiState.controlRailActiveIndex = index;
-    }
-  });
-  if(bestKey && bestKey !== uiState.controlStripPanel){
-    uiState.controlStripPanel = bestKey;
-    renderControlStripSelector();
-  }
+  applyRailFocus(currentControlFocusRailIndex(rail), {scroll:false, resetGesture:false});
 }
 
 function renderControlStripSelector(){
   ensureControlFocusDefault();
-  const focusKey = String(uiState.controlStripPanel || 'market');
+  const focusKey = controlFocusKeyForIndex(uiState.controlRailActiveIndex);
+  uiState.controlStripPanel = focusKey;
   const selector = $('controlStripSelector');
   const label = $('controlStripSelectorLabel');
   const optionsBox = $('controlStripSelectorOptions');
