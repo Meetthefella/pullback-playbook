@@ -4919,7 +4919,7 @@ function renderScannerDecisionTrace(view){
   if(Array.isArray(resolution.warnings) && resolution.warnings.length){
     resolution.warnings.forEach(line => lines.push(String(line)));
   }
-  return `<details class="compact-result-details"><summary>Decision Trace</summary><div class="mutebox scrollbox">${escapeHtml(lines.join('\n') || 'No trace available.')}</div></details>`;
+  return `<details class="compact-result-details scan-card-panel scan-card-trace" data-panel="trace"><summary>Decision Trace</summary><div class="mutebox scrollbox">${escapeHtml(lines.join('\n') || 'No trace available.')}</div></details>`;
 }
 
 function rrReliabilityClass(rrReliability){
@@ -4959,7 +4959,7 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(resolution.rr_value) ? `RR ${Number(resolution.rr_value).toFixed(1)} (${resolution.rr_label || 'n/a'})` : ''
   ].filter(Boolean).join(' | ');
   const traceMarkup = renderScannerDecisionTrace(view);
-  return `<div class="resultcompact result-card result-feed-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.decision ? `<div class="resultdecisionline">${escapeHtml(summary.decision)}</div>` : ''}${readinessLabel ? `<div class="resultconfidence">${escapeHtml(readinessLabel)}</div>` : ''}${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><div class="resultactionsbar result-feed-card__actions"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}</details>${traceMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.decision ? `<div class="resultdecisionline">${escapeHtml(summary.decision)}</div>` : ''}${readinessLabel ? `<div class="resultconfidence">${escapeHtml(readinessLabel)}</div>` : ''}${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="false">⋯</button><div class="card-overflow-menu no-card-click" data-role="overflow-menu"><button type="button" data-act="open-details">Details</button><button type="button" data-act="open-trace">Decision Trace</button></div><details class="compact-result-details scan-card-panel" data-panel="details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}</details>${traceMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
@@ -10707,34 +10707,47 @@ function renderScannerResults(){
         card.innerHTML = renderCompactResultCardFromView(view);
         const node = card.firstElementChild;
         if(!node) return;
-        const reviewBtn = node.querySelector('[data-act="review"]');
-        if(reviewBtn){
-          const ticker = view.ticker;
-          const sourceVerdict = reviewBtn.getAttribute('data-source-verdict') || '';
-          reviewBtn.onclick = () => openRankedResultInReview(ticker, {sourceVerdict});
-          const watchlistBtn = node.querySelector('[data-act="watchlist"]');
-          if(watchlistBtn){
-            watchlistBtn.onclick = event => {
-              event.stopPropagation();
-              const liveRecord = upsertTickerRecord(ticker);
-              const result = addToWatchlist({
-                ticker:liveRecord.ticker,
-                dateAdded:todayIsoDate(),
-                scoreWhenAdded:preferredScoreForRecord(liveRecord),
-                verdictWhenAdded:preferredVerdictForRecord(liveRecord),
-                expiryAfterTradingDays:5
-              });
-              const message = result && result.updated
-                ? `${escapeHtml(ticker)} is already in the watchlist. Review metadata updated.`
-                : `${escapeHtml(ticker)} saved to the watchlist.`;
-              setStatus('scannerSelectionStatus', `<span class="ok">${message}</span>`);
-            };
-          }
-          node.onclick = event => {
-            if(event.target.closest('button') || event.target.closest('summary') || event.target.closest('details')) return;
-            openRankedResultInReview(ticker);
+        const ticker = view.ticker;
+        const sourceVerdict = node.getAttribute('data-source-verdict') || '';
+        const overflowToggle = node.querySelector('[data-act="overflow-toggle"]');
+        const overflowMenu = node.querySelector('[data-role="overflow-menu"]');
+        const detailsPanel = node.querySelector('[data-panel="details"]');
+        const tracePanel = node.querySelector('[data-panel="trace"]');
+        const detailsAction = node.querySelector('[data-act="open-details"]');
+        const traceAction = node.querySelector('[data-act="open-trace"]');
+        if(overflowToggle && overflowMenu){
+          overflowToggle.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const isOpen = overflowMenu.classList.contains('is-open');
+            closeScanCardOverflowMenus(isOpen ? null : overflowMenu);
+            overflowMenu.classList.toggle('is-open', !isOpen);
+            overflowToggle.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
           };
         }
+        if(detailsAction && detailsPanel){
+          detailsAction.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            detailsPanel.open = true;
+            if(tracePanel) tracePanel.open = false;
+            closeScanCardOverflowMenus();
+          };
+        }
+        if(traceAction && tracePanel){
+          traceAction.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            tracePanel.open = true;
+            if(detailsPanel) detailsPanel.open = false;
+            closeScanCardOverflowMenus();
+          };
+        }
+        node.onclick = event => {
+          if(event.target.closest('.no-card-click') || event.target.closest('summary')) return;
+          closeScanCardOverflowMenus();
+          openRankedResultInReview(ticker, {sourceVerdict});
+        };
         list.appendChild(node);
       });
     }else{
@@ -10755,6 +10768,16 @@ function contextualResultEmptyState(bucket){
     return `No near-entry setups right now. Market regime: ${market}. Use the scanner to find fresh pullbacks or check the watchlist for developing names.`;
   }
   return `No lower-priority setups right now. Market regime: ${market}. If conditions improve, rerun the scan and review the stronger names first.`;
+}
+
+function closeScanCardOverflowMenus(exceptMenu = null){
+  document.querySelectorAll('.card-overflow-menu.is-open').forEach(menu => {
+    if(exceptMenu && menu === exceptMenu) return;
+    menu.classList.remove('is-open');
+    const card = menu.closest('.scan-card');
+    const toggle = card && card.querySelector('[data-act="overflow-toggle"]');
+    if(toggle) toggle.setAttribute('aria-expanded', 'false');
+  });
 }
 
 function legacyRenderCardsFromCardList(){
@@ -12038,6 +12061,10 @@ click('refreshLifecycleBtn', refreshSelectedTickerLifecycle);
 click('expireLifecycleBtn', expireSelectedTickerLifecycle);
 click('reactivateLifecycleBtn', reactivateSelectedTickerLifecycle);
 click('calcBtn', calculate);
+document.addEventListener('click', event => {
+  if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]')) return;
+  closeScanCardOverflowMenus();
+});
 
 on('tickerSearch', 'keydown', event => {
   if(event.key === 'Enter'){
