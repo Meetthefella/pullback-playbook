@@ -4908,9 +4908,9 @@ function scanCardIntensityForView(view){
   return 'low';
 }
 
-function renderScannerDecisionTrace(view){
+function renderScannerDecisionTraceContent(view){
   const resolution = view && view.scannerResolution ? view.scannerResolution : null;
-  if(!resolution) return '';
+  if(!resolution) return '<div class="tiny">No trace available.</div>';
   const lines = [];
   (resolution.trace || []).forEach(line => lines.push(String(line)));
   if(Array.isArray(resolution.reason_codes) && resolution.reason_codes.length){
@@ -4919,7 +4919,27 @@ function renderScannerDecisionTrace(view){
   if(Array.isArray(resolution.warnings) && resolution.warnings.length){
     resolution.warnings.forEach(line => lines.push(String(line)));
   }
-  return `<details class="compact-result-details scan-card-panel scan-card-trace" data-panel="trace"><summary>Decision Trace</summary><div class="mutebox scrollbox">${escapeHtml(lines.join('\n') || 'No trace available.')}</div></details>`;
+  return `<div class="mutebox scrollbox">${escapeHtml(lines.join('\n') || 'No trace available.')}</div>`;
+}
+
+function renderScannerDetailsContent(view){
+  const item = view.item;
+  const resolution = view.scannerResolution || {};
+  const statusChip = primaryShortlistStatusChip(view);
+  const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
+  const modifiersMarkup = emojiModifierMarkup(statusChip);
+  const detailMeta = [
+    companyLine,
+    Number.isFinite(item.marketData.price) ? `Price ${fmtPrice(Number(item.marketData.price))}` : '',
+    Number.isFinite(item.marketData.ma20) ? `20 ${fmtPrice(Number(item.marketData.ma20))}` : '',
+    Number.isFinite(item.marketData.ma50) ? `50 ${fmtPrice(Number(item.marketData.ma50))}` : '',
+    Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
+    Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
+    item.setup.marketCaution ? 'Weak market' : '',
+    view.planUiState && view.planUiState.label ? `Plan ${view.planUiState.label}` : '',
+    Number.isFinite(resolution.rr_value) ? `RR ${Number(resolution.rr_value).toFixed(1)} (${resolution.rr_label || 'n/a'})` : ''
+  ].filter(Boolean).join(' | ');
+  return `<div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}`;
 }
 
 function rrReliabilityClass(rrReliability){
@@ -4933,7 +4953,6 @@ function renderCompactResultCardFromView(view){
   const statusChip = primaryShortlistStatusChip(view);
   const sourceVerdict = reviewVerdictOverrideFromView(view);
   const scoreLabel = view.setupScoreDisplay;
-  const resolution = view.scannerResolution || {};
   const tone = scanCardToneForView(view);
   const intensity = scanCardIntensityForView(view);
   const toneClass = `result-card--${tone}`;
@@ -4946,20 +4965,7 @@ function renderCompactResultCardFromView(view){
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const summary = scanCardSummaryForView(view);
   const readinessLabel = readinessLabelForView(view);
-  const modifiersMarkup = emojiModifierMarkup(statusChip);
-  const detailMeta = [
-    companyLine,
-    Number.isFinite(item.marketData.price) ? `Price ${fmtPrice(Number(item.marketData.price))}` : '',
-    Number.isFinite(item.marketData.ma20) ? `20 ${fmtPrice(Number(item.marketData.ma20))}` : '',
-    Number.isFinite(item.marketData.ma50) ? `50 ${fmtPrice(Number(item.marketData.ma50))}` : '',
-    Number.isFinite(item.marketData.ma200) ? `200 ${fmtPrice(Number(item.marketData.ma200))}` : '',
-    Number.isFinite(item.marketData.rsi) ? `RSI ${fmtPrice(Number(item.marketData.rsi))}` : '',
-    item.setup.marketCaution ? 'Weak market' : '',
-    view.planUiState && view.planUiState.label ? `Plan ${view.planUiState.label}` : '',
-    Number.isFinite(resolution.rr_value) ? `RR ${Number(resolution.rr_value).toFixed(1)} (${resolution.rr_label || 'n/a'})` : ''
-  ].filter(Boolean).join(' | ');
-  const traceMarkup = renderScannerDecisionTrace(view);
-  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.decision ? `<div class="resultdecisionline">${escapeHtml(summary.decision)}</div>` : ''}${readinessLabel ? `<div class="resultconfidence">${escapeHtml(readinessLabel)}</div>` : ''}${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="false">⋯</button><div class="card-overflow-menu no-card-click" data-role="overflow-menu"><button type="button" data-act="open-details">Details</button><button type="button" data-act="open-trace">Decision Trace</button></div><details class="compact-result-details scan-card-panel" data-panel="details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}</details>${traceMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.decision ? `<div class="resultdecisionline">${escapeHtml(summary.decision)}</div>` : ''}${readinessLabel ? `<div class="resultconfidence">${escapeHtml(readinessLabel)}</div>` : ''}${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="false">⋯</button><div class="card-overflow-menu no-card-click" data-role="overflow-menu"><button type="button" data-act="open-details">Details</button><button type="button" data-act="open-trace">Decision Trace</button></div></div>`;
 }
 
 function scanCardSummaryForView(view){
@@ -10713,8 +10719,6 @@ function renderScannerResults(){
         const sourceVerdict = node.getAttribute('data-source-verdict') || '';
         const overflowToggle = node.querySelector('[data-act="overflow-toggle"]');
         const overflowMenu = node.querySelector('[data-role="overflow-menu"]');
-        const detailsPanel = node.querySelector('[data-panel="details"]');
-        const tracePanel = node.querySelector('[data-panel="trace"]');
         const detailsAction = node.querySelector('[data-act="open-details"]');
         const traceAction = node.querySelector('[data-act="open-trace"]');
         if(overflowToggle && overflowMenu){
@@ -10730,26 +10734,25 @@ function renderScannerResults(){
             overflowToggle.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
           };
         }
-        if(detailsAction && detailsPanel){
+        if(detailsAction){
           detailsAction.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            detailsPanel.open = true;
-            if(tracePanel) tracePanel.open = false;
             closeScanCardOverflowMenus();
+            openScanCardInfoPopover(node, 'Details', renderScannerDetailsContent(view));
           };
         }
-        if(traceAction && tracePanel){
+        if(traceAction){
           traceAction.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            tracePanel.open = true;
-            if(detailsPanel) detailsPanel.open = false;
             closeScanCardOverflowMenus();
+            openScanCardInfoPopover(node, 'Decision Trace', renderScannerDecisionTraceContent(view));
           };
         }
         node.onclick = event => {
           if(event.target.closest('.no-card-click') || event.target.closest('summary')) return;
+          closeScanCardInfoPopover();
           closeScanCardOverflowMenus();
           openRankedResultInReview(ticker, {sourceVerdict});
         };
@@ -10783,6 +10786,23 @@ function closeScanCardOverflowMenus(exceptMenu = null){
     const toggle = card && card.querySelector('[data-act="overflow-toggle"]');
     if(toggle) toggle.setAttribute('aria-expanded', 'false');
   });
+}
+
+function closeScanCardInfoPopover(){
+  document.querySelectorAll('.scan-card-info-popover.is-open').forEach(popover => popover.remove());
+}
+
+function openScanCardInfoPopover(card, title, contentHtml){
+  if(!card) return;
+  closeScanCardOverflowMenus();
+  closeScanCardInfoPopover();
+  const popover = document.createElement('div');
+  popover.className = 'scan-card-info-popover no-card-click is-open';
+  popover.innerHTML = `<div class="scan-card-info-popover__title">${escapeHtml(title)}</div><div class="scan-card-info-popover__body">${contentHtml || '<div class="tiny">No information available.</div>'}</div>`;
+  popover.onclick = event => {
+    event.stopPropagation();
+  };
+  card.appendChild(popover);
 }
 
 function legacyRenderCardsFromCardList(){
@@ -12067,7 +12087,8 @@ click('expireLifecycleBtn', expireSelectedTickerLifecycle);
 click('reactivateLifecycleBtn', reactivateSelectedTickerLifecycle);
 click('calcBtn', calculate);
 document.addEventListener('click', event => {
-  if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]')) return;
+  if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]') || event.target.closest('.scan-card-info-popover')) return;
+  closeScanCardInfoPopover();
   closeScanCardOverflowMenus();
 });
 
