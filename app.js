@@ -2705,9 +2705,10 @@ function loadState(){
 function renderStats(){
   state.maxRisk = currentMaxLoss();
   const pct = state.accountSize ? ((state.maxRisk / state.accountSize) * 100).toFixed(1) : '0.0';
-  $('accountStat').textContent = formatGbp(state.accountSize);
-  $('riskStat').textContent = formatGbp(state.maxRisk);
-  $('riskPctStat').textContent = `${pct}%`;
+  if($('accountStat')) $('accountStat').textContent = formatGbp(state.accountSize);
+  if($('riskStat')) $('riskStat').textContent = formatGbp(state.maxRisk);
+  if($('riskPctStat')) $('riskPctStat').textContent = `${pct}%`;
+  if($('accountRiskStrip')) $('accountRiskStrip').textContent = `${formatGbp(state.accountSize)} | ${formatGbp(state.maxRisk)}`;
 }
 
 function updateTickerInputFromState(){
@@ -12178,6 +12179,14 @@ click('resetAllBtn', () => {
 });
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
+click('accountRiskPill', () => {
+  const settings = $('headerRiskSettings');
+  if(!settings) return;
+  settings.open = !settings.open;
+  if(settings.open){
+    settings.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+});
 click('jumpToDiaryBtn', () => {
   const diarySection = $('diarySection');
   if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});

@@ -47,9 +47,62 @@ body{
 .hero,.grid{display:grid;gap:16px}
 .hero{grid-template-columns:1.3fr .7fr}
 .grid{grid-template-columns:1fr 1fr}
-.contextstrip,.contextmain,.contextmeta{display:grid;gap:12px}
+.contextstrip,.contextmain{display:grid;gap:12px}
 .contexttitle p{margin-bottom:0}
-.contextpill{display:grid;gap:6px;max-width:320px}
+.controlstrip{
+  display:flex;
+  gap:10px;
+  overflow-x:auto;
+  padding:2px 0 4px;
+  scrollbar-width:thin;
+  -webkit-overflow-scrolling:touch;
+}
+.controlstrip-pill{
+  flex:0 0 auto;
+  min-height:48px;
+  min-width:0;
+  border-radius:var(--radius-pill);
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.05);
+  color:var(--text-primary);
+  padding:8px 12px;
+  display:grid;
+  align-content:center;
+  gap:2px;
+}
+.controlstrip-pill label,
+.controlstrip-label{
+  color:var(--text-muted);
+  font-size:11px;
+  line-height:1.1;
+}
+.controlstrip-pill strong{
+  color:var(--text-primary);
+  font-size:.92rem;
+  font-weight:700;
+  white-space:nowrap;
+}
+.controlstrip-pill select{
+  border:0;
+  box-shadow:none;
+  background:transparent;
+  padding:0;
+  min-height:0;
+  color:var(--text-primary);
+  font-weight:700;
+}
+.controlstrip-pill select:focus{
+  box-shadow:none;
+  background:transparent;
+}
+.controlstrip-pill--button{
+  cursor:pointer;
+  text-align:left;
+}
+.controlstrip-version{
+  align-self:center;
+  white-space:nowrap;
+}
 .compact-settings{padding:0;border:0;background:transparent}
 .compact-settings>summary{
   display:inline-flex;
@@ -1006,8 +1059,10 @@ details>summary::-webkit-details-marker{display:none}
   .resultactions,.resultreview{justify-self:start}
 }
 @media (max-width:640px){
-  .wrap{padding:16px 12px 28px}
-  .searchaddrow{grid-template-columns:minmax(0,1fr) auto}
+    .wrap{padding:16px 12px 28px}
+    .controlstrip{gap:8px}
+    .controlstrip-pill{padding:8px 10px}
+    .searchaddrow{grid-template-columns:minmax(0,1fr) auto}
   .searchaddaction{justify-content:flex-start}
   .compactbutton{padding-inline:14px}
   .quicklist.carousel{gap:8px;padding-inline:2px}
