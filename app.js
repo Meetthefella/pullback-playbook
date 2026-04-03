@@ -10493,6 +10493,8 @@ function openRankedResultInReview(ticker, options = {}){
     recompute:options.recompute === true,
     sourceVerdict:options.sourceVerdict || ''
   });
+  const reviewSection = $('reviewSection');
+  if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function reviewWatchlistTicker(ticker){
@@ -10716,6 +10718,9 @@ function renderScannerResults(){
         const detailsAction = node.querySelector('[data-act="open-details"]');
         const traceAction = node.querySelector('[data-act="open-trace"]');
         if(overflowToggle && overflowMenu){
+          overflowMenu.onclick = event => {
+            event.stopPropagation();
+          };
           overflowToggle.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
