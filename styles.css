@@ -270,6 +270,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   position:relative;
   cursor:pointer;
   -webkit-tap-highlight-color:transparent;
+  padding-bottom:56px;
 }
 .scan-card:active{
   transform:scale(.985);
@@ -284,6 +285,8 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   position:absolute;
   right:12px;
   bottom:12px;
+  left:auto !important;
+  top:auto !important;
   width:40px;
   height:40px;
   min-height:40px;
@@ -311,7 +314,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .card-overflow-menu{
   position:absolute;
   right:12px;
-  bottom:58px;
+  bottom:64px;
   min-width:170px;
   padding:8px;
   border-radius:12px;
@@ -341,7 +344,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .scan-card-secondary-panel{
   position:absolute;
   right:12px;
-  bottom:58px;
+  bottom:64px;
   min-width:170px;
   max-width:min(280px, calc(100% - 24px));
   padding:10px 12px;

@@ -10801,7 +10801,11 @@ function renderScannerResults(){
         }
         node.onclick = event => {
           if(event.target.closest('.no-card-click') || event.target.closest('summary')) return;
-          clearScanCardSecondaryUi();
+          if(currentScanCardSecondaryUi(ticker)){
+            clearScanCardSecondaryUi();
+            renderScannerResults();
+            return;
+          }
           openRankedResultInReview(ticker, {sourceVerdict});
         };
         list.appendChild(node);
