@@ -2805,30 +2805,96 @@ function focusRailButtonForKey(focusKey){
   return null;
 }
 
+function controlFocusRailItems(container){
+  if(!container) return [];
+  return [...container.querySelectorAll('.focus-rail-item[data-control-strip]')];
+}
+
+function centeredScrollLeftForRailItem(container, item){
+  if(!container || !item) return 0;
+  const maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+  const target = item.offsetLeft - ((container.clientWidth - item.offsetWidth) / 2);
+  return Math.max(0, Math.min(maxLeft, target));
+}
+
+function updateControlFocusRailVisuals(container){
+  const rail = container || $('controlFocusRail');
+  if(!rail) return;
+  const items = controlFocusRailItems(rail);
+  if(!items.length) return;
+  const center = rail.scrollLeft + (rail.clientWidth / 2);
+  const maxDist = Math.max(rail.clientWidth / 2, 1);
+  items.forEach(item => {
+    const itemCenter = item.offsetLeft + (item.offsetWidth / 2);
+    const dist = Math.abs(center - itemCenter);
+    const ratio = Math.max(0, 1 - (dist / maxDist));
+    const scale = 0.9 + (ratio * 0.2);
+    const opacity = 0.5 + (ratio * 0.5);
+    item.style.transform = `scale(${scale.toFixed(3)})`;
+    item.style.opacity = opacity.toFixed(3);
+  });
+}
+
+function snapControlFocusRail(container, options = {}){
+  const rail = container || $('controlFocusRail');
+  if(!rail) return;
+  const items = controlFocusRailItems(rail);
+  if(!items.length) return;
+  const center = rail.scrollLeft + (rail.clientWidth / 2);
+  let closest = null;
+  let minDist = Infinity;
+  items.forEach(item => {
+    const itemCenter = item.offsetLeft + (item.offsetWidth / 2);
+    const dist = Math.abs(center - itemCenter);
+    if(dist < minDist){
+      minDist = dist;
+      closest = item;
+    }
+  });
+  if(!closest) return;
+  const targetLeft = centeredScrollLeftForRailItem(rail, closest);
+  const shouldScroll = Math.abs(rail.scrollLeft - targetLeft) > 1;
+  if(shouldScroll){
+    rail.scrollTo({
+      left:targetLeft,
+      behavior:options.instant ? 'auto' : 'smooth'
+    });
+  }
+  const nextKey = closest.getAttribute('data-control-strip') || '';
+  if(nextKey && nextKey !== uiState.controlStripPanel){
+    uiState.controlStripPanel = nextKey;
+    renderControlStripSelector();
+  }
+  updateControlFocusRailVisuals(rail);
+}
+
 function setControlFocus(focusKey, options = {}){
   const nextFocus = ['market','account','mode','setup'].includes(String(focusKey || '')) ? String(focusKey) : 'market';
   uiState.controlStripPanel = nextFocus;
   renderControlStripSelector();
   if(options.scroll !== false){
+    const rail = $('controlFocusRail');
     const button = focusRailButtonForKey(nextFocus);
-    if(button){
-      button.scrollIntoView({behavior:options.instant ? 'auto' : 'smooth', inline:'center', block:'nearest'});
+    if(rail && button){
+      rail.scrollTo({
+        left:centeredScrollLeftForRailItem(rail, button),
+        behavior:options.instant ? 'auto' : 'smooth'
+      });
     }
   }
+  updateControlFocusRailVisuals($('controlFocusRail'));
 }
 
 function detectFocusedRailItem(){
   const rail = $('controlFocusRail');
   if(!rail) return;
-  const buttons = [...rail.querySelectorAll('[data-control-strip]')];
+  const buttons = controlFocusRailItems(rail);
   if(!buttons.length) return;
-  const railRect = rail.getBoundingClientRect();
-  const railCenter = railRect.left + (railRect.width / 2);
+  const railCenter = rail.scrollLeft + (rail.clientWidth / 2);
   let bestKey = '';
   let bestDistance = Infinity;
   buttons.forEach(button => {
-    const rect = button.getBoundingClientRect();
-    const center = rect.left + (rect.width / 2);
+    const center = button.offsetLeft + (button.offsetWidth / 2);
     const distance = Math.abs(center - railCenter);
     if(distance < bestDistance){
       bestDistance = distance;
@@ -12405,9 +12471,14 @@ on('ocrReviewInput', 'input', syncOcrReviewVisibility);
   if(rail){
     let focusRailTimer = 0;
     rail.addEventListener('scroll', () => {
+      updateControlFocusRailVisuals(rail);
       clearTimeout(focusRailTimer);
-      focusRailTimer = setTimeout(() => detectFocusedRailItem(), 80);
+      focusRailTimer = setTimeout(() => {
+        detectFocusedRailItem();
+        snapControlFocusRail(rail);
+      }, 90);
     }, {passive:true});
+    updateControlFocusRailVisuals(rail);
   }
 }
 on('tickerInput', 'input', () => {
@@ -12467,6 +12538,7 @@ document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', 
 registerPwa();
 loadState();
 setControlFocus(uiState.controlStripPanel || 'market', {scroll:false, instant:true});
+updateControlFocusRailVisuals($('controlFocusRail'));
 consumeResetNotice();
 bootstrapBackgroundMonitoring();
 bootstrapWatchlistLifecycleAutomation();
