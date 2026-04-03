@@ -338,7 +338,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .card-overflow-menu button:active{
   background:rgba(255,255,255,.06);
 }
-.scan-card-info-popover{
+.scan-card-secondary-panel{
   position:absolute;
   right:12px;
   bottom:58px;
@@ -351,7 +351,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   box-shadow:0 8px 24px rgba(6,14,32,.18);
   z-index:29;
 }
-.scan-card-info-popover__title{
+.scan-card-secondary-panel__title{
   margin-bottom:8px;
   font-size:.8rem;
   font-weight:600;
@@ -359,10 +359,10 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   text-transform:uppercase;
   color:var(--text-secondary);
 }
-.scan-card-info-popover__body{
+.scan-card-secondary-panel__body{
   color:var(--text-primary);
 }
-.scan-card-info-popover .inline-status{
+.scan-card-secondary-panel .inline-status{
   margin-top:8px;
 }
 .no-card-click{
