@@ -290,49 +290,75 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .watchlist-card{
   position:relative;
   border-radius:16px;
-  border:1px solid rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.04);
   background:rgba(20, 28, 38, 0.88);
+  overflow:hidden;
 }
-.result-feed-card.state-developing,
-.watchlist-card.state-developing{
-  border-color:rgba(250, 204, 21, 0.45);
+.result-feed-card::after,
+.watchlist-card::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:16px;
+  pointer-events:none;
+  opacity:1;
+}
+.result-feed-card.state-developing::after,
+.watchlist-card.state-developing::after{
+  box-shadow:
+    inset 1px 0 0 rgba(250, 204, 21, 0.65),
+    inset 0 1px 0 rgba(250, 204, 21, 0.25),
+    inset 0 -1px 0 rgba(250, 204, 21, 0.18);
   background:linear-gradient(
     to top,
-    rgba(250, 204, 21, 0.08),
-    rgba(250, 204, 21, 0.02)
+    rgba(250, 204, 21, 0.05),
+    rgba(250, 204, 21, 0.01) 45%,
+    transparent 75%
   );
 }
-.result-feed-card.state-monitor,
-.watchlist-card.state-monitor{
-  border-color:rgba(245, 158, 11, 0.45);
+.result-feed-card.state-monitor::after,
+.watchlist-card.state-monitor::after{
+  box-shadow:
+    inset 1px 0 0 rgba(245, 158, 11, 0.65),
+    inset 0 1px 0 rgba(245, 158, 11, 0.25),
+    inset 0 -1px 0 rgba(245, 158, 11, 0.18);
   background:linear-gradient(
     to top,
-    rgba(245, 158, 11, 0.08),
-    rgba(245, 158, 11, 0.02)
+    rgba(245, 158, 11, 0.05),
+    rgba(245, 158, 11, 0.01) 45%,
+    transparent 75%
   );
 }
-.result-feed-card.state-near-entry,
-.watchlist-card.state-near-entry,
-.result-feed-card.state-entry,
-.watchlist-card.state-entry{
-  border-color:rgba(52, 211, 153, 0.45);
+.result-feed-card.state-near-entry::after,
+.watchlist-card.state-near-entry::after,
+.result-feed-card.state-entry::after,
+.watchlist-card.state-entry::after{
+  box-shadow:
+    inset 1px 0 0 rgba(52, 211, 153, 0.65),
+    inset 0 1px 0 rgba(52, 211, 153, 0.25),
+    inset 0 -1px 0 rgba(52, 211, 153, 0.18);
   background:linear-gradient(
     to top,
-    rgba(52, 211, 153, 0.08),
-    rgba(52, 211, 153, 0.02)
+    rgba(52, 211, 153, 0.05),
+    rgba(52, 211, 153, 0.01) 45%,
+    transparent 75%
   );
 }
-.result-feed-card.state-dead,
-.watchlist-card.state-dead,
-.result-feed-card.state-needs-rebuild,
-.watchlist-card.state-needs-rebuild,
-.result-feed-card.state-invalid-plan,
-.watchlist-card.state-invalid-plan{
-  border-color:rgba(239, 68, 68, 0.45);
+.result-feed-card.state-dead::after,
+.watchlist-card.state-dead::after,
+.result-feed-card.state-needs-rebuild::after,
+.watchlist-card.state-needs-rebuild::after,
+.result-feed-card.state-invalid-plan::after,
+.watchlist-card.state-invalid-plan::after{
+  box-shadow:
+    inset 1px 0 0 rgba(239, 68, 68, 0.72),
+    inset 0 1px 0 rgba(239, 68, 68, 0.22),
+    inset 0 -1px 0 rgba(239, 68, 68, 0.18);
   background:linear-gradient(
     to top,
-    rgba(239, 68, 68, 0.10),
-    rgba(239, 68, 68, 0.02)
+    rgba(239, 68, 68, 0.06),
+    rgba(239, 68, 68, 0.01) 45%,
+    transparent 75%
   );
 }
 .watchlist-card.state-dead,
