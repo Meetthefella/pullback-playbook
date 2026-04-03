@@ -2817,6 +2817,25 @@ function centeredScrollLeftForRailItem(container, item){
   return Math.max(0, Math.min(maxLeft, target));
 }
 
+function currentControlFocusRailIndex(container){
+  const rail = container || $('controlFocusRail');
+  if(!rail) return 0;
+  const items = controlFocusRailItems(rail);
+  if(!items.length) return 0;
+  const center = rail.scrollLeft + (rail.clientWidth / 2);
+  let bestIndex = 0;
+  let bestDistance = Infinity;
+  items.forEach((item, index) => {
+    const itemCenter = item.offsetLeft + (item.offsetWidth / 2);
+    const distance = Math.abs(center - itemCenter);
+    if(distance < bestDistance){
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
 function updateControlFocusRailVisuals(container){
   const rail = container || $('controlFocusRail');
   if(!rail) return;
@@ -2840,19 +2859,18 @@ function snapControlFocusRail(container, options = {}){
   if(!rail) return;
   const items = controlFocusRailItems(rail);
   if(!items.length) return;
-  const center = rail.scrollLeft + (rail.clientWidth / 2);
-  let closest = null;
-  let minDist = Infinity;
-  items.forEach(item => {
-    const itemCenter = item.offsetLeft + (item.offsetWidth / 2);
-    const dist = Math.abs(center - itemCenter);
-    if(dist < minDist){
-      minDist = dist;
-      closest = item;
-    }
-  });
-  if(!closest) return;
-  const targetLeft = centeredScrollLeftForRailItem(rail, closest);
+  const currentIndex = currentControlFocusRailIndex(rail);
+  const hasGestureStart = Number.isFinite(uiState.controlRailGestureStartIndex);
+  const startIndex = hasGestureStart ? uiState.controlRailGestureStartIndex : currentIndex;
+  const startLeft = Number.isFinite(uiState.controlRailGestureStartLeft) ? uiState.controlRailGestureStartLeft : rail.scrollLeft;
+  const delta = rail.scrollLeft - startLeft;
+  const direction = delta > 6 ? 1 : (delta < -6 ? -1 : 0);
+  const targetIndex = hasGestureStart && direction !== 0
+    ? Math.max(0, Math.min(items.length - 1, startIndex + direction))
+    : currentIndex;
+  const targetItem = items[targetIndex];
+  if(!targetItem) return;
+  const targetLeft = centeredScrollLeftForRailItem(rail, targetItem);
   const shouldScroll = Math.abs(rail.scrollLeft - targetLeft) > 1;
   if(shouldScroll){
     rail.scrollTo({
@@ -2860,7 +2878,10 @@ function snapControlFocusRail(container, options = {}){
       behavior:options.instant ? 'auto' : 'smooth'
     });
   }
-  const nextKey = closest.getAttribute('data-control-strip') || '';
+  uiState.controlRailActiveIndex = targetIndex;
+  uiState.controlRailGestureStartIndex = null;
+  uiState.controlRailGestureStartLeft = null;
+  const nextKey = targetItem.getAttribute('data-control-strip') || '';
   if(nextKey && nextKey !== uiState.controlStripPanel){
     uiState.controlStripPanel = nextKey;
     renderControlStripSelector();
@@ -2876,6 +2897,9 @@ function setControlFocus(focusKey, options = {}){
     const rail = $('controlFocusRail');
     const button = focusRailButtonForKey(nextFocus);
     if(rail && button){
+      uiState.controlRailActiveIndex = controlFocusRailItems(rail).indexOf(button);
+      uiState.controlRailGestureStartIndex = null;
+      uiState.controlRailGestureStartLeft = null;
       rail.scrollTo({
         left:centeredScrollLeftForRailItem(rail, button),
         behavior:options.instant ? 'auto' : 'smooth'
@@ -2899,6 +2923,7 @@ function detectFocusedRailItem(){
     if(distance < bestDistance){
       bestDistance = distance;
       bestKey = button.getAttribute('data-control-strip') || '';
+      uiState.controlRailActiveIndex = index;
     }
   });
   if(bestKey && bestKey !== uiState.controlStripPanel){
@@ -12470,6 +12495,14 @@ on('ocrReviewInput', 'input', syncOcrReviewVisibility);
   const rail = $('controlFocusRail');
   if(rail){
     let focusRailTimer = 0;
+    const markGestureStart = () => {
+      uiState.controlRailGestureStartIndex = currentControlFocusRailIndex(rail);
+      uiState.controlRailGestureStartLeft = rail.scrollLeft;
+      uiState.controlRailActiveIndex = uiState.controlRailGestureStartIndex;
+    };
+    rail.addEventListener('touchstart', markGestureStart, {passive:true});
+    rail.addEventListener('pointerdown', markGestureStart, {passive:true});
+    rail.addEventListener('mousedown', markGestureStart, {passive:true});
     rail.addEventListener('scroll', () => {
       updateControlFocusRailVisuals(rail);
       clearTimeout(focusRailTimer);
