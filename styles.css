@@ -217,6 +217,27 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .saved-universe-row{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
 .list{display:grid;gap:16px;margin-top:10px;align-content:start}
+.scan-primary-stack{display:grid;gap:0}
+.scanner-settings{
+  background:rgba(16,24,42,.38);
+  border:1px solid rgba(255,255,255,.04);
+  border-radius:16px;
+  padding:12px;
+  box-shadow:none;
+}
+.scanner-settings>summary{
+  display:flex;
+  align-items:center;
+  min-height:36px;
+  color:var(--text-secondary);
+}
+.scanner-settings-panel{
+  background:rgba(20,28,38,.56);
+  border-color:rgba(255,255,255,.04);
+}
+.scanner-settings-actions{
+  opacity:.92;
+}
 .resultsgroup{
   display:grid;
   gap:12px;

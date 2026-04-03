@@ -800,6 +800,17 @@ function setOcrImportStatus(html){
   setStatus('ocrImportStatus', html);
 }
 
+function syncOcrReviewVisibility(){
+  const reviewBlock = $('ocrReviewBlock');
+  const reviewInput = $('ocrReviewInput');
+  const applyBtn = $('applyOcrBtn');
+  const clearBtn = $('clearOcrBtn');
+  const hasReviewText = !!String(reviewInput && reviewInput.value || '').trim();
+  if(reviewBlock) reviewBlock.hidden = !hasReviewText;
+  if(applyBtn) applyBtn.disabled = !hasReviewText;
+  if(clearBtn) clearBtn.disabled = !hasReviewText;
+}
+
 function renderTvImportPreview(tickers, mode = 'manual'){
   const box = $('tvImportPreview');
   if(!box) return;
@@ -874,6 +885,7 @@ function importTradingViewTickers(){
 function clearOcrReview(message){
   if($('ocrReviewInput')) $('ocrReviewInput').value = '';
   setOcrImportStatus(message || 'OCR import is optional and runs fully in your browser.');
+  syncOcrReviewVisibility();
 }
 
 function extractTickersFromOcrText(text){
@@ -921,13 +933,16 @@ async function runOcrImport(file){
     if(!tickers.length){
       if($('ocrReviewInput')) $('ocrReviewInput').value = '';
       setOcrImportStatus('<span class="badtext">No ticker symbols detected. Try a clearer screenshot.</span>');
+      syncOcrReviewVisibility();
       return;
     }
     if($('ocrReviewInput')) $('ocrReviewInput').value = tickers.join('\n');
     setOcrImportStatus(`<span class="ok">${tickers.length} likely ticker${tickers.length === 1 ? '' : 's'} detected. Review and confirm before scanning.</span>`);
+    syncOcrReviewVisibility();
   }catch(error){
     if($('ocrReviewInput')) $('ocrReviewInput').value = '';
     setOcrImportStatus(`<span class="badtext">${escapeHtml(String(error && error.message || 'No ticker symbols detected. Try a clearer screenshot.'))}</span>`);
+    syncOcrReviewVisibility();
   }
 }
 
@@ -2661,6 +2676,7 @@ function loadState(){
   renderFinalUniversePreview();
   renderSavedScannerUniverseSnapshot();
   clearOcrReview();
+  syncOcrReviewVisibility();
   renderScannerResults();
   renderCards();
   renderScannerRulesPanel();
@@ -5577,9 +5593,16 @@ function queueTickerSuggestions(){
 
 function buildCards(){
   uiState.selectedScanner = {};
-  return runScannerWorkflow({force:true, syncInput:true}).catch(err => {
-    setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
-  });
+  return runScannerWorkflow({force:true, syncInput:true})
+    .then(() => {
+      const resultsToggle = $('resultsToggle');
+      const resultsSection = $('resultsSection');
+      if(resultsToggle) resultsToggle.open = true;
+      if(resultsSection) resultsSection.scrollIntoView({behavior:'smooth', block:'start'});
+    })
+    .catch(err => {
+      setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
+    });
 }
 
 function addTicker(rawTicker, meta){
@@ -12187,6 +12210,7 @@ on('ocrImportFile', 'change', event => {
   runOcrImport(file).catch(() => {});
   event.target.value = '';
 });
+on('ocrReviewInput', 'input', syncOcrReviewVisibility);
 on('tickerInput', 'input', () => {
   syncUniverseFromInputs();
   if(!uniqueTickers(state.tickers || []).length){

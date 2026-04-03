@@ -87,82 +87,84 @@
 
   <div class="card" style="margin-top:14px">
     <h2 id="dailyInput">2) Scan List</h2>
-    <p class="tiny">Paste/import tickers, optionally add one manually, then run the scan.</p>
-    <div style="margin-top:10px">
+    <div class="scan-primary-stack" style="margin-top:10px">
       <strong>Import From Screenshot</strong>
-      <div class="tiny" style="margin-top:6px">Upload a TradingView screenshot to extract tickers. OCR does not run the scan automatically.</div>
+      <div class="tiny" style="margin-top:6px">Upload a TradingView screenshot to extract tickers for review before scanning.</div>
       <div class="actions">
         <button class="secondary" id="importScreenshotBtn">Import From Screenshot</button>
       </div>
       <input id="ocrImportFile" type="file" accept="image/*" style="display:none" />
       <div class="statusline tiny" id="ocrImportStatus">OCR import is optional and runs fully in your browser.</div>
-      <div style="margin-top:10px">
+      <div id="ocrReviewBlock" style="margin-top:10px" hidden>
         <label>OCR Review / Edit</label>
         <textarea id="ocrReviewInput" placeholder="Detected tickers will appear here for review before import."></textarea>
-        <div class="actions">
-          <button class="secondary" id="applyOcrBtn">Confirm OCR Tickers</button>
-          <button class="ghost" id="clearOcrBtn">Clear OCR Review</button>
+      </div>
+      <div class="actions">
+        <button class="secondary" id="applyOcrBtn">Confirm OCR Tickers</button>
+        <button class="ghost" id="clearOcrBtn">Clear OCR Review</button>
+      </div>
+      <div style="margin-top:14px">
+        <label>Quick Manual Ticker Search</label>
+        <div class="searchaddrow" style="margin-top:10px">
+          <div class="searchaddinput">
+            <label>Ticker Search / Add</label>
+            <input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" />
+            <div id="tickerSuggestions" class="suggestions" hidden></div>
+          </div>
+          <div class="searchaddaction"><button class="primary compactbutton" id="addTickerBtn">Add Ticker</button></div>
         </div>
+        <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
       </div>
-    </div>
-    <div class="panelbox" style="margin-top:12px">
-      <strong>Scanner Universe Controls</strong>
-      <div class="row" style="margin-top:10px">
-        <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
-        <div><label>Universe Mode</label><select id="universeMode"><option value="tradingview_only">TradingView Only</option><option value="core8">Curated Core 8</option><option value="combined">Combined</option></select></div>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <div><label>Setup Type</label><select id="scannerSetupType"><option value="">Unknown</option><option value="20MA">20MA</option><option value="50MA">50MA</option></select></div>
-        <div class="tiny" style="align-self:end">Max loss uses the override if set, otherwise account size x risk %.</div>
-      </div>
-      <div id="finalUniversePreview" class="mutebox" style="margin-top:10px">Final scan universe will appear here.</div>
-      <div class="quicklisthead" style="margin-top:12px">
-        <strong>Scanner Universe</strong>
-        <span class="tiny">This is the live universe used for the scan.</span>
-      </div>
-      <div class="summary saved-universe-summary" id="savedUniverseSummary" style="margin-top:10px">No saved scanner universe snapshot on this device.</div>
-      <div class="quicklist" id="scannerUniverseQuickList"></div>
-    </div>
-    <div style="margin-top:14px">
-      <label>Quick Manual Ticker Search</label>
-      <div class="searchaddrow" style="margin-top:10px">
-        <div class="searchaddinput">
-          <label>Ticker Search / Add</label>
-          <input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" />
-          <div id="tickerSuggestions" class="suggestions" hidden></div>
-        </div>
-        <div class="searchaddaction"><button class="primary compactbutton" id="addTickerBtn">Add Ticker</button></div>
-      </div>
-      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
-    </div>
-    <details id="advancedScannerTools" style="margin-top:14px">
-      <summary><strong>Advanced Scanner Controls</strong></summary>
-      <div style="margin-top:10px">
-        <label>Universe Text List</label>
-        <textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea>
-        <div class="tiny" style="margin-top:8px">Use this only for bulk editing. The scan uses your imported/manual tickers when present, otherwise the curated fallback list.</div>
-      </div>
-      <div style="margin-top:10px">
-        <label>Paste or Import Tickers</label>
+      <div style="margin-top:14px">
+        <label>Paste Ticker List</label>
         <textarea id="tvImportInput" placeholder="CAT,DE,UNP,GEV&#10;or&#10;CAT DE UNP GEV&#10;or one ticker per line"></textarea>
         <div class="actions">
           <button class="secondary" id="importTvBtn">Import Tickers</button>
+          <button class="primary" id="buildBtn">Run Scan</button>
         </div>
         <div id="tvImportPreview" class="mutebox" style="margin-top:10px">No imported ticker list yet.</div>
+        <div class="statusline tiny" id="inputStatus">Scans use your imported/manual tickers when present, otherwise the curated default list.</div>
       </div>
-      <details style="margin-top:12px">
-        <summary><strong>Active Scanner Rules</strong></summary>
-        <div id="scannerRulesList" class="mutebox" style="margin-top:10px">Loading active scanner rules...</div>
-        <div id="scannerDebugList" class="mutebox" style="margin-top:10px">No scan debug data yet.</div>
-      </details>
-    </details>
-    <div class="actions">
-      <button class="secondary" id="saveBtn">Save List</button>
-      <button class="secondary" id="loadBtn">Load Saved</button>
-      <button class="ghost" id="clearBtn">Clear</button>
-      <button class="primary" id="buildBtn">Run Scan</button>
     </div>
-    <div class="statusline tiny" id="inputStatus">Scans use your imported/manual tickers when present, otherwise the curated default list.</div>
+    <details id="scannerSettings" class="scanner-settings" style="margin-top:14px">
+      <summary><strong>Scanner Settings</strong></summary>
+      <div class="panelbox scanner-settings-panel" style="margin-top:12px">
+        <strong>Scanner Universe Controls</strong>
+        <div class="row" style="margin-top:10px">
+          <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
+          <div><label>Universe Mode</label><select id="universeMode"><option value="tradingview_only">TradingView Only</option><option value="core8">Curated Core 8</option><option value="combined">Combined</option></select></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div><label>Setup Type</label><select id="scannerSetupType"><option value="">Unknown</option><option value="20MA">20MA</option><option value="50MA">50MA</option></select></div>
+          <div class="tiny" style="align-self:end">Max loss uses the override if set, otherwise account size x risk %.</div>
+        </div>
+        <div id="finalUniversePreview" class="mutebox" style="margin-top:10px">Final scan universe will appear here.</div>
+        <div class="quicklisthead" style="margin-top:12px">
+          <strong>Scanner Universe</strong>
+          <span class="tiny">This is the live universe used for the scan.</span>
+        </div>
+        <div class="summary saved-universe-summary" id="savedUniverseSummary" style="margin-top:10px">No saved scanner universe snapshot on this device.</div>
+        <div class="quicklist" id="scannerUniverseQuickList"></div>
+      </div>
+      <details id="advancedScannerTools" style="margin-top:12px">
+        <summary><strong>Advanced Scanner Controls</strong></summary>
+        <div style="margin-top:10px">
+          <label>Universe Text List</label>
+          <textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea>
+          <div class="tiny" style="margin-top:8px">Use this for bulk editing only when you need more control.</div>
+        </div>
+        <details style="margin-top:12px">
+          <summary><strong>Active Scanner Rules</strong></summary>
+          <div id="scannerRulesList" class="mutebox" style="margin-top:10px">Loading active scanner rules...</div>
+          <div id="scannerDebugList" class="mutebox" style="margin-top:10px">No scan debug data yet.</div>
+        </details>
+      </details>
+      <div class="actions scanner-settings-actions">
+        <button class="secondary" id="saveBtn">Save List</button>
+        <button class="secondary" id="loadBtn">Load Saved</button>
+        <button class="ghost" id="clearBtn">Clear</button>
+      </div>
+    </details>
   </div>
 
   <div class="card" style="margin-top:14px">
