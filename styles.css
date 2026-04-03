@@ -70,7 +70,6 @@ body{
   align-content:center;
   gap:2px;
 }
-.controlstrip-pill label,
 .controlstrip-label{
   color:var(--text-muted);
   font-size:11px;
@@ -82,26 +81,50 @@ body{
   font-weight:700;
   white-space:nowrap;
 }
-.controlstrip-pill select{
-  border:0;
-  box-shadow:none;
-  background:transparent;
-  padding:0;
-  min-height:0;
-  color:var(--text-primary);
-  font-weight:700;
-}
-.controlstrip-pill select:focus{
-  box-shadow:none;
-  background:transparent;
-}
 .controlstrip-pill--button{
   cursor:pointer;
   text-align:left;
 }
+.controlstrip-pill--button[aria-expanded="true"]{
+  background:rgba(255,255,255,.08);
+  border-color:rgba(255,255,255,.14);
+}
 .controlstrip-version{
   align-self:center;
   white-space:nowrap;
+}
+.controlstrip-selector{
+  display:grid;
+  gap:8px;
+  margin-top:4px;
+  padding:10px 12px;
+  border-radius:14px;
+  background:#1c2030;
+  border-top:1px solid rgba(255,255,255,.06);
+}
+.controlstrip-selector__label{
+  font-size:10px;
+  color:rgba(255,255,255,.35);
+}
+.controlstrip-selector__options{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.controlstrip-option{
+  min-height:0;
+  padding:5px 13px;
+  border-radius:20px;
+  border:1px solid rgba(255,255,255,.15);
+  background:transparent;
+  font-size:13px;
+  font-weight:600;
+  color:rgba(255,255,255,.6);
+}
+.controlstrip-option.is-selected{
+  background:rgba(26,210,150,.15);
+  border-color:rgba(26,210,150,.4);
+  color:#1ad296;
 }
 .compact-settings{padding:0;border:0;background:transparent}
 .compact-settings>summary{

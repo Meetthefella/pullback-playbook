@@ -86,6 +86,7 @@ const uiState = {
   scannerSessionTickers:[],
   scannerLastScanAt:'',
   scannerSessionId:'',
+  controlStripPanel:'',
   scannerShortlistSuppressed:false,
   watchlistLifecycleRunning:false,
   watchlistLifecycleLastRunAt:'',
@@ -2709,6 +2710,121 @@ function renderStats(){
   if($('riskStat')) $('riskStat').textContent = formatGbp(state.maxRisk);
   if($('riskPctStat')) $('riskPctStat').textContent = `${pct}%`;
   if($('accountRiskStrip')) $('accountRiskStrip').textContent = `${formatGbp(state.accountSize)} | ${formatGbp(state.maxRisk)}`;
+  if($('marketStatusStrip')) $('marketStatusStrip').textContent = String(state.marketStatus || 'S&P above 50 MA');
+  if($('scannerModeStrip')) $('scannerModeStrip').textContent = scannerModeChipLabel(effectiveUniverseMode());
+  if($('setupTypeStrip')) $('setupTypeStrip').textContent = setupTypeChipLabel(state.setupType);
+  renderControlStripSelector();
+}
+
+function scannerModeChipLabel(mode){
+  if(mode === 'tradingview_only') return 'TradingView';
+  if(mode === 'combined') return 'Combined';
+  return 'Curated Core';
+}
+
+function setupTypeChipLabel(type){
+  return normalizeScanType(type) || 'Unknown';
+}
+
+function controlStripOptionsForPanel(panel){
+  if(panel === 'market'){
+    return {
+      label:'Market',
+      selected:String(state.marketStatus || 'S&P above 50 MA'),
+      options:[
+        {value:'S&P above 50 MA', label:'S&P above 50 MA'},
+        {value:'S&P near 50 MA', label:'S&P near 50 MA'},
+        {value:'S&P below 50 MA', label:'S&P below 50 MA'}
+      ]
+    };
+  }
+  if(panel === 'scanner-mode'){
+    return {
+      label:'Scanner Mode',
+      selected:effectiveUniverseMode(),
+      options:[
+        {value:'tradingview_only', label:'TradingView'},
+        {value:'core8', label:'Curated Core'},
+        {value:'combined', label:'Combined'}
+      ]
+    };
+  }
+  if(panel === 'setup-type'){
+    return {
+      label:'Setup Type',
+      selected:normalizeScanType(state.setupType),
+      options:[
+        {value:'', label:'Unknown'},
+        {value:'20MA', label:'20MA'},
+        {value:'50MA', label:'50MA'}
+      ]
+    };
+  }
+  return null;
+}
+
+function setControlStripSelection(panel, value){
+  if(panel === 'market'){
+    if($('marketStatus')) $('marketStatus').value = value;
+    saveState();
+    refreshRiskContextForActiveSetups({
+      source:'market_status',
+      force:true
+    });
+    return;
+  }
+  if(panel === 'scanner-mode'){
+    if($('universeMode')) $('universeMode').value = value;
+    saveState();
+    renderFinalUniversePreview();
+    return;
+  }
+  if(panel === 'setup-type'){
+    if($('scannerSetupType')) $('scannerSetupType').value = value;
+    saveState();
+    renderFinalUniversePreview();
+    setStatus('inputStatus', 'Setup mode updated for future scans only. Existing results keep their stored scan context until rescanned.');
+  }
+}
+
+function renderControlStripSelector(){
+  const panel = String(uiState.controlStripPanel || '');
+  const selector = $('controlStripSelector');
+  const label = $('controlStripSelectorLabel');
+  const optionsBox = $('controlStripSelectorOptions');
+  ['marketStatusPill','scannerModePill','setupTypePill'].forEach(id => {
+    const button = $(id);
+    if(button) button.setAttribute('aria-expanded', 'false');
+  });
+  if(!selector || !label || !optionsBox) return;
+  const config = controlStripOptionsForPanel(panel);
+  if(!config){
+    selector.hidden = true;
+    optionsBox.innerHTML = '';
+    return;
+  }
+  if(panel === 'market' && $('marketStatusPill')) $('marketStatusPill').setAttribute('aria-expanded', 'true');
+  if(panel === 'scanner-mode' && $('scannerModePill')) $('scannerModePill').setAttribute('aria-expanded', 'true');
+  if(panel === 'setup-type' && $('setupTypePill')) $('setupTypePill').setAttribute('aria-expanded', 'true');
+  selector.hidden = false;
+  label.textContent = config.label;
+  optionsBox.innerHTML = config.options.map(option => (
+    `<button class="controlstrip-option ${String(option.value) === String(config.selected) ? 'is-selected' : ''}" type="button" data-control-option="${escapeHtml(panel)}" data-value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</button>`
+  )).join('');
+  optionsBox.querySelectorAll('[data-control-option]').forEach(button => {
+    button.onclick = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setControlStripSelection(panel, button.getAttribute('data-value') || '');
+      uiState.controlStripPanel = '';
+      renderControlStripSelector();
+    };
+  });
+}
+
+function toggleControlStripPanel(panel){
+  uiState.controlStripPanel = uiState.controlStripPanel === panel ? '' : panel;
+  renderControlStripSelector();
 }
 
 function updateTickerInputFromState(){
@@ -12179,7 +12295,10 @@ click('resetAllBtn', () => {
 });
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
+click('marketStatusPill', () => toggleControlStripPanel('market'));
 click('accountRiskPill', () => {
+  uiState.controlStripPanel = '';
+  renderControlStripSelector();
   const settings = $('headerRiskSettings');
   if(!settings) return;
   settings.open = !settings.open;
@@ -12187,6 +12306,8 @@ click('accountRiskPill', () => {
     settings.scrollIntoView({behavior:'smooth', block:'nearest'});
   }
 });
+click('scannerModePill', () => toggleControlStripPanel('scanner-mode'));
+click('setupTypePill', () => toggleControlStripPanel('setup-type'));
 click('jumpToDiaryBtn', () => {
   const diarySection = $('diarySection');
   if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});
@@ -12204,6 +12325,14 @@ click('expireLifecycleBtn', expireSelectedTickerLifecycle);
 click('reactivateLifecycleBtn', reactivateSelectedTickerLifecycle);
 click('calcBtn', calculate);
 document.addEventListener('click', event => {
+  if(
+    uiState.controlStripPanel
+    && !event.target.closest('[data-control-strip]')
+    && !event.target.closest('#controlStripSelector')
+  ){
+    uiState.controlStripPanel = '';
+    renderControlStripSelector();
+  }
   if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]') || event.target.closest('.scan-card-secondary-panel')) return;
   if(event.target.closest('.scan-card')) return;
   if(uiState.secondaryUiTicker || uiState.secondaryUiMode){

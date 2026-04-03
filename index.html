@@ -35,39 +35,46 @@
         <p>Scan, shortlist, review, decide, then track.</p>
       </div>
       <div class="controlstrip" aria-label="Header control strip">
-        <div class="controlstrip-pill controlstrip-pill--select">
-          <label id="marketStatusSection">Market</label>
-          <select id="marketStatus">
-            <option>S&amp;P above 50 MA</option>
-            <option>S&amp;P near 50 MA</option>
-            <option>S&amp;P below 50 MA</option>
-          </select>
-        </div>
+        <button class="controlstrip-pill controlstrip-pill--button" id="marketStatusPill" type="button" data-control-strip="market">
+          <span class="controlstrip-label" id="marketStatusSection">Market</span>
+          <strong id="marketStatusStrip">S&amp;P above 50 MA</strong>
+        </button>
         <button class="controlstrip-pill controlstrip-pill--button" id="accountRiskPill" type="button">
           <span class="controlstrip-label">Account | Risk</span>
           <strong id="accountRiskStrip">GBP 4,000 | GBP 40</strong>
         </button>
-        <div class="controlstrip-pill controlstrip-pill--select">
-          <label>Scanner Mode</label>
-          <select id="universeMode">
-            <option value="tradingview_only">TradingView</option>
-            <option value="core8">Curated Core</option>
-            <option value="combined">Combined</option>
-          </select>
-        </div>
-        <div class="controlstrip-pill controlstrip-pill--select">
-          <label>Setup Type</label>
-          <select id="scannerSetupType">
-            <option value="">Unknown</option>
-            <option value="20MA">20MA</option>
-            <option value="50MA">50MA</option>
-          </select>
-        </div>
+        <button class="controlstrip-pill controlstrip-pill--button" id="scannerModePill" type="button" data-control-strip="scanner-mode">
+          <span class="controlstrip-label">Scanner Mode</span>
+          <strong id="scannerModeStrip">Curated Core</strong>
+        </button>
+        <button class="controlstrip-pill controlstrip-pill--button" id="setupTypePill" type="button" data-control-strip="setup-type">
+          <span class="controlstrip-label">Setup Type</span>
+          <strong id="setupTypeStrip">Unknown</strong>
+        </button>
         <span class="pill controlstrip-version" id="appVersion">v4.4.1</span>
       </div>
+      <div class="controlstrip-selector" id="controlStripSelector" hidden>
+        <div class="controlstrip-selector__label" id="controlStripSelectorLabel">Setup Type</div>
+        <div class="controlstrip-selector__options" id="controlStripSelectorOptions"></div>
+      </div>
+      <select id="marketStatus" hidden>
+        <option>S&amp;P above 50 MA</option>
+        <option>S&amp;P near 50 MA</option>
+        <option>S&amp;P below 50 MA</option>
+      </select>
+      <select id="universeMode" hidden>
+        <option value="tradingview_only">TradingView</option>
+        <option value="core8">Curated Core</option>
+        <option value="combined">Combined</option>
+      </select>
+      <select id="scannerSetupType" hidden>
+        <option value="">Unknown</option>
+        <option value="20MA">20MA</option>
+        <option value="50MA">50MA</option>
+      </select>
     </div>
     <details class="compact-settings" id="headerRiskSettings" style="margin-top:12px">
-      <summary><strong>1) Header / Market Context</strong> · Edit settings</summary>
+      <summary><strong>Risk Settings</strong> | Edit account controls</summary>
       <div class="row" style="margin-top:12px">
         <div>
           <label>Account Size (GBP)</label>
@@ -283,3 +290,5 @@
 <script src="./app.js?v=4.4.1"></script>
 </body>
 </html>
+
+
