@@ -49,67 +49,77 @@ body{
 .grid{grid-template-columns:1fr 1fr}
 .contextstrip,.contextmain{display:grid;gap:12px}
 .contexttitle p{margin-bottom:0}
-.controlstrip{
+.control-focus-rail{
   display:flex;
-  gap:10px;
+  gap:8px;
   overflow-x:auto;
-  padding:2px 0 4px;
-  scrollbar-width:thin;
+  padding:2px 18vw 6px;
+  scrollbar-width:none;
   -webkit-overflow-scrolling:touch;
+  scroll-snap-type:x mandatory;
+  scroll-padding-inline:18vw;
+  overscroll-behavior-x:contain;
 }
-.controlstrip-pill{
-  flex:0 0 auto;
-  min-height:48px;
-  min-width:0;
-  border-radius:var(--radius-pill);
+.control-focus-rail::-webkit-scrollbar{display:none}
+.focus-rail-item{
+  flex:0 0 min(62vw, 220px);
+  min-height:56px;
+  padding:9px 12px;
+  border-radius:20px;
   border:1px solid rgba(255,255,255,.08);
   background:rgba(255,255,255,.05);
   color:var(--text-primary);
-  padding:8px 12px;
   display:grid;
+  gap:3px;
   align-content:center;
-  gap:2px;
-}
-.controlstrip-label{
-  color:var(--text-muted);
-  font-size:11px;
-  line-height:1.1;
-}
-.controlstrip-pill strong{
-  color:var(--text-primary);
-  font-size:.92rem;
-  font-weight:700;
-  white-space:nowrap;
-}
-.controlstrip-pill--button{
-  cursor:pointer;
   text-align:left;
+  scroll-snap-align:center;
+  transition:opacity .16s ease, transform .16s ease, background-color .16s ease, border-color .16s ease;
+  opacity:.58;
+  transform:scale(.94);
 }
-.controlstrip-pill--button[aria-expanded="true"]{
+.focus-rail-item.is-active{
+  opacity:1;
+  transform:scale(1);
   background:rgba(255,255,255,.08);
   border-color:rgba(255,255,255,.14);
 }
-.controlstrip-version{
-  align-self:center;
+.focus-rail-label{
+  color:var(--text-muted);
+  font-size:10px;
+  line-height:1.1;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.focus-rail-value{
+  color:var(--text-primary);
+  font-size:.94rem;
+  font-weight:700;
   white-space:nowrap;
 }
-.controlstrip-selector{
+.focus-rail-item.is-active .focus-rail-value{
+  font-size:1rem;
+}
+.control-focus-tray{
   display:grid;
   gap:8px;
-  margin-top:4px;
+  margin-top:2px;
   padding:10px 12px;
   border-radius:14px;
   background:#1c2030;
   border-top:1px solid rgba(255,255,255,.06);
 }
-.controlstrip-selector__label{
+.control-focus-tray__label{
   font-size:10px;
   color:rgba(255,255,255,.35);
+  text-transform:uppercase;
+  letter-spacing:.04em;
 }
-.controlstrip-selector__options{
+.control-focus-tray__body{
   display:flex;
   gap:6px;
   flex-wrap:wrap;
+  align-items:center;
 }
 .controlstrip-option{
   min-height:0;
@@ -125,6 +135,26 @@ body{
   background:rgba(26,210,150,.15);
   border-color:rgba(26,210,150,.4);
   color:#1ad296;
+}
+.control-focus-account{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  width:100%;
+}
+.control-focus-account__summary{
+  display:grid;
+  gap:2px;
+}
+.control-focus-account__summary strong{
+  color:var(--text-primary);
+  font-size:.95rem;
+}
+.control-focus-account__summary span{
+  color:var(--text-secondary);
+  font-size:.82rem;
 }
 .compact-settings{padding:0;border:0;background:transparent}
 .compact-settings>summary{
@@ -1083,8 +1113,8 @@ details>summary::-webkit-details-marker{display:none}
 }
 @media (max-width:640px){
     .wrap{padding:16px 12px 28px}
-    .controlstrip{gap:8px}
-    .controlstrip-pill{padding:8px 10px}
+    .control-focus-rail{padding-inline:14vw;scroll-padding-inline:14vw}
+    .focus-rail-item{flex-basis:min(68vw, 210px)}
     .searchaddrow{grid-template-columns:minmax(0,1fr) auto}
   .searchaddaction{justify-content:flex-start}
   .compactbutton{padding-inline:14px}

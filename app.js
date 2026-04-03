@@ -2726,8 +2726,8 @@ function setupTypeChipLabel(type){
   return normalizeScanType(type) || 'Unknown';
 }
 
-function controlStripOptionsForPanel(panel){
-  if(panel === 'market'){
+function controlFocusConfig(focusKey){
+  if(focusKey === 'market'){
     return {
       label:'Market',
       selected:String(state.marketStatus || 'S&P above 50 MA'),
@@ -2738,7 +2738,7 @@ function controlStripOptionsForPanel(panel){
       ]
     };
   }
-  if(panel === 'scanner-mode'){
+  if(focusKey === 'mode'){
     return {
       label:'Scanner Mode',
       selected:effectiveUniverseMode(),
@@ -2749,7 +2749,7 @@ function controlStripOptionsForPanel(panel){
       ]
     };
   }
-  if(panel === 'setup-type'){
+  if(focusKey === 'setup'){
     return {
       label:'Setup Type',
       selected:normalizeScanType(state.setupType),
@@ -2760,11 +2760,15 @@ function controlStripOptionsForPanel(panel){
       ]
     };
   }
-  return null;
+  return {
+    label:'Account',
+    selected:'',
+    options:[]
+  };
 }
 
-function setControlStripSelection(panel, value){
-  if(panel === 'market'){
+function setControlFocusSelection(focusKey, value){
+  if(focusKey === 'market'){
     if($('marketStatus')) $('marketStatus').value = value;
     saveState();
     refreshRiskContextForActiveSetups({
@@ -2773,13 +2777,13 @@ function setControlStripSelection(panel, value){
     });
     return;
   }
-  if(panel === 'scanner-mode'){
+  if(focusKey === 'mode'){
     if($('universeMode')) $('universeMode').value = value;
     saveState();
     renderFinalUniversePreview();
     return;
   }
-  if(panel === 'setup-type'){
+  if(focusKey === 'setup'){
     if($('scannerSetupType')) $('scannerSetupType').value = value;
     saveState();
     renderFinalUniversePreview();
@@ -2787,44 +2791,99 @@ function setControlStripSelection(panel, value){
   }
 }
 
+function ensureControlFocusDefault(){
+  if(!['market','account','mode','setup'].includes(String(uiState.controlStripPanel || ''))){
+    uiState.controlStripPanel = 'market';
+  }
+}
+
+function focusRailButtonForKey(focusKey){
+  if(focusKey === 'market') return $('marketStatusPill');
+  if(focusKey === 'account') return $('accountRiskPill');
+  if(focusKey === 'mode') return $('scannerModePill');
+  if(focusKey === 'setup') return $('setupTypePill');
+  return null;
+}
+
+function setControlFocus(focusKey, options = {}){
+  const nextFocus = ['market','account','mode','setup'].includes(String(focusKey || '')) ? String(focusKey) : 'market';
+  uiState.controlStripPanel = nextFocus;
+  renderControlStripSelector();
+  if(options.scroll !== false){
+    const button = focusRailButtonForKey(nextFocus);
+    if(button){
+      button.scrollIntoView({behavior:options.instant ? 'auto' : 'smooth', inline:'center', block:'nearest'});
+    }
+  }
+}
+
+function detectFocusedRailItem(){
+  const rail = $('controlFocusRail');
+  if(!rail) return;
+  const buttons = [...rail.querySelectorAll('[data-control-strip]')];
+  if(!buttons.length) return;
+  const railRect = rail.getBoundingClientRect();
+  const railCenter = railRect.left + (railRect.width / 2);
+  let bestKey = '';
+  let bestDistance = Infinity;
+  buttons.forEach(button => {
+    const rect = button.getBoundingClientRect();
+    const center = rect.left + (rect.width / 2);
+    const distance = Math.abs(center - railCenter);
+    if(distance < bestDistance){
+      bestDistance = distance;
+      bestKey = button.getAttribute('data-control-strip') || '';
+    }
+  });
+  if(bestKey && bestKey !== uiState.controlStripPanel){
+    uiState.controlStripPanel = bestKey;
+    renderControlStripSelector();
+  }
+}
+
 function renderControlStripSelector(){
-  const panel = String(uiState.controlStripPanel || '');
+  ensureControlFocusDefault();
+  const focusKey = String(uiState.controlStripPanel || 'market');
   const selector = $('controlStripSelector');
   const label = $('controlStripSelectorLabel');
   const optionsBox = $('controlStripSelectorOptions');
-  ['marketStatusPill','scannerModePill','setupTypePill'].forEach(id => {
+  const rail = $('controlFocusRail');
+  ['marketStatusPill','accountRiskPill','scannerModePill','setupTypePill'].forEach(id => {
     const button = $(id);
-    if(button) button.setAttribute('aria-expanded', 'false');
+    if(button) button.classList.remove('is-active');
   });
+  const activeButton = focusRailButtonForKey(focusKey);
+  if(activeButton) activeButton.classList.add('is-active');
   if(!selector || !label || !optionsBox) return;
-  const config = controlStripOptionsForPanel(panel);
-  if(!config){
-    selector.hidden = true;
-    optionsBox.innerHTML = '';
-    return;
-  }
-  if(panel === 'market' && $('marketStatusPill')) $('marketStatusPill').setAttribute('aria-expanded', 'true');
-  if(panel === 'scanner-mode' && $('scannerModePill')) $('scannerModePill').setAttribute('aria-expanded', 'true');
-  if(panel === 'setup-type' && $('setupTypePill')) $('setupTypePill').setAttribute('aria-expanded', 'true');
-  selector.hidden = false;
+  const config = controlFocusConfig(focusKey);
   label.textContent = config.label;
-  optionsBox.innerHTML = config.options.map(option => (
-    `<button class="controlstrip-option ${String(option.value) === String(config.selected) ? 'is-selected' : ''}" type="button" data-control-option="${escapeHtml(panel)}" data-value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</button>`
-  )).join('');
-  optionsBox.querySelectorAll('[data-control-option]').forEach(button => {
-    button.onclick = event => {
-      event.preventDefault();
-      event.stopPropagation();
-      setControlStripSelection(panel, button.getAttribute('data-value') || '');
-      uiState.controlStripPanel = '';
-      renderControlStripSelector();
-    };
-  });
-}
-
-function toggleControlStripPanel(panel){
-  uiState.controlStripPanel = uiState.controlStripPanel === panel ? '' : panel;
-  renderControlStripSelector();
+  if(focusKey === 'account'){
+    optionsBox.innerHTML = `<div class="control-focus-account"><div class="control-focus-account__summary"><strong>${escapeHtml(formatGbp(state.accountSize))} | ${escapeHtml(formatGbp(currentMaxLoss()))}</strong><span>Account size and max risk for the next scan.</span></div><button class="secondary compactbutton" type="button" id="controlFocusAccountAction">Edit Risk Settings</button></div>`;
+    const button = $('controlFocusAccountAction');
+    if(button){
+      button.onclick = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const settings = $('headerRiskSettings');
+        if(!settings) return;
+        settings.open = true;
+        settings.scrollIntoView({behavior:'smooth', block:'nearest'});
+      };
+    }
+  }else{
+    optionsBox.innerHTML = config.options.map(option => (
+      `<button class="controlstrip-option ${String(option.value) === String(config.selected) ? 'is-selected' : ''}" type="button" data-control-option="${escapeHtml(focusKey)}" data-value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</button>`
+    )).join('');
+    optionsBox.querySelectorAll('[data-control-option]').forEach(button => {
+      button.onclick = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        setControlFocusSelection(focusKey, button.getAttribute('data-value') || '');
+        renderControlStripSelector();
+      };
+    });
+  }
+  if(rail) rail.querySelectorAll('[data-control-strip]').forEach(button => button.setAttribute('aria-current', button.classList.contains('is-active') ? 'true' : 'false'));
 }
 
 function updateTickerInputFromState(){
@@ -12295,19 +12354,10 @@ click('resetAllBtn', () => {
 });
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
-click('marketStatusPill', () => toggleControlStripPanel('market'));
-click('accountRiskPill', () => {
-  uiState.controlStripPanel = '';
-  renderControlStripSelector();
-  const settings = $('headerRiskSettings');
-  if(!settings) return;
-  settings.open = !settings.open;
-  if(settings.open){
-    settings.scrollIntoView({behavior:'smooth', block:'nearest'});
-  }
-});
-click('scannerModePill', () => toggleControlStripPanel('scanner-mode'));
-click('setupTypePill', () => toggleControlStripPanel('setup-type'));
+click('marketStatusPill', () => setControlFocus('market'));
+click('accountRiskPill', () => setControlFocus('account'));
+click('scannerModePill', () => setControlFocus('mode'));
+click('setupTypePill', () => setControlFocus('setup'));
 click('jumpToDiaryBtn', () => {
   const diarySection = $('diarySection');
   if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});
@@ -12325,14 +12375,6 @@ click('expireLifecycleBtn', expireSelectedTickerLifecycle);
 click('reactivateLifecycleBtn', reactivateSelectedTickerLifecycle);
 click('calcBtn', calculate);
 document.addEventListener('click', event => {
-  if(
-    uiState.controlStripPanel
-    && !event.target.closest('[data-control-strip]')
-    && !event.target.closest('#controlStripSelector')
-  ){
-    uiState.controlStripPanel = '';
-    renderControlStripSelector();
-  }
   if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]') || event.target.closest('.scan-card-secondary-panel')) return;
   if(event.target.closest('.scan-card')) return;
   if(uiState.secondaryUiTicker || uiState.secondaryUiMode){
@@ -12358,6 +12400,16 @@ on('ocrImportFile', 'change', event => {
   event.target.value = '';
 });
 on('ocrReviewInput', 'input', syncOcrReviewVisibility);
+{
+  const rail = $('controlFocusRail');
+  if(rail){
+    let focusRailTimer = 0;
+    rail.addEventListener('scroll', () => {
+      clearTimeout(focusRailTimer);
+      focusRailTimer = setTimeout(() => detectFocusedRailItem(), 80);
+    }, {passive:true});
+  }
+}
 on('tickerInput', 'input', () => {
   syncUniverseFromInputs();
   if(!uniqueTickers(state.tickers || []).length){
@@ -12414,6 +12466,7 @@ document.querySelectorAll('.logic').forEach(el => el.addEventListener('change', 
 
 registerPwa();
 loadState();
+setControlFocus(uiState.controlStripPanel || 'market', {scroll:false, instant:true});
 consumeResetNotice();
 bootstrapBackgroundMonitoring();
 bootstrapWatchlistLifecycleAutomation();

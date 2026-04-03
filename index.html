@@ -34,28 +34,27 @@
         <h1>Pullback Playbook v4.4.1</h1>
         <p>Scan, shortlist, review, decide, then track.</p>
       </div>
-      <div class="controlstrip" aria-label="Header control strip">
-        <button class="controlstrip-pill controlstrip-pill--button" id="marketStatusPill" type="button" data-control-strip="market">
-          <span class="controlstrip-label" id="marketStatusSection">Market</span>
-          <strong id="marketStatusStrip">S&amp;P above 50 MA</strong>
+      <div class="control-focus-rail" id="controlFocusRail" aria-label="Control focus rail">
+        <button class="focus-rail-item" id="marketStatusPill" type="button" data-control-strip="market">
+          <span class="focus-rail-label" id="marketStatusSection">Market</span>
+          <strong class="focus-rail-value" id="marketStatusStrip">S&amp;P above 50 MA</strong>
         </button>
-        <button class="controlstrip-pill controlstrip-pill--button" id="accountRiskPill" type="button">
-          <span class="controlstrip-label">Account | Risk</span>
-          <strong id="accountRiskStrip">GBP 4,000 | GBP 40</strong>
+        <button class="focus-rail-item" id="accountRiskPill" type="button" data-control-strip="account">
+          <span class="focus-rail-label">Account</span>
+          <strong class="focus-rail-value" id="accountRiskStrip">GBP 4,000 | GBP 40</strong>
         </button>
-        <button class="controlstrip-pill controlstrip-pill--button" id="scannerModePill" type="button" data-control-strip="scanner-mode">
-          <span class="controlstrip-label">Scanner Mode</span>
-          <strong id="scannerModeStrip">Curated Core</strong>
+        <button class="focus-rail-item" id="scannerModePill" type="button" data-control-strip="mode">
+          <span class="focus-rail-label">Mode</span>
+          <strong class="focus-rail-value" id="scannerModeStrip">Curated Core</strong>
         </button>
-        <button class="controlstrip-pill controlstrip-pill--button" id="setupTypePill" type="button" data-control-strip="setup-type">
-          <span class="controlstrip-label">Setup Type</span>
-          <strong id="setupTypeStrip">Unknown</strong>
+        <button class="focus-rail-item" id="setupTypePill" type="button" data-control-strip="setup">
+          <span class="focus-rail-label">Setup</span>
+          <strong class="focus-rail-value" id="setupTypeStrip">Unknown</strong>
         </button>
-        <span class="pill controlstrip-version" id="appVersion">v4.4.1</span>
       </div>
-      <div class="controlstrip-selector" id="controlStripSelector" hidden>
-        <div class="controlstrip-selector__label" id="controlStripSelectorLabel">Setup Type</div>
-        <div class="controlstrip-selector__options" id="controlStripSelectorOptions"></div>
+      <div class="control-focus-tray" id="controlStripSelector">
+        <div class="control-focus-tray__label" id="controlStripSelectorLabel">Market</div>
+        <div class="control-focus-tray__body" id="controlStripSelectorOptions"></div>
       </div>
       <select id="marketStatus" hidden>
         <option>S&amp;P above 50 MA</option>
