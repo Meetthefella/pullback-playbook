@@ -83,6 +83,9 @@ const uiState = {
   activeReviewTicker:'',
   activeReviewAddsToScannerUniverse:true,
   activeReviewVerdictOverride:'',
+  scannerSessionTickers:[],
+  scannerLastScanAt:'',
+  scannerSessionId:'',
   scannerShortlistSuppressed:false,
   watchlistLifecycleRunning:false,
   watchlistLifecycleLastRunAt:'',
@@ -2474,7 +2477,10 @@ function resultSortScoreFromRecord(record){
 
 function rankedTickerRecords(){
   if(uiState.scannerShortlistSuppressed) return [];
+  const sessionTickers = new Set(uniqueTickers(uiState.scannerSessionTickers || []));
+  if(!sessionTickers.size) return [];
   return allTickerRecords()
+    .filter(record => sessionTickers.has(normalizeTickerRecord(record).ticker))
     .filter(record => record.scan && (record.scan.lastScannedAt || record.scan.verdict || Number.isFinite(record.scan.score)))
     .sort((a, b) =>
       statusRankFromRecord(a) - statusRankFromRecord(b)
@@ -2516,11 +2522,6 @@ function syncTickerRecordsFromLegacyCollections(){
     const record = records[normalizeTicker(ticker)] || normalizeTickerRecord(baseTickerRecord(ticker));
     records[record.ticker] = record;
   });
-  (state.scannerResults || []).map(normalizeCard).forEach(card => {
-    const record = records[card.ticker] || normalizeTickerRecord(baseTickerRecord(card.ticker));
-    mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:false});
-    records[card.ticker] = record;
-  });
   (state.cards || []).map(normalizeCard).forEach(card => {
     const record = records[card.ticker] || normalizeTickerRecord(baseTickerRecord(card.ticker));
     mergeLegacyCardIntoRecord(record, card, {fromScanner:false, fromCards:true, cardOpen:true});
@@ -2553,10 +2554,7 @@ function syncLegacyCollectionsFromTickerRecords(){
   // generated from tickerRecords only and are not authoritative sources.
   const records = Object.values(normalizeTickerRecordsMap(state.tickerRecords || {}));
   state.cards = records.filter(record => record.review.cardOpen).map(tickerRecordToLegacyCard);
-  state.scannerResults = records
-    .filter(record => record.scan.lastScannedAt || record.scan.verdict || Number.isFinite(record.scan.score))
-    .map(tickerRecordToLegacyCard)
-    .sort((a, b) => resultSortScore(b) - resultSortScore(a) || b.score - a.score || a.ticker.localeCompare(b.ticker));
+  state.scannerResults = [];
   state.watchlist = records
     .map(tickerRecordToWatchlistEntry)
     .filter(Boolean)
@@ -2609,11 +2607,27 @@ function saveState(){
   renderFinalUniversePreview();
 }
 
+function clearScannerSessionState(options = {}){
+  uiState.scannerSessionTickers = [];
+  uiState.scannerLastScanAt = '';
+  uiState.scannerSessionId = '';
+  if(options.suppressed === true) uiState.scannerShortlistSuppressed = true;
+  else if(options.suppressed === false) uiState.scannerShortlistSuppressed = false;
+  clearScanCardSecondaryUi();
+}
+
+function setScannerSessionResults(tickers, scannedAt){
+  uiState.scannerSessionTickers = uniqueTickers(tickers || []);
+  uiState.scannerLastScanAt = String(scannedAt || new Date().toISOString());
+  uiState.scannerSessionId = `scan-${Date.now()}`;
+  uiState.scannerShortlistSuppressed = false;
+}
+
 function loadState(){
   Object.assign(state, createDefaultState(), safeStorageGet(key, {}) || {});
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
-  uiState.scannerShortlistSuppressed = false;
+  clearScannerSessionState({suppressed:false});
   delete state.lastImportRaw;
   state.aiEndpoint = state.aiEndpoint || defaultAiEndpoint;
   state.marketDataEndpoint = defaultMarketDataEndpoint;
@@ -2641,11 +2655,11 @@ function loadState(){
   state.activeQueueManualTickers = uniqueTickers(state.activeQueueManualTickers || []);
   state.activeQueueLastRebuiltCycle = String(state.activeQueueLastRebuiltCycle || '');
   state.watchlist = (state.watchlist || []).map(normalizeWatchlistEntry).filter(Boolean);
-  state.scannerResults = (state.scannerResults || []).map(normalizeCard).filter(card => card.ticker);
+  state.scannerResults = [];
   state.cards = (state.cards || []).map(normalizeCard).filter(card => card.ticker);
   state.tradeDiary = (state.tradeDiary || []).map(normalizeTradeRecord);
   state.symbolMeta = state.symbolMeta && typeof state.symbolMeta === 'object' ? state.symbolMeta : {};
-  state.scannerDebug = Array.isArray(state.scannerDebug) ? state.scannerDebug : [];
+  state.scannerDebug = [];
   state.showExpiredWatchlist = !!state.showExpiredWatchlist;
   syncTickerRecordsFromLegacyCollections();
   syncLegacyCollectionsFromTickerRecords();
@@ -3689,6 +3703,7 @@ function scannerEmptyState(message){
   state.scannerResults = [];
   state.scannerDebug = [];
   uiState.selectedScanner = {};
+  clearScannerSessionState({suppressed:false});
   commitTickerState();
   renderTickerQuickLists();
   renderScannerResults();
@@ -3698,7 +3713,7 @@ function scannerEmptyState(message){
 }
 
 async function runScannerWorkflow(options = {}){
-  uiState.scannerShortlistSuppressed = false;
+  clearScannerSessionState({suppressed:false});
   saveState();
   const {parsed, universe, blocked} = prepareScannerUniverse(options);
   if(blocked) return {done:0, failed:0, rejected:0};
@@ -3706,6 +3721,7 @@ async function runScannerWorkflow(options = {}){
   updateRecentTickers(universe);
   renderTickerQuickLists();
   renderScannerRulesPanel();
+  renderScannerResults();
   if(!universe.length){
     const messages = [];
     if(parsed.invalid.length) messages.push(`Invalid: ${escapeHtml(parsed.invalid.join(', '))}`);
@@ -3730,6 +3746,9 @@ async function runScannerWorkflow(options = {}){
     $('resultsToggle').open = true;
     syncResultsToggleLabel();
   }
+  setScannerSessionResults(universe, new Date().toISOString());
+  renderScannerResults();
+  renderFocusQueue();
   setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} ranked, ${result.rejected} avoid, ${result.failed} failed.`);
   return result;
 }
@@ -10690,17 +10709,18 @@ function selectedScannerTickers(){
 function updateScannerSelectionStatus(){
   const resultCount = rankedTickerRecords().length;
   if(!$('scannerSelectionStatus')) return;
+  const lastScanLabel = uiState.scannerLastScanAt ? ` Last scanned: ${formatLocalTimestamp(uiState.scannerLastScanAt)}.` : '';
   if(uiState.scannerShortlistSuppressed){
-    setStatus('scannerSelectionStatus', 'Session shortlist cleared. Run a new scan to rebuild ranked results.');
+    setStatus('scannerSelectionStatus', `Session shortlist cleared. Run a new scan to rebuild ranked results.${lastScanLabel}`);
     return;
   }
   if(!resultCount){
-    setStatus('scannerSelectionStatus', (state.tickers || []).length
-      ? 'Refresh the scanner to rank your imported TradingView tickers.'
-      : 'Running the scanner will populate ranked results from the Curated Core 8 fallback universe.');
+    setStatus('scannerSelectionStatus', uiState.scannerLastScanAt
+      ? `Latest scan is empty for this session.${lastScanLabel}`
+      : 'Run a fresh scan or import tickers to generate new opportunities for review.');
     return;
   }
-  setStatus('scannerSelectionStatus', 'Open any ranked setup to jump straight into review.');
+  setStatus('scannerSelectionStatus', `Open any ranked setup to jump straight into review.${lastScanLabel}`);
 }
 
 function seedCardsFromUniverse(limit){
@@ -10731,19 +10751,7 @@ function renderScannerResults(){
       box.innerHTML = '<div class="summary">Session shortlist cleared. Run a new scan to rebuild Tradeable, Early / Monitor, and Focus results.</div>';
       return;
     }
-    box.innerHTML = !(state.tickers || []).length
-      ? '<div class="summary">Scanning the Curated Core 8 fallback universe. Add your own tickers any time to switch into manual mode.</div>'
-      : (state.scannerDebug && state.scannerDebug.length
-      ? '<div class="summary">No ranked setups yet, but your imported tickers can still be opened in cards for manual review.</div><button class="secondary" data-act="seed-from-universe">Open Universe In Cards</button>'
-      : '<div class="summary">Running the scanner will populate ranked results here.</div>');
-    const seedBtn = box.querySelector('[data-act="seed-from-universe"]');
-    if(seedBtn){
-      seedBtn.onclick = () => {
-        seedCardsFromUniverse(6);
-        const reviewSection = $('reviewSection');
-        if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
-      };
-    }
+    box.innerHTML = '<div class="summary"><strong>No scan results yet</strong><div class="tiny" style="margin-top:8px">Run a fresh scan or import tickers to generate new opportunities for review.</div></div>';
     renderWorkflowAlerts();
     return;
   }
@@ -11714,7 +11722,7 @@ function resetAllData(){
   Object.assign(state, createDefaultState());
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
-  uiState.scannerShortlistSuppressed = false;
+  clearScannerSessionState({suppressed:false});
   uiState.promptOpen = {};
   uiState.responseOpen = {};
   uiState.loadingTicker = '';
@@ -11773,7 +11781,7 @@ function clearTransientSessionState(options = {}){
   uiState.promptOpen = {};
   uiState.responseOpen = {};
   uiState.reviewAnalysisCache = {};
-  uiState.scannerShortlistSuppressed = suppressScannerShortlist;
+  clearScannerSessionState({suppressed:suppressScannerShortlist});
   if(clearPersistedShortlistState){
     state.tickers = [];
     state.scannerResults = [];
@@ -12142,6 +12150,7 @@ click('clearBtn', () => {
   uiState.promptOpen = {};
   uiState.responseOpen = {};
   uiState.selectedScanner = {};
+  clearScannerSessionState({suppressed:false});
   Object.values(state.tickerRecords || {}).forEach(clearScannerProjectionState);
   renderTickerSuggestions([]);
   // Scanner clear should remain isolated from canonical watchlist/review records.
