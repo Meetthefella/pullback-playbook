@@ -3520,22 +3520,17 @@ function renderWatchlist(){
         resolvedContract
       });
       const div = document.createElement('div');
-      const failedStates = ['dead','expired_dead','needs_rebuild','invalid_plan'];
       const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
       const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
       const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
       const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
-      console.log('STATE DEBUG:', {
-        ticker: entry.ticker,
-        state: watchlistState || primaryState || finalDisplayState || '(none)',
-        watchlist_lifecycle_state: watchlistState || '(none)'
+      const visualStateClass = visualCardStateClass({
+        primaryState,
+        lifecycleState:watchlistState,
+        finalDisplayState,
+        planStatusKey:planState
       });
-      const isDeadCard = failedStates.includes(watchlistState)
-        || failedStates.includes(primaryState)
-        || failedStates.includes(finalDisplayState)
-        || failedStates.includes(planState)
-        || primaryState === 'inactive';
-      div.className = `resultcompact watchlist-card ${escapeHtml(matteStateClassForPrimaryState(watchlistPresentation.primaryState))} ${isDeadCard ? 'card-dead' : ''}`.trim();
+      div.className = `resultcompact watchlist-card ${escapeHtml(visualStateClass)}`.trim();
       div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${watchlistBadgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save</button><button class="danger" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
@@ -4821,6 +4816,23 @@ function matteStateClassForPrimaryState(primaryState){
   return 'state-monitor';
 }
 
+function visualCardStateClass(options = {}){
+  const primaryState = String(options.primaryState || '').toLowerCase();
+  const lifecycleState = String(options.lifecycleState || '').toLowerCase();
+  const finalDisplayState = String(options.finalDisplayState || '').toLowerCase();
+  const planStatusKey = String(options.planStatusKey || '').toLowerCase();
+  const candidates = [lifecycleState, finalDisplayState, planStatusKey, primaryState].filter(Boolean);
+  if(candidates.includes('dead') || candidates.includes('expired_dead')) return 'state-dead';
+  if(candidates.includes('needs_rebuild') || candidates.includes('rebuild_required')) return 'state-needs-rebuild';
+  if(candidates.includes('invalid_plan') || candidates.includes('invalid')) return 'state-invalid-plan';
+  if(candidates.includes('entry')) return 'state-entry';
+  if(candidates.includes('near_entry')) return 'state-near-entry';
+  if(candidates.includes('developing')) return 'state-developing';
+  if(candidates.includes('monitor')) return 'state-monitor';
+  if(candidates.includes('inactive')) return 'state-dead';
+  return 'state-monitor';
+}
+
 function rrDisplayClass(rrValue){
   const rr = numericOrNull(rrValue);
   if(!Number.isFinite(rr)) return '';
@@ -4926,8 +4938,11 @@ function renderCompactResultCardFromView(view){
   const intensity = scanCardIntensityForView(view);
   const toneClass = `result-card--${tone}`;
   const intensityClass = `result-card--intensity-${intensity}`;
-  const matteStateClass = matteStateClassForPrimaryState(statusChip.primaryState);
-  const isDeadCard = ['dead','inactive','expired_dead'].includes(String(statusChip.primaryState || '').toLowerCase());
+  const visualStateClass = visualCardStateClass({
+    primaryState:statusChip.primaryState,
+    finalDisplayState:view && (view.displayStage || view.finalVerdict),
+    planStatusKey:view && view.planUiState && view.planUiState.state
+  });
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const summary = scanCardSummaryForView(view);
   const readinessLabel = readinessLabelForView(view);
@@ -4944,7 +4959,7 @@ function renderCompactResultCardFromView(view){
     Number.isFinite(resolution.rr_value) ? `RR ${Number(resolution.rr_value).toFixed(1)} (${resolution.rr_label || 'n/a'})` : ''
   ].filter(Boolean).join(' | ');
   const traceMarkup = renderScannerDecisionTrace(view);
-  return `<div class="resultcompact result-card result-feed-card ${escapeHtml(matteStateClass)} ${isDeadCard ? 'card-dead' : ''} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.decision ? `<div class="resultdecisionline">${escapeHtml(summary.decision)}</div>` : ''}${readinessLabel ? `<div class="resultconfidence">${escapeHtml(readinessLabel)}</div>` : ''}${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><div class="resultactionsbar result-feed-card__actions"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}</details>${traceMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.decision ? `<div class="resultdecisionline">${escapeHtml(summary.decision)}</div>` : ''}${readinessLabel ? `<div class="resultconfidence">${escapeHtml(readinessLabel)}</div>` : ''}${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><div class="resultactionsbar result-feed-card__actions"><button class="primary compactbutton" data-act="review" data-source-verdict="${escapeHtml(sourceVerdict)}">Open Review</button></div><details class="compact-result-details"><summary>Details</summary><div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}</details>${traceMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
