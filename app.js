@@ -5369,11 +5369,12 @@ function resolveVisualState(setup = {}){
   const tradeability = normalizeAnalysisVerdict(setup.tradeability || '');
   const structure = String(setup.structure || '').toLowerCase();
   const bounce = String(setup.bounce || '').toLowerCase();
+  const weakStructure = ['weak','weakening','developing_loose'].includes(structure);
 
   if(state === 'dead' || tradeability === 'Avoid'){
     return {tone:'red'};
   }
-  if(structure === 'weak' || bounce === 'none'){
+  if(weakStructure || bounce === 'none'){
     return {tone:'orange'};
   }
   if(state === 'entry' || state === 'near_entry'){
