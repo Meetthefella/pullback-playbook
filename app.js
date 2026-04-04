@@ -13382,7 +13382,6 @@ function resolveFinalStateContract(record, options = {}){
     item.marketData && item.marketData.currency
   );
   const planCheckState = options.planCheckState || planCheckStateForRecord(item, {effectivePlan, displayedPlan});
-  const rrResolution = options.rrResolution || resolveScannerStateWithTrace(item, {derivedStates});
   const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {
     displayedPlan,
     derivedStates,
@@ -13436,6 +13435,12 @@ function resolveFinalStateContract(record, options = {}){
   else if(planUiState.state === 'invalid') planStateKey = 'invalid';
   else if(planUiState.state === 'needs_adjustment' || riskTooWide || capitalBlocked) planStateKey = 'needs_adjustment';
   else if(planUiState.state === 'unrealistic_rr') planStateKey = 'unrealistic_rr';
+  const rrResolution = options.rrResolution || {
+    rr_label:planStateKey !== 'valid' ? 'Invalid plan' : 'Low confidence',
+    rawResolverVerdict:finalVerdict,
+    status:finalVerdict,
+    remapReason:''
+  };
 
   const planStatusLabel = ({
     missing:'Missing plan',
