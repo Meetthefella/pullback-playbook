@@ -5187,15 +5187,12 @@ function rankedDecisionBucketForView(view){
   });
   const primaryState = String(presentation.primaryState || '').toLowerCase();
   const fallbackVerdict = normalizeAnalysisVerdict(view && (view.displayStage || view.finalVerdict || (view.scannerResolution && view.scannerResolution.status) || ''));
-  const planState = String(view && view.planUiState && view.planUiState.state || '').toLowerCase();
-
   if(primaryState === 'entry') return 'tradeable_entry';
-  if(planState === 'invalid' || planState === 'unrealistic_rr') return 'lower_priority';
-  if(primaryState === 'near_entry' || fallbackVerdict === 'Near Entry') return 'near_entry_monitor';
-  if(primaryState === 'monitor' || primaryState === 'developing' || fallbackVerdict === 'Watch') return 'near_entry_monitor';
+  if(primaryState === 'near_entry' || fallbackVerdict === 'Near Entry') return 'near_entry';
+  if(primaryState === 'monitor' || primaryState === 'developing' || fallbackVerdict === 'Watch') return 'monitor_watch';
   if(primaryState === 'dead' || primaryState === 'inactive') return 'lower_priority';
   if(fallbackVerdict === 'Entry') return 'tradeable_entry';
-  if(['Near Entry','Watch','Avoid'].includes(fallbackVerdict)) return 'lower_priority';
+  if(fallbackVerdict === 'Avoid') return 'lower_priority';
   return 'lower_priority';
 }
 
@@ -5294,8 +5291,16 @@ function primaryShortlistStatusChip(view){
     derivedStates:view && view.setupStates,
     warningState:view && view.warningState
   });
+  const primaryState = String(presentation.primaryState || '').toLowerCase();
+  const finalVerdict = normalizeAnalysisVerdict(view && (view.displayStage || view.finalVerdict || (view.scannerResolution && view.scannerResolution.status) || ''));
+  let label = presentation.primaryText;
+  if(primaryState === 'entry' || finalVerdict === 'Entry') label = '🚀 Entry';
+  else if(primaryState === 'near_entry' || finalVerdict === 'Near Entry') label = '🎯 Near Entry';
+  else if(primaryState === 'developing') label = '🌱 Developing';
+  else if(primaryState === 'monitor' || finalVerdict === 'Watch') label = '🧐 Monitor';
+  else if(primaryState === 'dead' || primaryState === 'inactive' || finalVerdict === 'Avoid') label = '⛔ Avoid';
   return {
-    label:presentation.primaryText,
+    label,
     className:presentation.badgeClass,
     modifiers:presentation.modifiers,
     primaryState:presentation.primaryState
@@ -11805,15 +11810,17 @@ function renderScannerResults(){
     renderWorkflowAlerts();
     return;
   }
-  const grouped = {tradeableEntry:[], nearEntryMonitor:[], lowerPriority:[]};
+  const grouped = {tradeableEntry:[], nearEntry:[], monitorWatch:[], lowerPriority:[]};
   finalViews.forEach(view => {
     const bucket = rankedDecisionBucketForView(view);
     if(bucket === 'tradeable_entry') grouped.tradeableEntry.push(view);
-    else if(bucket === 'near_entry_monitor') grouped.nearEntryMonitor.push(view);
+    else if(bucket === 'near_entry') grouped.nearEntry.push(view);
+    else if(bucket === 'monitor_watch') grouped.monitorWatch.push(view);
     else grouped.lowerPriority.push(view);
   });
   const tradeable = grouped.tradeableEntry;
-  const nearEntryMonitor = grouped.nearEntryMonitor;
+  const nearEntry = grouped.nearEntry;
+  const monitorWatch = grouped.monitorWatch;
   const lowerPriority = grouped.lowerPriority;
   const sections = [
     {
@@ -11827,20 +11834,30 @@ function renderScannerResults(){
       empty: contextualResultEmptyState('tradeable_entry')
     },
     {
-      key:'near-entry-monitor',
-      title:'Near Entry / Monitor',
-      summary: nearEntryMonitor.length
-        ? `${nearEntryMonitor.length} setup${nearEntryMonitor.length === 1 ? '' : 's'} need${nearEntryMonitor.length === 1 ? 's' : ''} confirmation`
+      key:'near-entry',
+      title:'Near Entry',
+      summary: nearEntry.length
+        ? `${nearEntry.length} setup${nearEntry.length === 1 ? '' : 's'} close to trigger`
         : 'Nothing Near Entry',
-      items:nearEntryMonitor,
+      items:nearEntry,
       collapsed:false,
       empty: contextualResultEmptyState('near_entry_monitor')
     },
     {
+      key:'monitor-watch',
+      title:'Monitor / Watch',
+      summary: monitorWatch.length
+        ? `${monitorWatch.length} review candidate${monitorWatch.length === 1 ? '' : 's'} worth monitoring`
+        : 'Nothing To Monitor',
+      items:monitorWatch,
+      collapsed:false,
+      empty: 'No watch candidates right now.'
+    },
+    {
       key:'lower-priority',
-      title:'Watch / Avoid / Lower Priority',
+      title:'Low Priority / Avoid',
       summary: lowerPriority.length
-        ? `${lowerPriority.length} lower-priority setup${lowerPriority.length === 1 ? '' : 's'}`
+        ? `${lowerPriority.length} low-priority setup${lowerPriority.length === 1 ? '' : 's'}`
         : 'No Lower-Priority Setups',
       items:lowerPriority,
       collapsed:false,
