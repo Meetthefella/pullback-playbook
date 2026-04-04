@@ -56,6 +56,13 @@
         <div class="control-focus-tray__label" id="controlStripSelectorLabel">Market</div>
         <div class="control-focus-tray__body" id="controlStripSelectorOptions"></div>
       </div>
+      <div class="market-session-widget" id="marketSessionWidget" aria-live="polite">
+        <div class="market-session-widget__top">
+          <span class="market-session-badge" id="marketSessionBadge">Market Closed</span>
+          <span class="market-session-hours" id="marketSessionHours">Regular 9:30 AM - 4:00 PM ET</span>
+        </div>
+        <div class="market-session-detail" id="marketSessionDetail">Next open 9:30 AM ET</div>
+      </div>
       <select id="marketStatus" hidden>
         <option>S&amp;P above 50 MA</option>
         <option>S&amp;P near 50 MA</option>
@@ -281,6 +288,16 @@
             <button class="danger" id="hardResetAppBtn" type="button">Hard Reset App Data</button>
           </div>
           <div id="resetStatus" class="subtle">Refresh rerenders only. Session clear drops shortlist/review working state. Hard reset also clears scanner caches and reloads.</div>
+        </div>
+        <div class="panelbox">
+          <strong>U.S. Market Calendar</strong>
+          <div id="marketCalendarSummary" class="tiny" style="margin-top:10px">Current U.S. trading month.</div>
+          <div class="market-calendar-grid" id="marketCalendarGrid" style="margin-top:10px"></div>
+          <div class="market-calendar-legend" style="margin-top:10px">
+            <span class="market-calendar-legend__item"><span class="market-calendar-legend__swatch market-calendar-legend__swatch--today"></span>Today</span>
+            <span class="market-calendar-legend__item"><span class="market-calendar-legend__swatch market-calendar-legend__swatch--holiday"></span>Holiday</span>
+            <span class="market-calendar-legend__item"><span class="market-calendar-legend__swatch market-calendar-legend__swatch--early"></span>Early close</span>
+          </div>
         </div>
       </div>
     </details>

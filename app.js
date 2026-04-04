@@ -108,6 +108,28 @@ const REVIEW_EXPIRY_TRADING_DAYS = 5;
 const PLAN_EXPIRY_TRADING_DAYS = 3;
 const WATCHLIST_LIFECYCLE_INTERVAL_MS = 5 * 60 * 1000;
 const WATCHLIST_LIFECYCLE_FRESHNESS_MS = 24 * 60 * 60 * 1000;
+const MARKET_STATUS_REFRESH_MS = 60 * 1000;
+const MARKET_TIMEZONE = 'America/New_York';
+const US_MARKET_CALENDAR_CONFIG = {
+  2026:{
+    holidays:[
+      '2026-01-01',
+      '2026-01-19',
+      '2026-02-16',
+      '2026-04-03',
+      '2026-05-25',
+      '2026-06-19',
+      '2026-07-03',
+      '2026-09-07',
+      '2026-11-26',
+      '2026-12-25'
+    ],
+    earlyCloseDays:{
+      '2026-11-27':'13:00',
+      '2026-12-24':'13:00'
+    }
+  }
+};
 const DIARY_SETUP_TAG_OPTIONS = ['20MA bounce', '50MA reclaim', 'first pullback', 'post-earnings continuation', 'weak-market exception', 'countertrend avoid'];
 const DIARY_MISTAKE_TAG_OPTIONS = ['early entry', 'chased breakout', 'ignored weak market', 'stop too tight', 'stop moved', 'oversize position', 'took subpar setup', 'sold too early', 'held too long'];
 const DIARY_LESSON_TAG_OPTIONS = ['wait for bounce confirmation', '50MA setups need extra patience', 'weak tape needs stricter filtering', 'best setups come from strong RS names', 'avoid loose structure under 20MA'];
@@ -177,6 +199,7 @@ let backendRefreshTimer = null;
 let pushConfigPromise = null;
 let watchlistLifecycleTimer = null;
 let watchlistLifecycleListenersBound = false;
+let marketStatusTimer = null;
 
 function formatGbp(value){
   return `GBP ${Number(value || 0).toLocaleString()}`;
@@ -628,6 +651,14 @@ function bootstrapBackgroundMonitoring(){
   backendRefreshTimer = setInterval(() => {
     pullTrackedRecordsFromBackend();
   }, BACKEND_REVIEW_POLL_MS);
+}
+
+function bootstrapMarketStatusClock(){
+  refreshMarketContextWidgets();
+  clearInterval(marketStatusTimer);
+  marketStatusTimer = setInterval(() => {
+    refreshMarketContextWidgets();
+  }, MARKET_STATUS_REFRESH_MS);
 }
 
 function escapeHtml(value){
@@ -2714,6 +2745,7 @@ function renderStats(){
   if($('scannerModeStrip')) $('scannerModeStrip').textContent = scannerModeChipLabel(effectiveUniverseMode());
   if($('setupTypeStrip')) $('setupTypeStrip').textContent = setupTypeChipLabel(state.setupType);
   renderControlStripSelector();
+  refreshMarketContextWidgets();
 }
 
 function scannerModeChipLabel(mode){
@@ -8452,6 +8484,312 @@ function todayIsoDate(){
   return new Date().toISOString().slice(0, 10);
 }
 
+function isoDateAddDays(isoDate, days){
+  const date = new Date(`${String(isoDate).slice(0, 10)}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return date.toISOString().slice(0, 10);
+}
+
+function isoDateMonthBounds(isoDate){
+  const [year, month] = String(isoDate || todayIsoDate()).slice(0, 10).split('-').map(Number);
+  const first = new Date(Date.UTC(year, Math.max(0, month - 1), 1, 12, 0, 0));
+  const last = new Date(Date.UTC(year, month, 0, 12, 0, 0));
+  return {
+    first:first.toISOString().slice(0, 10),
+    last:last.toISOString().slice(0, 10),
+    year,
+    month
+  };
+}
+
+function weekdayIndexFromIsoDate(isoDate){
+  return new Date(`${String(isoDate).slice(0, 10)}T12:00:00Z`).getUTCDay();
+}
+
+function formatIsoDateLabel(isoDate, options = {}){
+  const date = new Date(`${String(isoDate).slice(0, 10)}T12:00:00Z`);
+  return new Intl.DateTimeFormat('en-US', {
+    weekday:options.weekday ? 'short' : undefined,
+    month:options.month || 'short',
+    day:'numeric',
+    year:options.year ? 'numeric' : undefined
+  }).format(date);
+}
+
+function formatMonthYearLabel(isoDate){
+  const date = new Date(`${String(isoDate).slice(0, 10)}T12:00:00Z`);
+  return new Intl.DateTimeFormat('en-US', {
+    month:'long',
+    year:'numeric'
+  }).format(date);
+}
+
+function timezoneOffsetMinutes(date, timeZone){
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName:'shortOffset'
+  });
+  const part = formatter.formatToParts(date).find(item => item.type === 'timeZoneName');
+  const raw = String(part && part.value || 'GMT+0');
+  const match = raw.match(/GMT([+-]\d{1,2})(?::?(\d{2}))?/i);
+  if(!match) return 0;
+  const hours = Number(match[1] || 0);
+  const minutes = Number(match[2] || 0);
+  return (hours * 60) + (hours >= 0 ? minutes : -minutes);
+}
+
+function marketDateTimeToUtc(dateET, time24){
+  const [year, month, day] = String(dateET || todayIsoDate()).slice(0, 10).split('-').map(Number);
+  const [hour, minute] = String(time24 || '09:30').split(':').map(value => Number(value));
+  const utcGuess = new Date(Date.UTC(year, Math.max(0, (month || 1) - 1), day || 1, hour || 0, minute || 0, 0));
+  const offsetMinutes = timezoneOffsetMinutes(utcGuess, MARKET_TIMEZONE);
+  return new Date(utcGuess.getTime() - (offsetMinutes * 60000));
+}
+
+function formatDualTime(value){
+  const dateValue = value instanceof Date ? value : new Date(value);
+  const et = new Intl.DateTimeFormat('en-US', {
+    hour:'numeric',
+    minute:'2-digit',
+    hour12:true,
+    timeZone:MARKET_TIMEZONE
+  }).format(dateValue);
+  const uk = new Intl.DateTimeFormat('en-GB', {
+    hour:'2-digit',
+    minute:'2-digit',
+    hour12:false,
+    timeZone:'Europe/London'
+  }).format(dateValue);
+  return {et, uk};
+}
+
+function formatEtTimeText(time24){
+  const dual = formatDualTime(marketDateTimeToUtc(todayIsoDate(), time24));
+  return `${dual.et} ET (${dual.uk} UK)`;
+}
+
+function formatMarketTimeForDate(dateET, time24){
+  const dual = formatDualTime(marketDateTimeToUtc(dateET, time24));
+  return `${dual.et} ET (${dual.uk} UK)`;
+}
+
+function etDateTimeParts(now = new Date()){
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone:MARKET_TIMEZONE,
+    year:'numeric',
+    month:'2-digit',
+    day:'2-digit',
+    weekday:'short',
+    hour:'2-digit',
+    minute:'2-digit',
+    hour12:false
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(now).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  const year = Number(parts.year || 0);
+  const month = Number(parts.month || 0);
+  const day = Number(parts.day || 0);
+  const hour = Number(parts.hour || 0);
+  const minute = Number(parts.minute || 0);
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    weekdayShort:String(parts.weekday || ''),
+    isoDate:`${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    minutesOfDay:(hour * 60) + minute
+  };
+}
+
+function marketCalendarYearConfig(year){
+  return US_MARKET_CALENDAR_CONFIG[Number(year)] || {holidays:[], earlyCloseDays:{}};
+}
+
+function isHoliday(dateET){
+  const isoDate = String(dateET || '').slice(0, 10);
+  const year = Number(isoDate.slice(0, 4));
+  return marketCalendarYearConfig(year).holidays.includes(isoDate);
+}
+
+function isEarlyClose(dateET){
+  const isoDate = String(dateET || '').slice(0, 10);
+  const year = Number(isoDate.slice(0, 4));
+  return marketCalendarYearConfig(year).earlyCloseDays[isoDate] || '';
+}
+
+function isTradingDay(dateET){
+  const isoDate = String(dateET || '').slice(0, 10);
+  const weekday = weekdayIndexFromIsoDate(isoDate);
+  return weekday !== 0 && weekday !== 6 && !isHoliday(isoDate);
+}
+
+function regularSessionHoursLabel(dateET){
+  return `Regular ${formatMarketTimeForDate(dateET, '09:30')} - ${formatMarketTimeForDate(dateET, isEarlyClose(dateET) || '16:00')}`;
+}
+
+function nextTradingDayFrom(dateET, startOffset = 0){
+  let offset = Number(startOffset || 0);
+  let candidate = isoDateAddDays(dateET, offset);
+  while(!isTradingDay(candidate)){
+    offset += 1;
+    candidate = isoDateAddDays(dateET, offset);
+  }
+  return candidate;
+}
+
+function getNextMarketOpen(now = new Date()){
+  const etNow = etDateTimeParts(now);
+  const today = etNow.isoDate;
+  const openMinute = (9 * 60) + 30;
+  const closeMinute = isEarlyClose(today) ? (13 * 60) : (16 * 60);
+  let nextDate = today;
+  if(!isTradingDay(today) || etNow.minutesOfDay >= closeMinute){
+    nextDate = nextTradingDayFrom(today, 1);
+  }else if(etNow.minutesOfDay < openMinute){
+    nextDate = today;
+  }
+  return {
+    date:nextDate,
+    time:'09:30',
+    label:`${formatIsoDateLabel(nextDate, {weekday:true})} ${formatMarketTimeForDate(nextDate, '09:30')}`
+  };
+}
+
+function getNextMarketClose(now = new Date()){
+  const etNow = etDateTimeParts(now);
+  const today = etNow.isoDate;
+  const closeTime = isEarlyClose(today) || '16:00';
+  if(isTradingDay(today) && etNow.minutesOfDay < (Number(closeTime.slice(0, 2)) * 60 + Number(closeTime.slice(3, 5)))){
+    return {
+      date:today,
+      time:closeTime,
+      label:formatMarketTimeForDate(today, closeTime)
+    };
+  }
+  const nextOpenDate = nextTradingDayFrom(today, isTradingDay(today) ? 1 : 0);
+  const nextCloseTime = isEarlyClose(nextOpenDate) || '16:00';
+  return {
+    date:nextOpenDate,
+    time:nextCloseTime,
+    label:`${formatIsoDateLabel(nextOpenDate, {weekday:true})} ${formatMarketTimeForDate(nextOpenDate, nextCloseTime)}`
+  };
+}
+
+function getMarketSessionStatus(now = new Date()){
+  const etNow = etDateTimeParts(now);
+  const today = etNow.isoDate;
+  const openMinute = (9 * 60) + 30;
+  const earlyCloseTime = isEarlyClose(today);
+  const closeTime = earlyCloseTime || '16:00';
+  const closeMinute = (Number(closeTime.slice(0, 2)) * 60) + Number(closeTime.slice(3, 5));
+  if(!isTradingDay(today)){
+    const nextOpen = getNextMarketOpen(now);
+    return {
+      key:'closed',
+      label:'Market Closed',
+      hours:regularSessionHoursLabel(today),
+      detail:`Next open ${nextOpen.label}`
+    };
+  }
+  if(etNow.minutesOfDay < openMinute){
+    return earlyCloseTime
+      ? {
+          key:'early-close',
+          label:'Early close today',
+          hours:regularSessionHoursLabel(today),
+          detail:`Opens ${formatMarketTimeForDate(today, '09:30')} · Closes ${formatMarketTimeForDate(today, closeTime)}`
+        }
+      : {
+          key:'pre-market',
+          label:'Pre-market',
+          hours:regularSessionHoursLabel(today),
+          detail:`Opens ${formatMarketTimeForDate(today, '09:30')}`
+        };
+  }
+  if(etNow.minutesOfDay < closeMinute){
+    return earlyCloseTime
+      ? {
+          key:'early-close',
+          label:'Early close today',
+          hours:regularSessionHoursLabel(today),
+          detail:`Closes ${formatMarketTimeForDate(today, closeTime)}`
+        }
+      : {
+          key:'open',
+          label:'Market Open',
+          hours:regularSessionHoursLabel(today),
+          detail:`Closes ${formatMarketTimeForDate(today, closeTime)}`
+        };
+  }
+  const nextOpen = getNextMarketOpen(now);
+  return {
+    key:'after-hours',
+    label:'After-hours',
+    hours:regularSessionHoursLabel(today),
+    detail:`Next open ${nextOpen.label}`
+  };
+}
+
+function buildMarketCalendarDays(isoDate){
+  const bounds = isoDateMonthBounds(isoDate);
+  const startOffset = weekdayIndexFromIsoDate(bounds.first);
+  const startDate = isoDateAddDays(bounds.first, -startOffset);
+  return Array.from({length:42}, (_, index) => {
+    const date = isoDateAddDays(startDate, index);
+    return {
+      date,
+      day:Number(date.slice(-2)),
+      isCurrentMonth:date.slice(0, 7) === bounds.first.slice(0, 7),
+      isToday:date === String(isoDate).slice(0, 10),
+      weekend:[0, 6].includes(weekdayIndexFromIsoDate(date)),
+      holiday:isHoliday(date),
+      earlyClose:!!isEarlyClose(date)
+    };
+  });
+}
+
+function renderMarketSessionStatus(){
+  const badge = $('marketSessionBadge');
+  const hours = $('marketSessionHours');
+  const detail = $('marketSessionDetail');
+  if(!badge || !hours || !detail) return;
+  const session = getMarketSessionStatus(new Date());
+  badge.textContent = session.label;
+  badge.setAttribute('data-session-state', session.key);
+  hours.textContent = session.hours;
+  detail.textContent = session.detail;
+}
+
+function renderMarketCalendarWidget(){
+  const summary = $('marketCalendarSummary');
+  const grid = $('marketCalendarGrid');
+  if(!summary || !grid) return;
+  const etNow = etDateTimeParts(new Date());
+  const bounds = isoDateMonthBounds(etNow.isoDate);
+  summary.textContent = `${formatMonthYearLabel(bounds.first)} · ${getMarketSessionStatus(new Date()).label}`;
+  const headers = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+    .map(label => `<div class="market-calendar-head">${label}</div>`)
+    .join('');
+  const days = buildMarketCalendarDays(etNow.isoDate).map(day => {
+    const classes = [
+      'market-calendar-cell',
+      day.weekend ? 'market-calendar-cell--weekend' : '',
+      day.holiday ? 'market-calendar-cell--holiday' : '',
+      day.earlyClose ? 'market-calendar-cell--early-close' : '',
+      day.isToday ? 'market-calendar-cell--today' : '',
+      day.isCurrentMonth ? '' : 'market-calendar-cell--outside'
+    ].filter(Boolean).join(' ');
+    return `<div class="${classes}" aria-label="${escapeHtml(formatIsoDateLabel(day.date, {weekday:true, month:'short'}))}${day.holiday ? ' holiday' : ''}${day.earlyClose ? ' early close' : ''}">${day.day}${day.earlyClose ? '<span class="market-calendar-cell__dot"></span>' : ''}</div>`;
+  }).join('');
+  grid.innerHTML = headers + days;
+}
+
+function refreshMarketContextWidgets(){
+  renderMarketSessionStatus();
+  renderMarketCalendarWidget();
+}
+
 function currentQueueCycleKey(now = new Date()){
   const utc = new Date(now);
   if(utc.getUTCHours() < 7){
@@ -12570,6 +12908,7 @@ setControlFocus(uiState.controlStripPanel || 'market', {scroll:false, instant:tr
 updateControlFocusRailVisuals($('controlFocusRail'));
 consumeResetNotice();
 bootstrapBackgroundMonitoring();
+bootstrapMarketStatusClock();
 bootstrapWatchlistLifecycleAutomation();
 updateTickerSearchStatus();
 updateProviderStatusNote();
