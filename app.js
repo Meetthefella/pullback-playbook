@@ -5456,16 +5456,72 @@ function renderScannerDetailsContent(view){
   return `<div class="tiny">${escapeHtml(detailMeta || 'No extra detail yet.')}</div>${modifiersMarkup ? `<div class="inline-status" style="margin-top:8px">${modifiersMarkup}</div>` : ''}`;
 }
 
+function scoreToneLabelFromScore(score){
+  const safeScore = numericOrNull(score);
+  if(!Number.isFinite(safeScore)) return 'red';
+  if(safeScore >= 8) return 'green';
+  if(safeScore >= 6) return 'blue';
+  if(safeScore >= 4) return 'indigo';
+  if(safeScore >= 2) return 'orange';
+  return 'red';
+}
+
+function renderScannerVisualDebugContent(view){
+  const item = view && view.item ? view.item : {};
+  const statusChip = primaryShortlistStatusChip(view || {});
+  const scannerVerdict = normalizeAnalysisVerdict(
+    view && (
+      (view.scannerResolution && view.scannerResolution.status)
+      || view.displayStage
+      || view.finalVerdict
+      || ''
+    )
+  );
+  const structureQuality = String(view && view.setupStates && view.setupStates.structureQuality || '').toLowerCase();
+  const bounceState = String(view && view.setupStates && view.setupStates.bounceState || '').toLowerCase();
+  const appliedToneClass = visualToneClass({
+    state:statusChip.primaryState,
+    tradeability:scannerVerdict,
+    structure:structureQuality,
+    bounce:bounceState
+  });
+  const expectedScoreClass = scannerScoreGradientClass(view && view.setupScore);
+  const expectedScoreTone = scoreToneLabelFromScore(view && view.setupScore);
+  const lines = [
+    `primary_state: ${String(statusChip.primaryState || '(none)')}`,
+    `scanner_verdict: ${scannerVerdict || '(none)'}`,
+    `display_stage: ${String(view && view.displayStage || '(none)')}`,
+    `final_verdict: ${String(view && view.finalVerdict || '(none)')}`,
+    `structure_quality: ${structureQuality || '(none)'}`,
+    `bounce_state: ${bounceState || '(none)'}`,
+    `setup_score: ${Number.isFinite(Number(view && view.setupScore)) ? String(Number(view.setupScore)) : '(none)'}`,
+    `expected_score_class: ${expectedScoreClass}`,
+    `expected_score_tone: ${expectedScoreTone}`,
+    `applied_tone_class: ${appliedToneClass}`,
+    `tone_source_rule: ${appliedToneClass === 'tone-red'
+      ? 'dead_or_avoid'
+      : (appliedToneClass === 'tone-orange'
+        ? 'weak_structure_or_no_bounce'
+        : (appliedToneClass === 'tone-green'
+          ? 'entry_or_near_entry'
+          : 'default_indigo'))}`
+  ];
+  return `<div class="mutebox scrollbox">${escapeHtml(lines.join('\n'))}</div>`;
+}
+
 function renderScanCardSecondaryUi(view){
   const mode = currentScanCardSecondaryUi(view && view.ticker);
   if(mode === 'menu'){
-    return `<div class="card-overflow-menu no-card-click is-open" data-role="overflow-menu"><button type="button" data-act="open-details">Details</button><button type="button" data-act="open-trace">Decision Trace</button></div>`;
+    return `<div class="card-overflow-menu no-card-click is-open" data-role="overflow-menu"><button type="button" data-act="open-details">Details</button><button type="button" data-act="open-trace">Decision Trace</button><button type="button" data-act="open-visual-debug">Visual Debug</button></div>`;
   }
   if(mode === 'details'){
     return `<div class="scan-card-secondary-panel scan-card-details-panel no-card-click" data-role="secondary-panel" data-panel-mode="details"><div class="scan-card-secondary-panel__title">Details</div><div class="scan-card-secondary-panel__body">${renderScannerDetailsContent(view)}</div></div>`;
   }
   if(mode === 'trace'){
     return `<div class="scan-card-secondary-panel scan-card-trace-panel no-card-click" data-role="secondary-panel" data-panel-mode="trace"><div class="scan-card-secondary-panel__title">Decision Trace</div><div class="scan-card-secondary-panel__body">${renderScannerDecisionTraceContent(view)}</div></div>`;
+  }
+  if(mode === 'visual-debug'){
+    return `<div class="scan-card-secondary-panel scan-card-visual-debug-panel no-card-click" data-role="secondary-panel" data-panel-mode="visual-debug"><div class="scan-card-secondary-panel__title">Visual Debug</div><div class="scan-card-secondary-panel__body">${renderScannerVisualDebugContent(view)}</div></div>`;
   }
   return '';
 }
@@ -11934,6 +11990,7 @@ function renderScannerResults(){
         const secondaryPanel = node.querySelector('[data-role="secondary-panel"]');
         const detailsAction = node.querySelector('[data-act="open-details"]');
         const traceAction = node.querySelector('[data-act="open-trace"]');
+        const visualDebugAction = node.querySelector('[data-act="open-visual-debug"]');
         if(overflowMenu){
           overflowMenu.onclick = event => {
             event.stopPropagation();
@@ -11965,6 +12022,14 @@ function renderScannerResults(){
             event.preventDefault();
             event.stopPropagation();
             setScanCardSecondaryUi(ticker, 'trace');
+            renderScannerResults();
+          };
+        }
+        if(visualDebugAction){
+          visualDebugAction.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            setScanCardSecondaryUi(ticker, 'visual-debug');
             renderScannerResults();
           };
         }

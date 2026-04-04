@@ -564,6 +564,13 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .scan-card-secondary-panel__body{
   color:var(--text-primary);
 }
+.scan-card-visual-debug-panel .mutebox{
+  margin:0;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:.75rem;
+  line-height:1.45;
+  white-space:pre-wrap;
+}
 .scan-card-secondary-panel .inline-status{
   margin-top:8px;
 }
