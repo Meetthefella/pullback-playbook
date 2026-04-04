@@ -810,6 +810,11 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   grid-template-columns:repeat(2,minmax(0,1fr));
   gap:12px 14px;
 }
+@media (min-width: 900px){
+  .reviewworkspace .reviewstats.reviewstats--compact{
+    grid-template-columns:repeat(4,minmax(0,1fr));
+  }
+}
 .reviewworkspace .reviewstats.reviewstats--compact .stat{
   padding:0;
   min-width:0;
@@ -834,6 +839,9 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   font-weight:900;
   letter-spacing:-.04em;
   line-height:1;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit{
+  justify-content:flex-start;
 }
 .reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit .big{
   text-transform:uppercase;
@@ -864,6 +872,8 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .reviewworkspace .trade-plan-fx-note{
   margin-top:2px;
+  color:#ffffff;
+  opacity:.8;
 }
 .reviewstats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .reviewmeta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}

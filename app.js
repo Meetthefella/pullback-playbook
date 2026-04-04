@@ -3838,7 +3838,8 @@ function renderWatchlist(){
         label:resolvedContract.actionLabel,
         shortLabel:resolvedContract.actionShortLabel
       });
-      const shortReason = resolvedContract.reasonSummary || watchlistReasonSummary(reasoning, shortAction);
+      const decisionCopy = watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reasoning, shortAction);
+      const shortReason = decisionCopy.reason;
       const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
         derivedStates,
         displayedPlan,
@@ -3858,7 +3859,7 @@ function renderWatchlist(){
         planStatusKey:planState
       });
       div.className = `resultcompact watchlist-card ${escapeHtml(visualStateClass)}`.trim();
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${watchlistBadgeClass}">${escapeHtml(watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save</button><button class="danger" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${escapeHtml(decisionCopy.badgeClass || watchlistBadgeClass)}">${escapeHtml(decisionCopy.badgeText || watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(decisionCopy.headline || shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -7511,6 +7512,49 @@ function watchlistReasonSummary(reasoning, actionText){
   return String(reasoning && reasoning.headline || '')
     .replace(/^(Monitor|Downgraded|Avoid|Ready|Prepare):\s*/i, '')
     .trim();
+}
+
+function watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reasoning, fallbackAction){
+  const lifecycleState = String(lifecycleSnapshot && lifecycleSnapshot.state || '').toLowerCase();
+  const planStatusKey = String(resolvedContract && resolvedContract.planStatusKey || '').toLowerCase();
+  const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').trim();
+  const reasonSummary = String(resolvedContract && resolvedContract.reasonSummary || '').trim();
+  const reasoningDetail = String(reasoning && reasoning.detail || '').trim();
+  const combinedReasonText = [blockerReason, reasonSummary, reasoningDetail].filter(Boolean).join(' | ').toLowerCase();
+  const structureBroken = /broken|damaged|invalidated|weak structure|rebuild|expired/.test(combinedReasonText);
+  const planInvalidOnly = /invalid plan|unrealistic|recalculate|rebuild required|plan missing|missing plan/.test(combinedReasonText)
+    || ['invalid','missing','rebuild_required','obsolete'].includes(planStatusKey);
+  const rebuildState = ['dead','expired'].includes(lifecycleState) || !!(resolvedContract && resolvedContract.terminal) || structureBroken;
+  const recalculateState = !rebuildState && (lifecycleState === 'inactive' || planInvalidOnly);
+
+  let badgeText = String(resolvedContract && resolvedContract.badgeText || '').trim() || 'Watch';
+  let badgeClass = String(resolvedContract && resolvedContract.badgeClass || '').trim() || 'watch';
+  let headline = String(fallbackAction || '').trim() || 'Hold for confirmation';
+  let reason = reasonSummary || watchlistReasonSummary(reasoning, headline) || blockerReason;
+
+  if(lifecycleState === 'expired'){
+    badgeText = 'Expired';
+    badgeClass = 'avoid';
+    headline = 'Rebuild setup before reconsidering entry';
+    reason = reason || 'Watchlist window expired without a usable improvement.';
+  }else if(rebuildState){
+    badgeText = '💀 Rebuild setup';
+    badgeClass = 'avoid';
+    headline = 'Rebuild setup before reconsidering entry';
+    reason = reason || 'Invalid plan + weak structure';
+  }else if(recalculateState){
+    badgeText = '🧰 Recalculate plan';
+    badgeClass = 'near';
+    headline = 'Recalculate plan from current structure';
+    reason = reason || 'Structure intact, but current plan is invalid.';
+  }
+
+  return {
+    badgeText,
+    badgeClass,
+    headline,
+    reason: String(reason || '').replace(/\.$/, '').trim()
+  };
 }
 
 function reviewReasonSummary(reasoning, actionText){
@@ -11940,8 +11984,8 @@ function renderReviewWorkspace(options = {}){
       <div class="reviewstats plan-grid plan-grid-stats reviewstats--compact">
         <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(rrDisplayClass(planRealism.raw_rr))}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
         <div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
+        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div class="big" id="capitalFitBox">${escapeHtml(capitalFitVisual.text)}</div></div>
         <div class="stat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(positionCostText)}</div></div>
-        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div>Exposure</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitVisual.text)}</div></div>
         <div class="stat review-hidden"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
         <div class="stat review-hidden"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div>
         <div class="stat review-hidden"><div>Max Loss</div><div class="big">${escapeHtml(formatGbp(currentMaxLoss()))}</div></div>
