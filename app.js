@@ -4895,14 +4895,36 @@ function resolveScannerStateWithTrace(record, options = {}){
   if(finalSetupState === 'broken'){
     addReason('broken_setup');
   }else if(planValidation === 'invalid'){
-    addReason('plan_invalid');
+    if(structurallyAlive){
+      bucket = 'early';
+      status = 'Watch';
+      addReason('plan_invalid');
+    }else{
+      addReason('plan_invalid');
+    }
   }else if(planValidation === 'unrealistic_rr' || rrCategory === 'unrealistic'){
-    addReason('rr_unrealistic');
+    if(structurallyAlive){
+      bucket = 'early';
+      status = 'Watch';
+      addReason('rr_unrealistic');
+    }else{
+      addReason('rr_unrealistic');
+    }
   }else if(Number.isFinite(positionSize) && positionSize < 1){
-    addReason('size_below_one');
+    if(structurallyAlive){
+      bucket = 'early';
+      status = 'Watch';
+      addReason('size_below_one');
+    }else{
+      addReason('size_below_one');
+    }
   }else if(hasPlanAdjustmentBlock || planValidation === 'needs_adjustment'){
+    bucket = structurallyAlive ? 'early' : bucket;
+    status = structurallyAlive ? 'Watch' : status;
     addReason('needs_adjustment');
   }else if(planValidation === 'pending_validation'){
+    bucket = structurallyAlive ? 'early' : bucket;
+    status = structurallyAlive ? 'Watch' : status;
     addReason('plan_premature');
   }else if(structureQuality === 'weak'){
     addReason('weak_structure');
@@ -8551,6 +8573,7 @@ function deriveExecutionPlanState(record, options = {}){
 }
 
 function deriveTradeability(planStatus, riskStatus, capitalFit){
+  if(planStatus === 'missing' || planStatus === 'invalid' || planStatus === 'needs_adjustment') return 'not_ready';
   if(planStatus !== 'valid') return 'invalid';
   if(riskStatus !== 'fits_risk') return 'invalid';
   if(capitalFit === 'fits_capital') return 'tradable';
@@ -9994,11 +10017,9 @@ function getReviewAnalysisState(record){
   const hasPersistedAnalysisPayload = !!(baseState.raw || baseState.normalized || baseState.error);
   const sourceState = hasPersistedAnalysisPayload ? baseState : (cachedState || baseState);
   const normalizedSource = sourceState.normalized || item.review.normalizedAnalysis || null;
-  const normalizedAnalysis = normalizedSource
-    ? normalizeAnalysisResult(normalizedSource, tickerRecordToLegacyCard(item))
-    : null;
+  const normalizedAnalysis = normalizedSource ? cloneData(normalizedSource, null) : null;
   const rawAnalysis = String(sourceState.raw || item.review.aiAnalysisRaw || (normalizedAnalysis ? JSON.stringify(sourceState.normalized || {}, null, 2) : ''));
-  const promptPreview = String(sourceState.prompt || item.review.lastPrompt || buildTickerPromptFromRecord(item));
+  const promptPreview = String(sourceState.prompt || item.review.lastPrompt || '');
   const error = String(sourceState.error || item.review.lastError || '');
   const analysisState = {
     normalizedAnalysis,
