@@ -13388,7 +13388,7 @@ function resolveFinalStateContract(record, options = {}){
     displayStage:finalVerdict,
     baseVerdict:finalVerdict
   });
-  const warningState = options.warningState || warningStateFromInputs(item, null, derivedStates);
+  const warningState = options.warningState || evaluateWarningState(item, getReviewAnalysisState(item).normalizedAnalysis);
   const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState, derivedStates, displayStage:finalVerdict});
   const setupUiState = options.setupUiState || getSetupUiState(item, {displayStage:finalVerdict, derivedStates, planUiState});
   const avoidSubtype = options.avoidSubtype || avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments, finalVerdict});
