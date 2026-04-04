@@ -7129,7 +7129,12 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : null;
   const derived = derivedStates || analysisDerivedStates(tickerRecordToLegacyCard(rawRecord));
   const plan = rawRecord.plan && typeof rawRecord.plan === 'object' ? rawRecord.plan : {};
-  const qualityAdjustments = evaluateSetupQualityAdjustments(rawRecord, {derivedStates:derived});
+  const seedVerdict = resolverSeedVerdictForRecord(rawRecord);
+  const qualityAdjustments = evaluateSetupQualityAdjustments(rawRecord, {
+    derivedStates:derived,
+    baseVerdict:seedVerdict,
+    displayStage:seedVerdict
+  });
   const rrRatio = numericOrNull(plan.plannedRR);
   const structureState = String(derived.structureState || '').toLowerCase();
   const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
@@ -7142,7 +7147,7 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
     if(reason && !cautionReasons.includes(reason)) cautionReasons.push(reason);
   };
 
-  const displayStage = displayStageForRecord(rawRecord);
+  const displayStage = seedVerdict;
   const structureLabel = structureLabelForRecord(rawRecord, derived, {displayStage});
   if(structureLabel) pushReason(structureLabel);
   if(bounceState !== 'confirmed') pushReason(bounceState === 'none' ? 'No bounce' : 'Bounce unconfirmed');
@@ -7172,8 +7177,12 @@ function deriveDisplaySetupScore(record, options = {}){
   const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
   const warningState = options.warningState || warningStateFromInputs(rawRecord, options.analysis || null, derived);
   const rawScore = rawSetupScoreForRecord(rawRecord);
-  const displayStage = normalizeAnalysisVerdict(options.displayStage || displayStageForRecord(rawRecord));
-  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(rawRecord, {derivedStates:derived});
+  const displayStage = normalizeAnalysisVerdict(options.displayStage || resolverSeedVerdictForRecord(rawRecord));
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(rawRecord, {
+    derivedStates:derived,
+    baseVerdict:displayStage,
+    displayStage
+  });
   const hardFail = isTrueHardFailForRecord(rawRecord, derived, {displayedPlan:options.displayedPlan});
   const structureState = String(derived.structureState || '').toLowerCase();
   const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
@@ -8081,7 +8090,7 @@ function aiVerdictCeilingForRecord(record){
 }
 
 function isTerminalDeadSetup(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
