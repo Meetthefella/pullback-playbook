@@ -10946,6 +10946,33 @@ function effectivePlanForRecord(record, options = {}){
   };
 }
 
+function recordPlanHasConcreteValues(record){
+  const item = record && typeof record === 'object' ? record : {};
+  return Number.isFinite(numericOrNull(item.plan && item.plan.entry))
+    && Number.isFinite(numericOrNull(item.plan && item.plan.stop))
+    && Number.isFinite(numericOrNull(item.plan && item.plan.firstTarget));
+}
+
+function ensureCanonicalPlanForRecord(record, options = {}){
+  if(!(record && typeof record === 'object')) return false;
+  if(recordPlanHasConcreteValues(record)) return false;
+  const derivedPlan = effectivePlanForRecord(record, {allowScannerFallback:options.allowScannerFallback === true});
+  const hasDerivedValues = [derivedPlan.entry, derivedPlan.stop, derivedPlan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
+  if(!hasDerivedValues) return false;
+  record.watchlist = record.watchlist && typeof record.watchlist === 'object' ? record.watchlist : {};
+  record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+  record.watchlist.debug.planSnapshotMismatch = 'Plan source mismatch: UI vs record.plan';
+  applyPlanCandidateToRecord(record, {
+    entry:derivedPlan.entry,
+    stop:derivedPlan.stop,
+    firstTarget:derivedPlan.firstTarget
+  }, {
+    source:String(derivedPlan.source || options.source || 'review'),
+    updatedAt:new Date().toISOString()
+  });
+  return true;
+}
+
 // Normalize server AI output into one render-safe object so cards never mix stale
 // planner/scanner fields with a fresh analysis response.
 function normalizeAnalysisResult(rawAnalysis, existingTickerState){
@@ -11866,16 +11893,18 @@ function renderReviewWorkspace(options = {}){
     return;
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
+  const canonicalPlanSynced = ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
   if(options.recompute === true){
     maybeExpireTickerRecord(liveRecord);
     reevaluateTickerProgress(liveRecord);
   }
+  if(canonicalPlanSynced) commitTickerState();
   const record = normalizeTickerRecord(liveRecord);
   const analysisState = getReviewAnalysisState(record);
   const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
     ? analysisState.normalizedAnalysis.warning_state
     : evaluateWarningState(record, analysisState.normalizedAnalysis);
-  const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
+  const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:false});
   const displayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency);
   const planCheckState = planCheckStateForRecord(record, {effectivePlan, displayedPlan});
   const executionState = deriveExecutionPlanState(record, {
@@ -12393,8 +12422,11 @@ function syncPlanDisplayMeta(){
     if(targetAlertBox) targetAlertBox.value = '';
     return;
   }
-  const record = normalizeTickerRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker));
-  const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
+  const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
+  const canonicalPlanSynced = ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
+  if(canonicalPlanSynced) commitTickerState();
+  const record = normalizeTickerRecord(liveRecord);
+  const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:false});
   const entryValue = $('entryPrice') ? $('entryPrice').value : effectivePlan.entry;
   const stopValue = $('stopPrice') ? $('stopPrice').value : effectivePlan.stop;
   const targetValue = $('targetPrice') ? $('targetPrice').value : effectivePlan.firstTarget;
