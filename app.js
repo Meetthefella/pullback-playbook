@@ -5511,25 +5511,25 @@ function getCardVisualStyle(setupScore, structureState){
   }
   if(Number.isFinite(safeScore) && safeScore <= 3){
     return {
-      background:'linear-gradient(135deg, rgba(30,30,30,0.9), rgba(0,0,0,0.95))',
-      border:'1px solid rgba(245,158,11,0.4)'
+      background:'linear-gradient(135deg, rgba(120,53,15,0.6), rgba(0,0,0,0.9))',
+      border:'1px solid rgba(245,158,11,0.8)'
     };
   }
   if(Number.isFinite(safeScore) && safeScore <= 5){
     return {
-      background:'linear-gradient(135deg, rgba(67,56,202,0.35), rgba(0,0,0,0.9))',
-      border:'1px solid rgba(99,102,241,0.4)'
+      background:'linear-gradient(135deg, rgba(67,56,202,0.6), rgba(0,0,0,0.9))',
+      border:'1px solid rgba(99,102,241,0.8)'
     };
   }
   if(Number.isFinite(safeScore) && safeScore <= 7){
     return {
-      background:'linear-gradient(135deg, rgba(37,99,235,0.35), rgba(0,0,0,0.9))',
-      border:'1px solid rgba(59,130,246,0.5)'
+      background:'linear-gradient(135deg, rgba(37,99,235,0.6), rgba(0,0,0,0.9))',
+      border:'1px solid rgba(59,130,246,0.8)'
     };
   }
   return {
-    background:'linear-gradient(135deg, rgba(22,163,74,0.35), rgba(0,0,0,0.9))',
-    border:'1px solid rgba(34,197,94,0.6)'
+    background:'linear-gradient(135deg, rgba(22,163,74,0.6), rgba(0,0,0,0.9))',
+    border:'1px solid rgba(34,197,94,0.8)'
   };
 }
 
