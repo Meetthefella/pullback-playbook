@@ -91,7 +91,9 @@ const uiState = {
   watchlistLifecycleRunning:false,
   watchlistLifecycleLastRunAt:'',
   watchlistLifecycleLastSource:'',
-  watchlistLifecyclePendingSource:''
+  watchlistLifecyclePendingSource:'',
+  runtimeDebugEntries:[],
+  runtimeDebugContext:''
 };
 const marketDataCache = new Map();
 const fxRateCache = new Map();
@@ -4030,6 +4032,14 @@ function scannerEmptyState(message){
 }
 
 async function runScannerWorkflow(options = {}){
+  setRuntimeDebugContext(`scan:${new Date().toISOString()}`);
+  pushRuntimeDebugEntry('scanner.start', {
+    message:'Run Scan started',
+    extra:{
+      force:!!options.force,
+      syncInput:!!options.syncInput
+    }
+  });
   clearScannerSessionState({suppressed:false});
   saveState();
   const {parsed, universe, blocked} = prepareScannerUniverse(options);
@@ -4052,7 +4062,20 @@ async function runScannerWorkflow(options = {}){
     : (mode === 'combined' ? 'Combined universe' : 'Curated Core 8 fallback universe');
   setStatus('inputStatus', `<span class="ok">${universe.length} ticker${universe.length === 1 ? '' : 's'} ready in the ${modeLabel}.</span>`);
   setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${universe.length} ticker${universe.length === 1 ? '' : 's'}...</span>`);
-  const result = await refreshMarketDataForTickers(universe, options);
+  let result;
+  try{
+    result = await refreshMarketDataForTickers(universe, options);
+  }catch(err){
+    pushRuntimeDebugEntry('scanner.error', {
+      message:err && err.message ? err.message : 'Scanner workflow failed',
+      stack:err && err.stack ? err.stack : '',
+      extra:{
+        universe,
+        options
+      }
+    });
+    throw err;
+  }
   state.dismissedFocusTickers = [];
   state.dismissedFocusCycle = '';
   state.activeQueueClearedCycle = '';
@@ -4067,6 +4090,10 @@ async function runScannerWorkflow(options = {}){
   renderScannerResults();
   renderFocusQueue();
   setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} ranked, ${result.rejected} avoid, ${result.failed} failed.`);
+  pushRuntimeDebugEntry('scanner.complete', {
+    message:'Run Scan finished',
+    extra:result
+  });
   return result;
 }
 
@@ -4090,6 +4117,102 @@ function syncScannerUniverseDraft(options = {}){
 function setStatus(id, html){
   const el = $(id);
   if(el) el.innerHTML = html;
+}
+
+function formatRuntimeDebugValue(value, depth = 0){
+  if(value == null) return String(value);
+  if(typeof value === 'string') return value;
+  if(typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if(value instanceof Error){
+    return [value.name || 'Error', value.message || '', value.stack || ''].filter(Boolean).join('\n');
+  }
+  if(depth > 1) return '[object]';
+  try{
+    return JSON.stringify(value, (key, innerValue) => {
+      if(innerValue instanceof Error){
+        return {
+          name:innerValue.name,
+          message:innerValue.message,
+          stack:innerValue.stack
+        };
+      }
+      return innerValue;
+    }, 2);
+  }catch(err){
+    return `[unserializable: ${err.message}]`;
+  }
+}
+
+function renderRuntimeDebugPanel(){
+  const statusEl = $('runtimeDebugStatus');
+  const outputEl = $('runtimeDebugOutput');
+  if(!statusEl || !outputEl) return;
+  const entries = Array.isArray(uiState.runtimeDebugEntries) ? uiState.runtimeDebugEntries : [];
+  if(!entries.length){
+    statusEl.textContent = 'No runtime errors captured yet.';
+    outputEl.textContent = 'No runtime debug output yet.';
+    return;
+  }
+  const latest = entries[0];
+  statusEl.textContent = `${latest.type || 'runtime'} | ${latest.at || 'n/a'}${latest.context ? ` | ${latest.context}` : ''}`;
+  outputEl.textContent = entries.map(entry => {
+    return [
+      `[${entry.at || 'n/a'}] ${entry.type || 'runtime'}`,
+      entry.context ? `Context: ${entry.context}` : '',
+      entry.message ? `Message: ${entry.message}` : '',
+      entry.stack ? `Stack:\n${entry.stack}` : '',
+      entry.extra ? `Extra:\n${entry.extra}` : ''
+    ].filter(Boolean).join('\n');
+  }).join('\n\n---\n\n');
+}
+
+function pushRuntimeDebugEntry(type, payload = {}){
+  const entry = {
+    at:new Date().toISOString(),
+    type:String(type || 'runtime'),
+    context:String(payload.context || uiState.runtimeDebugContext || '').trim(),
+    message:String(payload.message || '').trim(),
+    stack:String(payload.stack || '').trim(),
+    extra:payload.extra ? formatRuntimeDebugValue(payload.extra) : ''
+  };
+  uiState.runtimeDebugEntries = [entry, ...(uiState.runtimeDebugEntries || [])].slice(0, 12);
+  renderRuntimeDebugPanel();
+}
+
+function setRuntimeDebugContext(context){
+  uiState.runtimeDebugContext = String(context || '').trim();
+  renderRuntimeDebugPanel();
+}
+
+function clearRuntimeDebugLog(){
+  uiState.runtimeDebugEntries = [];
+  uiState.runtimeDebugContext = '';
+  renderRuntimeDebugPanel();
+}
+
+function installRuntimeDebugHooks(){
+  if(typeof window === 'undefined' || window.__ppRuntimeDebugInstalled) return;
+  window.__ppRuntimeDebugInstalled = true;
+  window.addEventListener('error', event => {
+    const error = event && event.error;
+    pushRuntimeDebugEntry('window.error', {
+      message:(error && error.message) || event.message || 'Unknown runtime error',
+      stack:(error && error.stack) || '',
+      extra:{
+        filename:event.filename || '',
+        lineno:event.lineno || '',
+        colno:event.colno || ''
+      }
+    });
+  });
+  window.addEventListener('unhandledrejection', event => {
+    const reason = event && event.reason;
+    pushRuntimeDebugEntry('unhandledrejection', {
+      message:(reason && reason.message) || String(reason || 'Unhandled promise rejection'),
+      stack:(reason && reason.stack) || '',
+      extra:reason
+    });
+  });
 }
 
 function getTradeRecord(recordId){
@@ -5978,6 +6101,10 @@ function buildCards(){
       if(resultsSection) resultsSection.scrollIntoView({behavior:'smooth', block:'start'});
     })
     .catch(err => {
+      pushRuntimeDebugEntry('buildCards.catch', {
+        message:err && err.message ? err.message : 'buildCards failed',
+        stack:err && err.stack ? err.stack : ''
+      });
       setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
     });
 }
@@ -13229,6 +13356,7 @@ click('resetAllBtn', () => {
 });
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
+click('clearRuntimeDebugBtn', clearRuntimeDebugLog);
 click('marketStatusPill', () => setControlFocus('market'));
 click('accountRiskPill', () => setControlFocus('account'));
 click('scannerModePill', () => setControlFocus('mode'));
@@ -13867,8 +13995,10 @@ function reviewHeaderVerdictForRecord(record){
   return verdict === 'Avoid' ? 'Watch' : verdict;
 }
 
+installRuntimeDebugHooks();
 registerPwa();
 loadState();
+renderRuntimeDebugPanel();
 setControlFocus(uiState.controlStripPanel || 'market', {scroll:false, instant:true});
 updateControlFocusRailVisuals($('controlFocusRail'));
 consumeResetNotice();
