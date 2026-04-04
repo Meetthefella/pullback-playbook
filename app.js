@@ -13839,7 +13839,7 @@ function watchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
 }
 
 function currentHardFailVerdictForRecord(record){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const trendState = String(derivedStates.trendState || '').toLowerCase();
   const structureState = String(derivedStates.structureState || '').toLowerCase();
