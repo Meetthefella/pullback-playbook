@@ -5592,9 +5592,17 @@ function renderCompactResultCardFromView(view){
   const intensity = scanCardIntensityForView(view);
   const toneClass = `result-card--${tone}`;
   const intensityClass = `result-card--intensity-${intensity}`;
+  const scannerVisualVerdict = normalizeAnalysisVerdict(
+    view && (
+      (view.scannerResolution && view.scannerResolution.status)
+      || view.displayStage
+      || view.finalVerdict
+      || ''
+    )
+  );
   const visualStateClass = visualToneClass({
     state:statusChip.primaryState,
-    tradeability:view && (view.displayStage || view.finalVerdict || (view.scannerResolution && view.scannerResolution.status)),
+    tradeability:scannerVisualVerdict,
     structure:view && view.setupStates && view.setupStates.structureQuality,
     bounce:view && view.setupStates && view.setupStates.bounceState
   });
