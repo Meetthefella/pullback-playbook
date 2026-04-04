@@ -7326,10 +7326,8 @@ function currentRuntimeVerdictForRecord(record){
 function runtimeFallbackVerdictForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
-  const watchlist = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : {};
   const scanVerdict = String(scan.verdict || '').trim();
-  const watchlistVerdict = String(watchlist.status || '').trim();
-  const rawVerdict = scanVerdict || watchlistVerdict;
+  const rawVerdict = scanVerdict;
   return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
 }
 
@@ -7405,7 +7403,6 @@ function analysisVerdictForRecord(record, options = {}){
   const aiVerdict = normalizeAnalysisVerdict(
     normalizedAnalysis && (normalizedAnalysis.final_verdict || normalizedAnalysis.verdict) || ''
   );
-  const savedVerdict = normalizeAnalysisVerdict(savedReviewVerdictForRecord(rawRecord) || '');
   const fallbackVerdict = options.includeRuntimeFallback === false
     ? ''
     : normalizeAnalysisVerdict(runtimeFallbackVerdictForRecord(rawRecord) || '');
@@ -7413,9 +7410,6 @@ function analysisVerdictForRecord(record, options = {}){
   const candidates = [];
   if(['Entry','Near Entry','Watch','Avoid'].includes(aiVerdict)){
     candidates.push(mostConservativeVerdict(baseVerdict, aiVerdict));
-  }
-  if(['Entry','Near Entry','Watch','Avoid'].includes(savedVerdict)){
-    candidates.push(mostConservativeVerdict(baseVerdict, savedVerdict));
   }
   if(['Entry','Near Entry','Watch','Avoid'].includes(fallbackVerdict)){
     candidates.push(mostConservativeVerdict(baseVerdict, fallbackVerdict));
