@@ -4891,65 +4891,32 @@ function resolveScannerStateWithTrace(record, options = {}){
 
   let bucket = 'filtered';
   let status = 'Avoid';
+  const validPullbackContext = ['near_20ma','near_50ma','at_20ma','at_50ma'].includes(pullbackZone);
+  const bounceConfirmed = bounceState === 'confirmed';
 
-  if(finalSetupState === 'broken'){
+  if(planValidation === 'invalid') addReason('plan_invalid');
+  if(planValidation === 'unrealistic_rr' || rrCategory === 'unrealistic') addReason('rr_unrealistic');
+  if(Number.isFinite(positionSize) && positionSize < 1) addReason('size_below_one');
+  if(hasPlanAdjustmentBlock || planValidation === 'needs_adjustment') addReason('needs_adjustment');
+  if(planValidation === 'pending_validation') addReason('plan_premature');
+
+  if(finalSetupState === 'broken' || !structurallyAlive){
     addReason('broken_setup');
-  }else if(planValidation === 'invalid'){
-    if(structurallyAlive){
-      bucket = 'early';
-      status = 'Watch';
-      addReason('plan_invalid');
-    }else{
-      addReason('plan_invalid');
-    }
-  }else if(planValidation === 'unrealistic_rr' || rrCategory === 'unrealistic'){
-    if(structurallyAlive){
-      bucket = 'early';
-      status = 'Watch';
-      addReason('rr_unrealistic');
-    }else{
-      addReason('rr_unrealistic');
-    }
-  }else if(Number.isFinite(positionSize) && positionSize < 1){
-    if(structurallyAlive){
-      bucket = 'early';
-      status = 'Watch';
-      addReason('size_below_one');
-    }else{
-      addReason('size_below_one');
-    }
-  }else if(hasPlanAdjustmentBlock || planValidation === 'needs_adjustment'){
-    bucket = structurallyAlive ? 'early' : bucket;
-    status = structurallyAlive ? 'Watch' : status;
-    addReason('needs_adjustment');
-  }else if(planValidation === 'pending_validation'){
-    bucket = structurallyAlive ? 'early' : bucket;
-    status = structurallyAlive ? 'Watch' : status;
-    addReason('plan_premature');
-  }else if(structureQuality === 'weak'){
-    addReason('weak_structure');
-  }else if(structureQuality === 'developing_loose'){
-    addReason('loose_structure');
-  }else if(structureQuality === 'developing_clean' && bounceState !== 'confirmed'){
-    addReason('developing_no_bounce');
-  }else if(structureQuality === 'developing_clean' && bounceState === 'confirmed'){
-    bucket = 'early';
-    status = 'Watch';
-    addReason('developing_confirmed_bounce');
-  }else if(structureQuality === 'strong' && ['none','attempt'].includes(bounceState)){
-    bucket = 'early';
-    status = 'Watch';
-    addReason(bounceState === 'attempt' ? 'bounce_attempt' : 'no_bounce');
-  }else if(Number.isFinite(setupScore) && setupScore < 6){
-    bucket = 'early';
-    status = 'Watch';
-    addReason('score_below_tradeable_floor');
-  }else if(structureQuality === 'strong' && bounceState === 'confirmed' && planValidation === 'valid'){
+  }else if(!validPullbackContext){
+    addReason('no_pullback_context');
+  }else if(Number.isFinite(setupScore) && setupScore >= 7 && bounceConfirmed){
     bucket = 'tradeable';
-    status = Number.isFinite(setupScore) && setupScore >= 8 ? 'Entry' : 'Near Entry';
-    addReason(status === 'Entry' ? 'high_score_tradeable' : 'tradeable_not_elite');
+    status = 'Near Entry';
+    addReason('scanner_ready_setup');
+  }else if(Number.isFinite(setupScore) && setupScore >= 4){
+    bucket = 'early';
+    status = 'Watch';
+    if(structureQuality === 'developing_loose') addReason('loose_structure');
+    else if(structureQuality === 'developing_clean' && !bounceConfirmed) addReason('developing_no_bounce');
+    else if(structureQuality === 'strong' && ['none','attempt'].includes(bounceState)) addReason(bounceState === 'attempt' ? 'bounce_attempt' : 'no_bounce');
+    else addReason('scanner_review_candidate');
   }else{
-    addReason('filtered_default');
+    addReason('score_below_watch_floor');
   }
 
   const finalPrimaryState = String(emojiPresentation.primaryState || '').toLowerCase();
