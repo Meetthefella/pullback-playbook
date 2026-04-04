@@ -1543,6 +1543,10 @@ function baseTickerRecord(ticker){
         reason:'',
         nextPossibleState:'',
         mainBlocker:'',
+        planRecomputed:false,
+        recomputeResult:'',
+        previousPlan:null,
+        newPlan:null,
         warnings:[],
         auditTrail:[]
       }
@@ -1730,6 +1734,10 @@ function normalizeTickerRecord(record){
   merged.watchlist.debug.reason = String(merged.watchlist.debug.reason || '');
   merged.watchlist.debug.nextPossibleState = String(merged.watchlist.debug.nextPossibleState || '');
   merged.watchlist.debug.mainBlocker = String(merged.watchlist.debug.mainBlocker || '');
+  merged.watchlist.debug.planRecomputed = !!merged.watchlist.debug.planRecomputed;
+  merged.watchlist.debug.recomputeResult = String(merged.watchlist.debug.recomputeResult || '');
+  merged.watchlist.debug.previousPlan = normalizeStoredPlanSnapshot(merged.watchlist.debug.previousPlan);
+  merged.watchlist.debug.newPlan = normalizeStoredPlanSnapshot(merged.watchlist.debug.newPlan);
   merged.watchlist.debug.warnings = Array.isArray(merged.watchlist.debug.warnings) ? merged.watchlist.debug.warnings.map(item => String(item || '').trim()).filter(Boolean).slice(0, 5) : [];
   merged.watchlist.debug.auditTrail = Array.isArray(merged.watchlist.debug.auditTrail)
     ? merged.watchlist.debug.auditTrail
@@ -3467,6 +3475,9 @@ function runWatchlistLifecycleEvaluation(options = {}){
           hadFreshInputs,
           duplicateSuppressed:false
         });
+        const attemptedRecompute = recomputeAttemptedForSource(source);
+        const previousPlan = normalizeStoredPlanSnapshot(record.watchlist.debug && record.watchlist.debug.newPlan);
+        const newPlan = planSnapshotFromDisplayedPlan(displayedPlan);
         record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
         record.watchlist.debug.lastEvaluatedAt = new Date().toISOString();
         record.watchlist.debug.lastSource = source;
@@ -3477,6 +3488,10 @@ function runWatchlistLifecycleEvaluation(options = {}){
         record.watchlist.debug.reason = snapshot.reason || '';
         record.watchlist.debug.nextPossibleState = nextStep.nextPossibleState || '';
         record.watchlist.debug.mainBlocker = nextStep.mainBlocker || '';
+        record.watchlist.debug.planRecomputed = attemptedRecompute;
+        record.watchlist.debug.previousPlan = previousPlan;
+        record.watchlist.debug.newPlan = newPlan;
+        record.watchlist.debug.recomputeResult = determineRecomputeResult(previousPlan, newPlan, attemptedRecompute);
         record.watchlist.debug.warnings = warnings;
         if(logUnchanged || changeType !== 'unchanged'){
           appendWatchlistDebugEvent(record, {
@@ -3653,7 +3668,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const age = countTradingDaysBetween(item.watchlist.addedAt || todayIsoDate(), todayIsoDate());
   const auditTrail = Array.isArray(debug.auditTrail) ? debug.auditTrail : [];
   const warnings = Array.isArray(debug.warnings) ? debug.warnings : [];
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Final display state</strong><div>${escapeHtml(resolved.badgeText || lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(resolved.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(resolved.marketRegimeLabel || 'n/a')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(resolved.planStatusLabel || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(resolved.rrConfidenceLabel || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(resolved.tradeabilityLabel || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || resolved.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || resolved.blockerReason || 'n/a')}</div></div></div>${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
+  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Final display state</strong><div>${escapeHtml(resolved.badgeText || lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(resolved.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(resolved.marketRegimeLabel || 'n/a')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(resolved.planStatusLabel || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(resolved.rrConfidenceLabel || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(resolved.tradeabilityLabel || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || resolved.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || resolved.blockerReason || 'n/a')}</div></div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Final display state</strong><div>${escapeHtml(lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(rrResolution.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(qualityAdjustments.weakRegimePenalty ? 'Weak market' : 'Supportive')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(getPlanUiState(item, {displayedPlan}).label || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(rrResolution.rr_label || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || 'n/a')}</div></div></div>${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
 }
 
@@ -7512,6 +7527,101 @@ function watchlistReasonSummary(reasoning, actionText){
   return String(reasoning && reasoning.headline || '')
     .replace(/^(Monitor|Downgraded|Avoid|Ready|Prepare):\s*/i, '')
     .trim();
+}
+
+function normalizeStoredPlanSnapshot(snapshot){
+  const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  return {
+    entry:String(source.entry || '').trim(),
+    stop:String(source.stop || '').trim(),
+    firstTarget:String(source.firstTarget || '').trim(),
+    status:String(source.status || '').trim(),
+    rr:String(source.rr || '').trim(),
+    tradeability:String(source.tradeability || '').trim()
+  };
+}
+
+function planSnapshotFromDisplayedPlan(displayedPlan){
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const rewardRisk = plan.rewardRisk && typeof plan.rewardRisk === 'object' ? plan.rewardRisk : {};
+  return normalizeStoredPlanSnapshot({
+    entry:Number.isFinite(numericOrNull(plan.entry)) ? Number(numericOrNull(plan.entry)).toFixed(2) : '',
+    stop:Number.isFinite(numericOrNull(plan.stop)) ? Number(numericOrNull(plan.stop)).toFixed(2) : '',
+    firstTarget:Number.isFinite(numericOrNull(plan.target)) ? Number(numericOrNull(plan.target)).toFixed(2) : '',
+    status:String(plan.status || '').trim(),
+    rr:Number.isFinite(numericOrNull(rewardRisk.rrRatio)) ? Number(numericOrNull(rewardRisk.rrRatio)).toFixed(2) : '',
+    tradeability:String(plan.tradeability || '').trim()
+  });
+}
+
+function planSnapshotSummary(snapshot, options = {}){
+  const plan = normalizeStoredPlanSnapshot(snapshot);
+  const emptyLabel = String(options.emptyLabel || 'No plan').trim();
+  if(!plan.entry && !plan.stop && !plan.firstTarget){
+    return emptyLabel;
+  }
+  return `Entry ${plan.entry || 'n/a'} | Stop ${plan.stop || 'n/a'} | First target ${plan.firstTarget || 'n/a'}`;
+}
+
+function planSnapshotsEqual(a, b){
+  const left = normalizeStoredPlanSnapshot(a);
+  const right = normalizeStoredPlanSnapshot(b);
+  return left.entry === right.entry
+    && left.stop === right.stop
+    && left.firstTarget === right.firstTarget
+    && left.status === right.status
+    && left.rr === right.rr
+    && left.tradeability === right.tradeability;
+}
+
+function recomputeAttemptedForSource(source){
+  return ['auto_recompute','manual_refresh','review','review_save','plan_update'].includes(String(source || '').trim());
+}
+
+function tradeabilityRank(value){
+  const ranks = {
+    avoid:0,
+    risk_only:1,
+    too_expensive:1,
+    watch:2,
+    monitor:2,
+    near_entry:3,
+    action_now:4,
+    entry:4
+  };
+  return ranks[String(value || '').trim().toLowerCase()] ?? 0;
+}
+
+function determineRecomputeResult(previousPlan, newPlan, attempted){
+  if(!attempted) return 'Skipped';
+  const before = normalizeStoredPlanSnapshot(previousPlan);
+  const after = normalizeStoredPlanSnapshot(newPlan);
+  if(after.status && after.status !== 'valid') return 'Failed';
+  if(planSnapshotsEqual(before, after)) return 'Unchanged';
+  const beforeRr = numericOrNull(before.rr);
+  const afterRr = numericOrNull(after.rr);
+  const beforeTradeability = tradeabilityRank(before.tradeability);
+  const afterTradeability = tradeabilityRank(after.tradeability);
+  if((before.status && before.status !== 'valid' && after.status === 'valid')
+    || afterTradeability > beforeTradeability
+    || (Number.isFinite(beforeRr) && Number.isFinite(afterRr) && afterRr > beforeRr)
+    || (!before.entry && !!after.entry)){
+    return 'Improved';
+  }
+  return 'Unchanged';
+}
+
+function renderRecomputeDiagnostics(debug, options = {}){
+  const info = debug && typeof debug === 'object' ? debug : {};
+  const previousPlan = normalizeStoredPlanSnapshot(info.previousPlan);
+  const newPlan = normalizeStoredPlanSnapshot(info.newPlan);
+  const identical = planSnapshotsEqual(previousPlan, newPlan);
+  const previousSummary = planSnapshotSummary(previousPlan, {emptyLabel:'No plan before recompute'});
+  const newSummary = identical
+    ? `Same as previous | ${planSnapshotSummary(newPlan, {emptyLabel:'No plan after recompute'})}`
+    : planSnapshotSummary(newPlan, {emptyLabel:'No plan after recompute'});
+  const wrapperClass = String(options.wrapperClass || '').trim();
+  return `<div class="${escapeHtml(wrapperClass || 'watchlist-debug-block tiny')}"><strong>Plan Recompute</strong><div>Plan recomputed: ${escapeHtml(info.planRecomputed ? 'Yes' : 'No')}</div><div>Recompute result: ${escapeHtml(info.recomputeResult || 'Skipped')}</div><div>Previous plan: ${escapeHtml(previousSummary)}</div><div>New plan: ${escapeHtml(newSummary)}</div></div>`;
 }
 
 function watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reasoning, fallbackAction){
@@ -11389,6 +11499,14 @@ function updateScannerSelectionStatus(){
   setStatus('scannerSelectionStatus', `${resultCount} scan result${resultCount === 1 ? '' : 's'} ready.${lastScanLabel}`);
 }
 
+function renderReviewRecomputeDiagnostics(record){
+  const debug = record && record.watchlist && record.watchlist.debug && typeof record.watchlist.debug === 'object'
+    ? record.watchlist.debug
+    : null;
+  if(!debug || (!debug.lastSource && !debug.lastEvaluatedAt && !debug.recomputeResult)) return '';
+  return `<details class="compact-details"><summary>Recompute Diagnostics</summary>${renderRecomputeDiagnostics(debug, {wrapperClass:'tiny'})}</details>`;
+}
+
 function seedCardsFromUniverse(limit){
   const universe = scannerUniverse().slice(0, limit || scannerUniverse().length);
   if(!universe.length) return;
@@ -12000,6 +12118,7 @@ function renderReviewWorkspace(options = {}){
       <div class="summary">${analysisPanelBody}</div>
       ${showAnalyseButton ? `<div class="reviewactions reviewactions-top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>` : '<div class="reviewactions reviewactions-top"><button class="ghost" id="resetReviewBtn">Remove</button></div>'}
       <textarea id="reviewNotes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea>
+      ${renderReviewRecomputeDiagnostics(record)}
       <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
         <summary>AI Summary</summary>
         ${renderAnalysisPanelFromRecord(record)}
