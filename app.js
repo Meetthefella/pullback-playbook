@@ -7230,13 +7230,17 @@ function convictionTierForRecord(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
   const warningState = options.warningState || warningStateFromInputs(rawRecord, options.analysis || null, derived);
-  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(rawRecord, {derivedStates:derived});
+  const displayStage = normalizeAnalysisVerdict(options.displayStage || resolverSeedVerdictForRecord(rawRecord));
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(rawRecord, {
+    derivedStates:derived,
+    displayStage,
+    baseVerdict:displayStage
+  });
   const displayScore = Number.isFinite(options.displayScore) ? options.displayScore : deriveDisplaySetupScore(rawRecord, {derivedStates:derived, warningState, analysis:options.analysis || null});
   const structureState = String(derived.structureState || '').toLowerCase();
   const volumeState = String(derived.volumeState || '').toLowerCase();
   const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
   const practicalSizeFlag = practicalSizeFlagForPlan(rawRecord.plan);
-  const displayStage = displayStageForRecord(rawRecord);
 
   if(displayStage === 'Avoid' || structureState === 'broken') return 'low_conviction';
   if(
@@ -11113,7 +11117,7 @@ function fallbackPlanProposalForCard(cardLike){
 
 function effectivePlanForRecord(record, options = {}){
   const allowScannerFallback = options.allowScannerFallback === true;
-  const item = normalizeTickerRecord(record || {});
+  const item = record && typeof record === 'object' ? record : {};
   const manualReview = item.review && item.review.manualReview && typeof item.review.manualReview === 'object'
     ? item.review.manualReview
     : null;
