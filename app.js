@@ -8090,7 +8090,7 @@ function reviewDowngradeSummaryForRecord(record, options = {}){
 }
 
 function aiVerdictCeilingForRecord(record){
-  return reviewHeaderVerdictForRecord(record);
+  return resolverSeedVerdictForRecord(record);
 }
 
 function isTerminalDeadSetup(record, options = {}){
@@ -14106,7 +14106,7 @@ function finalVerdictForRecord(record, options = {}){
 }
 
 function reviewHeaderVerdictForRecord(record){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const displayedPlan = deriveCurrentPlanState(
     item.plan && item.plan.entry,
     item.plan && item.plan.stop,
