@@ -5312,15 +5312,21 @@ function resolveVisualState(setup = {}){
   const structure = String(setup.structure || '').toLowerCase();
   const bounce = String(setup.bounce || '').toLowerCase();
   const weakStructure = ['weak','weakening','developing_loose'].includes(structure);
+  const terminalState = ['dead','inactive','rebuild_setup','rebuild'].includes(state) || structure === 'broken';
+  const nearEntryState = ['monitor','near_entry'].includes(state);
+  const readyState = state === 'entry';
 
-  if(state === 'dead' || tradeability === 'Avoid'){
+  if(terminalState){
     return {tone:'red'};
   }
-  if(weakStructure || bounce === 'none'){
-    return {tone:'orange'};
-  }
-  if(state === 'entry' || state === 'near_entry'){
+  if(readyState || tradeability === 'Entry'){
     return {tone:'green'};
+  }
+  if(nearEntryState || tradeability === 'Near Entry'){
+    return {tone:'blue'};
+  }
+  if(weakStructure || bounce === 'none' || tradeability === 'Avoid'){
+    return {tone:'orange'};
   }
   return {tone:'indigo'};
 }
@@ -5499,12 +5505,14 @@ function renderScannerVisualDebugContent(view){
     `expected_score_tone: ${expectedScoreTone}`,
     `applied_tone_class: ${appliedToneClass}`,
     `tone_source_rule: ${appliedToneClass === 'tone-red'
-      ? 'dead_or_avoid'
+      ? 'terminal_dead_or_broken'
       : (appliedToneClass === 'tone-orange'
-        ? 'weak_structure_or_no_bounce'
-        : (appliedToneClass === 'tone-green'
-          ? 'entry_or_near_entry'
-          : 'default_indigo'))}`
+        ? 'weak_alive_or_generic_avoid'
+        : (appliedToneClass === 'tone-blue'
+          ? 'monitor_or_near_entry'
+          : (appliedToneClass === 'tone-green'
+            ? 'entry_ready'
+            : 'default_indigo')))}`,
   ];
   return `<div class="mutebox scrollbox">${escapeHtml(lines.join('\n'))}</div>`;
 }

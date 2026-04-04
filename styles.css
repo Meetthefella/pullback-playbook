@@ -615,6 +615,11 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   border-color:rgba(99,102,241,0.6) !important;
   background:linear-gradient(135deg, rgba(99,102,241,0.18), rgba(30,27,75,0.85)) !important;
 }
+.tone-blue{
+  --tone-color:rgb(59,130,246);
+  border-color:rgba(59,130,246,0.6) !important;
+  background:linear-gradient(135deg, rgba(59,130,246,0.18), rgba(17,37,84,0.85)) !important;
+}
 .tone-green{
   --tone-color:rgb(34,197,94);
   border-color:rgba(34,197,94,0.6) !important;
@@ -623,16 +628,19 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .result-feed-card.tone-red,
 .result-feed-card.tone-orange,
 .result-feed-card.tone-indigo,
+.result-feed-card.tone-blue,
 .result-feed-card.tone-green,
 .watchlist-card.tone-red,
 .watchlist-card.tone-orange,
 .watchlist-card.tone-indigo,
+.watchlist-card.tone-blue,
 .watchlist-card.tone-green{
   backdrop-filter:blur(6px);
 }
 .reviewworkspace-shell.tone-red,
 .reviewworkspace-shell.tone-orange,
 .reviewworkspace-shell.tone-indigo,
+.reviewworkspace-shell.tone-blue,
 .reviewworkspace-shell.tone-green{
   --state-color:var(--tone-color);
 }
