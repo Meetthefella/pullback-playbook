@@ -11148,7 +11148,18 @@ function effectivePlanForRecord(record, options = {}){
       source:'ai'
     };
   }
-  const fallbackPlan = allowScannerFallback ? fallbackPlanProposalForCard(tickerRecordToLegacyCard(item)) : null;
+  const fallbackPlan = allowScannerFallback
+    ? fallbackPlanProposalForCard({
+      ticker:item.ticker,
+      status:resolverSeedVerdictForRecord(item),
+      chartVerdict:resolverSeedVerdictForRecord(item),
+      riskStatus:(item.plan && item.plan.riskStatus) || (item.scan && item.scan.riskStatus) || 'plan_missing',
+      score:Number.isFinite(numericOrNull(item.scan && item.scan.score)) ? Number(item.scan.score) : 0,
+      summary:(item.scan && item.scan.summary) || ((item.scan && item.scan.reasons && item.scan.reasons[0]) || ''),
+      checks:cloneData((item.scan && item.scan.flags && item.scan.flags.checks) || {}, {}),
+      marketData:cloneData(item.marketData || {}, {})
+    })
+    : null;
   if(fallbackPlan){
     return {
       entry:String(fallbackPlan.entry || ''),
