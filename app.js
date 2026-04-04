@@ -13902,6 +13902,77 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
   };
 }
 
+function deriveDisplaySetupScore(record, options = {}){
+  const rawRecord = record && typeof record === 'object' ? record : {};
+  const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
+  const warningState = options.warningState || warningStateFromInputs(rawRecord, options.analysis || null, derived);
+  const rawScore = rawSetupScoreForRecord(rawRecord);
+  const displayStage = normalizeAnalysisVerdict(options.displayStage || resolverSeedVerdictForRecord(rawRecord));
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(rawRecord, {
+    derivedStates:derived,
+    displayStage,
+    baseVerdict:displayStage
+  });
+  const hardFail = isTrueHardFailForRecord(rawRecord, derived, {displayedPlan:options.displayedPlan});
+  const structureState = String(derived.structureState || '').toLowerCase();
+  const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
+  const bounceState = String(derived.bounceState || '').toLowerCase();
+  const volumeState = String(derived.volumeState || '').toLowerCase();
+  const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
+  const practicalSizeFlag = practicalSizeFlagForPlan(rawRecord.plan);
+  const noBounce = bounceState === 'none';
+  const confirmedBounce = bounceState === 'confirmed';
+  let adjusted = rawScore;
+
+  if(warningState.showWarning) adjusted -= 1;
+  if(volumeState === 'weak') adjusted -= 1;
+  if(hostileMarket) adjusted -= 0.5;
+  if(structureState === 'broken') adjusted -= 4;
+  if(!confirmedBounce && stabilisationState === 'early') adjusted -= 1;
+  if(confirmedBounce) adjusted += 1;
+  if(practicalSizeFlag === 'tiny_size') adjusted -= 2;
+  if(practicalSizeFlag === 'low_impact') adjusted -= 1;
+  if(qualityAdjustments.widthPenalty > 0) adjusted -= qualityAdjustments.widthPenalty;
+  if(qualityAdjustments.weakRegimePenalty) adjusted -= 1;
+
+  if(warningState.showWarning) adjusted = Math.min(adjusted, 9);
+  if(volumeState === 'weak') adjusted = Math.min(adjusted, 8);
+  if(hostileMarket) adjusted = Math.min(adjusted, 8);
+  if(volumeState === 'weak' && hostileMarket) adjusted = Math.min(adjusted, 7);
+  if(practicalSizeFlag === 'tiny_size') adjusted = Math.min(adjusted, 7);
+  if(qualityAdjustments.widthPenalty >= 1) adjusted = Math.min(adjusted, 7);
+  if(qualityAdjustments.widthPenalty >= 2) adjusted = Math.min(adjusted, 6);
+  if(qualityAdjustments.weakRegimePenalty) adjusted = Math.min(adjusted, 6);
+  if(noBounce && !confirmedBounce) adjusted = Math.min(adjusted, 4);
+  if(confirmedBounce) adjusted = Math.max(adjusted, 5);
+
+  const rounded = Math.max(0, Math.min(10, Math.round(adjusted)));
+  if(displayStage === 'Entry') return Math.max(8, Math.min(10, rounded));
+  if(displayStage === 'Near Entry') return Math.max(6, Math.min(7, rounded));
+  if(displayStage === 'Watch') return Math.max(4, Math.min(5, rounded));
+  if(displayStage === 'Avoid') return hardFail ? Math.max(0, Math.min(3, rounded)) : Math.max(2, Math.min(4, rounded));
+  return rounded;
+}
+
+function isTerminalDeadSetup(record, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const stopPrice = numericOrNull(item.plan && item.plan.stop);
+  const invalidated = !!(item.plan && item.plan.invalidatedState);
+  const missed = !!(item.plan && item.plan.missedState);
+  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
+
+  if(structureState === 'broken') return {dead:true, reasonCode:'broken_structure', terminalTriggerUsed:'structure_state'};
+  if(trendState === 'broken') return {dead:true, reasonCode:'broken_trend', terminalTriggerUsed:'trend_state'};
+  if(invalidated) return {dead:true, reasonCode:'invalidated', terminalTriggerUsed:'plan_invalidated'};
+  if(missed) return {dead:true, reasonCode:'missed_state', terminalTriggerUsed:'plan_missed'};
+  if(brokenBelowStop) return {dead:true, reasonCode:'stop_breach', terminalTriggerUsed:'price_below_stop'};
+  return {dead:false, reasonCode:'', terminalTriggerUsed:'', fallbackStateIfNotDead:'monitor'};
+}
+
 function validateCurrentPlan(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
