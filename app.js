@@ -5097,6 +5097,11 @@ function buildFinalSetupView(record, options = {}){
     scannerResolution
   });
   const bucket = legacyBucketForFinalClassification(finalClassification);
+  if(view.item && view.item.scan){
+    view.item.scan.resolvedVerdict = String(scannerResolution.status || '');
+    view.item.scan.resolvedFinalDisplayState = String(scannerResolution.finalDisplayState || '');
+    view.item.scan.resolvedBucket = String(scannerResolution.bucket || bucket || '');
+  }
   return {
     ...view,
     ticker:view.item.ticker,
@@ -7319,14 +7324,14 @@ function savedReviewScoreForRecord(record){
 function currentRuntimeVerdictForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
-  const scanVerdict = String(scan.verdict || '').trim();
+  const scanVerdict = String(scan.resolvedVerdict || scan.verdict || '').trim();
   return scanVerdict ? normalizeImportedStatus(scanVerdict, {preserveEmpty:true}) : '';
 }
 
 function runtimeFallbackVerdictForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
-  const scanVerdict = String(scan.verdict || '').trim();
+  const scanVerdict = String(scan.resolvedVerdict || scan.verdict || '').trim();
   const rawVerdict = scanVerdict;
   return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
 }
