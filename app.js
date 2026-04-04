@@ -13695,6 +13695,163 @@ function watchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
   };
 }
 
+function currentHardFailVerdictForRecord(record){
+  const item = normalizeTickerRecord(record);
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const stopPrice = numericOrNull(item.plan && item.plan.stop);
+  const structurallyDead = !!(
+    structureState === 'broken'
+    || trendState === 'broken'
+    || (item.plan && item.plan.invalidatedState)
+    || (item.plan && item.plan.missedState)
+    || (Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice)
+  );
+  return structurallyDead ? 'Avoid' : '';
+}
+
+function validateCurrentPlan(record, options = {}){
+  const rawRecord = record && typeof record === 'object' ? record : {};
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    rawRecord.plan && rawRecord.plan.entry,
+    rawRecord.plan && rawRecord.plan.stop,
+    rawRecord.plan && rawRecord.plan.firstTarget,
+    rawRecord.marketData && rawRecord.marketData.currency
+  );
+  const trigger = options.triggerState || evaluateEntryTrigger(rawRecord, {displayedPlan, derivedStates:options.derivedStates});
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const currentPrice = numericOrNull(rawRecord.marketData && rawRecord.marketData.price);
+  const entry = displayedPlan.entry;
+  const stop = displayedPlan.stop;
+  const target = displayedPlan.target;
+  const structurallyDead = !!(
+    structureState === 'broken'
+    || trendState === 'broken'
+    || (rawRecord.plan && rawRecord.plan.invalidatedState)
+    || (rawRecord.plan && rawRecord.plan.missedState)
+    || (Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= (stop * 0.995))
+  );
+  const structurePremature = !trigger.trendValid || !trigger.structureIntact;
+  const confirmationPremature = !trigger.confirmedBounce || !trigger.clearStabilisation;
+
+  if(displayedPlan.status !== 'valid'){
+    return {
+      state:displayedPlan.status === 'missing' ? 'not_reviewed' : 'needs_replan',
+      valid:false,
+      needsReplan:displayedPlan.status !== 'missing',
+      missed:false,
+      invalidated:false,
+      capitalConstraint:'',
+      reasonCode:displayedPlan.status === 'missing' ? 'plan_missing' : 'plan_incomplete'
+    };
+  }
+  if(structurallyDead){
+    return {state:'invalidated', valid:false, needsReplan:false, missed:false, invalidated:true, capitalConstraint:'', reasonCode:'technical_invalidation'};
+  }
+  if(trigger.clearlyMissed || (Number.isFinite(currentPrice) && Number.isFinite(target) && currentPrice >= (target * 0.98))){
+    return {state:'missed', valid:false, needsReplan:false, missed:true, invalidated:false, capitalConstraint:'', reasonCode:'missed_setup'};
+  }
+  if(structurePremature || confirmationPremature){
+    return {
+      state:'pending_validation',
+      valid:false,
+      needsReplan:true,
+      missed:false,
+      invalidated:false,
+      capitalConstraint:'',
+      reasonCode:structurePremature ? 'weak_structure' : 'bounce_not_confirmed'
+    };
+  }
+  const prospectiveRisk = (Number.isFinite(currentPrice) && Number.isFinite(stop) && Number.isFinite(target) && currentPrice > entry)
+    ? evaluateRewardRisk(currentPrice, stop, target)
+    : displayedPlan.rewardRisk;
+  const prospectiveRiskFit = (Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice > entry)
+    ? evaluateRiskFit({entry:currentPrice, stop, ...currentRiskSettings()})
+    : displayedPlan.riskFit;
+  const sizeShift = Number.isFinite(displayedPlan.riskFit.position_size) && displayedPlan.riskFit.position_size > 0 && Number.isFinite(prospectiveRiskFit.position_size)
+    ? Math.abs(prospectiveRiskFit.position_size - displayedPlan.riskFit.position_size) / displayedPlan.riskFit.position_size
+    : 0;
+  const staleMove = trigger.extendedFromEntry
+    || (prospectiveRisk.valid && prospectiveRisk.rrRatio < 1.5)
+    || sizeShift > 0.35;
+  return {
+    state:staleMove ? 'needs_replan' : 'valid',
+    valid:!staleMove,
+    needsReplan:staleMove,
+    missed:false,
+    invalidated:false,
+    capitalConstraint:(rawRecord.plan && rawRecord.plan.affordability === 'not_affordable') ? 'not_affordable' : ((rawRecord.plan && rawRecord.plan.affordability === 'heavy_capital') ? 'heavy_capital' : ''),
+    reasonCode:staleMove ? 'plan_premature_or_stale' : 'valid'
+  };
+}
+
+function finalVerdictForRecord(record, options = {}){
+  const item = normalizeTickerRecord(record);
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan});
+  const baseVerdict = baseVerdictForRecord(item, options);
+  const advisoryVerdict = analysisVerdictForRecord(item, options);
+  const includeExecutionDowngrade = options.includeExecutionDowngrade !== false;
+  const executionVerdict = includeExecutionDowngrade
+    ? executionDowngradeVerdictForRecord(item, {displayedPlan, planUiState})
+    : '';
+  const conservativeVerdict = mostConservativeVerdict(baseVerdict, advisoryVerdict, executionVerdict);
+  const deadCheck = isTerminalDeadSetup(item, {derivedStates, displayedPlan});
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const structurallyAlive = !deadCheck.dead
+    && structureState !== 'broken'
+    && trendState !== 'broken'
+    && !(item.plan && item.plan.invalidatedState)
+    && !(item.plan && item.plan.missedState);
+  if(!structurallyAlive) return conservativeVerdict;
+
+  const resolved = resolveFinalStateContract(item, {
+    context:options.context || 'review',
+    finalVerdict:conservativeVerdict,
+    derivedStates,
+    displayedPlan,
+    planUiState
+  });
+  if(resolved.structuralState === 'dead' || resolved.actionStateKey === 'rebuild_setup'){
+    return conservativeVerdict === 'Entry' ? 'Near Entry' : 'Watch';
+  }
+  if(resolved.actionStateKey === 'ready_to_act') return 'Entry';
+  if(resolved.structuralState === 'near_entry') return 'Near Entry';
+  return conservativeVerdict === 'Avoid' ? 'Watch' : conservativeVerdict;
+}
+
+function reviewHeaderVerdictForRecord(record){
+  const item = normalizeTickerRecord(record);
+  const displayedPlan = deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const deadCheck = isTerminalDeadSetup(item, {derivedStates, displayedPlan});
+  const verdict = finalVerdictForRecord(item, {
+    includeExecutionDowngrade:false,
+    includeRuntimeFallback:false,
+    context:'review',
+    derivedStates,
+    displayedPlan
+  });
+  if(deadCheck.dead) return verdict;
+  return verdict === 'Avoid' ? 'Watch' : verdict;
+}
+
 registerPwa();
 loadState();
 setControlFocus(uiState.controlStripPanel || 'market', {scroll:false, instant:true});
