@@ -11100,7 +11100,7 @@ function tightenPlaybookVerdict(rawVerdict, derivedStates, marketStatus){
 }
 
 function evaluateWarningState(record, analysis = null, derivedStates = null){
-  const item = normalizeTickerRecord(record || {});
+  const item = record && typeof record === 'object' ? record : {};
   return warningStateFromInputs(item, analysis, derivedStates);
 }
 
