@@ -3874,11 +3874,11 @@ function renderWatchlist(){
       const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
       const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
       const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
-      const visualStateClass = getResolvedStateVisualClass({
-        structuralState:resolvedContract.structuralState,
-        actionStateKey:resolvedContract.actionStateKey,
-        lifecycleState:watchlistState,
-        tradeability:resolvedContract.tradeabilityVerdict
+      const visualStateClass = visualToneClass({
+        state:resolvedContract.structuralState,
+        tradeability:resolvedContract.tradeabilityVerdict,
+        structure:record && record.setup && record.setup.structureState,
+        bounce:record && record.setup && record.setup.bounceState
       });
       div.className = `resultcompact watchlist-card ${escapeHtml(visualStateClass)}`.trim();
       div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${escapeHtml(decisionCopy.badgeClass || watchlistBadgeClass)}">${escapeHtml(decisionCopy.badgeText || watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(decisionCopy.headline || shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
@@ -5364,6 +5364,29 @@ function getResolvedStateVisualClass(options = {}){
   return 'state-monitor';
 }
 
+function resolveVisualState(setup = {}){
+  const state = String(setup.state || '').toLowerCase();
+  const tradeability = normalizeAnalysisVerdict(setup.tradeability || '');
+  const structure = String(setup.structure || '').toLowerCase();
+  const bounce = String(setup.bounce || '').toLowerCase();
+
+  if(state === 'dead' || tradeability === 'Avoid'){
+    return {tone:'red'};
+  }
+  if(structure === 'weak' || bounce === 'none'){
+    return {tone:'orange'};
+  }
+  if(state === 'entry' || state === 'near_entry'){
+    return {tone:'green'};
+  }
+  return {tone:'indigo'};
+}
+
+function visualToneClass(setup = {}){
+  const visual = resolveVisualState(setup);
+  return `tone-${visual.tone}`;
+}
+
 function rrDisplayClass(rrValue){
   const rr = numericOrNull(rrValue);
   if(!Number.isFinite(rr)) return '';
@@ -5568,19 +5591,18 @@ function renderCompactResultCardFromView(view){
   const intensity = scanCardIntensityForView(view);
   const toneClass = `result-card--${tone}`;
   const intensityClass = `result-card--intensity-${intensity}`;
-  const scoreGradientClass = scannerScoreGradientClass(view && view.setupScore);
-  const visualStateClass = visualCardStateClass({
-    primaryState:statusChip.primaryState,
-    finalDisplayState:view && (view.displayStage || view.finalVerdict),
-    planStatusKey:view && view.planUiState && view.planUiState.state
+  const visualStateClass = visualToneClass({
+    state:statusChip.primaryState,
+    tradeability:view && (view.displayStage || view.finalVerdict || (view.scannerResolution && view.scannerResolution.status)),
+    structure:view && view.setupStates && view.setupStates.structureQuality,
+    bounce:view && view.setupStates && view.setupStates.bounceState
   });
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const summary = scanCardSummaryForView(view);
   const actionLabel = scanCardPrimaryActionLabel(view);
   const secondaryUiMarkup = renderScanCardSecondaryUi(view);
   const expanded = currentScanCardSecondaryUi(item.ticker);
-  const visualStyle = cardVisualStyleAttr(view && view.setupScore, view && view.setupUiState && view.setupUiState.state);
-  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)} ${escapeHtml(scoreGradientClass)}" style="${escapeHtml(visualStyle)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${expanded === 'menu' ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${expanded === 'menu' ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
@@ -12412,10 +12434,11 @@ function renderReviewWorkspace(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
   });
-  const reviewVisualStateClass = getResolvedStateVisualClass({
-    structuralState:resolvedContract && resolvedContract.structuralState,
-    actionStateKey:resolvedContract && resolvedContract.actionStateKey,
-    tradeability:resolvedContract && resolvedContract.tradeabilityVerdict
+  const reviewVisualStateClass = visualToneClass({
+    state:resolvedContract && resolvedContract.structuralState,
+    tradeability:resolvedContract && resolvedContract.tradeabilityVerdict,
+    structure:record && record.setup && record.setup.structureState,
+    bounce:record && record.setup && record.setup.bounceState
   });
   box.className = `list reviewworkspace-shell ${reviewVisualStateClass}`;
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
