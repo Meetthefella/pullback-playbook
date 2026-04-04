@@ -13360,9 +13360,19 @@ function primaryVerdictBadge(verdict){
   return {label:'\uD83E\uDDD0 Monitor', className:'watch'};
 }
 
+function resolverSeedVerdictForRecord(record){
+  const item = normalizeTickerRecord(record);
+  return normalizeAnalysisVerdict(
+    (item.review && item.review.savedVerdict)
+    || (item.scan && item.scan.verdict)
+    || baseVerdictForRecord(item, {includeRuntimeFallback:false})
+    || 'Watch'
+  );
+}
+
 function resolveFinalStateContract(record, options = {}){
   const item = normalizeTickerRecord(record);
-  const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || displayStageForRecord(item));
+  const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || resolverSeedVerdictForRecord(item));
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
@@ -13591,7 +13601,7 @@ function resolveFinalStateContract(record, options = {}){
 
 function resolveEmojiPresentation(record, options = {}){
   const item = normalizeTickerRecord(record);
-  const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || displayStageForRecord(item));
+  const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || resolverSeedVerdictForRecord(item));
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
