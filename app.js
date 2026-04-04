@@ -9984,7 +9984,7 @@ function setReviewAnalysisState(record, nextState = {}){
 }
 
 function getReviewAnalysisState(record){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const cachedState = uiState.reviewAnalysisCache && typeof uiState.reviewAnalysisCache === 'object'
     ? uiState.reviewAnalysisCache[item.ticker]
     : null;
