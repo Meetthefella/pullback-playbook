@@ -1545,6 +1545,7 @@ function baseTickerRecord(ticker){
         mainBlocker:'',
         planRecomputed:false,
         recomputeResult:'',
+        planSnapshotMismatch:'',
         previousPlan:null,
         newPlan:null,
         warnings:[],
@@ -1736,6 +1737,7 @@ function normalizeTickerRecord(record){
   merged.watchlist.debug.mainBlocker = String(merged.watchlist.debug.mainBlocker || '');
   merged.watchlist.debug.planRecomputed = !!merged.watchlist.debug.planRecomputed;
   merged.watchlist.debug.recomputeResult = String(merged.watchlist.debug.recomputeResult || '');
+  merged.watchlist.debug.planSnapshotMismatch = String(merged.watchlist.debug.planSnapshotMismatch || '');
   merged.watchlist.debug.previousPlan = normalizeStoredPlanSnapshot(merged.watchlist.debug.previousPlan);
   merged.watchlist.debug.newPlan = normalizeStoredPlanSnapshot(merged.watchlist.debug.newPlan);
   merged.watchlist.debug.warnings = Array.isArray(merged.watchlist.debug.warnings) ? merged.watchlist.debug.warnings.map(item => String(item || '').trim()).filter(Boolean).slice(0, 5) : [];
@@ -3478,6 +3480,11 @@ function runWatchlistLifecycleEvaluation(options = {}){
         const attemptedRecompute = recomputeAttemptedForSource(source);
         const previousPlan = normalizeStoredPlanSnapshot(record.watchlist.debug && record.watchlist.debug.newPlan);
         const newPlan = planSnapshotFromDisplayedPlan(displayedPlan);
+        const displayedPlanHasValues = !!(
+          Number.isFinite(numericOrNull(displayedPlan && displayedPlan.entry))
+          || Number.isFinite(numericOrNull(displayedPlan && displayedPlan.stop))
+          || Number.isFinite(numericOrNull(displayedPlan && displayedPlan.target))
+        );
         record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
         record.watchlist.debug.lastEvaluatedAt = new Date().toISOString();
         record.watchlist.debug.lastSource = source;
@@ -3492,6 +3499,9 @@ function runWatchlistLifecycleEvaluation(options = {}){
         record.watchlist.debug.previousPlan = previousPlan;
         record.watchlist.debug.newPlan = newPlan;
         record.watchlist.debug.recomputeResult = determineRecomputeResult(previousPlan, newPlan, attemptedRecompute);
+        record.watchlist.debug.planSnapshotMismatch = displayedPlanHasValues && storedPlanState(newPlan) === 'NO_PLAN'
+          ? 'Displayed Trade Plan has values, but recompute snapshot resolved to no plan.'
+          : '';
         record.watchlist.debug.warnings = warnings;
         if(logUnchanged || changeType !== 'unchanged'){
           appendWatchlistDebugEvent(record, {
@@ -7536,9 +7546,18 @@ function normalizeStoredPlanSnapshot(snapshot){
     stop:String(source.stop || '').trim(),
     firstTarget:String(source.firstTarget || '').trim(),
     status:String(source.status || '').trim(),
+    planState:String(source.planState || '').trim(),
     rr:String(source.rr || '').trim(),
     tradeability:String(source.tradeability || '').trim()
   };
+}
+
+function storedPlanState(snapshot){
+  const plan = normalizeStoredPlanSnapshot(snapshot);
+  const hasValues = !!(plan.entry || plan.stop || plan.firstTarget);
+  if(!hasValues) return 'NO_PLAN';
+  if(String(plan.status || '').toLowerCase() === 'valid') return 'VALID_PLAN';
+  return 'INVALID_PLAN';
 }
 
 function planSnapshotFromDisplayedPlan(displayedPlan){
@@ -7549,6 +7568,7 @@ function planSnapshotFromDisplayedPlan(displayedPlan){
     stop:Number.isFinite(numericOrNull(plan.stop)) ? Number(numericOrNull(plan.stop)).toFixed(2) : '',
     firstTarget:Number.isFinite(numericOrNull(plan.target)) ? Number(numericOrNull(plan.target)).toFixed(2) : '',
     status:String(plan.status || '').trim(),
+    planState:'',
     rr:Number.isFinite(numericOrNull(rewardRisk.rrRatio)) ? Number(numericOrNull(rewardRisk.rrRatio)).toFixed(2) : '',
     tradeability:String(plan.tradeability || '').trim()
   });
@@ -7556,11 +7576,10 @@ function planSnapshotFromDisplayedPlan(displayedPlan){
 
 function planSnapshotSummary(snapshot, options = {}){
   const plan = normalizeStoredPlanSnapshot(snapshot);
-  const emptyLabel = String(options.emptyLabel || 'No plan').trim();
-  if(!plan.entry && !plan.stop && !plan.firstTarget){
-    return emptyLabel;
-  }
-  return `Entry ${plan.entry || 'n/a'} | Stop ${plan.stop || 'n/a'} | First target ${plan.firstTarget || 'n/a'}`;
+  const state = storedPlanState(plan);
+  if(state === 'NO_PLAN') return String(options.emptyLabel || 'None').trim();
+  const stateLabel = state === 'VALID_PLAN' ? 'Exists (valid)' : 'Exists (invalid)';
+  return `${stateLabel} | Entry ${plan.entry || 'n/a'} | Stop ${plan.stop || 'n/a'} | First target ${plan.firstTarget || 'n/a'}`;
 }
 
 function planSnapshotsEqual(a, b){
@@ -7596,18 +7615,20 @@ function determineRecomputeResult(previousPlan, newPlan, attempted){
   if(!attempted) return 'Skipped';
   const before = normalizeStoredPlanSnapshot(previousPlan);
   const after = normalizeStoredPlanSnapshot(newPlan);
-  if(after.status && after.status !== 'valid') return 'Failed';
   if(planSnapshotsEqual(before, after)) return 'Unchanged';
+  const beforeState = storedPlanState(before);
+  const afterState = storedPlanState(after);
   const beforeRr = numericOrNull(before.rr);
   const afterRr = numericOrNull(after.rr);
   const beforeTradeability = tradeabilityRank(before.tradeability);
   const afterTradeability = tradeabilityRank(after.tradeability);
-  if((before.status && before.status !== 'valid' && after.status === 'valid')
+  if((beforeState !== 'VALID_PLAN' && afterState === 'VALID_PLAN')
     || afterTradeability > beforeTradeability
     || (Number.isFinite(beforeRr) && Number.isFinite(afterRr) && afterRr > beforeRr)
     || (!before.entry && !!after.entry)){
     return 'Improved';
   }
+  if(afterState !== 'VALID_PLAN') return 'Failed';
   return 'Unchanged';
 }
 
@@ -7616,12 +7637,12 @@ function renderRecomputeDiagnostics(debug, options = {}){
   const previousPlan = normalizeStoredPlanSnapshot(info.previousPlan);
   const newPlan = normalizeStoredPlanSnapshot(info.newPlan);
   const identical = planSnapshotsEqual(previousPlan, newPlan);
-  const previousSummary = planSnapshotSummary(previousPlan, {emptyLabel:'No plan before recompute'});
+  const previousSummary = planSnapshotSummary(previousPlan, {emptyLabel:'None'});
   const newSummary = identical
-    ? `Same as previous | ${planSnapshotSummary(newPlan, {emptyLabel:'No plan after recompute'})}`
-    : planSnapshotSummary(newPlan, {emptyLabel:'No plan after recompute'});
+    ? `Same as previous | ${planSnapshotSummary(newPlan, {emptyLabel:'None'})}`
+    : planSnapshotSummary(newPlan, {emptyLabel:'None'});
   const wrapperClass = String(options.wrapperClass || '').trim();
-  return `<div class="${escapeHtml(wrapperClass || 'watchlist-debug-block tiny')}"><strong>Plan Recompute</strong><div>Plan recomputed: ${escapeHtml(info.planRecomputed ? 'Yes' : 'No')}</div><div>Recompute result: ${escapeHtml(info.recomputeResult || 'Skipped')}</div><div>Previous plan: ${escapeHtml(previousSummary)}</div><div>New plan: ${escapeHtml(newSummary)}</div></div>`;
+  return `<div class="${escapeHtml(wrapperClass || 'watchlist-debug-block tiny')}"><strong>Plan Recompute</strong><div>Plan recomputed: ${escapeHtml(info.planRecomputed ? 'Yes' : 'No')}</div><div>Recompute result: ${escapeHtml(info.recomputeResult || 'Skipped')}</div><div>Previous plan: ${escapeHtml(previousSummary)}</div><div>New plan: ${escapeHtml(newSummary)}</div>${info.planSnapshotMismatch ? `<div>Snapshot warning: ${escapeHtml(info.planSnapshotMismatch)}</div>` : ''}</div>`;
 }
 
 function watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reasoning, fallbackAction){
