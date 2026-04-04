@@ -7127,7 +7127,7 @@ function structureLabelForRecord(record, derivedStates = null, options = {}){
 function warningStateFromInputs(record, analysis = null, derivedStates = null){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : null;
-  const derived = derivedStates || analysisDerivedStates(tickerRecordToLegacyCard(rawRecord));
+  const derived = derivedStates || analysisDerivedStatesFromRecord(rawRecord);
   const plan = rawRecord.plan && typeof rawRecord.plan === 'object' ? rawRecord.plan : {};
   const seedVerdict = resolverSeedVerdictForRecord(rawRecord);
   const qualityAdjustments = evaluateSetupQualityAdjustments(rawRecord, {
@@ -13882,7 +13882,7 @@ function currentHardFailVerdictForRecord(record){
 function warningStateFromInputs(record, analysis = null, derivedStates = null){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : null;
-  const derived = derivedStates || analysisDerivedStates(tickerRecordToLegacyCard(rawRecord));
+  const derived = derivedStates || analysisDerivedStatesFromRecord(rawRecord);
   const plan = rawRecord.plan && typeof rawRecord.plan === 'object' ? rawRecord.plan : {};
   const seedVerdict = resolverSeedVerdictForRecord(rawRecord);
   const qualityAdjustments = evaluateSetupQualityAdjustments(rawRecord, {
