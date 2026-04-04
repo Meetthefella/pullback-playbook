@@ -6640,6 +6640,11 @@ function resolveFinalStateContract(record, options = {}){
   primaryEmoji = structuralPresentation.emoji;
   primaryLabel = structuralPresentation.label;
   badgeClass = structuralPresentation.badgeClass;
+  if(primaryState === 'dead') primaryEmoji = '\uD83D\uDC80';
+  else if(primaryState === 'entry') primaryEmoji = '\uD83D\uDE80';
+  else if(primaryState === 'near_entry') primaryEmoji = '\uD83C\uDFAF';
+  else if(primaryState === 'developing') primaryEmoji = '\uD83C\uDF31';
+  else if(primaryState === 'monitor') primaryEmoji = '\uD83E\uDDD0';
   const contractPlanStatusKey = primaryState === 'dead' ? 'rebuild_required' : planUiState.state;
   const contractPlanStatusLabel = primaryState === 'dead' ? 'Rebuild required' : planStatusLabel;
 
@@ -7698,14 +7703,19 @@ function watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reas
   const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').trim();
   const reasonSummary = String(resolvedContract && resolvedContract.reasonSummary || '').trim();
 
-  let badgeText = String(resolvedContract && resolvedContract.badgeText || '').trim() || 'Watch';
-  let badgeClass = String(resolvedContract && resolvedContract.badgeClass || '').trim() || 'watch';
+  const actionStateKey = String(resolvedContract && resolvedContract.actionStateKey || '').trim().toLowerCase();
+  let badgeText = String(resolvedContract && (resolvedContract.actionStateLabel || resolvedContract.actionLabel) || '').trim() || 'Hold for confirmation';
+  let badgeClass = actionStateKey === 'rebuild_setup'
+    ? 'avoid'
+    : (actionStateKey === 'recalculate_plan' ? 'near' : (String(resolvedContract && resolvedContract.badgeClass || '').trim() || 'watch'));
   let headline = String(resolvedContract && (resolvedContract.actionStateLabel || resolvedContract.actionLabel) || fallbackAction || '').trim() || 'Hold for confirmation';
   const conciseReason = reasonSummary || watchlistReasonSummary(reasoning, headline) || blockerReason;
   const tradeability = String(resolvedContract && (resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel) || 'Watch').trim();
   let reason = conciseReason ? `Tradeability: ${tradeability} | ${conciseReason}` : `Tradeability: ${tradeability}`;
-  const rebuildState = false;
-  const recalculateState = false;
+  if(actionStateKey === 'rebuild_setup') badgeText = '\uD83D\uDC80 Rebuild setup';
+  else if(actionStateKey === 'recalculate_plan') badgeText = '\uD83E\uDDF0 Recalculate plan';
+  else if(actionStateKey === 'ready_to_act') badgeText = 'Ready to act';
+  else if(actionStateKey === 'hold_confirmation') badgeText = 'Hold for confirmation';
 
   if(String(lifecycleSnapshot && lifecycleSnapshot.state || '').toLowerCase() === 'expired'){
     badgeText = 'Expired';
