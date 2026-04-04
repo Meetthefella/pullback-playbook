@@ -824,6 +824,30 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   line-height:1.3;
   color:var(--text-muted);
 }
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit .big{
+  font-size:1.42rem;
+  font-weight:900;
+  letter-spacing:-.03em;
+  text-transform:uppercase;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--comfortable .big{
+  color:#34d399;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--manageable .big{
+  color:#2dd4bf;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--heavy .big{
+  color:#f59e0b;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--stretch .big{
+  color:#fb923c;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--too-expensive .big{
+  color:#ef4444;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--unknown .big{
+  color:var(--text-secondary);
+}
 .reviewworkspace .reviewstats.reviewstats--compact .stat--primary .big,
 .reviewworkspace .reviewstats.reviewstats--compact #rrValue{
   font-size:1.58rem;

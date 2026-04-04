@@ -7976,6 +7976,18 @@ function capitalComfortSummary({capitalFit, capitalNote, affordability, capitalU
   return {label:'Needs Check', note:statusNote || (capitalFit === 'unknown' ? 'Capital unresolved' : '')};
 }
 
+function capitalFitPresentation({capitalFit, affordability, comfortLabel}){
+  const fit = String(capitalFit || '').trim().toLowerCase();
+  const afford = String(affordability || '').trim().toLowerCase();
+  const comfort = String(comfortLabel || '').trim().toLowerCase();
+  if(afford === 'not_affordable' || fit === 'too_expensive') return {className:'capital-fit--too-expensive', icon:'⛔', text:'TOO EXPENSIVE'};
+  if(comfort.includes('stretch')) return {className:'capital-fit--stretch', icon:'⚠', text:'STRETCH'};
+  if(comfort.includes('heavy')) return {className:'capital-fit--heavy', icon:'⚠', text:'HEAVY CAPITAL'};
+  if(comfort.includes('comfortable')) return {className:'capital-fit--comfortable', icon:'✓', text:'COMFORTABLE'};
+  if(comfort.includes('manageable')) return {className:'capital-fit--manageable', icon:'•', text:'MANAGEABLE'};
+  return {className:'capital-fit--unknown', icon:'•', text:String(comfortLabel || 'UNKNOWN').toUpperCase()};
+}
+
 function tradeabilityLabel(tradeability){
   if(tradeability === 'tradable') return 'Tradable';
   if(tradeability === 'too_expensive') return 'Too Expensive';
@@ -11873,6 +11885,11 @@ function renderReviewWorkspace(options = {}){
   const promptPreviewOpen = (uiState.promptOpen[record.ticker] ?? false) ? 'open' : '';
   const capitalFitLabel = capitalComfort.label || 'Unknown';
   const fxBasisNote = capitalComfort.note || 'No FX conversion note.';
+  const capitalFitVisual = capitalFitPresentation({
+    capitalFit:displayedPlan.capitalFit.capital_fit,
+    affordability:displayedPlan.affordability,
+    comfortLabel:capitalFitLabel
+  });
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate();
   });
@@ -11924,7 +11941,7 @@ function renderReviewWorkspace(options = {}){
         <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(rrDisplayClass(planRealism.raw_rr))}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
         <div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
         <div class="stat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(positionCostText)}</div></div>
-        <div class="stat"><div>Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitLabel)}</div><div class="statnote" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div></div>
+        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div>Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(`${capitalFitVisual.icon} ${capitalFitVisual.text}`)}</div><div class="statnote" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div></div>
         <div class="stat review-hidden"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
         <div class="stat review-hidden"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div>
         <div class="stat review-hidden"><div>Max Loss</div><div class="big">${escapeHtml(formatGbp(currentMaxLoss()))}</div></div>
@@ -12370,7 +12387,15 @@ function calculate(options = {}){
   });
   $('riskFitBox').textContent = `${riskFitLabel} / ${capitalComfort.label}`;
   if($('capitalComfortBox')) $('capitalComfortBox').textContent = capitalComfort.label;
-  if($('capitalFitBox')) $('capitalFitBox').textContent = capitalComfort.label || 'Unknown';
+  const capitalFitVisual = capitalFitPresentation({
+    capitalFit:displayedPlan.capitalFit.capital_fit,
+    affordability:displayedPlan.affordability,
+    comfortLabel:capitalComfort.label
+  });
+  if($('capitalFitMetric')){
+    $('capitalFitMetric').className = `stat stat--capital-fit ${capitalFitVisual.className}`.trim();
+  }
+  if($('capitalFitBox')) $('capitalFitBox').textContent = `${capitalFitVisual.icon} ${capitalFitVisual.text}`;
   if($('fxBasisBox')) $('fxBasisBox').textContent = capitalComfort.note || 'No FX conversion note.';
   if($('capitalCheckBox')) $('capitalCheckBox').textContent = capitalComfort.note || 'Clear';
   if($('positionCostBox')){
