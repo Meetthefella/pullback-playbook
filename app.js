@@ -3881,7 +3881,9 @@ function renderWatchlist(){
         planStatusKey:planState,
         actionStateKey:resolvedContract.actionStateKey
       });
+      const watchlistVisualStyle = cardVisualStyleAttr(view && view.setupScore, resolvedContract && resolvedContract.structuralState);
       div.className = `resultcompact watchlist-card ${escapeHtml(visualStateClass)}`.trim();
+      div.setAttribute('style', watchlistVisualStyle);
       div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${escapeHtml(decisionCopy.badgeClass || watchlistBadgeClass)}">${escapeHtml(decisionCopy.badgeText || watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(decisionCopy.headline || shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
@@ -3908,7 +3910,7 @@ function renderWatchlist(){
     const expiryDate = record.lifecycle.expiresAt || 'Not set';
     const div = document.createElement('div');
     div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead"><div class="watchlistidentity inline-status" style="justify-content:space-between;align-items:flex-start"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="inline-status"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(view.setupUiState.label)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span></div></div><div class="tiny">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div><div class="inline-status" style="margin-top:8px"><span class="pill">${escapeHtml(cautionChip)}</span><span class="pill">${escapeHtml(view.planStateLabel)}</span></div><div class="tiny" style="margin-top:8px">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div><div class="resultreview inline-status" style="margin-top:10px"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save to Diary</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
+    div.innerHTML = `<div class="resulthead" style="${escapeHtml(cardVisualStyleAttr(view && view.setupScore, view && view.setupUiState && view.setupUiState.state))}"><div class="watchlistidentity inline-status" style="justify-content:space-between;align-items:flex-start"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="inline-status"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(view.setupUiState.label)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span></div></div><div class="tiny">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div><div class="inline-status" style="margin-top:8px"><span class="pill">${escapeHtml(cautionChip)}</span><span class="pill">${escapeHtml(view.planStateLabel)}</span></div><div class="tiny" style="margin-top:8px">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div><div class="resultreview inline-status" style="margin-top:10px"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save to Diary</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
     div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
     div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
     div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -5497,6 +5499,45 @@ function scannerScoreGradientClass(score){
   return 'score-broken';
 }
 
+function getCardVisualStyle(setupScore, structureState){
+  const safeScore = numericOrNull(setupScore);
+  const safeStructureState = String(structureState || '').trim().toLowerCase();
+
+  if(safeStructureState === 'broken' || (Number.isFinite(safeScore) && safeScore <= 1)){
+    return {
+      background:'linear-gradient(135deg, rgba(127,29,29,0.6), rgba(0,0,0,0.9))',
+      border:'1px solid rgba(239,68,68,0.8)'
+    };
+  }
+  if(Number.isFinite(safeScore) && safeScore <= 3){
+    return {
+      background:'linear-gradient(135deg, rgba(30,30,30,0.9), rgba(0,0,0,0.95))',
+      border:'1px solid rgba(245,158,11,0.4)'
+    };
+  }
+  if(Number.isFinite(safeScore) && safeScore <= 5){
+    return {
+      background:'linear-gradient(135deg, rgba(67,56,202,0.35), rgba(0,0,0,0.9))',
+      border:'1px solid rgba(99,102,241,0.4)'
+    };
+  }
+  if(Number.isFinite(safeScore) && safeScore <= 7){
+    return {
+      background:'linear-gradient(135deg, rgba(37,99,235,0.35), rgba(0,0,0,0.9))',
+      border:'1px solid rgba(59,130,246,0.5)'
+    };
+  }
+  return {
+    background:'linear-gradient(135deg, rgba(22,163,74,0.35), rgba(0,0,0,0.9))',
+    border:'1px solid rgba(34,197,94,0.6)'
+  };
+}
+
+function cardVisualStyleAttr(setupScore, structureState){
+  const visual = getCardVisualStyle(setupScore, structureState);
+  return `background:${visual.background};border:${visual.border};backdrop-filter:blur(6px);`;
+}
+
 function renderCompactResultCardFromView(view){
   const item = view.item;
   const statusChip = primaryShortlistStatusChip(view);
@@ -5517,7 +5558,8 @@ function renderCompactResultCardFromView(view){
   const actionLabel = scanCardPrimaryActionLabel(view);
   const secondaryUiMarkup = renderScanCardSecondaryUi(view);
   const expanded = currentScanCardSecondaryUi(item.ticker);
-  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)} ${escapeHtml(scoreGradientClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${expanded === 'menu' ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
+  const visualStyle = cardVisualStyleAttr(view && view.setupScore, view && view.setupUiState && view.setupUiState.state);
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)} ${escapeHtml(scoreGradientClass)}" style="${escapeHtml(visualStyle)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${expanded === 'menu' ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
@@ -12007,7 +12049,7 @@ function legacyRenderCardsFromCardList(){
     const riskMeta = renderPlanProjectionFromRecord(record);
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead"><div class="ticker">${escapeHtml(record.ticker)}</div><div><div>${escapeHtml(currentRuntimeSummaryForRecord(record) || savedReviewSummaryForRecord(record) || 'No review saved yet.')}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${record.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${record.review.chartRef && record.review.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${record.ticker}">Notes</label><textarea id="notes-${record.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button></div><details class="responsepanel" id="response-${record.ticker}" ${(((uiState.responseOpen[record.ticker] ?? !!record.review.aiAnalysisRaw) || !!record.review.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button><button class="secondary" data-act="add-watchlist">Add to Watchlist</button></div><details class="promptdetails" id="prompt-${record.ticker}" ${(uiState.promptOpen[record.ticker] ?? !!record.review.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${record.ticker}">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></div></div>`;
+    div.innerHTML = `<div class="resulthead" style="${escapeHtml(cardVisualStyleAttr(view && view.setupScore, view && view.setupUiState && view.setupUiState.state))}"><div class="ticker">${escapeHtml(record.ticker)}</div><div><div>${escapeHtml(currentRuntimeSummaryForRecord(record) || savedReviewSummaryForRecord(record) || 'No review saved yet.')}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${record.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${record.review.chartRef && record.review.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${record.ticker}">Notes</label><textarea id="notes-${record.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button></div><details class="responsepanel" id="response-${record.ticker}" ${(((uiState.responseOpen[record.ticker] ?? !!record.review.aiAnalysisRaw) || !!record.review.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button><button class="secondary" data-act="add-watchlist">Add to Watchlist</button></div><details class="promptdetails" id="prompt-${record.ticker}" ${(uiState.promptOpen[record.ticker] ?? !!record.review.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${record.ticker}">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(record.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeCard(record.ticker);
     div.querySelector('[data-act="analyse"]').onclick = () => { if(!uiState.loadingTicker) analyseSetup(record.ticker); };
@@ -12348,10 +12390,11 @@ function renderReviewWorkspace(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
   });
+  const reviewVisualStyle = cardVisualStyleAttr(setupScore, resolvedContract && resolvedContract.structuralState);
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate();
   });
-  box.innerHTML = `<div class="reviewworkspace ready">
+  box.innerHTML = `<div class="reviewworkspace ready" style="${escapeHtml(reviewVisualStyle)}">
     <div class="panelbox review-section review-section--snapshot">
       <div class="reviewsectionhead"><strong>Snapshot</strong></div>
       <div class="reviewhero reviewhero-compact">
