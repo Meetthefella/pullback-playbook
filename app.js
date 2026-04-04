@@ -13855,6 +13855,53 @@ function currentHardFailVerdictForRecord(record){
   return structurallyDead ? 'Avoid' : '';
 }
 
+function warningStateFromInputs(record, analysis = null, derivedStates = null){
+  const rawRecord = record && typeof record === 'object' ? record : {};
+  const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : null;
+  const derived = derivedStates || analysisDerivedStates(tickerRecordToLegacyCard(rawRecord));
+  const plan = rawRecord.plan && typeof rawRecord.plan === 'object' ? rawRecord.plan : {};
+  const seedVerdict = resolverSeedVerdictForRecord(rawRecord);
+  const qualityAdjustments = evaluateSetupQualityAdjustments(rawRecord, {
+    derivedStates:derived,
+    baseVerdict:seedVerdict,
+    displayStage:seedVerdict
+  });
+  const rrRatio = numericOrNull(plan.plannedRR);
+  const structureState = String(derived.structureState || '').toLowerCase();
+  const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
+  const bounceState = String(derived.bounceState || '').toLowerCase();
+  const volumeState = String(derived.volumeState || '').toLowerCase();
+  const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
+  const practicalSizeFlag = practicalSizeFlagForPlan(plan);
+  const cautionReasons = [];
+  const pushReason = reason => {
+    if(reason && !cautionReasons.includes(reason)) cautionReasons.push(reason);
+  };
+
+  const structureLabel = structureLabelForRecord(rawRecord, derived, {displayStage:seedVerdict});
+  if(structureLabel) pushReason(structureLabel);
+  if(bounceState !== 'confirmed') pushReason(bounceState === 'none' ? 'No bounce' : 'Bounce unconfirmed');
+  if(stabilisationState === 'early') pushReason('Early stabilisation only');
+  if(volumeState === 'weak') pushReason('Weak volume');
+  if(hostileMarket) pushReason('Hostile market');
+  if(practicalSizeFlag === 'tiny_size') pushReason('Tiny size');
+  if(practicalSizeFlag === 'low_impact') pushReason('Low impact');
+  if(qualityAdjustments.lowControlSetup) pushReason('Lower control setup');
+  if(qualityAdjustments.weakRegimePenalty) pushReason('Weak market needs stronger confirmation');
+  if(Number.isFinite(rrRatio) && rrRatio >= 3 && (bounceState !== 'confirmed' || ['weak','weakening','broken'].includes(structureState))){
+    pushReason('Paper R:R looks better than confirmation');
+  }
+  if(safeAnalysis && normalizeAnalysisVerdict(safeAnalysis.final_verdict || safeAnalysis.verdict) !== 'Avoid' && hostileMarket && stabilisationState === 'early'){
+    pushReason('Borderline setup in weak market');
+  }
+
+  const majorCaution = ['weak','weakening','broken'].includes(structureState) || practicalSizeFlag === 'tiny_size';
+  return {
+    showWarning:majorCaution || cautionReasons.length >= 2,
+    reasons:cautionReasons.slice(0, 4)
+  };
+}
+
 function validateCurrentPlan(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
@@ -13933,7 +13980,7 @@ function validateCurrentPlan(record, options = {}){
 }
 
 function finalVerdictForRecord(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     item.plan && item.plan.entry,
     item.plan && item.plan.stop,
