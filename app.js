@@ -3874,16 +3874,13 @@ function renderWatchlist(){
       const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
       const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
       const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
-      const visualStateClass = visualCardStateClass({
-        primaryState,
+      const visualStateClass = getResolvedStateVisualClass({
+        structuralState:resolvedContract.structuralState,
+        actionStateKey:resolvedContract.actionStateKey,
         lifecycleState:watchlistState,
-        finalDisplayState,
-        planStatusKey:planState,
-        actionStateKey:resolvedContract.actionStateKey
+        tradeability:resolvedContract.tradeabilityVerdict
       });
-      const watchlistVisualStyle = cardVisualStyleAttr(view && view.setupScore, resolvedContract && resolvedContract.structuralState);
       div.className = `resultcompact watchlist-card ${escapeHtml(visualStateClass)}`.trim();
-      div.setAttribute('style', watchlistVisualStyle);
       div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${escapeHtml(decisionCopy.badgeClass || watchlistBadgeClass)}">${escapeHtml(decisionCopy.badgeText || watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(decisionCopy.headline || shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
@@ -5340,6 +5337,30 @@ function visualCardStateClass(options = {}){
   if(candidates.includes('developing')) return 'state-developing';
   if(candidates.includes('monitor')) return 'state-monitor';
   if(candidates.includes('inactive')) return 'state-dead';
+  return 'state-monitor';
+}
+
+function getResolvedStateVisualClass(options = {}){
+  const structuralState = String(options.structuralState || options.primaryState || '').toLowerCase();
+  const actionStateKey = String(options.actionStateKey || '').toLowerCase();
+  const lifecycleState = String(options.lifecycleState || '').toLowerCase();
+  const tradeability = normalizeAnalysisVerdict(options.tradeability || options.finalVerdict || '');
+
+  if(['dead','expired','inactive'].includes(lifecycleState) || structuralState === 'dead' || actionStateKey === 'rebuild_setup'){
+    return 'state-dead';
+  }
+  if(actionStateKey === 'recalculate_plan'){
+    return 'state-recalculate';
+  }
+  if(actionStateKey === 'ready_to_act' || structuralState === 'entry' || tradeability === 'Entry'){
+    return 'state-ready';
+  }
+  if(structuralState === 'near_entry' || tradeability === 'Near Entry'){
+    return 'state-monitor';
+  }
+  if(['developing','monitor'].includes(structuralState) || tradeability === 'Watch'){
+    return 'state-developing';
+  }
   return 'state-monitor';
 }
 
@@ -12390,12 +12411,16 @@ function renderReviewWorkspace(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
   });
-  const reviewVisualStyle = cardVisualStyleAttr(setupScore, resolvedContract && resolvedContract.structuralState);
+  const reviewVisualStateClass = getResolvedStateVisualClass({
+    structuralState:resolvedContract && resolvedContract.structuralState,
+    actionStateKey:resolvedContract && resolvedContract.actionStateKey,
+    tradeability:resolvedContract && resolvedContract.tradeabilityVerdict
+  });
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate();
   });
-  box.innerHTML = `<div class="reviewworkspace ready" style="${escapeHtml(reviewVisualStyle)}">
-    <div class="panelbox review-section review-section--snapshot">
+  box.innerHTML = `<div class="reviewworkspace ready ${escapeHtml(reviewVisualStateClass)}">
+    <div class="panelbox review-section review-section--snapshot ${escapeHtml(reviewVisualStateClass)}">
       <div class="reviewsectionhead"><strong>Snapshot</strong></div>
       <div class="reviewhero reviewhero-compact">
         <div class="reviewherohead">
