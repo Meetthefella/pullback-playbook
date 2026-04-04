@@ -11941,13 +11941,14 @@ function renderReviewWorkspace(options = {}){
         <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(rrDisplayClass(planRealism.raw_rr))}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
         <div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
         <div class="stat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(positionCostText)}</div></div>
-        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div class="review-hidden">Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitVisual.text)}</div><div class="statnote" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div></div>
+        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div>Exposure</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitVisual.text)}</div></div>
         <div class="stat review-hidden"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
         <div class="stat review-hidden"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div>
         <div class="stat review-hidden"><div>Max Loss</div><div class="big">${escapeHtml(formatGbp(currentMaxLoss()))}</div></div>
         <div class="stat review-hidden"><div>Risk / Capital</div><div class="big" id="riskFitBox">${escapeHtml(`${riskStatusLabel(record.plan.riskStatus || 'plan_missing')} / ${capitalComfort.label}`)}</div></div>
         <div class="stat review-hidden"><div>Capital Check</div><div class="big" id="capitalCheckBox">${escapeHtml(capitalComfort.note || 'Clear')}</div></div>
       </div>
+      <div class="statnote trade-plan-fx-note" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div>
       <div class="tiny" id="calcNote">Enter planned entry, stop, and first target to calculate size.</div>
     </div>
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">

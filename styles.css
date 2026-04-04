@@ -807,18 +807,21 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   box-shadow:none;
 }
 .reviewworkspace .reviewstats.reviewstats--compact{
-  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-columns:repeat(2,minmax(0,1fr));
   gap:12px 14px;
 }
 .reviewworkspace .reviewstats.reviewstats--compact .stat{
   padding:0;
+  min-width:0;
 }
 .reviewworkspace .reviewstats.reviewstats--compact .stat .big{
   font-size:1.08rem;
   font-weight:800;
   color:var(--text-primary);
+  overflow-wrap:anywhere;
 }
-.reviewworkspace .reviewstats.reviewstats--compact .stat .statnote{
+.reviewworkspace .reviewstats.reviewstats--compact .stat .statnote,
+.reviewworkspace .trade-plan-fx-note{
   margin-top:4px;
   font-size:.74rem;
   line-height:1.3;
@@ -858,6 +861,9 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   font-weight:900;
   letter-spacing:-.04em;
   line-height:1;
+}
+.reviewworkspace .trade-plan-fx-note{
+  margin-top:2px;
 }
 .reviewstats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .reviewmeta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
