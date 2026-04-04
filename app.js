@@ -5380,11 +5380,11 @@ function rrDisplayClass(rrValue){
 function readinessLabelForView(view){
   const statusChip = primaryShortlistStatusChip(view);
   const state = String(statusChip.primaryState || '').toLowerCase();
-  const planState = String(view.planUiState && view.planUiState.state || '').toLowerCase();
+  const scannerStatus = normalizeAnalysisVerdict(view && view.scannerResolution && view.scannerResolution.status || '');
   if(state === 'entry') return 'Ready now';
   if(state === 'near_entry') return 'Ready soon';
   if(state === 'dead' || state === 'inactive') return 'Low confidence';
-  if(planState === 'invalid' || planState === 'missing') return 'Low confidence';
+  if(scannerStatus === 'Watch') return 'Building';
   if(state === 'developing') return 'Building';
   return 'Low confidence';
 }
@@ -5567,12 +5567,11 @@ function scanCardSummaryForView(view){
 
 function scanCardPrimaryActionLabel(view){
   const primaryState = String((primaryShortlistStatusChip(view) || {}).primaryState || '').toLowerCase();
-  const planState = String(view.planUiState && view.planUiState.state || '').toLowerCase();
-  if(primaryState === 'entry') return 'ENTRY';
-  if(primaryState === 'near_entry') return 'NEAR ENTRY';
+  const scannerStatus = normalizeAnalysisVerdict(view && view.scannerResolution && view.scannerResolution.status || '');
+  if(primaryState === 'entry' || scannerStatus === 'Entry') return 'ENTRY';
+  if(primaryState === 'near_entry' || scannerStatus === 'Near Entry') return 'NEAR ENTRY';
   if(primaryState === 'dead' || primaryState === 'inactive') return 'AVOID';
-  if(planState === 'invalid' || planState === 'missing') return 'AVOID';
-  if(primaryState === 'monitor') return 'WATCH';
+  if(primaryState === 'monitor' || scannerStatus === 'Watch') return 'WATCH';
   return 'WAIT';
 }
 
@@ -5580,10 +5579,10 @@ function scanDecisionLineForView(view){
   const primaryState = String((primaryShortlistStatusChip(view) || {}).primaryState || '').toLowerCase();
   const item = view.item;
   const derived = view.setupStates || analysisDerivedStatesFromRecord(item);
-  const planState = String(view.planUiState && view.planUiState.state || '').toLowerCase();
+  const actionStateKey = String(view && view.scannerResolution && view.scannerResolution.actionStateKey || '').toLowerCase();
   if(primaryState === 'entry') return 'Entry trigger looks ready';
   if(primaryState === 'dead' || primaryState === 'inactive') return 'Broken - avoid';
-  if(planState === 'invalid') return 'Invalid plan - needs re-entry setup';
+  if(actionStateKey === 'recalculate_plan') return 'Recalculate plan from current structure';
   if(item.setup.marketCaution) return 'Weak market - wait';
   if(String(derived.bounceState || '').toLowerCase() === 'none') return 'Needs confirmation';
   if(String(derived.bounceState || '').toLowerCase() === 'attempt') return 'Weak bounce - wait';
