@@ -8453,7 +8453,7 @@ function hasUnsavedPlanEdits(record, currentPlan){
 }
 
 function planCheckStateForRecord(record, options = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = record && typeof record === 'object' ? record : {};
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     effectivePlan.entry,
