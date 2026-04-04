@@ -5306,64 +5306,6 @@ function primaryShortlistStatusChip(view){
   };
 }
 
-function matteStateClassForPrimaryState(primaryState){
-  const state = String(primaryState || '').toLowerCase();
-  if(state === 'entry') return 'state-entry';
-  if(state === 'near_entry') return 'state-near-entry';
-  if(state === 'developing') return 'state-developing';
-  if(state === 'monitor') return 'state-monitor';
-  if(state === 'dead' || state === 'inactive') return 'state-dead';
-  return 'state-monitor';
-}
-
-function visualCardStateClass(options = {}){
-  const primaryState = String(options.primaryState || '').toLowerCase();
-  const lifecycleState = String(options.lifecycleState || '').toLowerCase();
-  const finalDisplayState = String(options.finalDisplayState || '').toLowerCase();
-  const planStatusKey = String(options.planStatusKey || '').toLowerCase();
-  const actionStateKey = String(options.actionStateKey || '').toLowerCase();
-  if(actionStateKey === 'rebuild_setup') return 'state-needs-rebuild';
-  if(actionStateKey === 'recalculate_plan'){
-    if(primaryState === 'near_entry') return 'state-near-entry';
-    if(primaryState === 'developing') return 'state-developing';
-    return 'state-monitor';
-  }
-  const candidates = [lifecycleState, finalDisplayState, planStatusKey, primaryState].filter(Boolean);
-  if(candidates.includes('dead') || candidates.includes('expired_dead')) return 'state-dead';
-  if(candidates.includes('needs_rebuild') || candidates.includes('rebuild_required')) return 'state-needs-rebuild';
-  if(candidates.includes('invalid_plan') || candidates.includes('invalid')) return 'state-invalid-plan';
-  if(candidates.includes('entry')) return 'state-entry';
-  if(candidates.includes('near_entry')) return 'state-near-entry';
-  if(candidates.includes('developing')) return 'state-developing';
-  if(candidates.includes('monitor')) return 'state-monitor';
-  if(candidates.includes('inactive')) return 'state-dead';
-  return 'state-monitor';
-}
-
-function getResolvedStateVisualClass(options = {}){
-  const structuralState = String(options.structuralState || options.primaryState || '').toLowerCase();
-  const actionStateKey = String(options.actionStateKey || '').toLowerCase();
-  const lifecycleState = String(options.lifecycleState || '').toLowerCase();
-  const tradeability = normalizeAnalysisVerdict(options.tradeability || options.finalVerdict || '');
-
-  if(['dead','expired','inactive'].includes(lifecycleState) || structuralState === 'dead' || actionStateKey === 'rebuild_setup'){
-    return 'state-dead';
-  }
-  if(actionStateKey === 'recalculate_plan'){
-    return 'state-recalculate';
-  }
-  if(actionStateKey === 'ready_to_act' || structuralState === 'entry' || tradeability === 'Entry'){
-    return 'state-ready';
-  }
-  if(structuralState === 'near_entry' || tradeability === 'Near Entry'){
-    return 'state-monitor';
-  }
-  if(['developing','monitor'].includes(structuralState) || tradeability === 'Watch'){
-    return 'state-developing';
-  }
-  return 'state-monitor';
-}
-
 function resolveVisualState(setup = {}){
   const state = String(setup.state || '').toLowerCase();
   const tradeability = normalizeAnalysisVerdict(setup.tradeability || '');
