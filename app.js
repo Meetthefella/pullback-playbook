@@ -8817,7 +8817,7 @@ function actionPriority(stage){
 
 function deriveActionStateForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
-  const verdict = displayStageForRecord(item);
+  const verdict = resolverSeedVerdictForRecord(item);
   const displayedPlan = deriveCurrentPlanState(
     item.plan && item.plan.entry,
     item.plan && item.plan.stop,
@@ -10051,7 +10051,7 @@ function queueAutoAnalysisForTicker(ticker){
 }
 
 function buildTickerPromptFromRecord(record){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const projected = item.scan.analysisProjection || {};
   const manualReview = item.review.manualReview || {};
   const checks = (manualReview && manualReview.checks) || (item.scan.flags && item.scan.flags.checks) || {};
