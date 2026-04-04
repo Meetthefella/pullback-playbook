@@ -12185,6 +12185,7 @@ function bindReviewWorkspaceActions(record){
 function renderReviewWorkspace(options = {}){
   const box = $('reviewWorkspace');
   if(!box) return;
+  box.className = 'list reviewworkspace-shell';
   box.innerHTML = '';
   const ticker = activeReviewTicker();
   if(!ticker){
@@ -12416,6 +12417,7 @@ function renderReviewWorkspace(options = {}){
     actionStateKey:resolvedContract && resolvedContract.actionStateKey,
     tradeability:resolvedContract && resolvedContract.tradeabilityVerdict
   });
+  box.className = `list reviewworkspace-shell ${reviewVisualStateClass}`;
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate();
   });

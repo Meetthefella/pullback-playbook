@@ -809,19 +809,25 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .result-feed-card .score{font-size:.76rem}
 .result-feed-card .primary{min-width:96px}
 .result-feed-card .resultsummary{gap:4px}
-.reviewworkspace{
-  gap:15px;
-  padding:16px;
+.reviewworkspace-shell{
   border:1px solid var(--state-color, rgba(255,255,255,.06));
+  border-radius:18px;
+  padding:16px;
   background:linear-gradient(
     180deg,
     color-mix(in srgb, var(--state-color, #18202c) 18%, transparent),
     color-mix(in srgb, var(--state-color, #18202c) 6%, transparent)
   );
 }
-.reviewworkspace > *{
+.reviewworkspace-shell > *{
   position:relative;
   z-index:1;
+}
+.reviewworkspace{
+  gap:15px;
+  padding:0;
+  border:0;
+  background:transparent;
 }
 .review-section{
   display:grid;
@@ -844,35 +850,35 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .reviewworkspace.ready{
   box-shadow:none;
 }
-.reviewworkspace.state-dead{
+.reviewworkspace-shell.state-dead{
   box-shadow:0 14px 36px rgba(127,29,29,0.2);
 }
-.reviewworkspace.state-recalculate{
+.reviewworkspace-shell.state-recalculate{
   box-shadow:0 14px 34px rgba(180,83,9,0.16);
 }
-.reviewworkspace.state-developing{
+.reviewworkspace-shell.state-developing{
   box-shadow:0 14px 34px rgba(67,56,202,0.15);
 }
-.reviewworkspace.state-monitor{
+.reviewworkspace-shell.state-monitor{
   box-shadow:0 14px 34px rgba(37,99,235,0.15);
 }
-.reviewworkspace.state-ready{
+.reviewworkspace-shell.state-ready{
   box-shadow:0 14px 34px rgba(22,163,74,0.16);
 }
 @supports not (background:linear-gradient(180deg, color-mix(in srgb, white 18%, transparent), color-mix(in srgb, white 6%, transparent))){
-  .reviewworkspace.state-dead{
+  .reviewworkspace-shell.state-dead{
     background:linear-gradient(180deg, rgba(220,38,38,0.18), rgba(220,38,38,0.05));
   }
-  .reviewworkspace.state-recalculate{
+  .reviewworkspace-shell.state-recalculate{
     background:linear-gradient(180deg, rgba(245,158,11,0.18), rgba(245,158,11,0.05));
   }
-  .reviewworkspace.state-developing{
+  .reviewworkspace-shell.state-developing{
     background:linear-gradient(180deg, rgba(99,102,241,0.18), rgba(99,102,241,0.05));
   }
-  .reviewworkspace.state-monitor{
+  .reviewworkspace-shell.state-monitor{
     background:linear-gradient(180deg, rgba(59,130,246,0.18), rgba(59,130,246,0.05));
   }
-  .reviewworkspace.state-ready{
+  .reviewworkspace-shell.state-ready{
     background:linear-gradient(180deg, rgba(34,197,94,0.18), rgba(34,197,94,0.05));
   }
 }
