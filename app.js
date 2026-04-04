@@ -3236,7 +3236,7 @@ function watchlistLifecycleSnapshot(record){
     deadCheck,
     emojiPresentation
   });
-  const primaryState = String(resolved.primaryState || emojiPresentation.primaryState || 'monitor').toLowerCase();
+  const primaryState = String(resolved.structuralState || resolved.primaryState || emojiPresentation.primaryState || 'monitor').toLowerCase();
   const planUiState = getPlanUiState(item, {displayedPlan});
   const actionState = deriveActionStateForRecord(item).stage;
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
@@ -3271,16 +3271,11 @@ function watchlistLifecycleSnapshot(record){
     status = 'inactive';
     nextExpiryAt = '';
     reason = resolved.blockerReason || 'Setup failed technically and is no longer actionable.';
-  }else if(primaryState === 'inactive'){
-    state = 'inactive';
-    bucket = 'inactive';
-    stage = 'avoided';
-    status = 'inactive';
-    nextExpiryAt = '';
-    reason = resolved.reasonSummary || resolved.blockerReason || 'Invalid plan - needs re-entry setup.';
   }else if(nonActionableButAlive){
     state = primaryState === 'developing' ? 'developing' : 'monitor';
-    bucket = ['confirmed','early','attempt'].includes(bounceState) ? 'developing' : 'waiting_confirmation';
+    bucket = resolved.actionStateKey === 'recalculate_plan'
+      ? 'developing'
+      : (['confirmed','early','attempt'].includes(bounceState) ? 'developing' : 'waiting_confirmation');
     stage = 'watchlist';
     status = 'active';
     nextExpiryAt = activeExpiryAt;
@@ -3293,7 +3288,7 @@ function watchlistLifecycleSnapshot(record){
     nextExpiryAt = expiryAt || todayIsoDate();
     expiryReason = 'Watchlist setup expired without meaningful improvement.';
     reason = expiryReason;
-  }else if(primaryState === 'entry' || actionState === 'action_now'){
+  }else if(primaryState === 'entry' || resolved.actionStateKey === 'ready_to_act' || actionState === 'action_now'){
     state = 'entry';
     bucket = 'ready_soon';
     stage = 'planned';
@@ -3678,7 +3673,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const age = countTradingDaysBetween(item.watchlist.addedAt || todayIsoDate(), todayIsoDate());
   const auditTrail = Array.isArray(debug.auditTrail) ? debug.auditTrail : [];
   const warnings = Array.isArray(debug.warnings) ? debug.warnings : [];
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Final display state</strong><div>${escapeHtml(resolved.badgeText || lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(resolved.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(resolved.marketRegimeLabel || 'n/a')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(resolved.planStatusLabel || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(resolved.rrConfidenceLabel || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(resolved.tradeabilityLabel || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || resolved.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || resolved.blockerReason || 'n/a')}</div></div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
+  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Structural state</strong><div>${escapeHtml(resolved.structuralStateLabel || resolved.badgeText || lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Action state</strong><div>${escapeHtml(resolved.actionStateLabel || resolved.actionLabel || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(resolved.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(resolved.marketRegimeLabel || 'n/a')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(resolved.planStatusLabel || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(resolved.rrConfidenceLabel || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || resolved.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || resolved.blockerReason || 'n/a')}</div></div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Final display state</strong><div>${escapeHtml(lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(rrResolution.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(qualityAdjustments.weakRegimePenalty ? 'Weak market' : 'Supportive')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(getPlanUiState(item, {displayedPlan}).label || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(rrResolution.rr_label || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || 'n/a')}</div></div></div>${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
 }
 
@@ -3881,7 +3876,8 @@ function renderWatchlist(){
         primaryState,
         lifecycleState:watchlistState,
         finalDisplayState,
-        planStatusKey:planState
+        planStatusKey:planState,
+        actionStateKey:resolvedContract.actionStateKey
       });
       div.className = `resultcompact watchlist-card ${escapeHtml(visualStateClass)}`.trim();
       div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${escapeHtml(decisionCopy.badgeClass || watchlistBadgeClass)}">${escapeHtml(decisionCopy.badgeText || watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(decisionCopy.headline || shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
@@ -5179,6 +5175,13 @@ function visualCardStateClass(options = {}){
   const lifecycleState = String(options.lifecycleState || '').toLowerCase();
   const finalDisplayState = String(options.finalDisplayState || '').toLowerCase();
   const planStatusKey = String(options.planStatusKey || '').toLowerCase();
+  const actionStateKey = String(options.actionStateKey || '').toLowerCase();
+  if(actionStateKey === 'rebuild_setup') return 'state-needs-rebuild';
+  if(actionStateKey === 'recalculate_plan'){
+    if(primaryState === 'near_entry') return 'state-near-entry';
+    if(primaryState === 'developing') return 'state-developing';
+    return 'state-monitor';
+  }
   const candidates = [lifecycleState, finalDisplayState, planStatusKey, primaryState].filter(Boolean);
   if(candidates.includes('dead') || candidates.includes('expired_dead')) return 'state-dead';
   if(candidates.includes('needs_rebuild') || candidates.includes('rebuild_required')) return 'state-needs-rebuild';
@@ -6622,6 +6625,23 @@ function resolveFinalStateContract(record, options = {}){
   }
   const effectivePlanStatusKey = ['dead','inactive'].includes(primaryState) ? 'rebuild_required' : planUiState.state;
   const effectivePlanStatusLabel = ['dead','inactive'].includes(primaryState) ? 'Rebuild required' : planStatusLabel;
+  const weakeningButAlive = ['weak','weakening','developing_loose'].includes(structureState)
+    || ['none','unconfirmed','attempt','early'].includes(bounceState);
+  const structuralPresentation = (() => {
+    if(hardStructureBroken) return {state:'dead', emoji:'ðŸ’€', label:'Dead', badgeClass:'avoid'};
+    if(finalVerdict === 'Entry') return {state:'entry', emoji:'ðŸš€', label:'Entry', badgeClass:'ready'};
+    if(finalVerdict === 'Near Entry') return {state:'near_entry', emoji:'ðŸŽ¯', label:'Near Entry', badgeClass:'near'};
+    if(setupUiState.state === 'developing' || weakeningButAlive || finalVerdict === 'Avoid'){
+      return {state:'developing', emoji:'ðŸŒ±', label:'Developing', badgeClass:'near'};
+    }
+    return {state:'monitor', emoji:'ðŸ§', label:'Monitor', badgeClass:'watch'};
+  })();
+  primaryState = structuralPresentation.state;
+  primaryEmoji = structuralPresentation.emoji;
+  primaryLabel = structuralPresentation.label;
+  badgeClass = structuralPresentation.badgeClass;
+  const contractPlanStatusKey = primaryState === 'dead' ? 'rebuild_required' : planUiState.state;
+  const contractPlanStatusLabel = primaryState === 'dead' ? 'Rebuild required' : planStatusLabel;
 
   const reasonParts = [];
   const addReason = value => {
@@ -6630,29 +6650,33 @@ function resolveFinalStateContract(record, options = {}){
   };
   let blockerCode = '';
   let blockerReason = '';
-  let actionLabel = 'Monitor for confirmation';
-  let actionShortLabel = 'Monitor for confirmation';
+  let actionStateKey = 'hold_confirmation';
+  let actionLabel = 'Hold for confirmation';
+  let actionShortLabel = 'Hold for confirmation';
   let actionTone = 'watch';
   let nextPossibleState = primaryState === 'entry' ? '🚀 Entry' : '🧰 Rebuild';
   let remapReason = rrResolution.remapReason || '';
 
   if(hardStructureBroken){
+    actionStateKey = 'rebuild_setup';
     blockerCode = deadCheck.reasonCode || (trendState === 'broken' ? 'broken_trend' : 'broken_structure');
     blockerReason = structureState === 'broken' ? 'Structure is broken' : 'Trend is invalidated';
-    actionLabel = 'Structure damaged - wait for rebuild';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Rebuild setup';
+    actionShortLabel = 'Rebuild setup';
     actionTone = 'danger';
     nextPossibleState = 'None';
     addReason(blockerReason);
   }else if(item.plan && item.plan.invalidatedState){
+    actionStateKey = 'rebuild_setup';
     blockerCode = 'setup_invalidated';
     blockerReason = 'Setup invalidated';
-    actionLabel = 'Setup invalidated - avoid until rebuilt';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Rebuild setup';
+    actionShortLabel = 'Rebuild setup';
     actionTone = 'danger';
     nextPossibleState = 'None';
     addReason(blockerReason);
   }else if(item.plan && item.plan.missedState){
+    actionStateKey = 'hold_confirmation';
     blockerCode = 'missed_setup';
     blockerReason = 'Missed entry window';
     actionLabel = 'Missed move - wait for a new setup';
@@ -6661,99 +6685,121 @@ function resolveFinalStateContract(record, options = {}){
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
   }else if(planInvalid){
+    actionStateKey = 'recalculate_plan';
     blockerCode = 'plan_invalid';
     blockerReason = 'Invalid plan';
-    actionLabel = 'Invalid plan - needs re-entry setup';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Recalculate plan from current structure';
+    actionShortLabel = 'Recalculate plan';
     actionTone = 'warning';
     nextPossibleState = invalidAvoidGuard ? '🧰 Rebuild' : '🧐 Monitor';
     addReason(blockerReason);
   }else if(planMissing){
+    actionStateKey = 'recalculate_plan';
     blockerCode = 'plan_missing';
     blockerReason = 'Plan not defined';
-    actionLabel = 'Build a trade plan before considering entry';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Recalculate plan from current structure';
+    actionShortLabel = 'Recalculate plan';
     actionTone = 'warning';
     nextPossibleState = invalidAvoidGuard ? '🧰 Rebuild' : '🧐 Monitor';
     addReason(blockerReason);
   }else if(riskTooWide){
+    actionStateKey = 'recalculate_plan';
     blockerCode = 'risk_too_wide';
     blockerReason = 'Risk too wide for account size';
-    actionLabel = 'Risk too wide for account size';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Recalculate plan from current structure';
+    actionShortLabel = 'Recalculate plan';
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
   }else if(capitalBlocked){
+    actionStateKey = 'recalculate_plan';
     blockerCode = 'capital_blocked';
     blockerReason = 'Capital fit is too weak for this plan';
-    actionLabel = 'Capital fit is too weak for this setup';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Recalculate plan from current structure';
+    actionShortLabel = 'Recalculate plan';
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
   }else if(planUnrealistic){
+    actionStateKey = 'recalculate_plan';
     blockerCode = 'rr_unrealistic';
     blockerReason = 'Target is too optimistic for current structure';
-    actionLabel = 'Adjust target before considering entry';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Recalculate plan from current structure';
+    actionShortLabel = 'Recalculate plan';
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
   }else if(planNeedsAdjustment){
+    actionStateKey = 'recalculate_plan';
     blockerCode = 'plan_adjustment';
     blockerReason = 'Plan needs adjustment';
-    actionLabel = 'Adjust plan before considering entry';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Recalculate plan from current structure';
+    actionShortLabel = 'Recalculate plan';
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
   }else if(bounceUnconfirmed){
+    actionStateKey = 'hold_confirmation';
     blockerCode = 'bounce_not_confirmed';
     blockerReason = 'Bounce not confirmed';
-    actionLabel = 'Wait for bounce confirmation';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Hold for confirmation';
+    actionShortLabel = 'Hold for confirmation';
     actionTone = 'warning';
     nextPossibleState = '🎯 Near Entry';
     addReason(blockerReason);
   }else if(weakVolume){
+    actionStateKey = 'hold_confirmation';
     blockerCode = 'weak_volume';
     blockerReason = 'Weak volume';
-    actionLabel = 'Monitor for stronger volume';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Hold for confirmation';
+    actionShortLabel = 'Hold for confirmation';
     actionTone = 'warning-soft';
     nextPossibleState = '🎯 Near Entry';
     addReason(blockerReason);
   }else if(marketWeak){
+    actionStateKey = 'hold_confirmation';
     blockerCode = 'weak_market';
     blockerReason = 'Weak market';
-    actionLabel = 'Wait for better conditions';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Hold for confirmation';
+    actionShortLabel = 'Hold for confirmation';
     actionTone = 'warning';
     nextPossibleState = '🎯 Near Entry';
     addReason(blockerReason);
   }else if(lowControl){
+    actionStateKey = 'hold_confirmation';
     blockerCode = 'weak_control';
     blockerReason = 'Weak control';
-    actionLabel = 'Wait for tighter structure';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Hold for confirmation';
+    actionShortLabel = 'Hold for confirmation';
     actionTone = 'warning-soft';
     nextPossibleState = '🎯 Near Entry';
     addReason(blockerReason);
   }else if(finalVerdict === 'Entry'){
+    actionStateKey = 'ready_to_act';
     blockerCode = 'ready';
     blockerReason = 'Trigger conditions are met';
-    actionLabel = 'Execute trade plan';
-    actionShortLabel = actionLabel;
+    actionLabel = 'Ready to act';
+    actionShortLabel = 'Ready to act';
     actionTone = 'success';
     nextPossibleState = '🚀 Entry';
   }else if(finalVerdict === 'Near Entry'){
+    actionStateKey = 'hold_confirmation';
     blockerCode = 'near_trigger';
     blockerReason = 'Close to trigger';
-    actionLabel = 'Prepare entry - near trigger';
-    actionShortLabel = 'Prepare entry';
+    actionLabel = 'Hold for confirmation';
+    actionShortLabel = 'Hold for confirmation';
     actionTone = 'warning';
     nextPossibleState = '🚀 Entry';
+  }
+
+  if(actionStateKey === 'rebuild_setup'){
+    nextPossibleState = 'None';
+  }else if(actionStateKey === 'recalculate_plan'){
+    nextPossibleState = 'ðŸ§° Recalculate plan';
+  }else if(actionStateKey === 'ready_to_act'){
+    nextPossibleState = 'ðŸš€ Entry';
+  }else if(actionStateKey === 'hold_confirmation' && blockerCode !== 'missed_setup'){
+    nextPossibleState = 'ðŸŽ¯ Near Entry';
   }
 
   if(['weak','weakening'].includes(structureState) && !hardStructureBroken) addReason('Weak structure');
@@ -6766,12 +6812,9 @@ function resolveFinalStateContract(record, options = {}){
 
   const reasonSummary = reasonParts.slice(0, 2).join(' + ');
   const nonActionableButAlive = !hardStructureBroken
-    && !invalidAvoidGuard
-    && ['plan_invalid','plan_missing','risk_too_wide','capital_blocked','rr_unrealistic','plan_adjustment','bounce_not_confirmed','weak_volume','weak_market','weak_control'].includes(blockerCode);
+    && ['recalculate_plan','hold_confirmation'].includes(actionStateKey);
 
-  if(invalidAvoidGuard || primaryState === 'inactive'){
-    remapReason = '';
-  }else if(!remapReason && rrResolution.rawResolverVerdict === 'Avoid' && ['developing','monitor'].includes(primaryState)){
+  if(!remapReason && rrResolution.rawResolverVerdict === 'Avoid' && ['developing','monitor'].includes(primaryState)){
     remapReason = hardStructureBroken ? '' : 'weak but still technically alive';
   }
 
@@ -6780,15 +6823,21 @@ function resolveFinalStateContract(record, options = {}){
     rawResolverVerdict:rrResolution.rawResolverVerdict || rrResolution.status || finalVerdict,
     finalDisplayState:primaryLabel,
     primaryState,
+    structuralState:primaryState,
+    structuralStateLabel:primaryLabel,
     badgeText:`${primaryEmoji} ${primaryLabel}`,
     badgeClass,
     modifiers:baseEmoji.modifiers || [],
     marketRegimeLabel:marketWeak ? 'Weak market' : 'Supportive',
     marketRegimeWeak:marketWeak,
-    planStatusLabel:effectivePlanStatusLabel,
-    planStatusKey:effectivePlanStatusKey,
+    planStatusLabel:contractPlanStatusLabel,
+    planStatusKey:contractPlanStatusKey,
     rrConfidenceLabel,
-    tradeabilityLabel:primaryState === 'inactive' ? 'Avoid' : (finalVerdict || 'Watch'),
+    tradeabilityLabel:finalVerdict || 'Watch',
+    tradeabilityVerdict:finalVerdict || 'Watch',
+    tradeabilityVerdictLabel:finalVerdict || 'Watch',
+    actionStateKey,
+    actionStateLabel:actionLabel,
     actionLabel,
     actionShortLabel,
     actionTone,
@@ -6798,7 +6847,7 @@ function resolveFinalStateContract(record, options = {}){
     reasonSummary,
     nextPossibleState,
     remapReason,
-    terminal:hardStructureBroken,
+    terminal:primaryState === 'dead',
     nonActionableButAlive
   };
 }
@@ -7646,28 +7695,23 @@ function renderRecomputeDiagnostics(debug, options = {}){
 }
 
 function watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reasoning, fallbackAction){
-  const lifecycleState = String(lifecycleSnapshot && lifecycleSnapshot.state || '').toLowerCase();
-  const planStatusKey = String(resolvedContract && resolvedContract.planStatusKey || '').toLowerCase();
   const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').trim();
   const reasonSummary = String(resolvedContract && resolvedContract.reasonSummary || '').trim();
-  const reasoningDetail = String(reasoning && reasoning.detail || '').trim();
-  const combinedReasonText = [blockerReason, reasonSummary, reasoningDetail].filter(Boolean).join(' | ').toLowerCase();
-  const structureBroken = /broken|damaged|invalidated|weak structure|rebuild|expired/.test(combinedReasonText);
-  const planInvalidOnly = /invalid plan|unrealistic|recalculate|rebuild required|plan missing|missing plan/.test(combinedReasonText)
-    || ['invalid','missing','rebuild_required','obsolete'].includes(planStatusKey);
-  const rebuildState = ['dead','expired'].includes(lifecycleState) || !!(resolvedContract && resolvedContract.terminal) || structureBroken;
-  const recalculateState = !rebuildState && (lifecycleState === 'inactive' || planInvalidOnly);
 
   let badgeText = String(resolvedContract && resolvedContract.badgeText || '').trim() || 'Watch';
   let badgeClass = String(resolvedContract && resolvedContract.badgeClass || '').trim() || 'watch';
-  let headline = String(fallbackAction || '').trim() || 'Hold for confirmation';
-  let reason = reasonSummary || watchlistReasonSummary(reasoning, headline) || blockerReason;
+  let headline = String(resolvedContract && (resolvedContract.actionStateLabel || resolvedContract.actionLabel) || fallbackAction || '').trim() || 'Hold for confirmation';
+  const conciseReason = reasonSummary || watchlistReasonSummary(reasoning, headline) || blockerReason;
+  const tradeability = String(resolvedContract && (resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel) || 'Watch').trim();
+  let reason = conciseReason ? `Tradeability: ${tradeability} | ${conciseReason}` : `Tradeability: ${tradeability}`;
+  const rebuildState = false;
+  const recalculateState = false;
 
-  if(lifecycleState === 'expired'){
+  if(String(lifecycleSnapshot && lifecycleSnapshot.state || '').toLowerCase() === 'expired'){
     badgeText = 'Expired';
     badgeClass = 'avoid';
-    headline = 'Rebuild setup before reconsidering entry';
-    reason = reason || 'Watchlist window expired without a usable improvement.';
+    headline = 'Rebuild setup';
+    reason = 'Tradeability: Avoid | Watchlist window expired without a usable improvement';
   }else if(rebuildState){
     badgeText = '💀 Rebuild setup';
     badgeClass = 'avoid';
@@ -12036,7 +12080,7 @@ function renderReviewWorkspace(options = {}){
     qualityAdjustments,
     warningState
   });
-  const nextActionText = resolvedContract.actionLabel;
+  const nextActionText = resolvedContract.actionStateLabel || resolvedContract.actionLabel;
   const reviewReasonText = resolvedContract.reasonSummary || reviewReasonSummary(decisionReasoning, nextActionText);
   if(displayStage === 'Watch' && /ignore/i.test(nextActionText)){
     console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:nextActionText});
@@ -12077,7 +12121,7 @@ function renderReviewWorkspace(options = {}){
   const chartGuidance = record.review.chartRef && record.review.chartRef.dataUrl
     ? ''
     : '<div class="summary" style="margin-bottom:12px"><strong>📸 Add screenshot for analysis</strong><div class="tiny" style="margin-top:6px">Open the live chart, capture a fresh screenshot, then import it to continue review.</div></div>';
-  const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">scanner_status: ${escapeHtml(scannerStatus || '(none)')}\nreview_status: ${escapeHtml(displayStage || '(none)')}\nfinal_display_state: ${escapeHtml(resolvedContract.finalDisplayState || '(none)')}\nmarket_regime: ${escapeHtml(resolvedContract.marketRegimeLabel || '(none)')}\nplan_status: ${escapeHtml(resolvedContract.planStatusLabel || '(none)')}\nrr_confidence: ${escapeHtml(resolvedContract.rrConfidenceLabel || '(none)')}\nmain_blocker: ${escapeHtml(resolvedContract.blockerReason || '(none)')}\naiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
+  const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">scanner_status: ${escapeHtml(scannerStatus || '(none)')}\nreview_status: ${escapeHtml(displayStage || '(none)')}\nstructural_state: ${escapeHtml(resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)')}\naction_state: ${escapeHtml(resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)')}\ntradeability_verdict: ${escapeHtml(resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)')}\nmarket_regime: ${escapeHtml(resolvedContract.marketRegimeLabel || '(none)')}\nplan_status: ${escapeHtml(resolvedContract.planStatusLabel || '(none)')}\nrr_confidence: ${escapeHtml(resolvedContract.rrConfidenceLabel || '(none)')}\nmain_blocker: ${escapeHtml(resolvedContract.blockerReason || '(none)')}\nraw_resolver_verdict: ${escapeHtml(resolvedContract.rawResolverVerdict || '(none)')}\nremap_reason: ${escapeHtml(resolvedContract.remapReason || '(none)')}\naiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
@@ -12092,7 +12136,7 @@ function renderReviewWorkspace(options = {}){
     : '';
   const marketMetaLine = headerContextChip ? '' : `<div class="tiny">${escapeHtml(marketLine)}</div>`;
   const snapshotWarningsMarkup = [modifierMarkup, headerContextMarkup].filter(Boolean).join('');
-  const snapshotVerdictLine = reviewReasonText || nextActionText || 'No verdict yet.';
+  const snapshotVerdictLine = `Tradeability: ${resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || 'Watch'}${reviewReasonText ? ` | ${reviewReasonText}` : ''}`;
   const analysisResponseOpen = (((uiState.responseOpen[record.ticker] ?? false) || !!analysisState.error)) ? 'open' : '';
   const promptPreviewOpen = (uiState.promptOpen[record.ticker] ?? false) ? 'open' : '';
   const capitalFitLabel = capitalComfort.label || 'Unknown';
