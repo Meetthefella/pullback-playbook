@@ -13489,7 +13489,7 @@ function primaryVerdictBadge(verdict){
 }
 
 function resolverSeedVerdictForRecord(record){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   return normalizeAnalysisVerdict(
     (item.review && item.review.savedVerdict)
     || (item.scan && item.scan.verdict)
