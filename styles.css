@@ -822,12 +822,13 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   margin-top:4px;
   font-size:.74rem;
   line-height:1.3;
-  color:var(--text-muted);
+  color:var(--text-primary);
+  opacity:.82;
 }
 .reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit .big{
-  font-size:1.42rem;
+  font-size:1.58rem;
   font-weight:900;
-  letter-spacing:-.03em;
+  letter-spacing:-.04em;
   text-transform:uppercase;
 }
 .reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--comfortable .big{
