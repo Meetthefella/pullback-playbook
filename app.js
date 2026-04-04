@@ -7891,6 +7891,8 @@ function watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reas
   const reasonSummary = String(resolvedContract && resolvedContract.reasonSummary || '').trim();
 
   const actionStateKey = String(resolvedContract && resolvedContract.actionStateKey || '').trim().toLowerCase();
+  const rebuildState = actionStateKey === 'rebuild_setup';
+  const recalculateState = actionStateKey === 'recalculate_plan';
   let badgeText = String(resolvedContract && (resolvedContract.actionStateLabel || resolvedContract.actionLabel) || '').trim() || 'Hold for confirmation';
   let badgeClass = actionStateKey === 'rebuild_setup'
     ? 'avoid'
