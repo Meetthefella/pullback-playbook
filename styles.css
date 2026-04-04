@@ -679,19 +679,21 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .resultidentity,.resultsummary,.resultmeta,.reviewheadline,.contextstrip,.reviewhero{display:grid;gap:6px;min-width:0}
 .resultsummary{align-content:start}
+.resultprimaryaction{
+  font-size:.76rem;
+  line-height:1.1;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--text-primary);
+}
 .resultreason,.watchlist-card__action,.review-next-action-primary{font-weight:700;color:var(--text-primary)}
-.resultreason{font-size:.92rem;line-height:1.35}
+.resultreason{font-size:.9rem;line-height:1.35}
 .watchlist-card__action,.review-next-action-primary{color:var(--text-primary)}
 .resultsubreason{
   font-size:.82rem;
   line-height:1.35;
   color:var(--text-secondary);
-}
-.resultdecisionline{
-  font-size:.8rem;
-  line-height:1.35;
-  color:var(--text-primary);
-  font-weight:700;
 }
 .resultconfidence{
   font-size:.76rem;
@@ -732,6 +734,24 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   gap:15px;
   padding:16px;
   background:rgba(20,28,38,.9);
+}
+.review-section{
+  display:grid;
+  gap:12px;
+}
+.review-section--snapshot{
+  gap:14px;
+}
+.review-warning-row{
+  gap:8px;
+  flex-wrap:wrap;
+}
+.reviewchartpanel--compact{
+  display:grid;
+  gap:12px;
+}
+.review-hidden{
+  display:none !important;
 }
 .reviewworkspace.ready{
   background:rgba(20,28,38,.92);
@@ -786,6 +806,24 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   background:transparent;
   box-shadow:none;
 }
+.reviewworkspace .reviewstats.reviewstats--compact{
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px 14px;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat{
+  padding:0;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat .big{
+  font-size:1.08rem;
+  font-weight:800;
+  color:var(--text-primary);
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--primary .big,
+.reviewworkspace .reviewstats.reviewstats--compact #rrValue{
+  font-size:1.58rem;
+  font-weight:900;
+  letter-spacing:-.04em;
+}
 .reviewstats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .reviewmeta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .plan-grid{display:grid;gap:10px}
@@ -796,6 +834,9 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   font-weight:900;
   color:var(--text-primary);
   letter-spacing:-.04em;
+}
+.reviewsectionhead + textarea#reviewNotes{
+  margin-top:-2px;
 }
 .reviewworkspace .reviewstats .stat:nth-child(n+4) .big{
   font-size:1rem;
