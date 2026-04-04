@@ -591,6 +591,31 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   background:rgba(20, 28, 38, 0.88);
   overflow:hidden;
 }
+.result-feed-card.scan-card.score-strong{
+  background:linear-gradient(180deg, rgba(16,185,129,0.25), rgba(16,185,129,0.05));
+  border-color:rgba(16,185,129,0.5);
+  backdrop-filter:blur(6px);
+}
+.result-feed-card.scan-card.score-good{
+  background:linear-gradient(180deg, rgba(59,130,246,0.22), rgba(59,130,246,0.05));
+  border-color:rgba(59,130,246,0.4);
+  backdrop-filter:blur(6px);
+}
+.result-feed-card.scan-card.score-developing{
+  background:linear-gradient(180deg, rgba(99,102,241,0.18), rgba(99,102,241,0.04));
+  border-color:rgba(99,102,241,0.3);
+  backdrop-filter:blur(6px);
+}
+.result-feed-card.scan-card.score-weak{
+  background:linear-gradient(180deg, rgba(239,68,68,0.18), rgba(239,68,68,0.05));
+  border-color:rgba(239,68,68,0.35);
+  backdrop-filter:blur(6px);
+}
+.result-feed-card.scan-card.score-broken{
+  background:linear-gradient(180deg, rgba(220,38,38,0.28), rgba(220,38,38,0.08));
+  border-color:rgba(220,38,38,0.6);
+  backdrop-filter:blur(6px);
+}
 .result-feed-card::after,
 .watchlist-card::after{
   content:"";
