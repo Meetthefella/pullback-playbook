@@ -4605,6 +4605,9 @@ function getFinalBucketFromView(view){
   const item = view.item;
   const rrValue = numericOrNull(view.rrValue);
   const targetReviewLabel = view.planUiState.state === 'valid' ? targetReviewQueueLabel(item.plan.targetReviewState) : '';
+  const derivedStates = view && view.setupStates ? view.setupStates : analysisDerivedStatesFromRecord(item);
+  const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
+  const structurallyAlive = !['broken'].includes(structureState) && view.setupUiState.state !== 'broken';
   if(item.lifecycle.stage === 'expired') return 'filtered';
   if(view.setupUiState.state === 'broken') return 'filtered';
   if(view.setupUiState.state === 'entry'){
@@ -4616,8 +4619,11 @@ function getFinalBucketFromView(view){
     return 'tradeable_secondary';
   }
   if(view.setupUiState.state === 'developing') return 'tradeable_secondary';
-  if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'filtered';
-  if(view.planUiState.state === 'unrealistic_rr') return 'filtered';
+  if(structurallyAlive && ['needs_adjustment','pending_validation','invalid','unrealistic_rr'].includes(String(view.planUiState.state || '').toLowerCase())){
+    return 'tradeable_secondary';
+  }
+  if(Number.isFinite(rrValue) && rrValue < currentRrThreshold() && !structurallyAlive) return 'filtered';
+  if(view.planUiState.state === 'unrealistic_rr' && !structurallyAlive) return 'filtered';
   return 'tradeable_secondary';
 }
 
@@ -4690,6 +4696,12 @@ function resolveScannerStateWithTrace(record, options = {}){
   const positionSize = numericOrNull(baseView.positionSize);
   const rrValue = numericOrNull(baseView.rrValue);
   const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const pullbackZone = String(derivedStates.pullbackZone || '').toLowerCase();
+  const structurallyAlive = !['broken'].includes(structureState) && finalSetupState !== 'broken';
+  const aliveDevelopingCandidate = structurallyAlive
+    && ['developing','watch'].includes(String(baseView.setupUiState.state || '').toLowerCase())
+    && ['intact','strong','weakening','developing','developing_clean','developing_loose'].includes(structureState)
+    && ['near_20ma','near_50ma','at_20ma','at_50ma'].includes(pullbackZone);
   const emojiPresentation = resolveEmojiPresentation(item, {
     context:'scanner',
     finalVerdict:baseView.displayStage,
@@ -4798,15 +4810,22 @@ function resolveScannerStateWithTrace(record, options = {}){
   const finalPrimaryState = String(emojiPresentation.primaryState || '').toLowerCase();
   const invalidAvoidGuard = planValidation === 'invalid' && status === 'Avoid';
   const finalDisplayState = String(emojiPresentation.primaryLabel || 'Monitor');
-  const finalDisplayBucket = ['dead','inactive'].includes(finalPrimaryState)
+  const falseDeadGuard = aliveDevelopingCandidate
+    && ['needs_adjustment','pending_validation','invalid'].includes(planValidation)
+    && ['developing','watch','avoid'].includes(String(baseView.displayStage || '').toLowerCase());
+  const finalDisplayBucket = (['dead','inactive'].includes(finalPrimaryState) && !falseDeadGuard)
     ? 'filtered'
-    : (['developing','monitor'].includes(finalPrimaryState) ? 'early' : bucket);
+    : (['developing','monitor'].includes(finalPrimaryState) || falseDeadGuard ? 'early' : bucket);
   const remapReason = !invalidAvoidGuard && status === 'Avoid' && ['developing','monitor'].includes(finalPrimaryState)
     ? 'weak but still technically alive'
     : '';
+  const guardedDisplayState = falseDeadGuard && ['dead','inactive'].includes(finalPrimaryState)
+    ? 'Developing'
+    : finalDisplayState;
 
   addStep('raw resolver verdict', status);
-  addStep('final display state', finalDisplayState);
+  if(falseDeadGuard) addStep('alive setup guard', 'blocked false Dead/filtered classification');
+  addStep('final display state', guardedDisplayState);
   if(remapReason) addStep('remap reason', remapReason);
   addStep('resulting bucket', finalDisplayBucket);
 
@@ -4835,7 +4854,7 @@ function resolveScannerStateWithTrace(record, options = {}){
     hasPlanAdjustmentBlock,
     setupState:finalSetupState,
     rawResolverVerdict:status,
-    finalDisplayState,
+    finalDisplayState:guardedDisplayState,
     remapReason
   };
 }
@@ -4854,16 +4873,22 @@ function getFinalClassification(view){
     ? view.scannerResolution
     : resolveScannerStateWithTrace(view && view.item ? view.item : view, {baseView:view});
   const item = view && view.item ? view.item : view;
+  const derivedStates = view && view.setupStates ? view.setupStates : analysisDerivedStatesFromRecord(item);
   const presentation = resolveEmojiPresentation(item, {
     context:'scanner',
     finalVerdict:view && (view.displayStage || view.finalVerdict),
     setupUiState:view && view.setupUiState,
     displayedPlan:view && view.displayedPlan,
-    derivedStates:view && view.setupStates,
+    derivedStates,
     warningState:view && view.warningState
   });
   const primaryState = String(presentation.primaryState || '').toLowerCase();
-  if(primaryState === 'dead' || primaryState === 'inactive') return 'filtered';
+  const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
+  const structurallyAlive = !['broken'].includes(structureState) && String(view && view.setupUiState && view.setupUiState.state || '').toLowerCase() !== 'broken';
+  if((primaryState === 'dead' || primaryState === 'inactive') && !structurallyAlive) return 'filtered';
+  if(structurallyAlive && ['needs_adjustment','pending_validation','invalid','unrealistic_rr'].includes(String(view && view.planUiState && view.planUiState.state || '').toLowerCase())){
+    return 'early';
+  }
   if(primaryState === 'entry' || primaryState === 'near_entry') return 'tradeable';
   if(primaryState === 'monitor' || primaryState === 'developing') return 'early';
   return resolved.bucket;
