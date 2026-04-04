@@ -13508,7 +13508,7 @@ function resolverSeedVerdictForRecord(record){
 }
 
 function resolveFinalStateContract(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || resolverSeedVerdictForRecord(item));
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
@@ -13742,7 +13742,7 @@ function resolveFinalStateContract(record, options = {}){
 }
 
 function resolveEmojiPresentation(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = record && typeof record === 'object' ? record : {};
   const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || resolverSeedVerdictForRecord(item));
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
