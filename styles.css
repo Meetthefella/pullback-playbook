@@ -822,13 +822,17 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   margin-top:4px;
   font-size:.74rem;
   line-height:1.3;
-  color:var(--text-primary);
-  opacity:.82;
+  color:#ffffff;
+  opacity:.85;
 }
-.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit .big{
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit .big,
+.reviewworkspace .reviewstats.reviewstats--compact #rrValue{
   font-size:1.58rem;
   font-weight:900;
   letter-spacing:-.04em;
+  line-height:1;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit .big{
   text-transform:uppercase;
 }
 .reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--comfortable .big{
@@ -849,11 +853,11 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--unknown .big{
   color:var(--text-secondary);
 }
-.reviewworkspace .reviewstats.reviewstats--compact .stat--primary .big,
-.reviewworkspace .reviewstats.reviewstats--compact #rrValue{
+.reviewworkspace .reviewstats.reviewstats--compact .stat--primary .big{
   font-size:1.58rem;
   font-weight:900;
   letter-spacing:-.04em;
+  line-height:1;
 }
 .reviewstats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .reviewmeta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}

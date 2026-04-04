@@ -11941,7 +11941,7 @@ function renderReviewWorkspace(options = {}){
         <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(rrDisplayClass(planRealism.raw_rr))}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
         <div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
         <div class="stat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(positionCostText)}</div></div>
-        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div class="review-hidden">Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(`${capitalFitVisual.icon} ${capitalFitVisual.text}`)}</div><div class="statnote" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div></div>
+        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div class="review-hidden">Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitVisual.text)}</div><div class="statnote" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div></div>
         <div class="stat review-hidden"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
         <div class="stat review-hidden"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div>
         <div class="stat review-hidden"><div>Max Loss</div><div class="big">${escapeHtml(formatGbp(currentMaxLoss()))}</div></div>
@@ -12395,7 +12395,7 @@ function calculate(options = {}){
   if($('capitalFitMetric')){
     $('capitalFitMetric').className = `stat stat--capital-fit ${capitalFitVisual.className}`.trim();
   }
-  if($('capitalFitBox')) $('capitalFitBox').textContent = `${capitalFitVisual.icon} ${capitalFitVisual.text}`;
+  if($('capitalFitBox')) $('capitalFitBox').textContent = capitalFitVisual.text;
   if($('fxBasisBox')) $('fxBasisBox').textContent = capitalComfort.note || 'No FX conversion note.';
   if($('capitalCheckBox')) $('capitalCheckBox').textContent = capitalComfort.note || 'Clear';
   if($('positionCostBox')){
