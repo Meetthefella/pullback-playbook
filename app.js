@@ -13634,6 +13634,38 @@ click('refreshLifecycleBtn', refreshSelectedTickerLifecycle);
 click('expireLifecycleBtn', expireSelectedTickerLifecycle);
 click('reactivateLifecycleBtn', reactivateSelectedTickerLifecycle);
 click('calcBtn', calculate);
+on('results', 'click', event => {
+  if(event.defaultPrevented) return;
+  if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]') || event.target.closest('.scan-card-secondary-panel') || event.target.closest('.no-card-click') || event.target.closest('summary')) return;
+  const card = event.target.closest('.scan-card');
+  if(!card) return;
+  const ticker = normalizeTicker(card.getAttribute('data-ticker') || '');
+  if(!ticker) return;
+  const sourceVerdict = card.getAttribute('data-source-verdict') || '';
+  if(currentScanCardSecondaryUi(ticker)){
+    clearScanCardSecondaryUi();
+    renderScannerResults();
+    return;
+  }
+  openRankedResultInReview(ticker, {sourceVerdict});
+});
+on('results', 'keydown', event => {
+  if(event.defaultPrevented) return;
+  if(event.key !== 'Enter' && event.key !== ' ') return;
+  if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]') || event.target.closest('.scan-card-secondary-panel') || event.target.closest('.no-card-click') || event.target.closest('summary')) return;
+  const card = event.target.closest('.scan-card');
+  if(!card) return;
+  const ticker = normalizeTicker(card.getAttribute('data-ticker') || '');
+  if(!ticker) return;
+  const sourceVerdict = card.getAttribute('data-source-verdict') || '';
+  event.preventDefault();
+  if(currentScanCardSecondaryUi(ticker)){
+    clearScanCardSecondaryUi();
+    renderScannerResults();
+    return;
+  }
+  openRankedResultInReview(ticker, {sourceVerdict});
+});
 document.addEventListener('click', event => {
   if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]') || event.target.closest('.scan-card-secondary-panel')) return;
   if(event.target.closest('.scan-card')) return;
