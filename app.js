@@ -12126,14 +12126,35 @@ function renderScannerResults(){
             renderScannerResults();
           };
         }
-        node.onclick = event => {
-          if(event.target.closest('.no-card-click') || event.target.closest('summary')) return;
+        const activateScannerCard = () => {
           if(currentScanCardSecondaryUi(ticker)){
             clearScanCardSecondaryUi();
             renderScannerResults();
             return;
           }
           openRankedResultInReview(ticker, {sourceVerdict});
+        };
+        const scannerCardActivationBlocked = event => !!(event && (event.target.closest('.no-card-click') || event.target.closest('summary')));
+        let lastPointerActivationAt = 0;
+        node.tabIndex = 0;
+        node.setAttribute('role', 'button');
+        node.onclick = event => {
+          if(scannerCardActivationBlocked(event)) return;
+          if(lastPointerActivationAt && Date.now() - lastPointerActivationAt < 450) return;
+          activateScannerCard();
+        };
+        node.onpointerup = event => {
+          if(scannerCardActivationBlocked(event)) return;
+          if(String(event.pointerType || '').toLowerCase() === 'mouse') return;
+          lastPointerActivationAt = Date.now();
+          event.preventDefault();
+          activateScannerCard();
+        };
+        node.onkeydown = event => {
+          if(event.key !== 'Enter' && event.key !== ' ') return;
+          if(scannerCardActivationBlocked(event)) return;
+          event.preventDefault();
+          activateScannerCard();
         };
         list.appendChild(node);
       });
