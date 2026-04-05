@@ -11852,11 +11852,17 @@ function loadTickerIntoReview(ticker, options = {}){
   delete uiState.selectedScanner[symbol];
   updateTickerInputFromState();
   commitTickerState();
-  renderTickerQuickLists();
-  renderScannerResults();
-  renderCards();
   setScannerCardClickTrace(symbol, 'loadTickerIntoReview.before_loadCard', `activeReviewTicker=${uiState.activeReviewTicker || '(none)'}`);
   loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true});
+  try{
+    renderTickerQuickLists();
+    renderScannerResults();
+    renderCards();
+    setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_render_complete', 'scanner_and_cards_rendered');
+  }catch(error){
+    setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_render_error', error && error.message ? error.message : 'unknown_error');
+    throw error;
+  }
 }
 
 function openRankedResultInReview(ticker, options = {}){
