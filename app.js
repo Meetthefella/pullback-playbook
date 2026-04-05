@@ -5187,6 +5187,26 @@ function buildRankedBucketsFromViews(views){
 
 function rankedDecisionBucketForView(view){
   const item = view && view.item ? view.item : view;
+  const scoreStage = scoreStageForRecord(item);
+  if(scoreStage !== 'preliminary'){
+    const finalVerdict = reviewHeaderVerdictForRecord(item);
+    const resolved = resolveFinalStateContract(item, {
+      context:'review',
+      finalVerdict
+    });
+    const globalVisual = resolveGlobalVisualState(item, 'scanner', {
+      structuralState:resolved && resolved.structuralState,
+      actionStateKey:resolved && resolved.actionStateKey,
+      tradeability:resolved && resolved.tradeabilityVerdict,
+      structure:item && item.setup && item.setup.structureState,
+      bounce:item && item.setup && item.setup.bounceState,
+      setupScore:view && view.setupScore
+    });
+    if(globalVisual.tone === 'green') return 'tradeable_entry';
+    if(globalVisual.tone === 'blue') return 'near_entry';
+    if(globalVisual.tone === 'indigo') return 'monitor_watch';
+    return 'lower_priority';
+  }
   const presentation = resolveEmojiPresentation(item, {
     context:'scanner',
     finalVerdict:view && (view.displayStage || view.finalVerdict),
