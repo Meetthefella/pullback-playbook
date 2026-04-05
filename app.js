@@ -12371,6 +12371,7 @@ function bindReviewWorkspaceActions(record){
   click('saveReviewBtn', saveReview);
   click('addWatchlistActiveBtn', addActiveReviewTickerToWatchlist);
   click('resetReviewBtn', resetReview);
+  click('removeTickerActiveBtn', () => removeTicker(record.ticker));
   click('expireLifecycleBtn', expireSelectedTickerLifecycle);
   document.querySelectorAll('#reviewWorkspace .logic').forEach(el => el.addEventListener('change', refreshReview));
   ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));
@@ -12731,6 +12732,9 @@ function renderReviewWorkspace(options = {}){
         ${reviewDebug}
         <div class="statusline tiny" id="reviewWorkspaceStatus">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div>
       </details>
+      <div class="reviewactions reviewactions-secondary">
+        <button class="danger" id="removeTickerActiveBtn" type="button">Remove Ticker</button>
+      </div>
     </div>
   </div>`;
   bindReviewWorkspaceActions(record);
