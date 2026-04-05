@@ -3700,7 +3700,48 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const age = countTradingDaysBetween(item.watchlist.addedAt || todayIsoDate(), todayIsoDate());
   const auditTrail = Array.isArray(debug.auditTrail) ? debug.auditTrail : [];
   const warnings = Array.isArray(debug.warnings) ? debug.warnings : [];
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Base verdict</strong><div>${escapeHtml(globalVerdict.base_verdict || 'n/a')}</div></div><div><strong>Final verdict</strong><div>${escapeHtml(globalVerdict.final_verdict || 'n/a')}</div></div><div><strong>Downgrade applied</strong><div>${escapeHtml(globalVerdict.downgrade_applied ? 'true' : 'false')}</div></div><div><strong>Setup score</strong><div>${escapeHtml(Number.isFinite(globalVerdict.setup_score) ? String(globalVerdict.setup_score) : 'n/a')}</div></div><div><strong>Structure state</strong><div>${escapeHtml(globalVerdict.structure_state || 'n/a')}</div></div><div><strong>Bounce state</strong><div>${escapeHtml(globalVerdict.bounce_state || 'n/a')}</div></div><div><strong>Market regime</strong><div>${escapeHtml(globalVerdict.market_regime || 'n/a')}</div></div><div><strong>Downgrade reason</strong><div>${escapeHtml(globalVerdict.downgrade_reason || 'n/a')}</div></div><div><strong>Tone</strong><div>${escapeHtml(globalVerdict.tone || 'n/a')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || globalVerdict.bucket || 'n/a')}</div></div><div><strong>Badge</strong><div>${escapeHtml((globalVerdict.badge && globalVerdict.badge.text) || 'n/a')}</div></div><div><strong>Allow plan</strong><div>${escapeHtml(globalVerdict.allow_plan ? 'true' : 'false')}</div></div><div><strong>Allow watchlist</strong><div>${escapeHtml(globalVerdict.allow_watchlist ? 'true' : 'false')}</div></div><div><strong>Source</strong><div>${escapeHtml(globalVerdict.source || 'resolver')}</div></div><div><strong>Lifecycle state</strong><div>${escapeHtml(lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Action state</strong><div>${escapeHtml(resolved.actionStateLabel || resolved.actionLabel || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(globalVerdict.allow_plan ? (resolved.planStatusLabel || 'n/a') : 'Plan blocked')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(resolved.rrConfidenceLabel || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || resolved.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || resolved.blockerReason || 'n/a')}</div></div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
+  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Final Decision', [
+    {label:'Final Verdict', value:globalVerdict.final_verdict || 'n/a'},
+    {label:'Tone', value:globalVerdict.tone || 'n/a'},
+    {label:'Bucket', value:lifecycleSnapshot.bucket || globalVerdict.bucket || 'n/a'},
+    {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || 'n/a'},
+    {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
+    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || 'n/a'}
+  ])}${renderDebugSectionMarkup('Base Assessment', [
+    {label:'Base Verdict', value:globalVerdict.base_verdict || 'n/a'},
+    {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : 'n/a'},
+    {label:'Structure', value:globalVerdict.structure_state || 'n/a'},
+    {label:'Bounce', value:globalVerdict.bounce_state || 'n/a'},
+    {label:'Market', value:globalVerdict.market_regime || 'n/a'},
+    {label:'Volume', value:String(derivedStates.volumeState || 'n/a')}
+  ])}${renderDebugSectionMarkup('Execution State', [
+    {label:'Lifecycle State', value:lifecycleSnapshot.state || globalVerdict.lifecycle || 'n/a'},
+    {label:'Action State', value:resolved.actionStateLabel || resolved.actionLabel || 'n/a'},
+    {label:'Plan Status', value:globalVerdict.allow_plan ? (resolved.planStatusLabel || 'n/a') : 'Plan blocked'},
+    {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
+    {label:'RR Confidence', value:resolved.rrConfidenceLabel || 'n/a'},
+    {label:'Capital Fit', value:capitalComfort.label || 'n/a'},
+    {label:'Next Possible', value:debug.nextPossibleState || resolved.nextPossibleState || 'n/a'}
+  ])}${renderAdvancedDebugMarkup([
+    {label:'Allow Plan', value:globalVerdict.allow_plan ? 'true' : 'false'},
+    {label:'Allow Watchlist', value:globalVerdict.allow_watchlist ? 'true' : 'false'},
+    {label:'Source', value:globalVerdict.source || 'resolver'},
+    {label:'Base Action Label', value:resolved.actionStateLabel || resolved.actionLabel || 'n/a'},
+    {label:'Base Tradeability', value:resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a'},
+    {label:'Previous', value:debug.previousState || '(none)'},
+    {label:'Priority', value:String(priority.score)},
+    {label:'Age', value:`${String(Math.max(age, 0))} trading days`},
+    {label:'Expiry', value:item.watchlist.expiryAt || 'Not set'},
+    {label:'Evaluated', value:formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a'},
+    {label:'Trigger', value:debug.lastSource || 'n/a'},
+    {label:'Fresh Inputs', value:debug.hadFreshInputs ? 'Yes' : 'No'},
+    {label:'Transition', value:(debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)')},
+    {label:'Change Type', value:debug.changeType || 'unchanged'},
+    {label:'Base Resolver Verdict', value:resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || 'n/a'},
+    {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'},
+    {label:'Control', value:qualityAdjustments.controlQuality || 'n/a'},
+    {label:'Main Blocker', value:debug.mainBlocker || resolved.blockerReason || 'n/a'}
+  ])}${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Final display state</strong><div>${escapeHtml(lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(rrResolution.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(qualityAdjustments.weakRegimePenalty ? 'Weak market' : 'Supportive')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(getPlanUiState(item, {displayedPlan}).label || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(rrResolution.rr_label || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || 'n/a')}</div></div></div>${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
 }
 
@@ -4970,7 +5011,7 @@ function resolveScannerStateWithTrace(record, options = {}){
     : '';
   const guardedDisplayState = finalDisplayState;
 
-  addStep('raw resolver verdict', status);
+  addStep('base verdict', normalizeGlobalVerdictKey(globalVerdict.base_verdict || status));
   if(falseDeadGuard) addStep('alive setup guard', 'blocked false Dead/filtered classification');
   addStep('final display state', guardedDisplayState);
   if(remapReason) addStep('remap reason', remapReason);
@@ -5467,7 +5508,36 @@ function renderScannerDecisionTraceContent(view){
   if(Array.isArray(resolution.warnings) && resolution.warnings.length){
     resolution.warnings.forEach(line => lines.push(String(line)));
   }
-  return `<div class="mutebox scrollbox">${escapeHtml(lines.join('\n') || 'No trace available.')}</div>`;
+  const item = view && view.item ? view.item : {};
+  const globalVerdict = resolveGlobalVerdict(item);
+  const nextAction = getActions(globalVerdict.final_verdict || '');
+  const baseSection = renderDebugSectionMarkup('Base Assessment', [
+    {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
+    {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
+    {label:'Structure', value:globalVerdict.structure_state || '(none)'},
+    {label:'Bounce', value:globalVerdict.bounce_state || '(none)'},
+    {label:'Market', value:globalVerdict.market_regime || '(none)'},
+    {label:'Volume', value:(view && view.setupStates && view.setupStates.volumeState) || resolution.volume_state || '(none)'}
+  ]);
+  const finalSection = renderDebugSectionMarkup('Final Decision', [
+    {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
+    {label:'Tone', value:globalVerdict.tone || '(none)'},
+    {label:'Bucket', value:globalVerdict.bucket || '(none)'},
+    {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
+    {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
+    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'}
+  ]);
+  const executionSection = renderDebugSectionMarkup('Execution State', [
+    {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
+    {label:'Action State', value:nextAction.label || '(none)'},
+    {label:'Plan Status', value:view && view.planUiState && view.planUiState.label || 'Plan blocked'},
+    {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
+    {label:'RR Confidence', value:resolution.rr_label || '(none)'},
+    {label:'Capital Fit', value:(view && view.planUiState && view.planUiState.capitalFitLabel) || '(none)'},
+    {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
+  ]);
+  const advancedSection = `<details class="compact-details"><summary>Advanced Debug (Internal)</summary><div class="mutebox scrollbox">${escapeHtml(lines.join('\n') || 'No trace available.')}</div></details>`;
+  return `${finalSection}${baseSection}${executionSection}${advancedSection}`;
 }
 
 function currentScanCardSecondaryUi(ticker){
@@ -5534,49 +5604,64 @@ function scannerCardClickTraceForTicker(ticker){
   return uiState.scannerCardClickTrace[symbol] || null;
 }
 
+function renderDebugKeyValueGrid(rows){
+  const safeRows = Array.isArray(rows) ? rows.filter(row => row && row.label) : [];
+  if(!safeRows.length) return '<div class="tiny">No debug data.</div>';
+  return `<div class="watchlist-debug-grid tiny">${safeRows.map(row => `<div><strong>${escapeHtml(String(row.label))}</strong><div>${escapeHtml(String(row.value ?? 'n/a'))}</div></div>`).join('')}</div>`;
+}
+
+function renderDebugSectionMarkup(title, rows){
+  return `<div class="watchlist-debug-block tiny"><strong>${escapeHtml(String(title || 'Debug'))}</strong>${renderDebugKeyValueGrid(rows)}</div>`;
+}
+
+function renderAdvancedDebugMarkup(rows, title = 'Advanced Debug (Internal)'){
+  const safeRows = Array.isArray(rows) ? rows.filter(row => row && row.label) : [];
+  if(!safeRows.length) return '';
+  return `<details class="compact-details"><summary>${escapeHtml(String(title))}</summary>${renderDebugKeyValueGrid(safeRows)}</details>`;
+}
+
 function renderScannerVisualDebugContent(view){
   const item = view && view.item ? view.item : {};
   const globalVerdict = resolveGlobalVerdict(item);
   const statusChip = primaryShortlistStatusChip(view || {});
   const structureQuality = String(view && view.setupStates && view.setupStates.structureQuality || '').toLowerCase();
   const bounceState = String(view && view.setupStates && view.setupStates.bounceState || '').toLowerCase();
-  const globalVisual = resolveGlobalVisualState(item, 'scanner', {
-    structuralState:statusChip.primaryState,
-    tradeability:globalVerdictLabel(globalVerdict.final_verdict),
-    structure:structureQuality,
-    bounce:bounceState,
-    setupScore:view && view.setupScore
-  });
-  const expectedScoreClass = scannerScoreGradientClass(view && view.setupScore);
-  const expectedScoreTone = scoreToneLabelFromScore(view && view.setupScore);
+  const nextAction = getActions(globalVerdict.final_verdict || '');
   const clickTrace = scannerCardClickTraceForTicker(item.ticker);
-  const lines = [
-    `global_verdict: ${globalVerdict.final_verdict || '(none)'}`,
-    `setup_score: ${Number.isFinite(globalVerdict.setup_score) ? String(globalVerdict.setup_score) : '(none)'}`,
-    `structure_state: ${globalVerdict.structure_state || '(none)'}`,
-    `bounce_state: ${globalVerdict.bounce_state || '(none)'}`,
-    `market_regime: ${globalVerdict.market_regime || '(none)'}`,
-    `downgrade_reason: ${globalVerdict.downgrade_reason || '(none)'}`,
-    `tone: ${globalVerdict.tone || '(none)'}`,
-    `bucket: ${globalVerdict.bucket || '(none)'}`,
-    `badge: ${statusChip.label || '(none)'}`,
-    `allow_plan: ${globalVerdict.allow_plan ? 'true' : 'false'}`,
-    `allow_watchlist: ${globalVerdict.allow_watchlist ? 'true' : 'false'}`,
-    `source: ${globalVerdict.source || 'resolver'}`,
-    `primary_state: ${String(statusChip.primaryState || '(none)')}`,
-    `scanner_verdict: ${globalVerdictLabel(globalVerdict.final_verdict) || '(none)'}`,
-    `display_stage: ${String(view && view.displayStage || '(none)')}`,
-    `final_verdict: ${String(view && view.finalVerdict || '(none)')}`,
-    `structure_quality: ${structureQuality || '(none)'}`,
-    `bounce_state: ${bounceState || '(none)'}`,
-    `setup_score: ${Number.isFinite(Number(view && view.setupScore)) ? String(Number(view.setupScore)) : '(none)'}`,
-    `expected_score_class: ${expectedScoreClass}`,
-    `expected_score_tone: ${expectedScoreTone}`,
-    `global_tone: ${globalVisual.tone}`,
-    `resolver_reason: ${globalVerdict.reason || '(none)'}`,
-    `card_click_trace: ${clickTrace ? `${clickTrace.stage}${clickTrace.detail ? ` | ${clickTrace.detail}` : ''} | ${clickTrace.at}` : '(none)'}`,
-  ];
-  return `<div class="mutebox scrollbox">${escapeHtml(lines.join('\n'))}</div>`;
+  const resolution = view && view.scannerResolution ? view.scannerResolution : {};
+  const baseSection = renderDebugSectionMarkup('Base Assessment', [
+    {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
+    {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
+    {label:'Structure', value:globalVerdict.structure_state || structureQuality || '(none)'},
+    {label:'Bounce', value:globalVerdict.bounce_state || bounceState || '(none)'},
+    {label:'Market', value:globalVerdict.market_regime || '(none)'},
+    {label:'Volume', value:(view && view.setupStates && view.setupStates.volumeState) || resolution.volume_state || '(none)'}
+  ]);
+  const finalSection = renderDebugSectionMarkup('Final Decision', [
+    {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
+    {label:'Tone', value:globalVerdict.tone || '(none)'},
+    {label:'Bucket', value:globalVerdict.bucket || '(none)'},
+    {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || statusChip.label || '(none)'},
+    {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
+    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'}
+  ]);
+  const executionSection = renderDebugSectionMarkup('Execution State', [
+    {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
+    {label:'Action State', value:nextAction.label || '(none)'},
+    {label:'Plan Status', value:view && view.planUiState && view.planUiState.label || 'Plan blocked'},
+    {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
+    {label:'RR Confidence', value:resolution.rr_label || '(none)'},
+    {label:'Capital Fit', value:(view && view.planUiState && view.planUiState.capitalFitLabel) || '(none)'},
+    {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
+  ]);
+  const advancedSection = renderAdvancedDebugMarkup([
+    {label:'Base Status Label', value:String(statusChip.primaryState || '(none)')},
+    {label:'Base Structure Label', value:structureQuality || '(none)'},
+    {label:'Base Bounce Label', value:bounceState || '(none)'},
+    {label:'Resolver Reason', value:globalVerdict.reason || '(none)'},
+    {label:'Card Click Trace', value:clickTrace ? `${clickTrace.stage}${clickTrace.detail ? ` | ${clickTrace.detail}` : ''} | ${clickTrace.at}` : '(none)'}
+  ]);
+  return `${finalSection}${baseSection}${executionSection}${advancedSection}`;
 }
 
 function renderScanCardSecondaryUi(view){
@@ -12537,7 +12622,44 @@ function renderReviewWorkspace(options = {}){
     bounce:record && record.setup && record.setup.bounceState,
     setupScore:setupScore
   });
-  const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">global_verdict: ${escapeHtml(globalVerdict.final_verdict || '(none)')}\nsetup_score: ${escapeHtml(Number.isFinite(globalVerdict.setup_score) ? String(globalVerdict.setup_score) : '(none)')}\nstructure_state: ${escapeHtml(globalVerdict.structure_state || '(none)')}\nbounce_state: ${escapeHtml(globalVerdict.bounce_state || '(none)')}\nmarket_regime: ${escapeHtml(globalVerdict.market_regime || '(none)')}\ndowngrade_reason: ${escapeHtml(globalVerdict.downgrade_reason || '(none)')}\ntone: ${escapeHtml(globalVerdict.tone || '(none)')}\nbucket: ${escapeHtml(globalVerdict.bucket || '(none)')}\nbadge: ${escapeHtml((globalVerdict.badge && globalVerdict.badge.text) || '(none)')}\nallow_plan: ${escapeHtml(globalVerdict.allow_plan ? 'true' : 'false')}\nallow_watchlist: ${escapeHtml(globalVerdict.allow_watchlist ? 'true' : 'false')}\nsource: ${escapeHtml(globalVerdict.source || 'resolver')}\nscanner_status: ${escapeHtml(scannerStatus || '(none)')}\nreview_status: ${escapeHtml(displayStage || '(none)')}\nstructural_state: ${escapeHtml(resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)')}\naction_state: ${escapeHtml(resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)')}\ntradeability_verdict: ${escapeHtml(resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)')}\nglobal_tone: ${escapeHtml(globalVisual.tone || '(none)')}\nplan_status: ${escapeHtml(resolvedContract.planStatusLabel || '(none)')}\nrr_confidence: ${escapeHtml(resolvedContract.rrConfidenceLabel || '(none)')}\nmain_blocker: ${escapeHtml(resolvedContract.blockerReason || '(none)')}\nraw_resolver_verdict: ${escapeHtml(resolvedContract.rawResolverVerdict || '(none)')}\nremap_reason: ${escapeHtml(resolvedContract.remapReason || '(none)')}\nresolver_reason: ${escapeHtml(globalVerdict.reason || '(none)')}\naiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
+  const reviewDebug = `<details class="compact-details"><summary>Debug State</summary>${renderDebugSectionMarkup('Final Decision', [
+    {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
+    {label:'Tone', value:globalVerdict.tone || '(none)'},
+    {label:'Bucket', value:globalVerdict.bucket || '(none)'},
+    {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
+    {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
+    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'}
+  ])}${renderDebugSectionMarkup('Base Assessment', [
+    {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
+    {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
+    {label:'Structure', value:globalVerdict.structure_state || '(none)'},
+    {label:'Bounce', value:globalVerdict.bounce_state || '(none)'},
+    {label:'Market', value:globalVerdict.market_regime || '(none)'},
+    {label:'Volume', value:(record && record.setup && record.setup.volumeState) || '(none)'}
+  ])}${renderDebugSectionMarkup('Execution State', [
+    {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
+    {label:'Action State', value:resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)'},
+    {label:'Plan Status', value:resolvedContract.planStatusLabel || '(none)'},
+    {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
+    {label:'RR Confidence', value:resolvedContract.rrConfidenceLabel || '(none)'},
+    {label:'Capital Fit', value:capitalFitLabel || '(none)'},
+    {label:'Next Possible', value:(globalVerdict.action && globalVerdict.action.label) || '(none)'}
+  ])}${renderAdvancedDebugMarkup([
+    {label:'Base Status Label', value:scannerStatus || '(none)'},
+    {label:'Base Review Label', value:displayStage || '(none)'},
+    {label:'Structure Label', value:resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)'},
+    {label:'Base Tradeability', value:resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)'},
+    {label:'Visual Tone', value:globalVisual.tone || '(none)'},
+    {label:'Plan Label', value:resolvedContract.planStatusLabel || '(none)'},
+    {label:'Main Blocker', value:resolvedContract.blockerReason || '(none)'},
+    {label:'Base Resolver Verdict', value:resolvedContract.rawResolverVerdict || '(none)'},
+    {label:'Remap Reason', value:resolvedContract.remapReason || '(none)'},
+    {label:'Resolver Reason', value:globalVerdict.reason || '(none)'},
+    {label:'AI Analysis Raw Length', value:String(analysisState.rawAnalysis.length)},
+    {label:'Normalized Analysis Exists', value:String(!!analysisState.normalizedAnalysis)},
+    {label:'Last Error', value:analysisState.error || '(none)'},
+    {label:'Last Reviewed At', value:record.review.lastReviewedAt || '(none)'}
+  ])}</details>`;
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
