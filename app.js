@@ -14511,9 +14511,20 @@ function applyGlobalVerdictGates(record){
   const globalVerdict = resolveGlobalVerdict(item);
   let changed = false;
   if(item.watchlist && item.watchlist.inWatchlist && !globalVerdict.allow_watchlist){
+    const removalVerdictLabel = globalVerdictLabel(globalVerdict.final_verdict || 'avoid');
+    const removalReason = globalVerdict.reason || globalVerdict.downgrade_reason || 'Setup is no longer watchlist-eligible.';
     item.watchlist.inWatchlist = false;
     item.watchlist.status = globalVerdict.final_verdict;
     item.watchlist.watchlist_priority_bucket = 'inactive';
+    appendWatchlistDebugEvent(item, {
+      at:new Date().toISOString(),
+      source:'watchlist_gate',
+      result:`removed: ${globalVerdict.final_verdict || 'avoid'} | ${removalReason}`
+    });
+    setStatus('inputStatus', `<span class="warntext">${escapeHtml(item.ticker || 'Ticker')} removed from Watchlist: downgraded to ${escapeHtml(removalVerdictLabel)}${removalReason ? ` | ${escapeHtml(removalReason)}` : ''}</span>`);
+    if(activeReviewTicker() === item.ticker){
+      setStatus('reviewWorkspaceStatus', `<span class="warntext">${escapeHtml(item.ticker || 'Ticker')} removed from Watchlist: downgraded to ${escapeHtml(removalVerdictLabel)}${removalReason ? ` | ${escapeHtml(removalReason)}` : ''}</span>`);
+    }
     changed = true;
   }
   if(item.plan && !globalVerdict.allow_plan){
