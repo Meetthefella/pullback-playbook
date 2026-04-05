@@ -3231,8 +3231,10 @@ function resolveLifecycleTransition(currentState, inputs = {}){
   const planStatus = String(inputs.plan_status || '').trim().toLowerCase();
   const rrConfidence = String(inputs.rr_confidence || '').trim().toLowerCase();
   const marketRegime = String(inputs.market_regime || '').trim().toLowerCase();
+  const finalVerdict = canonicalLifecycleState(inputs.final_verdict);
+  let nextState = lifecycleState || canonicalLifecycleState(inputs.final_state) || '';
 
-  if(structureState === 'broken') return 'avoid';
+  if(structureState === 'broken') nextState = 'avoid';
 
   if(
     lifecycleState === 'monitor'
@@ -3242,24 +3244,39 @@ function resolveLifecycleTransition(currentState, inputs = {}){
     && rrConfidence !== 'invalid'
     && !(marketRegime === 'weak' && bounceState !== 'confirmed')
   ){
-    return 'near_entry';
+    nextState = 'near_entry';
   }
 
   if(
     lifecycleState === 'monitor'
-    && (structureState === 'broken' || planStatus === 'invalid')
+    && structureState === 'broken'
   ){
-    return 'avoid';
+    nextState = 'avoid';
+  }
+
+  if(
+    lifecycleState === 'monitor'
+    && planStatus === 'invalid'
+  ){
+    nextState = 'monitor';
   }
 
   if(
     rawState === 'developing'
     && structureState === 'intact'
   ){
-    return 'monitor';
+    nextState = 'monitor';
   }
 
-  return lifecycleState || canonicalLifecycleState(inputs.final_state) || '';
+  if(
+    nextState === 'avoid'
+    && finalVerdict
+    && finalVerdict !== 'avoid'
+  ){
+    return lifecycleState || currentState;
+  }
+
+  return nextState;
 }
 
 function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
@@ -3463,6 +3480,7 @@ function watchlistLifecycleSnapshot(record){
     plan_status:planUiState.state,
     rr_confidence:resolved.rrConfidenceLabel || resolved.rrConfidence || '',
     market_regime:qualityAdjustments.weakRegimePenalty ? 'weak' : 'normal',
+    final_verdict:globalVerdict.final_verdict,
     final_state:snapshot.state
   });
   if(transitionedState && transitionedState !== snapshot.state){
