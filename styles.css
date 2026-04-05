@@ -610,6 +610,11 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   border-color:rgba(245,158,11,0.6) !important;
   background:linear-gradient(135deg, rgba(245,158,11,0.18), rgba(60,34,8,0.85)) !important;
 }
+.tone-yellow{
+  --tone-color:rgb(250,204,21);
+  border-color:rgba(250,204,21,0.6) !important;
+  background:linear-gradient(135deg, rgba(250,204,21,0.18), rgba(64,52,10,0.85)) !important;
+}
 .tone-indigo{
   --tone-color:rgb(99,102,241);
   border-color:rgba(99,102,241,0.6) !important;
@@ -627,11 +632,13 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .result-feed-card.tone-red,
 .result-feed-card.tone-orange,
+.result-feed-card.tone-yellow,
 .result-feed-card.tone-indigo,
 .result-feed-card.tone-blue,
 .result-feed-card.tone-green,
 .watchlist-card.tone-red,
 .watchlist-card.tone-orange,
+.watchlist-card.tone-yellow,
 .watchlist-card.tone-indigo,
 .watchlist-card.tone-blue,
 .watchlist-card.tone-green{
@@ -639,6 +646,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .reviewworkspace-shell.tone-red,
 .reviewworkspace-shell.tone-orange,
+.reviewworkspace-shell.tone-yellow,
 .reviewworkspace-shell.tone-indigo,
 .reviewworkspace-shell.tone-blue,
 .reviewworkspace-shell.tone-green{
