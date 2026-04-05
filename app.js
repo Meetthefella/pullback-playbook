@@ -12795,11 +12795,18 @@ function loadCard(ticker, options = {}){
     commitTickerState();
   }
   renderReviewWorkspace({recompute:options.recompute === true});
+  setScannerCardClickTrace(ticker, 'loadCard.after_renderReviewWorkspace', 'workspace_rendered');
   const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : null;
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
-  checklistIds.forEach(id => { $(id).checked = !!reviewChecks[id]; });
+  checklistIds.forEach(id => {
+    const input = $(id);
+    if(input) input.checked = !!reviewChecks[id];
+  });
+  setScannerCardClickTrace(ticker, 'loadCard.after_syncChecks', 'checks_synced');
   refreshReview();
+  setScannerCardClickTrace(ticker, 'loadCard.after_refreshReview', 'review_refreshed');
   syncPlannerFromTicker(record.ticker);
+  setScannerCardClickTrace(ticker, 'loadCard.after_syncPlanner', 'planner_synced');
   renderReviewLifecycleSummary(record.ticker);
   const reviewSection = $('reviewSection');
   if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
