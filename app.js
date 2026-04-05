@@ -3214,6 +3214,113 @@ function watchlistLifecycleStateRank(state){
   return 6;
 }
 
+function canonicalLifecycleState(state){
+  const value = String(state || '').trim().toLowerCase();
+  if(value === 'developing') return 'monitor';
+  if(value === 'early') return 'watch';
+  if(value === 'filtered' || value === 'inactive' || value === 'avoided') return 'avoid';
+  if(['entry','near_entry','watch','monitor','avoid','dead'].includes(value)) return value;
+  return '';
+}
+
+function resolveLifecycleTransition(currentState, inputs = {}){
+  const rawState = String(currentState || '').trim().toLowerCase();
+  const lifecycleState = canonicalLifecycleState(currentState);
+  const structureState = String(inputs.structure_state || '').trim().toLowerCase();
+  const bounceState = String(inputs.bounce_state || '').trim().toLowerCase();
+  const planStatus = String(inputs.plan_status || '').trim().toLowerCase();
+  const rrConfidence = String(inputs.rr_confidence || '').trim().toLowerCase();
+  const marketRegime = String(inputs.market_regime || '').trim().toLowerCase();
+
+  if(structureState === 'broken') return 'avoid';
+
+  if(
+    lifecycleState === 'monitor'
+    && structureState === 'intact'
+    && bounceState === 'confirmed'
+    && planStatus === 'valid'
+    && rrConfidence !== 'invalid'
+    && !(marketRegime === 'weak' && bounceState !== 'confirmed')
+  ){
+    return 'near_entry';
+  }
+
+  if(
+    lifecycleState === 'monitor'
+    && (structureState === 'broken' || planStatus === 'invalid')
+  ){
+    return 'avoid';
+  }
+
+  if(
+    rawState === 'developing'
+    && structureState === 'intact'
+  ){
+    return 'monitor';
+  }
+
+  return lifecycleState || canonicalLifecycleState(inputs.final_state) || '';
+}
+
+function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
+  const state = canonicalLifecycleState(nextState) || canonicalLifecycleState(snapshot && snapshot.state);
+  const globalVerdict = context.globalVerdict || {};
+  const resolved = context.resolved || {};
+  const activeExpiryAt = context.activeExpiryAt || '';
+  const planExpiryAt = context.planExpiryAt || '';
+  const expiryAt = context.expiryAt || '';
+  const reason = context.reason || snapshot.reason || globalVerdict.reason || '';
+  const badge = getBadge(state || 'monitor');
+  const nextSnapshot = {
+    ...snapshot,
+    state:state || snapshot.state,
+    label:badge.text,
+    badgeClass:badge.className,
+    reason
+  };
+
+  if(state === 'dead'){
+    nextSnapshot.bucket = 'low_priority_avoid';
+    nextSnapshot.stage = 'avoided';
+    nextSnapshot.status = 'inactive';
+    nextSnapshot.expiresAt = '';
+    nextSnapshot.reason = reason || globalVerdict.reason || resolved.blockerReason || 'Setup failed technically and is no longer actionable.';
+  }else if(state === 'avoid'){
+    nextSnapshot.bucket = 'low_priority_avoid';
+    nextSnapshot.stage = 'avoided';
+    nextSnapshot.status = 'inactive';
+    nextSnapshot.expiresAt = '';
+    nextSnapshot.reason = reason || globalVerdict.reason || 'Setup is no longer watchlist-eligible.';
+  }else if(state === 'entry'){
+    nextSnapshot.bucket = 'tradeable_entry';
+    nextSnapshot.stage = 'planned';
+    nextSnapshot.status = 'active';
+    nextSnapshot.expiresAt = planExpiryAt || nextSnapshot.expiresAt;
+    nextSnapshot.reason = reason || 'Entry setup is actionable now.';
+  }else if(state === 'near_entry'){
+    nextSnapshot.bucket = 'tradeable_entry';
+    nextSnapshot.stage = 'watchlist';
+    nextSnapshot.status = 'active';
+    nextSnapshot.expiresAt = activeExpiryAt || nextSnapshot.expiresAt;
+    nextSnapshot.reason = reason || 'Near entry - monitor for trigger.';
+  }else if(state === 'watch'){
+    nextSnapshot.bucket = 'monitor_watch';
+    nextSnapshot.stage = 'watchlist';
+    nextSnapshot.status = 'active';
+    nextSnapshot.expiresAt = activeExpiryAt || expiryAt || nextSnapshot.expiresAt;
+    nextSnapshot.reason = reason || globalVerdict.reason || 'Watch setup - keep tracking.';
+  }else{
+    nextSnapshot.bucket = 'monitor_watch';
+    nextSnapshot.stage = 'watchlist';
+    nextSnapshot.status = 'active';
+    nextSnapshot.expiresAt = activeExpiryAt || expiryAt || nextSnapshot.expiresAt;
+    nextSnapshot.reason = reason || globalVerdict.reason || 'Needs confirmation before it can be acted on.';
+  }
+
+  nextSnapshot.rank = watchlistLifecycleStateRank(nextSnapshot.state);
+  return nextSnapshot;
+}
+
 function watchlistLifecycleSnapshot(record){
   const item = normalizeTickerRecord(record);
   const gating = applyGlobalVerdictGates(item);
@@ -3330,12 +3437,10 @@ function watchlistLifecycleSnapshot(record){
     reason = globalVerdict.reason || 'Needs confirmation before it can be acted on.';
   }
 
-  const badge = getBadge(state);
-
-  return {
+  let snapshot = {
     state,
-    label:badge.text,
-    badgeClass:badge.className,
+    label:getBadge(state).text,
+    badgeClass:getBadge(state).className,
     bucket,
     stage,
     status,
@@ -3349,6 +3454,29 @@ function watchlistLifecycleSnapshot(record){
     rank:watchlistLifecycleStateRank(state),
     hasMeaningfulImprovement
   };
+
+  const currentState = canonicalLifecycleState(item.watchlist && item.watchlist.lifecycleState);
+  const planUiState = getPlanUiState(item, {displayedPlan});
+  const transitionedState = resolveLifecycleTransition(currentState || snapshot.state, {
+    structure_state:derivedStates.structureState,
+    bounce_state:derivedStates.bounceState,
+    plan_status:planUiState.state,
+    rr_confidence:resolved.rrConfidenceLabel || resolved.rrConfidence || '',
+    market_regime:qualityAdjustments.weakRegimePenalty ? 'weak' : 'normal',
+    final_state:snapshot.state
+  });
+  if(transitionedState && transitionedState !== snapshot.state){
+    snapshot = applyLifecycleStatePresentation(snapshot, transitionedState, {
+      globalVerdict,
+      resolved,
+      activeExpiryAt,
+      planExpiryAt:businessDaysFromNow(PLAN_EXPIRY_TRADING_DAYS),
+      expiryAt,
+      reason:snapshot.reason
+    });
+  }
+
+  return snapshot;
 }
 
 function syncWatchlistLifecycle(record){
@@ -3501,6 +3629,7 @@ function runWatchlistLifecycleEvaluation(options = {}){
         record.watchlist.debug.hadFreshInputs = hadFreshInputs;
         record.watchlist.debug.previousState = previousState || '(none)';
         record.watchlist.debug.currentState = snapshot.state || '(none)';
+        record.watchlist.debug.transition = `${previousState || '(none)'} -> ${snapshot.state || '(none)'}`;
         record.watchlist.debug.changeType = changeType;
         record.watchlist.debug.reason = snapshot.reason || '';
         record.watchlist.debug.baseVerdict = snapshot.baseVerdict || '(none)';
