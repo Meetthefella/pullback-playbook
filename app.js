@@ -12642,7 +12642,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Plan Status', value:resolvedContract.planStatusLabel || '(none)'},
     {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
     {label:'RR Confidence', value:resolvedContract.rrConfidenceLabel || '(none)'},
-    {label:'Capital Fit', value:capitalFitLabel || '(none)'},
+    {label:'Capital Fit', value:(capitalComfort.label || 'Unknown') || '(none)'},
     {label:'Next Possible', value:(globalVerdict.action && globalVerdict.action.label) || '(none)'}
   ])}${renderAdvancedDebugMarkup([
     {label:'Base Status Label', value:scannerStatus || '(none)'},
