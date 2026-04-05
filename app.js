@@ -3698,7 +3698,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const age = countTradingDaysBetween(item.watchlist.addedAt || todayIsoDate(), todayIsoDate());
   const auditTrail = Array.isArray(debug.auditTrail) ? debug.auditTrail : [];
   const warnings = Array.isArray(debug.warnings) ? debug.warnings : [];
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Global verdict</strong><div>${escapeHtml(globalVerdict.final_verdict || 'n/a')}</div></div><div><strong>Tone</strong><div>${escapeHtml(globalVerdict.tone || 'n/a')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(globalVerdict.bucket || 'n/a')}</div></div><div><strong>Badge</strong><div>${escapeHtml((globalVerdict.badge && globalVerdict.badge.text) || 'n/a')}</div></div><div><strong>Allow plan</strong><div>${escapeHtml(globalVerdict.allow_plan ? 'true' : 'false')}</div></div><div><strong>Allow watchlist</strong><div>${escapeHtml(globalVerdict.allow_watchlist ? 'true' : 'false')}</div></div><div><strong>Source</strong><div>${escapeHtml(globalVerdict.source || 'resolver')}</div></div><div><strong>Structural state</strong><div>${escapeHtml(resolved.structuralStateLabel || resolved.badgeText || lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Action state</strong><div>${escapeHtml(resolved.actionStateLabel || resolved.actionLabel || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Lifecycle bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(resolved.marketRegimeLabel || 'n/a')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(globalVerdict.allow_plan ? (resolved.planStatusLabel || 'n/a') : 'Plan blocked')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(resolved.rrConfidenceLabel || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || resolved.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || resolved.blockerReason || 'n/a')}</div></div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
+  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Global verdict</strong><div>${escapeHtml(globalVerdict.final_verdict || 'n/a')}</div></div><div><strong>Setup score</strong><div>${escapeHtml(Number.isFinite(globalVerdict.setup_score) ? String(globalVerdict.setup_score) : 'n/a')}</div></div><div><strong>Structure state</strong><div>${escapeHtml(globalVerdict.structure_state || 'n/a')}</div></div><div><strong>Bounce state</strong><div>${escapeHtml(globalVerdict.bounce_state || 'n/a')}</div></div><div><strong>Market regime</strong><div>${escapeHtml(globalVerdict.market_regime || 'n/a')}</div></div><div><strong>Downgrade reason</strong><div>${escapeHtml(globalVerdict.downgrade_reason || 'n/a')}</div></div><div><strong>Tone</strong><div>${escapeHtml(globalVerdict.tone || 'n/a')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(globalVerdict.bucket || 'n/a')}</div></div><div><strong>Badge</strong><div>${escapeHtml((globalVerdict.badge && globalVerdict.badge.text) || 'n/a')}</div></div><div><strong>Allow plan</strong><div>${escapeHtml(globalVerdict.allow_plan ? 'true' : 'false')}</div></div><div><strong>Allow watchlist</strong><div>${escapeHtml(globalVerdict.allow_watchlist ? 'true' : 'false')}</div></div><div><strong>Source</strong><div>${escapeHtml(globalVerdict.source || 'resolver')}</div></div><div><strong>Structural state</strong><div>${escapeHtml(resolved.structuralStateLabel || resolved.badgeText || lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Action state</strong><div>${escapeHtml(resolved.actionStateLabel || resolved.actionLabel || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Lifecycle bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(globalVerdict.allow_plan ? (resolved.planStatusLabel || 'n/a') : 'Plan blocked')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(resolved.rrConfidenceLabel || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || resolved.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || resolved.blockerReason || 'n/a')}</div></div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Final display state</strong><div>${escapeHtml(lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(rrResolution.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(qualityAdjustments.weakRegimePenalty ? 'Weak market' : 'Supportive')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(getPlanUiState(item, {displayedPlan}).label || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(rrResolution.rr_label || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || 'n/a')}</div></div></div>${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
 }
 
@@ -5551,6 +5551,11 @@ function renderScannerVisualDebugContent(view){
   const clickTrace = scannerCardClickTraceForTicker(item.ticker);
   const lines = [
     `global_verdict: ${globalVerdict.final_verdict || '(none)'}`,
+    `setup_score: ${Number.isFinite(globalVerdict.setup_score) ? String(globalVerdict.setup_score) : '(none)'}`,
+    `structure_state: ${globalVerdict.structure_state || '(none)'}`,
+    `bounce_state: ${globalVerdict.bounce_state || '(none)'}`,
+    `market_regime: ${globalVerdict.market_regime || '(none)'}`,
+    `downgrade_reason: ${globalVerdict.downgrade_reason || '(none)'}`,
     `tone: ${globalVerdict.tone || '(none)'}`,
     `bucket: ${globalVerdict.bucket || '(none)'}`,
     `badge: ${statusChip.label || '(none)'}`,
@@ -12531,7 +12536,7 @@ function renderReviewWorkspace(options = {}){
     bounce:record && record.setup && record.setup.bounceState,
     setupScore:setupScore
   });
-  const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">global_verdict: ${escapeHtml(globalVerdict.final_verdict || '(none)')}\ntone: ${escapeHtml(globalVerdict.tone || '(none)')}\nbucket: ${escapeHtml(globalVerdict.bucket || '(none)')}\nbadge: ${escapeHtml((globalVerdict.badge && globalVerdict.badge.text) || '(none)')}\nallow_plan: ${escapeHtml(globalVerdict.allow_plan ? 'true' : 'false')}\nallow_watchlist: ${escapeHtml(globalVerdict.allow_watchlist ? 'true' : 'false')}\nsource: ${escapeHtml(globalVerdict.source || 'resolver')}\nscanner_status: ${escapeHtml(scannerStatus || '(none)')}\nreview_status: ${escapeHtml(displayStage || '(none)')}\nstructural_state: ${escapeHtml(resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)')}\naction_state: ${escapeHtml(resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)')}\ntradeability_verdict: ${escapeHtml(resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)')}\nglobal_tone: ${escapeHtml(globalVisual.tone || '(none)')}\nmarket_regime: ${escapeHtml(resolvedContract.marketRegimeLabel || '(none)')}\nplan_status: ${escapeHtml(resolvedContract.planStatusLabel || '(none)')}\nrr_confidence: ${escapeHtml(resolvedContract.rrConfidenceLabel || '(none)')}\nmain_blocker: ${escapeHtml(resolvedContract.blockerReason || '(none)')}\nraw_resolver_verdict: ${escapeHtml(resolvedContract.rawResolverVerdict || '(none)')}\nremap_reason: ${escapeHtml(resolvedContract.remapReason || '(none)')}\nresolver_reason: ${escapeHtml(globalVerdict.reason || '(none)')}\naiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
+  const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">global_verdict: ${escapeHtml(globalVerdict.final_verdict || '(none)')}\nsetup_score: ${escapeHtml(Number.isFinite(globalVerdict.setup_score) ? String(globalVerdict.setup_score) : '(none)')}\nstructure_state: ${escapeHtml(globalVerdict.structure_state || '(none)')}\nbounce_state: ${escapeHtml(globalVerdict.bounce_state || '(none)')}\nmarket_regime: ${escapeHtml(globalVerdict.market_regime || '(none)')}\ndowngrade_reason: ${escapeHtml(globalVerdict.downgrade_reason || '(none)')}\ntone: ${escapeHtml(globalVerdict.tone || '(none)')}\nbucket: ${escapeHtml(globalVerdict.bucket || '(none)')}\nbadge: ${escapeHtml((globalVerdict.badge && globalVerdict.badge.text) || '(none)')}\nallow_plan: ${escapeHtml(globalVerdict.allow_plan ? 'true' : 'false')}\nallow_watchlist: ${escapeHtml(globalVerdict.allow_watchlist ? 'true' : 'false')}\nsource: ${escapeHtml(globalVerdict.source || 'resolver')}\nscanner_status: ${escapeHtml(scannerStatus || '(none)')}\nreview_status: ${escapeHtml(displayStage || '(none)')}\nstructural_state: ${escapeHtml(resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)')}\naction_state: ${escapeHtml(resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)')}\ntradeability_verdict: ${escapeHtml(resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)')}\nglobal_tone: ${escapeHtml(globalVisual.tone || '(none)')}\nplan_status: ${escapeHtml(resolvedContract.planStatusLabel || '(none)')}\nrr_confidence: ${escapeHtml(resolvedContract.rrConfidenceLabel || '(none)')}\nmain_blocker: ${escapeHtml(resolvedContract.blockerReason || '(none)')}\nraw_resolver_verdict: ${escapeHtml(resolvedContract.rawResolverVerdict || '(none)')}\nremap_reason: ${escapeHtml(resolvedContract.remapReason || '(none)')}\nresolver_reason: ${escapeHtml(globalVerdict.reason || '(none)')}\naiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
@@ -14112,14 +14117,19 @@ function resolveGlobalVerdict(record){
   );
   const planStatusKey = String(resolved.planStatusKey || '').toLowerCase();
   const tradeabilityState = String(displayedPlan.tradeability || '').toLowerCase();
+  const volumeState = String(derivedStates.volumeState || '').toLowerCase();
   const structurallyBroken = !!(
     resolved.terminal
     || structureState === 'broken'
     || trendState === 'broken'
     || resolved.structuralState === 'dead'
   );
-  const weakAlive = ['weak','weakening','developing_loose'].includes(structureState)
-    || ['none','unconfirmed','attempt','early'].includes(bounceState);
+  const weakStructure = ['weak','weakening','developing_loose'].includes(structureState);
+  const tentativeBounce = ['none','unconfirmed','attempt','early'].includes(bounceState);
+  const weakVolume = volumeState === 'weak';
+  const invalidPlan = ['invalid','missing','needs_adjustment','unrealistic_rr','rebuild_required'].includes(planStatusKey)
+    || tradeabilityState === 'invalid';
+  const supportiveStructure = !weakStructure && ['intact','strong','developing'].includes(structureState || '');
   let finalVerdict = 'watch';
   let reason = 'Default live setup state.';
 
@@ -14129,27 +14139,38 @@ function resolveGlobalVerdict(record){
   }else if(setupScore <= 2){
     finalVerdict = 'avoid';
     reason = 'Setup score is too weak.';
-  }else if(tradeabilityState === 'invalid' || ['invalid','missing','needs_adjustment','unrealistic_rr','rebuild_required'].includes(planStatusKey)){
+  }else if(weakStructure && invalidPlan){
     finalVerdict = 'avoid';
-    reason = 'Plan blocked: setup not tradeable.';
-  }else if(weakAlive && marketWeak){
-    finalVerdict = 'avoid';
-    reason = 'Weak structure and weak market.';
+    reason = 'Weak structure with unusable plan.';
   }else if(resolved.actionStateKey === 'ready_to_act' || resolved.structuralState === 'entry'){
     finalVerdict = 'entry';
     reason = resolved.blockerReason || 'Ready to act.';
   }else if(resolved.structuralState === 'near_entry' || resolved.tradeabilityVerdict === 'Near Entry'){
     finalVerdict = 'near_entry';
     reason = resolved.reasonSummary || 'Close to trigger.';
-  }else if(resolved.actionStateKey === 'wait_for_confirmation'){
+  }else if(setupScore >= 5 && supportiveStructure && !marketWeak && !weakVolume && !tentativeBounce){
+    finalVerdict = 'watch';
+    reason = 'Alive structure with improving confirmation.';
+  }else if(setupScore >= 5 && supportiveStructure){
+    finalVerdict = marketWeak || weakVolume || tentativeBounce ? 'monitor' : 'watch';
+    reason = marketWeak ? 'Weak market caution.' : (weakVolume ? 'Weak volume caution.' : (tentativeBounce ? 'Bounce still tentative.' : 'Alive setup worth monitoring.'));
+  }else if(setupScore >= 3 && !structurallyBroken){
+    finalVerdict = 'monitor';
+    reason = invalidPlan
+      ? 'Alive setup but plan is not ready.'
+      : (marketWeak
+        ? 'Weak market caution.'
+        : (tentativeBounce
+          ? 'Bounce still tentative.'
+          : (weakVolume ? 'Weak volume caution.' : 'Alive but early setup.')));
+  }else if(resolved.actionStateKey === 'recalculate_plan' || resolved.actionStateKey === 'wait_for_confirmation' || resolved.structuralState === 'developing'){
     finalVerdict = 'monitor';
     reason = resolved.blockerReason || 'Waiting for confirmation.';
-  }else if(resolved.actionStateKey === 'recalculate_plan' || resolved.structuralState === 'developing'){
-    finalVerdict = 'watch';
-    reason = resolved.blockerReason || 'Alive but needs work.';
   }else if(String(resolved.finalVerdict || '').toLowerCase() === 'avoid'){
-    finalVerdict = weakAlive ? 'monitor' : 'avoid';
-    reason = resolved.reasonSummary || resolved.blockerReason || 'Lower-priority setup.';
+    finalVerdict = weakStructure ? 'avoid' : 'monitor';
+    reason = weakStructure
+      ? (resolved.reasonSummary || resolved.blockerReason || 'Lower-priority setup.')
+      : 'Alive setup downgraded to monitoring.';
   }
 
   const lifecycleMap = {
@@ -14179,6 +14200,11 @@ function resolveGlobalVerdict(record){
     allow_plan:action.planAllowed,
     allow_watchlist:action.watchlistAllowed,
     reason,
+    downgrade_reason:reason,
+    setup_score:Number.isFinite(setupScore) ? setupScore : null,
+    structure_state:structureState || '',
+    bounce_state:bounceState || '',
+    market_regime:marketWeak ? 'weak' : 'normal',
     source:'resolver',
     debugToneSource:({
       dead:'terminal_dead',
