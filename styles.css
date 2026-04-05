@@ -644,6 +644,10 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .reviewworkspace-shell.tone-green{
   --state-color:var(--tone-color);
 }
+/* LEGACY COLOUR LOGIC DISABLED
+   Replaced by resolveGlobalVisualState(...)
+   Left in place temporarily for later review
+
 .result-feed-card.scan-card.score-strong{
   background:linear-gradient(180deg, rgba(16,185,129,0.28), rgba(16,185,129,0.08));
   border-color:rgba(16,185,129,0.6);
@@ -669,6 +673,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   border-color:rgba(220,38,38,0.6);
   backdrop-filter:blur(6px);
 }
+*/
 .reviewworkspace .panelbox,
 .watchlist-card .compact-details,
 .watchlist-card .watchlist-actions,
@@ -786,6 +791,10 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .reviewworkspace.ready{
   box-shadow:none;
 }
+/* LEGACY COLOUR LOGIC DISABLED
+   Replaced by resolveGlobalVisualState(...)
+   Left in place temporarily for later review
+
 .reviewworkspace-shell.state-dead{
   box-shadow:0 14px 36px rgba(127,29,29,0.2);
 }
@@ -818,6 +827,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
     background:linear-gradient(180deg, rgba(34,197,94,0.18), rgba(34,197,94,0.05));
   }
 }
+*/
 .reviewhero-compact{padding-bottom:2px}
 .review-downgrade-badge{margin-bottom:8px}
 .review-decision-headline{margin-top:4px;margin-bottom:6px;line-height:1.3;font-weight:600;color:var(--text-primary)}

@@ -3658,6 +3658,13 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     qualityAdjustments,
     rrResolution
   });
+  const globalVisual = options.globalVisual || resolveGlobalVisualState(item, 'watchlist', {
+    structuralState:resolved.structuralState,
+    actionStateKey:resolved.actionStateKey,
+    tradeability:resolved.tradeabilityVerdict,
+    structure:item && item.setup && item.setup.structureState,
+    bounce:item && item.setup && item.setup.bounceState
+  });
   const capitalComfort = capitalComfortSummary({
     capitalFit:displayedPlan.capitalFit.capital_fit,
     capitalNote:displayedPlan.capitalFit.capital_note,
@@ -3675,7 +3682,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const age = countTradingDaysBetween(item.watchlist.addedAt || todayIsoDate(), todayIsoDate());
   const auditTrail = Array.isArray(debug.auditTrail) ? debug.auditTrail : [];
   const warnings = Array.isArray(debug.warnings) ? debug.warnings : [];
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Structural state</strong><div>${escapeHtml(resolved.structuralStateLabel || resolved.badgeText || lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Action state</strong><div>${escapeHtml(resolved.actionStateLabel || resolved.actionLabel || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(resolved.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(resolved.marketRegimeLabel || 'n/a')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(resolved.planStatusLabel || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(resolved.rrConfidenceLabel || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || resolved.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || resolved.blockerReason || 'n/a')}</div></div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
+  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Structural state</strong><div>${escapeHtml(resolved.structuralStateLabel || resolved.badgeText || lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Action state</strong><div>${escapeHtml(resolved.actionStateLabel || resolved.actionLabel || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a')}</div></div><div><strong>Global tone</strong><div>${escapeHtml(globalVisual.tone || 'n/a')}</div></div><div><strong>Tone source</strong><div>${escapeHtml(globalVisual.debugToneSource || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(resolved.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(resolved.marketRegimeLabel || 'n/a')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(resolved.planStatusLabel || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(resolved.rrConfidenceLabel || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || resolved.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || resolved.blockerReason || 'n/a')}</div></div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Final display state</strong><div>${escapeHtml(lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(rrResolution.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(qualityAdjustments.weakRegimePenalty ? 'Weak market' : 'Supportive')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(getPlanUiState(item, {displayedPlan}).label || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(rrResolution.rr_label || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || 'n/a')}</div></div></div>${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
 }
 
@@ -3862,25 +3869,28 @@ function renderWatchlist(){
       });
       const decisionCopy = watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reasoning, shortAction);
       const shortReason = decisionCopy.reason;
+      const globalVisual = resolveGlobalVisualState(record, 'watchlist', {
+        structuralState:resolvedContract.structuralState,
+        actionStateKey:resolvedContract.actionStateKey,
+        tradeability:resolvedContract.tradeabilityVerdict,
+        structure:record && record.setup && record.setup.structureState,
+        bounce:record && record.setup && record.setup.bounceState,
+        setupScore:view && view.setupScore
+      });
       const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
         derivedStates,
         displayedPlan,
         qualityAdjustments,
         rrResolution,
-        resolvedContract
+        resolvedContract,
+        globalVisual
       });
       const div = document.createElement('div');
       const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
       const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
       const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
       const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
-      const visualStateClass = visualToneClass({
-        state:resolvedContract.structuralState,
-        tradeability:resolvedContract.tradeabilityVerdict,
-        structure:record && record.setup && record.setup.structureState,
-        bounce:record && record.setup && record.setup.bounceState
-      });
-      div.className = `resultcompact watchlist-card ${escapeHtml(visualStateClass)}`.trim();
+      div.className = `resultcompact watchlist-card ${escapeHtml(globalVisual.toneClass)}`.trim();
       div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${escapeHtml(decisionCopy.badgeClass || watchlistBadgeClass)}">${escapeHtml(decisionCopy.badgeText || watchlistBadgeLabel)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(decisionCopy.headline || shortAction)}</div>${shortReason ? `<div class="tiny watchlist-card__reason">${escapeHtml(shortReason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(resolvedContract.planStatusLabel)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
@@ -5306,6 +5316,10 @@ function primaryShortlistStatusChip(view){
   };
 }
 
+/* LEGACY COLOUR LOGIC DISABLED
+   Replaced by resolveGlobalVisualState(...)
+   Left in place temporarily for later review
+
 function resolveVisualState(setup = {}){
   const state = String(setup.state || '').toLowerCase();
   const tradeability = normalizeAnalysisVerdict(setup.tradeability || '');
@@ -5334,6 +5348,59 @@ function resolveVisualState(setup = {}){
 function visualToneClass(setup = {}){
   const visual = resolveVisualState(setup);
   return `tone-${visual.tone}`;
+}
+*/
+
+function resolveGlobalVisualState(record, context = 'scanner', options = {}){
+  const safeRecord = record && typeof record === 'object' ? record : {};
+  const structuralState = String(options.structuralState || options.state || '').toLowerCase();
+  const actionStateKey = String(options.actionStateKey || '').toLowerCase();
+  const tradeability = normalizeAnalysisVerdict(options.tradeability || '');
+  const structure = String(options.structure || (safeRecord.setup && safeRecord.setup.structureState) || '').toLowerCase();
+  const bounce = String(options.bounce || (safeRecord.setup && safeRecord.setup.bounceState) || '').toLowerCase();
+  const setupScore = numericOrNull(options.setupScore);
+  const terminalState = options.terminal === true
+    || ['dead','inactive','expired'].includes(structuralState)
+    || ['rebuild_setup','rebuild'].includes(actionStateKey)
+    || structure === 'broken';
+  const readyState = structuralState === 'entry'
+    || actionStateKey === 'ready_to_act'
+    || tradeability === 'Entry';
+  const monitorState = ['monitor','near_entry'].includes(structuralState)
+    || tradeability === 'Near Entry';
+  const weakAliveState = !terminalState && (
+    ['weak','weakening','developing_loose'].includes(structure)
+    || bounce === 'none'
+    || tradeability === 'Avoid'
+    || (Number.isFinite(setupScore) && setupScore <= 3)
+  );
+
+  let tone = 'indigo';
+  let debugToneSource = 'developing_default';
+  if(terminalState){
+    tone = 'red';
+    debugToneSource = 'terminal_dead';
+  }else if(readyState){
+    tone = 'green';
+    debugToneSource = 'ready_state';
+  }else if(monitorState){
+    tone = 'blue';
+    debugToneSource = 'monitor_state';
+  }else if(weakAliveState){
+    tone = 'orange';
+    debugToneSource = 'weak_alive';
+  }
+
+  return {
+    tone,
+    toneClass:`tone-${tone}`,
+    borderClass:`tone-${tone}`,
+    backgroundClass:`tone-${tone}`,
+    badgeToneClass:`badge-tone-${tone}`,
+    scoreClass:Number.isFinite(setupScore) ? scannerScoreGradientClass(setupScore) : '',
+    debugToneSource,
+    context
+  };
 }
 
 function rrDisplayClass(rrValue){
@@ -5384,6 +5451,10 @@ function renderCompactResultCard(record){
   return renderCompactResultCardFromView(view);
 }
 
+/* LEGACY COLOUR LOGIC DISABLED
+   Replaced by resolveGlobalVisualState(...)
+   Left in place temporarily for later review
+
 function scanCardToneForView(view){
   const verdict = view && view.displayStage ? String(view.displayStage) : '';
   const setupScore = Number.isFinite(Number(view && view.setupScore)) ? Number(view.setupScore) : null;
@@ -5410,6 +5481,7 @@ function scanCardIntensityForView(view){
   if(score >= 5) return 'med-low';
   return 'low';
 }
+*/
 
 function renderScannerDecisionTraceContent(view){
   const resolution = view && view.scannerResolution ? view.scannerResolution : null;
@@ -5485,11 +5557,12 @@ function renderScannerVisualDebugContent(view){
   );
   const structureQuality = String(view && view.setupStates && view.setupStates.structureQuality || '').toLowerCase();
   const bounceState = String(view && view.setupStates && view.setupStates.bounceState || '').toLowerCase();
-  const appliedToneClass = visualToneClass({
-    state:statusChip.primaryState,
+  const globalVisual = resolveGlobalVisualState(item, 'scanner', {
+    structuralState:statusChip.primaryState,
     tradeability:scannerVerdict,
     structure:structureQuality,
-    bounce:bounceState
+    bounce:bounceState,
+    setupScore:view && view.setupScore
   });
   const expectedScoreClass = scannerScoreGradientClass(view && view.setupScore);
   const expectedScoreTone = scoreToneLabelFromScore(view && view.setupScore);
@@ -5503,16 +5576,9 @@ function renderScannerVisualDebugContent(view){
     `setup_score: ${Number.isFinite(Number(view && view.setupScore)) ? String(Number(view.setupScore)) : '(none)'}`,
     `expected_score_class: ${expectedScoreClass}`,
     `expected_score_tone: ${expectedScoreTone}`,
-    `applied_tone_class: ${appliedToneClass}`,
-    `tone_source_rule: ${appliedToneClass === 'tone-red'
-      ? 'terminal_dead_or_broken'
-      : (appliedToneClass === 'tone-orange'
-        ? 'weak_alive_or_generic_avoid'
-        : (appliedToneClass === 'tone-blue'
-          ? 'monitor_or_near_entry'
-          : (appliedToneClass === 'tone-green'
-            ? 'entry_ready'
-            : 'default_indigo')))}`,
+    `global_tone: ${globalVisual.tone}`,
+    `applied_tone_class: ${globalVisual.toneClass}`,
+    `tone_source_rule: ${globalVisual.debugToneSource}`,
   ];
   return `<div class="mutebox scrollbox">${escapeHtml(lines.join('\n'))}</div>`;
 }
@@ -5549,6 +5615,10 @@ function scannerScoreGradientClass(score){
   if(safeScore >= 2) return 'score-weak';
   return 'score-broken';
 }
+
+/* LEGACY COLOUR LOGIC DISABLED
+   Replaced by resolveGlobalVisualState(...)
+   Left in place temporarily for later review
 
 function getCardVisualStyle(setupScore, structureState){
   const safeScore = numericOrNull(setupScore);
@@ -5588,16 +5658,13 @@ function cardVisualStyleAttr(setupScore, structureState){
   const visual = getCardVisualStyle(setupScore, structureState);
   return `background:${visual.background};border:${visual.border};backdrop-filter:blur(6px);`;
 }
+*/
 
 function renderCompactResultCardFromView(view){
   const item = view.item;
   const statusChip = primaryShortlistStatusChip(view);
   const sourceVerdict = reviewVerdictOverrideFromView(view);
   const scoreLabel = view.setupScoreDisplay;
-  const tone = scanCardToneForView(view);
-  const intensity = scanCardIntensityForView(view);
-  const toneClass = `result-card--${tone}`;
-  const intensityClass = `result-card--intensity-${intensity}`;
   const scannerVisualVerdict = normalizeAnalysisVerdict(
     view && (
       (view.scannerResolution && view.scannerResolution.status)
@@ -5606,18 +5673,28 @@ function renderCompactResultCardFromView(view){
       || ''
     )
   );
-  const visualStateClass = visualToneClass({
-    state:statusChip.primaryState,
+  /* LEGACY COLOUR LOGIC DISABLED
+     Replaced by resolveGlobalVisualState(...)
+     Left in place temporarily for later review
+
+  const tone = scanCardToneForView(view);
+  const intensity = scanCardIntensityForView(view);
+  const toneClass = `result-card--${tone}`;
+  const intensityClass = `result-card--intensity-${intensity}`;
+  */
+  const globalVisual = resolveGlobalVisualState(item, 'scanner', {
+    structuralState:statusChip.primaryState,
     tradeability:scannerVisualVerdict,
     structure:view && view.setupStates && view.setupStates.structureQuality,
-    bounce:view && view.setupStates && view.setupStates.bounceState
+    bounce:view && view.setupStates && view.setupStates.bounceState,
+    setupScore:view && view.setupScore
   });
   const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
   const summary = scanCardSummaryForView(view);
   const actionLabel = scanCardPrimaryActionLabel(view);
   const secondaryUiMarkup = renderScanCardSecondaryUi(view);
   const expanded = currentScanCardSecondaryUi(item.ticker);
-  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualStateClass)} ${escapeHtml(toneClass)} ${escapeHtml(intensityClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${expanded === 'menu' ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(globalVisual.toneClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}" data-tone-source="${escapeHtml(globalVisual.debugToneSource)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${expanded === 'menu' ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
@@ -12433,7 +12510,7 @@ function renderReviewWorkspace(options = {}){
   const chartGuidance = record.review.chartRef && record.review.chartRef.dataUrl
     ? ''
     : '<div class="summary" style="margin-bottom:12px"><strong>📸 Add screenshot for analysis</strong><div class="tiny" style="margin-top:6px">Open the live chart, capture a fresh screenshot, then import it to continue review.</div></div>';
-  const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">scanner_status: ${escapeHtml(scannerStatus || '(none)')}\nreview_status: ${escapeHtml(displayStage || '(none)')}\nstructural_state: ${escapeHtml(resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)')}\naction_state: ${escapeHtml(resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)')}\ntradeability_verdict: ${escapeHtml(resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)')}\nmarket_regime: ${escapeHtml(resolvedContract.marketRegimeLabel || '(none)')}\nplan_status: ${escapeHtml(resolvedContract.planStatusLabel || '(none)')}\nrr_confidence: ${escapeHtml(resolvedContract.rrConfidenceLabel || '(none)')}\nmain_blocker: ${escapeHtml(resolvedContract.blockerReason || '(none)')}\nraw_resolver_verdict: ${escapeHtml(resolvedContract.rawResolverVerdict || '(none)')}\nremap_reason: ${escapeHtml(resolvedContract.remapReason || '(none)')}\naiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
+  const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">scanner_status: ${escapeHtml(scannerStatus || '(none)')}\nreview_status: ${escapeHtml(displayStage || '(none)')}\nstructural_state: ${escapeHtml(resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)')}\naction_state: ${escapeHtml(resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)')}\ntradeability_verdict: ${escapeHtml(resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)')}\nglobal_tone: ${escapeHtml(globalVisual.tone || '(none)')}\ntone_source: ${escapeHtml(globalVisual.debugToneSource || '(none)')}\nmarket_regime: ${escapeHtml(resolvedContract.marketRegimeLabel || '(none)')}\nplan_status: ${escapeHtml(resolvedContract.planStatusLabel || '(none)')}\nrr_confidence: ${escapeHtml(resolvedContract.rrConfidenceLabel || '(none)')}\nmain_blocker: ${escapeHtml(resolvedContract.blockerReason || '(none)')}\nraw_resolver_verdict: ${escapeHtml(resolvedContract.rawResolverVerdict || '(none)')}\nremap_reason: ${escapeHtml(resolvedContract.remapReason || '(none)')}\naiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
@@ -12458,18 +12535,20 @@ function renderReviewWorkspace(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
   });
-  const reviewVisualStateClass = visualToneClass({
-    state:resolvedContract && resolvedContract.structuralState,
+  const globalVisual = resolveGlobalVisualState(record, 'review', {
+    structuralState:resolvedContract && resolvedContract.structuralState,
+    actionStateKey:resolvedContract && resolvedContract.actionStateKey,
     tradeability:resolvedContract && resolvedContract.tradeabilityVerdict,
     structure:record && record.setup && record.setup.structureState,
-    bounce:record && record.setup && record.setup.bounceState
+    bounce:record && record.setup && record.setup.bounceState,
+    setupScore:setupScore
   });
-  box.className = `list reviewworkspace-shell ${reviewVisualStateClass}`;
+  box.className = `list reviewworkspace-shell ${globalVisual.toneClass}`;
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate();
   });
-  box.innerHTML = `<div class="reviewworkspace ready ${escapeHtml(reviewVisualStateClass)}">
-    <div class="panelbox review-section review-section--snapshot ${escapeHtml(reviewVisualStateClass)}">
+  box.innerHTML = `<div class="reviewworkspace ready ${escapeHtml(globalVisual.toneClass)}" data-tone-source="${escapeHtml(globalVisual.debugToneSource)}">
+    <div class="panelbox review-section review-section--snapshot">
       <div class="reviewsectionhead"><strong>Snapshot</strong></div>
       <div class="reviewhero reviewhero-compact">
         <div class="reviewherohead">
