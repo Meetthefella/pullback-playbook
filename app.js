@@ -12561,6 +12561,14 @@ function renderReviewWorkspace(options = {}){
   const chartGuidance = record.review.chartRef && record.review.chartRef.dataUrl
     ? ''
     : '<div class="summary" style="margin-bottom:12px"><strong>📸 Add screenshot for analysis</strong><div class="tiny" style="margin-top:6px">Open the live chart, capture a fresh screenshot, then import it to continue review.</div></div>';
+  const globalVisual = resolveGlobalVisualState(record, 'review', {
+    structuralState:resolvedContract && resolvedContract.structuralState,
+    actionStateKey:resolvedContract && resolvedContract.actionStateKey,
+    tradeability:resolvedContract && resolvedContract.tradeabilityVerdict,
+    structure:record && record.setup && record.setup.structureState,
+    bounce:record && record.setup && record.setup.bounceState,
+    setupScore:setupScore
+  });
   const reviewDebug = `<details class="compact-details"><summary>Debug State</summary><div class="mutebox scrollbox">scanner_status: ${escapeHtml(scannerStatus || '(none)')}\nreview_status: ${escapeHtml(displayStage || '(none)')}\nstructural_state: ${escapeHtml(resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)')}\naction_state: ${escapeHtml(resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)')}\ntradeability_verdict: ${escapeHtml(resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)')}\nglobal_tone: ${escapeHtml(globalVisual.tone || '(none)')}\ntone_source: ${escapeHtml(globalVisual.debugToneSource || '(none)')}\nmarket_regime: ${escapeHtml(resolvedContract.marketRegimeLabel || '(none)')}\nplan_status: ${escapeHtml(resolvedContract.planStatusLabel || '(none)')}\nrr_confidence: ${escapeHtml(resolvedContract.rrConfidenceLabel || '(none)')}\nmain_blocker: ${escapeHtml(resolvedContract.blockerReason || '(none)')}\nraw_resolver_verdict: ${escapeHtml(resolvedContract.rawResolverVerdict || '(none)')}\nremap_reason: ${escapeHtml(resolvedContract.remapReason || '(none)')}\naiAnalysisRaw length: ${escapeHtml(String(analysisState.rawAnalysis.length))}\nnormalizedAnalysis exists: ${escapeHtml(String(!!analysisState.normalizedAnalysis))}\nlastError: ${escapeHtml(analysisState.error || '(none)')}\nlastReviewedAt: ${escapeHtml(record.review.lastReviewedAt || '(none)')}</div></details>`;
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
@@ -12585,14 +12593,6 @@ function renderReviewWorkspace(options = {}){
     capitalFit:displayedPlan.capitalFit.capital_fit,
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
-  });
-  const globalVisual = resolveGlobalVisualState(record, 'review', {
-    structuralState:resolvedContract && resolvedContract.structuralState,
-    actionStateKey:resolvedContract && resolvedContract.actionStateKey,
-    tradeability:resolvedContract && resolvedContract.tradeabilityVerdict,
-    structure:record && record.setup && record.setup.structureState,
-    bounce:record && record.setup && record.setup.bounceState,
-    setupScore:setupScore
   });
   box.className = `list reviewworkspace-shell ${globalVisual.toneClass}`;
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
