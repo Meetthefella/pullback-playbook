@@ -93,7 +93,8 @@ const uiState = {
   watchlistLifecycleLastSource:'',
   watchlistLifecyclePendingSource:'',
   runtimeDebugEntries:[],
-  runtimeDebugContext:''
+  runtimeDebugContext:'',
+  scannerCardClickTrace:{}
 };
 const marketDataCache = new Map();
 const fxRateCache = new Map();
@@ -5544,6 +5545,23 @@ function scoreToneLabelFromScore(score){
   return 'red';
 }
 
+function setScannerCardClickTrace(ticker, stage, detail = ''){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  uiState.scannerCardClickTrace[symbol] = {
+    at:new Date().toISOString(),
+    stage:String(stage || '').trim() || 'unknown',
+    detail:String(detail || '').trim(),
+    activeReviewTicker:activeReviewTicker() || ''
+  };
+}
+
+function scannerCardClickTraceForTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return null;
+  return uiState.scannerCardClickTrace[symbol] || null;
+}
+
 function renderScannerVisualDebugContent(view){
   const item = view && view.item ? view.item : {};
   const statusChip = primaryShortlistStatusChip(view || {});
@@ -5566,6 +5584,7 @@ function renderScannerVisualDebugContent(view){
   });
   const expectedScoreClass = scannerScoreGradientClass(view && view.setupScore);
   const expectedScoreTone = scoreToneLabelFromScore(view && view.setupScore);
+  const clickTrace = scannerCardClickTraceForTicker(item.ticker);
   const lines = [
     `primary_state: ${String(statusChip.primaryState || '(none)')}`,
     `scanner_verdict: ${scannerVerdict || '(none)'}`,
@@ -5579,6 +5598,7 @@ function renderScannerVisualDebugContent(view){
     `global_tone: ${globalVisual.tone}`,
     `applied_tone_class: ${globalVisual.toneClass}`,
     `tone_source_rule: ${globalVisual.debugToneSource}`,
+    `card_click_trace: ${clickTrace ? `${clickTrace.stage}${clickTrace.detail ? ` | ${clickTrace.detail}` : ''} | ${clickTrace.at}` : '(none)'}`,
   ];
   return `<div class="mutebox scrollbox">${escapeHtml(lines.join('\n'))}</div>`;
 }
@@ -11820,6 +11840,7 @@ function statusRank(status){
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
+  setScannerCardClickTrace(symbol, 'loadTickerIntoReview.enter', `includeInScannerUniverse=${options.includeInScannerUniverse === true} recompute=${options.recompute === true}`);
   const record = upsertTickerRecord(symbol);
   uiState.activeReviewAddsToScannerUniverse = options.includeInScannerUniverse !== false;
   uiState.activeReviewVerdictOverride = options.useSourceVerdict !== false
@@ -11834,10 +11855,12 @@ function loadTickerIntoReview(ticker, options = {}){
   renderTickerQuickLists();
   renderScannerResults();
   renderCards();
+  setScannerCardClickTrace(symbol, 'loadTickerIntoReview.before_loadCard', `activeReviewTicker=${uiState.activeReviewTicker || '(none)'}`);
   loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true});
 }
 
 function openRankedResultInReview(ticker, options = {}){
+  setScannerCardClickTrace(ticker, 'openRankedResultInReview.enter', `sourceVerdict=${options.sourceVerdict || '(none)'}`);
   loadTickerIntoReview(ticker, {
     includeInScannerUniverse:options.includeInScannerUniverse === true,
     recompute:options.recompute === true,
@@ -11845,6 +11868,7 @@ function openRankedResultInReview(ticker, options = {}){
   });
   const reviewSection = $('reviewSection');
   if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
+  setScannerCardClickTrace(ticker, 'openRankedResultInReview.scrolled', 'reviewSection');
 }
 
 function reviewWatchlistTicker(ticker){
@@ -12757,6 +12781,7 @@ async function importLatestChart(ticker){
 function loadCard(ticker, options = {}){
   const record = getTickerRecord(ticker);
   if(!record) return;
+  setScannerCardClickTrace(ticker, 'loadCard.enter', `touchLifecycle=${options.touchLifecycle === true} recompute=${options.recompute === true}`);
   console.debug('RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
   setActiveReviewTicker(record.ticker);
   if(options.touchLifecycle === true){
@@ -12772,6 +12797,7 @@ function loadCard(ticker, options = {}){
   renderReviewLifecycleSummary(record.ticker);
   const reviewSection = $('reviewSection');
   if(reviewSection) reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
+  setScannerCardClickTrace(ticker, 'loadCard.complete', `selectedTicker=${(($('selectedTicker') && $('selectedTicker').value) || '(none)')}`);
 }
 
 function refreshReview(){
@@ -13642,7 +13668,9 @@ on('results', 'click', event => {
   const ticker = normalizeTicker(card.getAttribute('data-ticker') || '');
   if(!ticker) return;
   const sourceVerdict = card.getAttribute('data-source-verdict') || '';
+  setScannerCardClickTrace(ticker, 'results.click', `sourceVerdict=${sourceVerdict || '(none)'}`);
   if(currentScanCardSecondaryUi(ticker)){
+    setScannerCardClickTrace(ticker, 'results.click.cleared_secondary_ui', `mode=${currentScanCardSecondaryUi(ticker) || '(none)'}`);
     clearScanCardSecondaryUi();
     renderScannerResults();
     return;
@@ -13659,7 +13687,9 @@ on('results', 'keydown', event => {
   if(!ticker) return;
   const sourceVerdict = card.getAttribute('data-source-verdict') || '';
   event.preventDefault();
+  setScannerCardClickTrace(ticker, 'results.keydown', `key=${event.key} sourceVerdict=${sourceVerdict || '(none)'}`);
   if(currentScanCardSecondaryUi(ticker)){
+    setScannerCardClickTrace(ticker, 'results.keydown.cleared_secondary_ui', `mode=${currentScanCardSecondaryUi(ticker) || '(none)'}`);
     clearScanCardSecondaryUi();
     renderScannerResults();
     return;
