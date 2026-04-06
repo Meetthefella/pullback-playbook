@@ -27,6 +27,7 @@ if(!window.AppRecords) throw new Error('AppRecords failed to load.');
 if(!window.PlanMath) throw new Error('PlanMath failed to load.');
 if(!window.Tradeability) throw new Error('Tradeability failed to load.');
 if(!window.WatchlistUtils) throw new Error('WatchlistUtils failed to load.');
+if(!window.ResolverSupport) throw new Error('ResolverSupport failed to load.');
 if(!window.ResolverCore) throw new Error('ResolverCore failed to load.');
 if(!window.ResolverPresentation) throw new Error('ResolverPresentation failed to load.');
 const {
@@ -98,6 +99,13 @@ const {
   recomputeAttemptedForSource: recomputeAttemptedForSourceImpl,
   determineRecomputeResult: determineRecomputeResultImpl
 } = window.WatchlistUtils;
+const {
+  baseVerdictFromResolvedContract: baseVerdictFromResolvedContractImpl,
+  resolverSeedVerdictForRecord: resolverSeedVerdictForRecordImpl,
+  finalVerdictForRecord: finalVerdictForRecordImpl,
+  displayStageForRecord: displayStageForRecordImpl,
+  reviewHeaderVerdictForRecord: reviewHeaderVerdictForRecordImpl
+} = window.ResolverSupport;
 const {
   normalizeGlobalVerdictKey: normalizeGlobalVerdictKeyImpl,
   globalVerdictLabel: globalVerdictLabelImpl,
@@ -7347,7 +7355,9 @@ function executionDowngradeVerdictForRecord(record, options = {}){
   return '';
 }
 
-function finalVerdictForRecord(record, options = {}){
+// LEGACY RESOLVER SUPPORT BLOCK DISABLED
+// Shadowed by the canonical resolver-support block later in app.js.
+function legacyFinalVerdictForRecord(record, options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     item.plan && item.plan.entry,
@@ -7862,7 +7872,17 @@ function validateCurrentPlan(record, options = {}){
 }
 
 function displayStageForRecord(record, options = {}){
-  return finalVerdictForRecord(record, options);
+  return displayStageForRecordImpl(record, options, {
+    deriveCurrentPlanState,
+    analysisDerivedStatesFromRecord,
+    getPlanUiState,
+    baseVerdictForRecord,
+    analysisVerdictForRecord,
+    executionDowngradeVerdictForRecord,
+    mostConservativeVerdict,
+    isTerminalDeadSetup,
+    resolveFinalStateContract
+  });
 }
 
 // LEGACY RESOLVER BLOCK DISABLED
@@ -13421,27 +13441,16 @@ function getActions(finalVerdict){
 }
 
 function baseVerdictFromResolvedContract(resolved){
-  const safeResolved = resolved && typeof resolved === 'object' ? resolved : {};
-  const structuralState = String(safeResolved.structuralState || '').toLowerCase();
-  const actionStateKey = String(safeResolved.actionStateKey || '').toLowerCase();
-  const tradeabilityVerdict = normalizeAnalysisVerdict(safeResolved.tradeabilityVerdict || safeResolved.finalVerdict || '');
-  if(structuralState === 'dead' || actionStateKey === 'rebuild_setup') return 'dead';
-  if(structuralState === 'entry' || actionStateKey === 'ready_to_act' || tradeabilityVerdict === 'Entry') return 'entry';
-  if(structuralState === 'near_entry' || tradeabilityVerdict === 'Near Entry') return 'near_entry';
-  if(actionStateKey === 'wait_for_confirmation') return 'monitor';
-  if(actionStateKey === 'recalculate_plan' || structuralState === 'developing') return 'watch';
-  if(tradeabilityVerdict === 'Avoid') return 'avoid';
-  return 'watch';
+  return baseVerdictFromResolvedContractImpl(resolved, {
+    normalizeAnalysisVerdict
+  });
 }
 
 function resolverSeedVerdictForRecord(record){
-  const item = record && typeof record === 'object' ? record : {};
-  return normalizeAnalysisVerdict(
-    (item.review && item.review.savedVerdict)
-    || (item.scan && item.scan.verdict)
-    || baseVerdictForRecord(item, {includeRuntimeFallback:false})
-    || 'Watch'
-  );
+  return resolverSeedVerdictForRecordImpl(record, {
+    normalizeAnalysisVerdict,
+    baseVerdictForRecord
+  });
 }
 
 function resolveFinalStateContract(record, options = {}){
@@ -14003,66 +14012,31 @@ function validateCurrentPlan(record, options = {}){
 }
 
 function finalVerdictForRecord(record, options = {}){
-  const item = record && typeof record === 'object' ? record : {};
-  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
-    item.plan && item.plan.entry,
-    item.plan && item.plan.stop,
-    item.plan && item.plan.firstTarget,
-    item.marketData && item.marketData.currency
-  );
-  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
-  const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan});
-  const baseVerdict = baseVerdictForRecord(item, options);
-  const advisoryVerdict = analysisVerdictForRecord(item, options);
-  const includeExecutionDowngrade = options.includeExecutionDowngrade !== false;
-  const executionVerdict = includeExecutionDowngrade
-    ? executionDowngradeVerdictForRecord(item, {displayedPlan, planUiState})
-    : '';
-  const conservativeVerdict = mostConservativeVerdict(baseVerdict, advisoryVerdict, executionVerdict);
-  const deadCheck = isTerminalDeadSetup(item, {derivedStates, displayedPlan});
-  const structureState = String(derivedStates.structureState || '').toLowerCase();
-  const trendState = String(derivedStates.trendState || '').toLowerCase();
-  const structurallyAlive = !deadCheck.dead
-    && structureState !== 'broken'
-    && trendState !== 'broken'
-    && !(item.plan && item.plan.invalidatedState)
-    && !(item.plan && item.plan.missedState);
-  if(!structurallyAlive) return conservativeVerdict;
-
-  const resolved = resolveFinalStateContract(item, {
-    context:options.context || 'review',
-    finalVerdict:conservativeVerdict,
-    derivedStates,
-    displayedPlan,
-    planUiState
+  return finalVerdictForRecordImpl(record, options, {
+    deriveCurrentPlanState,
+    analysisDerivedStatesFromRecord,
+    getPlanUiState,
+    baseVerdictForRecord,
+    analysisVerdictForRecord,
+    executionDowngradeVerdictForRecord,
+    mostConservativeVerdict,
+    isTerminalDeadSetup,
+    resolveFinalStateContract
   });
-  if(resolved.structuralState === 'dead' || resolved.actionStateKey === 'rebuild_setup'){
-    return conservativeVerdict === 'Entry' ? 'Near Entry' : 'Watch';
-  }
-  if(resolved.actionStateKey === 'ready_to_act') return 'Entry';
-  if(resolved.structuralState === 'near_entry') return 'Near Entry';
-  return conservativeVerdict === 'Avoid' ? 'Watch' : conservativeVerdict;
 }
 
 function reviewHeaderVerdictForRecord(record){
-  const item = record && typeof record === 'object' ? record : {};
-  const displayedPlan = deriveCurrentPlanState(
-    item.plan && item.plan.entry,
-    item.plan && item.plan.stop,
-    item.plan && item.plan.firstTarget,
-    item.marketData && item.marketData.currency
-  );
-  const derivedStates = analysisDerivedStatesFromRecord(item);
-  const deadCheck = isTerminalDeadSetup(item, {derivedStates, displayedPlan});
-  const verdict = finalVerdictForRecord(item, {
-    includeExecutionDowngrade:false,
-    includeRuntimeFallback:false,
-    context:'review',
-    derivedStates,
-    displayedPlan
+  return reviewHeaderVerdictForRecordImpl(record, {
+    deriveCurrentPlanState,
+    analysisDerivedStatesFromRecord,
+    isTerminalDeadSetup,
+    getPlanUiState,
+    baseVerdictForRecord,
+    analysisVerdictForRecord,
+    executionDowngradeVerdictForRecord,
+    mostConservativeVerdict,
+    resolveFinalStateContract
   });
-  if(deadCheck.dead) return verdict;
-  return verdict === 'Avoid' ? 'Watch' : verdict;
 }
 
 installRuntimeDebugHooks();
