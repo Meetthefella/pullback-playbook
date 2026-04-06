@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
-const APP_VERSION = 'v4.4.1';
+const APP_VERSION = 'v4.4.4';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';
@@ -28,6 +28,7 @@ if(!window.PlanMath) throw new Error('PlanMath failed to load.');
 if(!window.Tradeability) throw new Error('Tradeability failed to load.');
 if(!window.WatchlistUtils) throw new Error('WatchlistUtils failed to load.');
 if(!window.ResolverCore) throw new Error('ResolverCore failed to load.');
+if(!window.ResolverPresentation) throw new Error('ResolverPresentation failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -106,6 +107,11 @@ const {
   getActions: getActionsImpl,
   resolveGlobalVerdict: resolveGlobalVerdictImpl
 } = window.ResolverCore;
+const {
+  primaryShortlistStatusChip: primaryShortlistStatusChipImpl,
+  resolveGlobalVisualState: resolveGlobalVisualStateImpl,
+  resolveEmojiPresentation: resolveEmojiPresentationImpl
+} = window.ResolverPresentation;
 
 // ---------------------------------------------------------------------------
 // End extracted bridge bindings. App.js remains the orchestrator for now.
@@ -5000,15 +5006,11 @@ function shortlistStructureBadgeForView(view){
 }
 
 function primaryShortlistStatusChip(view){
-  const item = view && view.item ? view.item : view;
-  const globalVerdict = resolveGlobalVerdict(item);
-  const badge = getBadge(globalVerdict.final_verdict);
-  return {
-    label:badge.text,
-    className:badge.className,
-    modifiers:[],
-    primaryState:normalizeGlobalVerdictKey(globalVerdict.final_verdict)
-  };
+  return primaryShortlistStatusChipImpl(view, {
+    resolveGlobalVerdict,
+    getBadge,
+    normalizeGlobalVerdictKey
+  });
 }
 
 /* LEGACY COLOUR LOGIC DISABLED
@@ -5047,24 +5049,9 @@ function visualToneClass(setup = {}){
 */
 
 function resolveGlobalVisualState(record, context = 'scanner', options = {}){
-  const safeRecord = record && typeof record === 'object' ? record : {};
-  const globalVerdict = resolveGlobalVerdict(safeRecord);
-  return {
-    tone:globalVerdict.tone,
-    toneClass:globalVerdict.toneClass,
-    borderClass:globalVerdict.borderClass,
-    backgroundClass:globalVerdict.backgroundClass,
-    badgeToneClass:globalVerdict.badgeToneClass,
-    scoreClass:globalVerdict.scoreClass,
-    debugToneSource:globalVerdict.debugToneSource,
-    finalVerdict:globalVerdict.final_verdict,
-    bucket:globalVerdict.bucket,
-    lifecycle:globalVerdict.lifecycle,
-    allowPlan:globalVerdict.allow_plan,
-    allowWatchlist:globalVerdict.allow_watchlist,
-    reason:globalVerdict.reason,
-    context
-  };
+  return resolveGlobalVisualStateImpl(record, context, options, {
+    resolveGlobalVerdict
+  });
 }
 
 function rrDisplayClass(rrValue){
@@ -13745,69 +13732,22 @@ function applyGlobalVerdictGates(record){
 }
 
 function resolveEmojiPresentation(record, options = {}){
-  const item = record && typeof record === 'object' ? record : {};
-  const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || resolverSeedVerdictForRecord(item));
-  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
-  const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
-  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
-    effectivePlan.entry,
-    effectivePlan.stop,
-    effectivePlan.firstTarget,
-    item.marketData && item.marketData.currency
-  );
-  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
-  const warningState = options.warningState || evaluateWarningState(item, getReviewAnalysisState(item).normalizedAnalysis);
-  const planCheckState = options.planCheckState || planCheckStateForRecord(item, {effectivePlan, displayedPlan});
-  const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState});
-  const setupUiState = options.setupUiState || getSetupUiState(item, {displayStage:finalVerdict, derivedStates, planUiState});
-  const avoidSubtype = options.avoidSubtype || avoidSubtypeForRecord(item, {
-    derivedStates,
-    displayedPlan,
-    qualityAdjustments,
-    finalVerdict
+  return resolveEmojiPresentationImpl(record, options, {
+    normalizeAnalysisVerdict,
+    resolverSeedVerdictForRecord,
+    analysisDerivedStatesFromRecord,
+    effectivePlanForRecord,
+    deriveCurrentPlanState,
+    evaluateSetupQualityAdjustments,
+    evaluateWarningState,
+    getReviewAnalysisState,
+    planCheckStateForRecord,
+    getPlanUiState,
+    getSetupUiState,
+    avoidSubtypeForRecord,
+    isTerminalDeadSetup,
+    resolveFinalStateContract
   });
-  const deadCheck = options.deadCheck || isTerminalDeadSetup(item, {derivedStates, displayedPlan});
-  const resolved = resolveFinalStateContract(item, {
-    context:options.context || 'generic',
-    finalVerdict,
-    derivedStates,
-    effectivePlan,
-    displayedPlan,
-    qualityAdjustments,
-    warningState,
-    planCheckState,
-    planUiState,
-    setupUiState,
-    avoidSubtype,
-    deadCheck
-  });
-  const modifiers = [];
-  const addModifier = (emoji, label, code, className = 'near') => {
-    if(!emoji || !label || modifiers.some(item => item.code === code) || modifiers.length >= 2) return;
-    modifiers.push({emoji, label, code, className});
-  };
-  const volumeState = String(derivedStates.volumeState || '').toLowerCase();
-  const weakMarket = !!(
-    qualityAdjustments.weakRegimePenalty
-    || item.setup.marketCaution
-    || (warningState && Array.isArray(warningState.reasons) && warningState.reasons.some(reason => /hostile market|weak market/i.test(String(reason || ''))))
-  );
-  if(qualityAdjustments.lowControlSetup || qualityAdjustments.tooWideForQualityPullback){
-    addModifier('\uD83D\uDD0B', 'Weak control', 'weak_control');
-  }
-  if(volumeState === 'weak'){
-    addModifier('\uD83E\uDED7', 'Weak volume', 'weak_volume');
-  }
-  if(weakMarket){
-    addModifier('\u26A0\uFE0F', 'Weak market', 'weak_market');
-  }
-  return {
-    primaryState:resolved.structuralState,
-    primaryEmoji:(resolved.badgeText.split(' ')[0] || '\uD83C\uDF31'),
-    primaryLabel:resolved.structuralStateLabel,
-    badgeClass:resolved.badgeClass || 'watch',
-    modifiers
-  };
 }
 
 function watchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
