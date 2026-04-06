@@ -11747,6 +11747,13 @@ async function refreshWatchlistTicker(ticker){
       render:false,
       force:true
     });
+    const refreshedVerdict = resolveGlobalVerdict(record);
+    const refreshedSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+    appendWatchlistDebugEvent(record, {
+      at:new Date().toISOString(),
+      source:'manual_refresh_result',
+      result:`settled: ${refreshedVerdict.final_verdict || 'unknown'} | allow_watchlist=${refreshedVerdict.allow_watchlist ? 'true' : 'false'} | lifecycle=${refreshedSnapshot && refreshedSnapshot.state ? refreshedSnapshot.state : 'n/a'}`
+    });
     setStatus('scannerSelectionStatus', `<span class="ok">${escapeHtml(symbol)} refreshed from saved market data.</span>`);
   }catch(error){
     runWatchlistLifecycleEvaluation({
