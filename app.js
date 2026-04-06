@@ -18,6 +18,7 @@ if(!window.AppDateUtils) throw new Error('AppDateUtils failed to load.');
 if(!window.AppTickerUtils) throw new Error('AppTickerUtils failed to load.');
 if(!window.AppStorage) throw new Error('AppStorage failed to load.');
 if(!window.AppStateBridge) throw new Error('AppStateBridge failed to load.');
+if(!window.AppRecords) throw new Error('AppRecords failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -52,6 +53,11 @@ const {
   writeMarketCache
 } = window.AppStorage;
 const {createAppState} = window.AppStateBridge;
+const {
+  createBaseTickerRecord,
+  getTickerRecord: getTickerRecordImpl,
+  upsertTickerRecord: upsertTickerRecordImpl
+} = window.AppRecords;
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
@@ -1303,181 +1309,7 @@ function normalizeCard(card){
 }
 
 function baseTickerRecord(ticker){
-  const createdAt = new Date().toISOString();
-  return {
-    ticker:normalizeTicker(ticker),
-    marketData:{
-      price:null,
-      asOf:'',
-      source:'',
-      ma20:null,
-      ma50:null,
-      ma200:null,
-      rsi:null,
-      avgVolume:null,
-      volume:null,
-      perf1w:null,
-      perf1m:null,
-      perf3m:null,
-      perf6m:null,
-      perfYtd:null,
-    marketCap:null,
-    currency:'',
-    history:[]
-  },
-    scan:{
-      scanType:'',
-      scanSetupType:'',
-      setupOrigin:'',
-      estimatedEntryZone:null,
-      estimatedStopArea:null,
-      estimatedTargetArea:null,
-      estimatedRR:null,
-      score:null,
-      verdict:'',
-      reasons:[],
-      flags:{},
-      summary:'',
-      riskStatus:'plan_missing',
-      trendStatus:'',
-      pullbackStatus:'',
-      pullbackType:'',
-      analysisProjection:null,
-      lastScannedAt:'',
-      updatedAt:''
-    },
-    review:{
-      chartAvailable:false,
-      chartRef:null,
-      importedFromScreenshot:false,
-      notes:'',
-      savedVerdict:'',
-      savedSummary:'',
-      savedScore:null,
-      analysisState:{
-        raw:'',
-        normalized:null,
-        prompt:'',
-        error:'',
-        reviewedAt:''
-      },
-      aiAnalysisRaw:'',
-      normalizedAnalysis:null,
-      lastReviewedAt:'',
-      lastPrompt:'',
-      lastError:'',
-      manualReview:null,
-      cardOpen:false,
-      source:'manual'
-    },
-    plan:{
-      hasValidPlan:false,
-      entry:null,
-      stop:null,
-      firstTarget:null,
-      exitMode:'fixed_target',
-      targetReviewState:'not_near_target',
-      targetActionRecommendation:'',
-      targetAlert:{
-        enabled:true,
-        level:null,
-        lastState:''
-      },
-      riskPerShare:null,
-      rewardPerShare:null,
-      plannedRR:null,
-      positionSize:null,
-      positionCost:null,
-      positionCostGbp:null,
-      quoteCurrency:'',
-      maxLoss:null,
-      riskStatus:'plan_missing',
-      capitalFit:'unknown',
-      tradeability:'invalid',
-      capitalNote:'',
-      affordability:'',
-      status:'missing',
-      triggerState:'waiting_for_trigger',
-      planValidationState:'',
-      needsReplan:false,
-      missedState:'',
-      invalidatedState:'',
-      firstTargetTooClose:false,
-      lastPlannedAt:'',
-      source:''
-    },
-    setup:{
-      rawScore:null,
-      score:null,
-      convictionTier:'',
-      practicalSizeFlag:'',
-      verdict:'',
-      reasons:[],
-      marketCaution:false
-    },
-    action:{
-      stage:'watch',
-      priority:3
-    },
-    watchlist:{
-      inWatchlist:false,
-      addedAt:'',
-      addedScore:null,
-      expiryAt:'',
-      status:'',
-      expiryAfterTradingDays:5,
-      updatedAt:'',
-      lifecycleState:'',
-      lifecycleLabel:'',
-      watchlist_priority_score:null,
-      watchlist_priority_bucket:'',
-      debug:{
-        lastEvaluatedAt:'',
-        lastSource:'',
-        hadFreshInputs:false,
-        previousState:'',
-        currentState:'',
-        changeType:'',
-        reason:'',
-        nextPossibleState:'',
-        mainBlocker:'',
-        planRecomputed:false,
-        recomputeResult:'',
-        planSnapshotMismatch:'',
-        previousPlan:null,
-        newPlan:null,
-        warnings:[],
-        auditTrail:[]
-      }
-    },
-    diary:{
-      hasDiary:false,
-      diaryIds:[],
-      lastOutcomeAt:'',
-      records:[],
-      tradeOutcome:baseTradeOutcome()
-    },
-    lifecycle:{
-      stage:'',
-      status:'inactive',
-      lockReason:'',
-      stageUpdatedAt:'',
-      expiresAt:'',
-      expiryReason:'',
-      history:[]
-    },
-    meta:{
-      createdAt,
-      updatedAt:createdAt,
-      tags:[],
-      dataVersion:2,
-      companyName:'',
-      exchange:'',
-      tradingViewSymbol:'',
-      marketStatus:'',
-      pinned:false
-    }
-  };
+  return createBaseTickerRecord(ticker, { normalizeTicker, baseTradeOutcome });
 }
 
 function analysisDerivedStatesFromRecord(record){
@@ -1904,15 +1736,16 @@ function reevaluateTickerProgress(record){
 }
 
 function getTickerRecord(ticker){
-  const symbol = normalizeTicker(ticker);
-  return symbol ? state.tickerRecords[symbol] || null : null;
+  return getTickerRecordImpl(ticker, { normalizeTicker, state });
 }
 
 function upsertTickerRecord(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return null;
-  if(!state.tickerRecords[symbol]) state.tickerRecords[symbol] = normalizeTickerRecord(baseTickerRecord(symbol));
-  return state.tickerRecords[symbol];
+  return upsertTickerRecordImpl(ticker, {
+    normalizeTicker,
+    state,
+    normalizeTickerRecord,
+    createBaseTickerRecord: symbol => baseTickerRecord(symbol)
+  });
 }
 
 function formatPlanFieldValue(value, fallback = ''){
