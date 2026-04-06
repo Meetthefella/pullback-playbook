@@ -28,7 +28,6 @@ if(!window.PlanMath) throw new Error('PlanMath failed to load.');
 if(!window.Tradeability) throw new Error('Tradeability failed to load.');
 if(!window.WatchlistUtils) throw new Error('WatchlistUtils failed to load.');
 if(!window.WatchlistLifecycleCore) throw new Error('WatchlistLifecycleCore failed to load.');
-if(!window.WatchlistLifecyclePresentation) throw new Error('WatchlistLifecyclePresentation failed to load.');
 if(!window.WatchlistGuidance) throw new Error('WatchlistGuidance failed to load.');
 if(!window.ResolverSupport) throw new Error('ResolverSupport failed to load.');
 if(!window.ResolverCore) throw new Error('ResolverCore failed to load.');
@@ -107,9 +106,6 @@ const {
   canonicalLifecycleState: canonicalLifecycleStateImpl,
   resolveLifecycleTransition: resolveLifecycleTransitionImpl
 } = window.WatchlistLifecycleCore;
-const {
-  applyLifecycleStatePresentation: applyLifecycleStatePresentationImpl
-} = window.WatchlistLifecyclePresentation;
 const {
   watchlistLifecycleChangeType: watchlistLifecycleChangeTypeImpl,
   watchlistNextStateGuidance: watchlistNextStateGuidanceImpl
@@ -2741,11 +2737,62 @@ function resolveLifecycleTransition(currentState, inputs = {}){
 }
 
 function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
-  return applyLifecycleStatePresentationImpl(snapshot, nextState, context, {
-    canonicalLifecycleState,
-    getBadge,
-    watchlistLifecycleStateRank
-  });
+  const state = canonicalLifecycleState(nextState) || canonicalLifecycleState(snapshot && snapshot.state);
+  const globalVerdict = context.globalVerdict || {};
+  const resolved = context.resolved || {};
+  const activeExpiryAt = context.activeExpiryAt || '';
+  const planExpiryAt = context.planExpiryAt || '';
+  const expiryAt = context.expiryAt || '';
+  const reason = context.reason || snapshot.reason || globalVerdict.reason || '';
+  const badge = getBadge(state || 'monitor');
+  const nextSnapshot = {
+    ...snapshot,
+    state:state || snapshot.state,
+    label:badge.text,
+    badgeClass:badge.className,
+    reason
+  };
+
+  if(state === 'dead'){
+    nextSnapshot.bucket = 'low_priority_avoid';
+    nextSnapshot.stage = 'avoided';
+    nextSnapshot.status = 'inactive';
+    nextSnapshot.expiresAt = '';
+    nextSnapshot.reason = reason || globalVerdict.reason || resolved.blockerReason || 'Setup failed technically and is no longer actionable.';
+  }else if(state === 'avoid'){
+    nextSnapshot.bucket = 'low_priority_avoid';
+    nextSnapshot.stage = 'avoided';
+    nextSnapshot.status = 'inactive';
+    nextSnapshot.expiresAt = '';
+    nextSnapshot.reason = reason || globalVerdict.reason || 'Setup is no longer watchlist-eligible.';
+  }else if(state === 'entry'){
+    nextSnapshot.bucket = 'tradeable_entry';
+    nextSnapshot.stage = 'planned';
+    nextSnapshot.status = 'active';
+    nextSnapshot.expiresAt = planExpiryAt || nextSnapshot.expiresAt;
+    nextSnapshot.reason = reason || 'Entry setup is actionable now.';
+  }else if(state === 'near_entry'){
+    nextSnapshot.bucket = 'tradeable_entry';
+    nextSnapshot.stage = 'watchlist';
+    nextSnapshot.status = 'active';
+    nextSnapshot.expiresAt = activeExpiryAt || nextSnapshot.expiresAt;
+    nextSnapshot.reason = reason || 'Near entry - monitor for trigger.';
+  }else if(state === 'watch'){
+    nextSnapshot.bucket = 'monitor_watch';
+    nextSnapshot.stage = 'watchlist';
+    nextSnapshot.status = 'active';
+    nextSnapshot.expiresAt = activeExpiryAt || expiryAt || nextSnapshot.expiresAt;
+    nextSnapshot.reason = reason || globalVerdict.reason || 'Watch setup - keep tracking.';
+  }else{
+    nextSnapshot.bucket = 'monitor_watch';
+    nextSnapshot.stage = 'watchlist';
+    nextSnapshot.status = 'active';
+    nextSnapshot.expiresAt = activeExpiryAt || expiryAt || nextSnapshot.expiresAt;
+    nextSnapshot.reason = reason || globalVerdict.reason || 'Needs confirmation before it can be acted on.';
+  }
+
+  nextSnapshot.rank = watchlistLifecycleStateRank(nextSnapshot.state);
+  return nextSnapshot;
 }
 
 function watchlistLifecycleSnapshot(record){
