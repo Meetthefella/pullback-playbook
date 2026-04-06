@@ -2534,12 +2534,13 @@ function loadState(){
   if($('showExpiredWatchlist')) $('showExpiredWatchlist').checked = !!state.showExpiredWatchlist;
   if($('appVersion')) $('appVersion').textContent = APP_VERSION;
   setResetStatus(summarizeStartupTrace(startupTrace), startupTrace.postSyncCanonicalWatchlistCount < startupTrace.preSyncCanonicalWatchlistCount ? 'warntext' : 'ok');
-  appendRuntimeDebugEntry({
+  uiState.runtimeDebugContext = 'startup';
+  uiState.runtimeDebugEntries = [{
     source:'startup_restore',
     message:summarizeStartupTrace(startupTrace),
     context:'startup',
     details:startupTrace
-  });
+  }, ...(uiState.runtimeDebugEntries || [])].slice(0, 12);
   updateProviderStatusNote();
   renderStats();
   renderTickerQuickLists();
