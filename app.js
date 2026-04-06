@@ -3,7 +3,9 @@ const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt,
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
 const liteKey = 'pullbackPlaybookV3Lite';
-const APP_VERSION = 'v4.4.4';
+const settingsKey = 'pullbackPlaybookSettingsV1';
+const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
+const APP_VERSION = 'v4.4.5';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';
@@ -378,13 +380,151 @@ function evaluateRewardRisk(entry, stop, firstTarget){
 }
 
 function persistState(){
+  const settingsSaved = safeStorageSet(settingsKey, buildSettingsPersistedState(state));
+  const recordsSaved = safeStorageSet(recordsLiteKey, buildRecordsLitePersistedState(state));
   const fullSaved = safeStorageSet(key, state);
   const liteSaved = safeStorageSet(liteKey, buildLitePersistedState(state));
-  if(!fullSaved && !liteSaved){
-    console.warn('STATE_PERSIST_FAILED', {key, liteKey});
+  if(!fullSaved && !liteSaved && !settingsSaved && !recordsSaved){
+    console.warn('STATE_PERSIST_FAILED', {key, liteKey, settingsKey, recordsLiteKey});
   }else if(!fullSaved){
-    console.warn('STATE_PERSIST_FALLBACK_LITE_ONLY', {key, liteKey});
+    console.warn('STATE_PERSIST_FALLBACK_ONLY', {
+      key,
+      liteKey,
+      settingsKey,
+      recordsLiteKey,
+      liteSaved,
+      settingsSaved,
+      recordsSaved
+    });
   }
+}
+
+function buildSettingsPersistedState(sourceState){
+  const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
+  return {
+    accountSize:baseState.accountSize,
+    maxRisk:baseState.maxRisk,
+    riskPercent:baseState.riskPercent,
+    maxLossOverride:baseState.maxLossOverride,
+    wholeSharesOnly:baseState.wholeSharesOnly,
+    marketStatus:baseState.marketStatus,
+    setupType:baseState.setupType,
+    listName:baseState.listName,
+    universeMode:baseState.universeMode,
+    tickers:Array.isArray(baseState.tickers) ? [...baseState.tickers] : [],
+    recentTickers:Array.isArray(baseState.recentTickers) ? [...baseState.recentTickers] : [],
+    dataProvider:baseState.dataProvider,
+    apiPlan:baseState.apiPlan,
+    aiEndpoint:baseState.aiEndpoint,
+    marketDataEndpoint:baseState.marketDataEndpoint,
+    showExpiredWatchlist:!!baseState.showExpiredWatchlist
+  };
+}
+
+function buildRecordsLitePersistedState(sourceState){
+  const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
+  const liteTickerRecords = Object.fromEntries(
+    Object.entries(normalizeTickerRecordsMap(baseState.tickerRecords || {})).map(([ticker, record]) => {
+      const item = normalizeTickerRecord(record);
+      return [ticker, {
+        ticker:item.ticker,
+        marketData:{
+          price:item.marketData.price,
+          asOf:item.marketData.asOf,
+          source:item.marketData.source,
+          ma20:item.marketData.ma20,
+          ma50:item.marketData.ma50,
+          ma200:item.marketData.ma200,
+          rsi:item.marketData.rsi,
+          avgVolume:item.marketData.avgVolume,
+          volume:item.marketData.volume,
+          perf1w:item.marketData.perf1w,
+          perf1m:item.marketData.perf1m,
+          perf3m:item.marketData.perf3m,
+          perf6m:item.marketData.perf6m,
+          perfYtd:item.marketData.perfYtd,
+          currency:item.marketData.currency
+        },
+        scan:{
+          scanType:item.scan.scanType,
+          scanSetupType:item.scan.scanSetupType,
+          setupOrigin:item.scan.setupOrigin,
+          score:item.scan.score,
+          verdict:item.scan.verdict,
+          reasons:Array.isArray(item.scan.reasons) ? [...item.scan.reasons] : [],
+          flags:item.scan.flags && typeof item.scan.flags === 'object' ? cloneData(item.scan.flags, {}) : {},
+          summary:item.scan.summary,
+          riskStatus:item.scan.riskStatus,
+          trendStatus:item.scan.trendStatus,
+          pullbackStatus:item.scan.pullbackStatus,
+          pullbackType:item.scan.pullbackType,
+          lastScannedAt:item.scan.lastScannedAt,
+          updatedAt:item.scan.updatedAt
+        },
+        review:{
+          notes:item.review.notes,
+          savedVerdict:item.review.savedVerdict,
+          savedSummary:item.review.savedSummary,
+          savedScore:item.review.savedScore,
+          lastReviewedAt:item.review.lastReviewedAt,
+          manualReview:item.review.manualReview && typeof item.review.manualReview === 'object' ? cloneData(item.review.manualReview, null) : null,
+          cardOpen:!!item.review.cardOpen,
+          source:item.review.source
+        },
+        plan:{
+          hasValidPlan:item.plan.hasValidPlan,
+          entry:item.plan.entry,
+          stop:item.plan.stop,
+          firstTarget:item.plan.firstTarget,
+          exitMode:item.plan.exitMode,
+          targetReviewState:item.plan.targetReviewState,
+          targetActionRecommendation:item.plan.targetActionRecommendation,
+          targetAlert:item.plan.targetAlert && typeof item.plan.targetAlert === 'object' ? cloneData(item.plan.targetAlert, {}) : {},
+          riskPerShare:item.plan.riskPerShare,
+          rewardPerShare:item.plan.rewardPerShare,
+          plannedRR:item.plan.plannedRR,
+          positionSize:item.plan.positionSize,
+          positionCost:item.plan.positionCost,
+          positionCostGbp:item.plan.positionCostGbp,
+          quoteCurrency:item.plan.quoteCurrency,
+          maxLoss:item.plan.maxLoss,
+          riskStatus:item.plan.riskStatus,
+          capitalFit:item.plan.capitalFit,
+          tradeability:item.plan.tradeability,
+          capitalNote:item.plan.capitalNote,
+          affordability:item.plan.affordability,
+          status:item.plan.status,
+          triggerState:item.plan.triggerState,
+          planValidationState:item.plan.planValidationState,
+          needsReplan:item.plan.needsReplan,
+          missedState:item.plan.missedState,
+          invalidatedState:item.plan.invalidatedState,
+          firstTargetTooClose:item.plan.firstTargetTooClose,
+          lastPlannedAt:item.plan.lastPlannedAt,
+          source:item.plan.source
+        },
+        setup:{
+          rawScore:item.setup.rawScore,
+          score:item.setup.score,
+          convictionTier:item.setup.convictionTier,
+          practicalSizeFlag:item.setup.practicalSizeFlag,
+          verdict:item.setup.verdict,
+          reasons:Array.isArray(item.setup.reasons) ? [...item.setup.reasons] : [],
+          marketCaution:item.setup.marketCaution
+        },
+        watchlist:item.watchlist && typeof item.watchlist === 'object' ? cloneData(item.watchlist, {}) : {},
+        lifecycle:item.lifecycle && typeof item.lifecycle === 'object' ? cloneData(item.lifecycle, {}) : {},
+        diary:item.diary && typeof item.diary === 'object' ? cloneData(item.diary, {}) : {},
+        meta:item.meta && typeof item.meta === 'object' ? cloneData(item.meta, {}) : {}
+      }];
+    })
+  );
+  return {
+    tickerRecords:liteTickerRecords,
+    watchlist:Array.isArray(baseState.watchlist) ? cloneData(baseState.watchlist, []) : [],
+    tradeDiary:Array.isArray(baseState.tradeDiary) ? cloneData(baseState.tradeDiary, []) : [],
+    symbolMeta:baseState.symbolMeta && typeof baseState.symbolMeta === 'object' ? cloneData(baseState.symbolMeta, {}) : {}
+  };
 }
 
 function buildLitePersistedState(sourceState){
@@ -2259,9 +2399,11 @@ function setScannerSessionResults(tickers, scannedAt){
 }
 
 function loadState(){
+  const settingsState = safeStorageGet(settingsKey, {}) || {};
+  const recordsLiteState = safeStorageGet(recordsLiteKey, {}) || {};
   const liteState = safeStorageGet(liteKey, {}) || {};
   const fullState = safeStorageGet(key, {}) || {};
-  Object.assign(state, createDefaultState(), liteState, fullState);
+  Object.assign(state, createDefaultState(), settingsState, recordsLiteState, liteState, fullState);
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
   clearScannerSessionState({suppressed:false});
