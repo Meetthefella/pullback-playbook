@@ -188,6 +188,10 @@ const DEFAULT_STATE = {
   scannerDebug:[]
 };
 
+function createDefaultState(){
+  return safeJsonParse(JSON.stringify(DEFAULT_STATE), DEFAULT_STATE);
+}
+
 const {state, uiState} = createAppState({
   defaultState:DEFAULT_STATE,
   safeJsonParse
