@@ -6564,7 +6564,9 @@ function evaluateSetupQualityAdjustments(record, options = {}){
   };
 }
 
-function resolveFinalStateContract(record, options = {}){
+// LEGACY RESOLVER BLOCK DISABLED
+// Shadowed by the canonical resolver block later in app.js.
+function legacyResolveFinalStateContract(record, options = {}){
   const item = normalizeTickerRecord(record);
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
@@ -7382,7 +7384,9 @@ function primaryVerdictBadge(verdict){
   return {label:'🧐 Monitor', className:'watch'};
 }
 
-function resolveEmojiPresentation(record, options = {}){
+// LEGACY RESOLVER BLOCK DISABLED
+// Shadowed by the canonical resolver block later in app.js.
+function legacyResolveEmojiPresentation(record, options = {}){
   const item = normalizeTickerRecord(record);
   const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || displayStageForRecord(item));
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
@@ -7864,7 +7868,9 @@ function displayStageForRecord(record, options = {}){
   return finalVerdictForRecord(record, options);
 }
 
-function reviewHeaderVerdictForRecord(record){
+// LEGACY RESOLVER BLOCK DISABLED
+// Shadowed by the canonical resolver block later in app.js.
+function legacyReviewHeaderVerdictForRecord(record){
   return finalVerdictForRecord(record, {
     includeExecutionDowngrade:false,
     includeRuntimeFallback:false
