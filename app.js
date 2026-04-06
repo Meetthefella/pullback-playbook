@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 const click = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 const key = 'pullbackPlaybookV3';
+const liteKey = 'pullbackPlaybookV3Lite';
 const APP_VERSION = 'v4.4.4';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
@@ -377,7 +378,73 @@ function evaluateRewardRisk(entry, stop, firstTarget){
 }
 
 function persistState(){
-  safeStorageSet(key, state);
+  const fullSaved = safeStorageSet(key, state);
+  const liteSaved = safeStorageSet(liteKey, buildLitePersistedState(state));
+  if(!fullSaved && !liteSaved){
+    console.warn('STATE_PERSIST_FAILED', {key, liteKey});
+  }else if(!fullSaved){
+    console.warn('STATE_PERSIST_FALLBACK_LITE_ONLY', {key, liteKey});
+  }
+}
+
+function buildLitePersistedState(sourceState){
+  const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
+  const liteTickerRecords = Object.fromEntries(
+    Object.entries(normalizeTickerRecordsMap(baseState.tickerRecords || {})).map(([ticker, record]) => {
+      const item = normalizeTickerRecord(record);
+      return [ticker, {
+        ...item,
+        review:{
+          ...item.review,
+          chartAvailable:false,
+          chartRef:null,
+          analysisState:{
+            ...item.review.analysisState,
+            raw:'',
+            normalized:null,
+            prompt:'',
+            error:''
+          },
+          aiAnalysisRaw:'',
+          normalizedAnalysis:null,
+          lastPrompt:'',
+          lastError:''
+        }
+      }];
+    })
+  );
+  return {
+    accountSize:baseState.accountSize,
+    maxRisk:baseState.maxRisk,
+    riskPercent:baseState.riskPercent,
+    maxLossOverride:baseState.maxLossOverride,
+    wholeSharesOnly:baseState.wholeSharesOnly,
+    marketStatus:baseState.marketStatus,
+    setupType:baseState.setupType,
+    listName:baseState.listName,
+    universeMode:baseState.universeMode,
+    tickers:Array.isArray(baseState.tickers) ? [...baseState.tickers] : [],
+    recentTickers:Array.isArray(baseState.recentTickers) ? [...baseState.recentTickers] : [],
+    tickerRecords:liteTickerRecords,
+    backendTrackedVersions:baseState.backendTrackedVersions && typeof baseState.backendTrackedVersions === 'object' ? {...baseState.backendTrackedVersions} : {},
+    backendLocalTrackedTickers:Array.isArray(baseState.backendLocalTrackedTickers) ? [...baseState.backendLocalTrackedTickers] : [],
+    lastAlertsSeenAt:baseState.lastAlertsSeenAt,
+    dismissedAlertIds:Array.isArray(baseState.dismissedAlertIds) ? [...baseState.dismissedAlertIds] : [],
+    dismissedFocusTickers:Array.isArray(baseState.dismissedFocusTickers) ? [...baseState.dismissedFocusTickers] : [],
+    dismissedFocusCycle:baseState.dismissedFocusCycle,
+    activeQueueClearedCycle:baseState.activeQueueClearedCycle,
+    activeQueueClearedTickers:Array.isArray(baseState.activeQueueClearedTickers) ? [...baseState.activeQueueClearedTickers] : [],
+    activeQueueManualTickers:Array.isArray(baseState.activeQueueManualTickers) ? [...baseState.activeQueueManualTickers] : [],
+    activeQueueLastRebuiltCycle:baseState.activeQueueLastRebuiltCycle,
+    watchlist:Array.isArray(baseState.watchlist) ? cloneData(baseState.watchlist, []) : [],
+    tradeDiary:Array.isArray(baseState.tradeDiary) ? cloneData(baseState.tradeDiary, []) : [],
+    symbolMeta:baseState.symbolMeta && typeof baseState.symbolMeta === 'object' ? cloneData(baseState.symbolMeta, {}) : {},
+    showExpiredWatchlist:!!baseState.showExpiredWatchlist,
+    dataProvider:baseState.dataProvider,
+    apiPlan:baseState.apiPlan,
+    aiEndpoint:baseState.aiEndpoint,
+    marketDataEndpoint:baseState.marketDataEndpoint
+  };
 }
 
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = APP_FETCH_TIMEOUT_MS, maxAttempts = 2){
@@ -2192,7 +2259,9 @@ function setScannerSessionResults(tickers, scannedAt){
 }
 
 function loadState(){
-  Object.assign(state, createDefaultState(), safeStorageGet(key, {}) || {});
+  const liteState = safeStorageGet(liteKey, {}) || {};
+  const fullState = safeStorageGet(key, {}) || {};
+  Object.assign(state, createDefaultState(), liteState, fullState);
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
   clearScannerSessionState({suppressed:false});
