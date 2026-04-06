@@ -27,6 +27,7 @@ if(!window.AppRecords) throw new Error('AppRecords failed to load.');
 if(!window.PlanMath) throw new Error('PlanMath failed to load.');
 if(!window.Tradeability) throw new Error('Tradeability failed to load.');
 if(!window.WatchlistUtils) throw new Error('WatchlistUtils failed to load.');
+if(!window.WatchlistDebug) throw new Error('WatchlistDebug failed to load.');
 if(!window.WatchlistLifecycleCore) throw new Error('WatchlistLifecycleCore failed to load.');
 if(!window.WatchlistLifecyclePresentation) throw new Error('WatchlistLifecyclePresentation failed to load.');
 if(!window.WatchlistLifecycleSnapshot) throw new Error('WatchlistLifecycleSnapshot failed to load.');
@@ -103,6 +104,9 @@ const {
   recomputeAttemptedForSource: recomputeAttemptedForSourceImpl,
   determineRecomputeResult: determineRecomputeResultImpl
 } = window.WatchlistUtils;
+const {
+  appendWatchlistDebugEvent: appendWatchlistDebugEventImpl
+} = window.WatchlistDebug;
 const {
   watchlistLifecycleStateRank: watchlistLifecycleStateRankImpl,
   canonicalLifecycleState: canonicalLifecycleStateImpl,
@@ -2994,25 +2998,7 @@ function syncWatchlistLifecycleBeforeRender(source = 'auto_recompute'){
 }
 
 function appendWatchlistDebugEvent(record, event){
-  if(!record || !record.watchlist || typeof record.watchlist !== 'object') return;
-  record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
-  const nextEvent = {
-    at:String(event && event.at || new Date().toISOString()),
-    source:String(event && event.source || ''),
-    result:String(event && event.result || '')
-  };
-  const trail = Array.isArray(record.watchlist.debug.auditTrail) ? record.watchlist.debug.auditTrail : [];
-  const latest = trail[0];
-  const timestampDeltaMs = Math.abs(Date.parse(nextEvent.at) - Date.parse(String(latest && latest.at || '')));
-  const dedupeUnchanged = latest
-    && latest.source === nextEvent.source
-    && latest.result === nextEvent.result
-    && /^unchanged:/i.test(nextEvent.result)
-    && ['auto_recompute','manual_refresh'].includes(nextEvent.source)
-    && Number.isFinite(timestampDeltaMs)
-    && timestampDeltaMs < 60000;
-  if(dedupeUnchanged) return;
-  record.watchlist.debug.auditTrail = [nextEvent, ...trail].slice(0, 5);
+  return appendWatchlistDebugEventImpl(record, event);
 }
 
 function watchlistLifecycleChangeType(previousState, currentState){
