@@ -13,6 +13,17 @@ const savedScannerUniverseKey = 'pp_scanner_universe_saved';
 const savedScannerUniverseMetaKey = 'pp_scanner_universe_saved_meta';
 const DEFAULT_PROVIDER = 'fmp';
 const DEFAULT_API_PLAN = 'scanner';
+if(!window.AppUtils) throw new Error('AppUtils failed to load.');
+const {
+  numericOrNull,
+  escapeHtml,
+  validateTickerSymbol,
+  normalizeTicker,
+  countTradingDaysBetween,
+  fmtPrice,
+  todayIsoDate,
+  businessDaysFromNow
+} = window.AppUtils;
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
@@ -354,12 +365,6 @@ function evaluateRewardRisk(entry, stop, firstTarget){
   return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'weak'};
 }
 
-function numericOrNull(value){
-  if(value === null || value === undefined || value === '') return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
 function safeJsonParse(value, fallback){
   try{
     const parsed = JSON.parse(value);
@@ -662,18 +667,6 @@ function bootstrapMarketStatusClock(){
   marketStatusTimer = setInterval(() => {
     refreshMarketContextWidgets();
   }, MARKET_STATUS_REFRESH_MS);
-}
-
-function escapeHtml(value){
-  return String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-}
-
-function validateTickerSymbol(value){
-  return /^[A-Z][A-Z0-9.-]{0,9}$/.test(String(value || '').trim().toUpperCase());
-}
-
-function normalizeTicker(value){
-  return String(value || '').trim().toUpperCase();
 }
 
 function normalizeScanType(value){
@@ -3180,21 +3173,6 @@ function removeFromWatchlist(ticker){
   commitTickerState();
   renderWatchlist();
   renderFocusQueue();
-}
-
-function countTradingDaysBetween(startDate, endDate){
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(startDate || '') || !/^\d{4}-\d{2}-\d{2}$/.test(endDate || '')) return 0;
-  const start = new Date(`${startDate}T12:00:00Z`);
-  const end = new Date(`${endDate}T12:00:00Z`);
-  if(end <= start) return 0;
-  let count = 0;
-  const cursor = new Date(start);
-  while(cursor < end){
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-    const day = cursor.getUTCDay();
-    if(day !== 0 && day !== 6 && cursor <= end) count += 1;
-  }
-  return count;
 }
 
 function getTradingDaysRemaining(entry){
@@ -9290,20 +9268,12 @@ function nextActionTextForRecord(record){
   return 'Monitor';
 }
 
-function fmtPrice(value){
-  return Number.isFinite(value) ? Number(value).toFixed(2) : '-';
-}
-
 function sleep(ms){
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function formatPercent(value){
   return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : '-';
-}
-
-function todayIsoDate(){
-  return new Date().toISOString().slice(0, 10);
 }
 
 function isoDateAddDays(isoDate, days){
@@ -9685,10 +9655,6 @@ function formatLocalTimestamp(timestamp){
   const time = Date.parse(timestamp || '');
   if(!Number.isFinite(time)) return '';
   return new Date(time).toLocaleString();
-}
-
-function businessDaysFromNow(days){
-  return tradingDaysFrom(todayIsoDate(), days);
 }
 
 function isClosedOutcome(outcome){
