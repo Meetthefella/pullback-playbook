@@ -16,6 +16,7 @@ const DEFAULT_API_PLAN = 'scanner';
 if(!window.AppUtils) throw new Error('AppUtils failed to load.');
 if(!window.AppDateUtils) throw new Error('AppDateUtils failed to load.');
 if(!window.AppTickerUtils) throw new Error('AppTickerUtils failed to load.');
+if(!window.AppStorage) throw new Error('AppStorage failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -41,6 +42,14 @@ const {
   parseTickers,
   uniqueTickers
 } = window.AppTickerUtils;
+const {
+  safeJsonParse,
+  safeStorageGet,
+  safeStorageSet,
+  safeStorageRemove,
+  readMarketCache,
+  writeMarketCache
+} = window.AppStorage;
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
@@ -380,43 +389,6 @@ function evaluateRewardRisk(entry, stop, firstTarget){
   if(rrRatio >= 2) return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'strong'};
   if(rrRatio >= 1.5) return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'acceptable'};
   return {valid:true, riskPerShare, rewardPerShare, rrRatio, rrState:'weak'};
-}
-
-function safeJsonParse(value, fallback){
-  try{
-    const parsed = JSON.parse(value);
-    return parsed == null ? fallback : parsed;
-  }catch(error){
-    return fallback;
-  }
-}
-
-function safeStorageGet(storageKey, fallback){
-  try{
-    const raw = localStorage.getItem(storageKey);
-    if(raw == null) return fallback;
-    return safeJsonParse(raw, fallback);
-  }catch(error){
-    return fallback;
-  }
-}
-
-function safeStorageSet(storageKey, value){
-  try{
-    localStorage.setItem(storageKey, JSON.stringify(value));
-    return true;
-  }catch(error){
-    return false;
-  }
-}
-
-function safeStorageRemove(storageKey){
-  try{
-    localStorage.removeItem(storageKey);
-    return true;
-  }catch(error){
-    return false;
-  }
 }
 
 function persistState(){
@@ -9594,21 +9566,6 @@ function relativeAgeLabel(timestamp){
 function isFreshScanTimestamp(timestamp){
   const time = Date.parse(timestamp || '');
   return Number.isFinite(time) && (Date.now() - time) <= MARKET_CACHE_TTL_MS;
-}
-
-function readMarketCache(){
-  const parsed = safeStorageGet(marketCacheKey, {});
-  if(!parsed || typeof parsed !== 'object') return {};
-  if(parsed.__schemaVersion !== MARKET_CACHE_SCHEMA_VERSION) return {};
-  return parsed.entries && typeof parsed.entries === 'object' ? parsed.entries : {};
-}
-
-function writeMarketCache(cache){
-  safeStorageSet(marketCacheKey, {
-    __schemaVersion:MARKET_CACHE_SCHEMA_VERSION,
-    updatedAt:new Date().toISOString(),
-    entries:cache || {}
-  });
 }
 
 function uniqueStrings(values){
