@@ -2120,11 +2120,13 @@ function syncTickerRecordsFromLegacyCollections(){
     record.diary.diaryIds = record.diary.records.map(item => item.id);
     if(record.watchlist.inWatchlist && record.watchlist.expiryAt && countTradingDaysBetween(todayIsoDate(), record.watchlist.expiryAt) <= 0){
       record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
-      record.watchlist.debug.watchlist_removed_by = 'legacy_expiry_normalize';
+      record.watchlist.debug.watchlist_removed_by = '';
       record.watchlist.debug.removal_global_verdict = '';
       record.watchlist.debug.removal_allow_watchlist = '';
       record.watchlist.debug.removal_source = 'normalizeTickerRecordsMap';
-      record.watchlist.inWatchlist = false;
+      const warnings = new Set(Array.isArray(record.watchlist.debug.warnings) ? record.watchlist.debug.warnings : []);
+      warnings.add('Legacy expiry normalization preserved this watchlist entry on page load.');
+      record.watchlist.debug.warnings = [...warnings].slice(0, 5);
     }
     maybeExpireTickerRecord(record);
     record.meta.updatedAt = String(record.meta.updatedAt || new Date().toISOString());
