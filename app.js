@@ -17,6 +17,7 @@ if(!window.AppUtils) throw new Error('AppUtils failed to load.');
 if(!window.AppDateUtils) throw new Error('AppDateUtils failed to load.');
 if(!window.AppTickerUtils) throw new Error('AppTickerUtils failed to load.');
 if(!window.AppStorage) throw new Error('AppStorage failed to load.');
+if(!window.AppStateBridge) throw new Error('AppStateBridge failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -50,6 +51,7 @@ const {
   readMarketCache,
   writeMarketCache
 } = window.AppStorage;
+const {createAppState} = window.AppStateBridge;
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
@@ -104,35 +106,10 @@ const DEFAULT_STATE = {
   scannerDebug:[]
 };
 
-function createDefaultState(){
-  return safeJsonParse(JSON.stringify(DEFAULT_STATE), DEFAULT_STATE);
-}
-
-const state = createDefaultState();
-
-const uiState = {
-  promptOpen:{},
-  responseOpen:{},
-  secondaryUiTicker:'',
-  secondaryUiMode:null,
-  loadingTicker:'',
-  selectedScanner:{},
-  activeReviewTicker:'',
-  activeReviewAddsToScannerUniverse:true,
-  activeReviewVerdictOverride:'',
-  scannerSessionTickers:[],
-  scannerLastScanAt:'',
-  scannerSessionId:'',
-  controlStripPanel:'',
-  scannerShortlistSuppressed:false,
-  watchlistLifecycleRunning:false,
-  watchlistLifecycleLastRunAt:'',
-  watchlistLifecycleLastSource:'',
-  watchlistLifecyclePendingSource:'',
-  runtimeDebugEntries:[],
-  runtimeDebugContext:'',
-  scannerCardClickTrace:{}
-};
+const {state, uiState} = createAppState({
+  defaultState:DEFAULT_STATE,
+  safeJsonParse
+});
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
