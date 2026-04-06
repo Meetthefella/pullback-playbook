@@ -14,6 +14,7 @@ const savedScannerUniverseMetaKey = 'pp_scanner_universe_saved_meta';
 const DEFAULT_PROVIDER = 'fmp';
 const DEFAULT_API_PLAN = 'scanner';
 if(!window.AppUtils) throw new Error('AppUtils failed to load.');
+if(!window.AppDateUtils) throw new Error('AppDateUtils failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -24,6 +25,14 @@ const {
   todayIsoDate,
   businessDaysFromNow
 } = window.AppUtils;
+const {
+  isoDateAddDays,
+  isoDateMonthBounds,
+  isHoliday,
+  isTradingDay,
+  formatLocalTimestamp,
+  tradingDaysFrom
+} = window.AppDateUtils;
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
@@ -9276,24 +9285,6 @@ function formatPercent(value){
   return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : '-';
 }
 
-function isoDateAddDays(isoDate, days){
-  const date = new Date(`${String(isoDate).slice(0, 10)}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + Number(days || 0));
-  return date.toISOString().slice(0, 10);
-}
-
-function isoDateMonthBounds(isoDate){
-  const [year, month] = String(isoDate || todayIsoDate()).slice(0, 10).split('-').map(Number);
-  const first = new Date(Date.UTC(year, Math.max(0, month - 1), 1, 12, 0, 0));
-  const last = new Date(Date.UTC(year, month, 0, 12, 0, 0));
-  return {
-    first:first.toISOString().slice(0, 10),
-    last:last.toISOString().slice(0, 10),
-    year,
-    month
-  };
-}
-
 function weekdayIndexFromIsoDate(isoDate){
   return new Date(`${String(isoDate).slice(0, 10)}T12:00:00Z`).getUTCDay();
 }
@@ -9398,22 +9389,10 @@ function marketCalendarYearConfig(year){
   return US_MARKET_CALENDAR_CONFIG[Number(year)] || {holidays:[], earlyCloseDays:{}};
 }
 
-function isHoliday(dateET){
-  const isoDate = String(dateET || '').slice(0, 10);
-  const year = Number(isoDate.slice(0, 4));
-  return marketCalendarYearConfig(year).holidays.includes(isoDate);
-}
-
 function isEarlyClose(dateET){
   const isoDate = String(dateET || '').slice(0, 10);
   const year = Number(isoDate.slice(0, 4));
   return marketCalendarYearConfig(year).earlyCloseDays[isoDate] || '';
-}
-
-function isTradingDay(dateET){
-  const isoDate = String(dateET || '').slice(0, 10);
-  const weekday = weekdayIndexFromIsoDate(isoDate);
-  return weekday !== 0 && weekday !== 6 && !isHoliday(isoDate);
 }
 
 function regularSessionHoursLabel(dateET){
@@ -9649,12 +9628,6 @@ function requeueTickerForToday(ticker, options = {}){
   state.activeQueueManualTickers = uniqueTickers([symbol, ...(state.activeQueueManualTickers || [])]);
   if(options.persist !== false) persistState();
   logQueueMutation('REQUEUE_TICKER_FOR_TODAY', before);
-}
-
-function formatLocalTimestamp(timestamp){
-  const time = Date.parse(timestamp || '');
-  if(!Number.isFinite(time)) return '';
-  return new Date(time).toLocaleString();
 }
 
 function isClosedOutcome(outcome){
@@ -10100,19 +10073,6 @@ function evaluateScannerRule(rule, data){
   const left = numericOrNull(data && data[rule.field]);
   const right = rule.valueField ? numericOrNull(data && data[rule.valueField]) : numericOrNull(rule.value);
   return compareValues(left, rule.operator, right);
-}
-
-function tradingDaysFrom(startDate, count){
-  // Weekday-based trading-day approximation for lifecycle expiry. This excludes
-  // weekends but does not model exchange holidays in this pass.
-  const base = new Date(`${startDate}T12:00:00Z`);
-  let added = 0;
-  while(added < count){
-    base.setUTCDate(base.getUTCDate() + 1);
-    const day = base.getUTCDay();
-    if(day !== 0 && day !== 6) added += 1;
-  }
-  return base.toISOString().slice(0, 10);
 }
 
 function isNearLevel(price, level, tolerance){
