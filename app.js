@@ -2079,23 +2079,6 @@ function syncTickerRecordsFromLegacyCollections(){
   // Compatibility-only migration helper for older localStorage snapshots.
   // Normal runtime logic should not depend on legacy arrays as sources of truth.
   const records = normalizeTickerRecordsMap(state.tickerRecords || {});
-  Object.values(records).forEach(record => {
-    record.watchlist = {
-      ...record.watchlist,
-      inWatchlist:false,
-      addedAt:'',
-      addedScore:null,
-      expiryAt:'',
-      status:''
-    };
-    record.diary = {
-      ...record.diary,
-      hasDiary:false,
-      diaryIds:[],
-      lastOutcomeAt:'',
-      records:[]
-    };
-  });
   (state.tickers || []).forEach(ticker => {
     const record = records[normalizeTicker(ticker)] || normalizeTickerRecord(baseTickerRecord(ticker));
     records[record.ticker] = record;
