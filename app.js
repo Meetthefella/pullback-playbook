@@ -3067,6 +3067,17 @@ function resolveLifecycleTransition(currentState, inputs = {}){
     nextState = 'monitor';
   }
 
+  const nextRank = watchlistLifecycleStateRank(nextState);
+  const finalRank = watchlistLifecycleStateRank(finalVerdict);
+  if(
+    finalVerdict
+    && Number.isFinite(nextRank)
+    && Number.isFinite(finalRank)
+    && nextRank < finalRank
+  ){
+    nextState = finalVerdict;
+  }
+
   if(
     nextState === 'avoid'
     && finalVerdict
