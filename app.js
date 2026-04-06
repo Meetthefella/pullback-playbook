@@ -5,6 +5,7 @@ const key = 'pullbackPlaybookV3';
 const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
+const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
 const APP_VERSION = 'v4.4.5';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
@@ -397,6 +398,38 @@ function persistState(){
       recordsSaved
     });
   }
+}
+
+function inspectStorageKey(storageKey){
+  try{
+    const raw = localStorage.getItem(storageKey);
+    return {
+      present:raw != null,
+      bytes:raw == null ? 0 : String(raw).length,
+      error:''
+    };
+  }catch(error){
+    return {
+      present:false,
+      bytes:0,
+      error:error && error.message ? String(error.message) : 'read_failed'
+    };
+  }
+}
+
+function countCanonicalWatchlistRecords(recordsMap){
+  return Object.values(normalizeTickerRecordsMap(recordsMap || {}))
+    .filter(record => record && record.watchlist && record.watchlist.inWatchlist)
+    .length;
+}
+
+function summarizeStartupTrace(trace){
+  const info = trace && typeof trace === 'object' ? trace : {};
+  const watchlist = Number.isFinite(Number(info.postSyncWatchlistCount)) ? Number(info.postSyncWatchlistCount) : 0;
+  const market = String(info.restoredMarketStatus || 'n/a');
+  const mode = String(info.restoredUniverseMode || 'n/a');
+  const setup = String(info.restoredSetupType || 'Unknown');
+  return `Startup restore: watchlist ${watchlist} | market ${market} | mode ${mode} | setup ${setup}`;
 }
 
 function buildSettingsPersistedState(sourceState){
@@ -2399,6 +2432,10 @@ function setScannerSessionResults(tickers, scannedAt){
 }
 
 function loadState(){
+  const fullStorageInfo = inspectStorageKey(key);
+  const liteStorageInfo = inspectStorageKey(liteKey);
+  const settingsStorageInfo = inspectStorageKey(settingsKey);
+  const recordsLiteStorageInfo = inspectStorageKey(recordsLiteKey);
   const settingsState = safeStorageGet(settingsKey, {}) || {};
   const recordsLiteState = safeStorageGet(recordsLiteKey, {}) || {};
   const liteState = safeStorageGet(liteKey, {}) || {};
@@ -2440,8 +2477,38 @@ function loadState(){
   state.symbolMeta = state.symbolMeta && typeof state.symbolMeta === 'object' ? state.symbolMeta : {};
   state.scannerDebug = [];
   state.showExpiredWatchlist = !!state.showExpiredWatchlist;
+  const preSyncTrace = {
+    timestamp:new Date().toISOString(),
+    appVersion:APP_VERSION,
+    storage:{
+      full:fullStorageInfo,
+      lite:liteStorageInfo,
+      settings:settingsStorageInfo,
+      recordsLite:recordsLiteStorageInfo
+    },
+    restoredMarketStatus:String(state.marketStatus || ''),
+    restoredUniverseMode:String(state.universeMode || ''),
+    restoredSetupType:String(state.setupType || ''),
+    restoredTickerCount:Array.isArray(state.tickers) ? state.tickers.length : 0,
+    restoredLegacyWatchlistCount:Array.isArray(state.watchlist) ? state.watchlist.length : 0,
+    preSyncCanonicalWatchlistCount:countCanonicalWatchlistRecords(state.tickerRecords)
+  };
   syncTickerRecordsFromLegacyCollections();
   syncLegacyCollectionsFromTickerRecords();
+  const startupTrace = {
+    ...preSyncTrace,
+    postSyncCanonicalWatchlistCount:countCanonicalWatchlistRecords(state.tickerRecords),
+    postSyncLegacyWatchlistCount:Array.isArray(state.watchlist) ? state.watchlist.length : 0
+  };
+  safeStorageSet(startupTraceKey, startupTrace);
+  Object.values(state.tickerRecords || {}).forEach(record => {
+    if(!record || !record.watchlist || !record.watchlist.inWatchlist) return;
+    appendWatchlistDebugEvent(record, {
+      at:startupTrace.timestamp,
+      source:'startup_restore',
+      result:`restored: watchlist=${startupTrace.postSyncLegacyWatchlistCount} | market=${startupTrace.restoredMarketStatus || '(none)'} | mode=${startupTrace.restoredUniverseMode || '(none)'} | setup=${startupTrace.restoredSetupType || '(none)'}`
+    });
+  });
   ensureActiveQueueCycle();
   scheduleTrackedRecordsSync(200);
   persistState();
@@ -2462,6 +2529,13 @@ function loadState(){
   $('aiEndpoint').value = state.aiEndpoint || defaultAiEndpoint;
   if($('showExpiredWatchlist')) $('showExpiredWatchlist').checked = !!state.showExpiredWatchlist;
   if($('appVersion')) $('appVersion').textContent = APP_VERSION;
+  setResetStatus(summarizeStartupTrace(startupTrace), startupTrace.postSyncCanonicalWatchlistCount < startupTrace.preSyncCanonicalWatchlistCount ? 'warntext' : 'ok');
+  appendRuntimeDebugEntry({
+    source:'startup_restore',
+    message:summarizeStartupTrace(startupTrace),
+    context:'startup',
+    details:startupTrace
+  });
   updateProviderStatusNote();
   renderStats();
   renderTickerQuickLists();
@@ -3611,6 +3685,9 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Fresh Inputs', value:debug.hadFreshInputs ? 'Yes' : 'No'},
     {label:'Transition', value:(debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)')},
     {label:'Change Type', value:debug.changeType || 'unchanged'},
+    {label:'Removed By', value:debug.watchlist_removed_by || '(none)'},
+    {label:'Removal Source', value:debug.removal_source || '(none)'},
+    {label:'Removal Verdict', value:debug.removal_global_verdict || '(none)'},
     {label:'Base Resolver Verdict', value:resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || 'n/a'},
     {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'},
     {label:'Control', value:qualityAdjustments.controlQuality || 'n/a'},
