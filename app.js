@@ -2119,6 +2119,11 @@ function syncTickerRecordsFromLegacyCollections(){
     record.diary.hasDiary = !!record.diary.records.length;
     record.diary.diaryIds = record.diary.records.map(item => item.id);
     if(record.watchlist.inWatchlist && record.watchlist.expiryAt && countTradingDaysBetween(todayIsoDate(), record.watchlist.expiryAt) <= 0){
+      record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+      record.watchlist.debug.watchlist_removed_by = 'legacy_expiry_normalize';
+      record.watchlist.debug.removal_global_verdict = '';
+      record.watchlist.debug.removal_allow_watchlist = '';
+      record.watchlist.debug.removal_source = 'normalizeTickerRecordsMap';
       record.watchlist.inWatchlist = false;
     }
     maybeExpireTickerRecord(record);
@@ -2697,6 +2702,11 @@ function removeFromWatchlist(ticker){
   const symbol = normalizeTicker(ticker);
   const record = getTickerRecord(symbol);
   if(record){
+    record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+    record.watchlist.debug.watchlist_removed_by = 'explicit_remove';
+    record.watchlist.debug.removal_global_verdict = '';
+    record.watchlist.debug.removal_allow_watchlist = '';
+    record.watchlist.debug.removal_source = 'removeFromWatchlist';
     record.watchlist.inWatchlist = false;
     record.watchlist.addedAt = '';
     record.watchlist.addedScore = null;
@@ -13712,6 +13722,11 @@ function applyGlobalVerdictGates(record){
   if(item.watchlist && item.watchlist.inWatchlist && !globalVerdict.allow_watchlist){
     const removalVerdictLabel = globalVerdictLabel(globalVerdict.final_verdict || 'avoid');
     const removalReason = globalVerdict.reason || globalVerdict.downgrade_reason || 'Setup is no longer watchlist-eligible.';
+    item.watchlist.debug = item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
+    item.watchlist.debug.watchlist_removed_by = 'global_verdict_gate';
+    item.watchlist.debug.removal_global_verdict = globalVerdict.final_verdict || '';
+    item.watchlist.debug.removal_allow_watchlist = globalVerdict.allow_watchlist ? 'true' : 'false';
+    item.watchlist.debug.removal_source = 'applyGlobalVerdictGates';
     item.watchlist.inWatchlist = false;
     item.watchlist.status = globalVerdict.final_verdict;
     item.watchlist.watchlist_priority_bucket = 'inactive';
