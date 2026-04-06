@@ -26,6 +26,7 @@ if(!window.AppStateBridge) throw new Error('AppStateBridge failed to load.');
 if(!window.AppRecords) throw new Error('AppRecords failed to load.');
 if(!window.PlanMath) throw new Error('PlanMath failed to load.');
 if(!window.Tradeability) throw new Error('Tradeability failed to load.');
+if(!window.WatchlistUtils) throw new Error('WatchlistUtils failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -84,6 +85,17 @@ const {
   tradeabilityLabel: tradeabilityLabelImpl,
   deriveTradeability: deriveTradeabilityImpl
 } = window.Tradeability;
+const {
+  watchlistActionSummary: watchlistActionSummaryImpl,
+  watchlistReasonSummary: watchlistReasonSummaryImpl,
+  normalizeStoredPlanSnapshot: normalizeStoredPlanSnapshotImpl,
+  storedPlanState: storedPlanStateImpl,
+  planSnapshotFromDisplayedPlan: planSnapshotFromDisplayedPlanImpl,
+  planSnapshotSummary: planSnapshotSummaryImpl,
+  planSnapshotsEqual: planSnapshotsEqualImpl,
+  recomputeAttemptedForSource: recomputeAttemptedForSourceImpl,
+  determineRecomputeResult: determineRecomputeResultImpl
+} = window.WatchlistUtils;
 
 // ---------------------------------------------------------------------------
 // End extracted bridge bindings. App.js remains the orchestrator for now.
@@ -7581,6 +7593,7 @@ function prioritizedSignalModifiers(presentation, maxModifiers = 2){
 }
 
 function watchlistActionSummary(actionPresentation){
+  return watchlistActionSummaryImpl(actionPresentation);
   const label = String(actionPresentation && (actionPresentation.shortLabel || actionPresentation.label) || '').trim();
   if(!label) return 'Monitor';
   if(/stronger volume/i.test(label)) return '🫗 Volume weak - monitor for expansion';
@@ -7591,6 +7604,7 @@ function watchlistActionSummary(actionPresentation){
 }
 
 function watchlistReasonSummary(reasoning, actionText){
+  return watchlistReasonSummaryImpl(reasoning, actionText);
   const actionLower = String(actionText || '').toLowerCase();
   const detailParts = String(reasoning && reasoning.detail || '')
     .split('|')
@@ -7613,6 +7627,7 @@ function watchlistReasonSummary(reasoning, actionText){
 }
 
 function normalizeStoredPlanSnapshot(snapshot){
+  return normalizeStoredPlanSnapshotImpl(snapshot);
   const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
   return {
     entry:String(source.entry || '').trim(),
@@ -7626,6 +7641,7 @@ function normalizeStoredPlanSnapshot(snapshot){
 }
 
 function storedPlanState(snapshot){
+  return storedPlanStateImpl(snapshot);
   const plan = normalizeStoredPlanSnapshot(snapshot);
   const hasValues = !!(plan.entry || plan.stop || plan.firstTarget);
   if(!hasValues) return 'NO_PLAN';
@@ -7634,6 +7650,7 @@ function storedPlanState(snapshot){
 }
 
 function planSnapshotFromDisplayedPlan(displayedPlan){
+  return planSnapshotFromDisplayedPlanImpl(displayedPlan, { numericOrNull });
   const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
   const rewardRisk = plan.rewardRisk && typeof plan.rewardRisk === 'object' ? plan.rewardRisk : {};
   return normalizeStoredPlanSnapshot({
@@ -7648,6 +7665,7 @@ function planSnapshotFromDisplayedPlan(displayedPlan){
 }
 
 function planSnapshotSummary(snapshot, options = {}){
+  return planSnapshotSummaryImpl(snapshot, options);
   const plan = normalizeStoredPlanSnapshot(snapshot);
   const state = storedPlanState(plan);
   if(state === 'NO_PLAN') return String(options.emptyLabel || 'None').trim();
@@ -7656,6 +7674,7 @@ function planSnapshotSummary(snapshot, options = {}){
 }
 
 function planSnapshotsEqual(a, b){
+  return planSnapshotsEqualImpl(a, b);
   const left = normalizeStoredPlanSnapshot(a);
   const right = normalizeStoredPlanSnapshot(b);
   return left.entry === right.entry
@@ -7667,6 +7686,7 @@ function planSnapshotsEqual(a, b){
 }
 
 function recomputeAttemptedForSource(source){
+  return recomputeAttemptedForSourceImpl(source);
   return ['auto_recompute','manual_refresh','review','review_save','plan_update'].includes(String(source || '').trim());
 }
 
@@ -7685,6 +7705,10 @@ function tradeabilityRank(value){
 }
 
 function determineRecomputeResult(previousPlan, newPlan, attempted){
+  return determineRecomputeResultImpl(previousPlan, newPlan, attempted, {
+    numericOrNull,
+    tradeabilityRank
+  });
   if(!attempted) return 'Skipped';
   const before = normalizeStoredPlanSnapshot(previousPlan);
   const after = normalizeStoredPlanSnapshot(newPlan);
