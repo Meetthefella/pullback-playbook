@@ -41,7 +41,13 @@
   }
 
   function businessDaysFromNow(days){
-    return global.tradingDaysFrom(todayIsoDate(), days);
+    const tradingDaysFrom = global.AppDateUtils && typeof global.AppDateUtils.tradingDaysFrom === 'function'
+      ? global.AppDateUtils.tradingDaysFrom
+      : global.tradingDaysFrom;
+    if(typeof tradingDaysFrom !== 'function'){
+      throw new Error('AppDateUtils.tradingDaysFrom is not available.');
+    }
+    return tradingDaysFrom(todayIsoDate(), days);
   }
 
   global.AppUtils = Object.assign({}, global.AppUtils, {
