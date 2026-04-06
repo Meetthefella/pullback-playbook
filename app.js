@@ -2661,7 +2661,7 @@ function addToWatchlist(tickerData){
   const entry = normalizeWatchlistEntry(tickerData);
   if(!entry) return {entry:null, record:null, added:false, updated:false, error:'invalid_ticker'};
   const record = upsertTickerRecord(entry.ticker);
-  const gated = applyGlobalVerdictGates(record);
+  const gated = applyGlobalVerdictGates(record, {source:'watchlist_add'});
   if(gated.changed) commitTickerState();
   if(!gated.globalVerdict.allow_watchlist){
     return {entry:null, record, added:false, updated:false, error:'watchlist_blocked'};
@@ -2872,7 +2872,7 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
 
 function watchlistLifecycleSnapshot(record){
   const item = normalizeTickerRecord(record);
-  const gating = applyGlobalVerdictGates(item);
+  const gating = applyGlobalVerdictGates(item, {source:'auto_recompute'});
   const globalVerdict = gating.globalVerdict;
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const displayedPlan = deriveCurrentPlanState(
@@ -3517,7 +3517,7 @@ function renderWatchlist(){
   if(!box) return;
   let gatingChanged = false;
   watchlistTickerRecords().forEach(record => {
-    const gated = applyGlobalVerdictGates(record);
+    const gated = applyGlobalVerdictGates(record, {source:'auto_recompute'});
     if(gated.changed) gatingChanged = true;
   });
   if(gatingChanged) commitTickerState();
@@ -10950,7 +10950,7 @@ function recordPlanHasConcreteValues(record){
 
 function ensureCanonicalPlanForRecord(record, options = {}){
   if(!(record && typeof record === 'object')) return false;
-  const gated = applyGlobalVerdictGates(record);
+  const gated = applyGlobalVerdictGates(record, {source:'review'});
   if(!gated.globalVerdict.allow_plan) return gated.changed;
   if(recordPlanHasConcreteValues(record)) return false;
   const derivedPlan = effectivePlanForRecord(record, {allowScannerFallback:options.allowScannerFallback === true});
@@ -13714,10 +13714,14 @@ function resolveGlobalVerdict(record){
   });
 }
 
-function applyGlobalVerdictGates(record){
+function applyGlobalVerdictGates(record, options = {}){
   const item = record && typeof record === 'object' ? record : null;
   if(!item) return {changed:false, globalVerdict:resolveGlobalVerdict({})};
   const globalVerdict = resolveGlobalVerdict(item);
+  const source = String(options.source || '').toLowerCase();
+  const deferWatchlistRemoval = options.deferWatchlistRemoval === true
+    || ['manual_refresh','auto_recompute','plan_update','review','review_save','analyse_setup','scan','market_status'].includes(source)
+    || uiState.watchlistLifecycleRunning;
   let changed = false;
   if(item.watchlist && item.watchlist.inWatchlist && !globalVerdict.allow_watchlist){
     const removalVerdictLabel = globalVerdictLabel(globalVerdict.final_verdict || 'avoid');
@@ -13726,7 +13730,15 @@ function applyGlobalVerdictGates(record){
     item.watchlist.debug.watchlist_removed_by = 'global_verdict_gate';
     item.watchlist.debug.removal_global_verdict = globalVerdict.final_verdict || '';
     item.watchlist.debug.removal_allow_watchlist = globalVerdict.allow_watchlist ? 'true' : 'false';
-    item.watchlist.debug.removal_source = 'applyGlobalVerdictGates';
+    item.watchlist.debug.removal_source = source || 'applyGlobalVerdictGates';
+    if(deferWatchlistRemoval){
+      appendWatchlistDebugEvent(item, {
+        at:new Date().toISOString(),
+        source:source || 'watchlist_gate_deferred',
+        result:`deferred: ${globalVerdict.final_verdict || 'avoid'} | ${removalReason}`
+      });
+      return {changed:false, globalVerdict, deferred:true};
+    }
     item.watchlist.inWatchlist = false;
     item.watchlist.status = globalVerdict.final_verdict;
     item.watchlist.watchlist_priority_bucket = 'inactive';
