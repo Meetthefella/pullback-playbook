@@ -3237,12 +3237,13 @@ function resolveLifecycleTransition(currentState, inputs = {}){
   if(structureState === 'broken') nextState = 'avoid';
 
   if(
-    lifecycleState === 'monitor'
+    ['watch','monitor'].includes(lifecycleState)
+    && finalVerdict === 'near_entry'
     && structureState === 'intact'
     && bounceState === 'confirmed'
     && planStatus === 'valid'
     && rrConfidence !== 'invalid'
-    && !(marketRegime === 'weak' && bounceState !== 'confirmed')
+    && marketRegime !== 'weak'
   ){
     nextState = 'near_entry';
   }
@@ -3262,7 +3263,8 @@ function resolveLifecycleTransition(currentState, inputs = {}){
   }
 
   if(
-    rawState === 'developing'
+    ['watch','developing'].includes(rawState)
+    && finalVerdict === 'monitor'
     && structureState === 'intact'
   ){
     nextState = 'monitor';
@@ -3272,6 +3274,14 @@ function resolveLifecycleTransition(currentState, inputs = {}){
     nextState === 'avoid'
     && finalVerdict
     && finalVerdict !== 'avoid'
+  ){
+    return lifecycleState || currentState;
+  }
+
+  if(
+    nextState === 'near_entry'
+    && finalVerdict
+    && finalVerdict !== 'near_entry'
   ){
     return lifecycleState || currentState;
   }
