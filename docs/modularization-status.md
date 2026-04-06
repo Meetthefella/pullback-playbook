@@ -2,7 +2,7 @@
 
 Current branch checkpoint:
 - `modularize-appjs-attempt`
-- stable checkpoint tag: `modularization-checkpoint-20260406-phase7-stable`
+- stable checkpoint tag: `modularization-checkpoint-20260406-phase10-stable`
 
 ## Extracted bridge modules
 
@@ -50,6 +50,35 @@ These files are now loaded before `app.js` and expose globals consumed by the ex
 - `getTickerRecord`
 - `upsertTickerRecord`
 
+### `js/plan-math.js`
+- `normalizeQuoteCurrency`
+- `convertQuoteValueToGbp`
+- `evaluateRiskFit`
+- `evaluateCapitalFit`
+- `evaluateRewardRisk`
+- `deriveAffordability`
+
+### `js/tradeability.js`
+- `riskStatusLabel`
+- `rrBandForValue`
+- `rrStateLabel`
+- `rrStateShortLabel`
+- `rrStateClass`
+- `planQualityForRr`
+- `tradeabilityLabel`
+- `deriveTradeability`
+
+### `js/watchlist-utils.js`
+- `watchlistActionSummary`
+- `watchlistReasonSummary`
+- `normalizeStoredPlanSnapshot`
+- `storedPlanState`
+- `planSnapshotFromDisplayedPlan`
+- `planSnapshotSummary`
+- `planSnapshotsEqual`
+- `recomputeAttemptedForSource`
+- `determineRecomputeResult`
+
 ## What still lives in `app.js`
 
 The following remain in `app.js` and should stay there until a later phase:
@@ -72,9 +101,9 @@ The project is using a bridge-first modularization approach:
 ## Recommended next steps
 
 If modularization continues, prefer this order:
-1. Review nearby record helpers for a narrow follow-up seam.
-2. Clean up top-level `app.js` bridge imports further if needed.
-3. Avoid resolver/render extraction until record/plan seams are clearer.
+1. Review wrapper functions in `app.js` and trim any dead legacy bodies that remain after bridge returns.
+2. Keep resolver, lifecycle, and render logic in `app.js` until there is stronger regression coverage.
+3. Prefer cleanup and seam review over another extraction pass right away.
 
 ## Do not do next
 
