@@ -27,6 +27,7 @@ if(!window.AppRecords) throw new Error('AppRecords failed to load.');
 if(!window.PlanMath) throw new Error('PlanMath failed to load.');
 if(!window.Tradeability) throw new Error('Tradeability failed to load.');
 if(!window.WatchlistUtils) throw new Error('WatchlistUtils failed to load.');
+if(!window.WatchlistGuidance) throw new Error('WatchlistGuidance failed to load.');
 if(!window.ResolverSupport) throw new Error('ResolverSupport failed to load.');
 if(!window.ResolverCore) throw new Error('ResolverCore failed to load.');
 if(!window.ResolverPresentation) throw new Error('ResolverPresentation failed to load.');
@@ -99,6 +100,10 @@ const {
   recomputeAttemptedForSource: recomputeAttemptedForSourceImpl,
   determineRecomputeResult: determineRecomputeResultImpl
 } = window.WatchlistUtils;
+const {
+  watchlistLifecycleChangeType: watchlistLifecycleChangeTypeImpl,
+  watchlistNextStateGuidance: watchlistNextStateGuidanceImpl
+} = window.WatchlistGuidance;
 const {
   baseVerdictFromResolvedContract: baseVerdictFromResolvedContractImpl,
   resolverSeedVerdictForRecord: resolverSeedVerdictForRecordImpl,
@@ -3249,15 +3254,14 @@ function appendWatchlistDebugEvent(record, event){
 }
 
 function watchlistLifecycleChangeType(previousState, currentState){
-  if(previousState === currentState) return 'unchanged';
-  if(currentState === 'expired') return 'expired';
-  const previousRank = watchlistLifecycleStateRank(previousState);
-  const currentRank = watchlistLifecycleStateRank(currentState);
-  if(!Number.isFinite(previousRank) || !Number.isFinite(currentRank)) return 'changed';
-  return currentRank < previousRank ? 'promoted' : 'downgraded';
+  return watchlistLifecycleChangeTypeImpl(previousState, currentState, {
+    watchlistLifecycleStateRank
+  });
 }
 
-function watchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
+// LEGACY WATCHLIST GUIDANCE BLOCK DISABLED
+// Shadowed by the canonical watchlist guidance block later in app.js.
+function legacyWatchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
   const derivedStates = context.derivedStates || analysisDerivedStatesFromRecord(record);
   const displayedPlan = context.displayedPlan || deriveCurrentPlanState(
     record.plan && record.plan.entry,
@@ -13760,43 +13764,14 @@ function resolveEmojiPresentation(record, options = {}){
 }
 
 function watchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
-  const item = normalizeTickerRecord(record);
-  const derivedStates = context.derivedStates || analysisDerivedStatesFromRecord(item);
-  const displayedPlan = context.displayedPlan || deriveCurrentPlanState(
-    item.plan && item.plan.entry,
-    item.plan && item.plan.stop,
-    item.plan && item.plan.firstTarget,
-    item.marketData && item.marketData.currency
-  );
-  const qualityAdjustments = context.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
-  const rrResolution = context.rrResolution || resolveScannerStateWithTrace(item);
-  const resolved = context.resolvedContract || resolveFinalStateContract(item, {
-    context:'watchlist',
-    derivedStates,
-    displayedPlan,
-    qualityAdjustments,
-    rrResolution,
-    planUiState:context.planUiState
+  return watchlistNextStateGuidanceImpl(record, lifecycleSnapshot, context, {
+    normalizeTickerRecord,
+    analysisDerivedStatesFromRecord,
+    deriveCurrentPlanState,
+    evaluateSetupQualityAdjustments,
+    resolveScannerStateWithTrace,
+    resolveFinalStateContract
   });
-  if(['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || '')) || resolved.structuralState === 'dead'){
-    return {nextPossibleState:'None', mainBlocker:resolved.blockerReason || 'Setup is no longer active'};
-  }
-  if(resolved.actionStateKey === 'recalculate_plan'){
-    return {
-      nextPossibleState:'\uD83E\uDDF0 Recalculate plan',
-      mainBlocker:resolved.blockerReason || 'Plan needs adjustment'
-    };
-  }
-  if(resolved.actionStateKey === 'ready_to_act'){
-    return {
-      nextPossibleState:'\uD83D\uDE80 Entry',
-      mainBlocker:resolved.blockerReason || 'Ready if trigger is met'
-    };
-  }
-  return {
-    nextPossibleState:resolved.structuralState === 'near_entry' ? '\uD83C\uDFAF Near Entry' : '\uD83C\uDF31 Developing',
-    mainBlocker:resolved.blockerReason || 'Needs better confirmation'
-  };
 }
 
 function currentHardFailVerdictForRecord(record){
