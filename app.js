@@ -13,6 +13,11 @@ const savedScannerUniverseKey = 'pp_scanner_universe_saved';
 const savedScannerUniverseMetaKey = 'pp_scanner_universe_saved_meta';
 const DEFAULT_PROVIDER = 'fmp';
 const DEFAULT_API_PLAN = 'scanner';
+
+// ---------------------------------------------------------------------------
+// Bridge modules extracted from app.js.
+// Keep these grouped here so later modularization phases have one clear seam.
+// ---------------------------------------------------------------------------
 if(!window.AppUtils) throw new Error('AppUtils failed to load.');
 if(!window.AppDateUtils) throw new Error('AppDateUtils failed to load.');
 if(!window.AppTickerUtils) throw new Error('AppTickerUtils failed to load.');
@@ -59,6 +64,11 @@ const {
   getTickerRecord: getTickerRecordImpl,
   upsertTickerRecord: upsertTickerRecordImpl
 } = window.AppRecords;
+
+// ---------------------------------------------------------------------------
+// End extracted bridge bindings. App.js remains the orchestrator for now.
+// ---------------------------------------------------------------------------
+
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const checklistLabels = {
   trendStrong:'Strong uptrend',
