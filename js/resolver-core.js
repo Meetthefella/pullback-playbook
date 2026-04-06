@@ -107,8 +107,8 @@
       finalVerdict = 'avoid';
       reason = 'Setup score is too weak.';
     }else if(weakStructure && invalidPlan){
-      finalVerdict = 'avoid';
-      reason = 'Weak structure with unusable plan.';
+      finalVerdict = 'monitor';
+      reason = 'Weak structure and invalid plan need monitoring, not rejection.';
     }else if(resolved.actionStateKey === 'ready_to_act' || resolved.structuralState === 'entry'){
       finalVerdict = 'entry';
       reason = resolved.blockerReason || 'Ready to act.';
