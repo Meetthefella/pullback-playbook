@@ -25,6 +25,7 @@ if(!window.AppStorage) throw new Error('AppStorage failed to load.');
 if(!window.AppStateBridge) throw new Error('AppStateBridge failed to load.');
 if(!window.AppRecords) throw new Error('AppRecords failed to load.');
 if(!window.PlanMath) throw new Error('PlanMath failed to load.');
+if(!window.Tradeability) throw new Error('Tradeability failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -73,6 +74,16 @@ const {
   evaluateRewardRisk: evaluateRewardRiskImpl,
   deriveAffordability: deriveAffordabilityImpl
 } = window.PlanMath;
+const {
+  riskStatusLabel: riskStatusLabelImpl,
+  rrBandForValue: rrBandForValueImpl,
+  rrStateLabel: rrStateLabelImpl,
+  rrStateShortLabel: rrStateShortLabelImpl,
+  rrStateClass: rrStateClassImpl,
+  planQualityForRr: planQualityForRrImpl,
+  tradeabilityLabel: tradeabilityLabelImpl,
+  deriveTradeability: deriveTradeabilityImpl
+} = window.Tradeability;
 
 // ---------------------------------------------------------------------------
 // End extracted bridge bindings. App.js remains the orchestrator for now.
@@ -6110,44 +6121,23 @@ function statusClass(status){
 }
 
 function riskStatusLabel(riskStatus){
-  if(riskStatus === 'fits_risk') return 'Fits Risk';
-  if(riskStatus === 'too_wide') return 'Too Wide';
-  if(riskStatus === 'settings_missing') return 'Settings Missing';
-  if(riskStatus === 'invalid_plan') return 'Invalid Plan';
-  return 'Plan Missing';
+  return riskStatusLabelImpl(riskStatus);
 }
 
 function rrBandForValue(rrValue){
-  if(!Number.isFinite(rrValue)) return 'na';
-  if(rrValue >= 3) return 'strong';
-  if(rrValue >= 2) return 'good';
-  if(rrValue >= 1.5) return 'acceptable';
-  return 'weak';
+  return rrBandForValueImpl(rrValue);
 }
 
 function rrStateLabel(rrValue){
-  const band = typeof rrValue === 'string' && !Number.isFinite(Number(rrValue)) ? rrValue : rrBandForValue(numericOrNull(rrValue));
-  if(band === 'strong') return 'Strong R:R';
-  if(band === 'good') return 'Good R:R';
-  if(band === 'acceptable') return 'Acceptable R:R';
-  if(band === 'weak') return 'Weak R:R';
-  return 'R:R N/A';
+  return rrStateLabelImpl(rrValue, { numericOrNull });
 }
 
 function rrStateShortLabel(rrValue){
-  const band = typeof rrValue === 'string' && !Number.isFinite(Number(rrValue)) ? rrValue : rrBandForValue(numericOrNull(rrValue));
-  if(band === 'strong') return 'Strong';
-  if(band === 'good') return 'Good';
-  if(band === 'acceptable') return 'Acceptable';
-  if(band === 'weak') return 'Weak';
-  return 'N/A';
+  return rrStateShortLabelImpl(rrValue, { numericOrNull });
 }
 
 function rrStateClass(rrValue){
-  const band = typeof rrValue === 'string' && !Number.isFinite(Number(rrValue)) ? rrValue : rrBandForValue(numericOrNull(rrValue));
-  if(band === 'strong' || band === 'good') return 's-hi';
-  if(band === 'acceptable') return 's-mid';
-  return 's-low';
+  return rrStateClassImpl(rrValue, { numericOrNull });
 }
 
 function setupUiLabel(setupState){
@@ -8121,12 +8111,7 @@ function planQualityForRecord(record){
 }
 
 function planQualityForRr(rrRatio){
-  const band = rrBandForValue(rrRatio);
-  if(band === 'strong') return 'Strong';
-  if(band === 'good') return 'Good';
-  if(band === 'acceptable') return 'Acceptable';
-  if(band === 'weak') return 'Weak';
-  return null;
+  return planQualityForRrImpl(rrRatio);
 }
 
 function capitalFitLabel(capitalFit){
@@ -8245,10 +8230,7 @@ function capitalFitPresentation({capitalFit, affordability, comfortLabel}){
 }
 
 function tradeabilityLabel(tradeability){
-  if(tradeability === 'tradable') return 'Tradable';
-  if(tradeability === 'too_expensive') return 'Too Expensive';
-  if(tradeability === 'risk_only') return 'Risk OK | Capital Check Estimated';
-  return 'Invalid';
+  return tradeabilityLabelImpl(tradeability);
 }
 
 function normalizeExitMode(exitMode){
@@ -8413,12 +8395,7 @@ function deriveExecutionPlanState(record, options = {}){
 }
 
 function deriveTradeability(planStatus, riskStatus, capitalFit){
-  if(planStatus === 'missing' || planStatus === 'invalid' || planStatus === 'needs_adjustment') return 'not_ready';
-  if(planStatus !== 'valid') return 'invalid';
-  if(riskStatus !== 'fits_risk') return 'invalid';
-  if(capitalFit === 'fits_capital') return 'tradable';
-  if(capitalFit === 'too_expensive') return 'too_expensive';
-  return 'risk_only';
+  return deriveTradeabilityImpl(planStatus, riskStatus, capitalFit);
 }
 
 function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrency = ''){
