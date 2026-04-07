@@ -157,6 +157,7 @@ const DEFAULT_STATE = {
   maxLossOverride:'',
   wholeSharesOnly:true,
   marketStatus:'S&P above 50 MA',
+  marketStatusMode:'auto',
   setupType:'',
   listName:"Today's Scan",
   universeMode:'core8',
@@ -448,6 +449,7 @@ function buildSettingsPersistedState(sourceState){
     maxLossOverride:baseState.maxLossOverride,
     wholeSharesOnly:baseState.wholeSharesOnly,
     marketStatus:baseState.marketStatus,
+    marketStatusMode:baseState.marketStatusMode,
     setupType:baseState.setupType,
     listName:baseState.listName,
     universeMode:baseState.universeMode,
@@ -884,9 +886,11 @@ function bootstrapBackgroundMonitoring(){
 
 function bootstrapMarketStatusClock(){
   refreshMarketContextWidgets();
+  refreshAutomaticMarketStatus().catch(() => {});
   clearInterval(marketStatusTimer);
   marketStatusTimer = setInterval(() => {
     refreshMarketContextWidgets();
+    refreshAutomaticMarketStatus().catch(() => {});
   }, MARKET_STATUS_REFRESH_MS);
 }
 
@@ -2406,6 +2410,7 @@ function saveState(){
   state.wholeSharesOnly = $('wholeSharesOnly') ? !!$('wholeSharesOnly').checked : true;
   state.maxRisk = currentMaxLoss();
   state.marketStatus = $('marketStatus').value;
+  state.marketStatusMode = normalizeMarketStatusMode($('marketStatusMode') ? $('marketStatusMode').value : state.marketStatusMode);
   state.setupType = $('scannerSetupType') ? normalizeScanType($('scannerSetupType').value) : '';
   state.listName = $('listName').value || "Today's Scan";
   if($('universeMode')) state.universeMode = normalizeUniverseMode($('universeMode').value) || defaultUniverseModeForTickers(state.tickers);
@@ -2461,6 +2466,7 @@ function loadState(){
     : ((Number(state.accountSize) > 0 && Number(state.maxRisk) > 0) ? Number(state.maxRisk) / Number(state.accountSize) : 0.01);
   state.maxLossOverride = state.maxLossOverride == null ? '' : String(state.maxLossOverride);
   state.wholeSharesOnly = state.wholeSharesOnly !== false;
+  state.marketStatusMode = normalizeMarketStatusMode(state.marketStatusMode);
   state.setupType = normalizeScanType(state.setupType);
   state.maxRisk = currentMaxLoss();
   state.tickers = parseTickers((state.tickers || []).join('\n'));
@@ -2524,6 +2530,7 @@ function loadState(){
   if($('maxLossOverride')) $('maxLossOverride').value = state.maxLossOverride;
   if($('wholeSharesOnly')) $('wholeSharesOnly').checked = state.wholeSharesOnly !== false;
   $('marketStatus').value = state.marketStatus || 'S&P above 50 MA';
+  if($('marketStatusMode')) $('marketStatusMode').value = normalizeMarketStatusMode(state.marketStatusMode);
   if($('scannerSetupType')) $('scannerSetupType').value = state.setupType || '';
   $('listName').value = state.listName || "Today's Scan";
   if($('universeMode')) $('universeMode').value = effectiveUniverseMode();
@@ -2570,7 +2577,7 @@ function renderStats(){
   if($('riskStat')) $('riskStat').textContent = formatGbp(state.maxRisk);
   if($('riskPctStat')) $('riskPctStat').textContent = `${pct}%`;
   if($('accountRiskStrip')) $('accountRiskStrip').textContent = `${formatGbp(state.accountSize)} | ${formatGbp(state.maxRisk)}`;
-  if($('marketStatusStrip')) $('marketStatusStrip').textContent = String(state.marketStatus || 'S&P above 50 MA');
+  if($('marketStatusStrip')) $('marketStatusStrip').textContent = marketStatusDisplayValue();
   if($('scannerModeStrip')) $('scannerModeStrip').textContent = scannerModeChipLabel(effectiveUniverseMode());
   if($('setupTypeStrip')) $('setupTypeStrip').textContent = setupTypeChipLabel(state.setupType);
   renderControlStripSelector();
@@ -2583,16 +2590,62 @@ function scannerModeChipLabel(mode){
   return 'Curated Core';
 }
 
+function normalizeMarketStatusMode(value){
+  return String(value || '').trim().toLowerCase() === 'manual' ? 'manual' : 'auto';
+}
+
+function marketStatusDisplayValue(){
+  const label = String(state.marketStatus || 'S&P above 50 MA');
+  return normalizeMarketStatusMode(state.marketStatusMode) === 'auto' ? `${label} (auto)` : label;
+}
+
+function deriveAutomaticMarketStatus(snapshot){
+  const price = numericOrNull(snapshot && snapshot.price);
+  const sma50 = numericOrNull(snapshot && snapshot.sma50);
+  if(!Number.isFinite(price) || !Number.isFinite(sma50) || sma50 <= 0) return '';
+  const distance = (price - sma50) / sma50;
+  if(Math.abs(distance) <= 0.01) return 'S&P near 50 MA';
+  return distance > 0 ? 'S&P above 50 MA' : 'S&P below 50 MA';
+}
+
+async function refreshAutomaticMarketStatus(options = {}){
+  if(normalizeMarketStatusMode(state.marketStatusMode) !== 'auto') return false;
+  try{
+    const snapshot = await fetchMarketData('SPY', {force:options.force === true});
+    const nextStatus = deriveAutomaticMarketStatus(snapshot);
+    if(!nextStatus) return false;
+    const changed = nextStatus !== String(state.marketStatus || '');
+    state.marketStatus = nextStatus;
+    if($('marketStatus')) $('marketStatus').value = nextStatus;
+    if($('marketStatusMode')) $('marketStatusMode').value = 'auto';
+    if(changed){
+      commitTickerState();
+      renderStats();
+      refreshRiskContextForActiveSetups({
+        source:'market_status',
+        force:true
+      });
+    }else{
+      renderStats();
+    }
+    return changed;
+  }catch(_error){
+    return false;
+  }
+}
+
 function setupTypeChipLabel(type){
   return normalizeScanType(type) || 'Unknown';
 }
 
 function controlFocusConfig(focusKey){
   if(focusKey === 'market'){
+    const mode = normalizeMarketStatusMode(state.marketStatusMode);
     return {
       label:'Market',
-      selected:String(state.marketStatus || 'S&P above 50 MA'),
+      selected:mode === 'auto' ? 'auto' : String(state.marketStatus || 'S&P above 50 MA'),
       options:[
+        {value:'auto', label:`Auto (${String(state.marketStatus || 'S&P above 50 MA')})`},
         {value:'S&P above 50 MA', label:'S&P above 50 MA'},
         {value:'S&P near 50 MA', label:'S&P near 50 MA'},
         {value:'S&P below 50 MA', label:'S&P below 50 MA'}
@@ -2630,12 +2683,21 @@ function controlFocusConfig(focusKey){
 
 function setControlFocusSelection(focusKey, value){
   if(focusKey === 'market'){
-    if($('marketStatus')) $('marketStatus').value = value;
-    saveState();
-    refreshRiskContextForActiveSetups({
-      source:'market_status',
-      force:true
-    });
+    if(String(value || '') === 'auto'){
+      if($('marketStatusMode')) $('marketStatusMode').value = 'auto';
+      state.marketStatusMode = 'auto';
+      saveState();
+      refreshAutomaticMarketStatus({force:true});
+    }else{
+      if($('marketStatusMode')) $('marketStatusMode').value = 'manual';
+      state.marketStatusMode = 'manual';
+      if($('marketStatus')) $('marketStatus').value = value;
+      saveState();
+      refreshRiskContextForActiveSetups({
+        source:'market_status',
+        force:true
+      });
+    }
     return;
   }
   if(focusKey === 'mode'){
@@ -13836,11 +13898,25 @@ on('universeMode', 'change', () => {
   refreshRiskContextForActiveSetups();
 }));
 on('marketStatus', 'change', () => {
+  state.marketStatusMode = 'manual';
+  if($('marketStatusMode')) $('marketStatusMode').value = 'manual';
   saveState();
   refreshRiskContextForActiveSetups({
     source:'market_status',
     force:true
   });
+});
+on('marketStatusMode', 'change', () => {
+  state.marketStatusMode = normalizeMarketStatusMode($('marketStatusMode').value);
+  saveState();
+  if(state.marketStatusMode === 'auto'){
+    refreshAutomaticMarketStatus({force:true});
+  }else{
+    refreshRiskContextForActiveSetups({
+      source:'market_status',
+      force:true
+    });
+  }
 });
 on('scannerSetupType', 'change', () => {
   saveState();
