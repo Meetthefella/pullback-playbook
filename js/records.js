@@ -180,7 +180,9 @@
         exchange: '',
         tradingViewSymbol: '',
         marketStatus: '',
-        pinned: false
+        pinned: false,
+        previousFinalVerdict: '',
+        lastAlertedState: ''
       }
     };
   }
@@ -415,6 +417,8 @@
     merged.meta.dataVersion = 2;
     merged.meta.updatedAt = String(merged.meta.updatedAt || merged.meta.createdAt || new Date().toISOString());
     merged.meta.createdAt = String(merged.meta.createdAt || merged.meta.updatedAt || new Date().toISOString());
+    merged.meta.previousFinalVerdict = String(merged.meta.previousFinalVerdict || '').trim().toLowerCase();
+    merged.meta.lastAlertedState = String(merged.meta.lastAlertedState || '').trim().toLowerCase();
     const computedPlanStatus = merged.plan.hasValidPlan ? 'valid' : (hasAnyPlanFields(merged) ? 'invalid' : 'missing');
     merged.plan.status = computedPlanStatus;
     const normalizedExecution = deriveExecutionPlanState(merged, {

@@ -7,6 +7,7 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
 const APP_VERSION = 'v4.4.5';
+const ENTRY_ALERT_WEBHOOK_URL = 'https://maker.ifttt.com/trigger/entry_signal/with/key/e_kh7NJw5iFDStUtRFNq52DiJj6T-ToBrHPDR2oqvTM';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';
@@ -3484,6 +3485,8 @@ function runWatchlistLifecycleEvaluation(options = {}){
       if(shouldEvaluateWatchlistLifecycleRecord(record, options)){
         reevaluateTickerProgress(record);
         const snapshot = syncWatchlistLifecycle(record);
+        const settledGlobalVerdict = resolveGlobalVerdict(record);
+        maybeTriggerEntryAlert(record, settledGlobalVerdict, {source});
         const derivedStates = analysisDerivedStatesFromRecord(record);
         const displayedPlan = deriveCurrentPlanState(
           record.plan && record.plan.entry,
@@ -3527,6 +3530,8 @@ function runWatchlistLifecycleEvaluation(options = {}){
         record.watchlist.debug.finalVerdict = snapshot.state || '(none)';
         record.watchlist.debug.downgradeApplied = !!snapshot.downgradeApplied;
         record.watchlist.debug.downgradeReason = snapshot.downgradeReason || '';
+        record.watchlist.debug.lastAlertedState = String(record.meta && record.meta.lastAlertedState || '').trim().toLowerCase() || '(none)';
+        record.watchlist.debug.alertTriggeredThisCycle = String(record.watchlist.debug.alertTriggeredThisCycle || 'false');
         record.watchlist.debug.nextPossibleState = nextStep.nextPossibleState || '';
         record.watchlist.debug.mainBlocker = nextStep.mainBlocker || '';
         record.watchlist.debug.planRecomputed = attemptedRecompute;
@@ -3602,6 +3607,53 @@ function appendWatchlistDebugEvent(record, event){
     && timestampDeltaMs < 60000;
   if(dedupeUnchanged) return;
   record.watchlist.debug.auditTrail = [nextEvent, ...trail].slice(0, 5);
+}
+
+function triggerEntryAlert(record, globalVerdict){
+  const item = normalizeTickerRecord(record);
+  const verdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : resolveGlobalVerdict(item);
+  const payload = {
+    value1:item.ticker,
+    value2:'ENTRY',
+    value3:`${setupScoreForRecord(item) || 0}/10`,
+    value4:String(verdict.reason || verdict.downgrade_reason || 'Entry signal triggered')
+  };
+  fetch(ENTRY_ALERT_WEBHOOK_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  }).catch(() => {});
+}
+
+function maybeTriggerEntryAlert(record, globalVerdict, options = {}){
+  const item = normalizeTickerRecord(record);
+  const verdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : resolveGlobalVerdict(item);
+  const finalVerdict = normalizeGlobalVerdictKey(verdict.final_verdict);
+  const previousFinalVerdict = normalizeGlobalVerdictKey(item.meta && item.meta.previousFinalVerdict);
+  const lastAlertedState = String(item.meta && item.meta.lastAlertedState || '').trim().toLowerCase();
+  const shouldTrigger = previousFinalVerdict !== 'entry'
+    && finalVerdict === 'entry'
+    && lastAlertedState !== 'entry';
+
+  item.meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
+  item.watchlist = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : {};
+  item.watchlist.debug = item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
+  item.watchlist.debug.alertTriggeredThisCycle = shouldTrigger ? 'true' : 'false';
+
+  if(shouldTrigger){
+    triggerEntryAlert(item, verdict);
+    item.meta.lastAlertedState = 'entry';
+    appendWatchlistDebugEvent(item, {
+      at:new Date().toISOString(),
+      source:String(options.source || 'entry_alert'),
+      result:'alert: entry_webhook_sent'
+    });
+  }else if(finalVerdict !== 'entry' && lastAlertedState === 'entry'){
+    item.meta.lastAlertedState = finalVerdict || '';
+  }
+
+  item.meta.previousFinalVerdict = finalVerdict || '';
+  return shouldTrigger;
 }
 
 function watchlistLifecycleChangeType(previousState, currentState){
@@ -3759,6 +3811,8 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Removed By', value:debug.watchlist_removed_by || '(none)'},
     {label:'Removal Source', value:debug.removal_source || '(none)'},
     {label:'Removal Verdict', value:debug.removal_global_verdict || '(none)'},
+    {label:'Last Alerted State', value:debug.lastAlertedState || '(none)'},
+    {label:'Alert Triggered This Cycle', value:debug.alertTriggeredThisCycle || 'false'},
     {label:'Base Resolver Verdict', value:resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || 'n/a'},
     {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'},
     {label:'Control', value:qualityAdjustments.controlQuality || 'n/a'},
