@@ -7,7 +7,6 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
 const APP_VERSION = 'v4.4.5';
-const ENTRY_ALERT_WEBHOOK_URL = 'https://maker.ifttt.com/trigger/entry_signal/with/key/e_kh7NJw5iFDStUtRFNq52DiJj6T-ToBrHPDR2oqvTM';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';
@@ -3612,13 +3611,13 @@ function appendWatchlistDebugEvent(record, event){
 function triggerEntryAlert(record, globalVerdict){
   const item = normalizeTickerRecord(record);
   const verdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : resolveGlobalVerdict(item);
+  const url = 'https://maker.ifttt.com/trigger/entry_signal/with/key/e_kh7NJw5iFDStUtRFNq52DiJj6T-ToBrHPDR2oqvTM';
   const payload = {
     value1:item.ticker,
-    value2:'ENTRY',
-    value3:`${setupScoreForRecord(item) || 0}/10`,
-    value4:String(verdict.reason || verdict.downgrade_reason || 'Entry signal triggered')
+    value2:`${setupScoreForRecord(item) || 0}/10`,
+    value3:String(verdict.reason || verdict.downgrade_reason || 'Entry signal triggered')
   };
-  fetch(ENTRY_ALERT_WEBHOOK_URL, {
+  fetch(url, {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify(payload)
