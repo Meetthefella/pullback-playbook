@@ -55,7 +55,7 @@
     const safeVerdict = normalizeGlobalVerdictKey(finalVerdict);
     return ({
       entry:{label:'ENTRY', detail:'Ready to act', planAllowed:true, watchlistAllowed:false},
-      near_entry:{label:'NEAR ENTRY', detail:'Close to trigger', planAllowed:true, watchlistAllowed:false},
+      near_entry:{label:'NEAR ENTRY', detail:'Close to trigger', planAllowed:true, watchlistAllowed:true},
       watch:{label:'WATCH', detail:'Review candidate', planAllowed:false, watchlistAllowed:true},
       monitor:{label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true},
       avoid:{label:'AVOID', detail:'Low priority', planAllowed:false, watchlistAllowed:false},

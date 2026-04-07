@@ -385,13 +385,16 @@ function evaluateRewardRisk(entry, stop, firstTarget){
 }
 
 function persistState(){
+  const fullSaved = safeStorageSet(key, state);
+  if(fullSaved) return;
+
   const settingsSaved = safeStorageSet(settingsKey, buildSettingsPersistedState(state));
   const recordsSaved = safeStorageSet(recordsLiteKey, buildRecordsLitePersistedState(state));
-  const fullSaved = safeStorageSet(key, state);
   const liteSaved = safeStorageSet(liteKey, buildLitePersistedState(state));
-  if(!fullSaved && !liteSaved && !settingsSaved && !recordsSaved){
+
+  if(!liteSaved && !settingsSaved && !recordsSaved){
     console.warn('STATE_PERSIST_FAILED', {key, liteKey, settingsKey, recordsLiteKey});
-  }else if(!fullSaved){
+  }else{
     console.warn('STATE_PERSIST_FALLBACK_ONLY', {
       key,
       liteKey,
@@ -3115,7 +3118,17 @@ function resolveLifecycleTransition(currentState, inputs = {}){
     finalVerdict
     && Number.isFinite(nextRank)
     && Number.isFinite(finalRank)
-    && nextRank < finalRank
+    && nextRank > finalRank
+  ){
+    nextState = finalVerdict;
+  }
+
+  const clampedNextRank = watchlistLifecycleStateRank(nextState);
+  if(
+    finalVerdict
+    && Number.isFinite(clampedNextRank)
+    && Number.isFinite(finalRank)
+    && clampedNextRank < finalRank
   ){
     nextState = finalVerdict;
   }
