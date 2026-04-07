@@ -3610,12 +3610,21 @@ function appendWatchlistDebugEvent(record, event){
 
 function triggerEntryAlert(record, globalVerdict){
   const item = normalizeTickerRecord(record);
-  const verdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : resolveGlobalVerdict(item);
+  const displayedPlan = deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const positionSize = numericOrNull(item.plan && item.plan.positionSize)
+    ?? numericOrNull(displayedPlan && displayedPlan.riskFit && displayedPlan.riskFit.position_size);
+  const entryPrice = numericOrNull(item.plan && item.plan.entry)
+    ?? numericOrNull(displayedPlan && displayedPlan.entry);
   const url = 'https://maker.ifttt.com/trigger/entry_signal/with/key/e_kh7NJw5iFDStUtRFNq52DiJj6T-ToBrHPDR2oqvTM';
   const payload = {
     value1:item.ticker,
-    value2:`${setupScoreForRecord(item) || 0}/10`,
-    value3:String(verdict.reason || verdict.downgrade_reason || 'Entry signal triggered')
+    value2:Number.isFinite(positionSize) && positionSize > 0 ? String(Math.round(positionSize)) : 'n/a',
+    value3:Number.isFinite(entryPrice) ? Number(entryPrice).toFixed(2) : 'n/a'
   };
   fetch(url, {
     method:'POST',
