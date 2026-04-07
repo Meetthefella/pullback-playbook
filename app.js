@@ -2932,14 +2932,51 @@ function normalizeWatchlistEntry(entry){
   return normalized.ticker ? normalized : null;
 }
 
+function watchlistEntryExistsForRecord(record){
+  const item = normalizeTickerRecord(record);
+  if(item.watchlist && item.watchlist.inWatchlist) return true;
+  return (state.watchlist || []).some(entry => normalizeTicker(entry && entry.ticker) === item.ticker);
+}
+
+function watchlistEligibilityForRecord(record){
+  const item = normalizeTickerRecord(record);
+  const globalVerdict = resolveGlobalVerdict(item);
+  const finalVerdict = normalizeGlobalVerdictKey(globalVerdict.final_verdict);
+  const inWatchlist = !!(item.watchlist && item.watchlist.inWatchlist);
+  const watchlistEntryExists = watchlistEntryExistsForRecord(item);
+  const reviewExists = !!(
+    (item.review && item.review.manualReview && typeof item.review.manualReview === 'object')
+    || String(item.review && item.review.lastReviewedAt || '').trim()
+    || String(item.review && item.review.lastPrompt || '').trim()
+    || String(item.review && item.review.aiAnalysisRaw || '').trim()
+  );
+  const allowWatchlist = !!(globalVerdict.allow_watchlist || ['near_entry','entry'].includes(finalVerdict));
+  const eligibleVerdict = ['watch','monitor','near_entry','entry'].includes(finalVerdict);
+  return {
+    recordExists:!!item.ticker,
+    reviewExists,
+    inWatchlist,
+    watchlistEntryExists,
+    allowWatchlist,
+    eligibleVerdict,
+    finalVerdict,
+    canAdd:allowWatchlist && eligibleVerdict && !inWatchlist,
+    globalVerdict
+  };
+}
+
 function addToWatchlist(tickerData){
   const entry = normalizeWatchlistEntry(tickerData);
   if(!entry) return {entry:null, record:null, added:false, updated:false, error:'invalid_ticker'};
   const record = upsertTickerRecord(entry.ticker);
+  const eligibility = watchlistEligibilityForRecord(record);
   const gated = applyGlobalVerdictGates(record, {source:'watchlist_add'});
   if(gated.changed) commitTickerState();
-  if(!gated.globalVerdict.allow_watchlist){
-    return {entry:null, record, added:false, updated:false, error:'watchlist_blocked'};
+  record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+  if(!eligibility.allowWatchlist || !eligibility.eligibleVerdict){
+    record.watchlist.debug.lastAddResult = 'blocked';
+    record.watchlist.debug.lastAddMessage = 'Watchlist blocked by current verdict.';
+    return {entry:null, record, added:false, updated:false, error:'watchlist_blocked', message:'Watchlist blocked by current verdict.'};
   }
   const wasInWatchlist = !!(record.watchlist && record.watchlist.inWatchlist);
   const entryToPersist = wasInWatchlist
@@ -2964,12 +3001,17 @@ function addToWatchlist(tickerData){
   requeueTickerForToday(entry.ticker);
   renderWatchlist();
   renderFocusQueue();
+  record.watchlist.debug.lastAddResult = wasInWatchlist ? 'already_present' : 'added';
+  record.watchlist.debug.lastAddMessage = wasInWatchlist
+    ? 'Already in watchlist.'
+    : 'Added to watchlist.';
   return {
     entry:entryToPersist,
     record,
     added:!wasInWatchlist,
     updated:wasInWatchlist,
-    error:''
+    error:'',
+    message:wasInWatchlist ? 'Already in watchlist.' : 'Added to watchlist.'
   };
 }
 
@@ -5229,6 +5271,15 @@ function buildRankedBucketsFromViews(views){
 function rankedDecisionBucketForView(view){
   const item = view && view.item ? view.item : view;
   return getBucket(resolveGlobalVerdict(item).final_verdict);
+}
+
+function rankedVisibleSectionForView(view){
+  const item = view && view.item ? view.item : view;
+  const finalVerdict = normalizeGlobalVerdictKey(resolveGlobalVerdict(item).final_verdict);
+  if(finalVerdict === 'entry') return 'tradeable_entry';
+  if(finalVerdict === 'near_entry') return 'near_entry';
+  if(finalVerdict === 'watch' || finalVerdict === 'monitor') return 'monitor_watch';
+  return 'lower_priority';
 }
 
 function resultReasonForRecord(record){
@@ -11800,10 +11851,21 @@ function addActiveReviewTickerToWatchlist(){
     return;
   }
   const liveRecord = upsertTickerRecord(ticker);
+  const eligibility = watchlistEligibilityForRecord(liveRecord);
   const reviewNotes = $('reviewNotes');
   if(reviewNotes) liveRecord.review.notes = reviewNotes.value;
   const reviewChecks = currentChecks();
   if(reviewChecks && typeof reviewChecks === 'object') liveRecord.review.checks = cloneData(reviewChecks, {});
+  liveRecord.watchlist.debug = liveRecord.watchlist.debug && typeof liveRecord.watchlist.debug === 'object' ? liveRecord.watchlist.debug : {};
+  if(eligibility.inWatchlist){
+    liveRecord.watchlist.debug.lastAddResult = 'already_present';
+    liveRecord.watchlist.debug.lastAddMessage = 'Already in watchlist.';
+    const message = `<span class="ok">${escapeHtml(ticker)} is already in the watchlist.</span>`;
+    setStatus('reviewWorkspaceStatus', message);
+    setStatus('inputStatus', message);
+    renderReviewWorkspace();
+    return;
+  }
   const entry = addToWatchlist({
     ticker:liveRecord.ticker,
     dateAdded:todayIsoDate(),
@@ -11813,14 +11875,18 @@ function addActiveReviewTickerToWatchlist(){
   });
   renderReviewLifecycleSummary(ticker);
   if(entry && entry.error){
-    setStatus('reviewWorkspaceStatus', `<span class="warntext">Could not add ${escapeHtml(ticker)} to the watchlist.</span>`);
+    liveRecord.watchlist.debug.lastAddResult = entry.error || 'blocked';
+    liveRecord.watchlist.debug.lastAddMessage = entry.message || 'Could not add to watchlist.';
+    setStatus('reviewWorkspaceStatus', `<span class="warntext">${escapeHtml(entry.message || `Could not add ${ticker} to the watchlist.`)}</span>`);
+    renderReviewWorkspace();
     return;
   }
   const statusMarkup = entry && entry.updated
-    ? `<span class="ok">${escapeHtml(ticker)} is already in the watchlist. Review metadata updated.</span>`
+    ? `<span class="ok">${escapeHtml(ticker)} is already in the watchlist.</span>`
     : `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`;
   setStatus('reviewWorkspaceStatus', statusMarkup);
   setStatus('inputStatus', statusMarkup);
+  renderReviewWorkspace();
 }
 
 function saveActiveReviewTickerTrade(){
@@ -11892,10 +11958,10 @@ function renderScannerResults(){
   }
   const grouped = {tradeableEntry:[], nearEntry:[], monitorWatch:[], lowerPriority:[]};
   finalViews.forEach(view => {
-    const bucket = rankedDecisionBucketForView(view);
-    if(bucket === 'tradeable_entry') grouped.tradeableEntry.push(view);
-    else if(bucket === 'near_entry') grouped.nearEntry.push(view);
-    else if(bucket === 'monitor_watch') grouped.monitorWatch.push(view);
+    const sectionKey = rankedVisibleSectionForView(view);
+    if(sectionKey === 'tradeable_entry') grouped.tradeableEntry.push(view);
+    else if(sectionKey === 'near_entry') grouped.nearEntry.push(view);
+    else if(sectionKey === 'monitor_watch') grouped.monitorWatch.push(view);
     else grouped.lowerPriority.push(view);
   });
   const tradeable = grouped.tradeableEntry;
@@ -12328,6 +12394,7 @@ function renderReviewWorkspace(options = {}){
     emojiPresentation
   });
   const globalVerdict = resolveGlobalVerdict(record);
+  const watchlistEligibility = watchlistEligibilityForRecord(record);
   const reviewBadge = getBadge(globalVerdict.final_verdict);
   const reviewAction = getActions(globalVerdict.final_verdict);
   const reviewBadgeLabel = reviewBadge.text;
@@ -12456,7 +12523,12 @@ function renderReviewWorkspace(options = {}){
     {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
     {label:'RR Confidence', value:resolvedContract.rrConfidenceLabel || '(none)'},
     {label:'Capital Fit', value:(capitalComfort.label || 'Unknown') || '(none)'},
-    {label:'Next Possible', value:(globalVerdict.action && globalVerdict.action.label) || '(none)'}
+    {label:'Next Possible', value:(globalVerdict.action && globalVerdict.action.label) || '(none)'},
+    {label:'In Watchlist', value:watchlistEligibility.inWatchlist ? 'true' : 'false'},
+    {label:'Watchlist Entry Exists', value:watchlistEligibility.watchlistEntryExists ? 'true' : 'false'},
+    {label:'Allow Watchlist', value:watchlistEligibility.allowWatchlist ? 'true' : 'false'},
+    {label:'Last Add Result', value:(record.watchlist && record.watchlist.debug && record.watchlist.debug.lastAddResult) || '(none)'},
+    {label:'Last Add Message', value:(record.watchlist && record.watchlist.debug && record.watchlist.debug.lastAddMessage) || '(none)'}
   ])}${renderAdvancedDebugMarkup([
     {label:'Base Status Label', value:scannerStatus || '(none)'},
     {label:'Base Review Label', value:displayStage || '(none)'},
@@ -12605,7 +12677,7 @@ function renderReviewWorkspace(options = {}){
       </details>
       <div class="reviewactions">
         <button class="secondary" id="saveReviewBtn">Save Review</button>
-        <button class="secondary" id="addWatchlistActiveBtn" ${globalVerdict.allow_watchlist ? '' : 'disabled'}>Add to Watchlist</button>
+        <button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button>
       </div>
       <details class="compact-details">
         <summary>Workspace Status</summary>
