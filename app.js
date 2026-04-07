@@ -2402,7 +2402,7 @@ function syncCardDraftsFromDom(){
   });
 }
 
-function saveState(){
+function syncStateFromDom(){
   syncCardDraftsFromDom();
   state.accountSize = Number($('accountSize').value || 0);
   state.riskPercent = Number($('riskPercent').value || 0);
@@ -2421,6 +2421,10 @@ function saveState(){
   state.marketDataEndpoint = defaultMarketDataEndpoint;
   state.showExpiredWatchlist = $('showExpiredWatchlist') ? !!$('showExpiredWatchlist').checked : !!state.showExpiredWatchlist;
   state.dismissedAlertIds = Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds.slice(-200) : [];
+}
+
+function saveState(){
+  syncStateFromDom();
   commitTickerState();
   scheduleTrackedRecordsSync();
   renderStats();
@@ -3847,7 +3851,9 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Bucket', value:lifecycleSnapshot.bucket || globalVerdict.bucket || 'n/a'},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || 'n/a'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || 'n/a'}
+    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || 'n/a'},
+    {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
+    {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
     {label:'Base Verdict', value:globalVerdict.base_verdict || 'n/a'},
     {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : 'n/a'},
@@ -3864,6 +3870,9 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Capital Fit', value:capitalComfort.label || 'n/a'},
     {label:'Next Possible', value:debug.nextPossibleState || resolved.nextPossibleState || 'n/a'}
   ])}${renderAdvancedDebugMarkup([
+    {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
     {label:'Allow Plan', value:globalVerdict.allow_plan ? 'true' : 'false'},
     {label:'Allow Watchlist', value:globalVerdict.allow_watchlist ? 'true' : 'false'},
     {label:'Source', value:globalVerdict.source || 'resolver'},
@@ -5661,7 +5670,9 @@ function renderScannerDecisionTraceContent(view){
     {label:'Bucket', value:globalVerdict.bucket || '(none)'},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'}
+    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
+    {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
+    {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
   ]);
   const executionSection = renderDebugSectionMarkup('Execution State', [
     {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
@@ -5673,7 +5684,12 @@ function renderScannerDecisionTraceContent(view){
     {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
   ]);
   const advancedSection = `<details class="compact-details"><summary>Advanced Debug (Internal)</summary><div class="mutebox scrollbox">${escapeHtml(lines.join('\n') || 'No trace available.')}</div></details>`;
-  return `${finalSection}${baseSection}${executionSection}${advancedSection}`;
+  const gateSection = renderAdvancedDebugMarkup([
+    {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'}
+  ], 'Promotion Gates');
+  return `${finalSection}${baseSection}${executionSection}${gateSection}${advancedSection}`;
 }
 
 function currentScanCardSecondaryUi(ticker){
@@ -5779,7 +5795,9 @@ function renderScannerVisualDebugContent(view){
     {label:'Bucket', value:globalVerdict.bucket || '(none)'},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || statusChip.label || '(none)'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'}
+    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
+    {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
+    {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
   ]);
   const executionSection = renderDebugSectionMarkup('Execution State', [
     {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
@@ -5791,6 +5809,9 @@ function renderScannerVisualDebugContent(view){
     {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
   ]);
   const advancedSection = renderAdvancedDebugMarkup([
+    {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
     {label:'Base Status Label', value:String(statusChip.primaryState || '(none)')},
     {label:'Base Structure Label', value:structureQuality || '(none)'},
     {label:'Base Bounce Label', value:bounceState || '(none)'},
@@ -11583,7 +11604,7 @@ function openTickerChart(ticker){
 
 async function analyseSetup(ticker){
   if(uiState.loadingTicker) return;
-  saveState();
+  syncStateFromDom();
   const record = upsertTickerRecord(ticker);
   record.review.cardOpen = true;
   let card = tickerRecordToLegacyCard(record);
@@ -11601,7 +11622,6 @@ async function analyseSetup(ticker){
   setReviewAnalysisState(record, {raw:'', normalized:null, error:''});
   uiState.loadingTicker = ticker;
   uiState.responseOpen[ticker] = true;
-  commitTickerState();
   renderCards();
   const endpoints = analysisEndpoints();
   if(!endpoints.length){
@@ -11614,7 +11634,6 @@ async function analyseSetup(ticker){
       reviewedAt:new Date().toISOString()
     });
     uiState.loadingTicker = '';
-    commitTickerState();
     renderCards();
     return;
   }
@@ -12645,7 +12664,9 @@ function renderReviewWorkspace(options = {}){
     {label:'Bucket', value:globalVerdict.bucket || '(none)'},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'}
+    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
+    {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
+    {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
     {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
     {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
@@ -12667,6 +12688,9 @@ function renderReviewWorkspace(options = {}){
     {label:'Last Add Result', value:(record.watchlist && record.watchlist.debug && record.watchlist.debug.lastAddResult) || '(none)'},
     {label:'Last Add Message', value:(record.watchlist && record.watchlist.debug && record.watchlist.debug.lastAddMessage) || '(none)'}
   ])}${renderAdvancedDebugMarkup([
+    {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
     {label:'Base Status Label', value:scannerStatus || '(none)'},
     {label:'Base Review Label', value:displayStage || '(none)'},
     {label:'Structure Label', value:resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)'},
@@ -14226,6 +14250,7 @@ function resolveGlobalVerdict(record){
     baseVerdictFromResolvedContract,
     analysisDerivedStatesFromRecord,
     deriveCurrentPlanState,
+    evaluatePlanRealism,
     setupScoreForRecord,
     isHostileMarketStatus,
     state,
