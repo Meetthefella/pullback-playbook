@@ -12183,11 +12183,15 @@ function attachScannerCardSwipeHandler(node, ticker){
     const fastEnough = nearAssist && velocity <= -0.35;
     if(deltaX <= -threshold || fastEnough){
       removeWithAnimation(distance);
-    }else{
-      const reason = nearAssist ? 'stop short of assist mark' : 'drag too short';
-      recordFailure(reason);
-      reset();
+      uiState.lastSwipeRemoved = {ticker, at:Date.now()};
+      if(event && typeof event.preventDefault === 'function'){
+        event.preventDefault();
+      }
+      return;
     }
+    const reason = nearAssist ? 'stop short of assist mark' : 'drag too short';
+    recordFailure(reason);
+    reset();
     deltaX = 0;
     maxDistance = 0;
   };
@@ -12380,16 +12384,22 @@ function renderScannerResults(){
           openRankedResultInReview(ticker, {sourceVerdict});
         };
         const scannerCardActivationBlocked = event => !!(event && (event.target.closest('.no-card-click') || event.target.closest('summary') || event.target.closest('.compact-details')));
+        const wasRecentlySwipedAway = () => {
+          const record = uiState.lastSwipeRemoved;
+          return record && record.ticker === ticker && Date.now() - record.at < 1000;
+        };
         let lastPointerActivationAt = 0;
         node.tabIndex = 0;
         node.setAttribute('role', 'button');
         node.onclick = event => {
           if(scannerCardActivationBlocked(event)) return;
+          if(wasRecentlySwipedAway()) return;
           if(lastPointerActivationAt && Date.now() - lastPointerActivationAt < 450) return;
           activateScannerCard();
         };
         node.onpointerup = event => {
           if(scannerCardActivationBlocked(event)) return;
+          if(wasRecentlySwipedAway()) return;
           if(String(event.pointerType || '').toLowerCase() === 'mouse') return;
           lastPointerActivationAt = Date.now();
           event.preventDefault();
