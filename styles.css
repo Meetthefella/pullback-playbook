@@ -447,6 +447,12 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   gap:12px;
   align-items:start;
 }
+ .badge-score-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
 .resultbody{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
 .cardreviewgrid,.resultsplit,.responsegrid,.analysislead,.analysisplanmini,.suggestions,.alertgroup,.alertsection,.reviewsecondary,.reviewchecklist,.checks,.analyticrows,.insightlist,.workflowmenu{display:grid;gap:10px}
 .resultcompact{
