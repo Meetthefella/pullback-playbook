@@ -6571,6 +6571,13 @@ function removeTicker(ticker){
   renderScannerResults();
   renderCards();
   updateTickerSearchStatus();
+  scrollToScannerResults();
+}
+
+function scrollToScannerResults(){
+  const target = $('resultsSection') || $('results');
+  if(!target) return;
+  target.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function removeCard(ticker){
@@ -9295,12 +9302,12 @@ function formatDualTime(value){
 
 function formatEtTimeText(time24){
   const dual = formatDualTime(marketDateTimeToUtc(todayIsoDate(), time24));
-  return `${dual.et} ET (${dual.uk} UK)`;
+  return `${dual.uk} UK (${dual.et} ET)`;
 }
 
 function formatMarketTimeForDate(dateET, time24){
   const dual = formatDualTime(marketDateTimeToUtc(dateET, time24));
-  return `${dual.et} ET (${dual.uk} UK)`;
+  return `${dual.uk} UK (${dual.et} ET)`;
 }
 
 function etDateTimeParts(now = new Date()){
@@ -12091,6 +12098,58 @@ function seedCardsFromUniverse(limit){
   renderCards();
 }
 
+function attachScannerCardSwipeHandler(node, ticker){
+  if(!node || !ticker) return;
+  const threshold = 90;
+  const cancelSelectors = ['button', 'summary', 'input', 'textarea'];
+  let pointerId = null;
+  let startX = 0;
+  let deltaX = 0;
+  let removing = false;
+  const reset = () => {
+    node.style.transition = 'transform .2s ease, opacity .2s ease';
+    node.style.transform = '';
+    node.style.opacity = '';
+  };
+  const shouldIgnore = target => cancelSelectors.some(selector => target && target.closest(selector));
+  const removeWithAnimation = () => {
+    if(removing) return;
+    removing = true;
+    node.style.transition = 'transform .2s ease, opacity .2s ease';
+    node.style.transform = 'translateX(-150%)';
+    node.style.opacity = '0';
+    setTimeout(() => removeCard(ticker), 220);
+  };
+  const finalize = event => {
+    if(pointerId === null) return;
+    if(event && typeof event.pointerId === 'number' && event.pointerId !== pointerId) return;
+    if(node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
+    pointerId = null;
+    if(deltaX <= -threshold) removeWithAnimation();
+    else reset();
+    deltaX = 0;
+  };
+  node.addEventListener('pointerdown', event => {
+    if(pointerId !== null) return;
+    if(event.button && event.button !== 0) return;
+    if(shouldIgnore(event.target)) return;
+    pointerId = event.pointerId;
+    startX = event.clientX;
+    deltaX = 0;
+    node.style.transition = '';
+    node.setPointerCapture(pointerId);
+  });
+  node.addEventListener('pointermove', event => {
+    if(pointerId === null || event.pointerId !== pointerId) return;
+    deltaX = Math.min(0, event.clientX - startX);
+    node.style.transform = `translateX(${deltaX}px)`;
+    node.style.opacity = `${Math.max(0.4, 1 + deltaX / 300)}`;
+  });
+  node.addEventListener('pointerup', finalize);
+  node.addEventListener('pointerleave', finalize);
+  node.addEventListener('pointercancel', finalize);
+}
+
 function renderScannerResults(){
   const box = $('results');
   const resultsToggle = $('resultsToggle');
@@ -12270,6 +12329,7 @@ function renderScannerResults(){
           event.preventDefault();
           activateScannerCard();
         };
+        attachScannerCardSwipeHandler(node, ticker);
         list.appendChild(node);
       });
     }else{

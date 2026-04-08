@@ -180,7 +180,8 @@ body{
 }
 .market-session-hours{
   color:var(--text-secondary);
-  font-size:.82rem;
+  font-size:1rem;
+  font-weight:600;
 }
 .market-session-detail{
   color:var(--text-primary);
@@ -1452,7 +1453,13 @@ details>summary::-webkit-details-marker{display:none}
   .focusstrip{grid-auto-columns:minmax(170px,84vw)}
   .watchlist-debug-grid{grid-template-columns:1fr 1fr}
   .resulthead{gap:10px}
-  .inline-status{gap:6px}
+.inline-status{gap:6px}
+.resultcompacthead .inline-status,
+.resulthead .inline-status,
+.watchlist-card__status,
+.watchlist-card .inline-status{
+  align-self:center;
+}
   .watchlist-card__status{gap:6px}
   .watchlist-actions{gap:6px}
   .resultdecisionline{font-size:.78rem}
