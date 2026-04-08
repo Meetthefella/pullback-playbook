@@ -198,6 +198,7 @@ const {state, uiState} = createAppState({
   safeJsonParse
 });
 uiState.scanCardMenu = {ticker:'', menuOpen:false, activeSubmenu:null};
+uiState.scanCardMenuGuard = {};
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -5753,6 +5754,26 @@ function closeScanCardSubmenu(){
 
 function closeScanCardMenu(){
   uiState.scanCardMenu = {ticker:'', menuOpen:false, activeSubmenu:null};
+}
+
+function suppressNextScannerActivation(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  uiState.scanCardMenuGuard = uiState.scanCardMenuGuard || {};
+  uiState.scanCardMenuGuard[symbol] = Date.now();
+}
+
+function allowScannerActivation(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return true;
+  const guard = uiState.scanCardMenuGuard && uiState.scanCardMenuGuard[symbol];
+  if(!guard) return true;
+  if(Date.now() - guard > 1200){
+    delete uiState.scanCardMenuGuard[symbol];
+    return true;
+  }
+  delete uiState.scanCardMenuGuard[symbol];
+  return false;
 }
 
 function renderScannerDetailsContent(view){
@@ -12488,6 +12509,7 @@ function renderScannerResults(){
           };
         });
         const activateScannerCard = () => {
+          if(!allowScannerActivation(ticker)) return;
           if(currentScanCardSecondaryUi(ticker)){
             clearScanCardSecondaryUi();
             renderScannerResults();
@@ -12511,6 +12533,7 @@ function renderScannerResults(){
           if(menuState.menuOpen){
             closeScanCardMenu();
             renderScannerResults();
+            suppressNextScannerActivation(ticker);
             return;
           }
           if(wasRecentlySwipedAway()) return;
@@ -12527,6 +12550,7 @@ function renderScannerResults(){
           if(menuState.menuOpen){
             closeScanCardMenu();
             renderScannerResults();
+            suppressNextScannerActivation(ticker);
             return;
           }
           if(wasRecentlySwipedAway() || event.defaultPrevented) return;
