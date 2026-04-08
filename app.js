@@ -5808,6 +5808,13 @@ function renderScannerVisualDebugContent(view){
     {label:'Capital Fit', value:(view && view.planUiState && view.planUiState.capitalFitLabel) || '(none)'},
     {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
   ]);
+  const swipeInfo = getSwipeFeedback(item.ticker);
+  const swipeFeedbackRow = {
+    label:'Swipe Feedback',
+    value:swipeInfo
+      ? (swipeInfo.removed ? 'Removed by swipe' : `${swipeInfo.reason || 'Swipe not far enough'}`)
+      : '(none)'
+  };
   const advancedSection = renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
@@ -12098,9 +12105,22 @@ function seedCardsFromUniverse(limit){
   renderCards();
 }
 
+function setSwipeFeedback(ticker, info){
+  uiState.swipeFeedback = uiState.swipeFeedback || {};
+  if(info && Object.keys(info).length){
+    uiState.swipeFeedback[ticker] = {...info, timestamp:new Date().toISOString()};
+  }else if(uiState.swipeFeedback){
+    delete uiState.swipeFeedback[ticker];
+  }
+}
+
+function getSwipeFeedback(ticker){
+  return uiState.swipeFeedback ? uiState.swipeFeedback[ticker] : null;
+}
+
 function attachScannerCardSwipeHandler(node, ticker){
   if(!node || !ticker) return;
-  const threshold = 90;
+  const threshold = 65;
   const cancelSelectors = ['button', 'summary', 'input', 'textarea'];
   let pointerId = null;
   let startX = 0;
@@ -12112,12 +12132,22 @@ function attachScannerCardSwipeHandler(node, ticker){
     node.style.opacity = '';
   };
   const shouldIgnore = target => cancelSelectors.some(selector => target && target.closest(selector));
+  const recordFailure = () => {
+    const distance = Math.round(Math.abs(deltaX));
+    setSwipeFeedback(ticker, {
+      attempted:true,
+      distance,
+      threshold,
+      reason:`Swiped ${distance}px; need ${threshold}px to delete.`
+    });
+  };
   const removeWithAnimation = () => {
     if(removing) return;
     removing = true;
     node.style.transition = 'transform .2s ease, opacity .2s ease';
     node.style.transform = 'translateX(-150%)';
     node.style.opacity = '0';
+    setSwipeFeedback(ticker, {removed:true});
     setTimeout(() => removeCard(ticker), 220);
   };
   const finalize = event => {
@@ -12125,8 +12155,12 @@ function attachScannerCardSwipeHandler(node, ticker){
     if(event && typeof event.pointerId === 'number' && event.pointerId !== pointerId) return;
     if(node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
     pointerId = null;
-    if(deltaX <= -threshold) removeWithAnimation();
-    else reset();
+    if(deltaX <= -threshold){
+      removeWithAnimation();
+    }else{
+      recordFailure();
+      reset();
+    }
     deltaX = 0;
   };
   node.addEventListener('pointerdown', event => {
@@ -12138,6 +12172,7 @@ function attachScannerCardSwipeHandler(node, ticker){
     deltaX = 0;
     node.style.transition = '';
     node.setPointerCapture(pointerId);
+    setSwipeFeedback(ticker, null);
   });
   node.addEventListener('pointermove', event => {
     if(pointerId === null || event.pointerId !== pointerId) return;

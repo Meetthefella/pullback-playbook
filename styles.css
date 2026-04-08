@@ -719,7 +719,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   display:flex;
   justify-content:space-between;
   gap:10px;
-  align-items:flex-start;
+  align-items:center;
   flex-wrap:wrap;
 }
 .resultidentity,.resultsummary,.resultmeta,.reviewheadline,.contextstrip,.reviewhero{display:grid;gap:6px;min-width:0}
