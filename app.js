@@ -12121,8 +12121,8 @@ function getSwipeFeedback(ticker){
 
 function attachScannerCardSwipeHandler(node, ticker){
   if(!node || !ticker) return;
-  const threshold = 65;
-  const assistDistance = 45;
+  const threshold = 50;
+  const assistDistance = 35;
   const cancelSelectors = ['button', 'summary', 'input', 'textarea'];
   let pointerId = null;
   let startX = 0;
