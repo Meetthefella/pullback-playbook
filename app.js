@@ -5816,6 +5816,7 @@ function renderScannerVisualDebugContent(view){
       : '(none)'
   };
   const advancedSection = renderAdvancedDebugMarkup([
+    swipeFeedbackRow,
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
@@ -12347,7 +12348,7 @@ function renderScannerResults(){
           }
           openRankedResultInReview(ticker, {sourceVerdict});
         };
-        const scannerCardActivationBlocked = event => !!(event && (event.target.closest('.no-card-click') || event.target.closest('summary')));
+        const scannerCardActivationBlocked = event => !!(event && (event.target.closest('.no-card-click') || event.target.closest('summary') || event.target.closest('.compact-details')));
         let lastPointerActivationAt = 0;
         node.tabIndex = 0;
         node.setAttribute('role', 'button');
