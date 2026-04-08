@@ -12122,7 +12122,7 @@ function getSwipeFeedback(ticker){
 function attachScannerCardSwipeHandler(node, ticker){
   if(!node || !ticker) return;
   const threshold = 65;
-  const minDistance = 35;
+  const assistDistance = 45;
   const cancelSelectors = ['button', 'summary', 'input', 'textarea'];
   let pointerId = null;
   let startX = 0;
@@ -12161,10 +12161,10 @@ function attachScannerCardSwipeHandler(node, ticker){
     const duration = Math.max(1, Date.now() - startTime);
     const velocity = deltaX / duration;
     const fastEnough = velocity <= -0.35;
-    if(deltaX <= -threshold || (Math.abs(deltaX) >= minDistance && fastEnough)){
+    if(deltaX <= -threshold || (Math.abs(deltaX) >= assistDistance && fastEnough)){
       removeWithAnimation();
     }else{
-      const reason = !fastEnough ? 'drag slow or short' : '';
+      const reason = !fastEnough ? 'drag slow or short' : 'stop short of assist mark';
       recordFailure(reason);
       reset();
     }
