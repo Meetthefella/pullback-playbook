@@ -12129,27 +12129,58 @@ function getSwipeFeedback(ticker){
   return uiState.swipeFeedback ? uiState.swipeFeedback[ticker] : null;
 }
 
+function recordGestureDebug(ticker, note){
+  if(!ticker) return;
+  uiState.cardGestureDebug = uiState.cardGestureDebug || {};
+  uiState.cardGestureDebug[ticker] = {
+    note,
+    at:new Date().toISOString()
+  };
+}
+
 function attachScannerCardSwipeHandler(node, ticker){
   if(!node || !ticker) return;
   const threshold = 65;
   const assistDistance = 45;
   const cancelSelectors = ['button', 'summary', 'input', 'textarea'];
-  let pointerId = null;
-  let startX = 0;
-  let startTime = 0;
-  let deltaX = 0;
-  let maxDistance = 0;
-  let removing = false;
+  const gestureState = {
+    startX:0,
+    startY:0,
+    deltaX:0,
+    deltaY:0,
+    intent:null,
+    suppressClick:false,
+    swiped:false,
+    maxDistance:0
+  };
+  node.__gestureState = gestureState;
   node.style.touchAction = 'pan-y';
+  let pointerId = null;
+  let startTime = 0;
+  let removing = false;
   const reset = () => {
     node.style.transition = 'transform .2s ease, opacity .2s ease';
     node.style.transform = '';
     node.style.opacity = '';
-    maxDistance = 0;
+    gestureState.maxDistance = 0;
   };
   const shouldIgnore = target => cancelSelectors.some(selector => target && target.closest(selector));
+  const updateIntent = () => {
+    if(gestureState.intent) return;
+    const absX = Math.abs(gestureState.deltaX);
+    const absY = Math.abs(gestureState.deltaY);
+    if(absX > absY * 1.5 && absX > 15){
+      gestureState.intent = 'horizontal-swipe';
+      gestureState.suppressClick = true;
+      recordGestureDebug(ticker, 'horizontal swipe detected; click suppressed');
+    }else if(absY > absX * 1.5 && absY > 10){
+      gestureState.intent = 'vertical-scroll';
+      gestureState.suppressClick = true;
+      recordGestureDebug(ticker, 'vertical scroll detected; click suppressed');
+    }
+  };
   const recordFailure = (reasonSuffix = '') => {
-    const distance = Math.round(Math.max(maxDistance, Math.abs(deltaX)));
+    const distance = Math.round(Math.max(gestureState.maxDistance, Math.abs(gestureState.deltaX)));
     setSwipeFeedback(ticker, {
       attempted:true,
       distance,
@@ -12169,6 +12200,9 @@ function attachScannerCardSwipeHandler(node, ticker){
       threshold,
       reason:'Removed by swipe'
     });
+    gestureState.swiped = true;
+    gestureState.suppressClick = true;
+    recordGestureDebug(ticker, 'card removed by horizontal swipe; review blocked');
     setTimeout(() => removeCard(ticker), 220);
   };
   const finalize = event => {
@@ -12177,11 +12211,11 @@ function attachScannerCardSwipeHandler(node, ticker){
     if(node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
     pointerId = null;
     const duration = Math.max(1, Date.now() - startTime);
-    const velocity = deltaX / duration;
-    const distance = Math.round(Math.max(maxDistance, Math.abs(deltaX)));
+    const velocity = gestureState.deltaX / duration;
+    const distance = Math.round(Math.max(gestureState.maxDistance, Math.abs(gestureState.deltaX)));
     const nearAssist = distance >= assistDistance;
     const fastEnough = nearAssist && velocity <= -0.35;
-    if(deltaX <= -threshold || fastEnough){
+    if(gestureState.intent === 'horizontal-swipe' && (gestureState.deltaX <= -threshold || fastEnough)){
       removeWithAnimation(distance);
       uiState.lastSwipeRemoved = {ticker, at:Date.now()};
       if(event && typeof event.preventDefault === 'function'){
@@ -12191,30 +12225,50 @@ function attachScannerCardSwipeHandler(node, ticker){
     }
     const reason = nearAssist ? 'stop short of assist mark' : 'drag too short';
     recordFailure(reason);
+    gestureState.intent = gestureState.intent || 'tap';
+    gestureState.suppressClick = gestureState.intent !== 'tap';
+    if(!gestureState.suppressClick){
+      recordGestureDebug(ticker, 'tap detected; review open allowed');
+    }
     reset();
-    deltaX = 0;
-    maxDistance = 0;
+    gestureState.deltaX = 0;
+    gestureState.deltaY = 0;
   };
   node.addEventListener('pointerdown', event => {
     if(pointerId !== null) return;
     if(event.button && event.button !== 0) return;
     if(shouldIgnore(event.target)) return;
     pointerId = event.pointerId;
-    startX = event.clientX;
+    gestureState.startX = event.clientX;
+    gestureState.startY = event.clientY;
     startTime = Date.now();
-    deltaX = 0;
-    maxDistance = 0;
+    gestureState.deltaX = 0;
+    gestureState.deltaY = 0;
+    gestureState.intent = null;
+    gestureState.suppressClick = false;
+    gestureState.swiped = false;
+    gestureState.maxDistance = 0;
     node.style.transition = '';
     node.setPointerCapture(pointerId);
     setSwipeFeedback(ticker, null);
+    recordGestureDebug(ticker, 'interaction started');
   });
   node.addEventListener('pointermove', event => {
     if(pointerId === null || event.pointerId !== pointerId) return;
-    event.preventDefault();
-    deltaX = Math.min(0, event.clientX - startX);
-    maxDistance = Math.max(maxDistance, Math.abs(deltaX));
-    node.style.transform = `translateX(${deltaX}px)`;
-    node.style.opacity = `${Math.max(0.4, 1 + deltaX / 300)}`;
+    gestureState.deltaX = event.clientX - gestureState.startX;
+    gestureState.deltaY = event.clientY - gestureState.startY;
+    updateIntent();
+    const moveX = Math.min(0, gestureState.deltaX);
+    const absX = Math.abs(gestureState.deltaX);
+    gestureState.maxDistance = Math.max(gestureState.maxDistance, absX);
+    if(gestureState.intent === 'horizontal-swipe'){
+      event.preventDefault();
+      node.style.transform = `translateX(${moveX}px)`;
+      node.style.opacity = `${Math.max(0.4, 1 + moveX / 300)}`;
+    }else if(!gestureState.intent){
+      node.style.transform = `translateX(${moveX}px)`;
+      node.style.opacity = `${Math.max(0.4, 1 + moveX / 300)}`;
+    }
   });
   node.addEventListener('pointerup', finalize);
   node.addEventListener('pointerleave', finalize);
@@ -12370,6 +12424,7 @@ function renderScannerResults(){
             renderScannerResults();
           };
         }
+        attachScannerCardSwipeHandler(node, ticker);
         node.querySelectorAll('.compact-details summary').forEach(summary => {
           summary.onclick = event => {
             event.stopPropagation();
@@ -12388,25 +12443,32 @@ function renderScannerResults(){
           const record = uiState.lastSwipeRemoved;
           return record && record.ticker === ticker && Date.now() - record.at < 1000;
         };
+        const gestureState = node.__gestureState || {};
+        const gestureAllowsActivation = () => !gestureState.suppressClick && (!gestureState.intent || gestureState.intent === 'tap');
         let lastPointerActivationAt = 0;
         node.tabIndex = 0;
         node.setAttribute('role', 'button');
         node.onclick = event => {
           if(scannerCardActivationBlocked(event)) return;
           if(wasRecentlySwipedAway()) return;
+          if(!gestureAllowsActivation()){
+            recordGestureDebug(ticker, 'click suppressed after swipe');
+            return;
+          }
           if(lastPointerActivationAt && Date.now() - lastPointerActivationAt < 450) return;
           activateScannerCard();
         };
         node.addEventListener('pointerup', event => {
           if(scannerCardActivationBlocked(event)) return;
           if(wasRecentlySwipedAway() || event.defaultPrevented) return;
+          if(!gestureAllowsActivation()) return;
           if(String(event.pointerType || '').toLowerCase() === 'mouse') return;
           lastPointerActivationAt = Date.now();
           event.preventDefault();
           activateScannerCard();
         });
         node.addEventListener('click', event => {
-          if(wasRecentlySwipedAway()){
+          if(wasRecentlySwipedAway() || !gestureAllowsActivation()){
             event.stopPropagation();
             event.preventDefault();
           }
@@ -12417,7 +12479,6 @@ function renderScannerResults(){
           event.preventDefault();
           activateScannerCard();
         };
-        attachScannerCardSwipeHandler(node, ticker);
         list.appendChild(node);
       });
     }else{
