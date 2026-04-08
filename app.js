@@ -12397,14 +12397,14 @@ function renderScannerResults(){
           if(lastPointerActivationAt && Date.now() - lastPointerActivationAt < 450) return;
           activateScannerCard();
         };
-        node.onpointerup = event => {
+        node.addEventListener('pointerup', event => {
           if(scannerCardActivationBlocked(event)) return;
-          if(wasRecentlySwipedAway()) return;
+          if(wasRecentlySwipedAway() || event.defaultPrevented) return;
           if(String(event.pointerType || '').toLowerCase() === 'mouse') return;
           lastPointerActivationAt = Date.now();
           event.preventDefault();
           activateScannerCard();
-        };
+        });
         node.addEventListener('click', event => {
           if(wasRecentlySwipedAway()){
             event.stopPropagation();
