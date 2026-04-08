@@ -197,6 +197,7 @@ const {state, uiState} = createAppState({
   defaultState:DEFAULT_STATE,
   safeJsonParse
 });
+uiState.scanCardMenu = {ticker:'', menuOpen:false, activeSubmenu:null};
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -5692,21 +5693,66 @@ function renderScannerDecisionTraceContent(view){
   return `${finalSection}${baseSection}${executionSection}${gateSection}${advancedSection}`;
 }
 
-function currentScanCardSecondaryUi(ticker){
+function currentScanCardMenuState(ticker){
   const symbol = normalizeTicker(ticker);
-  if(!symbol || uiState.secondaryUiTicker !== symbol) return null;
-  return uiState.secondaryUiMode || null;
+  const menu = uiState.scanCardMenu || {ticker:'', menuOpen:false, activeSubmenu:null};
+  if(!symbol || menu.ticker !== symbol) return {ticker:'', menuOpen:false, activeSubmenu:null};
+  return {...menu};
+}
+
+function currentScanCardSecondaryUi(ticker){
+  const menuState = currentScanCardMenuState(ticker);
+  if(!menuState.menuOpen) return null;
+  return menuState.activeSubmenu || 'menu';
 }
 
 function setScanCardSecondaryUi(ticker, mode){
-  const symbol = normalizeTicker(ticker);
-  uiState.secondaryUiTicker = symbol || '';
-  uiState.secondaryUiMode = symbol && mode ? mode : null;
+  if(mode === 'menu'){
+    toggleScanCardMenu(ticker);
+  }else if(['details','trace','visual-debug'].includes(mode)){
+    setScanCardActiveSubmenu(ticker, mode);
+  }
 }
 
 function clearScanCardSecondaryUi(){
-  uiState.secondaryUiTicker = '';
-  uiState.secondaryUiMode = null;
+  closeScanCardMenu();
+}
+
+function toggleScanCardMenu(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  const state = currentScanCardMenuState(symbol);
+  if(state.menuOpen){
+    if(state.activeSubmenu){
+      closeScanCardSubmenu();
+    }else{
+      closeScanCardMenu();
+    }
+    return;
+  }
+  openScanCardMenu(symbol);
+}
+
+function openScanCardMenu(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  uiState.scanCardMenu = {ticker:symbol, menuOpen:true, activeSubmenu:null};
+}
+
+function setScanCardActiveSubmenu(ticker, submenu){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  uiState.scanCardMenu = {ticker:symbol, menuOpen:true, activeSubmenu:submenu};
+}
+
+function closeScanCardSubmenu(){
+  const menu = uiState.scanCardMenu || {ticker:'', menuOpen:false, activeSubmenu:null};
+  if(!menu.menuOpen) return;
+  uiState.scanCardMenu = {ticker:menu.ticker, menuOpen:true, activeSubmenu:null};
+}
+
+function closeScanCardMenu(){
+  uiState.scanCardMenu = {ticker:'', menuOpen:false, activeSubmenu:null};
 }
 
 function renderScannerDetailsContent(view){
@@ -5833,20 +5879,24 @@ function renderScannerVisualDebugContent(view){
 }
 
 function renderScanCardSecondaryUi(view){
-  const mode = currentScanCardSecondaryUi(view && view.ticker);
-  if(mode === 'menu'){
+  const ticker = view && view.ticker;
+  const menuState = currentScanCardMenuState(ticker);
+  if(!menuState.menuOpen) return '';
+  if(!menuState.activeSubmenu){
     return `<div class="card-overflow-menu no-card-click is-open" data-role="overflow-menu"><button type="button" data-act="open-details">Details</button><button type="button" data-act="open-trace">Decision Trace</button><button type="button" data-act="open-visual-debug">Visual Debug</button></div>`;
   }
-  if(mode === 'details'){
-    return `<div class="scan-card-secondary-panel scan-card-details-panel no-card-click" data-role="secondary-panel" data-panel-mode="details"><div class="scan-card-secondary-panel__title">Details</div><div class="scan-card-secondary-panel__body">${renderScannerDetailsContent(view)}</div></div>`;
+  const submenu = getScannerSubmenuContent(menuState.activeSubmenu, view);
+  return `<div class="scan-card-secondary-panel scan-card-submenu-panel no-card-click" data-role="secondary-panel" data-panel-mode="${escapeHtml(menuState.activeSubmenu)}" data-submenu-panel><div class="scan-card-secondary-panel__submenu-header" data-act="submenu-back"><button type="button" class="scan-card-secondary-panel__submenu-back">Back</button><div class="scan-card-secondary-panel__title">${escapeHtml(submenu.title)}</div></div><div class="scan-card-secondary-panel__submenu-body">${submenu.content}</div></div>`;
+}
+
+function getScannerSubmenuContent(key, view){
+  if(key === 'trace'){
+    return {title:'Decision Trace', content:renderScannerDecisionTraceContent(view)};
   }
-  if(mode === 'trace'){
-    return `<div class="scan-card-secondary-panel scan-card-trace-panel no-card-click" data-role="secondary-panel" data-panel-mode="trace"><div class="scan-card-secondary-panel__title">Decision Trace</div><div class="scan-card-secondary-panel__body">${renderScannerDecisionTraceContent(view)}</div></div>`;
+  if(key === 'visual-debug'){
+    return {title:'Visual Debug', content:renderScannerVisualDebugContent(view)};
   }
-  if(mode === 'visual-debug'){
-    return `<div class="scan-card-secondary-panel scan-card-visual-debug-panel no-card-click" data-role="secondary-panel" data-panel-mode="visual-debug"><div class="scan-card-secondary-panel__title">Visual Debug</div><div class="scan-card-secondary-panel__body">${renderScannerVisualDebugContent(view)}</div></div>`;
-  }
-  return '';
+  return {title:'Details', content:renderScannerDetailsContent(view)};
 }
 
 function rrReliabilityClass(rrReliability){
@@ -5943,8 +5993,9 @@ function renderCompactResultCardFromView(view){
   const summary = scanCardSummaryForView(view);
   const actionLabel = scanCardPrimaryActionLabel(view);
   const secondaryUiMarkup = renderScanCardSecondaryUi(view);
-  const expanded = currentScanCardSecondaryUi(item.ticker);
-  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(globalVisual.toneClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="badge-score-row result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${expanded === 'menu' ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
+  const menuState = currentScanCardMenuState(item.ticker);
+  const expanded = menuState.menuOpen ? (menuState.activeSubmenu || 'menu') : null;
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(globalVisual.toneClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="badge-score-row result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
@@ -12203,6 +12254,7 @@ function attachScannerCardSwipeHandler(node, ticker){
     gestureState.swiped = true;
     gestureState.suppressClick = true;
     recordGestureDebug(ticker, 'card removed by horizontal swipe; review blocked');
+    closeScanCardMenu();
     setTimeout(() => removeCard(ticker), 220);
   };
   const finalize = event => {
@@ -12383,12 +12435,7 @@ function renderScannerResults(){
           overflowToggle.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            const currentMode = currentScanCardSecondaryUi(ticker);
-            if(currentMode === 'menu'){
-              clearScanCardSecondaryUi();
-            }else{
-              setScanCardSecondaryUi(ticker, 'menu');
-            }
+            toggleScanCardMenu(ticker);
             renderScannerResults();
           };
         }
@@ -12396,7 +12443,7 @@ function renderScannerResults(){
           detailsAction.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            setScanCardSecondaryUi(ticker, 'details');
+            setScanCardActiveSubmenu(ticker, 'details');
             renderScannerResults();
           };
         }
@@ -12404,7 +12451,7 @@ function renderScannerResults(){
           traceAction.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            setScanCardSecondaryUi(ticker, 'trace');
+            setScanCardActiveSubmenu(ticker, 'trace');
             renderScannerResults();
           };
         }
@@ -12412,7 +12459,7 @@ function renderScannerResults(){
           visualDebugAction.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            setScanCardSecondaryUi(ticker, 'visual-debug');
+            setScanCardActiveSubmenu(ticker, 'visual-debug');
             renderScannerResults();
           };
         }
@@ -12420,8 +12467,18 @@ function renderScannerResults(){
           secondaryPanel.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
-            setScanCardSecondaryUi(ticker, 'menu');
-            renderScannerResults();
+            // Keep interaction within the submenu; background/back handling occurs separately.
+          };
+        }
+        const submenuPanel = node.querySelector('[data-submenu-panel]');
+        if(submenuPanel){
+          submenuPanel.onclick = event => {
+            if(event.target === submenuPanel || event.target.closest('[data-act="submenu-back"]')){
+              event.stopPropagation();
+              event.preventDefault();
+              closeScanCardSubmenu();
+              renderScannerResults();
+            }
           };
         }
         attachScannerCardSwipeHandler(node, ticker);
@@ -12450,6 +12507,12 @@ function renderScannerResults(){
         node.setAttribute('role', 'button');
         node.onclick = event => {
           if(scannerCardActivationBlocked(event)) return;
+          const menuState = currentScanCardMenuState(ticker);
+          if(menuState.menuOpen){
+            closeScanCardMenu();
+            renderScannerResults();
+            return;
+          }
           if(wasRecentlySwipedAway()) return;
           if(!gestureAllowsActivation()){
             recordGestureDebug(ticker, 'click suppressed after swipe');
@@ -12460,6 +12523,12 @@ function renderScannerResults(){
         };
         node.addEventListener('pointerup', event => {
           if(scannerCardActivationBlocked(event)) return;
+          const menuState = currentScanCardMenuState(ticker);
+          if(menuState.menuOpen){
+            closeScanCardMenu();
+            renderScannerResults();
+            return;
+          }
           if(wasRecentlySwipedAway() || event.defaultPrevented) return;
           if(!gestureAllowsActivation()) return;
           if(String(event.pointerType || '').toLowerCase() === 'mouse') return;
@@ -14059,9 +14128,15 @@ on('results', 'keydown', event => {
 });
 document.addEventListener('click', event => {
   if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]') || event.target.closest('.scan-card-secondary-panel')) return;
-  if(event.target.closest('.scan-card')) return;
-  if(uiState.secondaryUiTicker || uiState.secondaryUiMode){
-    clearScanCardSecondaryUi();
+  if(event.target.closest('.scan-card')){
+    if(uiState.scanCardMenu && uiState.scanCardMenu.menuOpen){
+      closeScanCardMenu();
+      renderScannerResults();
+    }
+    return;
+  }
+  if(uiState.scanCardMenu && uiState.scanCardMenu.menuOpen){
+    closeScanCardMenu();
     renderScannerResults();
   }
 });
