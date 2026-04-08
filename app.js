@@ -12161,10 +12161,10 @@ function attachScannerCardSwipeHandler(node, ticker){
     const duration = Math.max(1, Date.now() - startTime);
     const velocity = deltaX / duration;
     const fastEnough = velocity <= -0.35;
-    if(deltaX <= -threshold || (Math.abs(deltaX) >= assistDistance && fastEnough)){
+    if(deltaX <= -threshold || (Math.abs(deltaX) >= assistDistance)){
       removeWithAnimation();
     }else{
-      const reason = !fastEnough ? 'drag slow or short' : 'stop short of assist mark';
+      const reason = Math.abs(deltaX) >= assistDistance ? 'drag too slow' : 'drag too short';
       recordFailure(reason);
       reset();
     }
