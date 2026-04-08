@@ -1458,7 +1458,8 @@ details>summary::-webkit-details-marker{display:none}
 .resulthead .inline-status,
 .watchlist-card__status,
 .watchlist-card .inline-status{
-  align-self:center;
+  flex:0 0 auto;
+  align-self:flex-start;
 }
   .watchlist-card__status{gap:6px}
   .watchlist-actions{gap:6px}
