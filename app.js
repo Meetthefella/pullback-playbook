@@ -12534,6 +12534,8 @@ function renderScannerResults(){
             closeScanCardMenu();
             renderScannerResults();
             suppressNextScannerActivation(ticker);
+            event.preventDefault();
+            event.stopPropagation();
             return;
           }
           if(wasRecentlySwipedAway()) return;
@@ -12551,6 +12553,8 @@ function renderScannerResults(){
             closeScanCardMenu();
             renderScannerResults();
             suppressNextScannerActivation(ticker);
+            event.preventDefault();
+            event.stopPropagation();
             return;
           }
           if(wasRecentlySwipedAway() || event.defaultPrevented) return;
