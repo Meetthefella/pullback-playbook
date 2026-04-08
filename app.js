@@ -6598,8 +6598,15 @@ function removeCard(ticker){
   delete uiState.promptOpen[ticker];
   delete uiState.responseOpen[ticker];
   if(activeReviewTicker() === ticker) resetReview();
+  const normalized = normalizeTicker(ticker);
+  if(normalized){
+    uiState.scannerSessionTickers = uniqueTickers((uiState.scannerSessionTickers || []).filter(item => normalizeTicker(item) !== normalized));
+  }
   commitTickerState();
   renderCards();
+  renderScannerResults();
+  renderFocusQueue();
+  renderWorkflowAlerts();
 }
 
 function scoreAndStatusFromChecks(checks){

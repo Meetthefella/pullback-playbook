@@ -452,6 +452,8 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   align-items:center;
   gap:10px;
   flex-wrap:wrap;
+  justify-content:flex-end;
+  width:100%;
 }
 .resultbody{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
 .cardreviewgrid,.resultsplit,.responsegrid,.analysislead,.analysisplanmini,.suggestions,.alertgroup,.alertsection,.reviewsecondary,.reviewchecklist,.checks,.analyticrows,.insightlist,.workflowmenu{display:grid;gap:10px}
