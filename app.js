@@ -12334,6 +12334,11 @@ function renderScannerResults(){
             renderScannerResults();
           };
         }
+        node.querySelectorAll('.compact-details summary').forEach(summary => {
+          summary.onclick = event => {
+            event.stopPropagation();
+          };
+        });
         const activateScannerCard = () => {
           if(currentScanCardSecondaryUi(ticker)){
             clearScanCardSecondaryUi();
