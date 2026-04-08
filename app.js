@@ -12122,9 +12122,11 @@ function getSwipeFeedback(ticker){
 function attachScannerCardSwipeHandler(node, ticker){
   if(!node || !ticker) return;
   const threshold = 65;
+  const minDistance = 35;
   const cancelSelectors = ['button', 'summary', 'input', 'textarea'];
   let pointerId = null;
   let startX = 0;
+  let startTime = 0;
   let deltaX = 0;
   let removing = false;
   const reset = () => {
@@ -12133,13 +12135,13 @@ function attachScannerCardSwipeHandler(node, ticker){
     node.style.opacity = '';
   };
   const shouldIgnore = target => cancelSelectors.some(selector => target && target.closest(selector));
-  const recordFailure = () => {
+  const recordFailure = (reasonSuffix = '') => {
     const distance = Math.round(Math.abs(deltaX));
     setSwipeFeedback(ticker, {
       attempted:true,
       distance,
       threshold,
-      reason:`Swiped ${distance}px; need ${threshold}px to delete.`
+      reason:`Swiped ${distance}px${reasonSuffix ? ` (${reasonSuffix})` : ''}; need ${threshold}px to delete.`
     });
   };
   const removeWithAnimation = () => {
@@ -12156,10 +12158,14 @@ function attachScannerCardSwipeHandler(node, ticker){
     if(event && typeof event.pointerId === 'number' && event.pointerId !== pointerId) return;
     if(node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
     pointerId = null;
-    if(deltaX <= -threshold){
+    const duration = Math.max(1, Date.now() - startTime);
+    const velocity = deltaX / duration;
+    const fastEnough = velocity <= -0.35;
+    if(deltaX <= -threshold || (Math.abs(deltaX) >= minDistance && fastEnough)){
       removeWithAnimation();
     }else{
-      recordFailure();
+      const reason = !fastEnough ? 'drag slow or short' : '';
+      recordFailure(reason);
       reset();
     }
     deltaX = 0;
@@ -12170,6 +12176,7 @@ function attachScannerCardSwipeHandler(node, ticker){
     if(shouldIgnore(event.target)) return;
     pointerId = event.pointerId;
     startX = event.clientX;
+    startTime = Date.now();
     deltaX = 0;
     node.style.transition = '';
     node.setPointerCapture(pointerId);
