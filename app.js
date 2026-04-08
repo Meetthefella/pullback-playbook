@@ -12508,73 +12508,28 @@ function renderScannerResults(){
             event.stopPropagation();
           };
         });
-        const activateScannerCard = () => {
-          if(!allowScannerActivation(ticker)) return;
+        const scannerCardActivationBlocked = event => !!(event && (event.target.closest('.no-card-click') || event.target.closest('summary') || event.target.closest('.compact-details')));
+        node.tabIndex = 0;
+        node.setAttribute('role', 'button');
+        node.onclick = null;
+        node.onpointerup = null;
+        node.onkeydown = event => {
+          if(event.key !== 'Enter' && event.key !== ' ') return;
+          if(scannerCardActivationBlocked(event)) return;
+          event.preventDefault();
+          const menuState = currentScanCardMenuState(ticker);
+          if(menuState.menuOpen){
+            closeScanCardMenu();
+            renderScannerResults();
+            suppressNextScannerActivation(ticker);
+            return;
+          }
           if(currentScanCardSecondaryUi(ticker)){
             clearScanCardSecondaryUi();
             renderScannerResults();
             return;
           }
-          openRankedResultInReview(ticker, {sourceVerdict});
-        };
-        const scannerCardActivationBlocked = event => !!(event && (event.target.closest('.no-card-click') || event.target.closest('summary') || event.target.closest('.compact-details')));
-        const wasRecentlySwipedAway = () => {
-          const record = uiState.lastSwipeRemoved;
-          return record && record.ticker === ticker && Date.now() - record.at < 1000;
-        };
-        const gestureState = node.__gestureState || {};
-        const gestureAllowsActivation = () => !gestureState.suppressClick && (!gestureState.intent || gestureState.intent === 'tap');
-        let lastPointerActivationAt = 0;
-        node.tabIndex = 0;
-        node.setAttribute('role', 'button');
-        node.onclick = event => {
-          if(scannerCardActivationBlocked(event)) return;
-          const menuState = currentScanCardMenuState(ticker);
-          if(menuState.menuOpen){
-            closeScanCardMenu();
-            renderScannerResults();
-            suppressNextScannerActivation(ticker);
-            event.preventDefault();
-            event.stopPropagation();
-            return;
-          }
-          if(wasRecentlySwipedAway()) return;
-          if(!gestureAllowsActivation()){
-            recordGestureDebug(ticker, 'click suppressed after swipe');
-            return;
-          }
-          if(lastPointerActivationAt && Date.now() - lastPointerActivationAt < 450) return;
-          activateScannerCard();
-        };
-        node.addEventListener('pointerup', event => {
-          if(scannerCardActivationBlocked(event)) return;
-          const menuState = currentScanCardMenuState(ticker);
-          if(menuState.menuOpen){
-            closeScanCardMenu();
-            renderScannerResults();
-            suppressNextScannerActivation(ticker);
-            event.preventDefault();
-            event.stopPropagation();
-            return;
-          }
-          if(wasRecentlySwipedAway() || event.defaultPrevented) return;
-          if(!gestureAllowsActivation()) return;
-          if(String(event.pointerType || '').toLowerCase() === 'mouse') return;
-          lastPointerActivationAt = Date.now();
-          event.preventDefault();
-          activateScannerCard();
-        });
-        node.addEventListener('click', event => {
-          if(wasRecentlySwipedAway() || !gestureAllowsActivation()){
-            event.stopPropagation();
-            event.preventDefault();
-          }
-        }, true);
-        node.onkeydown = event => {
-          if(event.key !== 'Enter' && event.key !== ' ') return;
-          if(scannerCardActivationBlocked(event)) return;
-          event.preventDefault();
-          activateScannerCard();
+          attemptScanCardActivation(ticker, sourceVerdict);
         };
         list.appendChild(node);
       });
@@ -14118,6 +14073,19 @@ click('refreshLifecycleBtn', refreshSelectedTickerLifecycle);
 click('expireLifecycleBtn', expireSelectedTickerLifecycle);
 click('reactivateLifecycleBtn', reactivateSelectedTickerLifecycle);
 click('calcBtn', calculate);
+function attemptScanCardActivation(ticker, sourceVerdict){
+  const menuState = currentScanCardMenuState(ticker);
+  if(menuState.menuOpen){
+    closeScanCardMenu();
+    renderScannerResults();
+    suppressNextScannerActivation(ticker);
+    return false;
+  }
+  if(!allowScannerActivation(ticker)) return false;
+  openRankedResultInReview(ticker, {sourceVerdict});
+  return true;
+}
+
 on('results', 'click', event => {
   if(event.defaultPrevented) return;
   if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]') || event.target.closest('.scan-card-secondary-panel') || event.target.closest('.no-card-click') || event.target.closest('summary')) return;
@@ -14127,13 +14095,26 @@ on('results', 'click', event => {
   if(!ticker) return;
   const sourceVerdict = card.getAttribute('data-source-verdict') || '';
   setScannerCardClickTrace(ticker, 'results.click', `sourceVerdict=${sourceVerdict || '(none)'}`);
+  const menuState = currentScanCardMenuState(ticker);
+  if(menuState.menuOpen){
+    closeScanCardMenu();
+    renderScannerResults();
+    suppressNextScannerActivation(ticker);
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   if(currentScanCardSecondaryUi(ticker)){
     setScannerCardClickTrace(ticker, 'results.click.cleared_secondary_ui', `mode=${currentScanCardSecondaryUi(ticker) || '(none)'}`);
     clearScanCardSecondaryUi();
     renderScannerResults();
     return;
   }
-  openRankedResultInReview(ticker, {sourceVerdict});
+  if(!attemptScanCardActivation(ticker, sourceVerdict)){
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
 });
 on('results', 'keydown', event => {
   if(event.defaultPrevented) return;
