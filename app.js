@@ -12405,6 +12405,12 @@ function renderScannerResults(){
           event.preventDefault();
           activateScannerCard();
         };
+        node.addEventListener('click', event => {
+          if(wasRecentlySwipedAway()){
+            event.stopPropagation();
+            event.preventDefault();
+          }
+        }, true);
         node.onkeydown = event => {
           if(event.key !== 'Enter' && event.key !== ' ') return;
           if(scannerCardActivationBlocked(event)) return;
