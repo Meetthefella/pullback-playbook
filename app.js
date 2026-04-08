@@ -4114,7 +4114,7 @@ function renderWatchlist(){
       const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
       const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
       div.className = `resultcompact watchlist-card ${escapeHtml(globalVisual.toneClass)}`.trim();
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div><div class="watchlist-card__status"><span class="badge state-pill ${escapeHtml(expired ? watchlistBadgeClass : watchlistBadge.className)}">${escapeHtml(expired ? watchlistBadgeLabel : watchlistBadge.text)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(expired ? (decisionCopy.headline || shortAction) : watchlistAction.label)}</div>${(expired ? shortReason : globalVerdict.reason) ? `<div class="tiny watchlist-card__reason">${escapeHtml(expired ? shortReason : globalVerdict.reason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(globalVerdict.allow_plan ? resolvedContract.planStatusLabel : 'Plan blocked')}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(expired ? watchlistBadgeClass : watchlistBadge.className)}">${escapeHtml(expired ? watchlistBadgeLabel : watchlistBadge.text)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(expired ? (decisionCopy.headline || shortAction) : watchlistAction.label)}</div>${(expired ? shortReason : globalVerdict.reason) ? `<div class="tiny watchlist-card__reason">${escapeHtml(expired ? shortReason : globalVerdict.reason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(globalVerdict.allow_plan ? resolvedContract.planStatusLabel : 'Plan blocked')}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -5809,12 +5809,15 @@ function renderScannerVisualDebugContent(view){
     {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
   ]);
   const swipeInfo = getSwipeFeedback(item.ticker);
-  const swipeFeedbackRow = {
-    label:'Swipe Feedback',
-    value:swipeInfo
-      ? (swipeInfo.removed ? 'Removed by swipe' : `${swipeInfo.reason || 'Swipe not far enough'}`)
-      : '(none)'
-  };
+  const swipeSummary = swipeInfo
+    ? (swipeInfo.removed
+      ? 'Removed by swipe'
+      : `${swipeInfo.reason || 'Swipe not far enough'}${Number.isFinite(swipeInfo.distance) && Number.isFinite(swipeInfo.threshold) ? ` (${swipeInfo.distance}/${swipeInfo.threshold}px)` : ''}`)
+    : '(none)';
+  const swipeFeedbackRow = {label:'Swipe Feedback', value:swipeSummary};
+  const interactionSection = renderDebugSectionMarkup('Interaction', [
+    {label:'Swipe Feedback', value:swipeSummary}
+  ]);
   const advancedSection = renderAdvancedDebugMarkup([
     swipeFeedbackRow,
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
@@ -5826,7 +5829,7 @@ function renderScannerVisualDebugContent(view){
     {label:'Resolver Reason', value:globalVerdict.reason || '(none)'},
     {label:'Card Click Trace', value:clickTrace ? `${clickTrace.stage}${clickTrace.detail ? ` | ${clickTrace.detail}` : ''} | ${clickTrace.at}` : '(none)'}
   ]);
-  return `${finalSection}${baseSection}${executionSection}${advancedSection}`;
+  return `${finalSection}${baseSection}${executionSection}${interactionSection}${advancedSection}`;
 }
 
 function renderScanCardSecondaryUi(view){
@@ -5941,7 +5944,7 @@ function renderCompactResultCardFromView(view){
   const actionLabel = scanCardPrimaryActionLabel(view);
   const secondaryUiMarkup = renderScanCardSecondaryUi(view);
   const expanded = currentScanCardSecondaryUi(item.ticker);
-  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(globalVisual.toneClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="badge-score-row inline-status result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${expanded === 'menu' ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(globalVisual.toneClass)}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="badge-score-row result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div></div><div class="resultsummary"><div class="resultprimaryaction">${escapeHtml(actionLabel)}</div><div class="resultreason">${escapeHtml(summary.primary)}</div>${summary.secondary ? `<div class="resultsubreason">${escapeHtml(summary.secondary)}</div>` : ''}</div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${expanded === 'menu' ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
@@ -12121,22 +12124,25 @@ function getSwipeFeedback(ticker){
 
 function attachScannerCardSwipeHandler(node, ticker){
   if(!node || !ticker) return;
-  const threshold = 50;
-  const assistDistance = 35;
+  const threshold = 65;
+  const assistDistance = 45;
   const cancelSelectors = ['button', 'summary', 'input', 'textarea'];
   let pointerId = null;
   let startX = 0;
   let startTime = 0;
   let deltaX = 0;
+  let maxDistance = 0;
   let removing = false;
+  node.style.touchAction = 'pan-y';
   const reset = () => {
     node.style.transition = 'transform .2s ease, opacity .2s ease';
     node.style.transform = '';
     node.style.opacity = '';
+    maxDistance = 0;
   };
   const shouldIgnore = target => cancelSelectors.some(selector => target && target.closest(selector));
   const recordFailure = (reasonSuffix = '') => {
-    const distance = Math.round(Math.abs(deltaX));
+    const distance = Math.round(Math.max(maxDistance, Math.abs(deltaX)));
     setSwipeFeedback(ticker, {
       attempted:true,
       distance,
@@ -12144,13 +12150,18 @@ function attachScannerCardSwipeHandler(node, ticker){
       reason:`Swiped ${distance}px${reasonSuffix ? ` (${reasonSuffix})` : ''}; need ${threshold}px to delete.`
     });
   };
-  const removeWithAnimation = () => {
+  const removeWithAnimation = (distance) => {
     if(removing) return;
     removing = true;
     node.style.transition = 'transform .2s ease, opacity .2s ease';
     node.style.transform = 'translateX(-150%)';
     node.style.opacity = '0';
-    setSwipeFeedback(ticker, {removed:true});
+    setSwipeFeedback(ticker, {
+      removed:true,
+      distance,
+      threshold,
+      reason:'Removed by swipe'
+    });
     setTimeout(() => removeCard(ticker), 220);
   };
   const finalize = event => {
@@ -12160,15 +12171,18 @@ function attachScannerCardSwipeHandler(node, ticker){
     pointerId = null;
     const duration = Math.max(1, Date.now() - startTime);
     const velocity = deltaX / duration;
-    const fastEnough = velocity <= -0.35;
-    if(deltaX <= -threshold || (Math.abs(deltaX) >= assistDistance)){
-      removeWithAnimation();
+    const distance = Math.round(Math.max(maxDistance, Math.abs(deltaX)));
+    const nearAssist = distance >= assistDistance;
+    const fastEnough = nearAssist && velocity <= -0.35;
+    if(deltaX <= -threshold || fastEnough){
+      removeWithAnimation(distance);
     }else{
-      const reason = Math.abs(deltaX) >= assistDistance ? 'drag too slow' : 'drag too short';
+      const reason = nearAssist ? 'stop short of assist mark' : 'drag too short';
       recordFailure(reason);
       reset();
     }
     deltaX = 0;
+    maxDistance = 0;
   };
   node.addEventListener('pointerdown', event => {
     if(pointerId !== null) return;
@@ -12178,13 +12192,16 @@ function attachScannerCardSwipeHandler(node, ticker){
     startX = event.clientX;
     startTime = Date.now();
     deltaX = 0;
+    maxDistance = 0;
     node.style.transition = '';
     node.setPointerCapture(pointerId);
     setSwipeFeedback(ticker, null);
   });
   node.addEventListener('pointermove', event => {
     if(pointerId === null || event.pointerId !== pointerId) return;
+    event.preventDefault();
     deltaX = Math.min(0, event.clientX - startX);
+    maxDistance = Math.max(maxDistance, Math.abs(deltaX));
     node.style.transform = `translateX(${deltaX}px)`;
     node.style.opacity = `${Math.max(0.4, 1 + deltaX / 300)}`;
   });

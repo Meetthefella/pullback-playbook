@@ -447,7 +447,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   gap:12px;
   align-items:start;
 }
- .badge-score-row{
+.badge-score-row{
   display:flex;
   align-items:center;
   gap:10px;
@@ -1292,7 +1292,7 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 .watchlist-card__header{display:flex;flex-direction:column;gap:8px}
 .watchlist-card__header-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:nowrap;min-width:0}
 .watchlist-card__ticker{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.watchlist-card__status{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;flex:0 0 auto}
+.watchlist-card__status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;white-space:normal;flex:0 0 auto;justify-content:flex-start}
 .watchlist-card__company{width:100%;color:var(--text-secondary)}
 .watchlist-signal-row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;min-width:0}
 .watchlist-signal-row .pill{max-width:100%}
