@@ -1586,7 +1586,13 @@ function analysisDerivedStatesFromRecord(record){
     structureState:String(analysisProjection.structure_state || normalizedAnalysis.structure_state || '').trim().toLowerCase(),
     stabilisationState:String(analysisProjection.stabilisation_state || normalizedAnalysis.stabilisation_state || '').trim().toLowerCase(),
     bounceState:String(analysisProjection.bounce_state || normalizedAnalysis.bounce_state || '').trim().toLowerCase(),
-    volumeState:String(analysisProjection.volume_state || normalizedAnalysis.volume_state || '').trim().toLowerCase()
+    volumeState:String(analysisProjection.volume_state || normalizedAnalysis.volume_state || '').trim().toLowerCase(),
+    scanType:String(analysisProjection.scan_type || normalizedAnalysis.scan_type || '').trim(),
+    evaluationScanType:String(analysisProjection.evaluation_scan_type || normalizedAnalysis.evaluation_scan_type || '').trim(),
+    importedScanType:String(analysisProjection.imported_scan_type || normalizedAnalysis.imported_scan_type || '').trim(),
+    globalSetupType:String(analysisProjection.global_setup_type || normalizedAnalysis.global_setup_type || '').trim(),
+    setupTypeOverlapDetected:String(analysisProjection.setup_type_overlap_detected || normalizedAnalysis.setup_type_overlap_detected || '').trim().toLowerCase(),
+    setupTypeReason:String(analysisProjection.setup_type_reason || normalizedAnalysis.setup_type_reason || '').trim()
   };
 }
 
@@ -5078,12 +5084,18 @@ function resolveScannerStateWithTrace(record, options = {}){
     if(code && !reasonCodes.includes(code)) reasonCodes.push(code);
   };
   const recordScanSetupType = normalizeScanType(item.scan.scanSetupType || item.scan.scanType || '');
-  const resolverSetupType = recordScanSetupType || currentSetupType() || 'unknown';
+  const derivedScanType = derivedStates.scanType || derivedStates.scan_type || '';
+  const derivedImportedScanType = derivedStates.importedScanType || derivedStates.imported_scan_type || '';
+  const derivedOverlapDetected = derivedStates.setupTypeOverlapDetected || derivedStates.setup_type_overlap_detected || '';
+  const derivedSetupTypeReason = derivedStates.setupTypeReason || derivedStates.setup_type_reason || '';
+  const resolverSetupType = derivedScanType || recordScanSetupType || currentSetupType() || 'unknown';
 
   addStep('scan source', item.scan.setupOrigin || 'unknown');
   addStep('current global setup type', currentSetupType() || 'unknown');
-  addStep('record scan_setup_type', recordScanSetupType || 'unknown');
+  addStep('record scan_setup_type', derivedImportedScanType || recordScanSetupType || 'unknown');
+  addStep('overlap detected', String(derivedOverlapDetected).toLowerCase() === 'yes' ? 'true' : 'false');
   addStep('resolver setup type used', resolverSetupType);
+  addStep('setup-type decision reason', derivedSetupTypeReason || 'n/a');
   addStep('setup origin', item.scan.setupOrigin || 'manual');
   addStep('price vs 20/50/200 MA', [
     Number.isFinite(item.marketData.price) ? `price=${fmtPrice(item.marketData.price)}` : 'price=n/a',
@@ -10119,6 +10131,13 @@ function buildScannerSummary(result){
   return result.reason || 'Trend structure looks broken for this workflow.';
 }
 
+function scanTypeForEvaluation(scanType){
+  const normalized = normalizeScanType(scanType);
+  if(normalized === '50MA' || normalized === 'ambiguous') return '50MA';
+  if(normalized === '20MA') return '20MA';
+  return '20MA';
+}
+
 function hardListFromScan(scan){
   const failed = Array.isArray(scan && scan.breakdown)
     ? scan.breakdown.filter(item => item && item.passed === false).map(item => String(item.label || '')).filter(Boolean)
@@ -10140,7 +10159,8 @@ function priorHighTarget(data, scanType){
   const rows = Array.isArray(data && data.history) ? data.history : [];
   const price = numericOrNull(data && data.price);
   if(!rows.length || !Number.isFinite(price)) return null;
-  const lookback = scanType === '50MA' ? 84 : 42;
+  const evaluationScanType = scanTypeForEvaluation(scanType);
+  const lookback = evaluationScanType === '50MA' ? 84 : 42;
   const windowRows = rows.slice(1, lookback);
   const highs = windowRows.map(row => numericOrNull(row.high ?? row.close)).filter(Number.isFinite).filter(value => value > price);
   if(!highs.length) return null;
@@ -10173,7 +10193,7 @@ function realisticFirstTarget(data, scanType, options = {}){
   const checks = options.checks || buildScannerChecks(data || {});
   const perf1w = numericOrNull(data && data.perf1w);
   if(!Number.isFinite(price) || !Number.isFinite(entry)) return null;
-  const scanStyle = scanType === '50MA' ? '50MA' : '20MA';
+  const scanStyle = scanTypeForEvaluation(scanType);
   const pivots = nearestPivotTargets(data, price, scanStyle === '50MA' ? 84 : 42);
   const nearestPivot = pivots.find(level => level > entry);
   const priorHigh = priorHighTarget(data, scanStyle);
@@ -10201,8 +10221,9 @@ function deriveTradePlan(data, scanType = '20MA'){
   const sma20 = numericOrNull(data.sma20);
   const sma50 = numericOrNull(data.sma50);
   if(!Number.isFinite(price) || !Number.isFinite(sma20) || !Number.isFinite(sma50)) return {entry:null, stop:null, target:null, riskPerShare:null, rewardPerShare:null, rr:null, rrState:'invalid', rrValid:false, firstTargetTooClose:false, positionSize:0, stopBufferPct:null};
-  const support = scanType === '50MA' ? sma50 : sma20;
-  const backupSupport = scanType === '50MA' ? sma20 : sma50;
+  const evaluationScanType = scanTypeForEvaluation(scanType);
+  const support = evaluationScanType === '50MA' ? sma50 : sma20;
+  const backupSupport = evaluationScanType === '50MA' ? sma20 : sma50;
   const entry = Math.max(price, support);
   const stopBufferPct = price < 50 ? 0.02 : (price <= 200 ? 0.015 : 0.01);
   const stop = Math.min(price, Math.min(support, backupSupport) * (1 - stopBufferPct));
@@ -10241,7 +10262,7 @@ function scannerEstimateForCard(card){
   if(!card || !card.marketData || card.marketData.__error) return null;
   const checks = buildScannerChecks(card.marketData);
   const scanType = resolveScanType(card, card.marketData, card.checks && Object.keys(card.checks).length ? card.checks : checks);
-  const estimate = deriveTradePlan(card.marketData, scanType === 'unknown' ? '20MA' : scanType);
+  const estimate = deriveTradePlan(card.marketData, scanTypeForEvaluation(scanType));
   if(!Number.isFinite(estimate.entry) && !Number.isFinite(estimate.stop) && !Number.isFinite(estimate.target) && !Number.isFinite(estimate.rr)) return null;
   return estimate;
 }
@@ -10263,6 +10284,7 @@ function buildSuitabilitySummary(parts){
   if(parts.pullback >= 2) reasons.push('pullback is close to support');
   if(parts.tradeQuality >= 2) reasons.push('trade plan is mostly defined');
   if(parts.scanType === '50MA') reasons.push('deeper 50 MA setup');
+  if(parts.scanType === 'ambiguous') reasons.push('overlap setup treated conservatively like a 50 MA pullback');
   if(parts.controlledPullback) reasons.push('pullback remains controlled');
   if(parts.bounceReady) reasons.push('stabilisation or bounce is improving');
   if(!reasons.length) reasons.push('candidate is early and needs more chart confirmation');
@@ -10557,7 +10579,8 @@ function scoreSuitability(card, data, checks){
   const sma20 = numericOrNull(data.sma20);
   const sma50 = numericOrNull(data.sma50);
   const scanType = resolveScanType(card, data, checks);
-  const tradePlan = deriveTradePlan(data, scanType);
+  const evaluationScanType = scanTypeForEvaluation(scanType);
+  const tradePlan = deriveTradePlan(data, evaluationScanType);
   const pullbackType = classifyPullbackType(data);
   const distance20 = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0 ? Math.abs(price - sma20) / sma20 : null;
   const distance50 = Number.isFinite(price) && Number.isFinite(sma50) && sma50 > 0 ? Math.abs(price - sma50) / sma50 : null;
@@ -10567,9 +10590,9 @@ function scoreSuitability(card, data, checks){
     (checks.above200 ? 1 : 0) +
     (checks.ma50gt200 ? 1 : 0) +
     (mediumTermStrength ? 1 : 0);
-  const controlledPullback = scanType === '50MA'
+  const controlledPullback = evaluationScanType === '50MA'
     ? (checks.near50 || (Number.isFinite(distance50) && distance50 <= 0.05))
-    : (scanType === '20MA'
+    : (evaluationScanType === '20MA'
       ? (checks.near20 || (Number.isFinite(distance20) && distance20 <= 0.04))
       : ((checks.near20 || checks.near50) && ((Number.isFinite(distance20) && distance20 <= 0.04) || (Number.isFinite(distance50) && distance50 <= 0.05))));
   const pullback =
@@ -10698,7 +10721,7 @@ async function evaluateScannerForData(data){
   }
   const checks = buildScannerChecks(safeData);
   const scanType = resolveScanType(null, safeData, checks);
-  const tradePlan = deriveTradePlan(safeData, scanType);
+  const tradePlan = deriveTradePlan(safeData, scanTypeForEvaluation(scanType));
   const hardReasons = scannerHardFailReasons(safeData, checks, tradePlan);
   const breakdown = [
     {passed:checks.above200, label:checks.above200 ? 'Above the 200 MA.' : 'Below the 200 MA.'},
@@ -10981,7 +11004,7 @@ function recomputeRiskContextForCard(card){
   const checks = normalized.checks || buildScannerChecks(sourceData);
   const scanType = resolveScanType(normalized, sourceData, checks);
   const suitability = hasUsableScannerData(sourceData) ? scoreSuitability(normalized, sourceData, checks) : null;
-  const tradePlan = suitability ? suitability.tradePlan : deriveTradePlan(sourceData, scanType === 'unknown' ? '20MA' : scanType);
+  const tradePlan = suitability ? suitability.tradePlan : deriveTradePlan(sourceData, scanTypeForEvaluation(scanType));
   const hardReasons = hasUsableScannerData(sourceData) ? scannerHardFailReasons(sourceData, checks, tradePlan) : [];
   const riskFit = evaluateRiskFit({
     entry:tradePlan.entry || normalized.entry,
@@ -11104,17 +11127,155 @@ function compactChecklistText(checks){
   ].join(', ');
 }
 
-function resolveScanType(card, data, checks){
+function resolveSetupTypeWithOverlap(card, data, checks){
   const explicit = normalizeScanType(
     (card && (card.scanSetupType || card.scanType || card.setupType))
     || (data && (data.scanSetupType || data.scanType || data.setupType))
   );
-  if(explicit) return explicit;
   const globalType = currentSetupType();
-  if(globalType !== 'unknown') return globalType;
-  if(checks && checks.near20 && !checks.near50) return '20MA';
-  if(checks && checks.near50 && !checks.near20) return '50MA';
-  return 'unknown';
+  const price = numericOrNull(data && (data.price ?? (card && card.price)));
+  const sma20 = numericOrNull(data && (data.sma20 ?? (card && card.sma20)));
+  const sma50 = numericOrNull(data && (data.sma50 ?? (card && card.sma50)));
+  const perf1w = numericOrNull(data && (data.perf1w ?? (card && card.perf1w)));
+  const near20 = !!(checks && checks.near20);
+  const near50 = !!(checks && checks.near50);
+  const overlapDetected = near20 && near50;
+  const marketWeak = /below 50 ma|weak|hostile/i.test(String(state.marketStatus || ''));
+  const distance20 = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0 ? Math.abs(price - sma20) / sma20 : null;
+  const distance50 = Number.isFinite(price) && Number.isFinite(sma50) && sma50 > 0 ? Math.abs(price - sma50) / sma50 : null;
+  const below20 = Number.isFinite(price) && Number.isFinite(sma20) ? price < sma20 * 0.998 : false;
+  const below50 = Number.isFinite(price) && Number.isFinite(sma50) ? price < sma50 * 0.998 : false;
+  const structureBroken = !!(checks && checks.structureBroken);
+  const constructiveBounce = !!(checks && (checks.bounce || checks.stabilising));
+  const strongTrend = !!(checks && checks.trendStrong);
+  const explicitSupported = explicit && (
+    !overlapDetected
+    || (explicit === '20MA' && near20 && !near50)
+    || (explicit === '50MA' && near50 && !near20)
+  );
+
+  if(explicit && !overlapDetected) return {
+    importedScanType:explicit,
+    globalSetupType:globalType,
+    overlapDetected:false,
+    resolvedScanType:explicit,
+    reason:'Explicit setup type kept because the chart does not show a true 20MA/50MA overlap.'
+  };
+  if(!explicit && globalType !== 'unknown' && !overlapDetected) return {
+    importedScanType:'unknown',
+    globalSetupType:globalType,
+    overlapDetected:false,
+    resolvedScanType:globalType,
+    reason:'Global setup toggle applied because the chart does not show a true overlap.'
+  };
+  if(explicitSupported && explicit) return {
+    importedScanType:explicit,
+    globalSetupType:globalType,
+    overlapDetected:false,
+    resolvedScanType:explicit,
+    reason:'Explicit setup type stayed in force because the chart still clearly fits it.'
+  };
+  if(near20 && !near50) return {
+    importedScanType:explicit || 'unknown',
+    globalSetupType:globalType,
+    overlapDetected:false,
+    resolvedScanType:'20MA',
+    reason:'Price is only near the 20MA, so the setup resolves as 20MA.'
+  };
+  if(near50 && !near20) return {
+    importedScanType:explicit || 'unknown',
+    globalSetupType:globalType,
+    overlapDetected:false,
+    resolvedScanType:'50MA',
+    reason:'Price is only near the 50MA, so the setup resolves as 50MA.'
+  };
+  if(!overlapDetected) return {
+    importedScanType:explicit || 'unknown',
+    globalSetupType:globalType,
+    overlapDetected:false,
+    resolvedScanType:'unknown',
+    reason:'Neither moving average is clearly in play, so setup type remains unknown.'
+  };
+
+  let score20 = 0;
+  let score50 = 0;
+  const reasons = [];
+  if(Number.isFinite(distance20) && Number.isFinite(distance50)){
+    if(distance20 + 0.0025 < distance50){
+      score20 += 2;
+      reasons.push('price is clearly closer to the 20MA');
+    }else if(distance50 + 0.0025 < distance20){
+      score50 += 2;
+      reasons.push('price is clearly closer to the 50MA');
+    }else{
+      reasons.push('price is genuinely near both moving averages');
+    }
+  }else{
+    reasons.push('price is genuinely near both moving averages');
+  }
+  if(strongTrend && !structureBroken){
+    score20 += 1;
+    reasons.push('trend structure still supports a continuation-style pullback');
+  }
+  if(constructiveBounce){
+    score20 += 1;
+    reasons.push('stabilisation or bounce still looks constructive');
+  }
+  if(below20){
+    score50 += 2;
+    reasons.push('price has meaningfully lost the 20MA');
+  }
+  if(structureBroken){
+    score50 += 2;
+    reasons.push('structure damage makes this behave more like a deeper 50MA setup');
+  }else if(!strongTrend){
+    score50 += 1;
+    reasons.push('trend quality is not strong enough for a clean 20MA continuation');
+  }
+  if(marketWeak){
+    score50 += 1;
+    reasons.push('weak market biases overlap cases toward the more conservative 50MA treatment');
+  }
+  if(Number.isFinite(perf1w) && perf1w < 0){
+    score50 += 1;
+    reasons.push('recent price action still looks heavy rather than cleanly constructive');
+  }
+  if(below50){
+    score50 += 2;
+    reasons.push('price is under the 50MA, which rules out optimistic 20MA treatment');
+  }
+
+  let resolvedScanType = 'ambiguous';
+  if(score50 >= score20 + 2){
+    resolvedScanType = '50MA';
+  }else if(score20 >= score50 + 2){
+    resolvedScanType = '20MA';
+  }
+  const reason = resolvedScanType === '20MA'
+    ? `Overlap resolved to 20MA because ${reasons.join(', ')}.`
+    : (resolvedScanType === '50MA'
+      ? `Overlap resolved to 50MA because ${reasons.join(', ')}.`
+      : `Overlap remains ambiguous because ${reasons.join(', ')}.`);
+
+  return {
+    importedScanType:explicit || 'unknown',
+    globalSetupType:globalType,
+    overlapDetected:true,
+    resolvedScanType,
+    reason
+  };
+}
+
+function resolveScanType(card, data, checks){
+  return resolveSetupTypeWithOverlap(card, data, checks).resolvedScanType;
+}
+
+function resolveSetupTypeDebug(card, data, checks){
+  return resolveSetupTypeWithOverlap(
+    card,
+    data,
+    checks
+  );
 }
 
 function mergeDerivedChecks(cardChecks, dataChecks, tradePlan){
@@ -11142,10 +11303,13 @@ function deriveSetupStates(card, data, checks, tradePlan){
   const safeData = data || {};
   const baseChecks = buildScannerChecks(safeData);
   const preflightChecks = mergeDerivedChecks((safeCard && safeCard.checks) || {}, checks || baseChecks, null);
-  const initialScanType = resolveScanType(safeCard, safeData, preflightChecks);
-  const plan = tradePlan || deriveTradePlan(safeData, initialScanType === 'unknown' ? '20MA' : initialScanType);
+  const initialSetupType = resolveSetupTypeDebug(safeCard, safeData, preflightChecks);
+  const initialScanType = initialSetupType.resolvedScanType;
+  const plan = tradePlan || deriveTradePlan(safeData, scanTypeForEvaluation(initialScanType));
   const safeChecks = mergeDerivedChecks((safeCard && safeCard.checks) || {}, checks || baseChecks, plan);
-  const scanType = resolveScanType(safeCard, safeData, safeChecks);
+  const setupTypeDecision = resolveSetupTypeDebug(safeCard, safeData, safeChecks);
+  const scanType = setupTypeDecision.resolvedScanType;
+  const evaluationScanType = scanTypeForEvaluation(scanType);
   const price = numericOrNull(safeData.price ?? safeCard.price);
   const sma20 = numericOrNull(safeData.sma20 ?? safeCard.sma20);
   const sma50 = numericOrNull(safeData.sma50 ?? safeCard.sma50);
@@ -11179,7 +11343,7 @@ function deriveSetupStates(card, data, checks, tradePlan){
     pullbackZone = 'near_20ma';
   }else if(Number.isFinite(dist50) && dist50 >= -0.05 && dist50 <= 0.02){
     pullbackZone = 'near_50ma';
-  }else if((scanType === '20MA' && Number.isFinite(dist20) && dist20 < -0.06) || (scanType === '50MA' && Number.isFinite(dist50) && dist50 < -0.07) || safeChecks.structureBroken){
+  }else if((evaluationScanType === '20MA' && Number.isFinite(dist20) && dist20 < -0.06) || (evaluationScanType === '50MA' && Number.isFinite(dist50) && dist50 < -0.07) || safeChecks.structureBroken){
     pullbackZone = 'extended';
   }
 
@@ -11195,7 +11359,7 @@ function deriveSetupStates(card, data, checks, tradePlan){
   const recentHighs = recentRows.map(row => numericOrNull(row && (row.high ?? row.close))).filter(Number.isFinite);
   const recentLows = recentRows.map(row => numericOrNull(row && (row.low ?? row.close))).filter(Number.isFinite);
   const recentCloses = recentRows.map(row => numericOrNull(row && row.close)).filter(Number.isFinite);
-  const reclaimArea = scanType === '50MA'
+  const reclaimArea = evaluationScanType === '50MA'
     ? Math.max(...[sma50, sma20].filter(Number.isFinite))
     : Math.max(...[sma20, sma50].filter(Number.isFinite));
   const localPivotHigh = recentHighs.length >= 3 ? Math.max(...recentHighs.slice(1, 3)) : null;
@@ -11257,6 +11421,11 @@ function deriveSetupStates(card, data, checks, tradePlan){
     bounce_state:bounceState,
     volume_state:volumeState,
     scan_type:scanType,
+    evaluation_scan_type:evaluationScanType,
+    setup_type_overlap_detected:setupTypeDecision.overlapDetected ? 'yes' : 'no',
+    setup_type_reason:setupTypeDecision.reason,
+    imported_scan_type:setupTypeDecision.importedScanType || 'unknown',
+    global_setup_type:setupTypeDecision.globalSetupType || 'unknown',
     entry_defined:entryDefined ? 'yes' : 'no',
     stop_defined:stopDefined ? 'yes' : 'no',
     target_defined:targetDefined ? 'yes' : 'no'
@@ -11268,7 +11437,7 @@ function buildAnalysisPayload(card){
   const marketData = safeCard.marketData || safeCard;
   const baseChecks = buildScannerChecks(marketData);
   const scanType = resolveScanType(safeCard, marketData, mergeDerivedChecks(safeCard.checks || {}, baseChecks));
-  const tradePlan = deriveTradePlan(marketData, scanType === 'unknown' ? '20MA' : scanType);
+  const tradePlan = deriveTradePlan(marketData, scanTypeForEvaluation(scanType));
   const derivedStates = deriveSetupStates(safeCard, marketData, safeCard.checks || baseChecks, tradePlan);
   return {
     ticker:safeCard.ticker,

@@ -4,7 +4,7 @@
 
   function normalizeScanType(value){
     const text = String(value || '').trim().toUpperCase();
-    if(text === '20MA' || text === '50MA') return text;
+    if(text === '20MA' || text === '50MA' || text === 'AMBIGUOUS') return text === 'AMBIGUOUS' ? 'ambiguous' : text;
     return '';
   }
 

@@ -467,6 +467,10 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   gap:12px;
   padding:15px;
 }
+.resultcompacthead .resultidentity{
+  flex:1 1 auto;
+  width:100%;
+}
 .scan-card{
   position:relative;
   cursor:pointer;
@@ -480,6 +484,8 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .result-feed-card__status{
   align-items:center;
   justify-content:flex-end;
+  justify-self:end;
+  margin-left:auto;
 }
 .result-feed-card__actions{margin-top:2px}
 .card-overflow-button{
