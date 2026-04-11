@@ -6,7 +6,7 @@ const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.4.6';
+const APP_VERSION = 'v4.4.7';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';
@@ -3892,6 +3892,7 @@ function watchlistDebugWarnings(record, lifecycleSnapshot, actionPresentation, o
 function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options = {}){
   const item = normalizeTickerRecord(record);
   const globalVerdict = resolveGlobalVerdict(item);
+  const setupScoreTrace = setupScoreTraceForRecord(item);
   const debug = item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
@@ -3945,6 +3946,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   ])}${renderDebugSectionMarkup('Base Assessment', [
     {label:'Base Verdict', value:globalVerdict.base_verdict || 'n/a'},
     {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : 'n/a'},
+    {label:'Setup Score Source', value:setupScoreTrace.source || 'n/a'},
     {label:'Structure', value:globalVerdict.structure_state || 'n/a'},
     {label:'Bounce', value:globalVerdict.bounce_state || 'n/a'},
     {label:'Market', value:globalVerdict.market_regime || 'n/a'},
@@ -3964,6 +3966,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Allow Plan', value:globalVerdict.allow_plan ? 'true' : 'false'},
     {label:'Allow Watchlist', value:globalVerdict.allow_watchlist ? 'true' : 'false'},
     {label:'Source', value:globalVerdict.source || 'resolver'},
+    {label:'Setup Score Trace', value:`${setupScoreTrace.detail} setup=${Number.isFinite(setupScoreTrace.inputs.setup_score) ? setupScoreTrace.inputs.setup_score : 'n/a'} | base=${Number.isFinite(setupScoreTrace.inputs.base_score) ? setupScoreTrace.inputs.base_score : 'n/a'} | scan=${Number.isFinite(setupScoreTrace.inputs.scan_score) ? setupScoreTrace.inputs.scan_score : 'n/a'}`},
     {label:'Base Action Label', value:resolved.actionStateLabel || resolved.actionLabel || 'n/a'},
     {label:'Base Tradeability', value:resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a'},
     {label:'Previous', value:debug.previousState || '(none)'},
@@ -6598,16 +6601,60 @@ function canonicalBaseSetupScore(record, options = {}){
   return null;
 }
 
-function setupScoreForRecord(record){
+function setupScoreTraceForRecord(record){
   const displayScore = numericOrNull(record && record.setup && record.setup.score);
-  const baseValue = Number.isFinite(displayScore)
-    ? Math.max(0, Math.min(10, Math.round(displayScore)))
-    : (Number.isFinite(canonicalBaseSetupScore(record))
-      ? Math.max(0, Math.min(10, Math.round(canonicalBaseSetupScore(record))))
-      : (Number.isFinite(numericOrNull(record && record.scan && record.scan.score))
-        ? Math.max(0, Math.min(10, Math.round(numericOrNull(record && record.scan && record.scan.score))))
-        : 0));
-  return baseValue;
+  const canonicalBase = canonicalBaseSetupScore(record);
+  const scanScore = numericOrNull(record && record.scan && record.scan.score);
+  if(Number.isFinite(displayScore)){
+    return {
+      score:Math.max(0, Math.min(10, Math.round(displayScore))),
+      source:'setup.score',
+      detail:'Displayed setup score from normalized setup state.',
+      inputs:{
+        setup_score:displayScore,
+        base_score:canonicalBase,
+        scan_score:scanScore
+      }
+    };
+  }
+  if(Number.isFinite(canonicalBase)){
+    return {
+      score:Math.max(0, Math.min(10, Math.round(canonicalBase))),
+      source:'setup.baseScore',
+      detail:'Canonical base setup score used because no display score was stored.',
+      inputs:{
+        setup_score:displayScore,
+        base_score:canonicalBase,
+        scan_score:scanScore
+      }
+    };
+  }
+  if(Number.isFinite(scanScore)){
+    return {
+      score:Math.max(0, Math.min(10, Math.round(scanScore))),
+      source:'scan.score',
+      detail:'Scanner score fallback used because setup scores were unavailable.',
+      inputs:{
+        setup_score:displayScore,
+        base_score:canonicalBase,
+        scan_score:scanScore
+      }
+    };
+  }
+  return {
+    score:0,
+    source:'default_zero',
+    detail:'No setup or scanner score available; defaulted to zero.',
+    inputs:{
+      setup_score:displayScore,
+      base_score:canonicalBase,
+      scan_score:scanScore
+    }
+  };
+}
+
+function setupScoreForRecord(record){
+  return setupScoreTraceForRecord(record).score;
 }
 
 function setupScoreDisplayForRecord(record){
@@ -11759,7 +11806,9 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
   try{
     const {card} = await refreshCardMarketData(symbol, {force:true});
     mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
-    record.watchlist.updatedAt = String(card.scannerUpdatedAt || card.updatedAt || new Date().toISOString());
+    const normalizedRecord = normalizeTickerRecord(record);
+    state.tickerRecords[symbol] = normalizedRecord;
+    normalizedRecord.watchlist.updatedAt = String(card.scannerUpdatedAt || card.updatedAt || new Date().toISOString());
     runWatchlistLifecycleEvaluation({
       source,
       tickers:[symbol],
@@ -11767,9 +11816,9 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       render:false,
       force:true
     });
-    const refreshedVerdict = resolveGlobalVerdict(record);
-    const refreshedSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
-    appendWatchlistDebugEvent(record, {
+    const refreshedVerdict = resolveGlobalVerdict(normalizedRecord);
+    const refreshedSnapshot = syncWatchlistLifecycle(normalizedRecord) || watchlistLifecycleSnapshot(normalizedRecord);
+    appendWatchlistDebugEvent(normalizedRecord, {
       at:new Date().toISOString(),
       source:`${source}_result`,
       result:`settled: ${refreshedVerdict.final_verdict || 'unknown'} | allow_watchlist=${refreshedVerdict.allow_watchlist ? 'true' : 'false'} | lifecycle=${refreshedSnapshot && refreshedSnapshot.state ? refreshedSnapshot.state : 'n/a'}`
@@ -11779,7 +11828,7 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       ok:true,
       skipped:false,
       reason:'',
-      record,
+      record:normalizedRecord,
       snapshot:refreshedSnapshot,
       verdict:refreshedVerdict
     };
