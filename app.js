@@ -2614,6 +2614,20 @@ function loadState(){
   renderPatternAnalytics();
   renderPlannerPlanSummary();
   refreshRiskContextForActiveSetups();
+  refreshWatchlistRecordsFromSourceOfTruth({
+    source:'startup_restore',
+    persist:true,
+    render:true,
+    clearReviewOverride:false
+  }).then(summary => {
+    if(!summary || !summary.attempted) return;
+    const message = summary.failed
+      ? `Startup refresh checked ${summary.refreshed}/${summary.attempted} watchlist ticker${summary.attempted === 1 ? '' : 's'} from live data.`
+      : `Startup refresh checked ${summary.refreshed} watchlist ticker${summary.refreshed === 1 ? '' : 's'} from live data.`;
+    setStatus('scannerSelectionStatus', `<span class="${summary.failed ? 'warntext' : 'ok'}">${escapeHtml(message)}</span>`);
+  }).catch(() => {
+    setStatus('scannerSelectionStatus', '<span class="warntext">Startup watchlist refresh could not complete. Kept saved watchlist state active locally.</span>');
+  });
 }
 
 function renderStats(){
@@ -11693,18 +11707,18 @@ function reviewWatchlistTicker(ticker){
   setStatus('scannerSelectionStatus', `<span class="ok">Loaded saved ${escapeHtml(symbol)} review state.</span>`);
 }
 
-async function refreshWatchlistTicker(ticker){
+async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
-  if(!symbol) return;
-  setStatus('scannerSelectionStatus', `Refreshing ${escapeHtml(symbol)}...`);
+  if(!symbol) return {symbol:'', ok:false, skipped:true, reason:'invalid_ticker', record:null, snapshot:null, verdict:null};
   const record = upsertTickerRecord(symbol);
-  if(activeReviewTicker() === symbol) uiState.activeReviewVerdictOverride = '';
+  const source = String(options.source || 'manual_refresh');
+  if(options.clearReviewOverride !== false && activeReviewTicker() === symbol) uiState.activeReviewVerdictOverride = '';
   try{
     const {card} = await refreshCardMarketData(symbol, {force:true});
     mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
     record.watchlist.updatedAt = String(card.scannerUpdatedAt || card.updatedAt || new Date().toISOString());
     runWatchlistLifecycleEvaluation({
-      source:'manual_refresh',
+      source,
       tickers:[symbol],
       persist:false,
       render:false,
@@ -11714,17 +11728,80 @@ async function refreshWatchlistTicker(ticker){
     const refreshedSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
     appendWatchlistDebugEvent(record, {
       at:new Date().toISOString(),
-      source:'manual_refresh_result',
+      source:`${source}_result`,
       result:`settled: ${refreshedVerdict.final_verdict || 'unknown'} | allow_watchlist=${refreshedVerdict.allow_watchlist ? 'true' : 'false'} | lifecycle=${refreshedSnapshot && refreshedSnapshot.state ? refreshedSnapshot.state : 'n/a'}`
     });
-    setStatus('scannerSelectionStatus', `<span class="ok">${escapeHtml(symbol)} refreshed from saved market data.</span>`);
+    return {
+      symbol,
+      ok:true,
+      skipped:false,
+      reason:'',
+      record,
+      snapshot:refreshedSnapshot,
+      verdict:refreshedVerdict
+    };
   }catch(error){
     runWatchlistLifecycleEvaluation({
-      source:'manual_refresh',
+      source,
       tickers:[symbol],
       persist:false,
       render:false
     });
+    return {
+      symbol,
+      ok:false,
+      skipped:false,
+      reason:error && error.message ? String(error.message) : 'refresh_failed',
+      record,
+      snapshot:syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record),
+      verdict:resolveGlobalVerdict(record)
+    };
+  }
+}
+
+async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
+  const source = String(options.source || 'startup_restore');
+  const tickers = uniqueTickers(
+    (options.tickers || watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker))
+      .filter(Boolean)
+  );
+  if(!tickers.length) return {source, attempted:0, refreshed:0, failed:0, results:[]};
+  const results = [];
+  for(const symbol of tickers){
+    const result = await refreshWatchlistRecordFromSourceOfTruth(symbol, {
+      source,
+      clearReviewOverride:options.clearReviewOverride
+    });
+    results.push(result);
+  }
+  if(options.persist !== false) commitTickerState();
+  if(options.render !== false){
+    renderWatchlist();
+    renderFocusQueue();
+    renderScannerResults();
+    renderCards();
+    if(activeReviewTicker()) renderReviewWorkspace();
+  }
+  return {
+    source,
+    attempted:tickers.length,
+    refreshed:results.filter(result => result.ok).length,
+    failed:results.filter(result => !result.ok).length,
+    results
+  };
+}
+
+async function refreshWatchlistTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  setStatus('scannerSelectionStatus', `Refreshing ${escapeHtml(symbol)}...`);
+  const result = await refreshWatchlistRecordFromSourceOfTruth(symbol, {
+    source:'manual_refresh',
+    clearReviewOverride:true
+  });
+  if(result.ok){
+    setStatus('scannerSelectionStatus', `<span class="ok">${escapeHtml(symbol)} refreshed from saved market data.</span>`);
+  }else{
     setStatus('scannerSelectionStatus', `<span class="warntext">Could not refresh ${escapeHtml(symbol)} right now. Kept the watchlist entry active locally.</span>`);
   }
   commitTickerState();
