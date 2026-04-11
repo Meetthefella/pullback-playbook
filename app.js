@@ -233,6 +233,9 @@ const {state, uiState} = createAppState({
 });
 uiState.scanCardMenu = {ticker:'', menuOpen:false, activeSubmenu:null};
 uiState.scanCardMenuGuard = {};
+uiState.watchlistLiveRefreshPending = uiState.watchlistLiveRefreshPending && typeof uiState.watchlistLiveRefreshPending === 'object'
+  ? uiState.watchlistLiveRefreshPending
+  : {};
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -2314,6 +2317,28 @@ function watchlistPriorityForRecord(record){
   return {score, bucket};
 }
 
+function setWatchlistLiveRefreshPending(tickers, pending = true){
+  const normalizedTickers = uniqueTickers((Array.isArray(tickers) ? tickers : [tickers]).map(normalizeTicker).filter(Boolean));
+  if(!normalizedTickers.length) return;
+  uiState.watchlistLiveRefreshPending = uiState.watchlistLiveRefreshPending && typeof uiState.watchlistLiveRefreshPending === 'object'
+    ? uiState.watchlistLiveRefreshPending
+    : {};
+  normalizedTickers.forEach(symbol => {
+    if(pending) uiState.watchlistLiveRefreshPending[symbol] = true;
+    else delete uiState.watchlistLiveRefreshPending[symbol];
+  });
+}
+
+function clearWatchlistLiveRefreshPending(ticker){
+  setWatchlistLiveRefreshPending(ticker, false);
+}
+
+function isWatchlistLiveRefreshPending(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return false;
+  return !!(uiState.watchlistLiveRefreshPending && uiState.watchlistLiveRefreshPending[symbol]);
+}
+
 function diaryTradeRecords(){
   return allTickerRecords()
     .flatMap(record => (record.diary && Array.isArray(record.diary.records) ? record.diary.records.map(item => ({record, trade:normalizeTradeRecord(item)})) : []))
@@ -2608,16 +2633,23 @@ function loadState(){
   renderScannerResults();
   renderCards();
   renderScannerRulesPanel();
+  uiState.watchlistLiveRefreshPending = {};
+  const startupRefreshTickers = watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker).filter(Boolean);
+  setWatchlistLiveRefreshPending(startupRefreshTickers, true);
   renderWatchlist();
   renderWorkflowAlerts();
   renderTradeDiary();
   renderPatternAnalytics();
   renderPlannerPlanSummary();
   refreshRiskContextForActiveSetups();
+  if(startupRefreshTickers.length){
+    setStatus('scannerSelectionStatus', `<span class="ok">Refreshing ${escapeHtml(String(startupRefreshTickers.length))} watchlist ticker${startupRefreshTickers.length === 1 ? '' : 's'} from live data...</span>`);
+  }
   refreshWatchlistRecordsFromSourceOfTruth({
     source:'startup_restore',
     persist:true,
     render:true,
+    renderProgress:true,
     clearReviewOverride:false
   }).then(summary => {
     if(!summary || !summary.attempted) return;
@@ -4087,6 +4119,7 @@ function renderWatchlist(){
       const entry = tickerRecordToWatchlistEntry(record);
       if(!entry) return;
       const view = buildFinalSetupView(record);
+      const liveRefreshPending = isWatchlistLiveRefreshPending(record.ticker);
       const remaining = getTradingDaysRemaining(entry);
       const lifecycleText = lifecycleLabel(record);
       const lifecycleSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
@@ -4169,8 +4202,17 @@ function renderWatchlist(){
       const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
       const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
       const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
+      const watchlistScoreText = liveRefreshPending
+        ? 'Refreshing...'
+        : (expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''));
+      const watchlistScoreClass = liveRefreshPending
+        ? 's-neutral'
+        : (expired ? 's-low' : scoreClass(view.setupScore || 0));
+      const liveRefreshNote = liveRefreshPending
+        ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
+        : '';
       div.className = `resultcompact watchlist-card ${escapeHtml(globalVisual.toneClass)}`.trim();
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(expired ? watchlistBadgeClass : watchlistBadge.className)}">${escapeHtml(expired ? watchlistBadgeLabel : watchlistBadge.text)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div></div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(expired ? (decisionCopy.headline || shortAction) : watchlistAction.label)}</div>${(expired ? shortReason : globalVerdict.reason) ? `<div class="tiny watchlist-card__reason">${escapeHtml(expired ? shortReason : globalVerdict.reason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(globalVerdict.allow_plan ? resolvedContract.planStatusLabel : 'Plan blocked')}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(expired ? watchlistBadgeClass : watchlistBadge.className)}">${escapeHtml(expired ? watchlistBadgeLabel : watchlistBadge.text)}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(expired ? (decisionCopy.headline || shortAction) : watchlistAction.label)}</div>${(expired ? shortReason : globalVerdict.reason) ? `<div class="tiny watchlist-card__reason">${escapeHtml(expired ? shortReason : globalVerdict.reason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(globalVerdict.allow_plan ? resolvedContract.planStatusLabel : 'Plan blocked')}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -11713,6 +11755,7 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
   const record = upsertTickerRecord(symbol);
   const source = String(options.source || 'manual_refresh');
   if(options.clearReviewOverride !== false && activeReviewTicker() === symbol) uiState.activeReviewVerdictOverride = '';
+  if(options.markPending) setWatchlistLiveRefreshPending(symbol, true);
   try{
     const {card} = await refreshCardMarketData(symbol, {force:true});
     mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
@@ -11756,6 +11799,8 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       snapshot:syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record),
       verdict:resolveGlobalVerdict(record)
     };
+  }finally{
+    if(options.markPending) clearWatchlistLiveRefreshPending(symbol);
   }
 }
 
@@ -11766,13 +11811,20 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
       .filter(Boolean)
   );
   if(!tickers.length) return {source, attempted:0, refreshed:0, failed:0, results:[]};
+  const markPending = options.markPending !== false && source === 'startup_restore';
+  if(markPending) setWatchlistLiveRefreshPending(tickers, true);
   const results = [];
   for(const symbol of tickers){
     const result = await refreshWatchlistRecordFromSourceOfTruth(symbol, {
       source,
-      clearReviewOverride:options.clearReviewOverride
+      clearReviewOverride:options.clearReviewOverride,
+      markPending
     });
     results.push(result);
+    if(options.renderProgress){
+      renderWatchlist();
+      if(activeReviewTicker()) renderReviewWorkspace();
+    }
   }
   if(options.persist !== false) commitTickerState();
   if(options.render !== false){
