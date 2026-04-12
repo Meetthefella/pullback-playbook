@@ -8614,55 +8614,70 @@ function capitalFitMetricText(capitalComfortLabel){
 }
 
 function joinNaturalLanguageConditions(conditions){
-  const parts = Array.isArray(conditions) ? conditions.filter(Boolean).slice(0, 3) : [];
+  const parts = Array.isArray(conditions) ? conditions.filter(Boolean).slice(0, 2) : [];
   if(!parts.length) return '';
   if(parts.length === 1) return parts[0];
   if(parts.length === 2) return `${parts[0]} and ${parts[1]}`;
-  return `${parts[0]}, ${parts[1]}, and ${parts[2]}`;
+  return `${parts[0]} and ${parts[1]}`;
 }
 
 function buildValidityConditionSummary({
+  finalVerdict,
   entryGateChecks,
   nearEntryGateChecks,
   structureState,
   bounceState,
-  planStatus,
   rrConfidence,
   pullbackState
 }){
-  const base = 'Only valid if the stock proves strength';
-  const checks = entryGateChecks && typeof entryGateChecks === 'object' && Object.keys(entryGateChecks).length
-    ? entryGateChecks
-    : (nearEntryGateChecks && typeof nearEntryGateChecks === 'object' ? nearEntryGateChecks : {});
+  const verdict = normalizeGlobalVerdictKey(finalVerdict || '');
+  const base = verdict === 'near_entry'
+    ? 'Almost valid - watch for confirmation'
+    : 'Only valid if the stock proves strength';
+  const checks = verdict === 'near_entry' && nearEntryGateChecks && typeof nearEntryGateChecks === 'object'
+    ? nearEntryGateChecks
+    : (entryGateChecks && typeof entryGateChecks === 'object' && Object.keys(entryGateChecks).length
+      ? entryGateChecks
+      : (nearEntryGateChecks && typeof nearEntryGateChecks === 'object' ? nearEntryGateChecks : {}));
   const unmet = [];
   const pushCondition = value => {
-    if(value && !unmet.includes(value) && unmet.length < 3) unmet.push(value);
+    if(value && !unmet.includes(value) && unmet.length < 2) unmet.push(value);
   };
   const bounce = String(bounceState || '').trim().toLowerCase();
   const structure = String(structureState || '').trim().toLowerCase();
-  const plan = String(planStatus || '').trim().toLowerCase();
   const rr = String(rrConfidence || '').trim().toLowerCase();
   const pullback = String(pullbackState || '').trim().toLowerCase();
 
   if(checks.bounce_ok === false){
-    if(bounce === 'none') pushCondition('a bounce forms');
-    else pushCondition('the bounce confirms');
+    if(bounce === 'none') pushCondition('a bounce');
+    else pushCondition('a confirmed bounce');
   }
   if(checks.structure_ok === false){
-    pushCondition(structure === 'broken' ? 'structure rebuilds' : 'structure stabilises');
-  }
-  if(checks.plan_ok === false){
-    pushCondition(plan === 'invalid' ? 'a valid plan forms' : 'the plan becomes valid');
+    pushCondition(structure === 'broken' ? 'stabilising structure' : 'stabilising structure');
   }
   if(checks.pullback_ok === false){
-    pushCondition(pullback === 'none' ? 'a pullback forms' : 'price pulls back to a better level');
+    pushCondition(pullback === 'none' ? 'a cleaner pullback' : 'a cleaner pullback');
   }
   if(checks.rr_ok === false){
-    pushCondition(rr === 'low' || rr === 'invalid' ? 'reward becomes realistic' : 'reward improves');
+    pushCondition(rr === 'low confidence' || rr === 'low' || rr === 'invalid plan' || rr === 'invalid'
+      ? 'a more realistic target'
+      : 'a more realistic target');
   }
 
-  if(!unmet.length) return base;
-  return `${base} (${joinNaturalLanguageConditions(unmet)})`;
+  return {
+    line1:base,
+    line2:unmet.length ? `Needs ${joinNaturalLanguageConditions(unmet)}` : ''
+  };
+}
+
+function renderTradeStatusMarkup(status){
+  const safeStatus = status && typeof status === 'object' ? status : {line1:String(status || ''), line2:''};
+  const line1 = String(safeStatus.line1 || '').trim();
+  const line2 = String(safeStatus.line2 || '').trim();
+  if(line2){
+    return `<span class="trade-status-primary">${escapeHtml(line1)}</span><span class="trade-status-secondary">${escapeHtml(line2)}</span>`;
+  }
+  return `<span class="trade-status-primary">${escapeHtml(line1)}</span>`;
 }
 
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
@@ -8674,23 +8689,23 @@ function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract})
     || blockerReason.includes('too heavy')
     || blockerReason.includes('too expensive')
     || blockerReason.includes('no viable plan');
-  if((verdict === 'monitor' || ((globalVerdict && globalVerdict.bucket) === 'monitor_watch' && (globalVerdict && globalVerdict.tone) === 'orange')) && !terminalBlock){
+  if((verdict === 'monitor' || verdict === 'watch' || verdict === 'near_entry' || ((globalVerdict && globalVerdict.bucket) === 'monitor_watch' && (globalVerdict && globalVerdict.tone) === 'orange')) && !terminalBlock){
     return buildValidityConditionSummary({
+      finalVerdict:verdict,
       entryGateChecks:globalVerdict && globalVerdict.entry_gate_checks,
       nearEntryGateChecks:globalVerdict && globalVerdict.near_entry_gate_checks,
       structureState:globalVerdict && globalVerdict.structure_state,
       bounceState:globalVerdict && globalVerdict.bounce_state,
-      planStatus:displayedPlan && displayedPlan.status,
       rrConfidence:resolvedContract && resolvedContract.rrConfidenceLabel,
       pullbackState:globalVerdict && globalVerdict.pullback_state
     });
   }
-  if(!globalVerdict || globalVerdict.allow_plan === false) return 'Blocked';
+  if(!globalVerdict || globalVerdict.allow_plan === false) return {line1:'Blocked', line2:''};
   const planStatus = String(displayedPlan && displayedPlan.status || '').trim().toLowerCase();
-  if(planStatus === 'valid') return 'Reviewable';
-  if(planStatus === 'needs_adjustment' || planStatus === 'pending_validation') return 'Needs work';
-  if(planStatus === 'missing') return 'Incomplete';
-  return String(resolvedContract && resolvedContract.planStatusLabel || 'Blocked');
+  if(planStatus === 'valid') return {line1:'Reviewable', line2:''};
+  if(planStatus === 'needs_adjustment' || planStatus === 'pending_validation') return {line1:'Needs work', line2:''};
+  if(planStatus === 'missing') return {line1:'Incomplete', line2:''};
+  return {line1:String(resolvedContract && resolvedContract.planStatusLabel || 'Blocked'), line2:''};
 }
 
 function normalizeExitMode(exitMode){
@@ -13279,7 +13294,7 @@ function renderReviewWorkspace(options = {}){
         <div><label>${escapeHtml(executionState.exitMode === 'dynamic_exit' ? 'Target Review Level' : 'Planned First Target')}</label><input id="targetPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.firstTarget || '')}" /></div>
       </div>
       <div class="reviewstats plan-grid plan-grid-stats reviewstats--compact">
-        <div class="stat stat--trade-status"><div>Trade Status</div><div class="big" id="tradeStatusBox">${escapeHtml(tradeStatusText)}</div></div>
+        <div class="stat stat--trade-status"><div>Trade Status</div><div class="big" id="tradeStatusBox">${renderTradeStatusMarkup(tradeStatusText)}</div></div>
         <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(rrDisplayClass(planRealism.raw_rr))}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
         <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div>Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitMetricText(capitalComfort.label))}</div></div>
         <div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
@@ -13802,7 +13817,7 @@ function calculate(options = {}){
     comfortLabel:capitalComfort.label
   });
   const tradeStatusText = tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract});
-  if($('tradeStatusBox')) $('tradeStatusBox').textContent = tradeStatusText;
+  if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   if($('capitalFitMetric')){
     $('capitalFitMetric').className = `stat stat--capital-fit ${capitalFitVisual.className}`.trim();
   }

@@ -994,6 +994,16 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   font-weight:800;
   line-height:1.15;
 }
+.reviewworkspace .reviewstats.reviewstats--compact .stat--trade-status .trade-status-primary,
+.reviewworkspace .reviewstats.reviewstats--compact .stat--trade-status .trade-status-secondary{
+  display:block;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--trade-status .trade-status-secondary{
+  margin-top:4px;
+  font-size:.88rem;
+  font-weight:600;
+  color:var(--text-secondary);
+}
 .reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--comfortable .big{
   color:#34d399;
 }
