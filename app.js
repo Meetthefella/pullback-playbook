@@ -8470,6 +8470,7 @@ function applyReviewCapitalSimulation(displayedPlan, ticker){
       capitalFit.capital_fit
     )
   };
+  const capitalOnlyTradeability = capitalSimulationTradeability(capitalFit.capital_fit);
   return {
     displayedPlan:simulatedPlan,
     simulation:{
@@ -8478,9 +8479,29 @@ function applyReviewCapitalSimulation(displayedPlan, ticker){
       capitalFit:capitalFit.capital_fit,
       affordability:simulatedPlan.affordability,
       capitalOk:capitalFit.capital_ok,
-      tradeability:simulatedPlan.tradeability
+      tradeability:capitalOnlyTradeability
     }
   };
+}
+
+function capitalSimulationTradeability(capitalFit){
+  const fit = String(capitalFit || '').trim().toLowerCase();
+  if(['too_heavy','too_expensive'].includes(fit)) return 'too_expensive';
+  if(fit === 'heavy') return 'capital_heavy';
+  if(['ideal','acceptable','borderline','fits_capital'].includes(fit)) return 'tradable';
+  return 'risk_only';
+}
+
+function capitalSimulationVerdictImpact(baseVerdict, capitalFit){
+  const tradeability = capitalSimulationTradeability(capitalFit);
+  const verdict = normalizeAnalysisVerdict(baseVerdict || 'Watch');
+  if(tradeability === 'too_expensive') return 'Avoid';
+  if(tradeability === 'capital_heavy'){
+    if(verdict === 'Entry') return 'Near Entry';
+    if(verdict === 'Near Entry') return 'Watch';
+    return verdict || 'Watch';
+  }
+  return verdict || 'Watch';
 }
 
 function capitalUsageAdvisory({positionCostGbp, positionCost, quoteCurrency, accountSizeGbp, fxStatus = ''}){
@@ -8556,6 +8577,19 @@ function capitalFitPresentation({capitalFit, affordability, comfortLabel}){
 
 function tradeabilityLabel(tradeability){
   return tradeabilityLabelImpl(tradeability);
+}
+
+function capitalFitMetricText(capitalComfortLabel){
+  return `Capital fit: ${String(capitalComfortLabel || 'Needs check')}`;
+}
+
+function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
+  if(!globalVerdict || globalVerdict.allow_plan === false) return 'Blocked';
+  const planStatus = String(displayedPlan && displayedPlan.status || '').trim().toLowerCase();
+  if(planStatus === 'valid') return 'Reviewable';
+  if(planStatus === 'needs_adjustment' || planStatus === 'pending_validation') return 'Needs work';
+  if(planStatus === 'missing') return 'Incomplete';
+  return String(resolvedContract && resolvedContract.planStatusLabel || 'Blocked');
 }
 
 function normalizeExitMode(exitMode){
@@ -12805,11 +12839,7 @@ function renderReviewWorkspace(options = {}){
     emojiPresentation
   });
   const simulatedExecutionVerdict = capitalSimulationState.simulation
-    ? executionDowngradeVerdictForRecord(record, {
-      displayedPlan,
-      planUiState,
-      provisionalVerdict:displayStage
-    })
+    ? capitalSimulationVerdictImpact(displayStage, capitalSimulationState.simulation.capitalFit)
     : '';
   const simulatedFinalVerdict = capitalSimulationState.simulation
     ? (simulatedExecutionVerdict || displayStage)
@@ -12854,6 +12884,7 @@ function renderReviewWorkspace(options = {}){
     controlQuality:qualityAdjustments.controlQuality,
     capitalEfficiency:qualityAdjustments.capitalEfficiency
   });
+  const tradeStatusText = tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract});
   const modifierMarkup = emojiModifierMarkup(resolvedContract);
   const scannerPresentation = resolveEmojiPresentation(record, {
     context:'scanner',
@@ -13055,9 +13086,10 @@ function renderReviewWorkspace(options = {}){
         <div><label>${escapeHtml(executionState.exitMode === 'dynamic_exit' ? 'Target Review Level' : 'Planned First Target')}</label><input id="targetPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.firstTarget || '')}" /></div>
       </div>
       <div class="reviewstats plan-grid plan-grid-stats reviewstats--compact">
+        <div class="stat stat--trade-status"><div>Trade Status</div><div class="big" id="tradeStatusBox">${escapeHtml(tradeStatusText)}</div></div>
         <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(rrDisplayClass(planRealism.raw_rr))}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
+        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div>Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitMetricText(capitalComfort.label))}</div></div>
         <div class="stat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
-        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)}" id="capitalFitMetric"><div class="big" id="capitalFitBox">${escapeHtml(capitalFitVisual.text)}</div></div>
         <div class="stat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(positionCostText)}</div></div>
         <div class="stat review-hidden"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
         <div class="stat review-hidden"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div>
@@ -13526,10 +13558,12 @@ function calculate(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalComfort.label
   });
+  const tradeStatusText = tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract});
+  if($('tradeStatusBox')) $('tradeStatusBox').textContent = tradeStatusText;
   if($('capitalFitMetric')){
     $('capitalFitMetric').className = `stat stat--capital-fit ${capitalFitVisual.className}`.trim();
   }
-  if($('capitalFitBox')) $('capitalFitBox').textContent = capitalFitVisual.text;
+  if($('capitalFitBox')) $('capitalFitBox').textContent = capitalFitMetricText(capitalComfort.label);
   if($('fxBasisBox')) $('fxBasisBox').textContent = capitalComfort.note || 'No FX conversion note.';
   if($('capitalCheckBox')) $('capitalCheckBox').textContent = capitalComfort.note || 'Clear';
   if($('positionCostBox')){

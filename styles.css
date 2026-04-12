@@ -973,7 +973,6 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   color:#ffffff;
   opacity:.85;
 }
-.reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit .big,
 .reviewworkspace .reviewstats.reviewstats--compact #rrValue{
   font-size:1.58rem;
   font-weight:900;
@@ -984,7 +983,16 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   justify-content:flex-start;
 }
 .reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit .big{
-  text-transform:uppercase;
+  font-size:1rem;
+  font-weight:700;
+  letter-spacing:-.01em;
+  line-height:1.2;
+  text-transform:none;
+}
+.reviewworkspace .reviewstats.reviewstats--compact .stat--trade-status .big{
+  font-size:1.12rem;
+  font-weight:800;
+  line-height:1.15;
 }
 .reviewworkspace .reviewstats.reviewstats--compact .stat--capital-fit.capital-fit--comfortable .big{
   color:#34d399;
