@@ -1630,11 +1630,20 @@ function analysisDerivedStatesFromRecord(record){
     && typeof rawRecord.review.analysisState.normalized === 'object'
       ? rawRecord.review.analysisState.normalized
       : (rawRecord.review && rawRecord.review.normalizedAnalysis && typeof rawRecord.review.normalizedAnalysis === 'object'
-        ? rawRecord.review.normalizedAnalysis
-        : {});
+      ? rawRecord.review.normalizedAnalysis
+      : {});
+  const pullback = resolvePullbackInterpretation({
+    pullbackZone:analysisProjection.pullback_zone || normalizedAnalysis.pullback_zone,
+    pullbackStatus:analysisProjection.pullback_status || normalizedAnalysis.pullback_status,
+    chartRead:normalizedAnalysis.plain_english_chart_read || normalizedAnalysis.chart_read,
+    keyReasons:normalizedAnalysis.key_reasons,
+    risks:normalizedAnalysis.risks
+  });
   return {
     trendState:String(analysisProjection.trend_state || analysisProjection.trend_status || normalizedAnalysis.trend_state || '').trim().toLowerCase(),
-    pullbackZone:String(analysisProjection.pullback_zone || analysisProjection.pullback_status || normalizedAnalysis.pullback_zone || '').trim().toLowerCase(),
+    pullbackZone:pullback.pullbackZone,
+    pullbackState:pullback.pullbackState,
+    pullbackQuality:pullback.pullbackQuality,
     structureState:String(analysisProjection.structure_state || normalizedAnalysis.structure_state || '').trim().toLowerCase(),
     stabilisationState:String(analysisProjection.stabilisation_state || normalizedAnalysis.stabilisation_state || '').trim().toLowerCase(),
     bounceState:String(analysisProjection.bounce_state || normalizedAnalysis.bounce_state || '').trim().toLowerCase(),
@@ -5664,8 +5673,7 @@ function compactReasonLineForView(view, maxParts = 3){
   if(structureLabel) pushPart(structureLabel);
   else if(derived.trendState === 'strong') pushPart('Strong trend');
   else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
-  if(derived.pullbackZone === 'near_20ma') pushPart('Near 20MA');
-  if(derived.pullbackZone === 'near_50ma') pushPart('Near 50MA');
+  if(derived.pullbackState && derived.pullbackState !== 'none') pushPart(pullbackStateLabel(derived.pullbackState));
   if(derived.bounceState === 'confirmed') pushPart('Bounce confirmed');
   else if(derived.bounceState === 'attempt') pushPart('Bounce tentative');
   else if(derived.bounceState === 'none') pushPart('No bounce');
@@ -8606,6 +8614,17 @@ function capitalFitMetricText(capitalComfortLabel){
 }
 
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
+  const verdict = normalizeGlobalVerdictKey(globalVerdict && globalVerdict.final_verdict || '');
+  const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').toLowerCase();
+  const terminalBlock = verdict === 'dead'
+    || blockerReason.includes('rebuild')
+    || blockerReason.includes('too much account capital')
+    || blockerReason.includes('too heavy')
+    || blockerReason.includes('too expensive')
+    || blockerReason.includes('no viable plan');
+  if((verdict === 'monitor' || ((globalVerdict && globalVerdict.bucket) === 'monitor_watch' && (globalVerdict && globalVerdict.tone) === 'orange')) && !terminalBlock){
+    return 'Not executable yet';
+  }
   if(!globalVerdict || globalVerdict.allow_plan === false) return 'Blocked';
   const planStatus = String(displayedPlan && displayedPlan.status || '').trim().toLowerCase();
   if(planStatus === 'valid') return 'Reviewable';
@@ -8924,8 +8943,7 @@ function compactReasonLineForRecord(record, maxParts = 3){
   if(structureLabel) pushPart(structureLabel);
   else if(derived.trendState === 'strong') pushPart('Strong trend');
   else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
-  if(derived.pullbackZone === 'near_20ma') pushPart('Near 20MA');
-  if(derived.pullbackZone === 'near_50ma') pushPart('Near 50MA');
+  if(derived.pullbackState && derived.pullbackState !== 'none') pushPart(pullbackStateLabel(derived.pullbackState));
   if(derived.bounceState === 'confirmed') pushPart('Bounce confirmed');
   else if(derived.bounceState === 'attempt') pushPart('Bounce tentative');
   else if(derived.bounceState === 'none') pushPart('No bounce');
@@ -11334,11 +11352,78 @@ function normalizeAnalysisPlanField(value){
   return isMissingAnalysisValue(value) ? '' : String(value).trim();
 }
 
+function resolvePullbackInterpretation({pullbackZone = '', pullbackStatus = '', chartRead = '', keyReasons = [], risks = []} = {}){
+  const normalizedZone = String(pullbackZone || pullbackStatus || '').trim().toLowerCase();
+  const prose = [
+    chartRead,
+    ...(Array.isArray(keyReasons) ? keyReasons : []),
+    ...(Array.isArray(risks) ? risks : [])
+  ].map(part => String(part || '').trim().toLowerCase()).filter(Boolean).join(' | ');
+  const mentionsPullback = /showing a pullback|in a pullback|pullback depth|deeper than preferred|attempt at a bounce|bounce attempt|stabilis|not at preferred pullback level|off level|not at support|reclaim candidate|deeper pullback/.test(prose);
+  const near20Text = /near[_\s-]?20ma|near the 20ma|20 ma pullback|20ma pullback|shallow pullback/.test(prose);
+  const near50Text = /near[_\s-]?50ma|near the 50ma|50 ma pullback|50ma pullback|50ma reclaim/.test(prose);
+  const extendedText = /extended|overextended|too extended/.test(prose);
+  const offLevelText = /not at preferred pullback level|off[\s-]?level|not at support|away from support|not near (the )?(20|50)/.test(prose);
+  const deepText = /deeper than preferred|deep pullback|deeper pullback|needs a deeper reclaim/.test(prose);
+
+  let pullbackState = 'none';
+  if(normalizedZone === 'near_20ma' || near20Text){
+    pullbackState = 'near_20ma';
+  }else if(normalizedZone === 'near_50ma' || near50Text){
+    pullbackState = 'near_50ma';
+  }else if(normalizedZone === 'extended' || extendedText){
+    pullbackState = 'extended';
+  }else if(offLevelText){
+    pullbackState = 'off_level';
+  }else if(deepText){
+    pullbackState = 'deep';
+  }else if(mentionsPullback){
+    pullbackState = 'shallow';
+  }
+
+  let pullbackQuality = 'invalid';
+  if(['near_20ma','near_50ma'].includes(pullbackState)) pullbackQuality = pullbackState === 'near_20ma' ? 'ideal' : 'acceptable';
+  else if(pullbackState === 'shallow') pullbackQuality = 'acceptable';
+  else if(['deep','off_level'].includes(pullbackState)) pullbackQuality = 'weak';
+
+  const compatibilityZone = ['near_20ma','near_50ma','extended'].includes(pullbackState)
+    ? pullbackState
+    : normalizedZone;
+
+  return {
+    pullbackState,
+    pullbackQuality,
+    pullbackZone:compatibilityZone || 'none'
+  };
+}
+
+function pullbackStateLabel(pullbackState){
+  const state = String(pullbackState || '').trim().toLowerCase();
+  if(state === 'near_20ma') return 'Near 20MA';
+  if(state === 'near_50ma') return 'Near 50MA';
+  if(state === 'shallow') return 'Shallow';
+  if(state === 'deep') return 'Deep';
+  if(state === 'extended') return 'Extended';
+  if(state === 'off_level') return 'Off level';
+  return 'None';
+}
+
 function normalizeAnalysisReasons(rawReasons, planValid, rewardRisk, previousState, rawChartRead){
   const reasons = [];
   const previousAnalysis = previousState && previousState.analysis && typeof previousState.analysis === 'object' ? previousState.analysis : null;
   if(previousAnalysis && previousAnalysis.trend_status) reasons.push(`Trend: ${previousAnalysis.trend_status}`);
-  if(previousAnalysis && previousAnalysis.pullback_status) reasons.push(`Pullback: ${previousAnalysis.pullback_status}`);
+  if(previousAnalysis){
+    const pullback = resolvePullbackInterpretation({
+      pullbackZone:previousAnalysis.pullback_zone,
+      pullbackStatus:previousAnalysis.pullback_status,
+      chartRead:rawChartRead,
+      keyReasons:rawReasons,
+      risks:previousAnalysis.risks
+    });
+    if(pullback.pullbackState && pullback.pullbackState !== 'none'){
+      reasons.push(`Pullback: ${pullbackStateLabel(pullback.pullbackState)}`);
+    }
+  }
   if(rawChartRead) reasons.push(rawChartRead);
   if(planValid && rewardRisk.valid && Number.isFinite(rewardRisk.rrRatio)){
     reasons.push(`Planned reward:risk is ${rewardRisk.rrRatio.toFixed(2)}R.`);
@@ -11357,9 +11442,18 @@ function analysisDerivedStates(previousState){
   const analysis = previousState && previousState.analysis && typeof previousState.analysis === 'object'
     ? previousState.analysis
     : {};
+  const pullback = resolvePullbackInterpretation({
+    pullbackZone:analysis.pullback_zone,
+    pullbackStatus:analysis.pullback_status,
+    chartRead:analysis.plain_english_chart_read || analysis.chart_read,
+    keyReasons:analysis.key_reasons,
+    risks:analysis.risks
+  });
   return {
     trendState:String(analysis.trend_state || analysis.trend_status || '').trim().toLowerCase(),
-    pullbackZone:String(analysis.pullback_zone || analysis.pullback_status || '').trim().toLowerCase(),
+    pullbackZone:pullback.pullbackZone,
+    pullbackState:pullback.pullbackState,
+    pullbackQuality:pullback.pullbackQuality,
     structureState:String(analysis.structure_state || '').trim().toLowerCase(),
     stabilisationState:String(analysis.stabilisation_state || '').trim().toLowerCase(),
     bounceState:String(analysis.bounce_state || '').trim().toLowerCase(),
