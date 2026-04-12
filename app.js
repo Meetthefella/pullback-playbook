@@ -8719,6 +8719,11 @@ function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
   };
 }
 
+function blockedTradeStatusText(resolvedContract){
+  const status = blockedTradeStatusFromPrimaryBlocker(resolvedContract);
+  return status.line2 ? `${status.line1} | ${status.line2}` : status.line1;
+}
+
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
   const verdict = normalizeGlobalVerdictKey(globalVerdict && globalVerdict.final_verdict || '');
   const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').toLowerCase();
@@ -13348,7 +13353,7 @@ function renderReviewWorkspace(options = {}){
     </div>
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
       <div class="reviewsectionhead"><strong>Confidence / Diagnostics</strong></div>
-      <div class="summary">${globalVerdict.allow_plan ? analysisPanelBody : '<div class="summary">Plan blocked: setup not tradeable</div><div class="tiny">Only Near Entry and Entry setups can keep an executable plan.</div>'}</div>
+      <div class="summary">${globalVerdict.allow_plan ? analysisPanelBody : `<div class="summary">${escapeHtml(blockedTradeStatusFromPrimaryBlocker(resolvedContract).line1)}</div>${blockedTradeStatusFromPrimaryBlocker(resolvedContract).line2 ? `<div class="tiny">${escapeHtml(blockedTradeStatusFromPrimaryBlocker(resolvedContract).line2)}</div>` : ''}`}</div>
       ${showAnalyseButton ? `<div class="reviewactions reviewactions-top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>` : '<div class="reviewactions reviewactions-top"><button class="ghost" id="resetReviewBtn">Remove</button></div>'}
       <textarea id="reviewNotes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea>
       ${renderReviewRecomputeDiagnostics(record)}
@@ -13356,7 +13361,7 @@ function renderReviewWorkspace(options = {}){
         <summary>AI Summary</summary>
         ${renderAnalysisPanelFromRecord(record)}
       </details>
-      <div class="summary" id="planRealismSummary">${escapeHtml(globalVerdict.allow_plan ? planRealismSummary : 'Plan blocked: setup not tradeable')}</div>
+      <div class="summary" id="planRealismSummary">${escapeHtml(globalVerdict.allow_plan ? planRealismSummary : blockedTradeStatusText(resolvedContract))}</div>
       <div class="tiny" id="planRealismReasons">${escapeHtml(planRealismReasons)}</div>
       <details class="compact-details">
         <summary>Plan Diagnostics</summary>
@@ -13693,7 +13698,9 @@ function syncPlanDisplayMeta(){
       ? `On @ ${Number.isFinite(executionState.targetAlertLevel) ? fmtPrice(Number(executionState.targetAlertLevel)) : 'n/a'}`
       : 'Off';
   }
-  if($('planRealismSummary')) $('planRealismSummary').textContent = planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.';
+  if($('planRealismSummary')) $('planRealismSummary').textContent = globalVerdict.allow_plan
+    ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
+    : blockedTradeStatusText(resolvedContract);
   if($('planRealismReasons')) $('planRealismReasons').textContent = planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
 }
 
@@ -13877,7 +13884,9 @@ function calculate(options = {}){
   if($('credibleRrBox')) $('credibleRrBox').value = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   if($('optimisticTargetBox')) $('optimisticTargetBox').value = planRealism.optimistic_target_flag ? 'Yes' : 'No';
   if($('targetAssessmentBox')) $('targetAssessmentBox').value = planRealism.credible_target_assessment || 'N/A';
-  if($('planRealismSummary')) $('planRealismSummary').textContent = planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.';
+  if($('planRealismSummary')) $('planRealismSummary').textContent = globalVerdict.allow_plan
+    ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
+    : blockedTradeStatusText(resolvedContract);
   if($('planRealismReasons')) $('planRealismReasons').textContent = planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
   if(displayedPlan.status === 'missing'){
     $('riskPerShare').textContent = '-';
@@ -14954,8 +14963,9 @@ function applyGlobalVerdictGates(record, options = {}){
       item.plan.riskStatus = 'plan_blocked';
       changed = true;
     }
-    if(item.plan.blockedReason !== 'Plan blocked: setup not tradeable'){
-      item.plan.blockedReason = 'Plan blocked: setup not tradeable';
+    const blockedMessage = globalVerdict.reason || globalVerdict.downgrade_reason || 'Blocked';
+    if(item.plan.blockedReason !== blockedMessage){
+      item.plan.blockedReason = blockedMessage;
       changed = true;
     }
   }
