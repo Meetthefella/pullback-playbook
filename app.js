@@ -13681,6 +13681,37 @@ function syncPlanDisplayMeta(){
     displayStage,
     setupUiState
   });
+  const warningState = warningStateFromInputs(record, null, analysisDerivedStatesFromRecord(record));
+  const avoidSubtype = avoidSubtypeForRecord(record, {
+    derivedStates:analysisDerivedStatesFromRecord(record),
+    displayedPlan,
+    qualityAdjustments:evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates:analysisDerivedStatesFromRecord(record)}),
+    finalVerdict:displayStage
+  });
+  const emojiPresentation = resolveEmojiPresentation(record, {
+    context:'review',
+    finalVerdict:displayStage,
+    derivedStates:analysisDerivedStatesFromRecord(record),
+    displayedPlan,
+    qualityAdjustments:evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates:analysisDerivedStatesFromRecord(record)}),
+    warningState,
+    planUiState,
+    setupUiState,
+    avoidSubtype
+  });
+  const resolvedContract = resolveFinalStateContract(record, {
+    context:'review',
+    finalVerdict:displayStage,
+    derivedStates:analysisDerivedStatesFromRecord(record),
+    displayedPlan,
+    qualityAdjustments:evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates:analysisDerivedStatesFromRecord(record)}),
+    warningState,
+    planUiState,
+    setupUiState,
+    avoidSubtype,
+    emojiPresentation
+  });
+  const globalVerdict = resolveGlobalVerdict(record);
   if(planStateBox) planStateBox.value = planUiState.label;
   const planQuality = planQualityForRr(displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null);
   if(planQualityBox) planQualityBox.value = planQuality || 'N/A';
