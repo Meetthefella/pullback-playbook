@@ -8680,6 +8680,45 @@ function renderTradeStatusMarkup(status){
   return `<span class="trade-status-primary">${escapeHtml(line1)}</span>`;
 }
 
+function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
+  const blockerCode = String(resolvedContract && resolvedContract.blockerCode || '').trim().toLowerCase();
+  const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').trim().toLowerCase();
+  if(['rr_unrealistic'].includes(blockerCode) || blockerReason.includes('target is too optimistic') || blockerReason.includes('low-confidence rr')){
+    return {
+      line1:'Blocked - reward too small for the risk',
+      line2:'Target is too close relative to the stop'
+    };
+  }
+  if(['bounce_not_confirmed','near_trigger','weak_volume','weak_market','weak_control','early_confirmation'].includes(blockerCode) || blockerReason.includes('bounce not confirmed') || blockerReason.includes('needs better confirmation')){
+    return {
+      line1:'Blocked - no safe entry yet',
+      line2:'Waiting for a confirmed bounce and stabilisation'
+    };
+  }
+  if(['broken_trend','broken_structure','setup_invalidated','weak_structure'].includes(blockerCode) || blockerReason.includes('structure is broken') || blockerReason.includes('trend is invalidated') || blockerReason.includes('structure is weak')){
+    return {
+      line1:'Blocked - structure is weak',
+      line2:'Price action is no longer holding up cleanly'
+    };
+  }
+  if(['risk_too_wide'].includes(blockerCode) || blockerReason.includes('risk too wide')){
+    return {
+      line1:'Blocked - risk too high',
+      line2:'The stop is too wide for the account risk'
+    };
+  }
+  if(['plan_invalid','plan_missing','plan_adjustment'].includes(blockerCode) || blockerReason.includes('invalid plan') || blockerReason.includes('plan not defined') || blockerReason.includes('plan needs adjustment')){
+    return {
+      line1:'Blocked - invalid trade plan',
+      line2:'Entry, stop, and target do not form a usable setup'
+    };
+  }
+  return {
+    line1:'Blocked',
+    line2:'Trade conditions are not ready yet'
+  };
+}
+
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
   const verdict = normalizeGlobalVerdictKey(globalVerdict && globalVerdict.final_verdict || '');
   const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').toLowerCase();
@@ -8700,12 +8739,11 @@ function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract})
       pullbackState:globalVerdict && globalVerdict.pullback_state
     });
   }
-  if(!globalVerdict || globalVerdict.allow_plan === false) return {line1:'Blocked', line2:''};
+  if(!globalVerdict || globalVerdict.allow_plan === false) return blockedTradeStatusFromPrimaryBlocker(resolvedContract);
   const planStatus = String(displayedPlan && displayedPlan.status || '').trim().toLowerCase();
   if(planStatus === 'valid') return {line1:'Reviewable', line2:''};
-  if(planStatus === 'needs_adjustment' || planStatus === 'pending_validation') return {line1:'Needs work', line2:''};
-  if(planStatus === 'missing') return {line1:'Incomplete', line2:''};
-  return {line1:String(resolvedContract && resolvedContract.planStatusLabel || 'Blocked'), line2:''};
+  if(planStatus === 'needs_adjustment' || planStatus === 'pending_validation' || planStatus === 'missing') return blockedTradeStatusFromPrimaryBlocker(resolvedContract);
+  return blockedTradeStatusFromPrimaryBlocker(resolvedContract);
 }
 
 function normalizeExitMode(exitMode){
