@@ -77,7 +77,7 @@
       capital_ok:(() => {
         const capitalFit = String(ctx.capital_fit || '').trim().toLowerCase();
         if(!capitalFit || capitalFit === 'unknown') return true;
-        return ['fits_capital', 'manageable', 'comfortable'].includes(capitalFit);
+        return ['ideal', 'acceptable', 'borderline', 'fits_capital'].includes(capitalFit);
       })()
     };
     const reasons = [];
@@ -90,7 +90,7 @@
     if(!checks.rr_ok) reasons.push('RR or credible RR must be at least 2.0.');
     if(!checks.score_ok) reasons.push('Setup score must be at least 7.');
     if(!checks.tradeability_ok) reasons.push('Tradeability must be tradable, entry, or ready.');
-    if(!checks.capital_ok) reasons.push('Capital fit must be manageable.');
+    if(!checks.capital_ok) reasons.push('Capital concentration is too high for entry readiness.');
     return {
       pass:reasons.length === 0,
       reasons,

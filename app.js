@@ -12812,11 +12812,7 @@ function renderReviewWorkspace(options = {}){
     })
     : '';
   const simulatedFinalVerdict = capitalSimulationState.simulation
-    ? mostConservativeVerdict(
-      baseVerdictForRecord(record),
-      analysisVerdictForRecord(record) || '',
-      simulatedExecutionVerdict || ''
-    )
+    ? (simulatedExecutionVerdict || displayStage)
     : '';
   const globalVerdict = resolveGlobalVerdict(record);
   const watchlistEligibility = watchlistEligibilityForRecord(record);
