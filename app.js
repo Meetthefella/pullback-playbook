@@ -8613,6 +8613,58 @@ function capitalFitMetricText(capitalComfortLabel){
   return `Capital fit: ${String(capitalComfortLabel || 'Needs check')}`;
 }
 
+function joinNaturalLanguageConditions(conditions){
+  const parts = Array.isArray(conditions) ? conditions.filter(Boolean).slice(0, 3) : [];
+  if(!parts.length) return '';
+  if(parts.length === 1) return parts[0];
+  if(parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts[0]}, ${parts[1]}, and ${parts[2]}`;
+}
+
+function buildValidityConditionSummary({
+  entryGateChecks,
+  nearEntryGateChecks,
+  structureState,
+  bounceState,
+  planStatus,
+  rrConfidence,
+  pullbackState
+}){
+  const base = 'Only valid if the stock proves strength';
+  const checks = entryGateChecks && typeof entryGateChecks === 'object' && Object.keys(entryGateChecks).length
+    ? entryGateChecks
+    : (nearEntryGateChecks && typeof nearEntryGateChecks === 'object' ? nearEntryGateChecks : {});
+  const unmet = [];
+  const pushCondition = value => {
+    if(value && !unmet.includes(value) && unmet.length < 3) unmet.push(value);
+  };
+  const bounce = String(bounceState || '').trim().toLowerCase();
+  const structure = String(structureState || '').trim().toLowerCase();
+  const plan = String(planStatus || '').trim().toLowerCase();
+  const rr = String(rrConfidence || '').trim().toLowerCase();
+  const pullback = String(pullbackState || '').trim().toLowerCase();
+
+  if(checks.bounce_ok === false){
+    if(bounce === 'none') pushCondition('a bounce forms');
+    else pushCondition('the bounce confirms');
+  }
+  if(checks.structure_ok === false){
+    pushCondition(structure === 'broken' ? 'structure rebuilds' : 'structure stabilises');
+  }
+  if(checks.plan_ok === false){
+    pushCondition(plan === 'invalid' ? 'a valid plan forms' : 'the plan becomes valid');
+  }
+  if(checks.pullback_ok === false){
+    pushCondition(pullback === 'none' ? 'a pullback forms' : 'price pulls back to a better level');
+  }
+  if(checks.rr_ok === false){
+    pushCondition(rr === 'low' || rr === 'invalid' ? 'reward becomes realistic' : 'reward improves');
+  }
+
+  if(!unmet.length) return base;
+  return `${base} (${joinNaturalLanguageConditions(unmet)})`;
+}
+
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
   const verdict = normalizeGlobalVerdictKey(globalVerdict && globalVerdict.final_verdict || '');
   const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').toLowerCase();
@@ -8623,7 +8675,15 @@ function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract})
     || blockerReason.includes('too expensive')
     || blockerReason.includes('no viable plan');
   if((verdict === 'monitor' || ((globalVerdict && globalVerdict.bucket) === 'monitor_watch' && (globalVerdict && globalVerdict.tone) === 'orange')) && !terminalBlock){
-    return 'Not executable yet';
+    return buildValidityConditionSummary({
+      entryGateChecks:globalVerdict && globalVerdict.entry_gate_checks,
+      nearEntryGateChecks:globalVerdict && globalVerdict.near_entry_gate_checks,
+      structureState:globalVerdict && globalVerdict.structure_state,
+      bounceState:globalVerdict && globalVerdict.bounce_state,
+      planStatus:displayedPlan && displayedPlan.status,
+      rrConfidence:resolvedContract && resolvedContract.rrConfidenceLabel,
+      pullbackState:globalVerdict && globalVerdict.pullback_state
+    });
   }
   if(!globalVerdict || globalVerdict.allow_plan === false) return 'Blocked';
   const planStatus = String(displayedPlan && displayedPlan.status || '').trim().toLowerCase();
