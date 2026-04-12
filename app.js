@@ -8683,6 +8683,12 @@ function renderTradeStatusMarkup(status){
 function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
   const blockerCode = String(resolvedContract && resolvedContract.blockerCode || '').trim().toLowerCase();
   const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').trim().toLowerCase();
+  if(['plan_invalid','plan_missing','plan_adjustment'].includes(blockerCode) || blockerReason.includes('invalid plan') || blockerReason.includes('plan not defined') || blockerReason.includes('plan needs adjustment')){
+    return {
+      line1:'Blocked - invalid trade plan',
+      line2:'Entry, stop, and target do not form a usable setup'
+    };
+  }
   if(['rr_unrealistic'].includes(blockerCode) || blockerReason.includes('target is too optimistic') || blockerReason.includes('low-confidence rr')){
     return {
       line1:'Blocked - reward too small for the risk',
@@ -8705,12 +8711,6 @@ function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
     return {
       line1:'Blocked - risk too high',
       line2:'The stop is too wide for the account risk'
-    };
-  }
-  if(['plan_invalid','plan_missing','plan_adjustment'].includes(blockerCode) || blockerReason.includes('invalid plan') || blockerReason.includes('plan not defined') || blockerReason.includes('plan needs adjustment')){
-    return {
-      line1:'Blocked - invalid trade plan',
-      line2:'Entry, stop, and target do not form a usable setup'
     };
   }
   return {
