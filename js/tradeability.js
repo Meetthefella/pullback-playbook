@@ -55,6 +55,7 @@
 
   function tradeabilityLabel(tradeability){
     if(tradeability === 'tradable') return 'Tradable';
+    if(tradeability === 'capital_heavy') return 'Capital Heavy';
     if(tradeability === 'too_expensive') return 'Too Expensive';
     if(tradeability === 'risk_only') return 'Risk OK | Capital Check Estimated';
     if(tradeability === 'not_ready') return 'Not Ready';
@@ -65,7 +66,9 @@
     if(planStatus === 'missing' || planStatus === 'invalid' || planStatus === 'needs_adjustment') return 'not_ready';
     if(planStatus !== 'valid') return 'invalid';
     if(riskStatus !== 'fits_risk') return 'invalid';
-    if(capitalFit === 'fits_capital') return 'tradable';
+    if(['ideal','acceptable','borderline','fits_capital'].includes(capitalFit)) return 'tradable';
+    if(capitalFit === 'heavy') return 'capital_heavy';
+    if(capitalFit === 'too_heavy') return 'too_expensive';
     if(capitalFit === 'too_expensive') return 'too_expensive';
     return 'risk_only';
   }

@@ -61,8 +61,33 @@
     };
   }
 
+  function classifyCapitalUsage({position_cost_gbp, account_size_gbp}, deps = {}){
+    const { numericOrNull } = deps;
+    const positionCostGbp = numericOrNull(position_cost_gbp);
+    const accountSize = numericOrNull(account_size_gbp);
+    if(!Number.isFinite(positionCostGbp) || positionCostGbp < 0 || !Number.isFinite(accountSize) || accountSize <= 0){
+      return {
+        usage_percent:null,
+        usage_bucket:'unknown',
+        capital_ok:null
+      };
+    }
+    const usagePercent = positionCostGbp / accountSize;
+    let usageBucket = 'too_expensive';
+    if(usagePercent <= 0.25) usageBucket = 'ideal';
+    else if(usagePercent <= 0.40) usageBucket = 'acceptable';
+    else if(usagePercent <= 0.60) usageBucket = 'borderline';
+    else if(usagePercent <= 0.75) usageBucket = 'heavy';
+    else if(usagePercent <= 1) usageBucket = 'too_heavy';
+    return {
+      usage_percent:usagePercent,
+      usage_bucket:usageBucket,
+      capital_ok:['ideal','acceptable','borderline'].includes(usageBucket)
+    };
+  }
+
   function evaluateCapitalFit({entry, position_size, account_size_gbp, quote_currency}, deps = {}){
-    const { numericOrNull, convertQuoteValueToGbp } = deps;
+    const { numericOrNull, convertQuoteValueToGbp, classifyCapitalUsage } = deps;
     const numericEntry = numericOrNull(entry);
     const positionSize = numericOrNull(position_size);
     const accountSize = numericOrNull(account_size_gbp) || 0;
@@ -73,6 +98,8 @@
         position_cost_gbp:null,
         quote_currency:quoteCurrency || '',
         capital_fit:'unknown',
+        capital_usage_pct:null,
+        capital_ok:null,
         capital_note:'Position cost is unavailable until entry and size are valid.'
       };
     }
@@ -84,23 +111,39 @@
         position_cost_gbp:null,
         quote_currency:quoteCurrency || '',
         capital_fit:'unknown',
+        capital_usage_pct:null,
+        capital_ok:null,
         fx_status:quoteCurrency ? 'estimated' : 'unavailable',
         capital_note:quoteCurrency
           ? 'Capital check: FX estimated'
           : 'Capital check unavailable - quote currency is unknown.'
       };
     }
+    const capitalUsage = classifyCapitalUsage({
+      position_cost_gbp:converted.gbpValue,
+      account_size_gbp:accountSize
+    });
+    const bucket = capitalUsage.usage_bucket;
+    const capitalNote = converted.conversion === 'live_fx'
+      ? 'Capital check: FX converted'
+      : ({
+        ideal:'Position cost is ideal for current account size.',
+        acceptable:'Position cost is acceptable for current account size.',
+        borderline:'Position cost is borderline for current account size.',
+        heavy:'Capital usage is heavy for this account size.',
+        too_heavy:'Position would use too much account capital.',
+        too_expensive:'Position cost is above current account size.'
+      })[bucket] || 'Capital check unavailable.';
     return {
       position_cost:positionCost,
       position_cost_gbp:converted.gbpValue,
       quote_currency:quoteCurrency || 'GBP',
       fx_status:converted.conversion === 'live_fx' ? 'converted' : (converted.conversion === 'native' || converted.conversion === 'pence' ? 'native' : ''),
-      capital_fit:converted.gbpValue <= accountSize ? 'fits_capital' : 'too_expensive',
-      capital_note:converted.conversion === 'live_fx'
-        ? 'Capital check: FX converted'
-        : (converted.gbpValue <= accountSize
-          ? 'Position cost fits account size.'
-          : 'Position cost is above current account size.')
+      capital_fit:bucket,
+      capital_usage_pct:capitalUsage.usage_percent,
+      capital_usage_bucket:bucket,
+      capital_ok:capitalUsage.capital_ok,
+      capital_note:capitalNote
     };
   }
 
@@ -124,11 +167,22 @@
   }
 
   function deriveAffordability(positionCost, deps = {}){
-    const { numericOrNull } = deps;
-    const cost = numericOrNull(positionCost);
-    if(!Number.isFinite(cost) || cost <= 0) return '';
-    if(cost > 3200) return 'not_affordable';
-    if(cost > 2500) return 'heavy_capital';
+    const { numericOrNull, classifyCapitalUsage } = deps;
+    const capitalContext = positionCost && typeof positionCost === 'object'
+      ? positionCost
+      : {position_cost:positionCost};
+    const usageBucket = String(
+      capitalContext.capital_fit
+      || capitalContext.capital_usage_bucket
+      || classifyCapitalUsage({
+        position_cost_gbp:capitalContext.position_cost_gbp ?? capitalContext.position_cost,
+        account_size_gbp:capitalContext.account_size_gbp
+      }).usage_bucket
+      || ''
+    ).trim().toLowerCase();
+    if(!usageBucket || usageBucket === 'unknown') return '';
+    if(usageBucket === 'heavy') return 'heavy_capital';
+    if(['too_heavy','too_expensive'].includes(usageBucket)) return 'not_affordable';
     return 'affordable';
   }
 
@@ -136,6 +190,7 @@
     normalizeQuoteCurrency,
     convertQuoteValueToGbp,
     evaluateRiskFit,
+    classifyCapitalUsage,
     evaluateCapitalFit,
     evaluateRewardRisk,
     deriveAffordability

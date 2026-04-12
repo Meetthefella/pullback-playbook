@@ -81,6 +81,7 @@ const {
   normalizeQuoteCurrency: normalizeQuoteCurrencyImpl,
   convertQuoteValueToGbp: convertQuoteValueToGbpImpl,
   evaluateRiskFit: evaluateRiskFitImpl,
+  classifyCapitalUsage: classifyCapitalUsageImpl,
   evaluateCapitalFit: evaluateCapitalFitImpl,
   evaluateRewardRisk: evaluateRewardRiskImpl,
   deriveAffordability: deriveAffordabilityImpl
@@ -236,6 +237,9 @@ uiState.scanCardMenuGuard = {};
 uiState.watchlistLiveRefreshPending = uiState.watchlistLiveRefreshPending && typeof uiState.watchlistLiveRefreshPending === 'object'
   ? uiState.watchlistLiveRefreshPending
   : {};
+uiState.reviewCapitalSimulation = uiState.reviewCapitalSimulation && typeof uiState.reviewCapitalSimulation === 'object'
+  ? uiState.reviewCapitalSimulation
+  : {ticker:'', usagePercent:null};
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -416,12 +420,17 @@ function evaluateRiskFit({entry, stop, account_size, risk_percent, max_loss_over
 function evaluateCapitalFit({entry, position_size, account_size_gbp, quote_currency}){
   return evaluateCapitalFitImpl({entry, position_size, account_size_gbp, quote_currency}, {
     numericOrNull,
-    convertQuoteValueToGbp
+    convertQuoteValueToGbp,
+    classifyCapitalUsage: ({position_cost_gbp, account_size_gbp}) => classifyCapitalUsage({position_cost_gbp, account_size_gbp})
   });
 }
 
 function evaluateRewardRisk(entry, stop, firstTarget){
   return evaluateRewardRiskImpl(entry, stop, firstTarget, { numericOrNull });
+}
+
+function classifyCapitalUsage({position_cost_gbp, account_size_gbp}){
+  return classifyCapitalUsageImpl({position_cost_gbp, account_size_gbp}, { numericOrNull });
 }
 
 function persistState(){
@@ -1929,7 +1938,10 @@ function applyPlanCandidateToRecord(record, planCandidate = {}, context = {}){
   record.plan.capitalFit = rewardRisk.valid ? capitalFit.capital_fit : 'unknown';
   record.plan.tradeability = rewardRisk.valid ? deriveTradeability('valid', riskFit.risk_status, capitalFit.capital_fit) : 'invalid';
   record.plan.capitalNote = rewardRisk.valid ? String(capitalFit.capital_note || '') : '';
-  record.plan.affordability = rewardRisk.valid ? deriveAffordability(capitalFit.position_cost) : '';
+  record.plan.affordability = rewardRisk.valid ? deriveAffordability({
+    ...capitalFit,
+    account_size_gbp:currentAccountSizeGbp()
+  }) : '';
   record.plan.status = !hasAnyFields ? 'missing' : (rewardRisk.valid ? 'valid' : 'invalid');
   record.plan.firstTargetTooClose = rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false;
   record.plan.lastPlannedAt = String(context.lastPlannedAt || context.updatedAt || record.plan.lastPlannedAt || '');
@@ -3958,6 +3970,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
     {label:'RR Confidence', value:resolved.rrConfidenceLabel || 'n/a'},
     {label:'Capital Fit', value:capitalComfort.label || 'n/a'},
+    {label:'Capital Usage', value:capitalUsageDebugText(displayedPlan)},
     {label:'Next Possible', value:debug.nextPossibleState || resolved.nextPossibleState || 'n/a'}
   ])}${renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
@@ -3966,6 +3979,8 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Allow Plan', value:globalVerdict.allow_plan ? 'true' : 'false'},
     {label:'Allow Watchlist', value:globalVerdict.allow_watchlist ? 'true' : 'false'},
     {label:'Source', value:globalVerdict.source || 'resolver'},
+    {label:'Capital Affordability', value:displayedPlan.affordability || '(none)'},
+    {label:'Capital OK', value:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_ok === true ? 'true' : (displayedPlan.capitalFit && displayedPlan.capitalFit.capital_ok === false ? 'false' : '(none)')},
     {label:'Setup Score Trace', value:`${setupScoreTrace.detail} setup=${Number.isFinite(setupScoreTrace.inputs.setup_score) ? setupScoreTrace.inputs.setup_score : 'n/a'} | base=${Number.isFinite(setupScoreTrace.inputs.base_score) ? setupScoreTrace.inputs.base_score : 'n/a'} | scan=${Number.isFinite(setupScoreTrace.inputs.scan_score) ? setupScoreTrace.inputs.scan_score : 'n/a'}`},
     {label:'Base Action Label', value:resolved.actionStateLabel || resolved.actionLabel || 'n/a'},
     {label:'Base Tradeability', value:resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a'},
@@ -6831,7 +6846,8 @@ function legacyResolveFinalStateContract(record, options = {}){
   const planUnrealistic = planUiState.state === 'unrealistic_rr';
   const zeroShares = !Number.isFinite(positionSize) || positionSize < 1;
   const riskTooWide = riskStatus === 'too_wide' || (zeroShares && displayedPlan.status === 'valid');
-  const capitalBlocked = tradeability === 'too_expensive' || affordability === 'not_affordable' || affordability === 'heavy_capital';
+  const capitalBlocked = executionCapitalBlocked(displayedPlan);
+  const capitalHeavy = executionCapitalHeavy(displayedPlan);
   const bounceUnconfirmed = ['none','unconfirmed','attempt','early'].includes(bounceState);
   const weakVolume = volumeState === 'weak';
   const rrConfidenceLabel = planInvalid || planMissing || planUnrealistic
@@ -6950,10 +6966,10 @@ function legacyResolveFinalStateContract(record, options = {}){
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
-  }else if(capitalBlocked){
+  }else if(capitalBlocked || capitalHeavy){
     actionStateKey = 'recalculate_plan';
-    blockerCode = 'capital_blocked';
-    blockerReason = 'Capital fit is too weak for this plan';
+    blockerCode = capitalBlocked ? 'capital_blocked' : 'capital_heavy';
+    blockerReason = capitalConstraintReasonForPlan(displayedPlan) || 'Capital usage is heavy for this account size.';
     actionLabel = 'Recalculate plan from current structure';
     actionShortLabel = 'Recalculate plan';
     actionTone = 'warning';
@@ -7547,13 +7563,25 @@ function executionDowngradeVerdictForRecord(record, options = {}){
   const positionSize = numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size);
   const riskStatus = String(displayedPlan.riskFit && displayedPlan.riskFit.risk_status || '');
   const planValidationState = String(item.plan && item.plan.planValidationState || '');
+  const provisionalVerdict = normalizeAnalysisVerdict(
+    options.provisionalVerdict
+    || mostConservativeVerdict(
+      baseVerdictForRecord(item, {includeRuntimeFallback:false}),
+      analysisVerdictForRecord(item, {includeRuntimeFallback:false}) || ''
+    )
+  );
 
   if(item.plan && (item.plan.invalidatedState || item.plan.missedState)) return 'Avoid';
   if(executionCapitalBlocked(displayedPlan)) return 'Avoid';
+  if(executionCapitalHeavy(displayedPlan)){
+    if(provisionalVerdict === 'Entry') return 'Near Entry';
+    if(provisionalVerdict === 'Near Entry') return 'Watch';
+    return provisionalVerdict || 'Watch';
+  }
   if(['too_wide','settings_missing'].includes(riskStatus)) return 'Avoid';
   if(planUiState.state === 'invalid' || planUiState.state === 'unrealistic_rr') return 'Avoid';
   if(!Number.isFinite(positionSize) || positionSize < 1) return 'Avoid';
-  if(displayedPlan.tradeability === 'too_expensive' || displayedPlan.affordability === 'not_affordable' || displayedPlan.affordability === 'heavy_capital') return 'Avoid';
+  if(displayedPlan.tradeability === 'too_expensive' || displayedPlan.affordability === 'not_affordable') return 'Avoid';
   if(planUiState.state === 'needs_adjustment' || displayedPlan.status !== 'valid' || planValidationState === 'needs_replan') return 'Watch';
   return '';
 }
@@ -8069,7 +8097,7 @@ function validateCurrentPlan(record, options = {}){
     needsReplan:staleMove,
     missed:false,
     invalidated:false,
-    capitalConstraint:(rawRecord.plan && rawRecord.plan.affordability === 'not_affordable') ? 'not_affordable' : ((rawRecord.plan && rawRecord.plan.affordability === 'heavy_capital') ? 'heavy_capital' : ''),
+    capitalConstraint:capitalConstraintCodeForPlan(displayedPlan),
     reasonCode:staleMove ? 'plan_premature_or_stale' : 'valid'
   };
 }
@@ -8121,7 +8149,7 @@ function reviewDowngradeSummaryForRecord(record, options = {}){
 
   if(item.plan && item.plan.invalidatedState) pushReason('Setup invalidated');
   if(item.plan && item.plan.missedState) pushReason('Missed entry window');
-  if(executionCapitalBlocked(displayedPlan)) pushReason('Capital burden is too high');
+  if(executionCapitalBlocked(displayedPlan) || executionCapitalHeavy(displayedPlan)) pushReason(capitalConstraintReasonForPlan(displayedPlan) || 'Capital usage is heavy for this account size.');
   if(displayedPlan.riskFit && displayedPlan.riskFit.risk_status === 'too_wide') pushReason('Stop is too wide for account risk');
   if(displayedPlan.riskFit && displayedPlan.riskFit.risk_status === 'settings_missing') pushReason('Risk settings need checking');
   (qualityAdjustments.adjustmentReasons || []).forEach(pushReason);
@@ -8233,9 +8261,8 @@ function avoidSubtypeForRecord(record, options = {}){
       || planUiState.state === 'invalid'
       || planUiState.state === 'unrealistic_rr'
       || (Number.isFinite(rrValue) && rrValue < currentRrThreshold())
-      || displayedPlan.affordability === 'heavy_capital'
-      || displayedPlan.affordability === 'not_affordable'
-      || displayedPlan.tradeability === 'too_expensive'
+      || executionCapitalHeavy(displayedPlan)
+      || executionCapitalBlocked(displayedPlan)
     )
   ) return 'conditional';
 
@@ -8307,9 +8334,14 @@ function planQualityForRr(rrRatio){
 }
 
 function capitalFitLabel(capitalFit){
-  if(capitalFit === 'fits_capital') return 'Fits Capital';
-  if(capitalFit === 'too_expensive') return 'Too Expensive';
-  return 'Capital Unknown';
+  if(capitalFit === 'ideal') return 'Ideal';
+  if(capitalFit === 'acceptable') return 'Acceptable';
+  if(capitalFit === 'borderline') return 'Borderline';
+  if(capitalFit === 'heavy') return 'Heavy';
+  if(capitalFit === 'too_heavy') return 'Too heavy';
+  if(capitalFit === 'fits_capital') return 'Acceptable';
+  if(capitalFit === 'too_expensive') return 'Too expensive';
+  return 'Needs Check';
 }
 
 function capitalFitDisplayText(capitalFit, capitalNote){
@@ -8321,20 +8353,140 @@ function capitalFitDisplayText(capitalFit, capitalNote){
 }
 
 function deriveAffordability(positionCost){
-  return deriveAffordabilityImpl(positionCost, { numericOrNull });
+  return deriveAffordabilityImpl(positionCost, {
+    numericOrNull,
+    classifyCapitalUsage: ({position_cost_gbp, account_size_gbp}) => classifyCapitalUsage({position_cost_gbp, account_size_gbp})
+  });
 }
 
 function affordabilityLabel(affordability){
-  if(affordability === 'not_affordable') return 'Not Affordable';
-  if(affordability === 'heavy_capital') return 'Heavy Capital';
+  if(affordability === 'not_affordable') return 'Too Expensive';
+  if(affordability === 'heavy_capital') return 'Heavy';
   if(affordability === 'affordable') return 'Affordable';
   return 'N/A';
+}
+
+function capitalFitForPlan(displayedPlan){
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const capitalFitValue = plan.capitalFit && typeof plan.capitalFit === 'object'
+    ? plan.capitalFit.capital_fit
+    : plan.capitalFit;
+  return String(capitalFitValue || '').trim().toLowerCase();
+}
+
+function executionCapitalHeavy(displayedPlan){
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  return capitalFitForPlan(plan) === 'heavy'
+    || plan.affordability === 'heavy_capital'
+    || plan.tradeability === 'capital_heavy';
+}
+
+function executionCapitalBlocked(displayedPlan){
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const capitalFit = capitalFitForPlan(plan);
+  return capitalFit === 'too_heavy'
+    || capitalFit === 'too_expensive'
+    || plan.affordability === 'not_affordable'
+    || plan.tradeability === 'too_expensive';
+}
+
+function capitalConstraintCodeForPlan(displayedPlan){
+  if(executionCapitalBlocked(displayedPlan)) return 'not_affordable';
+  if(executionCapitalHeavy(displayedPlan)) return 'heavy_capital';
+  return '';
+}
+
+function capitalConstraintReasonForPlan(displayedPlan){
+  const capitalFit = capitalFitForPlan(displayedPlan);
+  if(capitalFit === 'too_expensive') return 'Position would use too much account capital.';
+  if(capitalFit === 'too_heavy') return 'Capital concentration blocks entry readiness.';
+  if(executionCapitalBlocked(displayedPlan)) return 'Trade is risk-valid but too capital-heavy.';
+  if(executionCapitalHeavy(displayedPlan)) return 'Capital usage is heavy for this account size.';
+  return '';
+}
+
+function capitalUsageDebugText(displayedPlan){
+  const usagePct = numericOrNull(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_usage_pct);
+  if(!Number.isFinite(usagePct)) return '(none)';
+  return `${(usagePct * 100).toFixed(0)}%`;
+}
+
+function currentReviewCapitalSimulation(ticker){
+  const symbol = normalizeTicker(ticker);
+  const stateValue = uiState.reviewCapitalSimulation && typeof uiState.reviewCapitalSimulation === 'object'
+    ? uiState.reviewCapitalSimulation
+    : {ticker:'', usagePercent:null};
+  if(!symbol || normalizeTicker(stateValue.ticker) !== symbol) return null;
+  const usagePercent = numericOrNull(stateValue.usagePercent);
+  if(!Number.isFinite(usagePercent) || usagePercent <= 0) return null;
+  return {ticker:symbol, usagePercent};
+}
+
+function setReviewCapitalSimulation(ticker, usagePercent = null){
+  const symbol = normalizeTicker(ticker);
+  const usage = numericOrNull(usagePercent);
+  if(!symbol || !Number.isFinite(usage) || usage <= 0){
+    uiState.reviewCapitalSimulation = {ticker:'', usagePercent:null};
+    return;
+  }
+  uiState.reviewCapitalSimulation = {ticker:symbol, usagePercent:usage};
+}
+
+function clearReviewCapitalSimulation(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(symbol && normalizeTicker(uiState.reviewCapitalSimulation && uiState.reviewCapitalSimulation.ticker) !== symbol) return;
+  uiState.reviewCapitalSimulation = {ticker:'', usagePercent:null};
+}
+
+function applyReviewCapitalSimulation(displayedPlan, ticker){
+  const simulation = currentReviewCapitalSimulation(ticker);
+  if(!simulation) return {displayedPlan, simulation:null};
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const accountSizeGbp = currentAccountSizeGbp();
+  if(!Number.isFinite(accountSizeGbp) || accountSizeGbp <= 0) return {displayedPlan:plan, simulation:null};
+  const simulatedCostGbp = accountSizeGbp * simulation.usagePercent;
+  const capitalFit = {
+    ...(plan.capitalFit && typeof plan.capitalFit === 'object' ? plan.capitalFit : {}),
+    capital_fit:classifyCapitalUsage({position_cost_gbp:simulatedCostGbp, account_size_gbp:accountSizeGbp}).usage_bucket,
+    capital_usage_pct:simulation.usagePercent,
+    capital_usage_bucket:classifyCapitalUsage({position_cost_gbp:simulatedCostGbp, account_size_gbp:accountSizeGbp}).usage_bucket,
+    capital_ok:classifyCapitalUsage({position_cost_gbp:simulatedCostGbp, account_size_gbp:accountSizeGbp}).capital_ok,
+    position_cost_gbp:simulatedCostGbp,
+    position_cost:Number.isFinite(numericOrNull(plan.capitalFit && plan.capitalFit.position_cost)) ? numericOrNull(plan.capitalFit.position_cost) : simulatedCostGbp,
+    quote_currency:String(plan.capitalFit && plan.capitalFit.quote_currency || 'GBP'),
+    fx_status:String(plan.capitalFit && plan.capitalFit.fx_status || 'native'),
+    capital_note:`Debug simulation at ${(simulation.usagePercent * 100).toFixed(0)}% of account size.`
+  };
+  const simulatedPlan = {
+    ...plan,
+    capitalFit,
+    affordability:deriveAffordability({
+      ...capitalFit,
+      account_size_gbp:accountSizeGbp
+    }),
+    tradeability:deriveTradeability(
+      plan.status,
+      plan.riskFit && plan.riskFit.risk_status,
+      capitalFit.capital_fit
+    )
+  };
+  return {
+    displayedPlan:simulatedPlan,
+    simulation:{
+      usagePercent:simulation.usagePercent,
+      label:`${Math.round(simulation.usagePercent * 100)}%`,
+      capitalFit:capitalFit.capital_fit,
+      affordability:simulatedPlan.affordability,
+      capitalOk:capitalFit.capital_ok,
+      tradeability:simulatedPlan.tradeability
+    }
+  };
 }
 
 function capitalUsageAdvisory({positionCostGbp, positionCost, quoteCurrency, accountSizeGbp, fxStatus = ''}){
   const accountSize = numericOrNull(accountSizeGbp) || currentAccountSizeGbp();
   if(!Number.isFinite(accountSize) || accountSize <= 0){
-    return {ratio:null, label:'', visible:false, estimated:false, conversionStatus:''};
+    return {ratio:null, label:'', bucket:'unknown', visible:false, estimated:false, conversionStatus:''};
   }
   let reliableCostGbp = numericOrNull(positionCostGbp);
   let estimated = false;
@@ -8350,63 +8502,43 @@ function capitalUsageAdvisory({positionCostGbp, positionCost, quoteCurrency, acc
     }
   }
   if(!Number.isFinite(reliableCostGbp) || reliableCostGbp < 0){
-    return {ratio:null, label:'', visible:false, estimated:false, conversionStatus:conversionStatus || 'unavailable'};
+    return {ratio:null, label:'', bucket:'unknown', visible:false, estimated:false, conversionStatus:conversionStatus || 'unavailable'};
   }
-  const ratio = reliableCostGbp / accountSize;
-  const label = estimated
-    ? (ratio >= 0.75
-      ? 'Very High (est.)'
-      : (ratio >= 0.5
-        ? 'High (est.)'
-        : (ratio >= 0.25 ? 'Moderate (est.)' : 'Low (est.)')))
-    : (ratio >= 0.75
-      ? 'Capital stretched'
-      : (ratio >= 0.5
-        ? 'High capital use'
-        : (ratio >= 0.25 ? 'Moderate capital use' : 'Low capital use')));
+  const classified = classifyCapitalUsage({
+    position_cost_gbp:reliableCostGbp,
+    account_size_gbp:accountSize
+  });
+  const ratio = classified.usage_percent;
+  const bucket = classified.usage_bucket || 'unknown';
+  const labelBase = capitalFitLabel(bucket);
+  const label = estimated && labelBase && bucket !== 'unknown' ? `${labelBase} (est.)` : labelBase;
   return {
     ratio,
     label,
-    visible:['High capital use','Capital stretched','High (est.)','Very High (est.)'].includes(label),
+    bucket,
+    visible:['borderline','heavy','too_heavy','too_expensive'].includes(bucket),
     estimated,
     conversionStatus
   };
 }
 
 function capitalComfortSummary({capitalFit, capitalNote, affordability, capitalUsage, controlQuality = '', capitalEfficiency = ''}){
-  const usageLabel = String(capitalUsage && capitalUsage.label || '').trim();
+  const fit = String(capitalFit || '').trim().toLowerCase();
+  const bucket = fit || String(capitalUsage && capitalUsage.bucket || '').trim().toLowerCase();
   const conversionStatus = String(capitalUsage && capitalUsage.conversionStatus || '').trim();
   const convertedFx = conversionStatus === 'converted' || /FX converted/i.test(String(capitalNote || ''));
   const estimatedFx = conversionStatus === 'estimated' || !!(capitalUsage && capitalUsage.estimated) || /FX estimated/i.test(String(capitalNote || ''));
   const statusNote = convertedFx ? 'Capital check: FX converted' : (estimatedFx ? 'Capital check: FX estimated' : '');
-  if(affordability === 'not_affordable' || capitalFit === 'too_expensive'){
-    return {label:'Stretch / Not Ideal', note:statusNote || 'Over account size'};
+  if(affordability === 'not_affordable' || ['too_heavy','too_expensive'].includes(bucket)){
+    return {label:bucket === 'too_heavy' ? 'Too heavy' : 'Too expensive', note:statusNote || (bucket === 'too_heavy' ? 'Position would use too much account capital.' : 'Over account size')};
   }
-  if(affordability === 'heavy_capital' || ['Capital stretched','Very High (est.)','High capital use','High (est.)'].includes(usageLabel)){
-    return {label:'Heavy', note:statusNote || (controlQuality === 'Loose' ? 'Fits risk, but tactically loose' : '')};
+  if(affordability === 'heavy_capital' || bucket === 'heavy'){
+    return {label:'Heavy', note:statusNote || 'Capital usage is heavy for this account size.'};
   }
-  if(['Moderate capital use','Moderate (est.)'].includes(usageLabel)){
-    if(capitalEfficiency === 'Inefficient' || controlQuality === 'Loose'){
-      return {label:'Heavy', note:statusNote || 'Fits risk, lower control'};
-    }
-    return {label:'Manageable', note:statusNote};
-  }
-  if(['Low capital use','Low (est.)'].includes(usageLabel)){
-    if(capitalEfficiency === 'Inefficient' || controlQuality === 'Loose'){
-      return {label:'Manageable', note:statusNote || 'Fits risk, inefficient for account size'};
-    }
-    if(controlQuality === 'Moderate'){
-      return {label:'Manageable', note:statusNote || 'Fits risk, lower control'};
-    }
-    return {label:'Comfortable', note:statusNote};
-  }
-  if(capitalFit === 'fits_capital'){
-    if(capitalEfficiency === 'Inefficient' || controlQuality === 'Loose'){
-      return {label:'Manageable', note:statusNote || 'Fits risk, lower control'};
-    }
-    return {label:'Manageable', note:statusNote};
-  }
-  return {label:'Needs Check', note:statusNote || (capitalFit === 'unknown' ? 'Capital unresolved' : '')};
+  if(bucket === 'borderline') return {label:'Borderline', note:statusNote};
+  if(bucket === 'acceptable' || bucket === 'fits_capital') return {label:'Acceptable', note:statusNote};
+  if(bucket === 'ideal') return {label:'Ideal', note:statusNote};
+  return {label:'Needs Check', note:statusNote || (bucket === 'unknown' ? 'Capital unresolved' : '')};
 }
 
 function capitalFitPresentation({capitalFit, affordability, comfortLabel}){
@@ -8414,10 +8546,11 @@ function capitalFitPresentation({capitalFit, affordability, comfortLabel}){
   const afford = String(affordability || '').trim().toLowerCase();
   const comfort = String(comfortLabel || '').trim().toLowerCase();
   if(afford === 'not_affordable' || fit === 'too_expensive') return {className:'capital-fit--too-expensive', icon:'⛔', text:'TOO EXPENSIVE'};
-  if(comfort.includes('stretch')) return {className:'capital-fit--stretch', icon:'⚠', text:'STRETCH'};
+  if(fit === 'too_heavy' || comfort.includes('too heavy')) return {className:'capital-fit--stretch', icon:'⚠', text:'TOO HEAVY'};
   if(comfort.includes('heavy')) return {className:'capital-fit--heavy', icon:'⚠', text:'HEAVY'};
-  if(comfort.includes('comfortable')) return {className:'capital-fit--comfortable', icon:'✓', text:'COMFORTABLE'};
-  if(comfort.includes('manageable')) return {className:'capital-fit--manageable', icon:'•', text:'MANAGEABLE'};
+  if(comfort.includes('ideal')) return {className:'capital-fit--comfortable', icon:'✓', text:'IDEAL'};
+  if(comfort.includes('acceptable')) return {className:'capital-fit--manageable', icon:'•', text:'ACCEPTABLE'};
+  if(comfort.includes('borderline')) return {className:'capital-fit--manageable', icon:'•', text:'BORDERLINE'};
   return {className:'capital-fit--unknown', icon:'•', text:String(comfortLabel || 'UNKNOWN').toUpperCase()};
 }
 
@@ -8616,7 +8749,10 @@ function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrenc
   const rewardPerShare = hasEntry && hasTarget && target > entry ? target - entry : null;
   const status = !allPresent ? 'missing' : (rewardRisk.valid ? 'valid' : 'invalid');
   const tradeability = deriveTradeability(status, riskFit.risk_status, capitalFit.capital_fit);
-  const affordability = status === 'valid' ? deriveAffordability(capitalFit.position_cost) : '';
+  const affordability = status === 'valid' ? deriveAffordability({
+    ...capitalFit,
+    account_size_gbp:currentAccountSizeGbp()
+  }) : '';
   return {
     entry,
     stop,
@@ -8680,12 +8816,14 @@ function projectTickerForCard(record, options = {}){
   const actionableRrValue = actionableRrValueForPlan(displayedPlan);
   const derivedActionState = deriveActionStateForRecord(item);
   const actionLabel = displayedPlan.affordability === 'not_affordable'
-    ? 'Not Affordable'
+    ? 'Too Expensive'
+    : (displayedPlan.affordability === 'heavy_capital' || displayedPlan.tradeability === 'capital_heavy'
+      ? 'Capital Heavy'
     : (displayedPlan.tradeability === 'too_expensive'
       ? 'Too Expensive'
       : (displayedPlan.tradeability === 'risk_only'
         ? 'Risk OK | Capital Check Estimated'
-        : formatActionState(derivedActionState.stage)));
+        : formatActionState(derivedActionState.stage))));
   return {
     item,
     analysisState,
@@ -8754,7 +8892,7 @@ function scanCardStatusPills(view, maxPills = 3){
   if(shouldShowActionableRR(view) && Number.isFinite(view.actionableRrValue)) pushPill(`R:R ${view.actionableRrValue.toFixed(2)}`);
   if(Number.isFinite(view.positionSize)) pushPill(`Size ${view.positionSize}`);
   if(view.displayedPlan.tradeability === 'risk_only') pushPill('Capital check estimated');
-  if(['heavy_capital','not_affordable'].includes(view.affordability)) pushPill(affordabilityLabel(view.affordability));
+  if(view.affordability === 'heavy_capital' || view.affordability === 'not_affordable' || view.displayedPlan.tradeability === 'capital_heavy') pushPill(affordabilityLabel(view.affordability === 'affordable' && view.displayedPlan.tradeability === 'capital_heavy' ? 'heavy_capital' : view.affordability));
   return pills.slice(0, maxPills);
 }
 
@@ -8783,7 +8921,8 @@ function rankTickerForFocus(record){
   if(item.setup.marketCaution) score -= 5;
   if(item.setup.practicalSizeFlag === 'tiny_size') score -= 8;
   else if(item.setup.practicalSizeFlag === 'low_impact') score -= 4;
-  if(['heavy_capital','not_affordable'].includes(view.affordability)) score -= 4;
+  if(view.affordability === 'not_affordable') score -= 4;
+  else if(view.affordability === 'heavy_capital' || view.displayedPlan.tradeability === 'capital_heavy') score -= 2;
   if(item.scan.lastScannedAt && !isFreshScanTimestamp(item.scan.lastScannedAt)) score -= 6;
   return score;
 }
@@ -8833,7 +8972,8 @@ function formatActionState(actionState){
 
 function actionDisplayLabelForRecord(record){
   const item = normalizeTickerRecord(record);
-  if(item.plan && item.plan.affordability === 'not_affordable') return 'Not Affordable';
+  if(item.plan && item.plan.affordability === 'not_affordable') return 'Too Expensive';
+  if(item.plan && (item.plan.affordability === 'heavy_capital' || item.plan.tradeability === 'capital_heavy')) return 'Capital Heavy';
   if(item.plan && item.plan.tradeability === 'too_expensive') return 'Too Expensive';
   if(item.plan && item.plan.tradeability === 'risk_only') return 'Risk OK | Capital Check Estimated';
   return formatActionState(item.action && item.action.stage);
@@ -8865,6 +9005,8 @@ function deriveActionStateForRecord(record){
     stage = 'avoid';
   }else if(executionCapitalBlocked(displayedPlan)){
     stage = 'avoid';
+  }else if(executionCapitalHeavy(displayedPlan)){
+    stage = 'needs_plan';
   }else if(planUiState.state === 'unrealistic_rr' || planUiState.state === 'needs_adjustment'){
     stage = 'needs_plan';
   }else if(planValidationState === 'needs_replan'){
@@ -8896,8 +9038,8 @@ function nextActionTextForRecord(record){
       return item.plan.targetActionRecommendation || 'Review now';
     }
   }
-  if(item.plan && item.plan.affordability === 'not_affordable') return 'Ignore - capital does not fit';
-  if(item.plan && item.plan.affordability === 'heavy_capital') return 'Pass - capital burden is too high';
+  if(item.plan && item.plan.affordability === 'not_affordable') return 'Ignore - position would use too much account capital';
+  if(item.plan && (item.plan.affordability === 'heavy_capital' || item.plan.tradeability === 'capital_heavy')) return 'Pass - capital usage is heavy for this account';
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const displayedPlan = deriveCurrentPlanState(
     item.plan && item.plan.entry,
@@ -12524,6 +12666,30 @@ function bindReviewWorkspaceActions(record){
   click('resetReviewBtn', resetReview);
   click('removeTickerActiveBtn', () => removeTicker(record.ticker));
   click('expireLifecycleBtn', expireSelectedTickerLifecycle);
+  box.querySelectorAll('[data-act="capital-sim-50"]').forEach(button => {
+    button.onclick = () => {
+      setReviewCapitalSimulation(record.ticker, 0.50);
+      renderReviewWorkspace();
+    };
+  });
+  box.querySelectorAll('[data-act="capital-sim-65"]').forEach(button => {
+    button.onclick = () => {
+      setReviewCapitalSimulation(record.ticker, 0.65);
+      renderReviewWorkspace();
+    };
+  });
+  box.querySelectorAll('[data-act="capital-sim-85"]').forEach(button => {
+    button.onclick = () => {
+      setReviewCapitalSimulation(record.ticker, 0.85);
+      renderReviewWorkspace();
+    };
+  });
+  box.querySelectorAll('[data-act="capital-sim-clear"]').forEach(button => {
+    button.onclick = () => {
+      clearReviewCapitalSimulation(record.ticker);
+      renderReviewWorkspace();
+    };
+  });
   document.querySelectorAll('#reviewWorkspace .logic').forEach(el => el.addEventListener('change', refreshReview));
   ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));
 }
@@ -12561,7 +12727,9 @@ function renderReviewWorkspace(options = {}){
     ? analysisState.normalizedAnalysis.warning_state
     : evaluateWarningState(record, analysisState.normalizedAnalysis);
   const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:false});
-  const displayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency);
+  const baseDisplayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency);
+  const capitalSimulationState = applyReviewCapitalSimulation(baseDisplayedPlan, record.ticker);
+  const displayedPlan = capitalSimulationState.displayedPlan;
   const planCheckState = planCheckStateForRecord(record, {effectivePlan, displayedPlan});
   const executionState = deriveExecutionPlanState(record, {
     exitMode:record.plan.exitMode,
@@ -12636,6 +12804,20 @@ function renderReviewWorkspace(options = {}){
     avoidSubtype,
     emojiPresentation
   });
+  const simulatedExecutionVerdict = capitalSimulationState.simulation
+    ? executionDowngradeVerdictForRecord(record, {
+      displayedPlan,
+      planUiState,
+      provisionalVerdict:displayStage
+    })
+    : '';
+  const simulatedFinalVerdict = capitalSimulationState.simulation
+    ? mostConservativeVerdict(
+      baseVerdictForRecord(record),
+      analysisVerdictForRecord(record) || '',
+      simulatedExecutionVerdict || ''
+    )
+    : '';
   const globalVerdict = resolveGlobalVerdict(record);
   const watchlistEligibility = watchlistEligibilityForRecord(record);
   const reviewBadge = getBadge(globalVerdict.final_verdict);
@@ -12745,6 +12927,7 @@ function renderReviewWorkspace(options = {}){
     bounce:record && record.setup && record.setup.bounceState,
     setupScore:setupScore
   });
+  const capitalSimulationControls = `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="capital-sim-50">Simulate 50%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-65">Simulate 65%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-85">Simulate 85%</button><button class="ghost compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>`;
   const reviewDebug = `<details class="compact-details"><summary>Debug State</summary>${renderDebugSectionMarkup('Final Decision', [
     {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
     {label:'Tone', value:globalVerdict.tone || '(none)'},
@@ -12768,6 +12951,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
     {label:'RR Confidence', value:resolvedContract.rrConfidenceLabel || '(none)'},
     {label:'Capital Fit', value:(capitalComfort.label || 'Unknown') || '(none)'},
+    {label:'Capital Usage', value:capitalUsageDebugText(displayedPlan)},
     {label:'Next Possible', value:(globalVerdict.action && globalVerdict.action.label) || '(none)'},
     {label:'In Watchlist', value:watchlistEligibility.inWatchlist ? 'true' : 'false'},
     {label:'Watchlist Entry Exists', value:watchlistEligibility.watchlistEntryExists ? 'true' : 'false'},
@@ -12784,6 +12968,8 @@ function renderReviewWorkspace(options = {}){
     {label:'Base Tradeability', value:resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)'},
     {label:'Visual Tone', value:globalVisual.tone || '(none)'},
     {label:'Plan Label', value:resolvedContract.planStatusLabel || '(none)'},
+    {label:'Capital Affordability', value:displayedPlan.affordability || '(none)'},
+    {label:'Capital OK', value:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_ok === true ? 'true' : (displayedPlan.capitalFit && displayedPlan.capitalFit.capital_ok === false ? 'false' : '(none)')},
     {label:'Main Blocker', value:resolvedContract.blockerReason || '(none)'},
     {label:'Base Resolver Verdict', value:resolvedContract.rawResolverVerdict || '(none)'},
     {label:'Remap Reason', value:resolvedContract.remapReason || '(none)'},
@@ -12792,7 +12978,14 @@ function renderReviewWorkspace(options = {}){
     {label:'Normalized Analysis Exists', value:String(!!analysisState.normalizedAnalysis)},
     {label:'Last Error', value:analysisState.error || '(none)'},
     {label:'Last Reviewed At', value:record.review.lastReviewedAt || '(none)'}
-  ])}</details>`;
+  ])}${renderDebugSectionMarkup('Capital Simulation (Debug Only)', [
+    {label:'Simulated Capital Usage', value:capitalSimulationState.simulation ? capitalSimulationState.simulation.label : '(none)'},
+    {label:'Simulated Capital Fit', value:capitalSimulationState.simulation ? capitalSimulationState.simulation.capitalFit : '(none)'},
+    {label:'Simulated Affordability', value:capitalSimulationState.simulation ? capitalSimulationState.simulation.affordability : '(none)'},
+    {label:'Simulated Capital OK', value:capitalSimulationState.simulation ? String(capitalSimulationState.simulation.capitalOk) : '(none)'},
+    {label:'Simulated Tradeability', value:capitalSimulationState.simulation ? capitalSimulationState.simulation.tradeability : '(none)'},
+    {label:'Simulated Final Verdict Impact', value:capitalSimulationState.simulation ? (simulatedFinalVerdict || displayStage) : '(none)'}
+  ])}${capitalSimulationControls}</details>`;
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
@@ -13387,9 +13580,13 @@ function calculate(options = {}){
     ? `Current max loss is ${formatGbp(displayedPlan.riskFit.max_loss)}. This setup is too wide right now.`
     : (displayedPlan.capitalFit.capital_fit === 'too_expensive'
       ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but the position cost is above the current account size.`
-      : (displayedPlan.capitalFit.capital_fit === 'unknown'
-        ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital affordability is unavailable. ${displayedPlan.capitalFit.capital_note}`
-        : `Current max loss is ${formatGbp(displayedPlan.riskFit.max_loss)}. Risk and capital both fit.`)));
+      : (displayedPlan.capitalFit.capital_fit === 'too_heavy'
+        ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital concentration is too high for this account size.`
+        : (displayedPlan.capitalFit.capital_fit === 'heavy'
+          ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital usage is heavy for this account size.`
+          : (displayedPlan.capitalFit.capital_fit === 'unknown'
+            ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital affordability is unavailable. ${displayedPlan.capitalFit.capital_note}`
+            : `Current max loss is ${formatGbp(displayedPlan.riskFit.max_loss)}. Capital usage is ${capitalFitLabel(displayedPlan.capitalFit.capital_fit).toLowerCase()}.`)))));
 }
 
 async function copyText(text){
@@ -13743,7 +13940,9 @@ function buildPromptBody(payload){
 
 function executionCapitalBlocked(displayedPlan){
   const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
-  return plan.affordability === 'heavy_capital'
+  const capitalFit = capitalFitForPlan(plan);
+  return capitalFit === 'too_heavy'
+    || capitalFit === 'too_expensive'
     || plan.affordability === 'not_affordable'
     || plan.tradeability === 'too_expensive';
 }
@@ -14170,7 +14369,8 @@ function resolveFinalStateContract(record, options = {}){
   const tradeability = String(displayedPlan.tradeability || '').toLowerCase();
   const zeroShares = !Number.isFinite(positionSize) || positionSize < 1;
   const riskTooWide = riskStatus === 'too_wide' || (zeroShares && displayedPlan.status === 'valid');
-  const capitalBlocked = tradeability === 'too_expensive' || affordability === 'not_affordable' || affordability === 'heavy_capital';
+  const capitalBlocked = executionCapitalBlocked(displayedPlan);
+  const capitalHeavy = executionCapitalHeavy(displayedPlan);
   const weakVolume = volumeState === 'weak';
   const weakControl = !!(qualityAdjustments.lowControlSetup || qualityAdjustments.tooWideForQualityPullback);
   const bounceUnconfirmed = ['none','unconfirmed','attempt','early'].includes(bounceState);
@@ -14192,7 +14392,7 @@ function resolveFinalStateContract(record, options = {}){
   let planStateKey = 'valid';
   if(!hasPlanValues || planUiState.state === 'missing') planStateKey = 'missing';
   else if(planUiState.state === 'invalid') planStateKey = 'invalid';
-  else if(planUiState.state === 'needs_adjustment' || riskTooWide || capitalBlocked) planStateKey = 'needs_adjustment';
+  else if(planUiState.state === 'needs_adjustment' || riskTooWide || capitalBlocked || capitalHeavy) planStateKey = 'needs_adjustment';
   else if(planUiState.state === 'unrealistic_rr') planStateKey = 'unrealistic_rr';
   const rrResolution = options.rrResolution || {
     rr_label:planStateKey !== 'valid' ? 'Invalid plan' : 'Low confidence',
@@ -14241,12 +14441,14 @@ function resolveFinalStateContract(record, options = {}){
     actionLabel = 'Recalculate plan';
     actionTone = 'warning';
     blockerCode = planStateKey;
-    blockerReason = ({
-      missing:'Plan not defined',
-      invalid:'Invalid plan',
-      needs_adjustment:'Plan needs adjustment',
-      unrealistic_rr:'R:R is not realistic'
-    })[planStateKey] || 'Plan needs adjustment';
+    blockerReason = (planStateKey === 'needs_adjustment' && (capitalBlocked || capitalHeavy))
+      ? (capitalConstraintReasonForPlan(displayedPlan) || 'Capital usage is heavy for this account size.')
+      : (({
+        missing:'Plan not defined',
+        invalid:'Invalid plan',
+        needs_adjustment:'Plan needs adjustment',
+        unrealistic_rr:'R:R is not realistic'
+      })[planStateKey] || 'Plan needs adjustment');
     addReason(blockerReason);
   }else if(
     finalVerdict === 'Entry'
@@ -14671,7 +14873,7 @@ function validateCurrentPlan(record, options = {}){
     needsReplan:staleMove,
     missed:false,
     invalidated:false,
-    capitalConstraint:(rawRecord.plan && rawRecord.plan.affordability === 'not_affordable') ? 'not_affordable' : ((rawRecord.plan && rawRecord.plan.affordability === 'heavy_capital') ? 'heavy_capital' : ''),
+    capitalConstraint:capitalConstraintCodeForPlan(displayedPlan),
     reasonCode:staleMove ? 'plan_premature_or_stale' : 'valid'
   };
 }
