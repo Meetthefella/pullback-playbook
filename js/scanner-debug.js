@@ -300,6 +300,8 @@
     const bounceState = String(view && view.setupStates && view.setupStates.bounceState || '').toLowerCase();
     const nextAction = deps.getActions(globalVerdict.final_verdict || '');
     const clickTrace = deps.scannerCardClickTraceForTicker(item.ticker);
+    const clickTraceHistory = deps.scannerCardClickTraceHistoryForTicker(item.ticker);
+    const reviewAnalysisState = deps.reviewAnalysisUiStateForRecord ? deps.reviewAnalysisUiStateForRecord(item) : '';
     const resolution = view && view.scannerResolution ? view.scannerResolution : {};
     const baseSection = renderDebugSectionMarkup('Base Assessment', [
       {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
@@ -336,7 +338,12 @@
       : '(none)';
     const swipeFeedbackRow = {label:'Swipe Feedback', value:swipeSummary};
     const interactionSection = renderDebugSectionMarkup('Interaction', [
-      {label:'Swipe Feedback', value:swipeSummary}
+      {label:'Swipe Feedback', value:swipeSummary},
+      {label:'Review Open Trace', value:clickTrace ? `${clickTrace.stage}${clickTrace.detail ? ` | ${clickTrace.detail}` : ''} | ${clickTrace.at}` : '(none)'},
+      {label:'Review Open Trace History', value:clickTraceHistory.length ? clickTraceHistory.map(entry => `${entry.stage}${entry.detail ? ` | ${entry.detail}` : ''} | ${entry.at}`).join(' || ') : '(none)'},
+      {label:'Review Loading State', value:reviewAnalysisState || '(none)'},
+      {label:'Loading Ticker', value:deps.uiState && deps.uiState.loadingTicker ? deps.uiState.loadingTicker : '(none)'},
+      {label:'Active Review Ticker', value:deps.uiState && deps.uiState.activeReviewTicker ? deps.uiState.activeReviewTicker : '(none)'}
     ], deps);
     const advancedSection = renderAdvancedDebugMarkup([
       swipeFeedbackRow,

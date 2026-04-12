@@ -234,6 +234,12 @@ const {state, uiState} = createAppState({
 });
 uiState.scanCardMenu = {ticker:'', menuOpen:false, activeSubmenu:null};
 uiState.scanCardMenuGuard = {};
+uiState.scannerCardClickTrace = uiState.scannerCardClickTrace && typeof uiState.scannerCardClickTrace === 'object'
+  ? uiState.scannerCardClickTrace
+  : {};
+uiState.scannerCardClickTraceHistory = uiState.scannerCardClickTraceHistory && typeof uiState.scannerCardClickTraceHistory === 'object'
+  ? uiState.scannerCardClickTraceHistory
+  : {};
 uiState.watchlistLiveRefreshPending = uiState.watchlistLiveRefreshPending && typeof uiState.watchlistLiveRefreshPending === 'object'
   ? uiState.watchlistLiveRefreshPending
   : {};
@@ -5122,6 +5128,9 @@ function scannerDebugBridgeDeps(){
     primaryShortlistStatusChip,
     emojiModifierMarkup,
     scannerCardClickTraceForTicker,
+    scannerCardClickTraceHistoryForTicker,
+    reviewAnalysisUiStateForRecord,
+    uiState,
     getSwipeFeedback
   };
 }
@@ -5434,18 +5443,31 @@ function scoreToneLabelFromScore(score){
 function setScannerCardClickTrace(ticker, stage, detail = ''){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
-  uiState.scannerCardClickTrace[symbol] = {
+  const entry = {
     at:new Date().toISOString(),
     stage:String(stage || '').trim() || 'unknown',
     detail:String(detail || '').trim(),
     activeReviewTicker:activeReviewTicker() || ''
   };
+  uiState.scannerCardClickTrace[symbol] = entry;
+  const existingHistory = Array.isArray(uiState.scannerCardClickTraceHistory[symbol])
+    ? uiState.scannerCardClickTraceHistory[symbol]
+    : [];
+  uiState.scannerCardClickTraceHistory[symbol] = [...existingHistory, entry].slice(-10);
 }
 
 function scannerCardClickTraceForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return null;
   return uiState.scannerCardClickTrace[symbol] || null;
+}
+
+function scannerCardClickTraceHistoryForTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return [];
+  return Array.isArray(uiState.scannerCardClickTraceHistory[symbol])
+    ? uiState.scannerCardClickTraceHistory[symbol]
+    : [];
 }
 
 function renderDebugKeyValueGrid(rows){
@@ -10180,12 +10202,27 @@ function reviewAnalysisUiStateForRecord(record){
 function queueAutoAnalysisForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
+  setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.scheduled', 'queued');
   window.setTimeout(() => {
-    if(activeReviewTicker() !== symbol) return;
-    if(uiState.loadingTicker) return;
+    if(activeReviewTicker() !== symbol){
+      setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.skipped', 'inactive_review_ticker');
+      return;
+    }
+    if(uiState.loadingTicker){
+      setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.skipped', `loadingTicker=${uiState.loadingTicker}`);
+      return;
+    }
     const record = getTickerRecord(symbol);
-    if(!record) return;
-    if(reviewAnalysisUiStateForRecord(record) !== 'ready') return;
+    if(!record){
+      setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.skipped', 'record_missing');
+      return;
+    }
+    const analysisUiState = reviewAnalysisUiStateForRecord(record);
+    if(analysisUiState !== 'ready'){
+      setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.skipped', `analysis_state=${analysisUiState}`);
+      return;
+    }
+    setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.run', 'analyseSetup');
     analyseSetup(symbol);
   }, 0);
 }
@@ -11628,6 +11665,7 @@ function openTickerChart(ticker){
 
 async function analyseSetup(ticker){
   if(uiState.loadingTicker) return;
+  setScannerCardClickTrace(ticker, 'analyseSetup.enter', 'starting');
   syncStateFromDom();
   const record = upsertTickerRecord(ticker);
   record.review.cardOpen = true;
@@ -11645,6 +11683,7 @@ async function analyseSetup(ticker){
   card.lastAnalysis = null;
   setReviewAnalysisState(record, {raw:'', normalized:null, error:''});
   uiState.loadingTicker = ticker;
+  setScannerCardClickTrace(ticker, 'analyseSetup.loading', 'loadingTicker_set');
   uiState.responseOpen[ticker] = true;
   renderCards();
   const endpoints = analysisEndpoints();
@@ -11658,6 +11697,7 @@ async function analyseSetup(ticker){
       reviewedAt:new Date().toISOString()
     });
     uiState.loadingTicker = '';
+    setScannerCardClickTrace(ticker, 'analyseSetup.no_endpoint', 'loadingTicker_cleared');
     renderCards();
     return;
   }
@@ -11700,6 +11740,7 @@ async function analyseSetup(ticker){
     if(!data || !data.analysis || typeof data.analysis !== 'object'){
       throw new Error('The AI endpoint returned no analysis payload.');
     }
+    setScannerCardClickTrace(ticker, 'analyseSetup.success', 'analysis_received');
     console.log('RAW_ANALYSIS_RESULT', data.analysis || null);
     console.log('PREVIOUS_TICKER_STATE', previousTickerState);
     const analysis = normalizeAnalysisResult(data.analysis, previousTickerState);
@@ -11771,6 +11812,7 @@ async function analyseSetup(ticker){
       syncPlannerFromTicker(card.ticker);
     }
   }catch(err){
+    setScannerCardClickTrace(ticker, 'analyseSetup.error', err && err.message ? err.message : 'unknown_error');
     const baseMessage = err && err.name === 'AbortError'
       ? 'The analysis request timed out. Retry the setup.'
       : String(err.message || 'Analysis request failed.');
@@ -11808,6 +11850,7 @@ async function analyseSetup(ticker){
   }finally{
     if(activeReviewTicker() === ticker) uiState.activeReviewVerdictOverride = '';
     uiState.loadingTicker = '';
+    setScannerCardClickTrace(ticker, 'analyseSetup.finally', 'loadingTicker_cleared');
     renderWatchlist();
     renderFocusQueue();
     renderCards();
@@ -12756,7 +12799,7 @@ function renderReviewWorkspace(options = {}){
   const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
     ? analysisState.normalizedAnalysis.warning_state
     : evaluateWarningState(record, analysisState.normalizedAnalysis);
-  const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:false});
+  const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
   const baseDisplayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency);
   const capitalSimulationState = applyReviewCapitalSimulation(baseDisplayedPlan, record.ticker);
   const displayedPlan = capitalSimulationState.displayedPlan;
