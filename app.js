@@ -13593,6 +13593,37 @@ function calculate(options = {}){
     displayStage,
     setupUiState:plannerSetupUiState
   });
+  const warningState = warningStateFromInputs(activeRecord || {}, null, plannerDerivedStates);
+  const avoidSubtype = avoidSubtypeForRecord(activeRecord || {}, {
+    derivedStates:plannerDerivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    finalVerdict:displayStage
+  });
+  const emojiPresentation = resolveEmojiPresentation(activeRecord || {}, {
+    context:'review',
+    finalVerdict:displayStage,
+    derivedStates:plannerDerivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    warningState,
+    planUiState:plannerPlanUiState,
+    setupUiState:plannerSetupUiState,
+    avoidSubtype
+  });
+  const resolvedContract = resolveFinalStateContract(activeRecord || {}, {
+    context:'review',
+    finalVerdict:displayStage,
+    derivedStates:plannerDerivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    warningState,
+    planUiState:plannerPlanUiState,
+    setupUiState:plannerSetupUiState,
+    avoidSubtype,
+    emojiPresentation
+  });
+  const globalVerdict = activeRecord ? resolveGlobalVerdict(activeRecord) : {allow_plan:false};
   $('rewardPerShareBox').textContent = Number.isFinite(displayedPlan.rewardPerShare) ? displayedPlan.rewardPerShare.toFixed(2) : '-';
   const riskFitLabel = riskStatusLabel(displayedPlan.status === 'valid' ? displayedPlan.riskFit.risk_status : (displayedPlan.status === 'invalid' ? 'invalid_plan' : 'plan_missing'));
   const capitalUsage = capitalUsageAdvisory({
