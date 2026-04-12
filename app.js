@@ -8589,7 +8589,7 @@ function capitalComfortSummary({capitalFit, capitalNote, affordability, capitalU
   if(bucket === 'borderline') return {label:'Borderline', note:statusNote};
   if(bucket === 'acceptable' || bucket === 'fits_capital') return {label:'Acceptable', note:statusNote};
   if(bucket === 'ideal') return {label:'Ideal', note:statusNote};
-  return {label:'Needs Check', note:statusNote || (bucket === 'unknown' ? 'Capital unresolved' : '')};
+  return {label:'Not available', note:statusNote || (bucket === 'unknown' ? 'Shown when no valid plan is defined' : '')};
 }
 
 function capitalFitPresentation({capitalFit, affordability, comfortLabel}){
@@ -8610,7 +8610,7 @@ function tradeabilityLabel(tradeability){
 }
 
 function capitalFitMetricText(capitalComfortLabel){
-  return `Capital fit: ${String(capitalComfortLabel || 'Needs check')}`;
+  return `Capital fit: ${String(capitalComfortLabel || 'Not available')}`;
 }
 
 function joinNaturalLanguageConditions(conditions){
@@ -13175,7 +13175,12 @@ function renderReviewWorkspace(options = {}){
     : (analysisUiState === 'error' ? 'Analyse Setup' : 'Analyse Setup');
   const showAnalyseButton = analysisUiState !== 'running';
   const analyseDisabled = analysisUiState === 'idle' || (analysisBusy && !loading);
-  const analysisPanelClass = `reviewanalysispanel analysis-state-${analysisUiState}`;
+  const diagnosticsToneClass = (
+    globalVerdict.allow_plan === false
+    || displayedPlan.status === 'invalid'
+    || String(displayedPlan.tradeability || '').toLowerCase() === 'invalid'
+  ) ? 'avoid' : `analysis-state-${analysisUiState}`;
+  const analysisPanelClass = `reviewanalysispanel ${diagnosticsToneClass}`;
   const analysisPanelBody = analysisUiState === 'idle'
     ? '<div class="tiny">Add a screenshot to run AI analysis.</div>'
     : (analysisUiState === 'ready'
