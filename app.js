@@ -4575,7 +4575,7 @@ function getCanonicalTradeSnapshot(cardOrTicker){
   const record = getTickerRecord(ticker);
   const card = typeof cardOrTicker === 'string' ? null : cardOrTicker;
   if(record){
-    const effectivePlan = effectivePlanForRecord(record);
+    const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
     const entry = String(effectivePlan.entry || '');
     const stop = String(effectivePlan.stop || '');
     const firstTarget = String(effectivePlan.firstTarget || '');
@@ -13229,20 +13229,21 @@ async function importLatestChart(ticker){
 
 function scrollReviewSectionIntoView(ticker, context = 'review_open'){
   const symbol = normalizeTicker(ticker);
-  const runScroll = () => {
-    const reviewSection = $('reviewSection');
-    if(!reviewSection){
-      setScannerCardClickTrace(symbol, `${context}.scroll_missing`, 'reviewSection_missing');
+  const runScroll = attempt => {
+    const scrollTarget = $('reviewWorkspace') || $('reviewSection');
+    if(!scrollTarget){
+      setScannerCardClickTrace(symbol, `${context}.scroll_missing`, `attempt=${attempt}`);
       return;
     }
-    reviewSection.scrollIntoView({behavior:'smooth', block:'start'});
-    setScannerCardClickTrace(symbol, `${context}.scrolled`, 'reviewSection');
+    scrollTarget.scrollIntoView({behavior:'smooth', block:'start'});
+    setScannerCardClickTrace(symbol, `${context}.scrolled`, `${scrollTarget.id || 'reviewWorkspace'} attempt=${attempt}`);
   };
   if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-    window.requestAnimationFrame(() => window.requestAnimationFrame(runScroll));
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => runScroll('raf')));
+    setTimeout(() => runScroll('timeout'), 80);
     return;
   }
-  setTimeout(runScroll, 0);
+  setTimeout(() => runScroll('timeout'), 0);
 }
 
 function loadCard(ticker, options = {}){
@@ -13389,7 +13390,7 @@ function syncPlanDisplayMeta(){
   const canonicalPlanSynced = ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
   if(canonicalPlanSynced) commitTickerState();
   const record = normalizeTickerRecord(liveRecord);
-  const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:false});
+  const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
   const entryValue = $('entryPrice') ? $('entryPrice').value : effectivePlan.entry;
   const stopValue = $('stopPrice') ? $('stopPrice').value : effectivePlan.stop;
   const targetValue = $('targetPrice') ? $('targetPrice').value : effectivePlan.firstTarget;
