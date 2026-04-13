@@ -4194,12 +4194,12 @@ function renderWatchlist(){
       const priority = watchlistPriorityForRecord(record);
       const avoidSubtype = avoidSubtypeForRecord(record);
       const derivedStates = analysisDerivedStatesFromRecord(record);
-      const displayedPlan = deriveCurrentPlanState(
+      const displayedPlan = applySetupConfirmationPlanGate(record, deriveCurrentPlanState(
         record.plan && record.plan.entry,
         record.plan && record.plan.stop,
         record.plan && record.plan.firstTarget,
         record.marketData && record.marketData.currency
-      );
+      ), derivedStates);
       const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
       const rrResolution = resolveScannerStateWithTrace(record);
       const resolvedContract = resolveFinalStateContract(record, {
@@ -4277,8 +4277,14 @@ function renderWatchlist(){
       const liveRefreshNote = liveRefreshPending
         ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
         : '';
+      const decisionSummary = globalVerdict.decision_summary || buildDecisionSummary({
+        finalVerdict:globalVerdict.final_verdict,
+        displayedPlan,
+        resolvedContract,
+        derivedStates
+      });
       div.className = `resultcompact watchlist-card ${escapeHtml(globalVisual.toneClass)}`.trim();
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(expired ? watchlistBadgeClass : watchlistBadge.className)}">${escapeHtml(expired ? watchlistBadgeLabel : watchlistBadge.text)}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div><div class="tiny watchlist-card__action">${escapeHtml(expired ? (decisionCopy.headline || shortAction) : watchlistAction.label)}</div>${(expired ? shortReason : globalVerdict.reason) ? `<div class="tiny watchlist-card__reason">${escapeHtml(expired ? shortReason : globalVerdict.reason)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(globalVerdict.allow_plan ? resolvedContract.planStatusLabel : 'Plan blocked')}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(expired ? watchlistBadgeClass : watchlistBadge.className)}">${escapeHtml(expired ? watchlistBadgeLabel : watchlistBadge.text)}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason">${escapeHtml(expired ? shortReason : decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(globalVerdict.allow_plan ? resolvedContract.planStatusLabel : 'Plan blocked')}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -6804,12 +6810,12 @@ function legacyResolveFinalStateContract(record, options = {}){
   const item = normalizeTickerRecord(record);
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
-  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+  const displayedPlan = applySetupConfirmationPlanGate(item, options.displayedPlan || deriveCurrentPlanState(
     effectivePlan.entry,
     effectivePlan.stop,
     effectivePlan.firstTarget,
     item.marketData && item.marketData.currency
-  );
+  ), derivedStates);
   const planCheckState = options.planCheckState || planCheckStateForRecord(item, {effectivePlan, displayedPlan});
   const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || displayStageForRecord(item));
   const rrResolution = options.rrResolution || resolveScannerStateWithTrace(item, {derivedStates});
@@ -8707,6 +8713,43 @@ function blockedTradeStatusText(resolvedContract){
   return status.line2 ? `${status.line1} | ${status.line2}` : status.line1;
 }
 
+function stateLabelForDecisionSummary(finalVerdict){
+  const verdict = normalizeGlobalVerdictKey(finalVerdict || '');
+  if(verdict === 'entry') return 'Entry';
+  if(verdict === 'near_entry') return 'Near Entry';
+  if(verdict === 'watch') return 'Developing';
+  if(verdict === 'avoid' || verdict === 'dead') return 'Avoid';
+  return 'Monitor';
+}
+
+function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, derivedStates}){
+  const verdict = normalizeGlobalVerdictKey(finalVerdict || '');
+  const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
+  const bounceState = String(derivedStates && derivedStates.bounceState || '').toLowerCase();
+  const planStatus = String(displayedPlan && displayedPlan.status || '').toLowerCase();
+  const label = stateLabelForDecisionSummary(verdict);
+
+  if(verdict === 'entry'){
+    return `${label}  strong structure and confirmed bounce. Plan is valid.`;
+  }
+  if(verdict === 'near_entry'){
+    return `${label}  structure improving. Watch for a confirmed bounce to trigger entry.`;
+  }
+  if(verdict === 'watch'){
+    return `${label}  early structure forming. Wait for price to stabilise before planning an entry.`;
+  }
+  if(verdict === 'avoid' || verdict === 'dead'){
+    if(structureState === 'broken'){
+      return `${label}  structure broken. No valid trade here.`;
+    }
+    if(planStatus === 'invalid'){
+      return `${label}  no valid entry setup. Entry, stop, and target do not align.`;
+    }
+    return `${label}  structure broken. No valid trade here.`;
+  }
+  return `${label}  trend weakening. No entry until price shows a clear bounce and holds above the 50MA.`;
+}
+
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
   return tradeStatusMetricTextImpl({globalVerdict, displayedPlan, resolvedContract}, reviewPresentationBridgeDeps());
 }
@@ -8920,6 +8963,30 @@ function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrenc
   };
 }
 
+function applySetupConfirmationPlanGate(record, displayedPlan, derivedStates = null){
+  const item = record && typeof record === 'object' ? record : {};
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const states = derivedStates || analysisDerivedStatesFromRecord(item);
+  const bounceState = String(states && states.bounceState || '').trim().toLowerCase();
+  const structureState = String(states && states.structureState || '').trim().toLowerCase();
+  const mustInvalidate = bounceState === 'none' || ['weakening','broken'].includes(structureState);
+  if(!mustInvalidate) return plan;
+  return {
+    ...plan,
+    status:'invalid',
+    tradeability:'invalid',
+    affordability:'',
+    rewardPerShare:null,
+    rewardRisk:{
+      ...(plan.rewardRisk && typeof plan.rewardRisk === 'object' ? plan.rewardRisk : {}),
+      valid:false,
+      rrRatio:null,
+      rrState:'invalid',
+      rewardPerShare:null
+    }
+  };
+}
+
 function actionableRrValueForPlan(displayedPlan){
   const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
   if(plan.status !== 'valid') return null;
@@ -8953,7 +9020,11 @@ function projectTickerForCard(record, options = {}){
     ? analysisState.normalizedAnalysis.warning_state
     : (item.setup.warning || evaluateWarningState(item, analysisState.normalizedAnalysis));
   const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback});
-  const displayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, item.marketData.currency);
+  const displayedPlan = applySetupConfirmationPlanGate(
+    item,
+    deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, item.marketData.currency),
+    derivedStates
+  );
   const displayStage = displayStageForRecord(item, {
     includeExecutionDowngrade:options.includeExecutionDowngrade !== false,
     includeRuntimeFallback:options.includeRuntimeFallback !== false
@@ -12895,7 +12966,10 @@ function renderReviewWorkspace(options = {}){
     ? analysisState.normalizedAnalysis.warning_state
     : evaluateWarningState(record, analysisState.normalizedAnalysis);
   const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
-  const baseDisplayedPlan = deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency);
+  const baseDisplayedPlan = applySetupConfirmationPlanGate(
+    record,
+    deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency)
+  );
   const capitalSimulationState = applyReviewCapitalSimulation(baseDisplayedPlan, record.ticker);
   const displayedPlan = capitalSimulationState.displayedPlan;
   const planCheckState = planCheckStateForRecord(record, {effectivePlan, displayedPlan});
@@ -13040,16 +13114,20 @@ function renderReviewWorkspace(options = {}){
     qualityAdjustments,
     warningState
   });
-  const nextActionText = reviewAction.label;
-  const reviewReasonText = resolvedContract.reasonSummary || reviewReasonSummary(decisionReasoning, nextActionText);
-  if(displayStage === 'Watch' && /ignore/i.test(nextActionText)){
-    console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:nextActionText});
+  const decisionSummary = globalVerdict.decision_summary || buildDecisionSummary({
+    finalVerdict:globalVerdict.final_verdict,
+    displayedPlan,
+    resolvedContract,
+    derivedStates:analysisDerivedStatesFromRecord(record)
+  });
+  if(displayStage === 'Watch' && /ignore/i.test(String(reviewAction.label || ''))){
+    console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:reviewAction.label});
   }
   if(displayStage === 'Watch' && avoidSubtype === 'terminal'){
     console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, avoidSubtype});
   }
   if((displayStage !== 'Avoid' && resolvedContract.primaryState === 'dead') || (displayStage === 'Avoid' && resolvedContract.primaryState !== 'dead' && avoidSubtype === 'terminal')){
-    console.warn('REVIEW_HEADER_DISAGREEMENT', {ticker:record.ticker, finalVerdict:displayStage, reviewBadgeLabel, headline:decisionReasoning.headline, nextAction:nextActionText});
+    console.warn('REVIEW_HEADER_DISAGREEMENT', {ticker:record.ticker, finalVerdict:displayStage, reviewBadgeLabel, headline:decisionReasoning.headline, nextAction:reviewAction.label});
   }
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
@@ -13082,7 +13160,7 @@ function renderReviewWorkspace(options = {}){
           : '<div class="summary">Analysis failed</div><div class="tiny">Try again.</div>')));
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
-  const rawRrDisplay = Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : 'N/A';
+  const rawRrDisplay = displayedPlan.status === 'valid' && Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : 'R:R not reliable';
   const credibleRrDisplay = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   const planRealismSummary = planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.';
   const planRealismReasons = planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
@@ -13173,7 +13251,7 @@ function renderReviewWorkspace(options = {}){
     : '';
   const marketMetaLine = headerContextChip ? '' : `<div class="tiny">${escapeHtml(marketLine)}</div>`;
   const snapshotWarningsMarkup = [modifierMarkup, headerContextMarkup].filter(Boolean).join('');
-  const snapshotVerdictLine = `Final verdict: ${globalVerdictLabel(globalVerdict.final_verdict)}${reviewReasonText ? ` | ${reviewReasonText}` : ''}`;
+  const snapshotVerdictLine = decisionSummary;
   const analysisResponseOpen = (((uiState.responseOpen[record.ticker] ?? false) || !!analysisState.error)) ? 'open' : '';
   const promptPreviewOpen = (uiState.promptOpen[record.ticker] ?? false) ? 'open' : '';
   const capitalFitLabel = capitalComfort.label || 'Unknown';
@@ -13202,7 +13280,6 @@ function renderReviewWorkspace(options = {}){
             ${marketMetaLine}
             ${snapshotWarningsMarkup ? `<div class="inline-status review-warning-row">${snapshotWarningsMarkup}</div>` : ''}
             ${downgradeSummary ? `<div class="tiny review-downgrade-badge"><span class="badge avoid">${escapeHtml(downgradeSummary.label)}</span> ${escapeHtml(downgradeSummary.transition)}</div>` : ''}
-            <div class="review-next-action review-next-action-primary">${escapeHtml(nextActionText)}</div>
             <div class="review-decision-detail">${escapeHtml(snapshotVerdictLine)}</div>
           </div>
         </div>
@@ -13544,7 +13621,10 @@ function syncPlanDisplayMeta(){
   const entryValue = $('entryPrice') ? $('entryPrice').value : effectivePlan.entry;
   const stopValue = $('stopPrice') ? $('stopPrice').value : effectivePlan.stop;
   const targetValue = $('targetPrice') ? $('targetPrice').value : effectivePlan.firstTarget;
-  const displayedPlan = deriveCurrentPlanState(entryValue, stopValue, targetValue, record.marketData.currency);
+  const displayedPlan = applySetupConfirmationPlanGate(
+    record,
+    deriveCurrentPlanState(entryValue, stopValue, targetValue, record.marketData.currency)
+  );
   const planCheckState = planCheckStateForRecord(record, {
     effectivePlan:{
       entry:entryValue,
@@ -13689,7 +13769,10 @@ function calculate(options = {}){
   const stop = numericOrNull($('stopPrice').value);
   const target = numericOrNull($('targetPrice').value);
   const activeRecord = ticker ? normalizeTickerRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker)) : null;
-  const displayedPlan = deriveCurrentPlanState($('entryPrice').value, $('stopPrice').value, $('targetPrice').value, activeRecord && activeRecord.marketData ? activeRecord.marketData.currency : '');
+  const displayedPlan = applySetupConfirmationPlanGate(
+    activeRecord || {},
+    deriveCurrentPlanState($('entryPrice').value, $('stopPrice').value, $('targetPrice').value, activeRecord && activeRecord.marketData ? activeRecord.marketData.currency : '')
+  );
   const plannerDerivedStates = analysisDerivedStatesFromRecord(activeRecord || {});
   const qualityAdjustments = evaluateSetupQualityAdjustments(activeRecord || {}, {
     displayedPlan,
@@ -13818,7 +13901,7 @@ function calculate(options = {}){
   if(displayedPlan.status === 'missing'){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = '-';
+    $('rrValue').textContent = 'R:R not reliable';
     $('rrValue').className = 'big';
     if($('plannerBox')) $('plannerBox').className = 'panelbox plannerbox plannerbox--rr-mid';
     $('calcNote').textContent = 'Add planned entry, stop, and first target to complete the trade plan.';
@@ -13827,7 +13910,7 @@ function calculate(options = {}){
   if(displayedPlan.status === 'invalid'){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = '-';
+    $('rrValue').textContent = 'R:R not reliable';
     $('rrValue').className = 'big';
     if($('plannerBox')) $('plannerBox').className = 'panelbox plannerbox plannerbox--rr-mid';
     $('calcNote').textContent = 'Planned entry, stop, and first target must form a valid long plan.';
@@ -14828,7 +14911,7 @@ function resolveFinalStateContract(record, options = {}){
 }
 
 function resolveGlobalVerdict(record){
-  return resolveGlobalVerdictImpl(record, {
+  const verdict = resolveGlobalVerdictImpl(record, {
     resolveFinalStateContract,
     baseVerdictFromResolvedContract,
     analysisDerivedStatesFromRecord,
@@ -14839,6 +14922,31 @@ function resolveGlobalVerdict(record){
     state,
     scannerScoreGradientClass
   });
+  const item = record && typeof record === 'object' ? record : {};
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+  const displayedPlan = applySetupConfirmationPlanGate(
+    item,
+    deriveCurrentPlanState(
+      effectivePlan.entry,
+      effectivePlan.stop,
+      effectivePlan.firstTarget,
+      item.marketData && item.marketData.currency
+    ),
+    derivedStates
+  );
+  const resolvedContract = resolveFinalStateContract(item, {
+    finalVerdict:globalVerdictLabel(verdict.final_verdict || ''),
+    derivedStates,
+    displayedPlan
+  });
+  verdict.decision_summary = buildDecisionSummary({
+    finalVerdict:verdict.final_verdict,
+    displayedPlan,
+    resolvedContract,
+    derivedStates
+  });
+  return verdict;
 }
 
 function applyGlobalVerdictGates(record, options = {}){
