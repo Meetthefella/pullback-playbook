@@ -185,7 +185,14 @@
 
   function resolveGlobalVerdict(record, deps = {}){
     const item = record && typeof record === 'object' ? record : {};
-    const resolved = deps.resolveFinalStateContract(item, {context:'global'});
+    const isTracked = !!(
+      item.in_watchlist
+      || item.watchlist_entry_exists
+      || (item.watchlist && item.watchlist.inWatchlist)
+    );
+    const resolved = isTracked
+      ? deps.resolveFinalStateContract(item, {context:'global'})
+      : deps.resolvePreLifecycleStateContract(item);
     const baseVerdict = deps.baseVerdictFromResolvedContract(resolved);
     const derivedStates = deps.analysisDerivedStatesFromRecord(item);
     const displayedPlan = deps.deriveCurrentPlanState(
@@ -293,6 +300,10 @@
     });
     finalVerdict = guardedVerdict.final_verdict;
     reason = guardedVerdict.reason || reason;
+    if(!isTracked && (finalVerdict === 'avoid' || finalVerdict === 'dead')){
+      finalVerdict = baseVerdict === 'avoid' ? 'avoid' : 'monitor';
+      reason = 'Pre-watchlist: downgrade suppressed.';
+    }
     const avoidTriggerSource = finalVerdict === 'avoid'
       ? (structurallyBroken ? 'structure_broken' : null)
       : null;
@@ -340,6 +351,7 @@
       pullback_zone:pullbackZone || '',
       volume_state:volumeState || '',
       market_regime:marketWeak ? 'weak' : 'normal',
+      tracked:isTracked,
       source:'resolver',
       debugToneSource:({
         dead:'terminal_dead',

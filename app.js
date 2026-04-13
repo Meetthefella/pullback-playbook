@@ -4007,6 +4007,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || 'n/a'},
     {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
     {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
+    {label:'Tracked', value:globalVerdict.tracked ? 'true' : 'false'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
     {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || 'n/a'},
     {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
@@ -13206,6 +13207,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
     {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
     {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
+    {label:'Tracked', value:globalVerdict.tracked ? 'true' : 'false'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
     {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
     {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
@@ -14971,9 +14973,68 @@ function resolveFinalStateContract(record, options = {}){
   };
 }
 
+function resolvePreLifecycleStateContract(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+  const displayedPlan = deriveCurrentPlanState(
+    effectivePlan.entry,
+    effectivePlan.stop,
+    effectivePlan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+  const marketWeak = !!(
+    item.setup.marketCaution
+    || isHostileMarketStatus((item.meta && item.meta.marketStatus) || state.marketStatus)
+  );
+  const weakStructure = ['weak','weakening','developing_loose'].includes(structureState);
+  const bounceUnconfirmed = ['none','unconfirmed','attempt','early'].includes(bounceState);
+  const hardStructureBroken = !!(
+    structureState === 'broken'
+    || trendState === 'broken'
+    || (item.plan && item.plan.invalidatedState)
+  );
+  const planStatusKey = String(displayedPlan.status || '').toLowerCase() || 'missing';
+  const baseVerdict = hardStructureBroken
+    ? 'avoid'
+    : (displayedPlan.status === 'valid' && !bounceUnconfirmed && !marketWeak && volumeState !== 'weak'
+      ? 'near_entry'
+      : 'watch');
+  let structuralStateKey = 'developing';
+  if(hardStructureBroken){
+    structuralStateKey = 'dead';
+  }else if(baseVerdict === 'near_entry'){
+    structuralStateKey = 'near_entry';
+  }else if(weakStructure){
+    structuralStateKey = 'developing';
+  }
+  const actionStateKey = hardStructureBroken
+    ? 'rebuild_setup'
+    : (displayedPlan.status === 'valid' && !bounceUnconfirmed ? 'wait_for_confirmation' : 'recalculate_plan');
+  const tradeabilityVerdict = hardStructureBroken
+    ? 'Avoid'
+    : (structuralStateKey === 'near_entry' ? 'Near Entry' : 'Watch');
+  return {
+    finalVerdict:baseVerdict === 'avoid' ? 'Avoid' : (baseVerdict === 'near_entry' ? 'Near Entry' : 'Watch'),
+    structuralState:structuralStateKey,
+    actionStateKey,
+    planStatusKey:planStatusKey || 'missing',
+    tradeabilityVerdict,
+    blockerReason:hardStructureBroken ? 'Structure is broken' : (displayedPlan.status === 'valid' ? 'Needs stronger confirmation' : 'Plan not ready'),
+    reasonSummary:hardStructureBroken ? 'Structure is broken' : (weakStructure ? 'Trend weakening' : 'Pre-watchlist setup'),
+    terminal:hardStructureBroken,
+    baseVerdict
+  };
+}
+
 function resolveGlobalVerdict(record){
   const verdict = resolveGlobalVerdictImpl(record, {
     resolveFinalStateContract,
+    resolvePreLifecycleStateContract,
     baseVerdictFromResolvedContract,
     analysisDerivedStatesFromRecord,
     deriveCurrentPlanState,
