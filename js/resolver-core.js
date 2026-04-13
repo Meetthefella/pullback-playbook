@@ -77,7 +77,7 @@
       capital_ok:(() => {
         const capitalFit = String(ctx.capital_fit || '').trim().toLowerCase();
         if(!capitalFit || capitalFit === 'unknown') return true;
-        return ['ideal', 'acceptable', 'borderline', 'fits_capital'].includes(capitalFit);
+        return ['ideal', 'acceptable', 'fits_capital'].includes(capitalFit);
       })()
     };
     const reasons = [];
@@ -157,9 +157,12 @@
       }
     }
 
+    const softenedVerdict = finalVerdict === 'avoid' && String(ctx.structure_state || '').trim().toLowerCase() !== 'broken'
+      ? 'monitor'
+      : finalVerdict;
     return {
       ...current,
-      final_verdict:finalVerdict,
+      final_verdict:softenedVerdict,
       reason,
       entry_gate_pass:entryGate.pass,
       entry_gate_reasons:entryGate.reasons,
@@ -167,6 +170,17 @@
       near_entry_gate_pass:nearEntryGate.pass,
       near_entry_gate_reasons:nearEntryGate.reasons
     };
+  }
+
+  function structureReasonLabel(structureState){
+    const safe = String(structureState || '').trim().toLowerCase();
+    if(safe === 'broken') return 'structure broken';
+    if(safe === 'weakening') return 'trend weakening';
+    if(safe === 'developing_loose') return 'messy pullback';
+    if(safe === 'weak') return 'weak structure';
+    if(safe === 'intact') return 'structure intact';
+    if(safe === 'strong') return 'strong structure';
+    return safe || 'structure unchanged';
   }
 
   function resolveGlobalVerdict(record, deps = {}){
@@ -220,15 +234,17 @@
     let finalVerdict = baseVerdict;
     let reason = 'Default live setup state.';
 
+    if(finalVerdict === 'avoid' && !structurallyBroken){
+      finalVerdict = 'monitor';
+      reason = `${structureReasonLabel(structureState)}. Non-structural avoid downgraded to monitor.`;
+    }
+
     if(structurallyBroken){
       finalVerdict = 'dead';
       reason = resolved.blockerReason || 'Structure is broken.';
-    }else if(setupScore <= 2){
-      finalVerdict = 'avoid';
-      reason = 'Setup score is too weak.';
     }else if(weakStructure && invalidPlan){
       finalVerdict = 'monitor';
-      reason = 'Weak structure and invalid plan need monitoring, not rejection.';
+      reason = `${structureReasonLabel(structureState)}. Setup stays on monitor while tradeability is unresolved.`;
     }else if(resolved.actionStateKey === 'ready_to_act' || resolved.structuralState === 'entry'){
       finalVerdict = 'entry';
       reason = resolved.blockerReason || 'Ready to act.';
@@ -244,20 +260,18 @@
     }else if(setupScore >= 3 && !structurallyBroken){
       finalVerdict = 'monitor';
       reason = invalidPlan
-        ? 'Alive setup but plan is not ready.'
+        ? `${structureReasonLabel(structureState)}. Plan is not ready yet.`
         : (marketWeak
           ? 'Weak market caution.'
           : (tentativeBounce
             ? 'Bounce still tentative.'
-            : (weakVolume ? 'Weak volume caution.' : 'Alive but early setup.')));
+            : (weakVolume ? 'Weak volume caution.' : `${structureReasonLabel(structureState)}. Setup is still early.`)));
     }else if(resolved.actionStateKey === 'recalculate_plan' || resolved.actionStateKey === 'wait_for_confirmation' || resolved.structuralState === 'developing'){
       finalVerdict = 'monitor';
       reason = resolved.blockerReason || 'Waiting for confirmation.';
     }else if(String(resolved.finalVerdict || '').toLowerCase() === 'avoid'){
-      finalVerdict = weakStructure ? 'avoid' : 'monitor';
-      reason = weakStructure
-        ? (resolved.reasonSummary || resolved.blockerReason || 'Lower-priority setup.')
-        : 'Alive setup downgraded to monitoring.';
+      finalVerdict = 'monitor';
+      reason = resolved.reasonSummary || resolved.blockerReason || `${structureReasonLabel(structureState)}. Alive setup downgraded to monitoring.`;
     }
 
     const guardedVerdict = applyPromotionGuards({
@@ -279,6 +293,9 @@
     });
     finalVerdict = guardedVerdict.final_verdict;
     reason = guardedVerdict.reason || reason;
+    const avoidTriggerSource = finalVerdict === 'avoid'
+      ? (structurallyBroken ? 'structure_broken' : null)
+      : null;
 
     const lifecycleMap = {
       entry:'active',
@@ -308,6 +325,8 @@
       allow_plan:action.planAllowed,
       allow_watchlist:action.watchlistAllowed,
       reason,
+      final_state_reason:'derived from structureState only',
+      avoid_trigger_source:avoidTriggerSource,
       downgrade_applied:baseVerdict !== finalVerdict,
       downgrade_reason:reason,
       entry_gate_pass:guardedVerdict.entry_gate_pass,

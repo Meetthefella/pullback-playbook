@@ -4005,6 +4005,8 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Tone', value:globalVerdict.tone || 'n/a'},
     {label:'Bucket', value:lifecycleSnapshot.bucket || globalVerdict.bucket || 'n/a'},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || 'n/a'},
+    {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
+    {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
     {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || 'n/a'},
     {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
@@ -7574,17 +7576,17 @@ function executionDowngradeVerdictForRecord(record, options = {}){
     )
   );
 
-  if(item.plan && (item.plan.invalidatedState || item.plan.missedState)) return 'Avoid';
-  if(executionCapitalBlocked(displayedPlan)) return 'Avoid';
+  if(item.plan && item.plan.invalidatedState) return 'Avoid';
+  if(executionCapitalBlocked(displayedPlan)) return provisionalVerdict === 'Entry' ? 'Near Entry' : 'Watch';
   if(executionCapitalHeavy(displayedPlan)){
     if(provisionalVerdict === 'Entry') return 'Near Entry';
     if(provisionalVerdict === 'Near Entry') return 'Watch';
     return provisionalVerdict || 'Watch';
   }
-  if(['too_wide','settings_missing'].includes(riskStatus)) return 'Avoid';
-  if(planUiState.state === 'invalid' || planUiState.state === 'unrealistic_rr') return 'Avoid';
-  if(!Number.isFinite(positionSize) || positionSize < 1) return 'Avoid';
-  if(displayedPlan.tradeability === 'too_expensive' || displayedPlan.affordability === 'not_affordable') return 'Avoid';
+  if(['too_wide','settings_missing'].includes(riskStatus)) return 'Watch';
+  if(planUiState.state === 'invalid' || planUiState.state === 'unrealistic_rr') return 'Watch';
+  if(!Number.isFinite(positionSize) || positionSize < 1) return 'Watch';
+  if(displayedPlan.tradeability === 'too_expensive' || displayedPlan.affordability === 'not_affordable') return 'Watch';
   if(planUiState.state === 'needs_adjustment' || displayedPlan.status !== 'valid' || planValidationState === 'needs_replan') return 'Watch';
   return '';
 }
@@ -8710,30 +8712,10 @@ function stateLabelForDecisionSummary(finalVerdict){
 
 function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, derivedStates}){
   const verdict = normalizeGlobalVerdictKey(finalVerdict || '');
-  const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
-  const bounceState = String(derivedStates && derivedStates.bounceState || '').toLowerCase();
-  const planStatus = String(displayedPlan && displayedPlan.status || '').toLowerCase();
-  const label = stateLabelForDecisionSummary(verdict);
-
-  if(verdict === 'entry'){
-    return `${label}  strong structure and confirmed bounce. Plan is valid.`;
-  }
-  if(verdict === 'near_entry'){
-    return `${label}  structure improving. Watch for a confirmed bounce to trigger entry.`;
-  }
-  if(verdict === 'watch'){
-    return `${label}  early structure forming. Wait for price to stabilise before planning an entry.`;
-  }
-  if(verdict === 'avoid' || verdict === 'dead'){
-    if(structureState === 'broken'){
-      return `${label}  structure broken. No valid trade here.`;
-    }
-    if(planStatus === 'invalid'){
-      return `${label}  no valid entry setup. Entry, stop, and target do not align.`;
-    }
-    return `${label}  structure broken. No valid trade here.`;
-  }
-  return `${label}  trend weakening. No entry until price shows a clear bounce and holds above the 50MA.`;
+  if(verdict === 'entry') return 'Entry - your plan fits.';
+  if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
+  if(verdict === 'avoid' || verdict === 'dead') return 'Avoid - too weak or broken. Leave it alone.';
+  return 'Monitor - not ready yet. Wait for a clearer bounce.';
 }
 
 function resolvePlanVisibility(setup){
@@ -8749,7 +8731,7 @@ function resolvePlanVisibility(setup){
       showPositionSize:false,
       showCapital:false,
       showRR:false,
-      diagnosticsMessage:'No valid entry yet - waiting for confirmation',
+      diagnosticsMessage:'Monitor - not ready yet. Wait for a clearer bounce.',
       diagnosticsTone:'neutral'
     };
   }
@@ -8760,7 +8742,7 @@ function resolvePlanVisibility(setup){
       showPositionSize:false,
       showCapital:false,
       showRR:false,
-      diagnosticsMessage:'No valid trade - entry, stop, and target do not align',
+      diagnosticsMessage:'Avoid - too weak or broken. Leave it alone.',
       diagnosticsTone:'danger'
     };
   }
@@ -8781,7 +8763,7 @@ function resolvePlanVisibility(setup){
     showPositionSize:false,
     showCapital:false,
     showRR:false,
-    diagnosticsMessage:'Waiting for confirmation',
+    diagnosticsMessage:'Monitor - not ready yet. Wait for a clearer bounce.',
     diagnosticsTone:'neutral'
   };
 }
@@ -13222,6 +13204,8 @@ function renderReviewWorkspace(options = {}){
     {label:'Tone', value:globalVerdict.tone || '(none)'},
     {label:'Bucket', value:globalVerdict.bucket || '(none)'},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
+    {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
+    {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
     {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
     {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},

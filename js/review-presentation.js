@@ -24,35 +24,14 @@
 
   function tradeStatusMetricText(input, deps){
     const {
-      normalizeGlobalVerdictKey,
-      buildValidityConditionSummary,
-      blockedTradeStatusFromPrimaryBlocker
+      normalizeGlobalVerdictKey
     } = deps;
-    const {globalVerdict, displayedPlan, resolvedContract} = input || {};
+    const {globalVerdict} = input || {};
     const verdict = normalizeGlobalVerdictKey(globalVerdict && globalVerdict.final_verdict || '');
-    const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').toLowerCase();
-    const terminalBlock = verdict === 'dead'
-      || blockerReason.includes('rebuild')
-      || blockerReason.includes('too much account capital')
-      || blockerReason.includes('too heavy')
-      || blockerReason.includes('too expensive')
-      || blockerReason.includes('no viable plan');
-    if((verdict === 'monitor' || verdict === 'watch' || verdict === 'near_entry' || ((globalVerdict && globalVerdict.bucket) === 'monitor_watch' && (globalVerdict && globalVerdict.tone) === 'orange')) && !terminalBlock){
-      return buildValidityConditionSummary({
-        finalVerdict:verdict,
-        entryGateChecks:globalVerdict && globalVerdict.entry_gate_checks,
-        nearEntryGateChecks:globalVerdict && globalVerdict.near_entry_gate_checks,
-        structureState:globalVerdict && globalVerdict.structure_state,
-        bounceState:globalVerdict && globalVerdict.bounce_state,
-        rrConfidence:resolvedContract && resolvedContract.rrConfidenceLabel,
-        pullbackState:globalVerdict && globalVerdict.pullback_state
-      });
-    }
-    if(!globalVerdict || globalVerdict.allow_plan === false) return blockedTradeStatusFromPrimaryBlocker(resolvedContract);
-    const planStatus = String(displayedPlan && displayedPlan.status || '').trim().toLowerCase();
-    if(planStatus === 'valid') return {line1:'Reviewable', line2:''};
-    if(planStatus === 'needs_adjustment' || planStatus === 'pending_validation' || planStatus === 'missing') return blockedTradeStatusFromPrimaryBlocker(resolvedContract);
-    return blockedTradeStatusFromPrimaryBlocker(resolvedContract);
+    if(verdict === 'entry') return {line1:'Entry - your plan fits.', line2:''};
+    if(verdict === 'near_entry') return {line1:'Near Entry - almost ready. Watch for confirmation.', line2:''};
+    if(verdict === 'avoid' || verdict === 'dead') return {line1:'Avoid - too weak or broken. Leave it alone.', line2:''};
+    return {line1:'Monitor - not ready yet. Wait for a clearer bounce.', line2:''};
   }
 
   window.ReviewPresentation = {

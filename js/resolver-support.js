@@ -10,7 +10,7 @@
     if(structuralState === 'near_entry' || tradeabilityVerdict === 'Near Entry') return 'near_entry';
     if(actionStateKey === 'wait_for_confirmation') return 'monitor';
     if(actionStateKey === 'recalculate_plan' || structuralState === 'developing') return 'watch';
-    if(tradeabilityVerdict === 'Avoid') return 'avoid';
+    if(tradeabilityVerdict === 'Avoid') return 'watch';
     return 'watch';
   }
 
