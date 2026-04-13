@@ -38,6 +38,7 @@ if(!window.ResolverPresentation) throw new Error('ResolverPresentation failed to
 if(!window.ScannerView) throw new Error('ScannerView failed to load.');
 if(!window.ScannerDebug) throw new Error('ScannerDebug failed to load.');
 if(!window.ScannerCardShell) throw new Error('ScannerCardShell failed to load.');
+if(!window.ScannerInteractionState) throw new Error('ScannerInteractionState failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -172,6 +173,16 @@ const {
   scanCardSummaryForView: scanCardSummaryForViewImpl,
   scanCardPrimaryActionLabel: scanCardPrimaryActionLabelImpl
 } = window.ScannerCardShell;
+const {
+  suppressNextScannerActivation: suppressNextScannerActivationImpl,
+  allowScannerActivation: allowScannerActivationImpl,
+  setScannerCardClickTrace: setScannerCardClickTraceImpl,
+  scannerCardClickTraceForTicker: scannerCardClickTraceForTickerImpl,
+  scannerCardClickTraceHistoryForTicker: scannerCardClickTraceHistoryForTickerImpl,
+  setSwipeFeedback: setSwipeFeedbackImpl,
+  getSwipeFeedback: getSwipeFeedbackImpl,
+  recordGestureDebug: recordGestureDebugImpl
+} = window.ScannerInteractionState;
 
 // ---------------------------------------------------------------------------
 // End extracted bridge bindings. App.js remains the orchestrator for now.
@@ -5175,6 +5186,18 @@ function scannerCardShellBridgeDeps(){
   };
 }
 
+function scannerInteractionStateBridgeDeps(){
+  return {
+    normalizeTicker,
+    uiState,
+    activeReviewTicker,
+    scannerCardClickTraceHistoryForTicker: ticker => scannerCardClickTraceHistoryForTickerImpl(ticker, {
+      normalizeTicker,
+      uiState
+    })
+  };
+}
+
 function currentRrThreshold(){
   return currentRrThresholdImpl();
 }
@@ -5447,23 +5470,11 @@ function closeScanCardMenu(){
 }
 
 function suppressNextScannerActivation(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return;
-  uiState.scanCardMenuGuard = uiState.scanCardMenuGuard || {};
-  uiState.scanCardMenuGuard[symbol] = Date.now();
+  return suppressNextScannerActivationImpl(ticker, scannerInteractionStateBridgeDeps());
 }
 
 function allowScannerActivation(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return true;
-  const guard = uiState.scanCardMenuGuard && uiState.scanCardMenuGuard[symbol];
-  if(!guard) return true;
-  if(Date.now() - guard > 1200){
-    delete uiState.scanCardMenuGuard[symbol];
-    return true;
-  }
-  delete uiState.scanCardMenuGuard[symbol];
-  return false;
+  return allowScannerActivationImpl(ticker, scannerInteractionStateBridgeDeps());
 }
 
 function renderScannerDetailsContent(view){
@@ -5481,33 +5492,15 @@ function scoreToneLabelFromScore(score){
 }
 
 function setScannerCardClickTrace(ticker, stage, detail = ''){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return;
-  const entry = {
-    at:new Date().toISOString(),
-    stage:String(stage || '').trim() || 'unknown',
-    detail:String(detail || '').trim(),
-    activeReviewTicker:activeReviewTicker() || ''
-  };
-  uiState.scannerCardClickTrace[symbol] = entry;
-  const existingHistory = Array.isArray(uiState.scannerCardClickTraceHistory[symbol])
-    ? uiState.scannerCardClickTraceHistory[symbol]
-    : [];
-  uiState.scannerCardClickTraceHistory[symbol] = [...existingHistory, entry].slice(-10);
+  return setScannerCardClickTraceImpl(ticker, stage, detail, scannerInteractionStateBridgeDeps());
 }
 
 function scannerCardClickTraceForTicker(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return null;
-  return uiState.scannerCardClickTrace[symbol] || null;
+  return scannerCardClickTraceForTickerImpl(ticker, scannerInteractionStateBridgeDeps());
 }
 
 function scannerCardClickTraceHistoryForTicker(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return [];
-  return Array.isArray(uiState.scannerCardClickTraceHistory[symbol])
-    ? uiState.scannerCardClickTraceHistory[symbol]
-    : [];
+  return scannerCardClickTraceHistoryForTickerImpl(ticker, scannerInteractionStateBridgeDeps());
 }
 
 function renderDebugKeyValueGrid(rows){
@@ -12408,25 +12401,15 @@ function seedCardsFromUniverse(limit){
 }
 
 function setSwipeFeedback(ticker, info){
-  uiState.swipeFeedback = uiState.swipeFeedback || {};
-  if(info && Object.keys(info).length){
-    uiState.swipeFeedback[ticker] = {...info, timestamp:new Date().toISOString()};
-  }else if(uiState.swipeFeedback){
-    delete uiState.swipeFeedback[ticker];
-  }
+  return setSwipeFeedbackImpl(ticker, info, scannerInteractionStateBridgeDeps());
 }
 
 function getSwipeFeedback(ticker){
-  return uiState.swipeFeedback ? uiState.swipeFeedback[ticker] : null;
+  return getSwipeFeedbackImpl(ticker, scannerInteractionStateBridgeDeps());
 }
 
 function recordGestureDebug(ticker, note){
-  if(!ticker) return;
-  uiState.cardGestureDebug = uiState.cardGestureDebug || {};
-  uiState.cardGestureDebug[ticker] = {
-    note,
-    at:new Date().toISOString()
-  };
+  return recordGestureDebugImpl(ticker, note, scannerInteractionStateBridgeDeps());
 }
 
 function attachScannerCardSwipeHandler(node, ticker){
