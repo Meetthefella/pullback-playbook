@@ -8573,10 +8573,11 @@ function capitalUsageAdvisory({positionCostGbp, positionCost, quoteCurrency, acc
   };
 }
 
-function capitalComfortSummary({capitalFit, capitalNote, affordability, capitalUsage, controlQuality = '', capitalEfficiency = ''}){
+function capitalComfortSummary({capitalFit, capitalNote, affordability, capitalUsage, planStatus = '', controlQuality = '', capitalEfficiency = ''}){
   const fit = String(capitalFit || '').trim().toLowerCase();
   const bucket = fit || String(capitalUsage && capitalUsage.bucket || '').trim().toLowerCase();
   const conversionStatus = String(capitalUsage && capitalUsage.conversionStatus || '').trim();
+  const normalizedPlanStatus = String(planStatus || '').trim().toLowerCase();
   const convertedFx = conversionStatus === 'converted' || /FX converted/i.test(String(capitalNote || ''));
   const estimatedFx = conversionStatus === 'estimated' || !!(capitalUsage && capitalUsage.estimated) || /FX estimated/i.test(String(capitalNote || ''));
   const statusNote = convertedFx ? 'Capital check: FX converted' : (estimatedFx ? 'Capital check: FX estimated' : '');
@@ -8589,7 +8590,14 @@ function capitalComfortSummary({capitalFit, capitalNote, affordability, capitalU
   if(bucket === 'borderline') return {label:'Borderline', note:statusNote};
   if(bucket === 'acceptable' || bucket === 'fits_capital') return {label:'Acceptable', note:statusNote};
   if(bucket === 'ideal') return {label:'Ideal', note:statusNote};
-  return {label:'Not available', note:statusNote || (bucket === 'unknown' ? 'Shown when no valid plan is defined' : '')};
+  if(statusNote) return {label:'Not available', note:statusNote};
+  if(normalizedPlanStatus && normalizedPlanStatus !== 'valid'){
+    return {label:'Not available', note:'Shown when no valid plan is defined'};
+  }
+  if(conversionStatus === 'unavailable' || /fx unavailable|fx missing|conversion unavailable|capital fit cannot be confirmed|affordability could not be verified/i.test(String(capitalNote || ''))){
+    return {label:'Not available', note:'Capital check unresolved due to unavailable FX conversion.'};
+  }
+  return {label:'Not available', note:'Plan is defined, but capital fit cannot be confirmed.'};
 }
 
 function capitalFitPresentation({capitalFit, affordability, comfortLabel}){
@@ -13132,6 +13140,7 @@ function renderReviewWorkspace(options = {}){
     capitalNote:displayedPlan.capitalFit.capital_note,
     affordability:displayedPlan.affordability,
     capitalUsage,
+    planStatus:displayedPlan.status,
     controlQuality:qualityAdjustments.controlQuality,
     capitalEfficiency:qualityAdjustments.capitalEfficiency
   });
@@ -13175,11 +13184,17 @@ function renderReviewWorkspace(options = {}){
     : (analysisUiState === 'error' ? 'Analyse Setup' : 'Analyse Setup');
   const showAnalyseButton = analysisUiState !== 'running';
   const analyseDisabled = analysisUiState === 'idle' || (analysisBusy && !loading);
-  const diagnosticsToneClass = (
-    globalVerdict.allow_plan === false
-    || displayedPlan.status === 'invalid'
-    || String(displayedPlan.tradeability || '').toLowerCase() === 'invalid'
-  ) ? 'avoid' : `analysis-state-${analysisUiState}`;
+  const finalVerdictKey = normalizeGlobalVerdictKey(globalVerdict.final_verdict || '');
+  const diagnosticsBucket = String(globalVerdict.bucket || '').trim().toLowerCase();
+  const diagnosticsTradeability = String(displayedPlan.tradeability || '').trim().toLowerCase();
+  const invalidTradePlan = displayedPlan.status === 'invalid';
+  const hardFailTradeability = ['avoid','invalid','too_expensive'].includes(diagnosticsTradeability);
+  const avoidStyleVerdict = ['avoid','dead'].includes(finalVerdictKey);
+  const avoidStyleBucket = ['low_priority_avoid','lower_priority','dead'].includes(diagnosticsBucket);
+  const watchStyleVerdict = ['watch','monitor'].includes(finalVerdictKey);
+  const diagnosticsToneClass = (invalidTradePlan || hardFailTradeability || avoidStyleVerdict || avoidStyleBucket)
+    ? 'avoid'
+    : (watchStyleVerdict ? 'watch' : `analysis-state-${analysisUiState}`);
   const analysisPanelClass = `reviewanalysispanel ${diagnosticsToneClass}`;
   const analysisPanelBody = analysisUiState === 'idle'
     ? '<div class="tiny">Add a screenshot to run AI analysis.</div>'
@@ -13887,6 +13902,7 @@ function calculate(options = {}){
     capitalNote:displayedPlan.capitalFit.capital_note,
     affordability:displayedPlan.status === 'valid' ? displayedPlan.affordability : '',
     capitalUsage,
+    planStatus:displayedPlan.status,
     controlQuality:qualityAdjustments.controlQuality,
     capitalEfficiency:qualityAdjustments.capitalEfficiency
   });
