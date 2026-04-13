@@ -133,6 +133,7 @@ const {
 } = window.ResolverCore;
 const {
   primaryShortlistStatusChip: primaryShortlistStatusChipImpl,
+  resolveVisualState: resolveVisualStateImpl,
   resolveGlobalVisualState: resolveGlobalVisualStateImpl,
   resolveEmojiPresentation: resolveEmojiPresentationImpl
 } = window.ResolverPresentation;
@@ -4252,7 +4253,7 @@ function renderWatchlist(){
       const watchlistBadge = getBadge(globalVerdict.final_verdict);
       const watchlistAction = getActions(globalVerdict.final_verdict);
       const shortReason = decisionCopy.reason;
-      const globalVisual = resolveGlobalVisualState(record, 'watchlist', {
+      const visualState = resolveVisualState(record, 'watchlist', {
         structuralState:resolvedContract.structuralState,
         actionStateKey:resolvedContract.actionStateKey,
         tradeability:resolvedContract.tradeabilityVerdict,
@@ -4266,7 +4267,7 @@ function renderWatchlist(){
         qualityAdjustments,
         rrResolution,
         resolvedContract,
-        globalVisual
+        globalVisual:visualState
       });
       const div = document.createElement('div');
       const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
@@ -4276,9 +4277,7 @@ function renderWatchlist(){
       const watchlistScoreText = liveRefreshPending
         ? 'Refreshing...'
         : (expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''));
-      const watchlistScoreClass = liveRefreshPending
-        ? 's-neutral'
-        : (expired ? 's-low' : scoreClass(view.setupScore || 0));
+      const watchlistScoreClass = liveRefreshPending ? 's-neutral' : 'visual-score';
       const liveRefreshNote = liveRefreshPending
         ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
         : '';
@@ -4293,8 +4292,11 @@ function renderWatchlist(){
         bounce_state:globalVerdict.bounce_state || (record && record.setup && record.setup.bounceState),
         structure:globalVerdict.structure_state || (record && record.setup && record.setup.structureState)
       });
-      div.className = `resultcompact watchlist-card ${escapeHtml(globalVisual.toneClass)}`.trim();
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(expired ? watchlistBadgeClass : watchlistBadge.className)}">${escapeHtml(expired ? watchlistBadgeLabel : watchlistBadge.text)}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason">${escapeHtml(expired ? shortReason : decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Waiting for confirmation'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.className = `resultcompact watchlist-card ${escapeHtml(visualState.className || visualState.toneClass || '')}`.trim();
+      div.style.cssText = visualState.styleAttr || '';
+      div.dataset.visualTone = visualState.visual_tone || '';
+      div.dataset.visualState = visualState.state || '';
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(expired ? watchlistBadgeClass : watchlistBadge.className)}">${escapeHtml(expired ? watchlistBadgeLabel : watchlistBadge.text)}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(expired ? shortReason : decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Waiting for confirmation'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -5204,6 +5206,7 @@ function scannerCardShellBridgeDeps(){
     primaryShortlistStatusChip,
     globalVerdictLabel,
     normalizeAnalysisVerdict,
+    resolveVisualState,
     resolveGlobalVisualState,
     scanCardSummaryForView,
     scanCardPrimaryActionLabel,
@@ -5339,44 +5342,17 @@ function primaryShortlistStatusChip(view){
   });
 }
 
-/* LEGACY COLOUR LOGIC DISABLED
-   Replaced by resolveGlobalVisualState(...)
-   Left in place temporarily for later review
-
-function resolveVisualState(setup = {}){
-  const state = String(setup.state || '').toLowerCase();
-  const tradeability = normalizeAnalysisVerdict(setup.tradeability || '');
-  const structure = String(setup.structure || '').toLowerCase();
-  const bounce = String(setup.bounce || '').toLowerCase();
-  const weakStructure = ['weak','weakening','developing_loose'].includes(structure);
-  const terminalState = ['dead','inactive','rebuild_setup','rebuild'].includes(state) || structure === 'broken';
-  const nearEntryState = ['monitor','near_entry'].includes(state);
-  const readyState = state === 'entry';
-
-  if(terminalState){
-    return {tone:'red'};
-  }
-  if(readyState || tradeability === 'Entry'){
-    return {tone:'green'};
-  }
-  if(nearEntryState || tradeability === 'Near Entry'){
-    return {tone:'blue'};
-  }
-  if(weakStructure || bounce === 'none' || tradeability === 'Avoid'){
-    return {tone:'orange'};
-  }
-  return {tone:'indigo'};
-}
-
-function visualToneClass(setup = {}){
-  const visual = resolveVisualState(setup);
-  return `tone-${visual.tone}`;
-}
-*/
-
 function resolveGlobalVisualState(record, context = 'scanner', options = {}){
   return resolveGlobalVisualStateImpl(record, context, options, {
-    resolveGlobalVerdict
+    resolveGlobalVerdict,
+    normalizeGlobalVerdictKey
+  });
+}
+
+function resolveVisualState(record, context = 'scanner', options = {}){
+  return resolveVisualStateImpl(record, context, options, {
+    resolveGlobalVerdict,
+    normalizeGlobalVerdictKey
   });
 }
 
@@ -13232,7 +13208,7 @@ function renderReviewWorkspace(options = {}){
   const chartGuidance = record.review.chartRef && record.review.chartRef.dataUrl
     ? ''
     : '<div class="summary" style="margin-bottom:12px"><strong>📸 Add screenshot for analysis</strong><div class="tiny" style="margin-top:6px">Open the live chart, capture a fresh screenshot, then import it to continue review.</div></div>';
-  const globalVisual = resolveGlobalVisualState(record, 'review', {
+  const visualState = resolveVisualState(record, 'review', {
     structuralState:resolvedContract && resolvedContract.structuralState,
     actionStateKey:resolvedContract && resolvedContract.actionStateKey,
     tradeability:resolvedContract && resolvedContract.tradeabilityVerdict,
@@ -13279,7 +13255,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Base Review Label', value:displayStage || '(none)'},
     {label:'Structure Label', value:resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)'},
     {label:'Base Tradeability', value:resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)'},
-    {label:'Visual Tone', value:globalVisual.tone || '(none)'},
+    {label:'Visual Tone', value:visualState.visual_tone || '(none)'},
     {label:'Plan Label', value:resolvedContract.planStatusLabel || '(none)'},
     {label:'Capital Affordability', value:displayedPlan.affordability || '(none)'},
     {label:'Capital OK', value:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_ok === true ? 'true' : (displayedPlan.capitalFit && displayedPlan.capitalFit.capital_ok === false ? 'false' : '(none)')},
@@ -13323,11 +13299,14 @@ function renderReviewWorkspace(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
   });
-  box.className = `list reviewworkspace-shell ${globalVisual.toneClass}`;
+  box.className = `list reviewworkspace-shell ${visualState.className || visualState.toneClass || ''}`;
+  box.style.cssText = visualState.styleAttr || '';
+  box.dataset.visualTone = visualState.visual_tone || '';
+  box.dataset.visualState = visualState.state || '';
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate();
   });
-  box.innerHTML = `<div class="reviewworkspace ready ${escapeHtml(globalVisual.toneClass)}" data-tone-source="${escapeHtml(globalVisual.debugToneSource)}">
+  box.innerHTML = `<div class="reviewworkspace ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(visualState.visual_tone || '')}" data-visual-state="${escapeHtml(visualState.state || '')}">
     <div class="panelbox review-section review-section--snapshot">
       <div class="reviewsectionhead"><strong>Snapshot</strong></div>
       <div class="reviewhero reviewhero-compact">
@@ -13336,13 +13315,13 @@ function renderReviewWorkspace(options = {}){
             <div class="inline-status">
               <strong>${escapeHtml(record.ticker)}</strong>
               <span class="badge ${reviewBadge.className}">${escapeHtml(reviewBadgeLabel)}</span>
-              <span class="score ${scoreClass(setupScore)}">${escapeHtml(setupScoreDisplay)}</span>
+              <span class="score visual-score">${escapeHtml(setupScoreDisplay)}</span>
             </div>
             <div class="tiny">${escapeHtml(companyLine)}</div>
             ${marketMetaLine}
             ${snapshotWarningsMarkup ? `<div class="inline-status review-warning-row">${snapshotWarningsMarkup}</div>` : ''}
             ${downgradeSummary ? `<div class="tiny review-downgrade-badge"><span class="badge avoid">${escapeHtml(downgradeSummary.label)}</span> ${escapeHtml(downgradeSummary.transition)}</div>` : ''}
-            <div class="review-decision-detail">${escapeHtml(snapshotVerdictLine)}</div>
+            <div class="review-decision-detail decision-summary">${escapeHtml(snapshotVerdictLine)}</div>
           </div>
         </div>
       </div>

@@ -1,5 +1,50 @@
 (function(global){
   // Canonical resolver presentation helpers extracted from app.js.
+  function clampScore(score){
+    const numeric = Number.isFinite(Number(score)) ? Number(score) : 0;
+    return Math.max(0, Math.min(10, numeric));
+  }
+
+  function visualStateKey(finalVerdict, deps = {}){
+    const normalized = deps.normalizeGlobalVerdictKey(finalVerdict || '');
+    if(normalized === 'entry') return 'entry';
+    if(normalized === 'near_entry') return 'near_entry';
+    if(normalized === 'monitor') return 'monitor';
+    if(normalized === 'avoid' || normalized === 'dead') return 'avoid';
+    return 'developing';
+  }
+
+  function visualToneForState(state){
+    if(state === 'entry' || state === 'near_entry') return 'bullish';
+    if(state === 'monitor') return 'caution';
+    if(state === 'avoid') return 'danger';
+    return 'neutral';
+  }
+
+  function visualPaletteForState(state){
+    if(state === 'entry'){
+      return {top:'#0c2b1d', bottom:'#071a12', border:'rgba(52, 211, 153, 0.34)', glow:'rgba(52, 211, 153, 0.14)'};
+    }
+    if(state === 'near_entry'){
+      return {top:'#123524', bottom:'#0a2017', border:'rgba(74, 222, 128, 0.28)', glow:'rgba(74, 222, 128, 0.10)'};
+    }
+    if(state === 'monitor'){
+      return {top:'#3a2a12', bottom:'#241a0a', border:'rgba(251, 191, 36, 0.26)', glow:'rgba(245, 158, 11, 0.08)'};
+    }
+    if(state === 'avoid'){
+      return {top:'#3a1212', bottom:'#1f0a0a', border:'rgba(248, 113, 113, 0.28)', glow:'rgba(239, 68, 68, 0.10)'};
+    }
+    return {top:'#2a2a2a', bottom:'#1a1a1a', border:'rgba(148, 163, 184, 0.22)', glow:'rgba(148, 163, 184, 0.06)'};
+  }
+
+  function visualStyleForState(state, score){
+    const palette = visualPaletteForState(state);
+    const intensity = clampScore(score) / 10;
+    const highlight = (0.03 + intensity * 0.13).toFixed(3);
+    const lift = (0.015 + intensity * 0.055).toFixed(3);
+    return `--visual-state-background:linear-gradient(to top, rgba(255,255,255,${highlight}), rgba(255,255,255,${lift})), linear-gradient(to top, ${palette.top}, ${palette.bottom});--visual-state-border:${palette.border};--visual-state-glow:${palette.glow};`;
+  }
+
   function primaryShortlistStatusChip(view, deps = {}){
     const item = view && view.item ? view.item : view;
     const globalVerdict = deps.resolveGlobalVerdict(item);
@@ -12,17 +57,27 @@
     };
   }
 
-  function resolveGlobalVisualState(record, context = 'scanner', options = {}, deps = {}){
+  function resolveVisualState(record, context = 'scanner', options = {}, deps = {}){
     const safeRecord = record && typeof record === 'object' ? record : {};
     const globalVerdict = deps.resolveGlobalVerdict(safeRecord);
+    const state = visualStateKey(globalVerdict.final_verdict, deps);
+    const visual_tone = visualToneForState(state);
+    const score = clampScore(globalVerdict.setup_score);
+    const styleAttr = visualStyleForState(state, score);
     return {
-      tone:globalVerdict.tone,
-      toneClass:globalVerdict.toneClass,
-      borderClass:globalVerdict.borderClass,
-      backgroundClass:globalVerdict.backgroundClass,
-      badgeToneClass:globalVerdict.badgeToneClass,
-      scoreClass:globalVerdict.scoreClass,
-      debugToneSource:globalVerdict.debugToneSource,
+      state,
+      decision_summary:globalVerdict.decision_summary || '',
+      visual_tone,
+      score,
+      className:`visual-state-card visual-state-${state} visual-tone-${visual_tone}`,
+      tone:visual_tone,
+      toneClass:`visual-state-${state} visual-tone-${visual_tone}`,
+      borderClass:'',
+      backgroundClass:'',
+      badgeToneClass:'',
+      scoreClass:'',
+      debugToneSource:'resolveVisualState',
+      styleAttr,
       finalVerdict:globalVerdict.final_verdict,
       bucket:globalVerdict.bucket,
       lifecycle:globalVerdict.lifecycle,
@@ -31,6 +86,10 @@
       reason:globalVerdict.reason,
       context
     };
+  }
+
+  function resolveGlobalVisualState(record, context = 'scanner', options = {}, deps = {}){
+    return resolveVisualState(record, context, options, deps);
   }
 
   function resolveEmojiPresentation(record, options = {}, deps = {}){
@@ -101,6 +160,7 @@
 
   global.ResolverPresentation = {
     primaryShortlistStatusChip,
+    resolveVisualState,
     resolveGlobalVisualState,
     resolveEmojiPresentation
   };
