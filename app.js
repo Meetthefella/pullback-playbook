@@ -9020,6 +9020,7 @@ function projectTickerForCard(record, options = {}){
     ? analysisState.normalizedAnalysis.warning_state
     : (item.setup.warning || evaluateWarningState(item, analysisState.normalizedAnalysis));
   const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback});
+  const derivedStates = analysisDerivedStatesFromRecord(item);
   const displayedPlan = applySetupConfirmationPlanGate(
     item,
     deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, item.marketData.currency),
@@ -9029,7 +9030,6 @@ function projectTickerForCard(record, options = {}){
     includeExecutionDowngrade:options.includeExecutionDowngrade !== false,
     includeRuntimeFallback:options.includeRuntimeFallback !== false
   });
-  const derivedStates = analysisDerivedStatesFromRecord(item);
   const provisionalSetupUiState = getSetupUiState(item, {displayStage, derivedStates});
   const planCheckState = planCheckStateForRecord(item, {effectivePlan, displayedPlan});
   const planUiState = getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState, setupState:provisionalSetupUiState.state});
