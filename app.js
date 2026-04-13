@@ -39,6 +39,7 @@ if(!window.ScannerView) throw new Error('ScannerView failed to load.');
 if(!window.ScannerDebug) throw new Error('ScannerDebug failed to load.');
 if(!window.ScannerCardShell) throw new Error('ScannerCardShell failed to load.');
 if(!window.ScannerInteractionState) throw new Error('ScannerInteractionState failed to load.');
+if(!window.ScannerResultsSupport) throw new Error('ScannerResultsSupport failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -183,6 +184,12 @@ const {
   getSwipeFeedback: getSwipeFeedbackImpl,
   recordGestureDebug: recordGestureDebugImpl
 } = window.ScannerInteractionState;
+const {
+  groupScannerViewsBySection: groupScannerViewsBySectionImpl,
+  contextualResultEmptyState: contextualResultEmptyStateImpl,
+  scannerResultSections: scannerResultSectionsImpl,
+  buildScannerSectionShell: buildScannerSectionShellImpl
+} = window.ScannerResultsSupport;
 
 // ---------------------------------------------------------------------------
 // End extracted bridge bindings. App.js remains the orchestrator for now.
@@ -5195,6 +5202,15 @@ function scannerInteractionStateBridgeDeps(){
       normalizeTicker,
       uiState
     })
+  };
+}
+
+function scannerResultsSupportBridgeDeps(){
+  return {
+    rankedVisibleSectionForView,
+    state,
+    escapeHtml,
+    documentRef:document
   };
 }
 
@@ -12571,69 +12587,9 @@ function renderScannerResults(){
     renderWorkflowAlerts();
     return;
   }
-  const grouped = {tradeableEntry:[], nearEntry:[], monitorWatch:[], lowerPriority:[]};
-  finalViews.forEach(view => {
-    const sectionKey = rankedVisibleSectionForView(view);
-    if(sectionKey === 'tradeable_entry') grouped.tradeableEntry.push(view);
-    else if(sectionKey === 'near_entry') grouped.nearEntry.push(view);
-    else if(sectionKey === 'monitor_watch') grouped.monitorWatch.push(view);
-    else grouped.lowerPriority.push(view);
-  });
-  const tradeable = grouped.tradeableEntry;
-  const nearEntry = grouped.nearEntry;
-  const monitorWatch = grouped.monitorWatch;
-  const lowerPriority = grouped.lowerPriority;
-  const sections = [
-    {
-      key:'tradeable-entry',
-      title:'Tradeable / Entry',
-      summary: tradeable.length
-        ? `${tradeable.length} entry-ready setup${tradeable.length === 1 ? '' : 's'}`
-        : 'No Entry Setups',
-      items:tradeable,
-      collapsed:false,
-      empty: contextualResultEmptyState('tradeable_entry')
-    },
-    {
-      key:'near-entry',
-      title:'Near Entry',
-      summary: nearEntry.length
-        ? `${nearEntry.length} setup${nearEntry.length === 1 ? '' : 's'} close to trigger`
-        : 'Nothing Near Entry',
-      items:nearEntry,
-      collapsed:false,
-      empty: contextualResultEmptyState('near_entry_monitor')
-    },
-    {
-      key:'monitor-watch',
-      title:'Monitor / Watch',
-      summary: monitorWatch.length
-        ? `${monitorWatch.length} review candidate${monitorWatch.length === 1 ? '' : 's'} worth monitoring`
-        : 'Nothing To Monitor',
-      items:monitorWatch,
-      collapsed:false,
-      empty: 'No watch candidates right now.'
-    },
-    {
-      key:'lower-priority',
-      title:'Low Priority / Avoid',
-      summary: lowerPriority.length
-        ? `${lowerPriority.length} low-priority setup${lowerPriority.length === 1 ? '' : 's'}`
-        : 'No Lower-Priority Setups',
-      items:lowerPriority,
-      collapsed:false,
-      empty: contextualResultEmptyState('lower_priority')
-    }
-  ];
+  const sections = scannerResultSectionsImpl(finalViews, scannerResultsSupportBridgeDeps());
   sections.forEach(section => {
-    const wrap = document.createElement(section.collapsed ? 'details' : 'div');
-    if(section.collapsed){
-      wrap.className = `resultsgroup resultsgroup--${section.key}`;
-      wrap.innerHTML = `<summary class="summary"><strong>${escapeHtml(section.title)}</strong><div class="tiny">${escapeHtml(section.summary)}</div></summary><div class="list"></div>`;
-    }else{
-      wrap.className = `resultsgroup resultsgroup--${section.key}`;
-      wrap.innerHTML = `<div class="summary resultsgroup__summary"><strong>${escapeHtml(section.title)}</strong><div class="tiny">${escapeHtml(section.summary)}</div></div><div class="list"></div>`;
-    }
+    const wrap = buildScannerSectionShellImpl(section, scannerResultsSupportBridgeDeps());
     const list = wrap.querySelector('.list');
     if(section.items.length){
       section.items.forEach(view => {
@@ -12745,14 +12701,7 @@ function renderScannerResults(){
 }
 
 function contextualResultEmptyState(bucket){
-  const market = String(state.marketStatus || '').trim() || 'Market not set';
-  if(bucket === 'tradeable_entry'){
-    return /below 50 ma/i.test(market) ? 'Market not supportive' : 'No Entry Setups';
-  }
-  if(bucket === 'near_entry_monitor'){
-    return 'No setups need confirmation';
-  }
-  return 'No lower-priority setups';
+  return contextualResultEmptyStateImpl(bucket, scannerResultsSupportBridgeDeps());
 }
 
 function legacyRenderCardsFromCardList(){
