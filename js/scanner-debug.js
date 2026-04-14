@@ -60,6 +60,15 @@
     const trace = [];
     const reasonCodes = [];
     const warnings = [];
+    const normalizeVisibleVerdict = verdict => {
+      const raw = String(verdict || '').trim().toLowerCase().replace(/\s+/g, '_');
+      const normalized = typeof deps.normalizeVerdict === 'function'
+        ? deps.normalizeVerdict(raw)
+        : deps.normalizeGlobalVerdictKey(raw);
+      if(normalized === 'watch') return 'monitor';
+      if(normalized === 'dead') return 'avoid';
+      return normalized;
+    };
     const addStep = (label, value) => trace.push(`${label}: ${value}`);
     const addReason = code => {
       if(code && !reasonCodes.includes(code)) reasonCodes.push(code);
@@ -169,11 +178,25 @@
     addStep('resulting bucket', finalDisplayBucket);
 
     const legacyStatus = deps.normalizeAnalysisVerdict(baseView.displayStage || '');
-    if(legacyStatus && legacyStatus !== status){
-      warnings.push(`WARNING: status mismatch resolved. legacy=${legacyStatus}, resolved=${status}`);
+    const legacyVerdict = normalizeVisibleVerdict(legacyStatus);
+    const intermediateVerdict = normalizeVisibleVerdict(status);
+    const renderedVerdict = normalizeVisibleVerdict(scannerVerdict);
+    const meaningfulMismatch = legacyVerdict
+      && renderedVerdict
+      && (
+        legacyVerdict !== renderedVerdict
+        || intermediateVerdict !== renderedVerdict
+      );
+    if(meaningfulMismatch){
+      warnings.push(`WARNING: state mismatch resolved. legacy=${legacyVerdict}, intermediate=${intermediateVerdict || '(none)'}, rendered=${renderedVerdict}`);
     }
-    if(!invalidAvoidGuard && status === 'Avoid' && ['watch','monitor'].includes(scannerVerdict)){
-      warnings.push(`INFO: raw Avoid softened to ${finalDisplayState} because the setup is still technically alive`);
+    if(
+      !invalidAvoidGuard
+      && intermediateVerdict === 'avoid'
+      && renderedVerdict !== 'avoid'
+      && ['monitor'].includes(renderedVerdict)
+    ){
+      warnings.push(`INFO: raw avoid softened before render. intermediate=${intermediateVerdict}, rendered=${renderedVerdict}`);
     }
 
     return {
