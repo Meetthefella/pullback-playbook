@@ -9008,7 +9008,12 @@ function bindEntryConditionsHoldInteractions(root){
     }, true);
     entryConditionsOutsideCloseBound = true;
   }
-  scopeRoot.querySelectorAll('[data-entry-hold-helper]').forEach(helper => {
+  const helperNodes = [];
+  if(scopeRoot && scopeRoot.nodeType === 1 && scopeRoot.matches && scopeRoot.matches('[data-entry-hold-helper]')){
+    helperNodes.push(scopeRoot);
+  }
+  scopeRoot.querySelectorAll('[data-entry-hold-helper]').forEach(node => helperNodes.push(node));
+  helperNodes.forEach(helper => {
     if(helper.dataset.boundHoldHelper === '1') return;
     const cardMode = helper.getAttribute('data-hold-card-trigger') === '1';
     const trigger = helper.querySelector('[data-hold-entry-helper]') || (cardMode ? helper : null);
