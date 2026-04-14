@@ -1072,6 +1072,20 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .reviewsectionhead + textarea#reviewNotes{
   margin-top:-2px;
 }
+#reviewNotes.review-notes--ai{
+  box-shadow:inset 0 0 0 1px rgba(78,222,163,.55), 0 0 0 2px rgba(78,222,163,.12);
+}
+#reviewNotes.review-notes--ai::placeholder{
+  color:rgba(226,255,244,.96);
+  opacity:1;
+}
+.ai-progress-text{
+  color:rgba(226,255,244,.96);
+  text-shadow:0 0 8px rgba(78,222,163,.18);
+}
+.ai-progress-subtext{
+  color:rgba(220,245,236,.92);
+}
 .reviewworkspace .reviewstats .stat:nth-child(n+4) .big{
   font-size:1rem;
   font-weight:700;

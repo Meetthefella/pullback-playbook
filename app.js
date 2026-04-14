@@ -4005,6 +4005,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   });
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Final Decision', [
     {label:'UI State Source', value:globalVisual.ui_state_source || 'n/a'},
+    {label:'Watchlist Presentation Source', value:globalVisual.watchlist_presentation_source || 'n/a'},
     {label:'Final Verdict Rendered', value:globalVisual.final_verdict_rendered || globalVisual.finalVerdict || 'n/a'},
     {label:'Bucket Rendered', value:globalVisual.bucket_rendered || globalVisual.bucket || 'n/a'},
     {label:'Dead Guard Applied', value:globalVisual.dead_guard_applied ? 'true' : 'false'},
@@ -4207,7 +4208,7 @@ function renderWatchlist(){
     groups.push({key:'inactive', title:'Dead / Expired', hint:'Technically failed or aged-out watchlist records.'});
   }
   groups.forEach(group => {
-    const groupRecords = records.filter(record => watchlistPriorityForRecord(record).bucket === group.key);
+    const groupRecords = records.filter(record => watchlistPresentationBucketForRecord(record) === group.key);
     if(!groupRecords.length) return;
     const section = document.createElement('div');
     section.className = 'watchlistgroup';
@@ -4281,7 +4282,19 @@ function renderWatchlist(){
         setupScore:view && view.setupScore
       });
       const globalVerdict = resolveGlobalVerdict(record);
+      const watchlistVisualState = reconcileWatchlistPresentation({
+        record,
+        visualState,
+        globalVerdict,
+        lifecycleSnapshot,
+        resolvedContract,
+        derivedStates,
+        displayedPlan
+      });
       const shortReason = decisionCopy.reason;
+      const watchlistSignalRowMarkup = watchlistVisualState.watchlist_presentation_source === 'strict_reconciled'
+        ? ''
+        : watchlistSignalMarkup;
       record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
       if(!record.watchlist.debug.holdTrace){
         const seededAt = new Date().toISOString();
@@ -4295,7 +4308,7 @@ function renderWatchlist(){
         qualityAdjustments,
         rrResolution,
         resolvedContract,
-        globalVisual:visualState
+        globalVisual:watchlistVisualState
       });
       const div = document.createElement('div');
       const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
@@ -4309,15 +4322,15 @@ function renderWatchlist(){
       const liveRefreshNote = liveRefreshPending
         ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
         : '';
-      const decisionSummary = visualState.decision_summary;
+      const decisionSummary = watchlistVisualState.decision_summary;
       const planUI = resolvePlanVisibility({
-        state:visualState.finalVerdict,
+        state:watchlistVisualState.finalVerdict,
         bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
         structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
       });
       const entryConditionsSummary = buildEntryConditionsSummary({
         ticker:entry.ticker,
-        finalVerdict:visualState.finalVerdict || visualState.final_verdict,
+        finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
         resolvedContract,
         globalVerdict,
         derivedStates,
@@ -4325,11 +4338,11 @@ function renderWatchlist(){
       });
       const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
       const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
-      div.className = `resultcompact watchlist-card ${escapeHtml(visualState.className || visualState.toneClass || '')}`.trim();
-      div.style.cssText = visualState.styleAttr || '';
-      div.dataset.visualTone = visualState.visual_tone || '';
-      div.dataset.visualState = visualState.state || '';
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((visualState.badge && visualState.badge.className) || 'near')}">${escapeHtml((visualState.badge && visualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Waiting for confirmation'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.className = `resultcompact watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
+      div.style.cssText = watchlistVisualState.styleAttr || '';
+      div.dataset.visualTone = watchlistVisualState.visual_tone || '';
+      div.dataset.visualState = watchlistVisualState.state || '';
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Waiting for confirmation'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -8775,6 +8788,86 @@ function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, de
   if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
   if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
   return 'Monitor - not ready yet. Wait for a clearer bounce.';
+}
+
+function isWatchlistAvoidBucket(bucket){
+  const value = String(bucket || '').trim().toLowerCase();
+  return value === 'low_priority_avoid' || value === 'lower_priority' || value === 'avoid' || value === 'dead' || value === 'inactive';
+}
+
+function watchlistStrictAvoidTruth(record, globalVerdict, lifecycleSnapshot){
+  const item = normalizeTickerRecord(record || {});
+  const debug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
+  const strictFinalVerdict = normalizeVerdict(globalVerdict && globalVerdict.final_verdict || '');
+  const lifecycleVerdict = normalizeVerdict(lifecycleSnapshot && lifecycleSnapshot.state || '');
+  const removalVerdict = normalizeVerdict(debug.removal_global_verdict || '');
+  const removedByGate = String(debug.watchlist_removed_by || '').trim().toLowerCase() === 'global_verdict_gate';
+  const allowWatchlist = !!(globalVerdict && globalVerdict.allow_watchlist);
+  const strictBucketAvoid = isWatchlistAvoidBucket(globalVerdict && globalVerdict.bucket)
+    || isWatchlistAvoidBucket(lifecycleSnapshot && lifecycleSnapshot.bucket);
+  return strictFinalVerdict === 'avoid'
+    || lifecycleVerdict === 'avoid'
+    || removalVerdict === 'avoid'
+    || removedByGate
+    || !allowWatchlist
+    || strictBucketAvoid;
+}
+
+function watchlistPresentationBucketForRecord(record){
+  const item = normalizeTickerRecord(record || {});
+  const strictVerdict = resolveGlobalVerdict(item);
+  const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
+  const priority = watchlistPriorityForRecord(item);
+  if(['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || '').toLowerCase())){
+    return priority.bucket || 'inactive';
+  }
+  if(watchlistStrictAvoidTruth(item, strictVerdict, lifecycleSnapshot)) return 'low_priority_avoid';
+  return priority.bucket || 'monitor_watch';
+}
+
+function reconcileWatchlistPresentation({
+  record,
+  visualState,
+  globalVerdict,
+  lifecycleSnapshot,
+  resolvedContract,
+  derivedStates,
+  displayedPlan
+} = {}){
+  const item = normalizeTickerRecord(record || {});
+  const base = visualState && typeof visualState === 'object' ? {...visualState} : {};
+  const softVerdict = normalizeVerdict(base.finalVerdict || base.final_verdict || '');
+  const strictAvoidTruth = watchlistStrictAvoidTruth(item, globalVerdict, lifecycleSnapshot);
+  if(!(strictAvoidTruth && softVerdict !== 'avoid')){
+    return {
+      ...base,
+      watchlist_presentation_source:base.watchlist_presentation_source || 'soft_display'
+    };
+  }
+  const summary = buildDecisionSummary({
+    finalVerdict:'avoid',
+    displayedPlan,
+    resolvedContract,
+    derivedStates
+  });
+  return {
+    ...base,
+    state:'avoid',
+    finalVerdict:'avoid',
+    final_verdict:'avoid',
+    final_verdict_rendered:'avoid',
+    bucket:'low_priority_avoid',
+    bucket_rendered:'low_priority_avoid',
+    badge:getBadge('avoid'),
+    tone:getTone('avoid'),
+    className:'tone-red',
+    toneClass:'tone-red',
+    visual_tone:'danger',
+    decision_summary:summary,
+    conflicting_legacy_state_detected:true,
+    watchlist_presentation_source:'strict_reconciled',
+    ui_state_source:`${base.ui_state_source || 'resolveFinalStateContract'}|strict_reconciled`
+  };
 }
 
 function resolveSetupPatternUi({
@@ -13697,7 +13790,7 @@ function renderReviewWorkspace(options = {}){
     : (analysisUiState === 'ready'
       ? '<div class="tiny">Screenshot attached. AI analysis will start automatically.</div>'
       : (analysisUiState === 'running'
-        ? '<div class="summary">🤖 AI analysis in progress<span class="ai-loading-dots"><span>.</span><span>.</span><span>.</span></span></div><div class="tiny">Reading chart and building trade plan.</div>'
+        ? '<div class="summary ai-progress-text">🤖 AI analysis in progress<span class="ai-loading-dots"><span>.</span><span>.</span><span>.</span></span></div><div class="tiny ai-progress-subtext">Reading chart and building trade plan.</div>'
         : (analysisUiState === 'complete'
           ? '<div class="summary">Analysis complete</div><div class="tiny">Review AI read and trade plan below.</div>'
           : '<div class="summary">Analysis failed</div><div class="tiny">Try again.</div>')));
@@ -13883,7 +13976,7 @@ function renderReviewWorkspace(options = {}){
       <div class="reviewsectionhead"><strong>Confidence / Diagnostics</strong></div>
       ${diagnosticsPanelBody}
       ${showAnalyseButton ? `<div class="reviewactions reviewactions-top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>` : '<div class="reviewactions reviewactions-top"><button class="ghost" id="resetReviewBtn">Remove</button></div>'}
-      <textarea id="reviewNotes" placeholder="${escapeHtml(notesPlaceholder)}">${escapeHtml(record.review.notes || '')}</textarea>
+      <textarea id="reviewNotes" class="${loading ? 'review-notes--ai' : ''}" placeholder="${escapeHtml(notesPlaceholder)}">${escapeHtml(record.review.notes || '')}</textarea>
       ${renderReviewRecomputeDiagnostics(record)}
       <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
         <summary>AI Summary</summary>
@@ -14067,6 +14160,12 @@ function refreshReview(){
   syncPlanDisplayMeta();
   const ticker = activeReviewTicker();
   const record = ticker ? getTickerRecord(ticker) : null;
+  const reviewNotes = $('reviewNotes');
+  if(reviewNotes){
+    const aiBusy = !!(ticker && uiState.loadingTicker === ticker);
+    reviewNotes.classList.toggle('review-notes--ai', aiBusy);
+    reviewNotes.placeholder = aiBusy ? '🤖 AI analysis in progress...' : 'Add ticker-specific notes here.';
+  }
   if(record && record.watchlist && record.watchlist.inWatchlist){
     runWatchlistLifecycleEvaluation({
       source:'auto_recompute',
