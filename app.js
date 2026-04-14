@@ -14241,6 +14241,7 @@ function syncPlanDisplayMeta(){
     displayedPlan,
     setupScore:setupScoreForRecord(record)
   });
+  const decisionSummary = visualState.decision_summary || '';
   const planUI = resolvePlanVisibility({
     state:visualState.finalVerdict,
     bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
