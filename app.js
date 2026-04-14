@@ -9041,6 +9041,14 @@ function setWatchlistHoldTrace(ticker, message){
   }
 }
 
+function holdTargetDescriptor(target){
+  if(!target || typeof target !== 'object') return 'unknown';
+  const tag = String(target.tagName || 'node').toLowerCase();
+  const id = target.id ? `#${target.id}` : '';
+  const cls = target.classList && target.classList.length ? `.${Array.from(target.classList).slice(0, 2).join('.')}` : '';
+  return `${tag}${id}${cls}`;
+}
+
 function bindEntryConditionsHoldInteractions(root){
   const scopeRoot = root && typeof root.querySelectorAll === 'function' ? root : document;
   if(!entryConditionsOutsideCloseBound){
@@ -9109,10 +9117,11 @@ function bindEntryConditionsHoldInteractions(root){
       state.startY = 0;
       helper.classList.remove('hold-armed');
     };
+    const ignoreSelector = 'button,a,input,textarea,select,.entry-conditions-panel';
     trigger.addEventListener('pointerdown', event => {
       if(event.pointerType === 'mouse' && event.button !== 0) return;
-      if(cardMode && event.target && event.target.closest && event.target.closest('button,a,input,textarea,select,summary,details,[data-act],.entry-conditions-panel')){
-        if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_start.ignored_interactive_target');
+      if(cardMode && event.target && event.target.closest && event.target.closest(ignoreSelector)){
+        if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_start.ignored_interactive_target target=${holdTargetDescriptor(event.target)}`);
         return;
       }
       state.pointerId = event.pointerId;
@@ -9154,8 +9163,8 @@ function bindEntryConditionsHoldInteractions(root){
     trigger.addEventListener('pointerleave', closeOnRelease);
     if(typeof window !== 'undefined' && !('PointerEvent' in window)){
       trigger.addEventListener('touchstart', event => {
-        if(cardMode && event.target && event.target.closest && event.target.closest('button,a,input,textarea,select,summary,details,[data-act],.entry-conditions-panel')){
-          if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_start.touch_ignored_interactive_target');
+        if(cardMode && event.target && event.target.closest && event.target.closest(ignoreSelector)){
+          if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_start.touch_ignored_interactive_target target=${holdTargetDescriptor(event.target)}`);
           return;
         }
         const touch = event.touches && event.touches[0];
