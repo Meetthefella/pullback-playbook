@@ -13672,6 +13672,7 @@ function renderReviewWorkspace(options = {}){
   }
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
+  const notesPlaceholder = loading ? '🤖 AI analysis in progress...' : 'Add ticker-specific notes here.';
   const analysisUiState = reviewAnalysisUiStateForRecord(record);
   const analyseLabel = analysisUiState === 'complete'
     ? 'Re-run analysis'
@@ -13687,7 +13688,7 @@ function renderReviewWorkspace(options = {}){
     : (analysisUiState === 'ready'
       ? '<div class="tiny">Screenshot attached. AI analysis will start automatically.</div>'
       : (analysisUiState === 'running'
-        ? '<div class="summary">🤖 Analysing setup...</div><div class="tiny">Reading chart and building trade plan.</div>'
+        ? '<div class="summary">🤖 AI analysis in progress<span class="ai-loading-dots"><span>.</span><span>.</span><span>.</span></span></div><div class="tiny">Reading chart and building trade plan.</div>'
         : (analysisUiState === 'complete'
           ? '<div class="summary">Analysis complete</div><div class="tiny">Review AI read and trade plan below.</div>'
           : '<div class="summary">Analysis failed</div><div class="tiny">Try again.</div>')));
@@ -13873,7 +13874,7 @@ function renderReviewWorkspace(options = {}){
       <div class="reviewsectionhead"><strong>Confidence / Diagnostics</strong></div>
       ${diagnosticsPanelBody}
       ${showAnalyseButton ? `<div class="reviewactions reviewactions-top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>` : '<div class="reviewactions reviewactions-top"><button class="ghost" id="resetReviewBtn">Remove</button></div>'}
-      <textarea id="reviewNotes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea>
+      <textarea id="reviewNotes" placeholder="${escapeHtml(notesPlaceholder)}">${escapeHtml(record.review.notes || '')}</textarea>
       ${renderReviewRecomputeDiagnostics(record)}
       <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
         <summary>AI Summary</summary>
