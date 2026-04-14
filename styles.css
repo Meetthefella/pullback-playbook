@@ -1368,7 +1368,7 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   padding:5px 9px;
 }
 .watchlist-card .badge{font-size:.77rem}
-.watchlist-card{display:flex;flex-direction:column;gap:14px;padding:16px}
+.watchlist-card{display:flex;flex-direction:column;gap:14px;padding:16px;position:relative}
 .watchlist-card>*{width:100%;min-width:0}
 .watchlist-card__header{display:flex;flex-direction:column;gap:8px}
 .watchlist-card__header-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:nowrap;min-width:0}
@@ -1426,6 +1426,13 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   background:rgba(15,23,42,.96);
   box-shadow:0 14px 36px rgba(2,6,23,.48);
   color:rgba(255,255,255,.92);
+}
+.entry-conditions-panel--card{
+  left:10px;
+  right:10px;
+  top:10px;
+  width:auto;
+  z-index:85;
 }
 .entry-conditions-panel.is-open{display:block}
 .entry-conditions-header{

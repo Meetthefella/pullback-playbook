@@ -4315,7 +4315,8 @@ function renderWatchlist(){
         derivedStates,
         displayedPlan
       });
-      const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker);
+      const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
+      const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
       div.className = `resultcompact watchlist-card ${escapeHtml(visualState.className || visualState.toneClass || '')}`.trim();
       div.style.cssText = visualState.styleAttr || '';
       div.dataset.visualTone = visualState.visual_tone || '';
@@ -4327,12 +4328,12 @@ function renderWatchlist(){
       div.querySelector('[data-act="refresh-life"]').onclick = () => { refreshWatchlistTicker(entry.ticker).catch(() => {}); };
       div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
       if(watchlistEntryConditionsHelper){
-        const actionsHost = div.querySelector('.watchlist-actions');
-        if(actionsHost){
-          const holdWrapper = document.createElement('div');
-          holdWrapper.innerHTML = watchlistEntryConditionsHelper;
-          if(holdWrapper.firstElementChild) actionsHost.appendChild(holdWrapper.firstElementChild);
-        }
+        div.setAttribute('data-entry-hold-helper', '1');
+        div.setAttribute('data-hold-card-trigger', '1');
+        div.setAttribute('data-panel-id', watchlistPanelId);
+        const holdWrapper = document.createElement('div');
+        holdWrapper.innerHTML = watchlistEntryConditionsHelper;
+        if(holdWrapper.firstElementChild) div.appendChild(holdWrapper.firstElementChild);
       }
       bindEntryConditionsHoldInteractions(div);
       section.appendChild(div);
@@ -8962,7 +8963,7 @@ function entryConditionsPanelId(scope, ticker){
   return `entry-conditions-${safeScope}-${safeTicker}`;
 }
 
-function renderEntryConditionsHoldHelper(summary, scope, ticker){
+function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
   const details = summary && typeof summary === 'object' ? summary : null;
   if(!details || !details.show) return '';
   const panelId = entryConditionsPanelId(scope, ticker || details.ticker || '');
@@ -8970,6 +8971,14 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker){
     .slice(0, 3)
     .map(line => `<li>${escapeHtml(String(line || ''))}</li>`)
     .join('');
+  if(options.mode === 'card'){
+    return `<div class="entry-conditions-panel entry-conditions-panel--card no-card-click" id="${escapeHtml(panelId)}" hidden>
+      <div class="entry-conditions-header">${escapeHtml(details.header || 'Monitor - Not ready')}</div>
+      <div class="entry-conditions-pattern">${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
+      ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
+      <div class="entry-conditions-footer">${escapeHtml(details.footer || 'When these conditions improve, the app can price entry, stop, and risk.')}</div>
+    </div>`;
+  }
   return `<div class="entry-conditions-helper no-card-click" data-entry-hold-helper>
     <button class="secondary compactbutton entry-conditions-trigger no-card-click" type="button" data-hold-entry-helper data-panel-id="${escapeHtml(panelId)}" data-hold-ms="650">Hold for Entry Conditions</button>
     <div class="entry-conditions-panel no-card-click" id="${escapeHtml(panelId)}" hidden>
@@ -9001,9 +9010,10 @@ function bindEntryConditionsHoldInteractions(root){
   }
   scopeRoot.querySelectorAll('[data-entry-hold-helper]').forEach(helper => {
     if(helper.dataset.boundHoldHelper === '1') return;
-    const trigger = helper.querySelector('[data-hold-entry-helper]');
+    const cardMode = helper.getAttribute('data-hold-card-trigger') === '1';
+    const trigger = helper.querySelector('[data-hold-entry-helper]') || (cardMode ? helper : null);
     if(!trigger) return;
-    const panelId = String(trigger.getAttribute('data-panel-id') || '');
+    const panelId = String(trigger.getAttribute('data-panel-id') || helper.getAttribute('data-panel-id') || '');
     const panel = panelId ? document.getElementById(panelId) : null;
     if(!panel) return;
     helper.dataset.boundHoldHelper = '1';
@@ -9042,6 +9052,9 @@ function bindEntryConditionsHoldInteractions(root){
     };
     trigger.addEventListener('pointerdown', event => {
       if(event.pointerType === 'mouse' && event.button !== 0) return;
+      if(cardMode && event.target && event.target.closest && event.target.closest('button,a,input,textarea,select,summary,details,[data-act],.entry-conditions-panel')){
+        return;
+      }
       state.pointerId = event.pointerId;
       if(typeof trigger.setPointerCapture === 'function'){
         try{ trigger.setPointerCapture(event.pointerId); }catch(_){}
@@ -9078,7 +9091,7 @@ function bindEntryConditionsHoldInteractions(root){
         event.stopPropagation();
         return;
       }
-      event.preventDefault();
+      if(!cardMode) event.preventDefault();
     });
   });
 }
@@ -13312,7 +13325,6 @@ function bindReviewWorkspaceActions(record){
       renderReviewWorkspace();
     };
   });
-  bindEntryConditionsHoldInteractions(box);
   document.querySelectorAll('#reviewWorkspace .logic').forEach(el => el.addEventListener('change', refreshReview));
   ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));
 }
@@ -13513,15 +13525,6 @@ function renderReviewWorkspace(options = {}){
     warningState
   });
   const decisionSummary = visualState.decision_summary;
-  const entryConditionsSummary = buildEntryConditionsSummary({
-    ticker:record.ticker,
-    finalVerdict:visualState.finalVerdict || visualState.final_verdict,
-    resolvedContract,
-    globalVerdict,
-    derivedStates,
-    displayedPlan
-  });
-  const entryConditionsHelperMarkup = renderEntryConditionsHoldHelper(entryConditionsSummary, 'review', record.ticker);
   if(displayStage === 'Watch' && /ignore/i.test(String(reviewAction.label || ''))){
     console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:reviewAction.label});
   }
@@ -13778,7 +13781,6 @@ function renderReviewWorkspace(options = {}){
         <button class="secondary" id="saveReviewBtn">Save Review</button>
         <button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button>
       </div>
-      ${entryConditionsHelperMarkup ? `<div class="reviewactions reviewactions-secondary">${entryConditionsHelperMarkup}</div>` : ''}
       <details class="compact-details">
         <summary>Workspace Status</summary>
         <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
