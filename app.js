@@ -3997,6 +3997,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const age = countTradingDaysBetween(item.watchlist.addedAt || todayIsoDate(), todayIsoDate());
   const auditTrail = Array.isArray(debug.auditTrail) ? debug.auditTrail : [];
   const warnings = Array.isArray(debug.warnings) ? debug.warnings : [];
+  const holdTraceHistory = Array.isArray(debug.holdTraceHistory) ? debug.holdTraceHistory : [];
   const debugPlanUI = resolvePlanVisibility({
     state:globalVisual.finalVerdict || globalVisual.final_verdict,
     bounce_state:globalVerdict.bounce_state || (record && record.setup && record.setup.bounceState),
@@ -4051,6 +4052,8 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Capital Usage', value:capitalUsageDebugText(displayedPlan)},
     {label:'Next Possible', value:debug.nextPossibleState || resolved.nextPossibleState || 'n/a'}
   ])}${renderAdvancedDebugMarkup([
+    {label:'Watchlist Hold Trace', value:debug.holdTrace || '(none)'},
+    {label:'Watchlist Hold Trace History', value:holdTraceHistory.length ? holdTraceHistory.join(' || ') : '(none)'},
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
@@ -4330,6 +4333,7 @@ function renderWatchlist(){
       if(watchlistEntryConditionsHelper){
         div.setAttribute('data-entry-hold-helper', '1');
         div.setAttribute('data-hold-card-trigger', '1');
+        div.setAttribute('data-hold-ticker', entry.ticker);
         div.setAttribute('data-panel-id', watchlistPanelId);
         div.setAttribute('data-hold-ms', '550');
         const holdWrapper = document.createElement('div');
@@ -8997,7 +9001,27 @@ function closeEntryConditionsPanels(exceptId = ''){
     if(exceptId && panel.id === exceptId) return;
     panel.classList.remove('is-open');
     panel.hidden = true;
+    if(panel.id){
+      document.querySelectorAll(`[data-panel-id="${panel.id}"]`).forEach(node => {
+        if(node && node.classList){
+          node.classList.remove('hold-open');
+          node.classList.remove('hold-armed');
+        }
+      });
+    }
   });
+}
+
+function setWatchlistHoldTrace(ticker, message){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  const record = upsertTickerRecord(symbol);
+  if(!record || !record.watchlist) return;
+  record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+  const stamp = new Date().toISOString();
+  record.watchlist.debug.holdTrace = `${message} | ${stamp}`;
+  const trail = Array.isArray(record.watchlist.debug.holdTraceHistory) ? record.watchlist.debug.holdTraceHistory : [];
+  record.watchlist.debug.holdTraceHistory = [`${message} | ${stamp}`, ...trail].slice(0, 8);
 }
 
 function bindEntryConditionsHoldInteractions(root){
@@ -9017,12 +9041,14 @@ function bindEntryConditionsHoldInteractions(root){
   helperNodes.forEach(helper => {
     if(helper.dataset.boundHoldHelper === '1') return;
     const cardMode = helper.getAttribute('data-hold-card-trigger') === '1';
+    const holdTicker = normalizeTicker(helper.getAttribute('data-hold-ticker') || '');
     const trigger = helper.querySelector('[data-hold-entry-helper]') || (cardMode ? helper : null);
     if(!trigger) return;
     const panelId = String(trigger.getAttribute('data-panel-id') || helper.getAttribute('data-panel-id') || '');
     const panel = panelId ? document.getElementById(panelId) : null;
     if(!panel) return;
     helper.dataset.boundHoldHelper = '1';
+    if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_helper.bound');
     const holdMs = Number.parseInt(String(trigger.getAttribute('data-hold-ms') || helper.getAttribute('data-hold-ms') || '550'), 10);
     const state = {
       timer:0,
@@ -9042,23 +9068,29 @@ function bindEntryConditionsHoldInteractions(root){
       closeEntryConditionsPanels(panel.id);
       panel.hidden = false;
       panel.classList.add('is-open');
+      helper.classList.add('hold-open');
       state.holdOpened = true;
       state.suppressClick = true;
+      if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_panel.opened');
     };
     const closePanel = () => {
       panel.classList.remove('is-open');
       panel.hidden = true;
+      helper.classList.remove('hold-open');
       state.holdOpened = false;
+      if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_panel.closed');
     };
     const resetPointer = () => {
       clearTimer();
       state.pointerId = null;
       state.startX = 0;
       state.startY = 0;
+      helper.classList.remove('hold-armed');
     };
     trigger.addEventListener('pointerdown', event => {
       if(event.pointerType === 'mouse' && event.button !== 0) return;
       if(cardMode && event.target && event.target.closest && event.target.closest('button,a,input,textarea,select,summary,details,[data-act],.entry-conditions-panel')){
+        if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_start.ignored_interactive_target');
         return;
       }
       state.pointerId = event.pointerId;
@@ -9069,13 +9101,21 @@ function bindEntryConditionsHoldInteractions(root){
       state.startY = Number(event.clientY || 0);
       state.holdOpened = false;
       clearTimer();
+      helper.classList.add('hold-armed');
+      if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_start.pointerdown (${event.pointerType || 'unknown'})`);
       state.timer = setTimeout(openPanel, Number.isFinite(holdMs) ? holdMs : 650);
+      if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_timer.started (${Number.isFinite(holdMs) ? holdMs : 650}ms)`);
     });
     trigger.addEventListener('pointermove', event => {
       if(state.pointerId == null || event.pointerId !== state.pointerId) return;
       const dx = Math.abs(Number(event.clientX || 0) - state.startX);
       const dy = Math.abs(Number(event.clientY || 0) - state.startY);
-      if(dx > 12 || dy > 12) clearTimer();
+      const cancelThreshold = cardMode ? 22 : 12;
+      if(dx > cancelThreshold || dy > cancelThreshold){
+        clearTimer();
+        helper.classList.remove('hold-armed');
+        if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_move.cancelled dx=${Math.round(dx)} dy=${Math.round(dy)} threshold=${cancelThreshold}`);
+      }
     });
     const closeOnRelease = event => {
       if(state.pointerId == null || event.pointerId !== state.pointerId) return;
@@ -9084,6 +9124,7 @@ function bindEntryConditionsHoldInteractions(root){
         try{ trigger.releasePointerCapture(event.pointerId); }catch(_){}
       }
       resetPointer();
+      if(holdTicker) setWatchlistHoldTrace(holdTicker, didHoldOpen ? 'hold_release.close_panel' : 'hold_release.before_threshold');
       if(didHoldOpen) closePanel();
     };
     trigger.addEventListener('pointerup', closeOnRelease);
@@ -9091,25 +9132,37 @@ function bindEntryConditionsHoldInteractions(root){
     trigger.addEventListener('pointerleave', closeOnRelease);
     if(typeof window !== 'undefined' && !('PointerEvent' in window)){
       trigger.addEventListener('touchstart', event => {
-        if(cardMode && event.target && event.target.closest && event.target.closest('button,a,input,textarea,select,summary,details,[data-act],.entry-conditions-panel')) return;
+        if(cardMode && event.target && event.target.closest && event.target.closest('button,a,input,textarea,select,summary,details,[data-act],.entry-conditions-panel')){
+          if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_start.touch_ignored_interactive_target');
+          return;
+        }
         const touch = event.touches && event.touches[0];
         if(!touch) return;
         state.startX = Number(touch.clientX || 0);
         state.startY = Number(touch.clientY || 0);
         state.holdOpened = false;
         clearTimer();
+        helper.classList.add('hold-armed');
+        if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_start.touchstart');
         state.timer = setTimeout(openPanel, Number.isFinite(holdMs) ? holdMs : 550);
+        if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_timer.started (${Number.isFinite(holdMs) ? holdMs : 550}ms touch)`);
       }, {passive:true});
       trigger.addEventListener('touchmove', event => {
         const touch = event.touches && event.touches[0];
         if(!touch) return;
         const dx = Math.abs(Number(touch.clientX || 0) - state.startX);
         const dy = Math.abs(Number(touch.clientY || 0) - state.startY);
-        if(dx > 16 || dy > 16) clearTimer();
+        if(dx > 20 || dy > 20){
+          clearTimer();
+          helper.classList.remove('hold-armed');
+          if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_move.touch_cancelled dx=${Math.round(dx)} dy=${Math.round(dy)} threshold=20`);
+        }
       }, {passive:true});
       const touchRelease = () => {
         const didHoldOpen = state.holdOpened;
         clearTimer();
+        helper.classList.remove('hold-armed');
+        if(holdTicker) setWatchlistHoldTrace(holdTicker, didHoldOpen ? 'hold_release.touch_close_panel' : 'hold_release.touch_before_threshold');
         if(didHoldOpen) closePanel();
       };
       trigger.addEventListener('touchend', touchRelease, {passive:true});
@@ -9119,10 +9172,12 @@ function bindEntryConditionsHoldInteractions(root){
     trigger.addEventListener('click', event => {
       if(state.suppressClick){
         state.suppressClick = false;
+        if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_click.suppressed_after_hold');
         event.preventDefault();
         event.stopPropagation();
         return;
       }
+      if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_click.no_hold');
       if(!cardMode) event.preventDefault();
     });
   });
