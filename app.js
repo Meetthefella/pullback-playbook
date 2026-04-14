@@ -4345,8 +4345,8 @@ function renderWatchlist(){
         holdWrapper.innerHTML = watchlistEntryConditionsHelper;
         if(holdWrapper.firstElementChild) div.appendChild(holdWrapper.firstElementChild);
       }
-      bindEntryConditionsHoldInteractions(div);
       section.appendChild(div);
+      bindEntryConditionsHoldInteractions(div);
     });
     box.appendChild(section);
   });
@@ -9062,8 +9062,13 @@ function bindEntryConditionsHoldInteractions(root){
     const trigger = helper.querySelector('[data-hold-entry-helper]') || (cardMode ? helper : null);
     if(!trigger) return;
     const panelId = String(trigger.getAttribute('data-panel-id') || helper.getAttribute('data-panel-id') || '');
-    const panel = panelId ? document.getElementById(panelId) : null;
-    if(!panel) return;
+    const panel = panelId
+      ? (document.getElementById(panelId) || helper.querySelector('.entry-conditions-panel'))
+      : helper.querySelector('.entry-conditions-panel');
+    if(!panel){
+      if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_helper.bind_skipped_panel_not_found');
+      return;
+    }
     helper.dataset.boundHoldHelper = '1';
     if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_helper.bound');
     const holdMs = Number.parseInt(String(trigger.getAttribute('data-hold-ms') || helper.getAttribute('data-hold-ms') || '550'), 10);
