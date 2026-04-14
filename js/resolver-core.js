@@ -6,60 +6,57 @@
     return 'watch';
   }
 
+  function normalizeVerdict(verdict){
+    const normalized = normalizeGlobalVerdictKey(verdict);
+    if(normalized === 'watch') return 'monitor';
+    if(normalized === 'dead') return 'avoid';
+    return normalized;
+  }
+
   function globalVerdictLabel(finalVerdict){
     return ({
       entry:'Entry',
       near_entry:'Near Entry',
-      watch:'Monitor',
       monitor:'Monitor',
       avoid:'Avoid',
-      dead:'Dead'
-    })[normalizeGlobalVerdictKey(finalVerdict)] || 'Monitor';
+    })[normalizeVerdict(finalVerdict)] || 'Monitor';
   }
 
   function getTone(finalVerdict){
     return ({
       entry:'green',
       near_entry:'teal',
-      watch:'purple',
       monitor:'orange',
       avoid:'red',
-      dead:'red'
-    })[normalizeGlobalVerdictKey(finalVerdict)] || 'purple';
+    })[normalizeVerdict(finalVerdict)] || 'orange';
   }
 
   function getBucket(finalVerdict){
     return ({
       entry:'tradeable_entry',
       near_entry:'tradeable_entry',
-      watch:'monitor_watch',
       monitor:'monitor_watch',
       avoid:'lower_priority',
-      dead:'lower_priority'
-    })[normalizeGlobalVerdictKey(finalVerdict)] || 'monitor_watch';
+    })[normalizeVerdict(finalVerdict)] || 'monitor_watch';
   }
 
   function getBadge(finalVerdict){
-    const safeVerdict = normalizeGlobalVerdictKey(finalVerdict);
+    const safeVerdict = normalizeVerdict(finalVerdict);
     return ({
       entry:{text:'\uD83D\uDE80 Entry', className:'ready'},
       near_entry:{text:'\uD83C\uDFAF Near Entry', className:'near'},
-      watch:{text:'\uD83D\uDFE1 Monitor', className:'near'},
       monitor:{text:'\uD83D\uDFE1 Monitor', className:'near'},
       avoid:{text:'\u26D4 Avoid', className:'avoid'},
-      dead:{text:'\uD83D\uDC80 Dead', className:'avoid'}
     })[safeVerdict] || {text:'\uD83D\uDFE1 Monitor', className:'near'};
   }
 
   function getActions(finalVerdict){
-    const safeVerdict = normalizeGlobalVerdictKey(finalVerdict);
+    const safeVerdict = normalizeVerdict(finalVerdict);
     return ({
       entry:{label:'ENTRY', detail:'Ready to act', planAllowed:true, watchlistAllowed:false},
       near_entry:{label:'NEAR ENTRY', detail:'Close to trigger', planAllowed:true, watchlistAllowed:true},
-      watch:{label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true},
       monitor:{label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true},
       avoid:{label:'AVOID', detail:'Low priority', planAllowed:false, watchlistAllowed:false},
-      dead:{label:'DEAD', detail:'Drop setup', planAllowed:false, watchlistAllowed:false}
     })[safeVerdict] || {label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true};
   }
 
@@ -299,7 +296,7 @@
       tradeability:tradeabilityState,
       capital_fit:capitalFit
     });
-    const trackedVerdict = guardedVerdict.final_verdict;
+    const trackedVerdict = normalizeVerdict(guardedVerdict.final_verdict);
     const trackedReason = guardedVerdict.reason || reason;
     const trackedAvoidTriggerSource = (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
       ? (structurallyBroken ? 'structure_broken' : (trackedVerdict !== baseVerdict ? 'lifecycle' : null))
@@ -307,7 +304,7 @@
     const lifecycleDowngradeSuppressed = !isTracked
       && (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
       && trackedAvoidTriggerSource === 'lifecycle';
-    finalVerdict = isTracked ? trackedVerdict : baseVerdict;
+    finalVerdict = normalizeVerdict(isTracked ? trackedVerdict : baseVerdict);
     reason = isTracked ? trackedReason : (lifecycleDowngradeSuppressed ? 'Pre-watchlist lifecycle downgrade suppressed.' : trackedReason);
     const avoidTriggerSource = (finalVerdict === 'avoid' || finalVerdict === 'dead')
       ? (structurallyBroken ? 'structure_broken' : null)
@@ -326,7 +323,7 @@
     const action = getActions(finalVerdict);
     const bucket = getBucket(finalVerdict);
     return {
-      base_verdict:baseVerdict,
+      base_verdict:normalizeVerdict(baseVerdict),
       tracked_verdict:trackedVerdict,
       final_verdict:finalVerdict,
       tone,
@@ -374,6 +371,7 @@
 
   global.ResolverCore = {
     normalizeGlobalVerdictKey,
+    normalizeVerdict,
     globalVerdictLabel,
     getTone,
     getBucket,

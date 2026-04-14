@@ -6,12 +6,12 @@
   }
 
   function visualStateKey(finalVerdict, deps = {}){
-    const normalized = deps.normalizeGlobalVerdictKey(finalVerdict || '');
+    const normalized = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict || '');
     if(normalized === 'entry') return 'entry';
     if(normalized === 'near_entry') return 'near_entry';
     if(normalized === 'monitor') return 'monitor';
-    if(normalized === 'avoid' || normalized === 'dead') return 'avoid';
-    return 'developing';
+    if(normalized === 'avoid') return 'avoid';
+    return 'monitor';
   }
 
   function visualToneForState(state){
@@ -46,7 +46,7 @@
   }
 
   function decisionSummaryForVerdict(finalVerdict, deps = {}){
-    const verdict = deps.normalizeGlobalVerdictKey(finalVerdict || '');
+    const verdict = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict || '');
     if(verdict === 'entry') return 'Entry - your plan fits.';
     if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
     if(verdict === 'avoid' || verdict === 'dead') return 'Avoid - too weak or broken. Leave it alone.';
@@ -77,7 +77,7 @@
       label:badge.text,
       className:badge.className,
       modifiers:[],
-      primaryState:deps.normalizeGlobalVerdictKey(visualState && (visualState.finalVerdict || visualState.final_verdict) || 'monitor')
+      primaryState:(deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(visualState && (visualState.finalVerdict || visualState.final_verdict) || 'monitor')
     };
   }
 
@@ -111,7 +111,7 @@
     const bucket = deps.getBucket(finalVerdict);
     const conflictingLegacyStateDetected = !!(
       legacyVerdict
-      && deps.normalizeGlobalVerdictKey(legacyVerdict.final_verdict || '') !== deps.normalizeGlobalVerdictKey(finalVerdict)
+      && (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(legacyVerdict.final_verdict || '') !== (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict)
     );
     return {
       state,

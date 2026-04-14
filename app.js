@@ -5151,6 +5151,7 @@ function scannerViewBridgeDeps(){
     resolveGlobalVerdict,
     resolveVisualState,
     normalizeGlobalVerdictKey,
+    normalizeVerdict,
     primaryVerdictBadge,
     setupUiLabel,
     setupUiClass,
@@ -5183,6 +5184,7 @@ function scannerDebugBridgeDeps(){
     resolveVisualState,
     globalVerdictLabel,
     getBucket,
+    normalizeVerdict,
     normalizeGlobalVerdictKey,
     normalizeAnalysisVerdict,
     getActions,
@@ -5207,6 +5209,7 @@ function scannerCardShellBridgeDeps(){
     resolveGlobalVerdict,
     primaryShortlistStatusChip,
     globalVerdictLabel,
+    normalizeVerdict,
     normalizeAnalysisVerdict,
     resolveVisualState,
     resolveGlobalVisualState,
@@ -5340,7 +5343,8 @@ function primaryShortlistStatusChip(view){
   return primaryShortlistStatusChipImpl(view, {
     resolveVisualState,
     getBadge,
-    normalizeGlobalVerdictKey
+    normalizeGlobalVerdictKey,
+    normalizeVerdict
   });
 }
 
@@ -5355,7 +5359,8 @@ function resolveGlobalVisualState(record, context = 'scanner', options = {}){
     setupScoreForRecord,
     getBadge,
     getBucket,
-    normalizeGlobalVerdictKey
+    normalizeGlobalVerdictKey,
+    normalizeVerdict
   });
 }
 
@@ -5369,7 +5374,8 @@ function resolveVisualState(record, context = 'scanner', options = {}){
     setupScoreForRecord,
     getBadge,
     getBucket,
-    normalizeGlobalVerdictKey
+    normalizeGlobalVerdictKey,
+    normalizeVerdict
   });
 }
 
@@ -8717,19 +8723,18 @@ function blockedTradeStatusText(resolvedContract){
 }
 
 function stateLabelForDecisionSummary(finalVerdict){
-  const verdict = normalizeGlobalVerdictKey(finalVerdict || '');
+  const verdict = normalizeVerdict(finalVerdict || '');
   if(verdict === 'entry') return 'Entry';
   if(verdict === 'near_entry') return 'Near Entry';
-  if(verdict === 'watch') return 'Developing';
-  if(verdict === 'avoid' || verdict === 'dead') return 'Avoid';
+  if(verdict === 'avoid') return 'Avoid';
   return 'Monitor';
 }
 
 function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, derivedStates}){
-  const verdict = normalizeGlobalVerdictKey(finalVerdict || '');
+  const verdict = normalizeVerdict(finalVerdict || '');
   if(verdict === 'entry') return 'Entry - your plan fits.';
   if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
-  if(verdict === 'avoid' || verdict === 'dead') return 'Avoid - too weak or broken. Leave it alone.';
+  if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
   return 'Monitor - not ready yet. Wait for a clearer bounce.';
 }
 
@@ -14729,6 +14734,10 @@ function primaryVerdictBadge(verdict){
 
 function normalizeGlobalVerdictKey(verdict){
   return normalizeGlobalVerdictKeyImpl(verdict);
+}
+
+function normalizeVerdict(verdict){
+  return normalizeVerdictImpl(verdict);
 }
 
 function globalVerdictLabel(finalVerdict){
