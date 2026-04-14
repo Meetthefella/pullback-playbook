@@ -3431,6 +3431,7 @@ function watchlistLifecycleSnapshot(record){
   const item = normalizeTickerRecord(record);
   const gating = applyGlobalVerdictGates(item, {source:'auto_recompute'});
   const globalVerdict = gating.globalVerdict;
+  const structureGate = watchlistRefreshStructureGate(item);
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const displayedPlan = deriveCurrentPlanState(
     item.plan && item.plan.entry,
@@ -3491,28 +3492,21 @@ function watchlistLifecycleSnapshot(record){
   let expiryReason = '';
   let reason = globalVerdict.reason || 'Still progressing on the watchlist.';
 
-  if(canonicalVerdict === 'dead'){
-    state = 'dead';
+  if((canonicalVerdict === 'dead' || canonicalVerdict === 'avoid' || !globalVerdict.allow_watchlist) && structureGate.avoid_allowed_by_structure_gate){
+    state = canonicalVerdict === 'dead' ? 'dead' : 'avoid';
     bucket = 'low_priority_avoid';
     stage = 'avoided';
     status = 'inactive';
     nextExpiryAt = '';
-    reason = globalVerdict.reason || resolved.blockerReason || 'Setup failed technically and is no longer actionable.';
-  }else if(canonicalVerdict === 'avoid' || !globalVerdict.allow_watchlist){
-    state = 'avoid';
-    bucket = 'low_priority_avoid';
-    stage = 'avoided';
-    status = 'inactive';
-    nextExpiryAt = '';
-    reason = globalVerdict.reason || 'Setup is no longer watchlist-eligible.';
+    reason = globalVerdict.reason || structureGate.refresh_demote_reason || resolved.blockerReason || 'Setup is no longer structurally alive.';
   }else if(remainingTradingDays <= 0 && !hasMeaningfulImprovement){
-    state = 'avoid';
-    bucket = 'low_priority_avoid';
-    stage = 'expired';
-    status = 'stale';
-    nextExpiryAt = expiryAt || todayIsoDate();
-    expiryReason = 'Watchlist setup expired without meaningful improvement.';
-    reason = expiryReason;
+    state = 'monitor';
+    bucket = 'monitor_watch';
+    stage = 'watchlist';
+    status = 'active';
+    nextExpiryAt = businessDaysFromNow(expiryTradingDays);
+    expiryReason = 'Extended because setup is still structurally alive.';
+    reason = 'Still structurally alive. Keep monitoring.';
   }else if(canonicalVerdict === 'entry' || resolved.actionStateKey === 'ready_to_act' || actionState === 'action_now'){
     state = 'entry';
     bucket = 'tradeable_entry';
@@ -3527,13 +3521,13 @@ function watchlistLifecycleSnapshot(record){
     status = 'active';
     nextExpiryAt = activeExpiryAt;
     reason = 'Near entry - monitor for trigger.';
-  }else if(canonicalVerdict === 'watch'){
-    state = 'watch';
+  }else if(canonicalVerdict === 'watch' || canonicalVerdict === 'monitor'){
+    state = 'monitor';
     bucket = 'monitor_watch';
     stage = 'watchlist';
     status = 'active';
     nextExpiryAt = activeExpiryAt;
-    reason = globalVerdict.reason || 'Watch setup - keep tracking.';
+    reason = globalVerdict.reason || 'Monitor setup - keep tracking.';
   }else{
     state = 'monitor';
     bucket = 'monitor_watch';
@@ -3556,6 +3550,10 @@ function watchlistLifecycleSnapshot(record){
     baseVerdict:globalVerdict.base_verdict || canonicalVerdict,
     downgradeApplied:!!globalVerdict.downgrade_applied,
     downgradeReason:globalVerdict.downgrade_reason || globalVerdict.reason || '',
+    refresh_demote_attempted:gating && gating.suppressed ? 'true' : (globalVerdict.allow_watchlist ? 'false' : 'true'),
+    refresh_demote_reason:structureGate.refresh_demote_reason || '',
+    structural_alive_at_refresh:structureGate.structural_alive_at_refresh ? 'true' : 'false',
+    avoid_allowed_by_structure_gate:structureGate.avoid_allowed_by_structure_gate ? 'true' : 'false',
     remainingTradingDays,
     rank:watchlistLifecycleStateRank(state),
     hasMeaningfulImprovement
@@ -4017,6 +4015,10 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Tracked', value:globalVerdict.tracked ? 'true' : 'false'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
     {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || 'n/a'},
+    {label:'Refresh Demote Attempted', value:lifecycleSnapshot.refresh_demote_attempted || 'false'},
+    {label:'Refresh Demote Reason', value:lifecycleSnapshot.refresh_demote_reason || '(none)'},
+    {label:'Structural Alive At Refresh', value:lifecycleSnapshot.structural_alive_at_refresh || 'n/a'},
+    {label:'Avoid Allowed By Structure Gate', value:lifecycleSnapshot.avoid_allowed_by_structure_gate || 'n/a'},
     {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
     {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
@@ -15109,19 +15111,65 @@ function resolveGlobalVerdict(record){
   return verdict;
 }
 
+function watchlistRefreshStructureGate(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const displayedPlan = deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const deadCheck = isTerminalDeadSetup(item, {derivedStates, displayedPlan});
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const explicitInvalidation = !!(item.plan && item.plan.invalidatedState);
+  const structuralAlive = !deadCheck.dead
+    && structureState !== 'broken'
+    && trendState !== 'broken'
+    && !explicitInvalidation;
+  return {
+    structural_alive_at_refresh:structuralAlive,
+    avoid_allowed_by_structure_gate:!structuralAlive,
+    refresh_demote_reason:!structuralAlive
+      ? (explicitInvalidation
+        ? 'Explicit setup invalidation.'
+        : (deadCheck.dead
+          ? (deadCheck.reason || deadCheck.reasonCode || 'Dead setup rule triggered.')
+          : 'Structure is broken.'))
+      : 'Structurally alive; keep on monitor.',
+    dead_trigger_source:explicitInvalidation
+      ? 'explicit_invalidation'
+      : (deadCheck.dead || structureState === 'broken' || trendState === 'broken' ? 'structure_broken' : null)
+  };
+}
+
 function applyGlobalVerdictGates(record, options = {}){
   const item = record && typeof record === 'object' ? record : null;
   if(!item) return {changed:false, globalVerdict:resolveGlobalVerdict({})};
   const globalVerdict = resolveGlobalVerdict(item);
+  const structureGate = watchlistRefreshStructureGate(item);
   const source = String(options.source || '').toLowerCase();
   const deferWatchlistRemoval = options.deferWatchlistRemoval === true
     || ['manual_refresh','auto_recompute','plan_update','review','review_save','analyse_setup','scan','market_status'].includes(source)
     || uiState.watchlistLifecycleRunning;
   let changed = false;
+  item.watchlist.debug = item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
+  item.watchlist.debug.refresh_demote_attempted = globalVerdict.allow_watchlist ? 'false' : 'true';
+  item.watchlist.debug.refresh_demote_reason = structureGate.refresh_demote_reason || (globalVerdict.reason || globalVerdict.downgrade_reason || '(none)');
+  item.watchlist.debug.structural_alive_at_refresh = structureGate.structural_alive_at_refresh ? 'true' : 'false';
+  item.watchlist.debug.avoid_allowed_by_structure_gate = structureGate.avoid_allowed_by_structure_gate ? 'true' : 'false';
   if(item.watchlist && item.watchlist.inWatchlist && !globalVerdict.allow_watchlist){
+    if(!structureGate.avoid_allowed_by_structure_gate){
+      appendWatchlistDebugEvent(item, {
+        at:new Date().toISOString(),
+        source:source || 'watchlist_gate_suppressed',
+        result:`suppressed: structurally_alive | ${structureGate.refresh_demote_reason}`
+      });
+      return {changed:false, globalVerdict, deferred:false, suppressed:true};
+    }
     const removalVerdictLabel = globalVerdictLabel(globalVerdict.final_verdict || 'avoid');
     const removalReason = globalVerdict.reason || globalVerdict.downgrade_reason || 'Setup is no longer watchlist-eligible.';
-    item.watchlist.debug = item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
     item.watchlist.debug.watchlist_removed_by = 'global_verdict_gate';
     item.watchlist.debug.removal_global_verdict = globalVerdict.final_verdict || '';
     item.watchlist.debug.removal_allow_watchlist = globalVerdict.allow_watchlist ? 'true' : 'false';
