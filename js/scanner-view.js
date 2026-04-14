@@ -140,10 +140,13 @@
       planValidation:{state:view.planUiState.state},
       scannerResolution
     }, deps);
-    const globalVerdict = deps.resolveGlobalVerdict(view.item);
-    const scannerVerdict = deps.normalizeGlobalVerdictKey(globalVerdict.base_verdict || globalVerdict.final_verdict);
-    const globalBadge = deps.getBadge(scannerVerdict);
-    const bucket = deps.getBucket(scannerVerdict);
+    const visualState = deps.resolveVisualState(view.item, 'scanner', {
+      derivedStates,
+      displayedPlan:view.displayedPlan
+    });
+    const scannerVerdict = deps.normalizeGlobalVerdictKey(visualState.finalVerdict || visualState.final_verdict);
+    const globalBadge = visualState.badge || deps.getBadge(scannerVerdict);
+    const bucket = visualState.bucket || deps.getBucket(scannerVerdict);
     const normalizedFinalClassification = ({
       tradeable_entry:'tradeable',
       monitor_watch:'early',
@@ -186,7 +189,7 @@
       finalVerdict:deps.globalVerdictLabel(scannerVerdict),
       finalClassification:normalizedFinalClassification,
       bucket,
-      globalVerdict,
+      globalVerdict:visualState,
       reasonCodes:scannerResolution.reason_codes,
       decisionTrace:scannerResolution.trace,
       decisionWarnings:scannerResolution.warnings,
@@ -263,14 +266,14 @@
 
   function rankedDecisionBucketForView(view, deps = {}){
     const item = view && view.item ? view.item : view;
-    const globalVerdict = deps.resolveGlobalVerdict(item);
-    return deps.getBucket(globalVerdict.base_verdict || globalVerdict.final_verdict);
+    const visualState = deps.resolveVisualState(item, 'scanner');
+    return visualState.bucket || deps.getBucket(visualState.finalVerdict || visualState.final_verdict);
   }
 
   function rankedVisibleSectionForView(view, deps = {}){
     const item = view && view.item ? view.item : view;
-    const globalVerdict = deps.resolveGlobalVerdict(item);
-    const finalVerdict = deps.normalizeGlobalVerdictKey(globalVerdict.base_verdict || globalVerdict.final_verdict);
+    const visualState = deps.resolveVisualState(item, 'scanner');
+    const finalVerdict = deps.normalizeGlobalVerdictKey(visualState.finalVerdict || visualState.final_verdict);
     if(finalVerdict === 'entry') return 'tradeable_entry';
     if(finalVerdict === 'near_entry') return 'near_entry';
     if(finalVerdict === 'watch' || finalVerdict === 'monitor') return 'monitor_watch';

@@ -32,43 +32,30 @@
 
   function renderCompactResultCardFromView(view, deps){
     const {
-      resolveGlobalVerdict,
       primaryShortlistStatusChip,
       globalVerdictLabel,
-      normalizeAnalysisVerdict,
       resolveVisualState,
       resolveGlobalVisualState,
-      scanCardSummaryForView,
       scanCardPrimaryActionLabel,
       renderScanCardSecondaryUi,
       currentScanCardMenuState,
       escapeHtml
     } = deps;
     const item = view.item;
-    const globalVerdict = resolveGlobalVerdict(item);
     const statusChip = primaryShortlistStatusChip(view);
-    const sourceVerdict = globalVerdictLabel(globalVerdict.final_verdict);
-    const scoreLabel = view.setupScoreDisplay;
-    const scannerVisualVerdict = normalizeAnalysisVerdict(
-      view && (
-        (view.scannerResolution && view.scannerResolution.status)
-        || view.displayStage
-        || view.finalVerdict
-        || ''
-      )
-    );
     const visualState = (resolveVisualState || resolveGlobalVisualState)(item, 'scanner', {
-      structuralState:statusChip.primaryState,
-      tradeability:scannerVisualVerdict,
-      structure:view && view.setupStates && view.setupStates.structureQuality,
-      bounce:view && view.setupStates && view.setupStates.bounceState,
+      displayedPlan:view && view.displayedPlan,
+      derivedStates:view && view.setupStates,
       setupScore:view && view.setupScore
     });
+    const sourceVerdict = globalVerdictLabel(visualState.finalVerdict || visualState.final_verdict);
+    const scoreLabel = view.setupScoreDisplay;
+    const resolvedBadge = visualState.badge || statusChip;
     const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
-    const summary = visualState.decision_summary || globalVerdict.decision_summary || scanCardPrimaryActionLabel(view);
+    const summary = visualState.decision_summary || scanCardPrimaryActionLabel(view);
     const secondaryUiMarkup = renderScanCardSecondaryUi(view);
     const menuState = currentScanCardMenuState(item.ticker);
-    return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualState.className || visualState.toneClass || '')}" style="${escapeHtml(visualState.styleAttr || '')}" data-visual-tone="${escapeHtml(visualState.visual_tone || '')}" data-visual-state="${escapeHtml(visualState.state || '')}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="badge-score-row result-feed-card__status"><span class="badge state-pill ${statusChip.className}">${escapeHtml(statusChip.label)}</span><span class="score visual-score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div></div><div class="resultsummary"><div class="resultreason decision-summary">${escapeHtml(summary)}</div></div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
+    return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualState.className || visualState.toneClass || '')}" style="${escapeHtml(visualState.styleAttr || '')}" data-visual-tone="${escapeHtml(visualState.visual_tone || '')}" data-visual-state="${escapeHtml(visualState.state || '')}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(resolvedBadge.className || statusChip.className)}">${escapeHtml(resolvedBadge.text || resolvedBadge.label || statusChip.label)}</span><span class="score visual-score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div></div><div class="resultsummary"><div class="resultreason decision-summary">${escapeHtml(summary)}</div></div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
   }
 
   function scanCardSummaryForView(view, deps){

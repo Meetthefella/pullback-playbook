@@ -45,28 +45,77 @@
     return `--visual-state-background:linear-gradient(to top, rgba(255,255,255,${highlight}), rgba(255,255,255,${lift})), linear-gradient(to top, ${palette.top}, ${palette.bottom});--visual-state-border:${palette.border};--visual-state-glow:${palette.glow};`;
   }
 
+  function decisionSummaryForVerdict(finalVerdict, deps = {}){
+    const verdict = deps.normalizeGlobalVerdictKey(finalVerdict || '');
+    if(verdict === 'entry') return 'Entry - your plan fits.';
+    if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
+    if(verdict === 'avoid' || verdict === 'dead') return 'Avoid - too weak or broken. Leave it alone.';
+    return 'Monitor - not ready yet. Wait for a clearer bounce.';
+  }
+
+  function finalVerdictFromResolvedContract(resolved, derivedStates, deps = {}){
+    const contract = resolved && typeof resolved === 'object' ? resolved : {};
+    const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
+    const structuralState = String(contract.structuralState || '').trim().toLowerCase();
+    const actionStateKey = String(contract.actionStateKey || '').trim().toLowerCase();
+    const structurallyBroken = structureState === 'broken' || structuralState === 'dead';
+    if(structurallyBroken || actionStateKey === 'rebuild_setup') return 'avoid';
+    if(structuralState === 'entry' || actionStateKey === 'ready_to_act') return 'entry';
+    if(structuralState === 'near_entry') return 'near_entry';
+    return 'monitor';
+  }
+
   function primaryShortlistStatusChip(view, deps = {}){
     const item = view && view.item ? view.item : view;
-    const globalVerdict = deps.resolveGlobalVerdict(item);
-    const badge = deps.getBadge(globalVerdict.final_verdict);
+    const visualState = deps.resolveVisualState
+      ? deps.resolveVisualState(item, 'scanner')
+      : null;
+    const badge = visualState && visualState.badge
+      ? visualState.badge
+      : deps.getBadge('monitor');
     return {
       label:badge.text,
       className:badge.className,
       modifiers:[],
-      primaryState:deps.normalizeGlobalVerdictKey(globalVerdict.final_verdict)
+      primaryState:deps.normalizeGlobalVerdictKey(visualState && (visualState.finalVerdict || visualState.final_verdict) || 'monitor')
     };
   }
 
   function resolveVisualState(record, context = 'scanner', options = {}, deps = {}){
     const safeRecord = record && typeof record === 'object' ? record : {};
-    const globalVerdict = deps.resolveGlobalVerdict(safeRecord);
-    const state = visualStateKey(globalVerdict.final_verdict, deps);
+    const derivedStates = options.derivedStates || deps.analysisDerivedStatesFromRecord(safeRecord);
+    const effectivePlan = options.effectivePlan || deps.effectivePlanForRecord(safeRecord, {allowScannerFallback:true});
+    const displayedPlan = options.displayedPlan || deps.deriveCurrentPlanState(
+      effectivePlan.entry,
+      effectivePlan.stop,
+      effectivePlan.firstTarget,
+      safeRecord.marketData && safeRecord.marketData.currency
+    );
+    const resolvedContract = options.resolvedContract || deps.resolveFinalStateContract(safeRecord, {
+      context,
+      derivedStates,
+      displayedPlan
+    });
+    const legacyVerdict = typeof deps.resolveGlobalVerdict === 'function'
+      ? deps.resolveGlobalVerdict(safeRecord)
+      : null;
+    const rawVerdict = finalVerdictFromResolvedContract(resolvedContract, derivedStates, deps);
+    const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
+    const deadGuardApplied = structureState !== 'broken' && rawVerdict === 'dead';
+    const finalVerdict = deadGuardApplied ? 'monitor' : rawVerdict;
+    const state = visualStateKey(finalVerdict, deps);
     const visual_tone = visualToneForState(state);
-    const score = clampScore(globalVerdict.setup_score);
+    const score = clampScore(options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord));
     const styleAttr = visualStyleForState(state, score);
+    const badge = deps.getBadge(finalVerdict);
+    const bucket = deps.getBucket(finalVerdict);
+    const conflictingLegacyStateDetected = !!(
+      legacyVerdict
+      && deps.normalizeGlobalVerdictKey(legacyVerdict.final_verdict || '') !== deps.normalizeGlobalVerdictKey(finalVerdict)
+    );
     return {
       state,
-      decision_summary:globalVerdict.decision_summary || '',
+      decision_summary:decisionSummaryForVerdict(finalVerdict, deps),
       visual_tone,
       score,
       className:`visual-state-card visual-state-${state} visual-tone-${visual_tone}`,
@@ -76,14 +125,27 @@
       backgroundClass:'',
       badgeToneClass:'',
       scoreClass:'',
-      debugToneSource:'resolveVisualState',
+      debugToneSource:'resolveFinalStateContract',
       styleAttr,
-      finalVerdict:globalVerdict.final_verdict,
-      bucket:globalVerdict.bucket,
-      lifecycle:globalVerdict.lifecycle,
-      allowPlan:globalVerdict.allow_plan,
-      allowWatchlist:globalVerdict.allow_watchlist,
-      reason:globalVerdict.reason,
+      badge,
+      finalVerdict,
+      final_verdict:finalVerdict,
+      bucket,
+      allowPlan:['entry','near_entry'].includes(finalVerdict),
+      allow_plan:['entry','near_entry'].includes(finalVerdict),
+      allowWatchlist:['monitor','near_entry','entry'].includes(finalVerdict),
+      allow_watchlist:['monitor','near_entry','entry'].includes(finalVerdict),
+      reason:decisionSummaryForVerdict(finalVerdict, deps),
+      ui_state_source:'resolveFinalStateContract',
+      final_verdict_rendered:finalVerdict,
+      bucket_rendered:bucket,
+      dead_guard_applied:deadGuardApplied,
+      dead_trigger_source:rawVerdict === 'dead' || rawVerdict === 'avoid'
+        ? (structureState === 'broken' ? 'structure_broken' : 'explicit_invalidation')
+        : null,
+      conflicting_legacy_state_detected:conflictingLegacyStateDetected,
+      resolvedContract,
+      legacyVerdict,
       context
     };
   }

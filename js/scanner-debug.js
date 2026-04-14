@@ -236,6 +236,7 @@
     }
     const item = view && view.item ? view.item : {};
     const globalVerdict = deps.resolveGlobalVerdict(item);
+    const visualState = deps.resolveVisualState ? deps.resolveVisualState(item, 'scanner') : null;
     const nextAction = deps.getActions(globalVerdict.final_verdict || '');
     const baseSection = renderDebugSectionMarkup('Base Assessment', [
       {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
@@ -246,6 +247,12 @@
       {label:'Volume', value:(view && view.setupStates && view.setupStates.volumeState) || resolution.volume_state || '(none)'}
     ], deps);
     const finalSection = renderDebugSectionMarkup('Final Decision', [
+      {label:'UI State Source', value:(visualState && visualState.ui_state_source) || '(none)'},
+      {label:'Final Verdict Rendered', value:(visualState && (visualState.final_verdict_rendered || visualState.finalVerdict)) || '(none)'},
+      {label:'Bucket Rendered', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
+      {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
+      {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
+      {label:'Conflicting Legacy State Detected', value:visualState && visualState.conflicting_legacy_state_detected ? 'true' : 'false'},
       {label:'Scanner Verdict', value:globalVerdict.base_verdict || '(none)'},
       {label:'Tracked Verdict', value:globalVerdict.tracked_verdict || '(none)'},
       {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
@@ -300,6 +307,7 @@
   function renderScannerVisualDebugContent(view, deps = {}){
     const item = view && view.item ? view.item : {};
     const globalVerdict = deps.resolveGlobalVerdict(item);
+    const visualState = deps.resolveVisualState ? deps.resolveVisualState(item, 'scanner') : null;
     const statusChip = deps.primaryShortlistStatusChip(view || {});
     const structureQuality = String(view && view.setupStates && view.setupStates.structureQuality || '').toLowerCase();
     const bounceState = String(view && view.setupStates && view.setupStates.bounceState || '').toLowerCase();
@@ -317,6 +325,12 @@
       {label:'Volume', value:(view && view.setupStates && view.setupStates.volumeState) || resolution.volume_state || '(none)'}
     ], deps);
     const finalSection = renderDebugSectionMarkup('Final Decision', [
+      {label:'UI State Source', value:(visualState && visualState.ui_state_source) || '(none)'},
+      {label:'Final Verdict Rendered', value:(visualState && (visualState.final_verdict_rendered || visualState.finalVerdict)) || '(none)'},
+      {label:'Bucket Rendered', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
+      {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
+      {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
+      {label:'Conflicting Legacy State Detected', value:visualState && visualState.conflicting_legacy_state_detected ? 'true' : 'false'},
       {label:'Scanner Verdict', value:globalVerdict.base_verdict || '(none)'},
       {label:'Tracked Verdict', value:globalVerdict.tracked_verdict || '(none)'},
       {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
