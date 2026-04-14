@@ -214,6 +214,13 @@
     const rrValue = Number.isFinite(Number(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio))
       ? Number(displayedPlan.rewardRisk.rrRatio)
       : null;
+    const currentPrice = Number.isFinite(Number(item && item.marketData && item.marketData.price))
+      ? Number(item.marketData.price)
+      : null;
+    const stopPrice = Number.isFinite(Number(item && item.plan && item.plan.stop))
+      ? Number(item.plan.stop)
+      : null;
+    const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
     const planRealism = typeof deps.evaluatePlanRealism === 'function'
       ? deps.evaluatePlanRealism(item, {
         displayedPlan,
@@ -224,11 +231,18 @@
       ? Number(planRealism.credible_rr)
       : rrValue;
     const capitalFit = String(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || '').toLowerCase();
+    const explicitInvalidationFlag = !!(item && item.plan && item.plan.invalidatedState);
+    const explicitInvalidationReason = explicitInvalidationFlag && (structureState === 'broken' || trendState === 'broken' || brokenBelowStop)
+      ? (structureState === 'broken'
+        ? 'Structure is broken.'
+        : (trendState === 'broken'
+          ? 'Trend is broken.'
+          : 'Price breached stop structure.'))
+      : '';
     const structurallyBroken = !!(
-      resolved.terminal
-      || structureState === 'broken'
+      structureState === 'broken'
       || trendState === 'broken'
-      || resolved.structuralState === 'dead'
+      || brokenBelowStop
     );
     const weakStructure = ['weak','weakening','developing_loose'].includes(structureState);
     const tentativeBounce = ['none','unconfirmed','attempt','early'].includes(bounceState);
@@ -306,9 +320,20 @@
       && trackedAvoidTriggerSource === 'lifecycle';
     finalVerdict = normalizeVerdict(isTracked ? trackedVerdict : baseVerdict);
     reason = isTracked ? trackedReason : (lifecycleDowngradeSuppressed ? 'Pre-watchlist lifecycle downgrade suppressed.' : trackedReason);
+    const avoidAllowedByStructureConsistencyGuard = structurallyBroken;
+    if(!avoidAllowedByStructureConsistencyGuard && (finalVerdict === 'avoid' || finalVerdict === 'dead')){
+      finalVerdict = 'monitor';
+      reason = 'Setup is weak and not tradeable yet, but not structurally broken.';
+    }
     const avoidTriggerSource = (finalVerdict === 'avoid' || finalVerdict === 'dead')
       ? (structurallyBroken ? 'structure_broken' : null)
       : null;
+    const deadTriggerSource = (finalVerdict === 'avoid' || finalVerdict === 'dead')
+      ? (structurallyBroken ? 'structure_broken' : null)
+      : null;
+    const lifecycleDropReason = trackedAvoidTriggerSource === 'lifecycle'
+      ? trackedReason
+      : '';
 
     const lifecycleMap = {
       entry:'active',
@@ -341,9 +366,14 @@
       reason,
       final_state_reason:'derived from structureState only',
       avoid_trigger_source:avoidTriggerSource,
+      dead_trigger_source:deadTriggerSource,
       downgrade_applied:baseVerdict !== trackedVerdict,
       downgrade_reason:trackedReason,
       lifecycle_downgrade_suppressed:lifecycleDowngradeSuppressed,
+      explicit_invalidation_reason:explicitInvalidationReason || '(none)',
+      structure_to_label_mapping_source:'resolveGlobalVerdict(structure_state)',
+      lifecycle_drop_reason:lifecycleDropReason || '(none)',
+      avoid_allowed_by_structure_consistency_guard:avoidAllowedByStructureConsistencyGuard,
       entry_gate_pass:guardedVerdict.entry_gate_pass,
       entry_gate_reasons:guardedVerdict.entry_gate_reasons,
       near_entry_gate_pass:guardedVerdict.near_entry_gate_pass,

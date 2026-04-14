@@ -275,6 +275,12 @@
       {label:'Bucket Rendered', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
       {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
       {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
+      {label:'Explicit Invalidation Reason', value:(visualState && visualState.explicit_invalidation_reason) || globalVerdict.explicit_invalidation_reason || '(none)'},
+      {label:'Structure->Label Source', value:(visualState && visualState.structure_to_label_mapping_source) || globalVerdict.structure_to_label_mapping_source || '(none)'},
+      {label:'Lifecycle Drop Reason', value:(visualState && visualState.lifecycle_drop_reason) || globalVerdict.lifecycle_drop_reason || '(none)'},
+      {label:'Avoid Allowed By Structure Guard', value:(visualState && typeof visualState.avoid_allowed_by_structure_consistency_guard === 'boolean')
+        ? (visualState.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')
+        : (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')},
       {label:'Conflicting Legacy State Detected', value:visualState && visualState.conflicting_legacy_state_detected ? 'true' : 'false'},
       {label:'Scanner Verdict', value:globalVerdict.base_verdict || '(none)'},
       {label:'Tracked Verdict', value:globalVerdict.tracked_verdict || '(none)'},
@@ -353,6 +359,12 @@
       {label:'Bucket Rendered', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
       {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
       {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
+      {label:'Explicit Invalidation Reason', value:(visualState && visualState.explicit_invalidation_reason) || globalVerdict.explicit_invalidation_reason || '(none)'},
+      {label:'Structure->Label Source', value:(visualState && visualState.structure_to_label_mapping_source) || globalVerdict.structure_to_label_mapping_source || '(none)'},
+      {label:'Lifecycle Drop Reason', value:(visualState && visualState.lifecycle_drop_reason) || globalVerdict.lifecycle_drop_reason || '(none)'},
+      {label:'Avoid Allowed By Structure Guard', value:(visualState && typeof visualState.avoid_allowed_by_structure_consistency_guard === 'boolean')
+        ? (visualState.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')
+        : (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')},
       {label:'Conflicting Legacy State Detected', value:visualState && visualState.conflicting_legacy_state_detected ? 'true' : 'false'},
       {label:'Scanner Verdict', value:globalVerdict.base_verdict || '(none)'},
       {label:'Tracked Verdict', value:globalVerdict.tracked_verdict || '(none)'},

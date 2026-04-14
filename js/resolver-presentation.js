@@ -101,7 +101,8 @@
       : null;
     const rawVerdict = finalVerdictFromResolvedContract(resolvedContract, derivedStates, deps);
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
-    const deadGuardApplied = structureState !== 'broken' && rawVerdict === 'dead';
+    const avoidAllowedByStructureConsistencyGuard = structureState === 'broken';
+    const deadGuardApplied = structureState !== 'broken' && (rawVerdict === 'dead' || rawVerdict === 'avoid');
     const finalVerdict = deadGuardApplied ? 'monitor' : rawVerdict;
     const state = visualStateKey(finalVerdict, deps);
     const visual_tone = visualToneForState(state);
@@ -109,10 +110,20 @@
     const styleAttr = visualStyleForState(state, score);
     const badge = deps.getBadge(finalVerdict);
     const bucket = deps.getBucket(finalVerdict);
+    const normalizedRenderedVerdict = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict);
+    const normalizedLegacyVerdict = legacyVerdict
+      ? (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(legacyVerdict.final_verdict || legacyVerdict.finalVerdict || '')
+      : '';
     const conflictingLegacyStateDetected = !!(
-      legacyVerdict
-      && (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(legacyVerdict.final_verdict || '') !== (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict)
+      normalizedLegacyVerdict
+      && normalizedLegacyVerdict !== normalizedRenderedVerdict
     );
+    const explicitInvalidationReason = legacyVerdict && legacyVerdict.explicit_invalidation_reason
+      ? String(legacyVerdict.explicit_invalidation_reason)
+      : '(none)';
+    const lifecycleDropReason = legacyVerdict && legacyVerdict.lifecycle_drop_reason
+      ? String(legacyVerdict.lifecycle_drop_reason)
+      : '(none)';
     return {
       state,
       decision_summary:decisionSummaryForVerdict(finalVerdict, deps),
@@ -141,8 +152,12 @@
       bucket_rendered:bucket,
       dead_guard_applied:deadGuardApplied,
       dead_trigger_source:rawVerdict === 'dead' || rawVerdict === 'avoid'
-        ? (structureState === 'broken' ? 'structure_broken' : 'explicit_invalidation')
+        ? (avoidAllowedByStructureConsistencyGuard ? 'structure_broken' : null)
         : null,
+      explicit_invalidation_reason:explicitInvalidationReason,
+      structure_to_label_mapping_source:'resolveVisualState(structure_guard)',
+      lifecycle_drop_reason:lifecycleDropReason,
+      avoid_allowed_by_structure_consistency_guard:avoidAllowedByStructureConsistencyGuard,
       conflicting_legacy_state_detected:conflictingLegacyStateDetected,
       resolvedContract,
       legacyVerdict,

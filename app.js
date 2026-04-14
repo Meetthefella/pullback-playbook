@@ -3554,6 +3554,9 @@ function watchlistLifecycleSnapshot(record){
     refresh_demote_reason:structureGate.refresh_demote_reason || '',
     structural_alive_at_refresh:structureGate.structural_alive_at_refresh ? 'true' : 'false',
     avoid_allowed_by_structure_gate:structureGate.avoid_allowed_by_structure_gate ? 'true' : 'false',
+    explicit_invalidation_reason:structureGate.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)',
+    lifecycle_drop_reason:structureGate.lifecycle_drop_reason || globalVerdict.lifecycle_drop_reason || '(none)',
+    avoid_allowed_by_structure_consistency_guard:globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false',
     remainingTradingDays,
     rank:watchlistLifecycleStateRank(state),
     hasMeaningfulImprovement
@@ -4005,6 +4008,12 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Bucket Rendered', value:globalVisual.bucket_rendered || globalVisual.bucket || 'n/a'},
     {label:'Dead Guard Applied', value:globalVisual.dead_guard_applied ? 'true' : 'false'},
     {label:'Dead Trigger Source', value:globalVisual.dead_trigger_source || '(none)'},
+    {label:'Explicit Invalidation Reason', value:globalVisual.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)'},
+    {label:'Structure->Label Source', value:globalVisual.structure_to_label_mapping_source || globalVerdict.structure_to_label_mapping_source || '(none)'},
+    {label:'Lifecycle Drop Reason', value:globalVisual.lifecycle_drop_reason || globalVerdict.lifecycle_drop_reason || '(none)'},
+    {label:'Avoid Allowed By Structure Guard', value:(typeof globalVisual.avoid_allowed_by_structure_consistency_guard === 'boolean'
+      ? (globalVisual.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')
+      : (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false'))},
     {label:'Conflicting Legacy State Detected', value:globalVisual.conflicting_legacy_state_detected ? 'true' : 'false'},
     {label:'Final Verdict', value:globalVerdict.final_verdict || 'n/a'},
     {label:'Tone', value:globalVerdict.tone || 'n/a'},
@@ -4019,6 +4028,9 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Refresh Demote Reason', value:lifecycleSnapshot.refresh_demote_reason || '(none)'},
     {label:'Structural Alive At Refresh', value:lifecycleSnapshot.structural_alive_at_refresh || 'n/a'},
     {label:'Avoid Allowed By Structure Gate', value:lifecycleSnapshot.avoid_allowed_by_structure_gate || 'n/a'},
+    {label:'Explicit Invalidation Reason', value:lifecycleSnapshot.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)'},
+    {label:'Lifecycle Drop Reason', value:lifecycleSnapshot.lifecycle_drop_reason || globalVerdict.lifecycle_drop_reason || '(none)'},
+    {label:'Avoid Allowed By Structure Consistency Guard', value:lifecycleSnapshot.avoid_allowed_by_structure_consistency_guard || (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')},
     {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
     {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
@@ -6951,13 +6963,13 @@ function legacyResolveFinalStateContract(record, options = {}){
     nextPossibleState = 'None';
     addReason(blockerReason);
   }else if(item.plan && item.plan.invalidatedState){
-    actionStateKey = 'rebuild_setup';
+    actionStateKey = 'hold_confirmation';
     blockerCode = 'setup_invalidated';
-    blockerReason = 'Setup invalidated';
-    actionLabel = 'Rebuild setup';
-    actionShortLabel = 'Rebuild setup';
-    actionTone = 'danger';
-    nextPossibleState = 'None';
+    blockerReason = 'Previous trigger invalidated; wait for a fresh setup';
+    actionLabel = 'Wait for a fresh setup';
+    actionShortLabel = 'Wait for reset';
+    actionTone = 'warning';
+    nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
   }else if(item.plan && item.plan.missedState){
     actionStateKey = 'hold_confirmation';
@@ -7563,7 +7575,6 @@ function currentHardFailVerdictForRecord(record){
     || (Number.isFinite(price) && Number.isFinite(ma200) && price < ma200)
     || (Number.isFinite(ma50) && Number.isFinite(ma200) && ma50 < ma200);
   if(brokenTrend) return 'Avoid';
-  if(item.plan && (item.plan.invalidatedState || item.plan.missedState)) return 'Avoid';
   return '';
 }
 
@@ -7600,7 +7611,7 @@ function executionDowngradeVerdictForRecord(record, options = {}){
     )
   );
 
-  if(item.plan && item.plan.invalidatedState) return 'Avoid';
+  if(item.plan && item.plan.invalidatedState) return 'Watch';
   if(executionCapitalBlocked(displayedPlan)) return provisionalVerdict === 'Entry' ? 'Near Entry' : 'Watch';
   if(executionCapitalHeavy(displayedPlan)){
     if(provisionalVerdict === 'Entry') return 'Near Entry';
@@ -8205,14 +8216,10 @@ function isTerminalDeadSetup(record, options = {}){
   const trendState = String(derivedStates.trendState || '').toLowerCase();
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stopPrice = numericOrNull(item.plan && item.plan.stop);
-  const invalidated = !!(item.plan && item.plan.invalidatedState);
-  const missed = !!(item.plan && item.plan.missedState);
   const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
 
   if(structureState === 'broken') return {dead:true, reasonCode:'broken_structure', terminalTriggerUsed:'structure_state'};
   if(trendState === 'broken') return {dead:true, reasonCode:'broken_trend', terminalTriggerUsed:'trend_state'};
-  if(invalidated) return {dead:true, reasonCode:'invalidated', terminalTriggerUsed:'plan_invalidated'};
-  if(missed) return {dead:true, reasonCode:'missed_state', terminalTriggerUsed:'plan_missed'};
   if(brokenBelowStop) return {dead:true, reasonCode:'stop_breach', terminalTriggerUsed:'price_below_stop'};
 
   return {dead:false, reasonCode:'', terminalTriggerUsed:'', fallbackStateIfNotDead:'monitor'};
@@ -13222,6 +13229,12 @@ function renderReviewWorkspace(options = {}){
     {label:'Bucket Rendered', value:visualState.bucket_rendered || visualState.bucket || '(none)'},
     {label:'Dead Guard Applied', value:visualState.dead_guard_applied ? 'true' : 'false'},
     {label:'Dead Trigger Source', value:visualState.dead_trigger_source || '(none)'},
+    {label:'Explicit Invalidation Reason', value:visualState.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)'},
+    {label:'Structure->Label Source', value:visualState.structure_to_label_mapping_source || globalVerdict.structure_to_label_mapping_source || '(none)'},
+    {label:'Lifecycle Drop Reason', value:visualState.lifecycle_drop_reason || globalVerdict.lifecycle_drop_reason || '(none)'},
+    {label:'Avoid Allowed By Structure Guard', value:(typeof visualState.avoid_allowed_by_structure_consistency_guard === 'boolean'
+      ? (visualState.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')
+      : (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false'))},
     {label:'Conflicting Legacy State Detected', value:visualState.conflicting_legacy_state_detected ? 'true' : 'false'},
     {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
     {label:'Tone', value:globalVerdict.tone || '(none)'},
@@ -14827,7 +14840,6 @@ function resolveFinalStateContract(record, options = {}){
     || structureState === 'broken'
     || trendState === 'broken'
     || brokenBelowStop
-    || (item.plan && item.plan.invalidatedState)
   );
 
   const hasPlanValues = !!(
@@ -15036,7 +15048,6 @@ function resolvePreLifecycleStateContract(record){
   const hardStructureBroken = !!(
     structureState === 'broken'
     || trendState === 'broken'
-    || (item.plan && item.plan.invalidatedState)
   );
   const planStatusKey = String(displayedPlan.status || '').toLowerCase() || 'missing';
   const baseVerdict = hardStructureBroken
@@ -15124,23 +15135,30 @@ function watchlistRefreshStructureGate(record){
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
   const explicitInvalidation = !!(item.plan && item.plan.invalidatedState);
+  const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const stopPrice = numericOrNull(item.plan && item.plan.stop);
+  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
+  const structuralBroken = deadCheck.dead || structureState === 'broken' || trendState === 'broken' || brokenBelowStop;
+  const explicitInvalidationAllowed = explicitInvalidation && structuralBroken;
   const structuralAlive = !deadCheck.dead
     && structureState !== 'broken'
     && trendState !== 'broken'
-    && !explicitInvalidation;
+    && !brokenBelowStop;
   return {
     structural_alive_at_refresh:structuralAlive,
     avoid_allowed_by_structure_gate:!structuralAlive,
     refresh_demote_reason:!structuralAlive
-      ? (explicitInvalidation
+      ? (explicitInvalidationAllowed
         ? 'Explicit setup invalidation.'
         : (deadCheck.dead
           ? (deadCheck.reason || deadCheck.reasonCode || 'Dead setup rule triggered.')
           : 'Structure is broken.'))
       : 'Structurally alive; keep on monitor.',
-    dead_trigger_source:explicitInvalidation
+    dead_trigger_source:explicitInvalidationAllowed
       ? 'explicit_invalidation'
-      : (deadCheck.dead || structureState === 'broken' || trendState === 'broken' ? 'structure_broken' : null)
+      : (structuralBroken ? 'structure_broken' : null),
+    explicit_invalidation_reason:explicitInvalidationAllowed ? 'Explicit invalidation with hard structural damage.' : '(none)',
+    lifecycle_drop_reason:!structuralAlive ? 'watchlist_refresh_structure_gate' : '(none)'
   };
 }
 
@@ -15159,6 +15177,9 @@ function applyGlobalVerdictGates(record, options = {}){
   item.watchlist.debug.refresh_demote_reason = structureGate.refresh_demote_reason || (globalVerdict.reason || globalVerdict.downgrade_reason || '(none)');
   item.watchlist.debug.structural_alive_at_refresh = structureGate.structural_alive_at_refresh ? 'true' : 'false';
   item.watchlist.debug.avoid_allowed_by_structure_gate = structureGate.avoid_allowed_by_structure_gate ? 'true' : 'false';
+  item.watchlist.debug.explicit_invalidation_reason = structureGate.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)';
+  item.watchlist.debug.lifecycle_drop_reason = structureGate.lifecycle_drop_reason || globalVerdict.lifecycle_drop_reason || '(none)';
+  item.watchlist.debug.avoid_allowed_by_structure_consistency_guard = globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false';
   if(item.watchlist && item.watchlist.inWatchlist && !globalVerdict.allow_watchlist){
     if(!structureGate.avoid_allowed_by_structure_gate){
       appendWatchlistDebugEvent(item, {
@@ -15368,14 +15389,10 @@ function isTerminalDeadSetup(record, options = {}){
   const trendState = String(derivedStates.trendState || '').toLowerCase();
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stopPrice = numericOrNull(item.plan && item.plan.stop);
-  const invalidated = !!(item.plan && item.plan.invalidatedState);
-  const missed = !!(item.plan && item.plan.missedState);
   const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
 
   if(structureState === 'broken') return {dead:true, reasonCode:'broken_structure', terminalTriggerUsed:'structure_state'};
   if(trendState === 'broken') return {dead:true, reasonCode:'broken_trend', terminalTriggerUsed:'trend_state'};
-  if(invalidated) return {dead:true, reasonCode:'invalidated', terminalTriggerUsed:'plan_invalidated'};
-  if(missed) return {dead:true, reasonCode:'missed_state', terminalTriggerUsed:'plan_missed'};
   if(brokenBelowStop) return {dead:true, reasonCode:'stop_breach', terminalTriggerUsed:'price_below_stop'};
   return {dead:false, reasonCode:'', terminalTriggerUsed:'', fallbackStateIfNotDead:'monitor'};
 }
@@ -15399,8 +15416,6 @@ function validateCurrentPlan(record, options = {}){
   const structurallyDead = !!(
     structureState === 'broken'
     || trendState === 'broken'
-    || (rawRecord.plan && rawRecord.plan.invalidatedState)
-    || (rawRecord.plan && rawRecord.plan.missedState)
     || (Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= (stop * 0.995))
   );
   const structurePremature = !trigger.trendValid || !trigger.structureIntact;
