@@ -8927,27 +8927,37 @@ function resolveSetupPatternUi({
 }
 
 function entryTriggerConditionForSummary({bounceState, pullbackState, volumeState, structureState} = {}){
-  const conditions = [];
-  if(['none','unconfirmed','early'].includes(bounceState)){
-    conditions.push('price forms a strong bullish candle with a higher low');
-  }else if(bounceState === 'attempt'){
-    conditions.push('bounce follow-through prints a strong close above the prior day');
+  const bounce = String(bounceState || '').trim().toLowerCase();
+  const structure = String(structureState || '').trim().toLowerCase();
+  const pullback = String(pullbackState || '').trim().toLowerCase();
+  const volume = String(volumeState || '').trim().toLowerCase();
+
+  // 1) No bounce: always prioritize structure formation.
+  if(bounce === 'none'){
+    return 'Higher low & breaks prior high';
   }
-  if(['near_20ma','at_20ma'].includes(pullbackState)){
-    conditions.push('price reclaims the 20MA with a strong close');
-  }else if(['near_50ma','at_50ma'].includes(pullbackState)){
-    conditions.push('price reclaims the 50MA with a strong close');
-  }else if(['off_level','extended','deep','none'].includes(pullbackState)){
-    conditions.push('pullback returns to a clean 20MA or 50MA support zone');
+
+  // 4) Weak-structure override for safer confirmation wording.
+  if(['weakening','developing_loose'].includes(structure)){
+    if(pullback === 'near_20ma') return 'Strong close above prior high & holds 20MA';
+    if(pullback === 'near_50ma') return 'Reclaims 50MA & strong close with volume';
   }
-  if(volumeState === 'weak'){
-    conditions.push('volume expands on the upward move');
+
+  // 2) Early/attempt bounce.
+  if(bounce === 'attempt'){
+    if(pullback === 'near_20ma') return 'Strong close above prior high & holds 20MA';
+    if(pullback === 'near_50ma') return 'Reclaims 50MA & strong close with volume';
+    return 'Strong close above prior high & holds level';
   }
-  if(['weak','weakening','developing_loose'].includes(structureState)){
-    conditions.push('structure prints a higher low and holds it');
+
+  // 3) Confirmed bounce.
+  if(bounce === 'confirmed'){
+    if(volume === 'weak') return 'Breaks prior high & volume expands';
+    if(['strong','intact'].includes(structure)) return 'Breaks prior high & holds above level';
   }
-  if(!conditions.length) conditions.push('price holds support and closes strong on rising volume');
-  return conditions.slice(0, 2).join(' and ');
+
+  // 5) Fallback.
+  return 'Breaks prior high & holds above level';
 }
 
 function nextUpgradeStateForSummary(verdict){
