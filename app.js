@@ -4284,6 +4284,13 @@ function renderWatchlist(){
       });
       const globalVerdict = resolveGlobalVerdict(record);
       const shortReason = decisionCopy.reason;
+      record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+      if(!record.watchlist.debug.holdTrace){
+        const seededAt = new Date().toISOString();
+        record.watchlist.debug.holdTrace = `hold_helper.rendered | ${seededAt}`;
+        const history = Array.isArray(record.watchlist.debug.holdTraceHistory) ? record.watchlist.debug.holdTraceHistory : [];
+        record.watchlist.debug.holdTraceHistory = [`hold_helper.rendered | ${seededAt}`, ...history].slice(0, 8);
+      }
       const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
         derivedStates,
         displayedPlan,
