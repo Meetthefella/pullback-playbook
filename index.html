@@ -41,7 +41,7 @@
         </button>
         <button class="focus-rail-item" id="accountRiskPill" type="button" data-control-strip="account">
           <span class="focus-rail-label">Account</span>
-          <strong class="focus-rail-value" id="accountRiskStrip">GBP 4,000 | GBP 40</strong>
+          <strong class="focus-rail-value" id="accountRiskStrip">GBP 4,000 | £--</strong>
         </button>
         <button class="focus-rail-item" id="scannerModePill" type="button" data-control-strip="mode">
           <span class="focus-rail-label">Mode</span>
@@ -51,6 +51,25 @@
           <span class="focus-rail-label">Setup</span>
           <strong class="focus-rail-value" id="setupTypeStrip">Unknown</strong>
         </button>
+      </div>
+      <div class="risk-quick-anchor" id="riskQuickAnchor">
+        <button class="risk-quick-pill" id="riskQuickToggle" type="button" aria-expanded="false" aria-controls="riskQuickPanel">Risk £--</button>
+        <div class="risk-quick-panel" id="riskQuickPanel" hidden>
+          <div class="risk-quick-panel__row">
+            <strong>Risk per trade</strong>
+            <span id="riskQuickValue">£--</span>
+          </div>
+          <input id="riskQuickSlider" type="range" min="5" max="200" step="1" value="40" />
+          <div class="risk-quick-presets" id="riskQuickPresets">
+            <button type="button" data-risk-preset="10">£10</button>
+            <button type="button" data-risk-preset="20">£20</button>
+            <button type="button" data-risk-preset="30">£30</button>
+            <button type="button" data-risk-preset="40">£40</button>
+            <button type="button" data-risk-preset="50">£50</button>
+            <button type="button" data-risk-preset="75">£75</button>
+            <button type="button" data-risk-preset="100">£100</button>
+          </div>
+        </div>
       </div>
       <div class="control-focus-tray" id="controlStripSelector">
         <div class="control-focus-tray__label" id="controlStripSelectorLabel">Market</div>

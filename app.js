@@ -223,6 +223,7 @@ const checklistLabels = {
 const DEFAULT_STATE = {
   accountSize:4000,
   maxRisk:40,
+  userRiskPerTrade:40,
   riskPercent:0.01,
   maxLossOverride:'',
   wholeSharesOnly:true,
@@ -281,6 +282,7 @@ uiState.watchlistLiveRefreshPending = uiState.watchlistLiveRefreshPending && typ
 uiState.reviewCapitalSimulation = uiState.reviewCapitalSimulation && typeof uiState.reviewCapitalSimulation === 'object'
   ? uiState.reviewCapitalSimulation
   : {ticker:'', usagePercent:null};
+uiState.riskQuickOpen = !!uiState.riskQuickOpen;
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -388,9 +390,16 @@ let pushConfigPromise = null;
 let watchlistLifecycleTimer = null;
 let watchlistLifecycleListenersBound = false;
 let marketStatusTimer = null;
+let riskQuickRefreshRaf = 0;
 
 function formatGbp(value){
   return `GBP ${Number(value || 0).toLocaleString()}`;
+}
+
+function formatPound(value){
+  const amount = Number(value || 0);
+  if(!Number.isFinite(amount)) return '£0';
+  return `£${amount.toLocaleString(undefined, {maximumFractionDigits:2})}`;
 }
 
 function currentSetupType(){
@@ -412,14 +421,22 @@ function setActiveReviewTicker(ticker){
 }
 
 function currentMaxLoss(){
-  const override = numericOrNull(state.maxLossOverride);
-  if(Number.isFinite(override) && override > 0) return override;
   const accountSize = numericOrNull(state.accountSize);
   const riskPercent = numericOrNull(state.riskPercent);
-  if(Number.isFinite(accountSize) && Number.isFinite(riskPercent) && accountSize > 0 && riskPercent > 0){
-    return accountSize * riskPercent;
+  const override = numericOrNull(state.maxLossOverride);
+  const persisted = numericOrNull(state.userRiskPerTrade);
+  let resolvedRisk = 0;
+  if(Number.isFinite(override) && override > 0){
+    resolvedRisk = override;
+  }else if(Number.isFinite(accountSize) && Number.isFinite(riskPercent) && accountSize > 0 && riskPercent > 0){
+    resolvedRisk = accountSize * riskPercent;
+  }else if(Number.isFinite(persisted) && persisted > 0){
+    resolvedRisk = persisted;
+  }else{
+    resolvedRisk = numericOrNull(state.maxRisk) || 0;
   }
-  return numericOrNull(state.maxRisk) || 0;
+  state.userRiskPerTrade = resolvedRisk > 0 ? resolvedRisk : 0;
+  return state.userRiskPerTrade;
 }
 
 function riskSettingsValid(){
@@ -430,7 +447,7 @@ function currentRiskSettings(){
   return {
     account_size:numericOrNull(state.accountSize) || 0,
     risk_percent:numericOrNull(state.riskPercent) || 0,
-    max_loss_override:numericOrNull(state.maxLossOverride),
+    max_loss_override:numericOrNull(state.userRiskPerTrade || currentMaxLoss()),
     whole_shares_only:state.wholeSharesOnly !== false
   };
 }
@@ -534,6 +551,7 @@ function buildSettingsPersistedState(sourceState){
   return {
     accountSize:baseState.accountSize,
     maxRisk:baseState.maxRisk,
+    userRiskPerTrade:baseState.userRiskPerTrade,
     riskPercent:baseState.riskPercent,
     maxLossOverride:baseState.maxLossOverride,
     wholeSharesOnly:baseState.wholeSharesOnly,
@@ -687,6 +705,7 @@ function buildLitePersistedState(sourceState){
   return {
     accountSize:baseState.accountSize,
     maxRisk:baseState.maxRisk,
+    userRiskPerTrade:baseState.userRiskPerTrade,
     riskPercent:baseState.riskPercent,
     maxLossOverride:baseState.maxLossOverride,
     wholeSharesOnly:baseState.wholeSharesOnly,
@@ -2537,7 +2556,8 @@ function syncStateFromDom(){
   state.riskPercent = Number($('riskPercent').value || 0);
   state.maxLossOverride = $('maxLossOverride') ? $('maxLossOverride').value.trim() : '';
   state.wholeSharesOnly = $('wholeSharesOnly') ? !!$('wholeSharesOnly').checked : true;
-  state.maxRisk = currentMaxLoss();
+  state.userRiskPerTrade = currentMaxLoss();
+  state.maxRisk = state.userRiskPerTrade;
   state.marketStatus = $('marketStatus').value;
   state.marketStatusMode = normalizeMarketStatusMode($('marketStatusMode') ? $('marketStatusMode').value : state.marketStatusMode);
   state.setupType = $('scannerSetupType') ? normalizeScanType($('scannerSetupType').value) : '';
@@ -2598,10 +2618,14 @@ function loadState(){
     ? Number(state.riskPercent)
     : ((Number(state.accountSize) > 0 && Number(state.maxRisk) > 0) ? Number(state.maxRisk) / Number(state.accountSize) : 0.01);
   state.maxLossOverride = state.maxLossOverride == null ? '' : String(state.maxLossOverride);
+  state.userRiskPerTrade = Number.isFinite(Number(state.userRiskPerTrade)) && Number(state.userRiskPerTrade) > 0
+    ? Number(state.userRiskPerTrade)
+    : 0;
   state.wholeSharesOnly = state.wholeSharesOnly !== false;
   state.marketStatusMode = normalizeMarketStatusMode(state.marketStatusMode);
   state.setupType = normalizeScanType(state.setupType);
-  state.maxRisk = currentMaxLoss();
+  state.userRiskPerTrade = currentMaxLoss();
+  state.maxRisk = state.userRiskPerTrade;
   state.tickers = parseTickers((state.tickers || []).join('\n'));
   state.universeMode = normalizeUniverseMode(state.universeMode) || defaultUniverseModeForTickers(state.tickers);
   state.recentTickers = uniqueTickers(state.recentTickers || []);
@@ -2725,17 +2749,123 @@ function loadState(){
 }
 
 function renderStats(){
-  state.maxRisk = currentMaxLoss();
+  state.userRiskPerTrade = currentMaxLoss();
+  state.maxRisk = state.userRiskPerTrade;
   const pct = state.accountSize ? ((state.maxRisk / state.accountSize) * 100).toFixed(1) : '0.0';
   if($('accountStat')) $('accountStat').textContent = formatGbp(state.accountSize);
   if($('riskStat')) $('riskStat').textContent = formatGbp(state.maxRisk);
   if($('riskPctStat')) $('riskPctStat').textContent = `${pct}%`;
-  if($('accountRiskStrip')) $('accountRiskStrip').textContent = `${formatGbp(state.accountSize)} | ${formatGbp(state.maxRisk)}`;
+  if($('accountRiskStrip')) $('accountRiskStrip').textContent = `${formatGbp(state.accountSize)}`;
   if($('marketStatusStrip')) $('marketStatusStrip').textContent = marketStatusDisplayValue();
   if($('scannerModeStrip')) $('scannerModeStrip').textContent = scannerModeChipLabel(effectiveUniverseMode());
   if($('setupTypeStrip')) $('setupTypeStrip').textContent = setupTypeChipLabel(state.setupType);
+  renderRiskQuickPanel();
   renderControlStripSelector();
   refreshMarketContextWidgets();
+}
+
+function normalizedRiskQuickValue(value){
+  const numeric = Number(value);
+  if(!Number.isFinite(numeric) || numeric <= 0) return Math.max(5, Math.round(currentMaxLoss() || 40));
+  return Math.max(5, Math.min(200, Math.round(numeric)));
+}
+
+function queueRiskContextRefresh(source = 'risk_quick'){
+  if(riskQuickRefreshRaf){
+    cancelAnimationFrame(riskQuickRefreshRaf);
+    riskQuickRefreshRaf = 0;
+  }
+  riskQuickRefreshRaf = requestAnimationFrame(() => {
+    riskQuickRefreshRaf = 0;
+    refreshRiskContextForActiveSetups({source, force:true});
+  });
+}
+
+function applyUserRiskPerTrade(value, options = {}){
+  const nextRisk = normalizedRiskQuickValue(value);
+  const previous = Number(state.userRiskPerTrade || currentMaxLoss() || 0);
+  state.userRiskPerTrade = nextRisk;
+  state.maxRisk = nextRisk;
+  state.maxLossOverride = String(nextRisk);
+  if(Number.isFinite(Number(state.accountSize)) && Number(state.accountSize) > 0){
+    state.riskPercent = nextRisk / Number(state.accountSize);
+  }
+  if($('maxLossOverride')) $('maxLossOverride').value = String(nextRisk);
+  if($('riskPercent')) $('riskPercent').value = String(state.riskPercent || '');
+  renderRiskQuickPanel();
+  if(Math.abs(previous - nextRisk) < 0.01 && options.force !== true) return;
+  queueRiskContextRefresh(String(options.source || 'risk_quick'));
+}
+
+function openRiskQuickPanel(){
+  uiState.riskQuickOpen = true;
+  renderRiskQuickPanel();
+}
+
+function closeRiskQuickPanel(){
+  uiState.riskQuickOpen = false;
+  renderRiskQuickPanel();
+}
+
+function renderRiskQuickPanel(){
+  const toggle = $('riskQuickToggle');
+  const panel = $('riskQuickPanel');
+  const slider = $('riskQuickSlider');
+  const valueLabel = $('riskQuickValue');
+  if(!toggle || !panel) return;
+  const riskValue = normalizedRiskQuickValue(state.userRiskPerTrade || currentMaxLoss() || 40);
+  toggle.textContent = `Risk ${formatPound(riskValue)}`;
+  toggle.setAttribute('aria-expanded', uiState.riskQuickOpen ? 'true' : 'false');
+  if(valueLabel) valueLabel.textContent = formatPound(riskValue);
+  if(slider) slider.value = String(riskValue);
+  panel.hidden = !uiState.riskQuickOpen;
+  panel.classList.toggle('is-open', !!uiState.riskQuickOpen);
+  const presets = [10,20,30,40,50,75,100];
+  panel.querySelectorAll('[data-risk-preset]').forEach(node => {
+    const preset = Number(node.getAttribute('data-risk-preset') || 0);
+    const active = presets.includes(preset) && preset === riskValue;
+    node.classList.toggle('is-selected', active);
+  });
+}
+
+function bindRiskQuickControls(){
+  const anchor = $('riskQuickAnchor');
+  const toggle = $('riskQuickToggle');
+  const panel = $('riskQuickPanel');
+  const slider = $('riskQuickSlider');
+  if(!anchor || !toggle || !panel || !slider) return;
+  if(anchor.dataset.boundRiskQuick === '1'){
+    renderRiskQuickPanel();
+    return;
+  }
+  anchor.dataset.boundRiskQuick = '1';
+  toggle.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if(uiState.riskQuickOpen) closeRiskQuickPanel();
+    else openRiskQuickPanel();
+  });
+  slider.addEventListener('input', event => {
+    applyUserRiskPerTrade(event.target.value, {source:'risk_slider_live'});
+  });
+  slider.addEventListener('change', event => {
+    applyUserRiskPerTrade(event.target.value, {source:'risk_slider_commit', force:true});
+  });
+  panel.querySelectorAll('[data-risk-preset]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const preset = Number(button.getAttribute('data-risk-preset') || 0);
+      applyUserRiskPerTrade(preset, {source:'risk_preset', force:true});
+      closeRiskQuickPanel();
+    });
+  });
+  document.addEventListener('pointerdown', event => {
+    if(!uiState.riskQuickOpen) return;
+    if(event.target && event.target.closest && event.target.closest('#riskQuickAnchor')) return;
+    closeRiskQuickPanel();
+  }, true);
+  renderRiskQuickPanel();
 }
 
 function scannerModeChipLabel(mode){
@@ -3022,7 +3152,7 @@ function renderControlStripSelector(){
   const config = controlFocusConfig(focusKey);
   label.textContent = config.label;
   if(focusKey === 'account'){
-    optionsBox.innerHTML = `<div class="control-focus-account"><div class="control-focus-account__summary"><strong>${escapeHtml(formatGbp(state.accountSize))} | ${escapeHtml(formatGbp(currentMaxLoss()))}</strong><span>Account size and max risk for the next scan.</span></div><button class="secondary compactbutton" type="button" id="controlFocusAccountAction">Edit Risk Settings</button></div>`;
+    optionsBox.innerHTML = `<div class="control-focus-account"><div class="control-focus-account__summary"><strong>${escapeHtml(formatGbp(state.accountSize))}</strong><span>Risk per trade: ${escapeHtml(formatPound(state.userRiskPerTrade || currentMaxLoss()))}</span></div><button class="secondary compactbutton" type="button" id="controlFocusAccountAction">Edit Risk Settings</button></div>`;
     const button = $('controlFocusAccountAction');
     if(button){
       button.onclick = event => {
@@ -8232,7 +8362,7 @@ function reviewDowngradeSummaryForRecord(record, options = {}){
   if(item.plan && item.plan.invalidatedState) pushReason('Setup invalidated');
   if(item.plan && item.plan.missedState) pushReason('Missed entry window');
   if(executionCapitalBlocked(displayedPlan) || executionCapitalHeavy(displayedPlan)) pushReason(capitalConstraintReasonForPlan(displayedPlan) || 'Capital usage is heavy for this account size.');
-  if(displayedPlan.riskFit && displayedPlan.riskFit.risk_status === 'too_wide') pushReason('Stop is too wide for account risk');
+  if(displayedPlan.riskFit && displayedPlan.riskFit.risk_status === 'too_wide') pushReason(`Stop would be too wide for ${formatPound(currentMaxLoss())} risk`);
   if(displayedPlan.riskFit && displayedPlan.riskFit.risk_status === 'settings_missing') pushReason('Risk settings need checking');
   (qualityAdjustments.adjustmentReasons || []).forEach(pushReason);
   (warningState.reasons || []).forEach(pushReason);
@@ -8760,7 +8890,7 @@ function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
   if(['risk_too_wide'].includes(blockerCode) || blockerReason.includes('risk too wide')){
     return {
       line1:'Risk too high',
-      line2:'The stop is too wide for the account risk'
+      line2:`Stop would be too wide for ${formatPound(currentMaxLoss())} risk`
     };
   }
   return {
@@ -9862,7 +9992,7 @@ function renderPlanProjectionFromRecord(record, options = {}){
   const view = projectTickerForCard(record, options);
   if(view.displayedPlan.status === 'valid'){
     const targetWarning = !!view.item.plan.firstTargetTooClose;
-    return `<div class="tiny">Planned Entry: ${escapeHtml(fmtPrice(view.displayedPlan.entry))} | Planned Stop: ${escapeHtml(fmtPrice(view.displayedPlan.stop))} | Planned First Target: ${escapeHtml(fmtPrice(view.displayedPlan.target))}</div><div class="tiny">Risk ${escapeHtml(riskStatusLabel(view.displayedPlan.riskFit.risk_status || 'plan_missing'))} | Max Loss ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.max_loss) ? view.displayedPlan.riskFit.max_loss.toFixed(2) : String(currentMaxLoss()))} | Planned Risk/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardRisk.riskPerShare) ? view.displayedPlan.rewardRisk.riskPerShare.toFixed(2) : 'N/A')} | Planned Reward/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardPerShare) ? view.displayedPlan.rewardPerShare.toFixed(2) : 'N/A')} | Planned Position ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.position_size) ? String(view.displayedPlan.riskFit.position_size) : 'N/A')}</div><div class="inline-status"><span class="badge ${view.planUiState.className}">${escapeHtml(view.planUiState.label)}</span><span class="tiny">Planned R:R ${escapeHtml(Number.isFinite(view.planUiState.rrRatio) ? view.planUiState.rrRatio.toFixed(2) : 'N/A')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>`;
+    return `<div class="tiny">Planned Entry: ${escapeHtml(fmtPrice(view.displayedPlan.entry))} | Planned Stop: ${escapeHtml(fmtPrice(view.displayedPlan.stop))} | Planned First Target: ${escapeHtml(fmtPrice(view.displayedPlan.target))}</div><div class="tiny">Risk: ${escapeHtml(formatPound(state.userRiskPerTrade || currentMaxLoss()))} | Risk ${escapeHtml(riskStatusLabel(view.displayedPlan.riskFit.risk_status || 'plan_missing'))} | Max Loss ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.max_loss) ? formatPound(view.displayedPlan.riskFit.max_loss) : formatPound(currentMaxLoss()))} | Planned Risk/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardRisk.riskPerShare) ? view.displayedPlan.rewardRisk.riskPerShare.toFixed(2) : 'N/A')} | Planned Reward/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardPerShare) ? view.displayedPlan.rewardPerShare.toFixed(2) : 'N/A')} | Planned Position ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.position_size) ? String(view.displayedPlan.riskFit.position_size) : 'N/A')}</div><div class="inline-status"><span class="badge ${view.planUiState.className}">${escapeHtml(view.planUiState.label)}</span><span class="tiny">Planned R:R ${escapeHtml(Number.isFinite(view.planUiState.rrRatio) ? view.planUiState.rrRatio.toFixed(2) : 'N/A')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>`;
   }
   return `<div class="inline-status"><span class="badge watch">Scan Estimate</span><span class="tiny">Use this card to review charts and define a real plan before acting on scanner estimates.</span></div>${renderEstimatedScannerPlanFromRecord(view.item)}`;
 }
@@ -11739,7 +11869,8 @@ function recomputeRiskContextForRecord(record){
 }
 
 function refreshRiskContextForActiveSetups(options = {}){
-  state.maxRisk = currentMaxLoss();
+  state.userRiskPerTrade = currentMaxLoss();
+  state.maxRisk = state.userRiskPerTrade;
   allTickerRecords().forEach(recomputeRiskContextForRecord);
   runWatchlistLifecycleEvaluation({
     source:String(options.source || 'risk_context'),
@@ -12127,7 +12258,7 @@ function buildAnalysisPayload(card){
     checklistLabels,
     notes:safeCard.notes || '',
     accountSize:state.accountSize,
-    maxRisk:state.maxRisk,
+    maxRisk:state.userRiskPerTrade || currentMaxLoss(),
     chartAttached:!!(safeCard.chartRef && safeCard.chartRef.dataUrl),
     chartFileName:safeCard.chartRef ? safeCard.chartRef.name : '',
     chartMatchStatus:'unclear',
@@ -14703,7 +14834,7 @@ function calculate(options = {}){
   $('rrValue').className = `big ${rrDisplayClass(displayedPlan.rewardRisk.rrRatio)}`.trim();
   if($('plannerBox')) $('plannerBox').className = `panelbox plannerbox ${plannerToneClass(displayedPlan.rewardRisk.rrRatio)}`.trim();
   $('calcNote').textContent = planRealism.plan_realism_reason || (displayedPlan.riskFit.risk_status === 'too_wide'
-    ? `Current max loss is ${formatGbp(displayedPlan.riskFit.max_loss)}. This setup is too wide right now.`
+    ? `Stop would be too wide for ${formatPound(state.userRiskPerTrade || currentMaxLoss())} risk.`
     : (displayedPlan.capitalFit.capital_fit === 'too_expensive'
       ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but the position cost is above the current account size.`
       : (displayedPlan.capitalFit.capital_fit === 'too_heavy'
@@ -14993,7 +15124,7 @@ function buildPromptBody(payload){
     '- Entry should be logical (reclaim, bounce, breakout, or continuation trigger)',
     '- Stop should sit below support, the pullback low, or the invalidation level',
     '- First target should be prior swing high or logical resistance',
-    '- Must respect GBP 40 max loss',
+    `- Must respect ${formatPound(payload.maxRisk)} max loss`,
     '- Respect entry / stop / target values as constraints',
     '- If plan is invalid, too wide, heavy, or unaffordable, do NOT promote setup',
     '- High reward:risk does NOT justify upgrading a weak setup',
@@ -15341,6 +15472,7 @@ on('ocrReviewInput', 'input', syncOcrReviewVisibility);
     updateControlFocusRailVisuals(rail);
   }
 }
+bindRiskQuickControls();
 on('tickerInput', 'input', () => {
   syncUniverseFromInputs();
   if(!uniqueTickers(state.tickers || []).length){
