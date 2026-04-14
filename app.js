@@ -9255,6 +9255,33 @@ function resolvePlanVisibility(setup){
   };
 }
 
+function normalizeUiCopy(text){
+  return String(text || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function isDuplicatedStatusCopy(message, decisionSummary){
+  if(!message || !decisionSummary) return false;
+  return normalizeUiCopy(message) === normalizeUiCopy(decisionSummary);
+}
+
+function nonPlanCalcNoteText(message, decisionSummary){
+  if(isDuplicatedStatusCopy(message, decisionSummary)) return 'Waiting for confirmation.';
+  return message || 'Waiting for confirmation.';
+}
+
+function nonPlanRealismSummaryText(message, decisionSummary){
+  if(isDuplicatedStatusCopy(message, decisionSummary)) return 'R:R not reliable until setup confirms.';
+  return message || 'Waiting for confirmation.';
+}
+
+function nonPlanDiagnosticsSummaryMarkup(message, decisionSummary){
+  if(!message) return '';
+  if(isDuplicatedStatusCopy(message, decisionSummary)){
+    return '<div class="tiny">Setup is still forming. Wait for confirmation before planning entry.</div>';
+  }
+  return `<div class="summary">${escapeHtml(message)}</div>`;
+}
+
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
   return tradeStatusMetricTextImpl({globalVerdict, displayedPlan, resolvedContract}, reviewPresentationBridgeDeps());
 }
@@ -13602,6 +13629,7 @@ function renderReviewWorkspace(options = {}){
     displayedPlan,
     setupScore
   });
+  const decisionSummary = visualState.decision_summary;
   const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
   const reviewAction = getActions(visualState.finalVerdict || visualState.final_verdict);
   const reviewBadgeLabel = reviewBadge.text;
@@ -13633,7 +13661,6 @@ function renderReviewWorkspace(options = {}){
     qualityAdjustments,
     warningState
   });
-  const decisionSummary = visualState.decision_summary;
   if(displayStage === 'Watch' && /ignore/i.test(String(reviewAction.label || ''))){
     console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:reviewAction.label});
   }
@@ -13665,7 +13692,7 @@ function renderReviewWorkspace(options = {}){
           ? '<div class="summary">Analysis complete</div><div class="tiny">Review AI read and trade plan below.</div>'
           : '<div class="summary">Analysis failed</div><div class="tiny">Try again.</div>')));
   const diagnosticsPanelBody = planUI.diagnosticsMessage
-    ? `<div class="summary">${escapeHtml(planUI.diagnosticsMessage)}</div>`
+    ? nonPlanDiagnosticsSummaryMarkup(planUI.diagnosticsMessage, decisionSummary)
     : analysisPanelBody;
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
@@ -13840,7 +13867,7 @@ function renderReviewWorkspace(options = {}){
         <div class="stat review-hidden"><div>Capital Check</div><div class="big" id="capitalCheckBox">${escapeHtml(capitalComfort.note || 'Clear')}</div></div>
       </div>
       <div class="statnote trade-plan-fx-note ${planUI.showCapital ? '' : 'review-hidden'}" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div>
-      <div class="tiny" id="calcNote">${escapeHtml(planUI.showPlan ? 'Enter planned entry, stop, and first target to calculate size.' : (planUI.diagnosticsMessage || 'Waiting for confirmation'))}</div>
+      <div class="tiny" id="calcNote">${escapeHtml(planUI.showPlan ? 'Enter planned entry, stop, and first target to calculate size.' : nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary))}</div>
     </div>
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
       <div class="reviewsectionhead"><strong>Confidence / Diagnostics</strong></div>
@@ -13852,7 +13879,7 @@ function renderReviewWorkspace(options = {}){
         <summary>AI Summary</summary>
         ${renderAnalysisPanelFromRecord(record)}
       </details>
-      <div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : (planUI.diagnosticsMessage || 'Waiting for confirmation'))}</div>
+      <div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary))}</div>
       <div class="tiny" id="planRealismReasons">${escapeHtml(planRealismReasons)}</div>
       <details class="compact-details">
         <summary>Plan Diagnostics</summary>
@@ -14249,7 +14276,7 @@ function syncPlanDisplayMeta(){
   if($('fxBasisBox')) $('fxBasisBox').classList.toggle('review-hidden', !planUI.showCapital);
   if($('planRealismSummary')) $('planRealismSummary').textContent = planUI.showPlan
     ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
-    : (planUI.diagnosticsMessage || 'Waiting for confirmation');
+    : nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary);
   if($('planRealismReasons')) $('planRealismReasons').textContent = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
 }
 
@@ -14396,6 +14423,7 @@ function calculate(options = {}){
     displayedPlan,
     setupScore:setupScoreForRecord(activeRecord)
   }) : {finalVerdict:'monitor'};
+  const plannerDecisionSummary = plannerVisualState && plannerVisualState.decision_summary ? plannerVisualState.decision_summary : '';
   const planUI = resolvePlanVisibility({
     state:plannerVisualState.finalVerdict,
     bounce_state:plannerDerivedStates.bounceState || (activeRecord && activeRecord.setup && activeRecord.setup.bounceState),
@@ -14456,7 +14484,7 @@ function calculate(options = {}){
   if($('targetAssessmentBox')) $('targetAssessmentBox').value = planRealism.credible_target_assessment || 'N/A';
   if($('planRealismSummary')) $('planRealismSummary').textContent = planUI.showPlan
     ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
-    : (planUI.diagnosticsMessage || 'Waiting for confirmation');
+    : nonPlanRealismSummaryText(planUI.diagnosticsMessage, plannerDecisionSummary);
   if($('planRealismReasons')) $('planRealismReasons').textContent = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
   if(!planUI.showPlan){
     $('riskPerShare').textContent = '-';
@@ -14464,7 +14492,7 @@ function calculate(options = {}){
     $('rrValue').textContent = 'R:R not reliable';
     $('rrValue').className = 'big';
     if($('plannerBox')) $('plannerBox').className = 'panelbox plannerbox plannerbox--rr-mid';
-    $('calcNote').textContent = planUI.diagnosticsMessage || 'Waiting for confirmation';
+    $('calcNote').textContent = nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary);
     return;
   }
   if(displayedPlan.status === 'missing'){
