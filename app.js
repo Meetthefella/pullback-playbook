@@ -8926,6 +8926,46 @@ function resolveSetupPatternUi({
   return {id:'no_clean_setup', label:'No clean setup', explanation:'price action is too messy', footer:'Wait for clearer structure and bounce before entry.'};
 }
 
+function entryTriggerConditionForSummary({bounceState, pullbackState, volumeState, structureState} = {}){
+  const conditions = [];
+  if(['none','unconfirmed','early'].includes(bounceState)){
+    conditions.push('price forms a strong bullish candle with a higher low');
+  }else if(bounceState === 'attempt'){
+    conditions.push('bounce follow-through prints a strong close above the prior day');
+  }
+  if(['near_20ma','at_20ma'].includes(pullbackState)){
+    conditions.push('price reclaims the 20MA with a strong close');
+  }else if(['near_50ma','at_50ma'].includes(pullbackState)){
+    conditions.push('price reclaims the 50MA with a strong close');
+  }else if(['off_level','extended','deep','none'].includes(pullbackState)){
+    conditions.push('pullback returns to a clean 20MA or 50MA support zone');
+  }
+  if(volumeState === 'weak'){
+    conditions.push('volume expands on the upward move');
+  }
+  if(['weak','weakening','developing_loose'].includes(structureState)){
+    conditions.push('structure prints a higher low and holds it');
+  }
+  if(!conditions.length) conditions.push('price holds support and closes strong on rising volume');
+  return conditions.slice(0, 2).join(' and ');
+}
+
+function nextUpgradeStateForSummary(verdict){
+  const safe = normalizeVerdict(verdict || '');
+  if(safe === 'developing') return '🟡 Monitor';
+  if(safe === 'near_entry') return '🚀 Entry';
+  if(safe === 'monitor') return '🎯 Near Entry';
+  return '🎯 Near Entry';
+}
+
+function nextUpgradeStateForSummaryLabel(verdict){
+  const safe = normalizeVerdict(verdict || '');
+  if(safe === 'developing') return '\uD83D\uDFE1 Monitor';
+  if(safe === 'near_entry') return '\uD83D\uDE80 Entry';
+  if(safe === 'monitor') return '\uD83C\uDFAF Near Entry';
+  return '\uD83C\uDFAF Near Entry';
+}
+
 function buildEntryConditionsSummary({
   ticker,
   finalVerdict,
@@ -8970,7 +9010,9 @@ function buildEntryConditionsSummary({
       header:'🚀 Entry - Ready',
       primary:'Entry conditions are satisfied.',
       secondary:[],
-      footer:'Review entry, stop, and target.'
+      triggerLine:'Becomes actionable IF: entry trigger stays valid on close.',
+      futureStateLine:'Would upgrade to: \uD83D\uDE80 Entry.',
+      footer:'Becomes actionable IF: entry trigger stays valid on close. Would upgrade to: \uD83D\uDE80 Entry.'
     };
   }
 
@@ -8996,13 +9038,13 @@ function buildEntryConditionsSummary({
     addBlocker('pullback', 5, 'Price must move into a cleaner pullback area', 'Price is not in a valid pullback zone yet');
   }
   if(entryChecks.rr_ok === false || /low|invalid/.test(rrConfidence)){
-    addBlocker('reward', 6, 'Reward is not strong enough yet', 'Reward potential is still limited versus risk');
+    addBlocker('reward', 6, 'Target needs more upside versus the stop', 'Target remains too close compared with risk');
   }
   if((capitalFit === 'too_heavy' || capitalFit === 'too_expensive') || affordability === 'not_affordable'){
     addBlocker('capital', 7, 'This setup does not currently fit the saved risk limit', 'Risk cannot be sized safely with current account settings');
   }
   if(!blockers.length){
-    addBlocker('confirmation', 8, 'Needs clearer confirmation before entry', 'Setup is still forming and not entry-ready yet');
+    addBlocker('confirmation', 8, 'Price action is still too early for a safe entry', 'The chart has not printed a clean trigger candle yet');
   }
 
   blockers.sort((a, b) => a.priority - b.priority);
@@ -9019,15 +9061,15 @@ function buildEntryConditionsSummary({
   }else if(pattern.id === 'weak_bounce'){
     addSecondary('Bounce is still tentative');
     if(['weak','weakening','developing_loose'].includes(structureState)) addSecondary('Structure remains loose');
-    if(entryChecks.rr_ok === false || /low|invalid/.test(rrConfidence)) addSecondary('Reward is not strong enough yet');
+    if(entryChecks.rr_ok === false || /low|invalid/.test(rrConfidence)) addSecondary('Target is still too close for the stop');
   }else if(pattern.id === 'constructive_pullback'){
     addSecondary('Price is near a valid pullback area');
     addSecondary('Structure is still intact');
-    if(entryChecks.bounce_ok === false) addSecondary('Confirmation is still needed');
+    if(entryChecks.bounce_ok === false) addSecondary('Bounce trigger candle has not printed yet');
   }else if(pattern.id === 'higher_low_forming'){
     addSecondary('Support is trying to hold');
     addSecondary('Bounce quality is improving');
-    if(entryChecks.bounce_ok === false) addSecondary('Confirmation is still needed');
+    if(entryChecks.bounce_ok === false) addSecondary('Bounce trigger candle has not printed yet');
   }else if(pattern.id === 'bounce_confirming'){
     addSecondary('Support is holding');
     addSecondary('Bounce quality is improving');
@@ -9042,7 +9084,20 @@ function buildEntryConditionsSummary({
   const header = (structuralState === 'developing' || structureState === 'developing_loose')
     ? '🌱 Developing - Still forming'
     : (verdict === 'near_entry' ? '🎯 Near Entry - Almost there' : '🟡 Monitor - Not ready');
-  const footer = pattern.footer;
+  const triggerCondition = entryTriggerConditionForSummary({
+    bounceState,
+    pullbackState,
+    volumeState,
+    structureState
+  });
+  const nextUpgrade = nextUpgradeStateForSummaryLabel(
+    (structuralState === 'developing' || structureState === 'developing_loose')
+      ? 'developing'
+      : (verdict || 'monitor')
+  );
+  const triggerLine = `Becomes actionable IF: ${triggerCondition}.`;
+  const futureStateLine = `Would upgrade to: ${nextUpgrade}.`;
+  const footer = `${triggerLine} ${futureStateLine}`;
   const normalizedHeader = (structuralState === 'developing' || structureState === 'developing_loose')
     ? '\uD83C\uDF31 Developing - Still forming'
     : (verdict === 'near_entry' ? '\uD83C\uDFAF Near Entry - Almost there' : '\uD83D\uDFE1 Monitor - Not ready');
@@ -9056,6 +9111,8 @@ function buildEntryConditionsSummary({
     pattern_label:pattern.label,
     pattern_explanation:pattern.explanation,
     secondary,
+    triggerLine,
+    futureStateLine,
     footer
   };
 }
@@ -9074,21 +9131,28 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
     .slice(0, 3)
     .map(line => `<li>${escapeHtml(String(line || ''))}</li>`)
     .join('');
+  const triggerLine = String(details.triggerLine || '').trim();
+  const futureStateLine = String(details.futureStateLine || '').trim();
+  const fallbackFooter = String(details.footer || 'When these conditions improve, the app can price entry, stop, and risk.').trim();
   if(options.mode === 'card'){
     return `<div class="entry-conditions-panel entry-conditions-panel--card no-card-click" id="${escapeHtml(panelId)}" hidden>
-      <div class="entry-conditions-header">${escapeHtml(details.header || 'Monitor - Not ready')}</div>
-      <div class="entry-conditions-pattern">${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
+      <div class="entry-conditions-header"><strong>Status:</strong> ${escapeHtml(details.header || 'Monitor - Not ready')}</div>
+      <div class="entry-conditions-pattern"><strong>Core Problem:</strong> ${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
+      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Why:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
-      <div class="entry-conditions-footer">${escapeHtml(details.footer || 'When these conditions improve, the app can price entry, stop, and risk.')}</div>
+      ${triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(triggerLine)}</div>` : ''}
+      ${futureStateLine ? `<div class="entry-conditions-footer">${escapeHtml(futureStateLine)}</div>` : (!triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
     </div>`;
   }
   return `<div class="entry-conditions-helper no-card-click" data-entry-hold-helper>
     <button class="secondary compactbutton entry-conditions-trigger no-card-click" type="button" data-hold-entry-helper data-panel-id="${escapeHtml(panelId)}" data-hold-ms="650">Hold for Entry Conditions</button>
     <div class="entry-conditions-panel no-card-click" id="${escapeHtml(panelId)}" hidden>
-      <div class="entry-conditions-header">${escapeHtml(details.header || 'Monitor - Not ready')}</div>
-      <div class="entry-conditions-pattern">${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
+      <div class="entry-conditions-header"><strong>Status:</strong> ${escapeHtml(details.header || 'Monitor - Not ready')}</div>
+      <div class="entry-conditions-pattern"><strong>Core Problem:</strong> ${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
+      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Why:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
-      <div class="entry-conditions-footer">${escapeHtml(details.footer || 'When these conditions improve, the app can price entry, stop, and risk.')}</div>
+      ${triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(triggerLine)}</div>` : ''}
+      ${futureStateLine ? `<div class="entry-conditions-footer">${escapeHtml(futureStateLine)}</div>` : (!triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
     </div>
   </div>`;
 }
