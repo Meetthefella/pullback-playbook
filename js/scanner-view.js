@@ -141,16 +141,17 @@
       scannerResolution
     }, deps);
     const globalVerdict = deps.resolveGlobalVerdict(view.item);
-    const globalBadge = deps.getBadge(globalVerdict.final_verdict);
-    const bucket = deps.getBucket(globalVerdict.final_verdict);
+    const scannerVerdict = deps.normalizeGlobalVerdictKey(globalVerdict.base_verdict || globalVerdict.final_verdict);
+    const globalBadge = deps.getBadge(scannerVerdict);
+    const bucket = deps.getBucket(scannerVerdict);
     const normalizedFinalClassification = ({
       tradeable_entry:'tradeable',
       monitor_watch:'early',
       lower_priority:'filtered'
     })[bucket] || legacyBucketForFinalClassification(finalClassification);
     if(view.item && view.item.scan){
-      view.item.scan.resolvedVerdict = deps.globalVerdictLabel(globalVerdict.final_verdict);
-      view.item.scan.resolvedFinalDisplayState = deps.globalVerdictLabel(globalVerdict.final_verdict);
+      view.item.scan.resolvedVerdict = deps.globalVerdictLabel(scannerVerdict);
+      view.item.scan.resolvedFinalDisplayState = deps.globalVerdictLabel(scannerVerdict);
       view.item.scan.resolvedBucket = String(bucket || '');
     }
     return {
@@ -174,15 +175,15 @@
         className:globalBadge.className
       },
       setupState:scannerResolution.setupState,
-      setupLabel:deps.globalVerdictLabel(globalVerdict.final_verdict),
+      setupLabel:deps.globalVerdictLabel(scannerVerdict),
       rrCategory,
       structureQuality,
       isStructureValid,
       hasPlanAdjustmentBlock,
       isNotReadySetup,
       scannerResolution,
-      displayStage:deps.globalVerdictLabel(globalVerdict.final_verdict),
-      finalVerdict:deps.globalVerdictLabel(globalVerdict.final_verdict),
+      displayStage:deps.globalVerdictLabel(scannerVerdict),
+      finalVerdict:deps.globalVerdictLabel(scannerVerdict),
       finalClassification:normalizedFinalClassification,
       bucket,
       globalVerdict,
@@ -262,12 +263,14 @@
 
   function rankedDecisionBucketForView(view, deps = {}){
     const item = view && view.item ? view.item : view;
-    return deps.getBucket(deps.resolveGlobalVerdict(item).final_verdict);
+    const globalVerdict = deps.resolveGlobalVerdict(item);
+    return deps.getBucket(globalVerdict.base_verdict || globalVerdict.final_verdict);
   }
 
   function rankedVisibleSectionForView(view, deps = {}){
     const item = view && view.item ? view.item : view;
-    const finalVerdict = deps.normalizeGlobalVerdictKey(deps.resolveGlobalVerdict(item).final_verdict);
+    const globalVerdict = deps.resolveGlobalVerdict(item);
+    const finalVerdict = deps.normalizeGlobalVerdictKey(globalVerdict.base_verdict || globalVerdict.final_verdict);
     if(finalVerdict === 'entry') return 'tradeable_entry';
     if(finalVerdict === 'near_entry') return 'near_entry';
     if(finalVerdict === 'watch' || finalVerdict === 'monitor') return 'monitor_watch';

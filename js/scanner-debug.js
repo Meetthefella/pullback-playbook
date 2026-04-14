@@ -151,12 +151,13 @@
 
     const globalVerdict = deps.resolveGlobalVerdict(item);
     const invalidAvoidGuard = planValidation === 'invalid' && status === 'Avoid';
-    const finalDisplayState = deps.globalVerdictLabel(globalVerdict.final_verdict);
+    const scannerVerdict = deps.normalizeGlobalVerdictKey(globalVerdict.base_verdict || globalVerdict.final_verdict);
+    const finalDisplayState = deps.globalVerdictLabel(scannerVerdict);
     const falseDeadGuard = aliveDevelopingCandidate
       && ['needs_adjustment','pending_validation','invalid'].includes(planValidation)
       && ['developing','watch','avoid'].includes(String(baseView.displayStage || '').toLowerCase());
-    const finalDisplayBucket = deps.getBucket(globalVerdict.final_verdict);
-    const remapReason = !invalidAvoidGuard && status === 'Avoid' && ['watch','monitor'].includes(globalVerdict.final_verdict)
+    const finalDisplayBucket = deps.getBucket(scannerVerdict);
+    const remapReason = !invalidAvoidGuard && status === 'Avoid' && ['watch','monitor'].includes(scannerVerdict)
       ? 'weak but still technically alive'
       : '';
     const guardedDisplayState = finalDisplayState;
@@ -171,7 +172,7 @@
     if(legacyStatus && legacyStatus !== status){
       warnings.push(`WARNING: status mismatch resolved. legacy=${legacyStatus}, resolved=${status}`);
     }
-    if(!invalidAvoidGuard && status === 'Avoid' && ['watch','monitor'].includes(globalVerdict.final_verdict)){
+    if(!invalidAvoidGuard && status === 'Avoid' && ['watch','monitor'].includes(scannerVerdict)){
       warnings.push(`INFO: raw Avoid softened to ${finalDisplayState} because the setup is still technically alive`);
     }
 
@@ -245,6 +246,8 @@
       {label:'Volume', value:(view && view.setupStates && view.setupStates.volumeState) || resolution.volume_state || '(none)'}
     ], deps);
     const finalSection = renderDebugSectionMarkup('Final Decision', [
+      {label:'Scanner Verdict', value:globalVerdict.base_verdict || '(none)'},
+      {label:'Tracked Verdict', value:globalVerdict.tracked_verdict || '(none)'},
       {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
       {label:'Tone', value:globalVerdict.tone || '(none)'},
       {label:'Bucket', value:globalVerdict.bucket || '(none)'},
@@ -314,6 +317,8 @@
       {label:'Volume', value:(view && view.setupStates && view.setupStates.volumeState) || resolution.volume_state || '(none)'}
     ], deps);
     const finalSection = renderDebugSectionMarkup('Final Decision', [
+      {label:'Scanner Verdict', value:globalVerdict.base_verdict || '(none)'},
+      {label:'Tracked Verdict', value:globalVerdict.tracked_verdict || '(none)'},
       {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
       {label:'Tone', value:globalVerdict.tone || '(none)'},
       {label:'Bucket', value:globalVerdict.bucket || '(none)'},

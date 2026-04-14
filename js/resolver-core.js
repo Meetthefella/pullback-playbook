@@ -185,6 +185,7 @@
 
   function resolveGlobalVerdict(record, deps = {}){
     const item = record && typeof record === 'object' ? record : {};
+    const preLifecycleResolved = deps.resolvePreLifecycleStateContract(item);
     const isTracked = !!(
       item.in_watchlist
       || item.watchlist_entry_exists
@@ -192,8 +193,8 @@
     );
     const resolved = isTracked
       ? deps.resolveFinalStateContract(item, {context:'global'})
-      : deps.resolvePreLifecycleStateContract(item);
-    const baseVerdict = deps.baseVerdictFromResolvedContract(resolved);
+      : preLifecycleResolved;
+    const baseVerdict = deps.baseVerdictFromResolvedContract(preLifecycleResolved);
     const derivedStates = deps.analysisDerivedStatesFromRecord(item);
     const displayedPlan = deps.deriveCurrentPlanState(
       item.plan && item.plan.entry,
@@ -298,13 +299,17 @@
       tradeability:tradeabilityState,
       capital_fit:capitalFit
     });
-    finalVerdict = guardedVerdict.final_verdict;
-    reason = guardedVerdict.reason || reason;
-    if(!isTracked && (finalVerdict === 'avoid' || finalVerdict === 'dead')){
-      finalVerdict = baseVerdict === 'avoid' ? 'avoid' : 'monitor';
-      reason = 'Pre-watchlist: downgrade suppressed.';
-    }
-    const avoidTriggerSource = finalVerdict === 'avoid'
+    const trackedVerdict = guardedVerdict.final_verdict;
+    const trackedReason = guardedVerdict.reason || reason;
+    const trackedAvoidTriggerSource = (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
+      ? (structurallyBroken ? 'structure_broken' : (trackedVerdict !== baseVerdict ? 'lifecycle' : null))
+      : null;
+    const lifecycleDowngradeSuppressed = !isTracked
+      && (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
+      && trackedAvoidTriggerSource === 'lifecycle';
+    finalVerdict = isTracked ? trackedVerdict : baseVerdict;
+    reason = isTracked ? trackedReason : (lifecycleDowngradeSuppressed ? 'Pre-watchlist lifecycle downgrade suppressed.' : trackedReason);
+    const avoidTriggerSource = (finalVerdict === 'avoid' || finalVerdict === 'dead')
       ? (structurallyBroken ? 'structure_broken' : null)
       : null;
 
@@ -322,6 +327,7 @@
     const bucket = getBucket(finalVerdict);
     return {
       base_verdict:baseVerdict,
+      tracked_verdict:trackedVerdict,
       final_verdict:finalVerdict,
       tone,
       toneClass:`tone-${tone}`,
@@ -338,8 +344,9 @@
       reason,
       final_state_reason:'derived from structureState only',
       avoid_trigger_source:avoidTriggerSource,
-      downgrade_applied:baseVerdict !== finalVerdict,
-      downgrade_reason:reason,
+      downgrade_applied:baseVerdict !== trackedVerdict,
+      downgrade_reason:trackedReason,
+      lifecycle_downgrade_suppressed:lifecycleDowngradeSuppressed,
       entry_gate_pass:guardedVerdict.entry_gate_pass,
       entry_gate_reasons:guardedVerdict.entry_gate_reasons,
       near_entry_gate_pass:guardedVerdict.near_entry_gate_pass,
