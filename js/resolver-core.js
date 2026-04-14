@@ -10,11 +10,11 @@
     return ({
       entry:'Entry',
       near_entry:'Near Entry',
-      watch:'Watch',
+      watch:'Monitor',
       monitor:'Monitor',
       avoid:'Avoid',
       dead:'Dead'
-    })[normalizeGlobalVerdictKey(finalVerdict)] || 'Watch';
+    })[normalizeGlobalVerdictKey(finalVerdict)] || 'Monitor';
   }
 
   function getTone(finalVerdict){
@@ -44,11 +44,11 @@
     return ({
       entry:{text:'\uD83D\uDE80 Entry', className:'ready'},
       near_entry:{text:'\uD83C\uDFAF Near Entry', className:'near'},
-      watch:{text:'\uD83D\uDFE3 Watch', className:'watch'},
+      watch:{text:'\uD83D\uDFE1 Monitor', className:'near'},
       monitor:{text:'\uD83D\uDFE1 Monitor', className:'near'},
       avoid:{text:'\u26D4 Avoid', className:'avoid'},
       dead:{text:'\uD83D\uDC80 Dead', className:'avoid'}
-    })[safeVerdict] || {text:'\uD83D\uDFE3 Watch', className:'watch'};
+    })[safeVerdict] || {text:'\uD83D\uDFE1 Monitor', className:'near'};
   }
 
   function getActions(finalVerdict){
@@ -56,11 +56,11 @@
     return ({
       entry:{label:'ENTRY', detail:'Ready to act', planAllowed:true, watchlistAllowed:false},
       near_entry:{label:'NEAR ENTRY', detail:'Close to trigger', planAllowed:true, watchlistAllowed:true},
-      watch:{label:'WATCH', detail:'Review candidate', planAllowed:false, watchlistAllowed:true},
+      watch:{label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true},
       monitor:{label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true},
       avoid:{label:'AVOID', detail:'Low priority', planAllowed:false, watchlistAllowed:false},
       dead:{label:'DEAD', detail:'Drop setup', planAllowed:false, watchlistAllowed:false}
-    })[safeVerdict] || {label:'WATCH', detail:'Review candidate', planAllowed:false, watchlistAllowed:true};
+    })[safeVerdict] || {label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true};
   }
 
   function canPromoteToEntry(ctx = {}){

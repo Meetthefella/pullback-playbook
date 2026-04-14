@@ -13666,6 +13666,8 @@ function syncPlanDisplayMeta(){
     record,
     deriveCurrentPlanState(entryValue, stopValue, targetValue, record.marketData.currency)
   );
+  const derivedStates = analysisDerivedStatesFromRecord(record);
+  const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
   const planCheckState = planCheckStateForRecord(record, {
     effectivePlan:{
       entry:entryValue,
@@ -13693,15 +13695,15 @@ function syncPlanDisplayMeta(){
   const planRealism = evaluatePlanRealism(record, {
     displayedPlan,
     derivedStates,
-    qualityAdjustments:evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates:analysisDerivedStatesFromRecord(record)}),
+    qualityAdjustments,
     displayStage,
     setupUiState
   });
-  const warningState = warningStateFromInputs(record, null, analysisDerivedStatesFromRecord(record));
+  const warningState = warningStateFromInputs(record, null, derivedStates);
   const avoidSubtype = avoidSubtypeForRecord(record, {
     derivedStates,
     displayedPlan,
-    qualityAdjustments:evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates:analysisDerivedStatesFromRecord(record)}),
+    qualityAdjustments,
     finalVerdict:displayStage
   });
   const emojiPresentation = resolveEmojiPresentation(record, {
@@ -13709,7 +13711,7 @@ function syncPlanDisplayMeta(){
     finalVerdict:displayStage,
     derivedStates,
     displayedPlan,
-    qualityAdjustments:evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates:analysisDerivedStatesFromRecord(record)}),
+    qualityAdjustments,
     warningState,
     planUiState,
     setupUiState,
@@ -13720,7 +13722,7 @@ function syncPlanDisplayMeta(){
     finalVerdict:displayStage,
     derivedStates,
     displayedPlan,
-    qualityAdjustments:evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates:analysisDerivedStatesFromRecord(record)}),
+    qualityAdjustments,
     warningState,
     planUiState,
     setupUiState,
@@ -13758,7 +13760,7 @@ function syncPlanDisplayMeta(){
   }
   if($('tradeStatusBox')){
     const tradeStatusText = planUI.showPlan
-      ? tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract})
+      ? tradeStatusMetricText({globalVerdict:visualState, displayedPlan, resolvedContract})
       : {line1:planUI.diagnosticsMessage || 'Waiting for confirmation', line2:''};
     $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   }
@@ -13946,7 +13948,7 @@ function calculate(options = {}){
     comfortLabel:capitalComfort.label
   });
   const tradeStatusText = planUI.showPlan
-    ? tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract})
+    ? tradeStatusMetricText({globalVerdict:plannerVisualState, displayedPlan, resolvedContract})
     : {line1:planUI.diagnosticsMessage || 'Waiting for confirmation', line2:''};
   if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
