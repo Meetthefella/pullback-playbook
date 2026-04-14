@@ -4331,6 +4331,7 @@ function renderWatchlist(){
         div.setAttribute('data-entry-hold-helper', '1');
         div.setAttribute('data-hold-card-trigger', '1');
         div.setAttribute('data-panel-id', watchlistPanelId);
+        div.setAttribute('data-hold-ms', '550');
         const holdWrapper = document.createElement('div');
         holdWrapper.innerHTML = watchlistEntryConditionsHelper;
         if(holdWrapper.firstElementChild) div.appendChild(holdWrapper.firstElementChild);
@@ -9022,7 +9023,7 @@ function bindEntryConditionsHoldInteractions(root){
     const panel = panelId ? document.getElementById(panelId) : null;
     if(!panel) return;
     helper.dataset.boundHoldHelper = '1';
-    const holdMs = Number.parseInt(String(trigger.getAttribute('data-hold-ms') || '650'), 10);
+    const holdMs = Number.parseInt(String(trigger.getAttribute('data-hold-ms') || helper.getAttribute('data-hold-ms') || '550'), 10);
     const state = {
       timer:0,
       pointerId:null,
@@ -9088,6 +9089,32 @@ function bindEntryConditionsHoldInteractions(root){
     trigger.addEventListener('pointerup', closeOnRelease);
     trigger.addEventListener('pointercancel', closeOnRelease);
     trigger.addEventListener('pointerleave', closeOnRelease);
+    if(typeof window !== 'undefined' && !('PointerEvent' in window)){
+      trigger.addEventListener('touchstart', event => {
+        if(cardMode && event.target && event.target.closest && event.target.closest('button,a,input,textarea,select,summary,details,[data-act],.entry-conditions-panel')) return;
+        const touch = event.touches && event.touches[0];
+        if(!touch) return;
+        state.startX = Number(touch.clientX || 0);
+        state.startY = Number(touch.clientY || 0);
+        state.holdOpened = false;
+        clearTimer();
+        state.timer = setTimeout(openPanel, Number.isFinite(holdMs) ? holdMs : 550);
+      }, {passive:true});
+      trigger.addEventListener('touchmove', event => {
+        const touch = event.touches && event.touches[0];
+        if(!touch) return;
+        const dx = Math.abs(Number(touch.clientX || 0) - state.startX);
+        const dy = Math.abs(Number(touch.clientY || 0) - state.startY);
+        if(dx > 16 || dy > 16) clearTimer();
+      }, {passive:true});
+      const touchRelease = () => {
+        const didHoldOpen = state.holdOpened;
+        clearTimer();
+        if(didHoldOpen) closePanel();
+      };
+      trigger.addEventListener('touchend', touchRelease, {passive:true});
+      trigger.addEventListener('touchcancel', touchRelease, {passive:true});
+    }
     trigger.addEventListener('contextmenu', event => event.preventDefault());
     trigger.addEventListener('click', event => {
       if(state.suppressClick){
