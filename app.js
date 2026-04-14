@@ -124,6 +124,7 @@ const {
 } = window.ResolverSupport;
 const {
   normalizeGlobalVerdictKey: normalizeGlobalVerdictKeyImpl,
+  normalizeVerdict: normalizeVerdictImpl,
   globalVerdictLabel: globalVerdictLabelImpl,
   getTone: getToneImpl,
   getBucket: getBucketImpl,
