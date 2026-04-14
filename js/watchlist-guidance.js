@@ -33,7 +33,7 @@
     }
     if(resolved.actionStateKey === 'recalculate_plan'){
       return {
-        nextPossibleState:'\uD83E\uDDF0 Recalculate plan',
+        nextPossibleState:'🟡 Hold for entry conditions',
         mainBlocker:resolved.blockerReason || 'Plan needs adjustment'
       };
     }

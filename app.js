@@ -4307,6 +4307,15 @@ function renderWatchlist(){
         bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
         structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
       });
+      const entryConditionsSummary = buildEntryConditionsSummary({
+        ticker:entry.ticker,
+        finalVerdict:visualState.finalVerdict || visualState.final_verdict,
+        resolvedContract,
+        globalVerdict,
+        derivedStates,
+        displayedPlan
+      });
+      const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker);
       div.className = `resultcompact watchlist-card ${escapeHtml(visualState.className || visualState.toneClass || '')}`.trim();
       div.style.cssText = visualState.styleAttr || '';
       div.dataset.visualTone = visualState.visual_tone || '';
@@ -4317,6 +4326,15 @@ function renderWatchlist(){
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
       div.querySelector('[data-act="refresh-life"]').onclick = () => { refreshWatchlistTicker(entry.ticker).catch(() => {}); };
       div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
+      if(watchlistEntryConditionsHelper){
+        const actionsHost = div.querySelector('.watchlist-actions');
+        if(actionsHost){
+          const holdWrapper = document.createElement('div');
+          holdWrapper.innerHTML = watchlistEntryConditionsHelper;
+          if(holdWrapper.firstElementChild) actionsHost.appendChild(holdWrapper.firstElementChild);
+        }
+      }
+      bindEntryConditionsHoldInteractions(div);
       section.appendChild(div);
     });
     box.appendChild(section);
@@ -6984,8 +7002,8 @@ function legacyResolveFinalStateContract(record, options = {}){
     actionStateKey = 'recalculate_plan';
     blockerCode = 'plan_invalid';
     blockerReason = 'Invalid plan';
-    actionLabel = 'Recalculate plan from current structure';
-    actionShortLabel = 'Recalculate plan';
+    actionLabel = 'Hold for entry conditions';
+    actionShortLabel = 'Hold for entry conditions';
     actionTone = 'warning';
     nextPossibleState = invalidAvoidGuard ? '🧰 Rebuild' : '🧐 Monitor';
     addReason(blockerReason);
@@ -6993,8 +7011,8 @@ function legacyResolveFinalStateContract(record, options = {}){
     actionStateKey = 'recalculate_plan';
     blockerCode = 'plan_missing';
     blockerReason = 'Plan not defined';
-    actionLabel = 'Recalculate plan from current structure';
-    actionShortLabel = 'Recalculate plan';
+    actionLabel = 'Hold for entry conditions';
+    actionShortLabel = 'Hold for entry conditions';
     actionTone = 'warning';
     nextPossibleState = invalidAvoidGuard ? '🧰 Rebuild' : '🧐 Monitor';
     addReason(blockerReason);
@@ -7002,8 +7020,8 @@ function legacyResolveFinalStateContract(record, options = {}){
     actionStateKey = 'recalculate_plan';
     blockerCode = 'risk_too_wide';
     blockerReason = 'Risk too wide for account size';
-    actionLabel = 'Recalculate plan from current structure';
-    actionShortLabel = 'Recalculate plan';
+    actionLabel = 'Hold for entry conditions';
+    actionShortLabel = 'Hold for entry conditions';
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
@@ -7011,8 +7029,8 @@ function legacyResolveFinalStateContract(record, options = {}){
     actionStateKey = 'recalculate_plan';
     blockerCode = capitalBlocked ? 'capital_blocked' : 'capital_heavy';
     blockerReason = capitalConstraintReasonForPlan(displayedPlan) || 'Capital usage is heavy for this account size.';
-    actionLabel = 'Recalculate plan from current structure';
-    actionShortLabel = 'Recalculate plan';
+    actionLabel = 'Hold for entry conditions';
+    actionShortLabel = 'Hold for entry conditions';
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
@@ -7020,8 +7038,8 @@ function legacyResolveFinalStateContract(record, options = {}){
     actionStateKey = 'recalculate_plan';
     blockerCode = 'rr_unrealistic';
     blockerReason = 'Target is too optimistic for current structure';
-    actionLabel = 'Recalculate plan from current structure';
-    actionShortLabel = 'Recalculate plan';
+    actionLabel = 'Hold for entry conditions';
+    actionShortLabel = 'Hold for entry conditions';
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
@@ -7029,8 +7047,8 @@ function legacyResolveFinalStateContract(record, options = {}){
     actionStateKey = 'recalculate_plan';
     blockerCode = 'plan_adjustment';
     blockerReason = 'Plan needs adjustment';
-    actionLabel = 'Recalculate plan from current structure';
-    actionShortLabel = 'Recalculate plan';
+    actionLabel = 'Hold for entry conditions';
+    actionShortLabel = 'Hold for entry conditions';
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
@@ -7091,7 +7109,7 @@ function legacyResolveFinalStateContract(record, options = {}){
   if(actionStateKey === 'rebuild_setup'){
     nextPossibleState = 'None';
   }else if(actionStateKey === 'recalculate_plan'){
-    nextPossibleState = 'ðŸ§° Recalculate plan';
+    nextPossibleState = '🟡 Monitor';
   }else if(actionStateKey === 'ready_to_act'){
     nextPossibleState = 'ðŸš€ Entry';
   }else if(actionStateKey === 'hold_confirmation' && blockerCode !== 'missed_setup'){
@@ -7982,7 +8000,7 @@ function watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reas
   const tradeability = String(resolvedContract && (resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel) || 'Watch').trim();
   let reason = conciseReason ? `Tradeability: ${tradeability} | ${conciseReason}` : `Tradeability: ${tradeability}`;
   if(actionStateKey === 'rebuild_setup') badgeText = '\uD83D\uDC80 Rebuild setup';
-  else if(actionStateKey === 'recalculate_plan') badgeText = '\uD83E\uDDF0 Recalculate plan';
+  else if(actionStateKey === 'recalculate_plan') badgeText = '🟡 Hold for entry conditions';
   else if(actionStateKey === 'ready_to_act') badgeText = 'Ready to act';
   else if(actionStateKey === 'hold_confirmation') badgeText = 'Hold for confirmation';
 
@@ -7997,9 +8015,9 @@ function watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reas
     headline = 'Rebuild setup before reconsidering entry';
     reason = reason || 'Invalid plan + weak structure';
   }else if(recalculateState){
-    badgeText = '🧰 Recalculate plan';
+    badgeText = '🟡 Hold for entry conditions';
     badgeClass = 'near';
-    headline = 'Recalculate plan from current structure';
+    headline = 'Hold for entry conditions';
     reason = reason || 'Structure intact, but current plan is invalid.';
   }
 
@@ -8746,6 +8764,323 @@ function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, de
   if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
   if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
   return 'Monitor - not ready yet. Wait for a clearer bounce.';
+}
+
+function resolveSetupPatternUi({
+  verdict,
+  structureState,
+  trendState,
+  bounceState,
+  stabilisationState,
+  pullbackState,
+  volumeState,
+  planStatus,
+  rrConfidence,
+  entryChecks
+} = {}){
+  const structureWeak = ['weak','weakening','developing_loose'].includes(structureState);
+  const structureBroken = structureState === 'broken';
+  const bounceNone = ['none','unconfirmed','early'].includes(bounceState);
+  const bounceAttempt = bounceState === 'attempt';
+  const bounceConfirmed = bounceState === 'confirmed';
+  const pullbackValid = ['near_20ma','near_50ma','at_20ma','at_50ma'].includes(pullbackState);
+  const planUnclear = ['missing','invalid','needs_adjustment','unrealistic_rr'].includes(planStatus) || entryChecks.plan_ok === false;
+  const volumeWeak = volumeState === 'weak' || entryChecks.volume_ok === false;
+  const trendWeak = ['weak','weakening','down'].includes(trendState);
+  const rrWeak = entryChecks.rr_ok === false || /low|invalid/.test(rrConfidence || '');
+  const stabilising = ['clear','early'].includes(stabilisationState);
+  const nearReady = verdict === 'near_entry' || (entryChecks.bounce_ok === true && entryChecks.structure_ok === true && pullbackValid);
+  const damagePoints = [
+    structureWeak,
+    trendWeak,
+    volumeWeak,
+    planUnclear,
+    !pullbackValid,
+    rrWeak
+  ].filter(Boolean).length;
+  const constructiveStabilisation = stabilisationState === 'clear' && pullbackValid && !trendWeak;
+
+  // Stricter falling-knife translation: only surface when downside damage is broad.
+  if(!structureBroken && bounceNone && !constructiveStabilisation && (structureWeak || trendWeak) && damagePoints >= 3){
+    return {id:'falling_knife', label:'Falling knife', explanation:'no clear bottom yet', footer:'Wait for price to stabilise and bounce before entry.'};
+  }
+  if(!structureBroken && bounceAttempt && (structureWeak || volumeWeak || planUnclear || rrWeak) && damagePoints >= 2){
+    return {id:'weak_bounce', label:'Weak bounce', explanation:'buyers have not taken control', footer:'Wait for stronger follow-through before entry.'};
+  }
+  if(!structureBroken && !pullbackValid && bounceNone && structureWeak){
+    return {id:'no_clean_setup', label:'No clean setup', explanation:'price action is too messy', footer:'Wait for cleaner structure before entry can be assessed.'};
+  }
+  if(!structureBroken && nearReady && (bounceConfirmed || bounceAttempt)){
+    return {id:'bounce_confirming', label:'Bounce confirming', explanation:'entry is getting closer', footer:'If this follows through, the app can price entry, stop, and size.'};
+  }
+  if(!structureBroken && stabilising && bounceAttempt){
+    return {id:'higher_low_forming', label:'Higher low forming', explanation:'early support may be building', footer:'If support holds, a valid entry may develop.'};
+  }
+  if(!structureBroken && pullbackValid && !structureWeak){
+    return {id:'constructive_pullback', label:'Constructive pullback', explanation:'support is holding so far', footer:'Watch for bounce confirmation from support.'};
+  }
+  return {id:'no_clean_setup', label:'No clean setup', explanation:'price action is too messy', footer:'Wait for clearer structure and bounce before entry.'};
+}
+
+function buildEntryConditionsSummary({
+  ticker,
+  finalVerdict,
+  resolvedContract,
+  globalVerdict,
+  derivedStates,
+  displayedPlan
+} = {}){
+  const verdict = normalizeVerdict(finalVerdict || (globalVerdict && globalVerdict.final_verdict) || '');
+  const structureState = String((derivedStates && derivedStates.structureState) || (globalVerdict && globalVerdict.structure_state) || '').toLowerCase();
+  const bounceState = String((derivedStates && derivedStates.bounceState) || (globalVerdict && globalVerdict.bounce_state) || '').toLowerCase();
+  const stabilisationState = String((derivedStates && derivedStates.stabilisationState) || '').toLowerCase();
+  const volumeState = String((derivedStates && derivedStates.volumeState) || (globalVerdict && globalVerdict.volume_state) || '').toLowerCase();
+  const pullbackState = String((derivedStates && derivedStates.pullbackZone) || (globalVerdict && globalVerdict.pullback_zone) || '').toLowerCase();
+  const planStatus = String((resolvedContract && resolvedContract.planStatusKey) || '').toLowerCase();
+  const rrConfidence = String((resolvedContract && resolvedContract.rrConfidenceLabel) || '').toLowerCase();
+  const structuralState = String((resolvedContract && resolvedContract.structuralState) || '').toLowerCase();
+  const entryChecks = globalVerdict && typeof globalVerdict.entry_gate_checks === 'object'
+    ? globalVerdict.entry_gate_checks
+    : {};
+  const entryGatePass = !!(globalVerdict && globalVerdict.entry_gate_pass);
+  const capitalFit = String(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || '').toLowerCase();
+  const affordability = String(displayedPlan && displayedPlan.affordability || '').toLowerCase();
+  const pattern = resolveSetupPatternUi({
+    verdict,
+    structureState,
+    trendState:String((derivedStates && derivedStates.trendState) || '').toLowerCase(),
+    bounceState,
+    stabilisationState,
+    pullbackState,
+    volumeState,
+    planStatus,
+    rrConfidence,
+    entryChecks
+  });
+
+  if(['avoid'].includes(verdict)) return {show:false};
+  if(verdict === 'entry' && entryGatePass){
+    return {
+      show:false,
+      ready:true,
+      header:'🚀 Entry - Ready',
+      primary:'Entry conditions are satisfied.',
+      secondary:[],
+      footer:'Review entry, stop, and target.'
+    };
+  }
+
+  const blockers = [];
+  const addBlocker = (id, priority, primary, secondary) => {
+    if(blockers.some(entry => entry.id === id)) return;
+    blockers.push({id, priority, primary, secondary});
+  };
+
+  if(entryChecks.structure_ok === false || ['weak','weakening','developing_loose','broken'].includes(structureState)){
+    addBlocker('structure', 1, 'Trend needs to stabilise', 'Structure is still weakening');
+  }
+  if(entryChecks.bounce_ok === false || ['none','attempt','early','unconfirmed'].includes(bounceState)){
+    addBlocker('bounce', 2, 'Needs a clearer bounce from support', bounceState === 'none' ? 'Bounce has not formed yet' : 'Bounce is not confirmed yet');
+  }
+  if(entryChecks.plan_ok === false || ['missing','invalid','needs_adjustment','unrealistic_rr'].includes(planStatus)){
+    addBlocker('plan', 3, 'A valid entry and stop are not available yet', 'Trade structure is not clear enough to price safely');
+  }
+  if(entryChecks.volume_ok === false || volumeState === 'weak'){
+    addBlocker('volume', 4, 'Volume needs to improve', 'Buyers need to show stronger participation');
+  }
+  if(entryChecks.pullback_ok === false || ['none','off_level','extended','deep'].includes(pullbackState)){
+    addBlocker('pullback', 5, 'Price must move into a cleaner pullback area', 'Price is not in a valid pullback zone yet');
+  }
+  if(entryChecks.rr_ok === false || /low|invalid/.test(rrConfidence)){
+    addBlocker('reward', 6, 'Reward is not strong enough yet', 'Reward potential is still limited versus risk');
+  }
+  if((capitalFit === 'too_heavy' || capitalFit === 'too_expensive') || affordability === 'not_affordable'){
+    addBlocker('capital', 7, 'This setup does not currently fit the saved risk limit', 'Risk cannot be sized safely with current account settings');
+  }
+  if(!blockers.length){
+    addBlocker('confirmation', 8, 'Needs clearer confirmation before entry', 'Setup is still forming and not entry-ready yet');
+  }
+
+  blockers.sort((a, b) => a.priority - b.priority);
+  const secondary = [];
+  const addSecondary = text => {
+    const line = String(text || '').trim();
+    if(!line || secondary.includes(line) || secondary.length >= 3) return;
+    secondary.push(line);
+  };
+  if(pattern.id === 'falling_knife'){
+    if(['none','unconfirmed','early'].includes(bounceState)) addSecondary('No clear bounce yet');
+    if(['weak','weakening','developing_loose'].includes(structureState)) addSecondary('Structure is still weakening');
+    if(volumeState === 'weak') addSecondary('Volume is still weak');
+  }else if(pattern.id === 'weak_bounce'){
+    addSecondary('Bounce is still tentative');
+    if(['weak','weakening','developing_loose'].includes(structureState)) addSecondary('Structure remains loose');
+    if(entryChecks.rr_ok === false || /low|invalid/.test(rrConfidence)) addSecondary('Reward is not strong enough yet');
+  }else if(pattern.id === 'constructive_pullback'){
+    addSecondary('Price is near a valid pullback area');
+    addSecondary('Structure is still intact');
+    if(entryChecks.bounce_ok === false) addSecondary('Confirmation is still needed');
+  }else if(pattern.id === 'higher_low_forming'){
+    addSecondary('Support is trying to hold');
+    addSecondary('Bounce quality is improving');
+    if(entryChecks.bounce_ok === false) addSecondary('Confirmation is still needed');
+  }else if(pattern.id === 'bounce_confirming'){
+    addSecondary('Support is holding');
+    addSecondary('Bounce quality is improving');
+    if(volumeState === 'weak' || entryChecks.volume_ok === false) addSecondary('Volume could still improve');
+  }
+  if(!secondary.length){
+    blockers.slice(0, 3).forEach(entry => addSecondary(entry.secondary));
+  }
+  if((capitalFit === 'too_heavy' || capitalFit === 'too_expensive' || affordability === 'not_affordable') && secondary.length < 3){
+    addSecondary('Current risk limit is too tight for this setup');
+  }
+  const header = (structuralState === 'developing' || structureState === 'developing_loose')
+    ? '🌱 Developing - Still forming'
+    : (verdict === 'near_entry' ? '🎯 Near Entry - Almost there' : '🟡 Monitor - Not ready');
+  const footer = pattern.footer;
+  const normalizedHeader = (structuralState === 'developing' || structureState === 'developing_loose')
+    ? '\uD83C\uDF31 Developing - Still forming'
+    : (verdict === 'near_entry' ? '\uD83C\uDFAF Near Entry - Almost there' : '\uD83D\uDFE1 Monitor - Not ready');
+
+  return {
+    show:true,
+    ready:false,
+    ticker:normalizeTicker(ticker || ''),
+    header:normalizedHeader,
+    primary:`${pattern.label} - ${pattern.explanation}`,
+    pattern_label:pattern.label,
+    pattern_explanation:pattern.explanation,
+    secondary,
+    footer
+  };
+}
+
+function entryConditionsPanelId(scope, ticker){
+  const safeScope = String(scope || 'review').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  const safeTicker = String(ticker || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '_') || 'TICKER';
+  return `entry-conditions-${safeScope}-${safeTicker}`;
+}
+
+function renderEntryConditionsHoldHelper(summary, scope, ticker){
+  const details = summary && typeof summary === 'object' ? summary : null;
+  if(!details || !details.show) return '';
+  const panelId = entryConditionsPanelId(scope, ticker || details.ticker || '');
+  const secondaryMarkup = (details.secondary || [])
+    .slice(0, 3)
+    .map(line => `<li>${escapeHtml(String(line || ''))}</li>`)
+    .join('');
+  return `<div class="entry-conditions-helper no-card-click" data-entry-hold-helper>
+    <button class="secondary compactbutton entry-conditions-trigger no-card-click" type="button" data-hold-entry-helper data-panel-id="${escapeHtml(panelId)}" data-hold-ms="650">Hold for Entry Conditions</button>
+    <div class="entry-conditions-panel no-card-click" id="${escapeHtml(panelId)}" hidden>
+      <div class="entry-conditions-header">${escapeHtml(details.header || 'Monitor - Not ready')}</div>
+      <div class="entry-conditions-pattern">${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
+      ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
+      <div class="entry-conditions-footer">${escapeHtml(details.footer || 'When these conditions improve, the app can price entry, stop, and risk.')}</div>
+    </div>
+  </div>`;
+}
+
+let entryConditionsOutsideCloseBound = false;
+function closeEntryConditionsPanels(exceptId = ''){
+  document.querySelectorAll('.entry-conditions-panel.is-open').forEach(panel => {
+    if(exceptId && panel.id === exceptId) return;
+    panel.classList.remove('is-open');
+    panel.hidden = true;
+  });
+}
+
+function bindEntryConditionsHoldInteractions(root){
+  const scopeRoot = root && typeof root.querySelectorAll === 'function' ? root : document;
+  if(!entryConditionsOutsideCloseBound){
+    document.addEventListener('pointerdown', event => {
+      if(event.target && event.target.closest && event.target.closest('[data-entry-hold-helper]')) return;
+      closeEntryConditionsPanels();
+    }, true);
+    entryConditionsOutsideCloseBound = true;
+  }
+  scopeRoot.querySelectorAll('[data-entry-hold-helper]').forEach(helper => {
+    if(helper.dataset.boundHoldHelper === '1') return;
+    const trigger = helper.querySelector('[data-hold-entry-helper]');
+    if(!trigger) return;
+    const panelId = String(trigger.getAttribute('data-panel-id') || '');
+    const panel = panelId ? document.getElementById(panelId) : null;
+    if(!panel) return;
+    helper.dataset.boundHoldHelper = '1';
+    const holdMs = Number.parseInt(String(trigger.getAttribute('data-hold-ms') || '650'), 10);
+    const state = {
+      timer:0,
+      pointerId:null,
+      startX:0,
+      startY:0,
+      holdOpened:false,
+      suppressClick:false
+    };
+    const clearTimer = () => {
+      if(state.timer){
+        clearTimeout(state.timer);
+        state.timer = 0;
+      }
+    };
+    const openPanel = () => {
+      closeEntryConditionsPanels(panel.id);
+      panel.hidden = false;
+      panel.classList.add('is-open');
+      state.holdOpened = true;
+      state.suppressClick = true;
+    };
+    const closePanel = () => {
+      panel.classList.remove('is-open');
+      panel.hidden = true;
+      state.holdOpened = false;
+    };
+    const resetPointer = () => {
+      clearTimer();
+      state.pointerId = null;
+      state.startX = 0;
+      state.startY = 0;
+    };
+    trigger.addEventListener('pointerdown', event => {
+      if(event.pointerType === 'mouse' && event.button !== 0) return;
+      state.pointerId = event.pointerId;
+      if(typeof trigger.setPointerCapture === 'function'){
+        try{ trigger.setPointerCapture(event.pointerId); }catch(_){}
+      }
+      state.startX = Number(event.clientX || 0);
+      state.startY = Number(event.clientY || 0);
+      state.holdOpened = false;
+      clearTimer();
+      state.timer = setTimeout(openPanel, Number.isFinite(holdMs) ? holdMs : 650);
+    });
+    trigger.addEventListener('pointermove', event => {
+      if(state.pointerId == null || event.pointerId !== state.pointerId) return;
+      const dx = Math.abs(Number(event.clientX || 0) - state.startX);
+      const dy = Math.abs(Number(event.clientY || 0) - state.startY);
+      if(dx > 12 || dy > 12) clearTimer();
+    });
+    const closeOnRelease = event => {
+      if(state.pointerId == null || event.pointerId !== state.pointerId) return;
+      const didHoldOpen = state.holdOpened;
+      if(typeof trigger.releasePointerCapture === 'function'){
+        try{ trigger.releasePointerCapture(event.pointerId); }catch(_){}
+      }
+      resetPointer();
+      if(didHoldOpen) closePanel();
+    };
+    trigger.addEventListener('pointerup', closeOnRelease);
+    trigger.addEventListener('pointercancel', closeOnRelease);
+    trigger.addEventListener('pointerleave', closeOnRelease);
+    trigger.addEventListener('contextmenu', event => event.preventDefault());
+    trigger.addEventListener('click', event => {
+      if(state.suppressClick){
+        state.suppressClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      event.preventDefault();
+    });
+  });
 }
 
 function resolvePlanVisibility(setup){
@@ -12977,6 +13312,7 @@ function bindReviewWorkspaceActions(record){
       renderReviewWorkspace();
     };
   });
+  bindEntryConditionsHoldInteractions(box);
   document.querySelectorAll('#reviewWorkspace .logic').forEach(el => el.addEventListener('change', refreshReview));
   ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));
 }
@@ -13177,6 +13513,15 @@ function renderReviewWorkspace(options = {}){
     warningState
   });
   const decisionSummary = visualState.decision_summary;
+  const entryConditionsSummary = buildEntryConditionsSummary({
+    ticker:record.ticker,
+    finalVerdict:visualState.finalVerdict || visualState.final_verdict,
+    resolvedContract,
+    globalVerdict,
+    derivedStates,
+    displayedPlan
+  });
+  const entryConditionsHelperMarkup = renderEntryConditionsHoldHelper(entryConditionsSummary, 'review', record.ticker);
   if(displayStage === 'Watch' && /ignore/i.test(String(reviewAction.label || ''))){
     console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:reviewAction.label});
   }
@@ -13433,6 +13778,7 @@ function renderReviewWorkspace(options = {}){
         <button class="secondary" id="saveReviewBtn">Save Review</button>
         <button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button>
       </div>
+      ${entryConditionsHelperMarkup ? `<div class="reviewactions reviewactions-secondary">${entryConditionsHelperMarkup}</div>` : ''}
       <details class="compact-details">
         <summary>Workspace Status</summary>
         <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
@@ -14898,7 +15244,7 @@ function resolveFinalStateContract(record, options = {}){
     addReason(blockerReason);
   }else if(planStateKey !== 'valid'){
     actionStateKey = 'recalculate_plan';
-    actionLabel = 'Recalculate plan';
+    actionLabel = 'Hold for entry conditions';
     actionTone = 'warning';
     blockerCode = planStateKey;
     blockerReason = (planStateKey === 'needs_adjustment' && (capitalBlocked || capitalHeavy))
@@ -14975,7 +15321,7 @@ function resolveFinalStateContract(record, options = {}){
   const nextPossibleState = actionStateKey === 'rebuild_setup'
     ? 'None'
     : (actionStateKey === 'recalculate_plan'
-      ? '\uD83E\uDDF0 Recalculate plan'
+      ? '🟡 Hold for entry conditions'
       : (actionStateKey === 'ready_to_act'
         ? '\uD83D\uDE80 Entry'
         : (structuralStateKey === 'near_entry' ? '\uD83C\uDFAF Near Entry' : '\uD83C\uDF31 Developing')));
