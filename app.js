@@ -2785,13 +2785,6 @@ function renderRiskQuickPreview(rawValue){
   const snapped = normalizedRiskQuickValue(numeric);
   if(toggle) toggle.textContent = `Risk ${formatPound(snapped)}`;
   if(valueLabel) valueLabel.textContent = formatPound(snapped);
-  const panel = $('riskQuickPanel');
-  if(panel){
-    panel.querySelectorAll('[data-risk-preset]').forEach(node => {
-      const preset = Number(node.getAttribute('data-risk-preset') || 0);
-      node.classList.toggle('is-selected', preset === snapped);
-    });
-  }
 }
 
 function queueRiskContextRefresh(source = 'risk_quick'){
@@ -2853,12 +2846,6 @@ function renderRiskQuickPanel(){
   }
   panel.hidden = !uiState.riskQuickOpen;
   panel.classList.toggle('is-open', !!uiState.riskQuickOpen);
-  const presets = [10,20,30,40,50,60,70,80,90,100];
-  panel.querySelectorAll('[data-risk-preset]').forEach(node => {
-    const preset = Number(node.getAttribute('data-risk-preset') || 0);
-    const active = presets.includes(preset) && preset === riskValue;
-    node.classList.toggle('is-selected', active);
-  });
 }
 
 function bindRiskQuickControls(){
@@ -2884,15 +2871,6 @@ function bindRiskQuickControls(){
   slider.addEventListener('change', event => {
     const snapped = normalizedRiskQuickValue(event.target.value);
     applyUserRiskPerTrade(snapped, {source:'risk_slider_commit', force:true});
-  });
-  panel.querySelectorAll('[data-risk-preset]').forEach(button => {
-    button.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const preset = Number(button.getAttribute('data-risk-preset') || 0);
-      applyUserRiskPerTrade(preset, {source:'risk_preset', force:true});
-      closeRiskQuickPanel();
-    });
   });
   document.addEventListener('pointerdown', event => {
     if(!uiState.riskQuickOpen) return;
@@ -9082,6 +9060,7 @@ function reconcileWatchlistPresentation({
 }
 
 function resolveSetupPatternUi({
+  setupScore,
   verdict,
   structureState,
   trendState,
@@ -9093,6 +9072,7 @@ function resolveSetupPatternUi({
   rrConfidence,
   entryChecks
 } = {}){
+  const numericSetupScore = Number.isFinite(Number(setupScore)) ? Number(setupScore) : null;
   const structureWeak = ['weak','weakening','developing_loose'].includes(structureState);
   const structureBroken = structureState === 'broken';
   const bounceNone = ['none','unconfirmed','early'].includes(bounceState);
@@ -9115,10 +9095,54 @@ function resolveSetupPatternUi({
   ].filter(Boolean).length;
   const constructiveStabilisation = stabilisationState === 'clear' && pullbackValid && !trendWeak;
 
-  // Stricter falling-knife translation: only surface when downside damage is broad.
-  if(!structureBroken && bounceNone && !constructiveStabilisation && (structureWeak || trendWeak) && damagePoints >= 3){
+  const developingStructure = ['developing','developing_clean','developing_loose'].includes(structureState);
+  const developingBounce = ['attempt','early','unconfirmed'].includes(bounceState);
+  const readyStructureStates = ['strong','intact','developing_clean'];
+
+  // 1) High risk / breaking structure
+  if(
+    (Number.isFinite(numericSetupScore) && numericSetupScore <= 3)
+    || structureState === 'broken'
+    || (structureState === 'weak' && bounceState === 'none')
+  ){
     return {id:'falling_knife', label:'Falling knife', explanation:'no clear bottom yet', footer:'Wait for price to stabilise and bounce before entry.'};
   }
+
+  // 2) Weak / deteriorating structure
+  if(
+    (Number.isFinite(numericSetupScore) && numericSetupScore >= 4 && numericSetupScore <= 6)
+    || structureState === 'weakening'
+    || bounceState === 'none'
+  ){
+    return {id:'weak_pullback', label:'Weak pullback', explanation:'low buying interest', footer:'Wait for a reclaim and stronger close before entry.'};
+  }
+
+  // 3) Developing structure primary case (exact required sentence)
+  if(developingStructure && developingBounce){
+    return {id:'developing_primary', label:'Developing', explanation:'Buyers have not taken control yet.', footer:'Wait for a reclaim and stronger close before entry.'};
+  }
+
+  // 5) Near confirmation (requires strong structure quality)
+  if(
+    Number.isFinite(numericSetupScore)
+    && numericSetupScore >= 8
+    && bounceState === 'confirmed'
+    && readyStructureStates.includes(structureState)
+  ){
+    return {id:'near_confirmation', label:'Pullback ready', explanation:'confirmation forming', footer:'Watch for entry trigger to remain valid on close.'};
+  }
+
+  // 4) Stronger / healthy pullback
+  if(
+    Number.isFinite(numericSetupScore)
+    && numericSetupScore >= 7
+    && readyStructureStates.includes(structureState)
+    && bounceState !== 'none'
+  ){
+    return {id:'healthy_pullback', label:'Pullback developing', explanation:'needs confirmation', footer:'Watch for entry trigger to remain valid on close.'};
+  }
+
+  // Keep existing granular fallback cues for internal secondary hints.
   if(!structureBroken && bounceAttempt && (structureWeak || volumeWeak || planUnclear || rrWeak) && damagePoints >= 2){
     return {id:'weak_bounce', label:'Weak bounce', explanation:'buyers have not taken control yet', footer:'Wait for a reclaim and stronger close before entry.'};
   }
@@ -9211,6 +9235,7 @@ function buildEntryConditionsSummary({
   const capitalFit = String(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || '').toLowerCase();
   const affordability = String(displayedPlan && displayedPlan.affordability || '').toLowerCase();
   const pattern = resolveSetupPatternUi({
+    setupScore:Number.isFinite(globalVerdict && globalVerdict.setup_score) ? globalVerdict.setup_score : null,
     verdict,
     structureState,
     trendState:String((derivedStates && derivedStates.trendState) || '').toLowerCase(),
