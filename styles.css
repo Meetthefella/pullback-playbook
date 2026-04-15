@@ -177,6 +177,7 @@ body{
 #riskQuickSlider{
   width:100%;
   accent-color:#34d399;
+  touch-action:pan-x;
 }
 .risk-quick-presets{
   display:flex;

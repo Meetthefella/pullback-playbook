@@ -2766,8 +2766,30 @@ function renderStats(){
 
 function normalizedRiskQuickValue(value){
   const numeric = Number(value);
-  if(!Number.isFinite(numeric) || numeric <= 0) return Math.max(5, Math.round(currentMaxLoss() || 40));
-  return Math.max(5, Math.min(200, Math.round(numeric)));
+  const maxConfigured = numericOrNull(state.riskQuickMax);
+  const maxValue = Number.isFinite(maxConfigured) && maxConfigured >= 100
+    ? Math.round(maxConfigured / 10) * 10
+    : 100;
+  if(!Number.isFinite(numeric) || numeric <= 0) return Math.max(10, Math.min(maxValue, 40));
+  const snapped = Math.round(numeric / 10) * 10;
+  return Math.max(10, Math.min(maxValue, snapped));
+}
+
+function renderRiskQuickPreview(rawValue){
+  const toggle = $('riskQuickToggle');
+  const valueLabel = $('riskQuickValue');
+  if(!toggle && !valueLabel) return;
+  const numeric = Number(rawValue);
+  const snapped = normalizedRiskQuickValue(numeric);
+  if(toggle) toggle.textContent = `Risk ${formatPound(snapped)}`;
+  if(valueLabel) valueLabel.textContent = formatPound(snapped);
+  const panel = $('riskQuickPanel');
+  if(panel){
+    panel.querySelectorAll('[data-risk-preset]').forEach(node => {
+      const preset = Number(node.getAttribute('data-risk-preset') || 0);
+      node.classList.toggle('is-selected', preset === snapped);
+    });
+  }
 }
 
 function queueRiskContextRefresh(source = 'risk_quick'){
@@ -2817,10 +2839,19 @@ function renderRiskQuickPanel(){
   toggle.textContent = `Risk ${formatPound(riskValue)}`;
   toggle.setAttribute('aria-expanded', uiState.riskQuickOpen ? 'true' : 'false');
   if(valueLabel) valueLabel.textContent = formatPound(riskValue);
-  if(slider) slider.value = String(riskValue);
+  if(slider){
+    const maxConfigured = numericOrNull(state.riskQuickMax);
+    const maxValue = Number.isFinite(maxConfigured) && maxConfigured >= 100
+      ? Math.round(maxConfigured / 10) * 10
+      : 100;
+    slider.min = '10';
+    slider.max = String(maxValue);
+    slider.step = '1';
+    slider.value = String(riskValue);
+  }
   panel.hidden = !uiState.riskQuickOpen;
   panel.classList.toggle('is-open', !!uiState.riskQuickOpen);
-  const presets = [10,20,30,40,50,75,100];
+  const presets = [10,20,30,40,50,60,70,80,90,100];
   panel.querySelectorAll('[data-risk-preset]').forEach(node => {
     const preset = Number(node.getAttribute('data-risk-preset') || 0);
     const active = presets.includes(preset) && preset === riskValue;
@@ -2846,10 +2877,11 @@ function bindRiskQuickControls(){
     else openRiskQuickPanel();
   });
   slider.addEventListener('input', event => {
-    applyUserRiskPerTrade(event.target.value, {source:'risk_slider_live'});
+    renderRiskQuickPreview(event.target.value);
   });
   slider.addEventListener('change', event => {
-    applyUserRiskPerTrade(event.target.value, {source:'risk_slider_commit', force:true});
+    const snapped = normalizedRiskQuickValue(event.target.value);
+    applyUserRiskPerTrade(snapped, {source:'risk_slider_commit', force:true});
   });
   panel.querySelectorAll('[data-risk-preset]').forEach(button => {
     button.addEventListener('click', event => {
@@ -9151,8 +9183,8 @@ function buildEntryConditionsSummary({
       primary:'Entry conditions are satisfied.',
       secondary:[],
       triggerLine:'Becomes actionable IF: entry trigger stays valid on close.',
-      futureStateLine:'Would upgrade to: \uD83D\uDE80 Entry.',
-      footer:'Becomes actionable IF: entry trigger stays valid on close. Would upgrade to: \uD83D\uDE80 Entry.'
+      futureStateLine:'Upgrades to: \uD83D\uDE80 Entry.',
+      footer:'Becomes actionable IF: entry trigger stays valid on close. Upgrades to: \uD83D\uDE80 Entry.'
     };
   }
 
@@ -9163,7 +9195,7 @@ function buildEntryConditionsSummary({
   };
 
   if(entryChecks.structure_ok === false || ['weak','weakening','developing_loose','broken'].includes(structureState)){
-    addBlocker('structure', 1, 'Trend needs to stabilise', 'Structure is still weakening');
+    addBlocker('structure', 1, 'Trend needs to stabilise', 'Structure still weakening');
   }
   if(entryChecks.bounce_ok === false || ['none','attempt','early','unconfirmed'].includes(bounceState)){
     addBlocker('bounce', 2, 'Needs a clearer bounce from support', bounceState === 'none' ? 'Bounce has not formed yet' : 'Bounce is not confirmed yet');
@@ -9196,8 +9228,8 @@ function buildEntryConditionsSummary({
   };
   if(pattern.id === 'falling_knife'){
     if(['none','unconfirmed','early'].includes(bounceState)) addSecondary('No clear bounce yet');
-    if(['weak','weakening','developing_loose'].includes(structureState)) addSecondary('Structure is still weakening');
-    if(volumeState === 'weak') addSecondary('Volume is still weak');
+    if(['weak','weakening','developing_loose'].includes(structureState)) addSecondary('Structure still weakening');
+    if(volumeState === 'weak') addSecondary('Volume still weak');
   }else if(pattern.id === 'weak_bounce'){
     addSecondary('Bounce is still tentative');
     if(['weak','weakening','developing_loose'].includes(structureState)) addSecondary('Structure remains loose');
@@ -9236,7 +9268,7 @@ function buildEntryConditionsSummary({
       : (verdict || 'monitor')
   );
   const triggerLine = `Becomes actionable IF: ${triggerCondition}.`;
-  const futureStateLine = `Would upgrade to: ${nextUpgrade}.`;
+  const futureStateLine = `Upgrades to: ${nextUpgrade}.`;
   const footer = `${triggerLine} ${futureStateLine}`;
   const normalizedHeader = (structuralState === 'developing' || structureState === 'developing_loose')
     ? '\uD83C\uDF31 Developing - Still forming'
@@ -9278,7 +9310,7 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
     return `<div class="entry-conditions-panel entry-conditions-panel--card no-card-click" id="${escapeHtml(panelId)}" hidden>
       <div class="entry-conditions-header"><strong>Status:</strong> ${escapeHtml(details.header || 'Monitor - Not ready')}</div>
       <div class="entry-conditions-pattern"><strong>Core Problem:</strong> ${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
-      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Why:</strong></div>` : ''}
+      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Holding it back:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
       ${triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(triggerLine)}</div>` : ''}
       ${futureStateLine ? `<div class="entry-conditions-footer">${escapeHtml(futureStateLine)}</div>` : (!triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
@@ -9289,7 +9321,7 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
     <div class="entry-conditions-panel no-card-click" id="${escapeHtml(panelId)}" hidden>
       <div class="entry-conditions-header"><strong>Status:</strong> ${escapeHtml(details.header || 'Monitor - Not ready')}</div>
       <div class="entry-conditions-pattern"><strong>Core Problem:</strong> ${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
-      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Why:</strong></div>` : ''}
+      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Holding it back:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
       ${triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(triggerLine)}</div>` : ''}
       ${futureStateLine ? `<div class="entry-conditions-footer">${escapeHtml(futureStateLine)}</div>` : (!triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
