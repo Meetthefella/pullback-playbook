@@ -61,6 +61,8 @@ body{
   scroll-snap-type:x mandatory;
   scroll-padding-inline:18vw;
   overscroll-behavior-x:contain;
+  position:relative;
+  z-index:60;
 }
 .control-focus-rail::-webkit-scrollbar{display:none}
 .focus-rail-item{
@@ -111,6 +113,8 @@ body{
   border-radius:14px;
   background:#1c2030;
   border-top:1px solid rgba(255,255,255,.06);
+  position:relative;
+  z-index:60;
 }
 .control-focus-tray__label{
   font-size:10px;

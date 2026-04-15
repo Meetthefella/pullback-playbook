@@ -2998,6 +2998,7 @@ function controlFocusConfig(focusKey){
 }
 
 function setControlFocusSelection(focusKey, value){
+  if(uiState.riskQuickOpen) closeRiskQuickPanel();
   if(focusKey === 'market'){
     if(String(value || '') === 'auto'){
       if($('marketStatusMode')) $('marketStatusMode').value = 'auto';
@@ -3156,6 +3157,7 @@ function snapControlFocusRail(container, options = {}){
 }
 
 function setControlFocus(focusKey, options = {}){
+  if(uiState.riskQuickOpen) closeRiskQuickPanel();
   const nextFocus = ['market','account','mode','setup'].includes(String(focusKey || '')) ? String(focusKey) : 'market';
   applyRailFocus(controlFocusIndexForKey(nextFocus), options);
 }
@@ -4201,6 +4203,12 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Base Verdict', value:globalVerdict.base_verdict || 'n/a'},
     {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : 'n/a'},
     {label:'Setup Score Source', value:setupScoreTrace.source || 'n/a'},
+    {label:'Previous Stored Score', value:Number.isFinite(debug.score_previous_stored) ? `${debug.score_previous_stored}/10` : '(none)'},
+    {label:'Recomputed Score', value:Number.isFinite(debug.score_recomputed) ? `${debug.score_recomputed}/10` : '(none)'},
+    {label:'Penalty-Adjusted Score', value:Number.isFinite(debug.score_recomputed_penalty_adjusted) ? `${debug.score_recomputed_penalty_adjusted}/10` : '(none)'},
+    {label:'Fallback Applied', value:debug.score_fallback_applied ? 'true' : 'false'},
+    {label:'Score Change Reason', value:debug.score_change_reason || '(none)'},
+    {label:'Refresh Replaced Reviewed State', value:debug.refresh_replaced_reviewed_state ? 'true' : 'false'},
     {label:'Structure', value:globalVerdict.structure_state || 'n/a'},
     {label:'Bounce', value:globalVerdict.bounce_state || 'n/a'},
     {label:'Market', value:globalVerdict.market_regime || 'n/a'},
@@ -6863,17 +6871,37 @@ function canonicalBaseSetupScore(record, options = {}){
 
 function setupScoreTraceForRecord(record){
   const displayScore = numericOrNull(record && record.setup && record.setup.score);
+  const setupScoreSource = String(record && record.setup && record.setup.scoreSource || '').trim();
+  const setupScorePrevious = numericOrNull(record && record.setup && record.setup.scorePrevious);
+  const setupScoreRecomputed = numericOrNull(record && record.setup && record.setup.scoreRecomputed);
+  const setupScoreFallbackApplied = !!(record && record.setup && record.setup.scoreFallbackApplied);
+  const setupScoreChangeReason = String(record && record.setup && record.setup.scoreChangeReason || '').trim();
+  const reviewedScorePreserved = !!(record && record.setup && record.setup.reviewedScorePreserved);
+  const refreshReplacedReviewedScore = !!(record && record.setup && record.setup.refreshReplacedReviewedScore);
   const canonicalBase = canonicalBaseSetupScore(record);
   const scanScore = numericOrNull(record && record.scan && record.scan.score);
   if(Number.isFinite(displayScore)){
     return {
       score:Math.max(0, Math.min(10, Math.round(displayScore))),
-      source:'setup.score',
-      detail:'Displayed setup score from normalized setup state.',
+      source:setupScoreSource || 'setup.score',
+      detail:setupScoreChangeReason || 'Displayed setup score from normalized setup state.',
       inputs:{
         setup_score:displayScore,
         base_score:canonicalBase,
-        scan_score:scanScore
+        scan_score:scanScore,
+        previous_score:setupScorePrevious,
+        recomputed_score:setupScoreRecomputed,
+        fallback_applied:setupScoreFallbackApplied ? 1 : 0,
+        reviewed_score_preserved:reviewedScorePreserved ? 1 : 0,
+        refresh_replaced_reviewed:refreshReplacedReviewedScore ? 1 : 0
+      },
+      sourceMeta:{
+        score_source_used:setupScoreSource || 'setup.score',
+        previous_stored_score:setupScorePrevious,
+        recomputed_score:setupScoreRecomputed,
+        fallback_applied:setupScoreFallbackApplied,
+        score_change_reason:setupScoreChangeReason || 'No score change.',
+        refresh_replaced_reviewed_state:refreshReplacedReviewedScore
       }
     };
   }
