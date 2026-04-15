@@ -45,12 +45,15 @@
     return `--visual-state-background:linear-gradient(to top, rgba(255,255,255,${highlight}), rgba(255,255,255,${lift})), linear-gradient(to top, ${palette.top}, ${palette.bottom});--visual-state-border:${palette.border};--visual-state-glow:${palette.glow};`;
   }
 
-  function decisionSummaryForVerdict(finalVerdict, deps = {}){
+  function decisionSummaryForVerdict(finalVerdict, options = {}, deps = {}){
     const verdict = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict || '');
     if(verdict === 'entry') return 'Entry - your plan fits.';
     if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
     if(verdict === 'avoid' || verdict === 'dead') return 'Avoid - too weak or broken. Leave it alone.';
-    return 'Monitor - not ready yet. Wait for a clearer bounce.';
+    const structuralState = String(options && options.structuralState || '').toLowerCase();
+    return structuralState === 'developing'
+      ? 'Developing - still forming. Buyers have not taken control yet.'
+      : 'Monitor - still forming. Buyers have not taken control yet.';
   }
 
   function finalVerdictFromResolvedContract(resolved, derivedStates, deps = {}){
@@ -126,7 +129,7 @@
       : '(none)';
     return {
       state,
-      decision_summary:decisionSummaryForVerdict(finalVerdict, deps),
+      decision_summary:decisionSummaryForVerdict(finalVerdict, {structuralState:resolvedContract && resolvedContract.structuralState}, deps),
       visual_tone,
       score,
       className:`visual-state-card visual-state-${state} visual-tone-${visual_tone}`,
@@ -146,7 +149,7 @@
       allow_plan:['entry','near_entry'].includes(finalVerdict),
       allowWatchlist:['monitor','near_entry','entry'].includes(finalVerdict),
       allow_watchlist:['monitor','near_entry','entry'].includes(finalVerdict),
-      reason:decisionSummaryForVerdict(finalVerdict, deps),
+      reason:decisionSummaryForVerdict(finalVerdict, {structuralState:resolvedContract && resolvedContract.structuralState}, deps),
       ui_state_source:'resolveFinalStateContract',
       final_verdict_rendered:finalVerdict,
       bucket_rendered:bucket,

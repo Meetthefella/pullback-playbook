@@ -9120,28 +9120,51 @@ function resolveSetupPatternUi({
   const developingStructure = ['developing','developing_clean','developing_loose'].includes(structureState);
   const developingBounce = ['attempt','early','unconfirmed'].includes(bounceState);
   const readyStructureStates = ['strong','intact','developing_clean'];
+  const terminalVerdict = ['avoid','dead'].includes(normalizeVerdict(verdict || ''));
+  const confirmedDeterioration = structureWeak && trendWeak && bounceNone && damagePoints >= 3;
+  const supportFailure = !pullbackValid && bounceNone && (structureWeak || trendWeak);
+  const strictFallingKnife = structureBroken
+    || terminalVerdict
+    || (structureState === 'weak' && bounceState === 'none' && trendWeak)
+    || (confirmedDeterioration && supportFailure);
 
-  // 1) High risk / breaking structure
-  if(
-    (Number.isFinite(numericSetupScore) && numericSetupScore <= 3)
-    || structureState === 'broken'
-    || (structureState === 'weak' && bounceState === 'none')
-  ){
-    return {id:'falling_knife', label:'Falling knife', explanation:'no clear bottom yet', footer:'Wait for price to stabilise and bounce before entry.'};
+  // 1) High risk / breaking structure (strict guard only)
+  if(strictFallingKnife){
+    return {
+      id:'falling_knife',
+      wordingTone:'broken_falling_knife',
+      label:'Falling knife',
+      explanation:'no clear bottom yet',
+      footer:'Support is failing and trend structure is no longer intact.'
+    };
   }
 
   // 2) Weak / deteriorating structure
   if(
+    (Number.isFinite(numericSetupScore) && numericSetupScore <= 3)
+    || 
     (Number.isFinite(numericSetupScore) && numericSetupScore >= 4 && numericSetupScore <= 6)
     || structureState === 'weakening'
     || bounceState === 'none'
   ){
-    return {id:'weak_pullback', label:'Weak pullback', explanation:'low buying interest', footer:'Wait for a reclaim and stronger close before entry.'};
+    return {
+      id:'weak_pullback',
+      wordingTone:'developing_pullback',
+      label:'Weak pullback',
+      explanation:'low buying interest',
+      footer:'Trade structure is not clear enough to price safely yet.'
+    };
   }
 
   // 3) Developing structure primary case (exact required sentence)
   if(developingStructure && developingBounce){
-    return {id:'developing_primary', label:'Developing', explanation:'Buyers have not taken control yet.', footer:'Wait for a reclaim and stronger close before entry.'};
+    return {
+      id:'developing_primary',
+      wordingTone:'developing_pullback',
+      label:'Developing',
+      explanation:'Buyers have not taken control yet.',
+      footer:'Trade structure is not clear enough to price safely yet.'
+    };
   }
 
   // 5) Near confirmation (requires strong structure quality)
@@ -9151,7 +9174,13 @@ function resolveSetupPatternUi({
     && bounceState === 'confirmed'
     && readyStructureStates.includes(structureState)
   ){
-    return {id:'near_confirmation', label:'Pullback ready', explanation:'confirmation forming', footer:'Watch for entry trigger to remain valid on close.'};
+    return {
+      id:'near_confirmation',
+      wordingTone:'healthy_pullback',
+      label:'Pullback ready',
+      explanation:'confirmation forming',
+      footer:'Watch for entry trigger to remain valid on close.'
+    };
   }
 
   // 4) Stronger / healthy pullback
@@ -9161,15 +9190,33 @@ function resolveSetupPatternUi({
     && readyStructureStates.includes(structureState)
     && bounceState !== 'none'
   ){
-    return {id:'healthy_pullback', label:'Pullback developing', explanation:'needs confirmation', footer:'Watch for entry trigger to remain valid on close.'};
+    return {
+      id:'healthy_pullback',
+      wordingTone:'healthy_pullback',
+      label:'Pullback developing',
+      explanation:'needs confirmation',
+      footer:'Watch for entry trigger to remain valid on close.'
+    };
   }
 
   // Keep existing granular fallback cues for internal secondary hints.
   if(!structureBroken && bounceAttempt && (structureWeak || volumeWeak || planUnclear || rrWeak) && damagePoints >= 2){
-    return {id:'weak_bounce', label:'Weak bounce', explanation:'buyers have not taken control yet', footer:'Wait for a reclaim and stronger close before entry.'};
+    return {
+      id:'weak_bounce',
+      wordingTone:'developing_pullback',
+      label:'Weak bounce',
+      explanation:'buyers have not taken control yet',
+      footer:'Trade structure is not clear enough to price safely yet.'
+    };
   }
   if(!structureBroken && !pullbackValid && bounceNone && structureWeak){
-    return {id:'no_clean_setup', label:'No clean setup', explanation:'price action is too messy', footer:'Wait for cleaner structure before entry can be assessed.'};
+    return {
+      id:'no_clean_setup',
+      wordingTone:'developing_pullback',
+      label:'Pullback in progress',
+      explanation:'buyers not stepping in yet',
+      footer:'Trade structure is not clear enough to price safely yet.'
+    };
   }
   if(!structureBroken && nearReady && (bounceConfirmed || bounceAttempt)){
     return {id:'bounce_confirming', label:'Bounce confirming', explanation:'entry is getting closer', footer:'If this follows through, the app can price entry, stop, and size.'};
@@ -9178,9 +9225,21 @@ function resolveSetupPatternUi({
     return {id:'higher_low_forming', label:'Higher low forming', explanation:'early support may be building', footer:'If support holds, a valid entry may develop.'};
   }
   if(!structureBroken && pullbackValid && !structureWeak){
-    return {id:'constructive_pullback', label:'Constructive pullback', explanation:'support is holding so far', footer:'Watch for bounce confirmation from support.'};
+    return {
+      id:'constructive_pullback',
+      wordingTone:'healthy_pullback',
+      label:'Constructive pullback',
+      explanation:'support is holding so far',
+      footer:'Watch for bounce confirmation from support.'
+    };
   }
-  return {id:'no_clean_setup', label:'No clean setup', explanation:'price action is too messy', footer:'Wait for clearer structure and bounce before entry.'};
+  return {
+    id:'no_clean_setup',
+    wordingTone:'developing_pullback',
+    label:'Pullback developing',
+    explanation:'needs confirmation',
+    footer:'Trade structure is not clear enough to price safely yet.'
+  };
 }
 
 function entryTriggerConditionForSummary({bounceState, pullbackState, volumeState, structureState} = {}){
@@ -9191,30 +9250,30 @@ function entryTriggerConditionForSummary({bounceState, pullbackState, volumeStat
 
   // 1) No bounce: always prioritize structure formation.
   if(bounce === 'none'){
-    return 'Higher low & breaks prior high';
+    return 'A higher low forms and buyers start reclaiming control';
   }
 
   // 4) Weak-structure override for safer confirmation wording.
   if(['weakening','developing_loose'].includes(structure)){
-    if(pullback === 'near_20ma') return 'Strong close above prior high & holds 20MA';
-    if(pullback === 'near_50ma') return 'Reclaims 50MA & strong close with volume';
+    if(pullback === 'near_20ma') return 'Price stabilises and buyers reclaim the 20MA';
+    if(pullback === 'near_50ma') return 'Price stabilises and buyers reclaim the 50MA';
   }
 
   // 2) Early/attempt bounce.
   if(bounce === 'attempt'){
-    if(pullback === 'near_20ma') return 'Strong close above prior high & holds 20MA';
-    if(pullback === 'near_50ma') return 'Reclaims 50MA & strong close with volume';
-    return 'Strong close above prior high & holds level';
+    if(pullback === 'near_20ma') return 'A higher low forms and buyers reclaim the 20MA';
+    if(pullback === 'near_50ma') return 'A higher low forms and buyers reclaim the 50MA';
+    return 'A higher low forms and buyers start reclaiming structure';
   }
 
   // 3) Confirmed bounce.
   if(bounce === 'confirmed'){
-    if(volume === 'weak') return 'Breaks prior high & volume expands';
-    if(['strong','intact'].includes(structure)) return 'Breaks prior high & holds above level';
+    if(volume === 'weak') return 'Buyers keep control and volume starts improving';
+    if(['strong','intact'].includes(structure)) return 'Buyers keep control and structure stays intact';
   }
 
   // 5) Fallback.
-  return 'Breaks prior high & holds above level';
+  return 'Price stabilises and buyers start reclaiming structure';
 }
 
 function nextUpgradeStateForSummary(verdict){
@@ -9376,6 +9435,7 @@ function buildEntryConditionsSummary({
     ticker:normalizeTicker(ticker || ''),
     header:normalizedHeader,
     primary:`${pattern.label} - ${pattern.explanation}`,
+    wording_tone:pattern.wordingTone || 'developing_pullback',
     pattern_label:pattern.label,
     pattern_explanation:pattern.explanation,
     secondary,

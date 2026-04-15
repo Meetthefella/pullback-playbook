@@ -287,7 +287,7 @@
             : (weakVolume ? 'Weak volume caution.' : `${structureReasonLabel(structureState)}. Setup is still early.`)));
     }else if(resolved.actionStateKey === 'recalculate_plan' || resolved.actionStateKey === 'wait_for_confirmation' || resolved.structuralState === 'developing'){
       finalVerdict = 'monitor';
-      reason = resolved.blockerReason || 'Waiting for confirmation.';
+      reason = resolved.blockerReason || 'Bounce is too weak to price cleanly.';
     }else if(String(resolved.finalVerdict || '').toLowerCase() === 'avoid'){
       finalVerdict = 'monitor';
       reason = resolved.reasonSummary || resolved.blockerReason || `${structureReasonLabel(structureState)}. Alive setup downgraded to monitoring.`;

@@ -1,4 +1,75 @@
 (function(global){
+  const VALID_SCORE_STRUCTURE_STATES = new Set([
+    'strong',
+    'intact',
+    'developing',
+    'developing_clean',
+    'developing_loose',
+    'weak',
+    'weakening',
+    'broken'
+  ]);
+
+  const VALID_SCORE_BOUNCE_STATES = new Set([
+    'none',
+    'attempt',
+    'confirmed',
+    'early',
+    'unconfirmed'
+  ]);
+
+  const VALID_SCORE_VOLUME_STATES = new Set([
+    'supportive',
+    'strong',
+    'normal',
+    'neutral',
+    'weak'
+  ]);
+
+  function hasCompleteScoreInputs(derivedStates, baseScore){
+    const safeDerived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+    const structureState = String(safeDerived.structureState || '').trim().toLowerCase();
+    const bounceState = String(safeDerived.bounceState || '').trim().toLowerCase();
+    const volumeState = String(safeDerived.volumeState || '').trim().toLowerCase();
+    const structureReady = VALID_SCORE_STRUCTURE_STATES.has(structureState);
+    const bounceReady = VALID_SCORE_BOUNCE_STATES.has(bounceState);
+    const volumeReady = VALID_SCORE_VOLUME_STATES.has(volumeState);
+    return Number.isFinite(baseScore) && structureReady && bounceReady && volumeReady;
+  }
+
+  function scoreSourceForRecordContext(context){
+    const safe = context && typeof context === 'object' ? context : {};
+    if(safe.preservedReviewedScore) return 'review.savedScore(preserved)';
+    if(Number.isFinite(safe.recomputedScore)) return 'recomputed.chartQuality';
+    if(Number.isFinite(safe.previousStoredScore)) return 'setup.score(previous)';
+    if(Number.isFinite(safe.reviewedScore)) return 'review.savedScore';
+    return 'fallback.default';
+  }
+
+  function scoreChangeReasonForRecordContext(context){
+    const safe = context && typeof context === 'object' ? context : {};
+    if(safe.preservedReviewedScore && safe.fallbackApplied){
+      return 'Reviewed score preserved because recomputation inputs were incomplete.';
+    }
+    if(safe.preservedReviewedScore){
+      return 'Reviewed score preserved to prevent fallback overwrite.';
+    }
+    if(Number.isFinite(safe.previousStoredScore) && Number.isFinite(safe.recomputedScore) && safe.previousStoredScore !== safe.recomputedScore){
+      return 'Score updated from full recomputation inputs.';
+    }
+    if(
+      Number.isFinite(safe.recomputedScore)
+      && Number.isFinite(safe.penaltyAdjustedScore)
+      && safe.penaltyAdjustedScore < safe.recomputedScore
+    ){
+      return 'Chart-quality score preserved; tradeability penalties kept out of setup score.';
+    }
+    if(Number.isFinite(safe.recomputedScore)){
+      return 'Recomputed score accepted.';
+    }
+    return 'No score change.';
+  }
+
   function createBaseTickerRecord(ticker, deps){
     const { normalizeTicker, baseTradeOutcome } = deps || {};
     if (typeof normalizeTicker !== 'function') {
@@ -113,7 +184,15 @@
       },
       setup: {
         rawScore: null,
+        baseScore: null,
         score: null,
+        scoreSource: '',
+        scorePrevious: null,
+        scoreRecomputed: null,
+        scoreFallbackApplied: false,
+        scoreChangeReason: '',
+        reviewedScorePreserved: false,
+        refreshReplacedReviewedScore: false,
         convictionTier: '',
         practicalSizeFlag: '',
         verdict: '',
@@ -357,6 +436,13 @@
     merged.setup.rawScore = numericOrNull(merged.setup.rawScore);
     merged.setup.baseScore = numericOrNull(merged.setup.baseScore);
     merged.setup.score = numericOrNull(merged.setup.score);
+    merged.setup.scoreSource = String(merged.setup.scoreSource || '');
+    merged.setup.scorePrevious = numericOrNull(merged.setup.scorePrevious);
+    merged.setup.scoreRecomputed = numericOrNull(merged.setup.scoreRecomputed);
+    merged.setup.scoreFallbackApplied = !!merged.setup.scoreFallbackApplied;
+    merged.setup.scoreChangeReason = String(merged.setup.scoreChangeReason || '');
+    merged.setup.reviewedScorePreserved = !!merged.setup.reviewedScorePreserved;
+    merged.setup.refreshReplacedReviewedScore = !!merged.setup.refreshReplacedReviewedScore;
     merged.setup.convictionTier = String(merged.setup.convictionTier || '');
     merged.setup.practicalSizeFlag = String(merged.setup.practicalSizeFlag || '');
     merged.setup.controlQuality = String(merged.setup.controlQuality || '');
@@ -445,16 +531,58 @@
       warningState: setupWarningState,
       qualityAdjustments
     });
+    const recomputedChartScore = Number.isFinite(baseSetupScore)
+      ? Math.max(0, Math.min(10, Math.round(baseSetupScore)))
+      : null;
+    const recomputedPenaltyAdjustedScore = Number.isFinite(displaySetupScore)
+      ? Math.max(0, Math.min(10, Math.round(displaySetupScore)))
+      : null;
+    const previousStoredScore = numericOrNull(merged.setup.score);
+    const reviewedScore = numericOrNull(
+      merged.review.savedScore
+      ?? (merged.review.manualReview && merged.review.manualReview.score)
+    );
+    const recomputeComplete = hasCompleteScoreInputs(setupDerivedStates, baseSetupScore);
+    const fallbackApplied = !recomputeComplete || !Number.isFinite(recomputedChartScore);
+    const preserveReviewedScore = Number.isFinite(reviewedScore) && fallbackApplied;
+    const selectedScore = preserveReviewedScore
+      ? reviewedScore
+      : (Number.isFinite(recomputedChartScore)
+        ? recomputedChartScore
+        : (Number.isFinite(previousStoredScore) ? previousStoredScore : (Number.isFinite(reviewedScore) ? reviewedScore : 0)));
+    const setupScoreContext = {
+      preservedReviewedScore:preserveReviewedScore,
+      recomputedScore:recomputedChartScore,
+      previousStoredScore,
+      reviewedScore,
+      penaltyAdjustedScore:recomputedPenaltyAdjustedScore,
+      fallbackApplied
+    };
+    const scoreSource = scoreSourceForRecordContext(setupScoreContext);
+    const scoreChangeReason = scoreChangeReasonForRecordContext(setupScoreContext);
+    const refreshReplacedReviewedScore = Number.isFinite(reviewedScore)
+      && Number.isFinite(previousStoredScore)
+      && previousStoredScore === reviewedScore
+      && !preserveReviewedScore
+      && Number.isFinite(recomputedChartScore)
+      && recomputedChartScore < reviewedScore;
     const convictionTier = convictionTierForRecord(merged, {
       derivedStates: setupDerivedStates,
       warningState: setupWarningState,
-      displayScore: displaySetupScore,
+      displayScore: selectedScore,
       qualityAdjustments
     });
     merged.setup = {
       baseScore: baseSetupScore,
       rawScore: baseSetupScore,
-      score: displaySetupScore,
+      score: selectedScore,
+      scoreSource,
+      scorePrevious: previousStoredScore,
+      scoreRecomputed: recomputedChartScore,
+      scoreFallbackApplied: !!fallbackApplied,
+      scoreChangeReason,
+      reviewedScorePreserved: !!preserveReviewedScore,
+      refreshReplacedReviewedScore: !!refreshReplacedReviewedScore,
       convictionTier,
       practicalSizeFlag: practicalSizeFlagForPlan(merged.plan),
       controlQuality: qualityAdjustments.controlQuality,
@@ -467,6 +595,15 @@
         : [String(merged.scan.summary || '').trim()].filter(Boolean),
       marketCaution: /below 50 ma/i.test(String(merged.meta.marketStatus || state.marketStatus || ''))
     };
+    merged.watchlist.debug = merged.watchlist.debug && typeof merged.watchlist.debug === 'object' ? merged.watchlist.debug : {};
+    merged.watchlist.debug.score_source_used = scoreSource;
+    merged.watchlist.debug.score_previous_stored = Number.isFinite(previousStoredScore) ? previousStoredScore : null;
+    merged.watchlist.debug.score_recomputed = Number.isFinite(recomputedChartScore) ? recomputedChartScore : null;
+    merged.watchlist.debug.score_recomputed_penalty_adjusted = Number.isFinite(recomputedPenaltyAdjustedScore) ? recomputedPenaltyAdjustedScore : null;
+    merged.watchlist.debug.score_fallback_applied = !!fallbackApplied;
+    merged.watchlist.debug.score_change_reason = scoreChangeReason;
+    merged.watchlist.debug.refresh_replaced_reviewed_state = !!refreshReplacedReviewedScore;
+    merged.watchlist.debug.score_recompute_complete = !!recomputeComplete;
     const triggerState = evaluateEntryTrigger(merged, { derivedStates: setupDerivedStates, displayedPlan: canonicalDisplayedPlan });
     const planValidation = validateCurrentPlan(merged, { derivedStates: setupDerivedStates, displayedPlan: canonicalDisplayedPlan, triggerState });
     if (hasLockedLifecycle(merged) || String(merged.lifecycle.status || '') === 'stale') {

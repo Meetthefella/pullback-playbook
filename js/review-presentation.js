@@ -26,12 +26,16 @@
     const {
       normalizeGlobalVerdictKey
     } = deps;
-    const {globalVerdict} = input || {};
+    const {globalVerdict, resolvedContract} = input || {};
     const verdict = normalizeGlobalVerdictKey(globalVerdict && globalVerdict.final_verdict || '');
     if(verdict === 'entry') return {line1:'Entry - your plan fits.', line2:''};
     if(verdict === 'near_entry') return {line1:'Near Entry - almost ready. Watch for confirmation.', line2:''};
     if(verdict === 'avoid' || verdict === 'dead') return {line1:'Avoid - too weak or broken. Leave it alone.', line2:''};
-    return {line1:'Monitor - not ready yet. Wait for a clearer bounce.', line2:''};
+    const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
+    const summary = structuralState === 'developing'
+      ? 'Developing - still forming. Buyers have not taken control yet.'
+      : 'Monitor - still forming. Buyers have not taken control yet.';
+    return {line1:'Bounce is too weak to price cleanly.', line2:summary};
   }
 
   window.ReviewPresentation = {

@@ -69,7 +69,9 @@
     let primary = '';
     let secondary = '';
     if(structureBadge && structureBadge.label){
-      primary = `${structureBadge.label} structure`;
+      primary = structureBadge.label === 'Developing'
+        ? 'Developing - still forming'
+        : `${structureBadge.label} structure`;
     }else if(String(derived.trendState || '').toLowerCase() === 'strong'){
       primary = 'Strong structure';
     }else{
@@ -82,7 +84,7 @@
     }else if(String(derived.bounceState || '').toLowerCase() === 'attempt'){
       secondary = 'Bounce tentative';
     }else if(String(derived.bounceState || '').toLowerCase() === 'none'){
-      secondary = 'Weak bounce';
+      secondary = 'Buyers have not taken control yet';
     }
     return {
       primary,
