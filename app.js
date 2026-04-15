@@ -2810,6 +2810,7 @@ function applyUserRiskPerTrade(value, options = {}){
   if($('maxLossOverride')) $('maxLossOverride').value = String(nextRisk);
   if($('riskPercent')) $('riskPercent').value = String(state.riskPercent || '');
   renderRiskQuickPanel();
+  if(options.skipRefresh === true) return;
   if(Math.abs(previous - nextRisk) < 0.01 && options.force !== true) return;
   queueRiskContextRefresh(String(options.source || 'risk_quick'));
 }
@@ -2866,7 +2867,9 @@ function bindRiskQuickControls(){
     else openRiskQuickPanel();
   });
   slider.addEventListener('input', event => {
-    renderRiskQuickPreview(event.target.value);
+    const snapped = normalizedRiskQuickValue(event.target.value);
+    applyUserRiskPerTrade(snapped, {source:'risk_slider_preview', force:true, skipRefresh:true});
+    renderRiskQuickPreview(snapped);
   });
   slider.addEventListener('change', event => {
     const snapped = normalizedRiskQuickValue(event.target.value);
