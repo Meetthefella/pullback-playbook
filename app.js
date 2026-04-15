@@ -229,6 +229,7 @@ const DEFAULT_STATE = {
   wholeSharesOnly:true,
   marketStatus:'S&P above 50 MA',
   marketStatusMode:'auto',
+  marketStatusAutoUpdatedAt:'',
   setupType:'',
   listName:"Today's Scan",
   universeMode:'core8',
@@ -289,6 +290,7 @@ const fxRatePending = new Map();
 const MAX_CHART_BYTES = 4 * 1024 * 1024;
 const ANALYSIS_TIMEOUT_MS = 45000;
 const MARKET_CACHE_TTL_MS = 15 * 60 * 1000;
+const MARKET_STATUS_STALE_MS = MARKET_CACHE_TTL_MS;
 const FX_RATE_CACHE_TTL_MS = 30 * 60 * 1000;
 const SEARCH_DEBOUNCE_MS = 250;
 const DEFAULT_WATCH_TRADING_DAYS = 3;
@@ -2911,8 +2913,15 @@ function normalizeMarketStatusMode(value){
 }
 
 function marketStatusDisplayValue(){
-  const label = String(state.marketStatus || 'S&P above 50 MA');
-  return normalizeMarketStatusMode(state.marketStatusMode) === 'auto' ? `${label} (auto)` : label;
+  const mode = normalizeMarketStatusMode(state.marketStatusMode);
+  const label = String(state.marketStatus || '').trim();
+  if(mode !== 'auto') return label || 'Market state not confirmed';
+  const updatedAt = String(state.marketStatusAutoUpdatedAt || '').trim();
+  if(!updatedAt) return 'Market state not confirmed';
+  if(!isFreshTimestamp(updatedAt, MARKET_STATUS_STALE_MS)) return 'Auto market state stale';
+  const age = relativeAgeLabel(updatedAt);
+  if(!label) return 'Market state not confirmed';
+  return age ? `Auto (${label}) · updated ${age}` : `Auto (${label})`;
 }
 
 function deriveAutomaticMarketStatus(snapshot){
@@ -2931,7 +2940,10 @@ async function refreshAutomaticMarketStatus(options = {}){
     const nextStatus = deriveAutomaticMarketStatus(snapshot);
     if(!nextStatus) return false;
     const changed = nextStatus !== String(state.marketStatus || '');
+    const nowIso = new Date().toISOString();
+    const previousAutoUpdatedAt = String(state.marketStatusAutoUpdatedAt || '').trim();
     state.marketStatus = nextStatus;
+    state.marketStatusAutoUpdatedAt = nowIso;
     if($('marketStatus')) $('marketStatus').value = nextStatus;
     if($('marketStatusMode')) $('marketStatusMode').value = 'auto';
     if(changed){
@@ -2942,6 +2954,7 @@ async function refreshAutomaticMarketStatus(options = {}){
         force:true
       });
     }else{
+      if(previousAutoUpdatedAt !== nowIso) commitTickerState();
       renderStats();
     }
     return changed;
@@ -2961,7 +2974,7 @@ function controlFocusConfig(focusKey){
       label:'Market',
       selected:mode === 'auto' ? 'auto' : String(state.marketStatus || 'S&P above 50 MA'),
       options:[
-        {value:'auto', label:`Auto (${String(state.marketStatus || 'S&P above 50 MA')})`},
+        {value:'auto', label:marketStatusDisplayValue()},
         {value:'S&P above 50 MA', label:'S&P above 50 MA'},
         {value:'S&P near 50 MA', label:'S&P near 50 MA'},
         {value:'S&P below 50 MA', label:'S&P below 50 MA'}
@@ -3008,6 +3021,7 @@ function setControlFocusSelection(focusKey, value){
     }else{
       if($('marketStatusMode')) $('marketStatusMode').value = 'manual';
       state.marketStatusMode = 'manual';
+      state.marketStatusAutoUpdatedAt = '';
       if($('marketStatus')) $('marketStatus').value = value;
       saveState();
       refreshRiskContextForActiveSetups({
@@ -4216,7 +4230,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   ])}${renderDebugSectionMarkup('Execution State', [
     {label:'Lifecycle State', value:lifecycleSnapshot.state || globalVerdict.lifecycle || 'n/a'},
     {label:'Action State', value:resolved.actionStateLabel || resolved.actionLabel || 'n/a'},
-    {label:'Plan Status', value:debugPlanUI.showPlan ? (resolved.planStatusLabel || 'n/a') : (debugPlanUI.diagnosticsMessage || 'Waiting for confirmation')},
+    {label:'Plan Status', value:debugPlanUI.showPlan ? (resolved.planStatusLabel || 'n/a') : (debugPlanUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.')},
     {label:'Plan Visible', value:debugPlanUI.showPlan ? 'true' : 'false'},
     {label:'RR Confidence', value:resolved.rrConfidenceLabel || 'n/a'},
     {label:'Capital Fit', value:capitalComfort.label || 'n/a'},
@@ -4512,7 +4526,7 @@ function renderWatchlist(){
       div.style.cssText = watchlistVisualState.styleAttr || '';
       div.dataset.visualTone = watchlistVisualState.visual_tone || '';
       div.dataset.visualState = watchlistVisualState.state || '';
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Waiting for confirmation'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -8921,6 +8935,8 @@ function renderTradeStatusMarkup(status){
 }
 
 function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
+  const weakBounceHeadline = 'Bounce is too weak to price cleanly.';
+  const weakBounceSubline = 'Buyers have not taken control yet.';
   const blockerCode = String(resolvedContract && resolvedContract.blockerCode || '').trim().toLowerCase();
   const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').trim().toLowerCase();
   if(['plan_invalid','plan_missing','plan_adjustment'].includes(blockerCode) || blockerReason.includes('invalid plan') || blockerReason.includes('plan not defined') || blockerReason.includes('plan needs adjustment')){
@@ -8937,8 +8953,8 @@ function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
   }
   if(['bounce_not_confirmed','near_trigger','weak_volume','weak_market','weak_control','early_confirmation'].includes(blockerCode) || blockerReason.includes('bounce not confirmed') || blockerReason.includes('needs better confirmation')){
     return {
-      line1:'No safe entry yet',
-      line2:'Waiting for a confirmed bounce and stabilisation'
+      line1:weakBounceHeadline,
+      line2:weakBounceSubline
     };
   }
   if(['broken_trend','broken_structure','setup_invalidated','weak_structure'].includes(blockerCode) || blockerReason.includes('structure is broken') || blockerReason.includes('trend is invalidated') || blockerReason.includes('structure is weak')){
@@ -8954,8 +8970,8 @@ function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
     };
   }
   return {
-    line1:'Waiting for confirmation',
-    line2:'Trade conditions are not ready yet'
+    line1:weakBounceHeadline,
+    line2:weakBounceSubline
   };
 }
 
@@ -8977,7 +8993,12 @@ function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, de
   if(verdict === 'entry') return 'Entry - your plan fits.';
   if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
   if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
-  return 'Monitor - not ready yet. Wait for a clearer bounce.';
+  const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
+  const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
+  const developingState = structuralState === 'developing' || ['developing','developing_loose','developing_clean'].includes(structureState);
+  return developingState
+    ? 'Developing - still forming. Buyers have not taken control yet.'
+    : 'Monitor - still forming. Buyers have not taken control yet.';
 }
 
 function isWatchlistAvoidBucket(bucket){
@@ -9099,7 +9120,7 @@ function resolveSetupPatternUi({
     return {id:'falling_knife', label:'Falling knife', explanation:'no clear bottom yet', footer:'Wait for price to stabilise and bounce before entry.'};
   }
   if(!structureBroken && bounceAttempt && (structureWeak || volumeWeak || planUnclear || rrWeak) && damagePoints >= 2){
-    return {id:'weak_bounce', label:'Weak bounce', explanation:'buyers have not taken control', footer:'Wait for stronger follow-through before entry.'};
+    return {id:'weak_bounce', label:'Weak bounce', explanation:'buyers have not taken control yet', footer:'Wait for a reclaim and stronger close before entry.'};
   }
   if(!structureBroken && !pullbackValid && bounceNone && structureWeak){
     return {id:'no_clean_setup', label:'No clean setup', explanation:'price action is too messy', footer:'Wait for cleaner structure before entry can be assessed.'};
@@ -9226,7 +9247,7 @@ function buildEntryConditionsSummary({
     addBlocker('structure', 1, 'Trend needs to stabilise', 'Structure still weakening');
   }
   if(entryChecks.bounce_ok === false || ['none','attempt','early','unconfirmed'].includes(bounceState)){
-    addBlocker('bounce', 2, 'Needs a clearer bounce from support', bounceState === 'none' ? 'Bounce has not formed yet' : 'Bounce is not confirmed yet');
+    addBlocker('bounce', 2, 'Bounce is still tentative', bounceState === 'none' ? 'Bounce has not formed yet' : 'Buyers have not taken control yet');
   }
   if(entryChecks.plan_ok === false || ['missing','invalid','needs_adjustment','unrealistic_rr'].includes(planStatus)){
     addBlocker('plan', 3, 'A valid entry and stop are not available yet', 'Trade structure is not clear enough to price safely');
@@ -9244,7 +9265,7 @@ function buildEntryConditionsSummary({
     addBlocker('capital', 7, 'This setup does not currently fit the saved risk limit', 'Risk cannot be sized safely with current account settings');
   }
   if(!blockers.length){
-    addBlocker('confirmation', 8, 'Price action is still too early for a safe entry', 'The chart has not printed a clean trigger candle yet');
+    addBlocker('confirmation', 8, 'Bounce is too weak to price cleanly.', 'No trustworthy entry yet.');
   }
 
   blockers.sort((a, b) => a.priority - b.priority);
@@ -9282,7 +9303,7 @@ function buildEntryConditionsSummary({
     addSecondary('Current risk limit is too tight for this setup');
   }
   const header = (structuralState === 'developing' || structureState === 'developing_loose')
-    ? '🌱 Developing - Still forming'
+    ? '🌱 Developing - still forming'
     : (verdict === 'near_entry' ? '🎯 Near Entry - Almost there' : '🟡 Monitor - Not ready');
   const triggerCondition = entryTriggerConditionForSummary({
     bounceState,
@@ -9299,7 +9320,7 @@ function buildEntryConditionsSummary({
   const futureStateLine = `Upgrades to: ${nextUpgrade}.`;
   const footer = `${triggerLine} ${futureStateLine}`;
   const normalizedHeader = (structuralState === 'developing' || structureState === 'developing_loose')
-    ? '\uD83C\uDF31 Developing - Still forming'
+    ? '\uD83C\uDF31 Developing - still forming'
     : (verdict === 'near_entry' ? '\uD83C\uDFAF Near Entry - Almost there' : '\uD83D\uDFE1 Monitor - Not ready');
 
   return {
@@ -9584,7 +9605,7 @@ function resolvePlanVisibility(setup){
       showPositionSize:false,
       showCapital:false,
       showRR:false,
-      diagnosticsMessage:'Monitor - not ready yet. Wait for a clearer bounce.',
+      diagnosticsMessage:'Bounce is too weak to price cleanly.',
       diagnosticsTone:'neutral'
     };
   }
@@ -9616,7 +9637,7 @@ function resolvePlanVisibility(setup){
     showPositionSize:false,
     showCapital:false,
     showRR:false,
-    diagnosticsMessage:'Monitor - not ready yet. Wait for a clearer bounce.',
+    diagnosticsMessage:'Bounce is too weak to price cleanly.',
     diagnosticsTone:'neutral'
   };
 }
@@ -9631,19 +9652,19 @@ function isDuplicatedStatusCopy(message, decisionSummary){
 }
 
 function nonPlanCalcNoteText(message, decisionSummary){
-  if(isDuplicatedStatusCopy(message, decisionSummary)) return 'Waiting for confirmation.';
-  return message || 'Waiting for confirmation.';
+  if(isDuplicatedStatusCopy(message, decisionSummary)) return 'No actionable plan yet.';
+  return message || 'No actionable plan yet.';
 }
 
 function nonPlanRealismSummaryText(message, decisionSummary){
-  if(isDuplicatedStatusCopy(message, decisionSummary)) return 'R:R not reliable until setup confirms.';
-  return message || 'Waiting for confirmation.';
+  if(isDuplicatedStatusCopy(message, decisionSummary)) return 'Bounce is too weak to price cleanly.';
+  return message || 'Bounce is too weak to price cleanly.';
 }
 
 function nonPlanDiagnosticsSummaryMarkup(message, decisionSummary){
   if(!message) return '';
   if(isDuplicatedStatusCopy(message, decisionSummary)){
-    return '<div class="tiny">Setup is still forming. Wait for confirmation before planning entry.</div>';
+    return '<div class="tiny">Bounce is too weak to price cleanly. Waiting for a reclaim and stronger close.</div>';
   }
   return `<div class="summary">${escapeHtml(message)}</div>`;
 }
@@ -13019,8 +13040,12 @@ function renderAnalysisPanel(card){
       key_reasons:analysis.key_reasons,
       risks:analysis.risks
     };
+    const showPlanNumbers = savedAiPlanNumbersAllowed(card);
+    const planMarkup = showPlanNumbers
+      ? `<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div>`
+      : '<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Bounce is too weak to price cleanly.</div><div class="tiny">Waiting for a reclaim and stronger close.</div></div>';
     console.log('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
-    return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
+    return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div>${planMarkup}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
@@ -13040,6 +13065,19 @@ function analysisAdvisoryContextForRecord(record, analysis){
     reviewMoreConservative,
     advisoryNote:'This is the saved AI read, not the final app decision.'
   };
+}
+
+function savedAiPlanNumbersAllowed(record){
+  const item = normalizeTickerRecord(record || {});
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const visualState = resolveVisualState(item, 'review', {derivedStates});
+  const planUI = resolvePlanVisibility({
+    state:visualState.finalVerdict || visualState.final_verdict,
+    bounce_state:derivedStates.bounceState || (item.setup && item.setup.bounceState),
+    structure:derivedStates.structureState || (item.setup && item.setup.structureState)
+  });
+  const verdict = normalizeGlobalVerdictKey(visualState.finalVerdict || visualState.final_verdict);
+  return planUI.showPlan && ['entry','near_entry'].includes(verdict);
 }
 
 function renderAnalysisPanelFromRecord(record){
@@ -13078,7 +13116,11 @@ function renderAnalysisPanelFromRecord(record){
       stop:analysis.stop || 'Not given',
       first_target:analysis.first_target || 'Not given',
     };
-    return `<div class="responsegrid"><div class="mutebox tiny">${escapeHtml(advisory.advisoryNote)}</div>${advisory.reviewMoreConservative ? '<div class="mutebox warntext"><strong>Final review is more conservative than the saved AI read.</strong></div>' : ''}${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Metrics</summary><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
+    const showPlanNumbers = savedAiPlanNumbersAllowed(item);
+    const planMarkup = showPlanNumbers
+      ? `<div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div>`
+      : '<div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Bounce is too weak to price cleanly.</div><div class="tiny">Waiting for a reclaim and stronger close.</div>';
+    return `<div class="responsegrid"><div class="mutebox tiny">${escapeHtml(advisory.advisoryNote)}</div>${advisory.reviewMoreConservative ? '<div class="mutebox warntext"><strong>Final review is more conservative than the saved AI read.</strong></div>' : ''}${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Metrics</summary><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div>${planMarkup}</div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
   }
   if(!analysisState.rawAnalysis) return '<div class="tiny">No AI analysis saved yet.</div>';
   console.debug('LEGACY_PATH_STILL_IN_USE', 'renderAnalysisPanelFromRecord-fallback', item.ticker);
@@ -14007,7 +14049,7 @@ function renderReviewWorkspace(options = {}){
   });
   const tradeStatusText = planUI.showPlan
     ? tradeStatusMetricText({globalVerdict:visualState, displayedPlan, resolvedContract})
-    : {line1:planUI.diagnosticsMessage || 'Waiting for confirmation', line2:''};
+    : {line1:planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.', line2:''};
   const modifierMarkup = emojiModifierMarkup(resolvedContract);
   const scannerPresentation = resolveEmojiPresentation(record, {
     context:'scanner',
@@ -14064,7 +14106,7 @@ function renderReviewWorkspace(options = {}){
     : analysisPanelBody;
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
-  const rawRrDisplay = planUI.showRR && displayedPlan.status === 'valid' && Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : 'R:R not reliable';
+  const rawRrDisplay = planUI.showRR && displayedPlan.status === 'valid' && Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : 'No actionable plan yet.';
   const credibleRrDisplay = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   const planRealismSummary = planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.';
   const planRealismReasons = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
@@ -14641,7 +14683,7 @@ function syncPlanDisplayMeta(){
   if($('tradeStatusBox')){
     const tradeStatusText = planUI.showPlan
       ? tradeStatusMetricText({globalVerdict:visualState, displayedPlan, resolvedContract})
-      : {line1:planUI.diagnosticsMessage || 'Waiting for confirmation', line2:''};
+      : {line1:planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.', line2:''};
     $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   }
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
@@ -14830,7 +14872,7 @@ function calculate(options = {}){
   });
   const tradeStatusText = planUI.showPlan
     ? tradeStatusMetricText({globalVerdict:plannerVisualState, displayedPlan, resolvedContract})
-    : {line1:planUI.diagnosticsMessage || 'Waiting for confirmation', line2:''};
+    : {line1:planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.', line2:''};
   if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
   if($('capitalFitMetric')){
@@ -14864,7 +14906,7 @@ function calculate(options = {}){
   if(!planUI.showPlan){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = 'R:R not reliable';
+    $('rrValue').textContent = 'No actionable plan yet.';
     $('rrValue').className = 'big';
     if($('plannerBox')) $('plannerBox').className = 'panelbox plannerbox plannerbox--rr-mid';
     $('calcNote').textContent = nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary);
@@ -14873,7 +14915,7 @@ function calculate(options = {}){
   if(displayedPlan.status === 'missing'){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = 'R:R not reliable';
+    $('rrValue').textContent = 'No actionable plan yet.';
     $('rrValue').className = 'big';
     if($('plannerBox')) $('plannerBox').className = 'panelbox plannerbox plannerbox--rr-mid';
     $('calcNote').textContent = 'Add planned entry, stop, and first target to complete the trade plan.';
@@ -14882,7 +14924,7 @@ function calculate(options = {}){
   if(displayedPlan.status === 'invalid'){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = 'R:R not reliable';
+    $('rrValue').textContent = 'No actionable plan yet.';
     $('rrValue').className = 'big';
     if($('plannerBox')) $('plannerBox').className = 'panelbox plannerbox plannerbox--rr-mid';
     $('calcNote').textContent = 'Planned entry, stop, and first target must form a valid long plan.';
@@ -15559,6 +15601,7 @@ on('universeMode', 'change', () => {
 }));
 on('marketStatus', 'change', () => {
   state.marketStatusMode = 'manual';
+  state.marketStatusAutoUpdatedAt = '';
   if($('marketStatusMode')) $('marketStatusMode').value = 'manual';
   saveState();
   refreshRiskContextForActiveSetups({
@@ -15568,6 +15611,7 @@ on('marketStatus', 'change', () => {
 });
 on('marketStatusMode', 'change', () => {
   state.marketStatusMode = normalizeMarketStatusMode($('marketStatusMode').value);
+  if(state.marketStatusMode !== 'auto') state.marketStatusAutoUpdatedAt = '';
   saveState();
   if(state.marketStatusMode === 'auto'){
     refreshAutomaticMarketStatus({force:true});
