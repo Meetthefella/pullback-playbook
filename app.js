@@ -2826,11 +2826,12 @@ function closeRiskQuickPanel(){
 }
 
 function renderRiskQuickPanel(){
+  const anchor = $('riskQuickAnchor');
   const toggle = $('riskQuickToggle');
   const panel = $('riskQuickPanel');
   const slider = $('riskQuickSlider');
   const valueLabel = $('riskQuickValue');
-  if(!toggle || !panel) return;
+  if(!toggle || !panel || !anchor) return;
   const riskValue = normalizedRiskQuickValue(state.userRiskPerTrade || currentMaxLoss() || 40);
   toggle.textContent = `Risk ${formatPound(riskValue)}`;
   toggle.setAttribute('aria-expanded', uiState.riskQuickOpen ? 'true' : 'false');
@@ -2847,6 +2848,24 @@ function renderRiskQuickPanel(){
   }
   panel.hidden = !uiState.riskQuickOpen;
   panel.classList.toggle('is-open', !!uiState.riskQuickOpen);
+  if(uiState.riskQuickOpen){
+    const anchorRect = anchor.getBoundingClientRect();
+    panel.style.position = 'fixed';
+    panel.style.right = 'auto';
+    panel.style.left = '0px';
+    panel.style.top = '0px';
+    const panelWidth = Math.min(Math.round(window.innerWidth * 0.92), 330);
+    const maxLeft = Math.max(8, window.innerWidth - panelWidth - 8);
+    const nextLeft = Math.max(8, Math.min(maxLeft, Math.round(anchorRect.left)));
+    const nextTop = Math.round(anchorRect.bottom + 8);
+    panel.style.left = `${nextLeft}px`;
+    panel.style.top = `${nextTop}px`;
+  }else{
+    panel.style.position = 'absolute';
+    panel.style.left = '';
+    panel.style.top = '';
+    panel.style.right = '';
+  }
 }
 
 function bindRiskQuickControls(){

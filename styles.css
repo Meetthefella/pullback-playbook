@@ -145,7 +145,7 @@ body{
   position:absolute;
   top:calc(100% + 8px);
   right:0;
-  z-index:90;
+  z-index:1200;
   width:min(92vw, 330px);
   padding:10px 11px;
   border-radius:14px;
@@ -157,10 +157,12 @@ body{
   opacity:0;
   transform:translateY(-4px);
   transition:opacity .16s ease, transform .16s ease;
+  pointer-events:none;
 }
 .risk-quick-panel.is-open{
   opacity:1;
   transform:translateY(0);
+  pointer-events:auto;
 }
 .risk-quick-panel__row{
   display:flex;
