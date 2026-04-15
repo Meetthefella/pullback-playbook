@@ -1,4 +1,27 @@
 (function(){
+  function scoreForView(view){
+    const safeScore = Number(view && view.score);
+    if(Number.isFinite(safeScore)) return safeScore;
+    const fallbackScore = Number(view && view.setupScore);
+    if(Number.isFinite(fallbackScore)) return fallbackScore;
+    return 0;
+  }
+
+  function rrForView(view){
+    const rr = Number(view && view.actionableRrValue);
+    if(Number.isFinite(rr)) return rr;
+    const fallbackRr = Number(view && view.rrValue);
+    return Number.isFinite(fallbackRr) ? fallbackRr : -999;
+  }
+
+  function sortScannerViews(views){
+    return (Array.isArray(views) ? views.slice() : []).sort((a, b) =>
+      scoreForView(b) - scoreForView(a)
+      || rrForView(b) - rrForView(a)
+      || String(a && a.ticker || '').localeCompare(String(b && b.ticker || ''))
+    );
+  }
+
   function groupScannerViewsBySection(finalViews, deps){
     const {rankedVisibleSectionForView} = deps;
     const grouped = {tradeableEntry:[], nearEntry:[], monitorWatch:[], lowerPriority:[]};
@@ -9,6 +32,10 @@
       else if(sectionKey === 'monitor_watch') grouped.monitorWatch.push(view);
       else grouped.lowerPriority.push(view);
     });
+    grouped.tradeableEntry = sortScannerViews(grouped.tradeableEntry);
+    grouped.nearEntry = sortScannerViews(grouped.nearEntry);
+    grouped.monitorWatch = sortScannerViews(grouped.monitorWatch);
+    grouped.lowerPriority = sortScannerViews(grouped.lowerPriority);
     return grouped;
   }
 
