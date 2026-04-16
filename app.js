@@ -2090,7 +2090,17 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   }
   record.scan.score = Number.isFinite(card.score) ? card.score : record.scan.score;
   record.scan.verdict = String(card.chartVerdict || card.status || record.scan.verdict || '');
-  record.scan.reasons = uniqueStrings([card.summary, ...(record.scan.reasons || [])]);
+  const scannerCycleReasons = uniqueStrings([
+    card.summary,
+    card.analysis && card.analysis.failedRule,
+    ...(Array.isArray(card.analysis && card.analysis.risks) ? card.analysis.risks : [])
+  ]);
+  if(options.fromScanner){
+    // Scanner refresh should reflect current-cycle reasons only to avoid stale carry-over.
+    record.scan.reasons = scannerCycleReasons;
+  }else{
+    record.scan.reasons = uniqueStrings([card.summary, ...(record.scan.reasons || [])]);
+  }
   record.scan.summary = String(card.summary || record.scan.summary || '');
   record.scan.flags = {
     ...(record.scan.flags || {}),
