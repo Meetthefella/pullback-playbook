@@ -3607,6 +3607,40 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
 
 function watchlistLifecycleSnapshot(record){
   const item = normalizeTickerRecord(record);
+  const liveRefreshPending = isWatchlistLiveRefreshPending(item.ticker);
+  if(liveRefreshPending){
+    const storedState = canonicalLifecycleState(item.watchlist && item.watchlist.lifecycleState);
+    const state = storedState || 'monitor';
+    const expiryTradingDays = item.watchlist.expiryAfterTradingDays || WATCHLIST_EXPIRY_TRADING_DAYS;
+    const addedAt = item.watchlist.addedAt || todayIsoDate();
+    const expiryAt = item.watchlist.expiryAt || tradingDaysFrom(addedAt, expiryTradingDays);
+    const remainingTradingDays = expiryAt ? countTradingDaysBetween(todayIsoDate(), expiryAt) : expiryTradingDays;
+    return {
+      state,
+      label:getBadge(state).text,
+      badgeClass:getBadge(state).className,
+      bucket:'monitor_watch',
+      stage:'watchlist',
+      status:'active',
+      expiresAt:expiryAt,
+      expiryReason:'',
+      reason:'Reviewing live data before final watchlist state.',
+      baseVerdict:state,
+      downgradeApplied:false,
+      downgradeReason:'',
+      refresh_demote_attempted:'false',
+      refresh_demote_reason:'',
+      structural_alive_at_refresh:'true',
+      avoid_allowed_by_structure_gate:'false',
+      explicit_invalidation_reason:'(none)',
+      lifecycle_drop_reason:'(none)',
+      avoid_allowed_by_structure_consistency_guard:'false',
+      remainingTradingDays,
+      rank:watchlistLifecycleStateRank(state),
+      hasMeaningfulImprovement:false,
+      pending:true
+    };
+  }
   const gating = applyGlobalVerdictGates(item, {source:'auto_recompute'});
   const globalVerdict = gating.globalVerdict;
   const structureGate = watchlistRefreshStructureGate(item);
@@ -4463,20 +4497,26 @@ function renderWatchlist(){
         resolvedContract,
         derivedStates,
         displayedPlan,
+        pendingResolution:liveRefreshPending,
         setupScore:view && view.setupScore
       });
-      const globalVerdict = resolveGlobalVerdict(record);
-      const watchlistVisualState = reconcileWatchlistPresentation({
-        record,
-        visualState,
-        globalVerdict,
-        lifecycleSnapshot,
-        resolvedContract,
-        derivedStates,
-        displayedPlan
-      });
+      const globalVerdict = liveRefreshPending ? null : resolveGlobalVerdict(record);
+      const watchlistVisualState = liveRefreshPending
+        ? {
+          ...visualState,
+          watchlist_presentation_source:'pending_passthrough'
+        }
+        : reconcileWatchlistPresentation({
+          record,
+          visualState,
+          globalVerdict,
+          lifecycleSnapshot,
+          resolvedContract,
+          derivedStates,
+          displayedPlan
+        });
       const shortReason = decisionCopy.reason;
-      const watchlistSignalRowMarkup = watchlistVisualState.watchlist_presentation_source === 'strict_reconciled'
+      const watchlistSignalRowMarkup = liveRefreshPending || watchlistVisualState.watchlist_presentation_source === 'strict_reconciled'
         ? ''
         : watchlistSignalMarkup;
       record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
@@ -9008,24 +9048,26 @@ function isWatchlistAvoidBucket(bucket){
 
 function watchlistStrictAvoidTruth(record, globalVerdict, lifecycleSnapshot){
   const item = normalizeTickerRecord(record || {});
-  const debug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
-  const strictFinalVerdict = normalizeVerdict(globalVerdict && globalVerdict.final_verdict || '');
-  const lifecycleVerdict = normalizeVerdict(lifecycleSnapshot && lifecycleSnapshot.state || '');
-  const removalVerdict = normalizeVerdict(debug.removal_global_verdict || '');
-  const removedByGate = String(debug.watchlist_removed_by || '').trim().toLowerCase() === 'global_verdict_gate';
-  const allowWatchlist = !!(globalVerdict && globalVerdict.allow_watchlist);
-  const strictBucketAvoid = isWatchlistAvoidBucket(globalVerdict && globalVerdict.bucket)
-    || isWatchlistAvoidBucket(lifecycleSnapshot && lifecycleSnapshot.bucket);
-  return strictFinalVerdict === 'avoid'
-    || lifecycleVerdict === 'avoid'
-    || removalVerdict === 'avoid'
-    || removedByGate
-    || !allowWatchlist
-    || strictBucketAvoid;
+  if(isWatchlistLiveRefreshPending(item.ticker)) return false;
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const structureState = String(derivedStates.structureState || '').toLowerCase();
+  const trendState = String(derivedStates.trendState || '').toLowerCase();
+  const structureGate = watchlistRefreshStructureGate(item);
+  const hardBreakByStructure = structureGate.avoid_allowed_by_structure_gate
+    || structureState === 'broken'
+    || trendState === 'broken';
+  const deadLikeLifecycle = ['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || '').toLowerCase());
+  const hardBreakByGlobal = !!(
+    globalVerdict
+    && ['dead','avoid'].includes(normalizeVerdict(globalVerdict.final_verdict || ''))
+    && ['structure_broken','explicit_invalidation'].includes(String(globalVerdict.dead_trigger_source || globalVerdict.avoid_trigger_source || '').toLowerCase())
+  );
+  return hardBreakByStructure || deadLikeLifecycle || hardBreakByGlobal;
 }
 
 function watchlistPresentationBucketForRecord(record){
   const item = normalizeTickerRecord(record || {});
+  if(isWatchlistLiveRefreshPending(item.ticker)) return 'monitor_watch';
   const strictVerdict = resolveGlobalVerdict(item);
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
   const priority = watchlistPriorityForRecord(item);
@@ -9046,6 +9088,12 @@ function reconcileWatchlistPresentation({
   displayedPlan
 } = {}){
   const item = normalizeTickerRecord(record || {});
+  if(isWatchlistLiveRefreshPending(item.ticker)){
+    return {
+      ...(visualState && typeof visualState === 'object' ? visualState : {}),
+      watchlist_presentation_source:'pending_passthrough'
+    };
+  }
   const base = visualState && typeof visualState === 'object' ? {...visualState} : {};
   const softVerdict = normalizeVerdict(base.finalVerdict || base.final_verdict || '');
   const strictAvoidTruth = watchlistStrictAvoidTruth(item, globalVerdict, lifecycleSnapshot);
@@ -13676,7 +13724,10 @@ function renderScannerResults(){
   if(!box) return;
   box.innerHTML = '';
   const records = rankedTickerRecords();
-  const finalViews = records.map(record => buildFinalSetupView(record));
+  const finalViews = records.map(record => ({
+    ...buildFinalSetupView(record),
+    resolutionPending:isWatchlistLiveRefreshPending(record && record.ticker)
+  }));
   if(resultsToggle){
     syncResultsToggleLabel();
   }
@@ -15847,6 +15898,7 @@ function resolveFinalStateContract(record, options = {}){
   const weakVolume = volumeState === 'weak';
   const weakControl = !!(qualityAdjustments.lowControlSetup || qualityAdjustments.tooWideForQualityPullback);
   const bounceUnconfirmed = ['none','unconfirmed','attempt','early'].includes(bounceState);
+  const nearReadyStructure = ['strong','intact','developing_clean'].includes(structureState);
   const hardStructureBroken = !!(
     deadCheck.dead
     || structureState === 'broken'
@@ -15884,9 +15936,9 @@ function resolveFinalStateContract(record, options = {}){
   let structuralStateKey = 'developing';
   if(hardStructureBroken){
     structuralStateKey = 'dead';
-  }else if(finalVerdict === 'Entry' && !bounceUnconfirmed && !weakVolume && !marketWeak && !weakControl && planStateKey === 'valid'){
+  }else if(finalVerdict === 'Entry' && nearReadyStructure && !bounceUnconfirmed && !weakVolume && !marketWeak && !weakControl && planStateKey === 'valid'){
     structuralStateKey = 'entry';
-  }else if(finalVerdict === 'Near Entry' && !bounceUnconfirmed && !weakVolume){
+  }else if(finalVerdict === 'Near Entry' && nearReadyStructure && !bounceUnconfirmed && !weakVolume){
     structuralStateKey = 'near_entry';
   }
 
@@ -16056,6 +16108,7 @@ function resolvePreLifecycleStateContract(record){
     || isHostileMarketStatus((item.meta && item.meta.marketStatus) || state.marketStatus)
   );
   const weakStructure = ['weak','weakening','developing_loose'].includes(structureState);
+  const nearReadyStructure = ['strong','intact','developing_clean'].includes(structureState);
   const bounceUnconfirmed = ['none','unconfirmed','attempt','early'].includes(bounceState);
   const hardStructureBroken = !!(
     structureState === 'broken'
@@ -16064,7 +16117,7 @@ function resolvePreLifecycleStateContract(record){
   const planStatusKey = String(displayedPlan.status || '').toLowerCase() || 'missing';
   const baseVerdict = hardStructureBroken
     ? 'avoid'
-    : (displayedPlan.status === 'valid' && !bounceUnconfirmed && !marketWeak && volumeState !== 'weak'
+    : (displayedPlan.status === 'valid' && nearReadyStructure && !bounceUnconfirmed && !marketWeak && volumeState !== 'weak'
       ? 'near_entry'
       : 'watch');
   let structuralStateKey = 'developing';

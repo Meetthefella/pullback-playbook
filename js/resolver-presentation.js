@@ -87,6 +87,9 @@
   function resolveVisualState(record, context = 'scanner', options = {}, deps = {}){
     const safeRecord = record && typeof record === 'object' ? record : {};
     const derivedStates = options.derivedStates || deps.analysisDerivedStatesFromRecord(safeRecord);
+    const legacyVerdict = typeof deps.resolveGlobalVerdict === 'function'
+      ? deps.resolveGlobalVerdict(safeRecord)
+      : null;
     const effectivePlan = options.effectivePlan || deps.effectivePlanForRecord(safeRecord, {allowScannerFallback:true});
     const displayedPlan = options.displayedPlan || deps.deriveCurrentPlanState(
       effectivePlan.entry,
@@ -99,20 +102,20 @@
       derivedStates,
       displayedPlan
     });
-    const legacyVerdict = typeof deps.resolveGlobalVerdict === 'function'
-      ? deps.resolveGlobalVerdict(safeRecord)
-      : null;
     const rawVerdict = finalVerdictFromResolvedContract(resolvedContract, derivedStates, deps);
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
     const avoidAllowedByStructureConsistencyGuard = structureState === 'broken';
     const deadGuardApplied = structureState !== 'broken' && (rawVerdict === 'dead' || rawVerdict === 'avoid');
-    const finalVerdict = deadGuardApplied ? 'monitor' : rawVerdict;
-    const state = visualStateKey(finalVerdict, deps);
+    const pendingResolution = options.pendingResolution === true;
+    const finalVerdict = pendingResolution ? 'monitor' : (deadGuardApplied ? 'monitor' : rawVerdict);
+    const state = pendingResolution ? 'monitor' : visualStateKey(finalVerdict, deps);
     const visual_tone = visualToneForState(state);
     const score = clampScore(options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord));
     const styleAttr = visualStyleForState(state, score);
-    const badge = deps.getBadge(finalVerdict);
-    const bucket = deps.getBucket(finalVerdict);
+    const badge = pendingResolution
+      ? {text:'⏳ Reviewing', className:'near'}
+      : deps.getBadge(finalVerdict);
+    const bucket = pendingResolution ? 'monitor_watch' : deps.getBucket(finalVerdict);
     const normalizedRenderedVerdict = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict);
     const normalizedLegacyVerdict = legacyVerdict
       ? (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(legacyVerdict.final_verdict || legacyVerdict.finalVerdict || '')
@@ -129,7 +132,9 @@
       : '(none)';
     return {
       state,
-      decision_summary:decisionSummaryForVerdict(finalVerdict, {structuralState:resolvedContract && resolvedContract.structuralState}, deps),
+      decision_summary:pendingResolution
+        ? 'Reviewing setup with live data before final status.'
+        : decisionSummaryForVerdict(finalVerdict, {structuralState:resolvedContract && resolvedContract.structuralState}, deps),
       visual_tone,
       score,
       className:`visual-state-card visual-state-${state} visual-tone-${visual_tone}`,
@@ -149,7 +154,9 @@
       allow_plan:['entry','near_entry'].includes(finalVerdict),
       allowWatchlist:['monitor','near_entry','entry'].includes(finalVerdict),
       allow_watchlist:['monitor','near_entry','entry'].includes(finalVerdict),
-      reason:decisionSummaryForVerdict(finalVerdict, {structuralState:resolvedContract && resolvedContract.structuralState}, deps),
+      reason:pendingResolution
+        ? 'Reviewing setup with live data before final status.'
+        : decisionSummaryForVerdict(finalVerdict, {structuralState:resolvedContract && resolvedContract.structuralState}, deps),
       ui_state_source:'resolveFinalStateContract',
       final_verdict_rendered:finalVerdict,
       bucket_rendered:bucket,

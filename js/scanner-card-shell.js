@@ -46,6 +46,7 @@
     const visualState = (resolveVisualState || resolveGlobalVisualState)(item, 'scanner', {
       displayedPlan:view && view.displayedPlan,
       derivedStates:view && view.setupStates,
+      pendingResolution:!!(view && view.resolutionPending),
       setupScore:view && view.setupScore
     });
     const sourceVerdict = globalVerdictLabel(visualState.finalVerdict || visualState.final_verdict);
