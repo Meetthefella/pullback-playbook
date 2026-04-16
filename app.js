@@ -605,6 +605,7 @@ function buildRecordsLitePersistedState(sourceState){
           scanSetupType:item.scan.scanSetupType,
           setupOrigin:item.scan.setupOrigin,
           score:item.scan.score,
+          resolvedVerdict:item.scan.resolvedVerdict,
           verdict:item.scan.verdict,
           reasons:Array.isArray(item.scan.reasons) ? [...item.scan.reasons] : [],
           flags:item.scan.flags && typeof item.scan.flags === 'object' ? cloneData(item.scan.flags, {}) : {},
@@ -2103,8 +2104,16 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   record.scan.analysisProjection = cloneData(card.analysis || record.scan.analysisProjection, null);
   record.scan.lastScannedAt = String(card.scannerUpdatedAt || record.scan.lastScannedAt || '');
   record.scan.updatedAt = String(card.scannerUpdatedAt || card.updatedAt || record.scan.updatedAt || '');
-  if(options.fromScanner && record.scan.verdict){
-    if(record.scan.verdict === 'Avoid'){
+  const resolvedScannerVerdict = normalizeAnalysisVerdict(
+    card.chartVerdict
+    || card.status
+    || (card.analysis && card.analysis.chart_verdict)
+    || record.scan.verdict
+    || ''
+  );
+  record.scan.resolvedVerdict = resolvedScannerVerdict;
+  if(options.fromScanner && resolvedScannerVerdict){
+    if(resolvedScannerVerdict === 'Avoid'){
       setLifecycleStage(record, {
         stage:'avoided',
         status:'inactive',
@@ -2335,7 +2344,7 @@ function tickerRecordToWatchlistEntry(record){
     ticker:item.ticker,
     dateAdded:item.watchlist.addedAt || todayIsoDate(),
     scoreWhenAdded:item.watchlist.addedScore,
-    verdictWhenAdded:item.watchlist.status || item.scan.verdict || '',
+    verdictWhenAdded:item.watchlist.status || displayStageForRecord(item) || item.scan.resolvedVerdict || item.scan.verdict || '',
     expiryAfterTradingDays
   });
 }
@@ -3308,6 +3317,7 @@ function clearScannerProjectionState(record){
   record.scan.scoreRaw = null;
   record.scan.scoreDisplay = null;
   record.scan.score = null;
+  record.scan.resolvedVerdict = '';
   record.scan.verdict = '';
   record.scan.summary = '';
   record.scan.reasons = [];
@@ -4300,6 +4310,8 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Removal Verdict', value:debug.removal_global_verdict || '(none)'},
     {label:'Last Alerted State', value:debug.lastAlertedState || '(none)'},
     {label:'Alert Triggered This Cycle', value:debug.alertTriggeredThisCycle || 'false'},
+    {label:'Legacy Scanner Verdict', value:String(item.scan.verdict || '').trim() || '(none)'},
+    {label:'Resolved Scanner Verdict', value:String(item.scan.resolvedVerdict || '').trim() || '(none)'},
     {label:'Base Resolver Verdict', value:resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || 'n/a'},
     {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'},
     {label:'Control', value:qualityAdjustments.controlQuality || 'n/a'},
@@ -5339,9 +5351,10 @@ function deriveWorkflowAlerts(){
       });
     }
 
-    if(hostileMarket && ['planned','reviewed'].includes(stage) && (item.scan.verdict === 'Entry' || item.scan.verdict === 'Near Entry')){
+    const resolvedDisplayStage = normalizeAnalysisVerdict(displayStageForRecord(item));
+    if(hostileMarket && ['planned','reviewed'].includes(stage) && (resolvedDisplayStage === 'Entry' || resolvedDisplayStage === 'Near Entry')){
       alerts.push({
-        id:alertIdForRecord(item, 'regime_warning', String(state.marketStatus), `${stage}-${item.scan.verdict}`),
+        id:alertIdForRecord(item, 'regime_warning', String(state.marketStatus), `${stage}-${resolvedDisplayStage}`),
         ticker:item.ticker,
         alertType:'regime_warning',
         severity:'warning',
@@ -7447,7 +7460,12 @@ function evaluatePlanRealism(record, options = {}){
     item.plan && item.plan.firstTarget,
     item.marketData && item.marketData.currency
   );
-  const displayStage = normalizeAnalysisVerdict(options.displayStage || item.scan && item.scan.verdict || item.review && item.review.savedVerdict || 'Watch');
+  const displayStage = normalizeAnalysisVerdict(
+    options.displayStage
+    || (item.scan && item.scan.resolvedVerdict)
+    || (item.review && item.review.savedVerdict)
+    || 'Watch'
+  );
   const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {
     displayedPlan,
     derivedStates,
@@ -7726,15 +7744,19 @@ function savedReviewScoreForRecord(record){
 function currentRuntimeVerdictForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
-  const scanVerdict = String(scan.resolvedVerdict || scan.verdict || '').trim();
+  const scanVerdict = String(scan.resolvedVerdict || '').trim();
   return scanVerdict ? normalizeImportedStatus(scanVerdict, {preserveEmpty:true}) : '';
 }
 
 function runtimeFallbackVerdictForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
-  const scanVerdict = String(scan.resolvedVerdict || scan.verdict || '').trim();
-  const rawVerdict = scanVerdict;
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const manualReview = review.manualReview && typeof review.manualReview === 'object' ? review.manualReview : null;
+  const reviewVerdict = String(review.savedVerdict || (manualReview && manualReview.status) || '').trim();
+  const rawVerdict = reviewVerdict
+    ? ''
+    : String(scan.resolvedVerdict || scan.verdict || '').trim();
   return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
 }
 
@@ -14866,7 +14888,14 @@ function refreshSelectedTickerLifecycle(){
   uiState.activeReviewVerdictOverride = '';
   const record = getTickerRecord(ticker);
   if(!record) return;
-  const stage = record.plan.hasValidPlan ? 'planned' : ((record.review.manualReview || record.review.cardOpen) ? 'reviewed' : (record.watchlist.inWatchlist ? 'watchlist' : (record.scan.verdict && record.scan.verdict !== 'Avoid' ? 'shortlisted' : 'reviewed')));
+  const displayStage = normalizeAnalysisVerdict(displayStageForRecord(record));
+  const stage = record.plan.hasValidPlan
+    ? 'planned'
+    : ((record.review.manualReview || record.review.cardOpen)
+      ? 'reviewed'
+      : (record.watchlist.inWatchlist
+        ? 'watchlist'
+        : ((displayStage && displayStage !== 'Avoid') ? 'shortlisted' : 'reviewed')));
   const days = stage === 'planned' ? PLAN_EXPIRY_TRADING_DAYS : (stage === 'reviewed' ? REVIEW_EXPIRY_TRADING_DAYS : WATCHLIST_EXPIRY_TRADING_DAYS);
   refreshLifecycleStage(record, stage, days, 'Lifecycle refreshed manually.', 'system');
   commitTickerState();
@@ -16396,6 +16425,45 @@ function summarizeVerdictCapUsage(records = allTickerRecords()){
 function runVerdictCapAudit(options = {}){
   const source = String(options.source || 'runtime');
   const records = Array.isArray(options.records) ? options.records : allTickerRecords();
+  const scannerSessionTickers = uniqueTickers(uiState.scannerSessionTickers || []).map(normalizeTicker).filter(Boolean);
+  const scannerSessionSet = new Set(scannerSessionTickers);
+  const rankedTickers = rankedTickerRecords()
+    .map(record => normalizeTickerRecord(record).ticker)
+    .filter(Boolean);
+  const finalRecordTickers = records
+    .map(record => normalizeTickerRecord(record).ticker)
+    .filter(Boolean);
+  const auditRows = records.map(record => {
+    const item = normalizeTickerRecord(record);
+    const derivedStates = analysisDerivedStatesFromRecord(item);
+    const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+    const displayedPlan = deriveCurrentPlanState(
+      effectivePlan.entry,
+      effectivePlan.stop,
+      effectivePlan.firstTarget,
+      item.marketData && item.marketData.currency
+    );
+    const resolved = resolveFinalStateContract(item, {
+      context:'verdict_cap_trace',
+      derivedStates,
+      displayedPlan
+    });
+    return {
+      ticker:item.ticker || '',
+      lastScannedAt:String(item.scan && item.scan.lastScannedAt || ''),
+      inScannerSession:scannerSessionSet.has(item.ticker || ''),
+      legacyScannerVerdict:String(item.scan && item.scan.verdict || ''),
+      resolvedScannerVerdict:String(item.scan && item.scan.resolvedVerdict || ''),
+      requestedVerdictBeforeCap:resolved.requestedVerdictBeforeCap || resolved.finalVerdict || '',
+      cappedVerdictAfterCap:resolved.cappedVerdictAfterCap || resolved.finalVerdict || ''
+    };
+  });
+  console.groupCollapsed(`[VerdictCapAuditTrace] ${source} | records=${finalRecordTickers.length}`);
+  console.info('scannerSessionTickers', scannerSessionTickers);
+  console.info('rankedTickerRecords', rankedTickers);
+  console.info('finalAuditRecords', finalRecordTickers);
+  console.table(auditRows);
+  console.groupEnd();
   const summary = summarizeVerdictCapUsage(records);
   uiState.verdictCapAudit = {
     ...summary,

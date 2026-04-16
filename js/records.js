@@ -110,6 +110,7 @@
         estimatedTargetArea: null,
         estimatedRR: null,
         score: null,
+        resolvedVerdict: '',
         verdict: '',
         reasons: [],
         flags: {},
@@ -589,7 +590,7 @@
       capitalEfficiency: qualityAdjustments.capitalEfficiency,
       adjustmentReasons: qualityAdjustments.adjustmentReasons,
       warning: setupWarningState,
-      verdict: String(merged.scan.verdict || merged.watchlist.status || 'Watch'),
+      verdict: String(merged.scan.resolvedVerdict || merged.scan.verdict || merged.watchlist.status || 'Watch'),
       reasons: Array.isArray(merged.scan.reasons) && merged.scan.reasons.length
         ? merged.scan.reasons
         : [String(merged.scan.summary || '').trim()].filter(Boolean),

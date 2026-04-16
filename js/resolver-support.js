@@ -16,10 +16,12 @@
 
   function resolverSeedVerdictForRecord(record, deps = {}){
     const item = record && typeof record === 'object' ? record : {};
+    const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
     return deps.normalizeAnalysisVerdict(
       (item.review && item.review.savedVerdict)
-      || (item.scan && item.scan.verdict)
+      || scan.resolvedVerdict
       || deps.baseVerdictForRecord(item, {includeRuntimeFallback:false})
+      || scan.verdict
       || 'Watch'
     );
   }
