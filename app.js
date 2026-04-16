@@ -284,6 +284,10 @@ uiState.reviewCapitalSimulation = uiState.reviewCapitalSimulation && typeof uiSt
   ? uiState.reviewCapitalSimulation
   : {ticker:'', usagePercent:null};
 uiState.riskQuickOpen = !!uiState.riskQuickOpen;
+uiState.verdictCapAudit = uiState.verdictCapAudit && typeof uiState.verdictCapAudit === 'object'
+  ? uiState.verdictCapAudit
+  : {};
+uiState.verdictCapAuditLastSignature = String(uiState.verdictCapAuditLastSignature || '');
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -9650,7 +9654,7 @@ function bindEntryConditionsHoldInteractions(root){
       state.startY = 0;
       helper.classList.remove('hold-armed');
     };
-    const ignoreSelector = 'button,a,input,textarea,select,.entry-conditions-panel';
+    const ignoreSelector = 'button,a,input,textarea,select,summary,details,.compact-details,.watchlist-card__details,.entry-conditions-panel';
     trigger.addEventListener('pointerdown', event => {
       if(event.pointerType === 'mouse' && event.button !== 0) return;
       if(cardMode && event.target && event.target.closest && event.target.closest(ignoreSelector)){
@@ -13724,6 +13728,7 @@ function renderScannerResults(){
   if(!box) return;
   box.innerHTML = '';
   const records = rankedTickerRecords();
+  runVerdictCapAudit({source:'renderScannerResults'});
   const finalViews = records.map(record => ({
     ...buildFinalSetupView(record),
     resolutionPending:isWatchlistLiveRefreshPending(record && record.ticker)
@@ -15852,25 +15857,75 @@ function resolverSeedVerdictForRecord(record){
   });
 }
 
+function capSeverityFromEvaluation(capCode, blockerFlags = {}){
+  const code = String(capCode || '').toLowerCase();
+  if(!code) return '';
+  if(code === 'entry_to_near_entry') return 'soft';
+  if(code === 'buyers_not_in_control'){
+    return blockerFlags && blockerFlags.bounceImproving ? 'soft' : 'hard';
+  }
+  if(code === 'entry_blocked'){
+    const nearReady = !!(blockerFlags && blockerFlags.nearEntryStructure);
+    const improving = !!(blockerFlags && blockerFlags.bounceImproving);
+    const planClose = ['valid','needs_adjustment'].includes(String(blockerFlags && blockerFlags.planStateKey || ''));
+    return nearReady && improving && planClose ? 'soft' : 'hard';
+  }
+  return 'hard';
+}
+
 function capVerdictByBlockingFactors(requestedVerdict, context = {}){
   const verdict = normalizeAnalysisVerdict(requestedVerdict || 'Watch');
-  if(verdict === 'Avoid') return {verdict:'Avoid', capApplied:false, capReason:'', capCode:''};
   const structureState = String(context.structureState || '').toLowerCase();
   const bounceState = String(context.bounceState || '').toLowerCase();
   const planStateKey = String(context.planStateKey || '').toLowerCase();
   const displayedPlanStatus = String(context.displayedPlanStatus || '').toLowerCase();
+  const pullbackState = String(context.pullbackState || '').toLowerCase();
+  const stabilisationState = String(context.stabilisationState || '').toLowerCase();
   const buyersNotInControl = ['none','unconfirmed','attempt','early'].includes(bounceState);
   const bounceImproving = ['attempt','early','unconfirmed'].includes(bounceState);
   const bounceAbsent = bounceState === 'none';
   const weakeningStructure = ['weakening','weak','broken','developing_loose'].includes(structureState);
   const entryStructureStrong = ['strong','intact'].includes(structureState);
   const nearEntryStructure = ['strong','intact','developing_clean'].includes(structureState);
+  const pullbackValid = ['near_20ma','near_50ma','at_20ma','at_50ma'].includes(pullbackState);
+  const stabilisationImproving = ['early','clear'].includes(stabilisationState);
   const planNotReady = ['missing','invalid','needs_adjustment','too_wide','unrealistic_rr'].includes(planStateKey)
     || displayedPlanStatus !== 'valid'
     || context.riskTooWide
     || !context.hasPlanValues;
   const tradeStructureUnclear = !!(context.weakControl || planNotReady);
   const cannotPriceRiskCleanly = !!(planNotReady || context.riskTooWide || !context.hasPlanValues);
+  const blockerFlags = {
+    structureState,
+    bounceState,
+    planStateKey,
+    displayedPlanStatus,
+    pullbackState,
+    stabilisationState,
+    buyersNotInControl,
+    bounceImproving,
+    bounceAbsent,
+    weakeningStructure,
+    entryStructureStrong,
+    nearEntryStructure,
+    pullbackValid,
+    stabilisationImproving,
+    planNotReady,
+    tradeStructureUnclear,
+    cannotPriceRiskCleanly,
+    riskTooWide:!!context.riskTooWide,
+    hasPlanValues:!!context.hasPlanValues
+  };
+  if(verdict === 'Avoid'){
+    return {
+      verdict:'Avoid',
+      capApplied:false,
+      capReason:'',
+      capCode:'',
+      capSeverity:'',
+      blockerFlags
+    };
+  }
 
   if(verdict === 'Entry'){
     const entryBlocked = !entryStructureStrong
@@ -15886,67 +15941,88 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
         && !!context.hasPlanValues
         && !context.riskTooWide;
       if(nearEntryEligible){
+        const capCode = 'entry_to_near_entry';
         return {
           verdict:'Near Entry',
           capApplied:true,
-          capCode:'entry_to_near_entry',
-          capReason:'Close to trigger, but confirmation is still developing.'
+          capCode,
+          capReason:'Close to trigger, but confirmation is still developing.',
+          capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
+          blockerFlags
         };
       }
+      const capCode = 'entry_blocked';
       return {
         verdict:'Watch',
         capApplied:true,
-        capCode:'entry_blocked',
-        capReason:'Trade structure is not clear enough to price safely yet.'
+        capCode,
+        capReason:'Trade structure is not clear enough to price safely yet.',
+        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
+        blockerFlags
       };
     }
-    return {verdict:'Entry', capApplied:false, capReason:'', capCode:''};
+    return {verdict:'Entry', capApplied:false, capReason:'', capCode:'', capSeverity:'', blockerFlags};
   }
 
   if(verdict === 'Near Entry'){
     if(weakeningStructure){
+      const capCode = 'weakening_structure';
       return {
         verdict:'Watch',
         capApplied:true,
-        capCode:'weakening_structure',
-        capReason:'Structure still weakening.'
+        capCode,
+        capReason:'Structure still weakening.',
+        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
+        blockerFlags
       };
     }
     if(bounceAbsent){
+      const capCode = 'buyers_not_in_control';
       return {
         verdict:'Watch',
         capApplied:true,
-        capCode:'buyers_not_in_control',
-        capReason:'Buyers have not taken control yet.'
+        capCode,
+        capReason:'Buyers have not taken control yet.',
+        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
+        blockerFlags
       };
     }
     if(buyersNotInControl && !bounceImproving && bounceState !== 'confirmed'){
+      const capCode = 'buyers_not_in_control';
       return {
         verdict:'Watch',
         capApplied:true,
-        capCode:'buyers_not_in_control',
-        capReason:'Buyers have not taken control yet.'
+        capCode,
+        capReason:'Buyers have not taken control yet.',
+        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
+        blockerFlags
       };
     }
     if(!nearEntryStructure){
+      const capCode = 'structure_not_ready';
       return {
         verdict:'Watch',
         capApplied:true,
-        capCode:'structure_not_ready',
-        capReason:'Structure is not clean enough yet.'
+        capCode,
+        capReason:'Structure is not clean enough yet.',
+        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
+        blockerFlags
       };
     }
     if(tradeStructureUnclear || cannotPriceRiskCleanly){
+      const capCode = 'risk_not_priceable';
       return {
         verdict:'Watch',
         capApplied:true,
-        capCode:'risk_not_priceable',
-        capReason:'Trade structure is not clear enough to price safely yet.'
+        capCode,
+        capReason:'Trade structure is not clear enough to price safely yet.',
+        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
+        blockerFlags
       };
     }
   }
 
-  return {verdict, capApplied:false, capReason:'', capCode:''};
+  return {verdict, capApplied:false, capReason:'', capCode:'', capSeverity:'', blockerFlags};
 }
 
 function resolveFinalStateContract(record, options = {}){
@@ -16018,6 +16094,8 @@ function resolveFinalStateContract(record, options = {}){
   const verdictCap = capVerdictByBlockingFactors(requestedFinalVerdict, {
     structureState,
     bounceState,
+    pullbackState,
+    stabilisationState,
     planStateKey,
     displayedPlanStatus:displayedPlan.status,
     hasPlanValues,
@@ -16166,6 +16244,13 @@ function resolveFinalStateContract(record, options = {}){
 
   return {
     finalVerdict,
+    requestedVerdictBeforeCap:requestedFinalVerdict,
+    cappedVerdictAfterCap:finalVerdict,
+    capApplied:!!verdictCap.capApplied,
+    capReason:verdictCap.capReason || '',
+    capCode:verdictCap.capCode || '',
+    capSeverity:verdictCap.capSeverity || '',
+    capBlockers:verdictCap.blockerFlags || {},
     rawResolverVerdict:rrResolution.rawResolverVerdict || rrResolution.status || finalVerdict,
     finalDisplayState:structuralLabel,
     primaryState:structuralStateKey,
@@ -16197,6 +16282,151 @@ function resolveFinalStateContract(record, options = {}){
     terminal:structuralStateKey === 'dead',
     nonActionableButAlive:structuralStateKey !== 'dead' && actionStateKey !== 'ready_to_act'
   };
+}
+
+function incrementCountBucket(bucket, key){
+  const safeKey = String(key || '(none)');
+  bucket[safeKey] = (bucket[safeKey] || 0) + 1;
+}
+
+function sortedCountEntries(bucket){
+  return Object.entries(bucket || {})
+    .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0));
+}
+
+function summarizeVerdictCapUsage(records = allTickerRecords()){
+  const safeRecords = Array.isArray(records) ? records : [];
+  const summary = {
+    scanned:safeRecords.length,
+    requestedEntryOrNearEntry:0,
+    cappedApplied:0,
+    capReasonCounts:{},
+    capCodeCounts:{},
+    hardBlockerCounts:{},
+    softBlockerCounts:{},
+    preventedNearEntryCombos:{},
+    overblockingCandidate:{
+      count:0,
+      tickers:[]
+    },
+    samples:[]
+  };
+
+  safeRecords.forEach(record => {
+    const item = normalizeTickerRecord(record);
+    if(!item || !item.ticker) return;
+    const derivedStates = analysisDerivedStatesFromRecord(item);
+    const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+    const displayedPlan = deriveCurrentPlanState(
+      effectivePlan.entry,
+      effectivePlan.stop,
+      effectivePlan.firstTarget,
+      item.marketData && item.marketData.currency
+    );
+    const resolved = resolveFinalStateContract(item, {
+      context:'verdict_cap_audit',
+      derivedStates,
+      displayedPlan
+    });
+    const requested = normalizeAnalysisVerdict(resolved.requestedVerdictBeforeCap || resolved.finalVerdict || 'Watch');
+    const capped = normalizeAnalysisVerdict(resolved.cappedVerdictAfterCap || resolved.finalVerdict || 'Watch');
+    const capApplied = !!resolved.capApplied;
+    const capCode = String(resolved.capCode || '').trim() || '(none)';
+    const capReason = String(resolved.capReason || '').trim() || '(none)';
+    const capSeverity = String(resolved.capSeverity || '').trim() || 'hard';
+    const blockers = resolved.capBlockers && typeof resolved.capBlockers === 'object' ? resolved.capBlockers : {};
+    const structure = String(blockers.structureState || derivedStates.structureState || '').toLowerCase();
+    const bounce = String(blockers.bounceState || derivedStates.bounceState || '').toLowerCase();
+    const planState = String(blockers.planStateKey || resolved.planStateKey || '').toLowerCase();
+    const pullback = String(blockers.pullbackState || derivedStates.pullbackZone || '').toLowerCase();
+    const stabilisation = String(blockers.stabilisationState || derivedStates.stabilisationState || '').toLowerCase();
+
+    if(!['Entry','Near Entry'].includes(requested)) return;
+    summary.requestedEntryOrNearEntry += 1;
+
+    if(capApplied){
+      summary.cappedApplied += 1;
+      incrementCountBucket(summary.capReasonCounts, capReason);
+      incrementCountBucket(summary.capCodeCounts, capCode);
+      if(capSeverity === 'soft') incrementCountBucket(summary.softBlockerCounts, capCode);
+      else incrementCountBucket(summary.hardBlockerCounts, capCode);
+    }
+
+    const nearEntryPrevented = ['Entry','Near Entry'].includes(requested) && !['Entry','Near Entry'].includes(capped);
+    if(nearEntryPrevented){
+      const combo = `${structure || 'unknown_structure'} | ${bounce || 'unknown_bounce'} | ${planState || 'unknown_plan'} | ${pullback || 'unknown_pullback'} | ${stabilisation || 'unknown_stabilisation'} | ${capCode}`;
+      incrementCountBucket(summary.preventedNearEntryCombos, combo);
+    }
+
+    const overblockingCandidate = ['attempt','early'].includes(bounce)
+      && structure === 'developing_clean'
+      && planState === 'needs_adjustment'
+      && ['near_20ma','near_50ma','at_20ma','at_50ma'].includes(pullback)
+      && ['early','clear'].includes(stabilisation)
+      && !['Entry','Near Entry'].includes(capped);
+    if(overblockingCandidate){
+      summary.overblockingCandidate.count += 1;
+      if(summary.overblockingCandidate.tickers.length < 25){
+        summary.overblockingCandidate.tickers.push(item.ticker);
+      }
+    }
+
+    if(summary.samples.length < 40 && capApplied){
+      summary.samples.push({
+        ticker:item.ticker,
+        requested,
+        capped,
+        cap_code:capCode,
+        cap_reason:capReason,
+        cap_severity:capSeverity,
+        structure,
+        bounce,
+        plan_state:planState,
+        pullback,
+        stabilisation
+      });
+    }
+  });
+
+  return summary;
+}
+
+function runVerdictCapAudit(options = {}){
+  const source = String(options.source || 'runtime');
+  const records = Array.isArray(options.records) ? options.records : allTickerRecords();
+  const summary = summarizeVerdictCapUsage(records);
+  uiState.verdictCapAudit = {
+    ...summary,
+    source,
+    generatedAt:new Date().toISOString(),
+    topCapCodes:sortedCountEntries(summary.capCodeCounts).slice(0, 8),
+    topCapReasons:sortedCountEntries(summary.capReasonCounts).slice(0, 8),
+    topHard:sortedCountEntries(summary.hardBlockerCounts).slice(0, 8),
+    topSoft:sortedCountEntries(summary.softBlockerCounts).slice(0, 8),
+    topPreventedCombos:sortedCountEntries(summary.preventedNearEntryCombos).slice(0, 8)
+  };
+
+  const signature = JSON.stringify({
+    requested:summary.requestedEntryOrNearEntry,
+    capped:summary.cappedApplied,
+    topCodes:uiState.verdictCapAudit.topCapCodes,
+    topCombos:uiState.verdictCapAudit.topPreventedCombos,
+    overblockingCandidate:summary.overblockingCandidate
+  });
+  if(signature !== uiState.verdictCapAuditLastSignature){
+    uiState.verdictCapAuditLastSignature = signature;
+    console.groupCollapsed(`[VerdictCapAudit] ${source} | requested=${summary.requestedEntryOrNearEntry} capped=${summary.cappedApplied}`);
+    console.table(uiState.verdictCapAudit.samples || []);
+    console.table(uiState.verdictCapAudit.topCapCodes || []);
+    console.table(uiState.verdictCapAudit.topPreventedCombos || []);
+    console.info('overblockingCandidate', uiState.verdictCapAudit.overblockingCandidate);
+    console.groupEnd();
+  }
+  return uiState.verdictCapAudit;
+}
+if(typeof window !== 'undefined'){
+  window.runVerdictCapAudit = runVerdictCapAudit;
+  window.summarizeVerdictCapUsage = summarizeVerdictCapUsage;
 }
 
 function resolvePreLifecycleStateContract(record){
