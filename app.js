@@ -15852,9 +15852,106 @@ function resolverSeedVerdictForRecord(record){
   });
 }
 
+function capVerdictByBlockingFactors(requestedVerdict, context = {}){
+  const verdict = normalizeAnalysisVerdict(requestedVerdict || 'Watch');
+  if(verdict === 'Avoid') return {verdict:'Avoid', capApplied:false, capReason:'', capCode:''};
+  const structureState = String(context.structureState || '').toLowerCase();
+  const bounceState = String(context.bounceState || '').toLowerCase();
+  const planStateKey = String(context.planStateKey || '').toLowerCase();
+  const displayedPlanStatus = String(context.displayedPlanStatus || '').toLowerCase();
+  const buyersNotInControl = ['none','unconfirmed','attempt','early'].includes(bounceState);
+  const bounceImproving = ['attempt','early','unconfirmed'].includes(bounceState);
+  const bounceAbsent = bounceState === 'none';
+  const weakeningStructure = ['weakening','weak','broken','developing_loose'].includes(structureState);
+  const entryStructureStrong = ['strong','intact'].includes(structureState);
+  const nearEntryStructure = ['strong','intact','developing_clean'].includes(structureState);
+  const planNotReady = ['missing','invalid','needs_adjustment','too_wide','unrealistic_rr'].includes(planStateKey)
+    || displayedPlanStatus !== 'valid'
+    || context.riskTooWide
+    || !context.hasPlanValues;
+  const tradeStructureUnclear = !!(context.weakControl || planNotReady);
+  const cannotPriceRiskCleanly = !!(planNotReady || context.riskTooWide || !context.hasPlanValues);
+
+  if(verdict === 'Entry'){
+    const entryBlocked = !entryStructureStrong
+      || bounceState !== 'confirmed'
+      || cannotPriceRiskCleanly
+      || displayedPlanStatus !== 'valid';
+    if(entryBlocked){
+      const nearEntryEligible = nearEntryStructure
+        && !weakeningStructure
+        && !bounceAbsent
+        && (bounceImproving || bounceState === 'confirmed')
+        && ['valid','needs_adjustment'].includes(planStateKey)
+        && !!context.hasPlanValues
+        && !context.riskTooWide;
+      if(nearEntryEligible){
+        return {
+          verdict:'Near Entry',
+          capApplied:true,
+          capCode:'entry_to_near_entry',
+          capReason:'Close to trigger, but confirmation is still developing.'
+        };
+      }
+      return {
+        verdict:'Watch',
+        capApplied:true,
+        capCode:'entry_blocked',
+        capReason:'Trade structure is not clear enough to price safely yet.'
+      };
+    }
+    return {verdict:'Entry', capApplied:false, capReason:'', capCode:''};
+  }
+
+  if(verdict === 'Near Entry'){
+    if(weakeningStructure){
+      return {
+        verdict:'Watch',
+        capApplied:true,
+        capCode:'weakening_structure',
+        capReason:'Structure still weakening.'
+      };
+    }
+    if(bounceAbsent){
+      return {
+        verdict:'Watch',
+        capApplied:true,
+        capCode:'buyers_not_in_control',
+        capReason:'Buyers have not taken control yet.'
+      };
+    }
+    if(buyersNotInControl && !bounceImproving && bounceState !== 'confirmed'){
+      return {
+        verdict:'Watch',
+        capApplied:true,
+        capCode:'buyers_not_in_control',
+        capReason:'Buyers have not taken control yet.'
+      };
+    }
+    if(!nearEntryStructure){
+      return {
+        verdict:'Watch',
+        capApplied:true,
+        capCode:'structure_not_ready',
+        capReason:'Structure is not clean enough yet.'
+      };
+    }
+    if(tradeStructureUnclear || cannotPriceRiskCleanly){
+      return {
+        verdict:'Watch',
+        capApplied:true,
+        capCode:'risk_not_priceable',
+        capReason:'Trade structure is not clear enough to price safely yet.'
+      };
+    }
+  }
+
+  return {verdict, capApplied:false, capReason:'', capCode:''};
+}
+
 function resolveFinalStateContract(record, options = {}){
   const item = record && typeof record === 'object' ? record : {};
-  const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || resolverSeedVerdictForRecord(item));
+  const requestedFinalVerdict = normalizeAnalysisVerdict(options.finalVerdict || resolverSeedVerdictForRecord(item));
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
@@ -15867,13 +15964,13 @@ function resolveFinalStateContract(record, options = {}){
   const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {
     displayedPlan,
     derivedStates,
-    displayStage:finalVerdict,
-    baseVerdict:finalVerdict
+    displayStage:requestedFinalVerdict,
+    baseVerdict:requestedFinalVerdict
   });
   const warningState = options.warningState || evaluateWarningState(item, getReviewAnalysisState(item).normalizedAnalysis);
-  const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState, derivedStates, displayStage:finalVerdict});
-  const setupUiState = options.setupUiState || getSetupUiState(item, {displayStage:finalVerdict, derivedStates, planUiState});
-  const avoidSubtype = options.avoidSubtype || avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments, finalVerdict});
+  const planUiState = options.planUiState || getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState, derivedStates, displayStage:requestedFinalVerdict});
+  const setupUiState = options.setupUiState || getSetupUiState(item, {displayStage:requestedFinalVerdict, derivedStates, planUiState});
+  const avoidSubtype = options.avoidSubtype || avoidSubtypeForRecord(item, {derivedStates, displayedPlan, qualityAdjustments, finalVerdict:requestedFinalVerdict});
   const deadCheck = options.deadCheck || isTerminalDeadSetup(item, {derivedStates, displayedPlan});
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
@@ -15918,6 +16015,16 @@ function resolveFinalStateContract(record, options = {}){
   else if(planUiState.state === 'invalid') planStateKey = 'invalid';
   else if(planUiState.state === 'needs_adjustment' || riskTooWide || capitalBlocked || capitalHeavy) planStateKey = 'needs_adjustment';
   else if(planUiState.state === 'unrealistic_rr') planStateKey = 'unrealistic_rr';
+  const verdictCap = capVerdictByBlockingFactors(requestedFinalVerdict, {
+    structureState,
+    bounceState,
+    planStateKey,
+    displayedPlanStatus:displayedPlan.status,
+    hasPlanValues,
+    riskTooWide,
+    weakControl
+  });
+  const finalVerdict = verdictCap.verdict;
   const rrResolution = options.rrResolution || {
     rr_label:planStateKey !== 'valid' ? 'Invalid plan' : 'Low confidence',
     rawResolverVerdict:finalVerdict,
@@ -15952,6 +16059,9 @@ function resolveFinalStateContract(record, options = {}){
     const text = String(value || '').trim();
     if(text && !reasonParts.includes(text)) reasonParts.push(text);
   };
+  if(verdictCap.capApplied && verdictCap.capReason){
+    addReason(verdictCap.capReason);
+  }
 
   if(structuralStateKey === 'dead'){
     actionStateKey = 'rebuild_setup';
