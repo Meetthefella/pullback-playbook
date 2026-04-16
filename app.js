@@ -11554,9 +11554,13 @@ function scannerHardFailReasons(data, checks, tradePlan){
   const sma50 = numericOrNull(data.sma50);
   const sma200 = numericOrNull(data.sma200);
   const reasons = [];
+  const structurallyBroken = !!(
+    checks.structureBroken
+    && (!checks.above200 || !checks.ma50gt200)
+  );
   if(Number.isFinite(price) && Number.isFinite(sma200) && price < sma200) reasons.push('Price is below the 200 MA.');
   if(Number.isFinite(sma50) && Number.isFinite(sma200) && sma50 < sma200) reasons.push('50 MA is below the 200 MA.');
-  if(checks.structureBroken) reasons.push('Structure looks broken.');
+  if(structurallyBroken) reasons.push('Structure looks broken.');
   if(!Number.isFinite(tradePlan.stop) || !Number.isFinite(tradePlan.riskPerShare) || tradePlan.riskPerShare <= 0) reasons.push('No valid stop.');
   if(!Number.isFinite(tradePlan.target) || tradePlan.target <= tradePlan.entry) reasons.push('No valid target.');
   return reasons;
@@ -11571,8 +11575,8 @@ function rankedStatusFromScore(score){
 
 function determineScannerVerdict({technicalValid, score, checks, riskFit, rewardRisk}){
   if(!technicalValid || !Number.isFinite(score) || score < 4) return 'Avoid';
-  if(riskFit.risk_status !== 'fits_risk') return 'Avoid';
-  if(!rewardRisk.valid || rewardRisk.rrState === 'invalid' || rewardRisk.rrState === 'weak') return 'Avoid';
+  if(riskFit.risk_status !== 'fits_risk') return 'Watch';
+  if(!rewardRisk.valid || rewardRisk.rrState === 'invalid' || rewardRisk.rrState === 'weak') return 'Watch';
   if(!(checks.stabilising || checks.bounce)) return 'Watch';
   if(rewardRisk.rrState === 'strong') return 'Entry';
   return 'Near Entry';
