@@ -16325,6 +16325,172 @@ function sortedCountEntries(bucket){
     .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0));
 }
 
+function scannerAvoidTriggerFromInputs(inputs = {}){
+  const hardReasons = Array.isArray(inputs.hardReasons) ? inputs.hardReasons : [];
+  const technicalValid = inputs.technicalValid === true;
+  const score = Number.isFinite(Number(inputs.score)) ? Number(inputs.score) : NaN;
+  const riskStatus = String(inputs.riskStatus || '').trim();
+  const rewardRiskValid = inputs.rewardRiskValid === true;
+  const rrState = String(inputs.rrState || '').trim();
+  const rrRatio = Number.isFinite(Number(inputs.rrRatio)) ? Number(inputs.rrRatio) : null;
+
+  if(hardReasons.length){
+    return {
+      source:'technical_hard_fail',
+      reason:hardReasons[0],
+      allReasons:hardReasons
+    };
+  }
+  if(!technicalValid){
+    return {
+      source:'technical_valid_gate',
+      reason:'Scanner technical-valid gate failed before score/risk evaluation.',
+      allReasons:[]
+    };
+  }
+  if(!Number.isFinite(score) || score < 4){
+    return {
+      source:'score_threshold',
+      reason:Number.isFinite(score)
+        ? `Scanner score ${score.toFixed(2)} is below minimum threshold 4.`
+        : 'Scanner score is unavailable.',
+      allReasons:[]
+    };
+  }
+  if(riskStatus !== 'fits_risk'){
+    return {
+      source:'risk_status_gate',
+      reason:`Risk status is ${riskStatus || 'unknown'} (requires fits_risk).`,
+      allReasons:[]
+    };
+  }
+  if(!rewardRiskValid){
+    return {
+      source:'reward_risk_invalid',
+      reason:'Reward:risk is invalid because target/entry/stop are not usable.',
+      allReasons:[]
+    };
+  }
+  if(rrState === 'invalid' || rrState === 'weak'){
+    const rrText = Number.isFinite(rrRatio) ? rrRatio.toFixed(2) : 'n/a';
+    return {
+      source:'rr_state_gate',
+      reason:`Reward:risk state is ${rrState} (rr=${rrText}).`,
+      allReasons:[]
+    };
+  }
+  return {
+    source:'',
+    reason:'',
+    allReasons:[]
+  };
+}
+
+function scannerStageVerdictDiagnosticsForRecord(record){
+  const item = normalizeTickerRecord(record);
+  const ticker = normalizeTicker(item.ticker || '');
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+  const displayedPlan = deriveCurrentPlanState(
+    effectivePlan.entry,
+    effectivePlan.stop,
+    effectivePlan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const planUiState = getPlanUiState(item, {displayedPlan, derivedStates});
+  const legacyCard = tickerRecordToLegacyCard(item);
+  const recomputedCard = recomputeRiskContextForCard(legacyCard);
+  const sourceData = recomputedCard.marketData || recomputedCard;
+  const checks = recomputedCard.checks || buildScannerChecks(sourceData);
+  const scanType = resolveScanType(recomputedCard, sourceData, checks);
+  const suitability = hasUsableScannerData(sourceData) ? scoreSuitability(recomputedCard, sourceData, checks) : null;
+  const tradePlan = suitability ? suitability.tradePlan : deriveTradePlan(sourceData, scanTypeForEvaluation(scanType));
+  const hardReasons = hasUsableScannerData(sourceData) ? scannerHardFailReasons(sourceData, checks, tradePlan) : [];
+  const riskFit = evaluateRiskFit({
+    entry:tradePlan.entry || recomputedCard.entry,
+    stop:tradePlan.stop || recomputedCard.stop,
+    ...currentRiskSettings()
+  });
+  const rewardRisk = evaluateRewardRisk(
+    tradePlan.entry || recomputedCard.entry,
+    tradePlan.stop || recomputedCard.stop,
+    tradePlan.target || recomputedCard.target
+  );
+  const score = suitability ? suitability.total : recomputedCard.score;
+  const technicalValid = hardReasons.length === 0;
+  const scannerRawBaseVerdict = technicalValid ? 'Watch' : 'Avoid';
+  const recomputedScannerVerdict = hasUsableScannerData(sourceData)
+    ? determineScannerVerdict({technicalValid, score, checks, riskFit, rewardRisk})
+    : normalizeAnalysisVerdict(String(recomputedCard.chartVerdict || recomputedCard.status || 'Watch'));
+  const avoidTrigger = (recomputedScannerVerdict === 'Avoid')
+    ? scannerAvoidTriggerFromInputs({
+      hardReasons,
+      technicalValid,
+      score,
+      riskStatus:riskFit.risk_status,
+      rewardRiskValid:rewardRisk.valid,
+      rrState:rewardRisk.rrState,
+      rrRatio:rewardRisk.rrRatio
+    })
+    : {source:'', reason:'', allReasons:[]};
+
+  return {
+    ticker,
+    structureState:String(derivedStates.structureState || ''),
+    bounceState:String(derivedStates.bounceState || ''),
+    stabilisationState:String(derivedStates.stabilisationState || ''),
+    pullbackState:String(derivedStates.pullbackState || ''),
+    pullbackZone:String(derivedStates.pullbackZone || ''),
+    planState:String(planUiState.state || item.plan.planValidationState || ''),
+    tradeability:String(displayedPlan.tradeability || ''),
+    scannerRawBaseVerdict,
+    scannerScore:Number.isFinite(score) ? Number(score.toFixed(2)) : null,
+    scannerRiskStatus:String(riskFit.risk_status || ''),
+    scannerRrState:String(rewardRisk.rrState || ''),
+    scannerRrRatio:Number.isFinite(rewardRisk.rrRatio) ? Number(rewardRisk.rrRatio.toFixed(2)) : null,
+    legacyScannerVerdict:String(item.scan.verdict || ''),
+    resolvedScannerVerdict:String(item.scan.resolvedVerdict || ''),
+    recomputedScannerVerdict:String(recomputedScannerVerdict || ''),
+    avoidTriggerSource:String(avoidTrigger.source || ''),
+    avoidReason:String(avoidTrigger.reason || ''),
+    hardFailReasons:hardReasons,
+    storedScanSummary:String(item.scan.summary || ''),
+    storedScanReasons:Array.isArray(item.scan.reasons) ? item.scan.reasons.slice(0, 3) : []
+  };
+}
+
+function runScannerVerdictResolutionAudit(options = {}){
+  const requestedTickers = uniqueTickers(options.tickers || ['FDX','CB','TRV']).map(normalizeTicker).filter(Boolean);
+  const includeAll = options.includeAll === true;
+  const records = includeAll
+    ? allTickerRecords()
+    : requestedTickers.map(ticker => getTickerRecord(ticker)).filter(Boolean);
+  const rows = records.map(scannerStageVerdictDiagnosticsForRecord);
+  console.groupCollapsed(`[ScannerVerdictAudit] tickers=${rows.length}`);
+  console.info('requestedTickers', requestedTickers);
+  console.table(rows.map(row => ({
+    ticker:row.ticker,
+    structureState:row.structureState,
+    bounceState:row.bounceState,
+    stabilisationState:row.stabilisationState,
+    pullbackState:row.pullbackState,
+    pullbackZone:row.pullbackZone,
+    planState:row.planState,
+    tradeability:row.tradeability,
+    scannerRawBaseVerdict:row.scannerRawBaseVerdict,
+    legacyScannerVerdict:row.legacyScannerVerdict,
+    resolvedScannerVerdict:row.resolvedScannerVerdict,
+    recomputedScannerVerdict:row.recomputedScannerVerdict,
+    avoidTriggerSource:row.avoidTriggerSource,
+    avoidReason:row.avoidReason
+  })));
+  rows.forEach(row => {
+    console.info(`[ScannerVerdictAudit:${row.ticker}]`, row);
+  });
+  console.groupEnd();
+  return rows;
+}
+
 function summarizeVerdictCapUsage(records = allTickerRecords()){
   const safeRecords = Array.isArray(records) ? records : [];
   const summary = {
@@ -16497,6 +16663,8 @@ function runVerdictCapAudit(options = {}){
 if(typeof window !== 'undefined'){
   window.runVerdictCapAudit = runVerdictCapAudit;
   window.summarizeVerdictCapUsage = summarizeVerdictCapUsage;
+  window.scannerStageVerdictDiagnosticsForRecord = scannerStageVerdictDiagnosticsForRecord;
+  window.runScannerVerdictResolutionAudit = runScannerVerdictResolutionAudit;
 }
 
 function resolvePreLifecycleStateContract(record){
