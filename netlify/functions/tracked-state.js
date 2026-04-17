@@ -64,8 +64,9 @@ function applyExplicitRemovals(records = {}, removedRecords = {}){
 }
 
 exports.handler = async function handler(event){
-  if(!guardTrustedOrigin(event)) return jsonResponse(event, 403, {error:'Forbidden'});
+ 
   if(event.httpMethod === 'OPTIONS') return jsonResponse(event, 200, {ok:true});
+ if(!guardTrustedOrigin(event)) return jsonResponse(event, 403, {error:'Forbidden'});
   if(event.httpMethod === 'GET'){
     const state = await loadTrackedState();
     return jsonResponse(event, 200, {ok:true, trackedState:state});

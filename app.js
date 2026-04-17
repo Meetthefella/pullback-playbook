@@ -6077,7 +6077,23 @@ function cardVisualStyleAttr(setupScore, structureState){
 */
 
 function renderCompactResultCardFromView(view){
-  return renderCompactResultCardFromViewImpl(view, scannerCardShellBridgeDeps());
+  const item = view && view.item ? view.item : {};
+  const statusChip = primaryShortlistStatusChip(view);
+  const visualState = resolveVisualState(item, 'scanner', {
+    displayedPlan:view && view.displayedPlan,
+    derivedStates:view && view.setupStates,
+    pendingResolution:!!(view && view.resolutionPending),
+    setupScore:view && view.setupScore
+  });
+  const sourceVerdict = globalVerdictLabel(visualState.finalVerdict || visualState.final_verdict);
+  const scoreLabel = view && view.setupScoreDisplay ? view.setupScoreDisplay : 'Setup --/10';
+  const resolvedBadge = visualState.badge || statusChip;
+  const menuState = currentScanCardMenuState(item.ticker);
+  const secondaryUiMarkup = renderScanCardSecondaryUi(view);
+  const companyLine = [item && item.meta && item.meta.companyName || '', item && item.meta && item.meta.exchange || ''].filter(Boolean).join(' | ');
+  const technicalSummary = scanCardTechnicalSummaryForView(view);
+  const decisionSummary = visualState.decision_summary || compactReasonLineForView(view, 3) || scanCardPrimaryActionLabel(view);
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualState.className || visualState.toneClass || '')}" style="${escapeHtml(visualState.styleAttr || '')}" data-visual-tone="${escapeHtml(visualState.visual_tone || '')}" data-visual-state="${escapeHtml(visualState.state || '')}" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="scan-card__header resultcompacthead"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(resolvedBadge.className || statusChip.className || 'watch')}">${escapeHtml(resolvedBadge.text || resolvedBadge.label || statusChip.label || 'Watch')}</span><span class="score visual-score">${escapeHtml(scoreLabel)}</span></div></div>${companyLine ? `<div class="scan-card__company tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}<div class="scan-card__technical tiny">${escapeHtml(technicalSummary)}</div><div class="scan-card__decision resultreason decision-summary">${escapeHtml(decisionSummary)}</div><div class="scan-card__footer"><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button></div>${secondaryUiMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
@@ -6121,6 +6137,38 @@ function compactReasonLineForView(view, maxParts = 3){
   warningState.reasons.forEach(pushPart);
   if(!parts.length) pushPart(resultReasonForView(view));
   return parts.slice(0, maxParts).join(' | ');
+}
+
+function scanCardTechnicalSummaryForView(view){
+  const item = view && view.item ? view.item : {};
+  const derived = view && view.setupStates ? view.setupStates : analysisDerivedStatesFromRecord(item);
+  const structureBadge = shortlistStructureBadgeForView(view);
+  const structureLabel = structureBadge && structureBadge.label
+    ? structureBadge.label
+    : ({
+      strong:'Strong',
+      intact:'Intact',
+      developing_clean:'Developing',
+      developing:'Developing',
+      weakening:'Weakening',
+      weak:'Weak',
+      broken:'Broken'
+    }[String(derived && derived.structureState || '').toLowerCase()] || 'Developing');
+  const pullbackLabel = ({
+    near_20ma:'Near 20MA',
+    near_50ma:'Near 50MA',
+    between_20_50:'Between 20/50MA',
+    extended:'Extended',
+    none:'No pullback'
+  }[String(derived && derived.pullbackState || '').toLowerCase()] || 'Pullback unclear');
+  const bounceState = String(derived && derived.bounceState || '').toLowerCase();
+  const stabilisationState = String(derived && derived.stabilisationState || '').toLowerCase();
+  let responseLabel = 'No bounce';
+  if(bounceState === 'confirmed') responseLabel = 'Bounce confirmed';
+  else if(bounceState === 'attempt') responseLabel = 'Bounce attempt';
+  else if(bounceState === 'early') responseLabel = 'Bounce early';
+  else if(stabilisationState === 'clear' || stabilisationState === 'present' || stabilisationState === 'early') responseLabel = 'Stabilising';
+  return [structureLabel, pullbackLabel, responseLabel].filter(Boolean).join(' | ');
 }
 
 function hasAiStageForRecord(record){
@@ -9753,9 +9801,8 @@ function holdTargetDescriptor(target){
 
 function shouldIgnoreHoldStartTarget(target, helper, cardMode){
   if(!target || !target.closest) return false;
-  const interactiveSelector = 'button,a,input,textarea,select,label,[contenteditable="true"],[role="button"],.entry-conditions-panel,[data-hold-entry-helper]';
+  const interactiveSelector = 'button,a,input,textarea,select,summary,[contenteditable="true"],.entry-conditions-panel,[data-hold-entry-helper]';
   if(target.closest(interactiveSelector)) return true;
-  if(cardMode && target.closest('.watchlist-actions')) return true;
   if(cardMode && helper && target.closest('[data-entry-hold-helper]') !== helper) return true;
   return false;
 }
@@ -9797,7 +9844,9 @@ function bindEntryConditionsHoldInteractions(root){
       startX:0,
       startY:0,
       holdOpened:false,
-      suppressClick:false
+      suppressClick:false,
+      holdAttempted:false,
+      moveCancelled:false
     };
     const clearTimer = () => {
       if(state.timer){
@@ -9841,6 +9890,8 @@ function bindEntryConditionsHoldInteractions(root){
       state.startX = Number(event.clientX || 0);
       state.startY = Number(event.clientY || 0);
       state.holdOpened = false;
+      state.holdAttempted = true;
+      state.moveCancelled = false;
       clearTimer();
       helper.classList.add('hold-armed');
       if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_start.pointerdown (${event.pointerType || 'unknown'})`);
@@ -9851,11 +9902,16 @@ function bindEntryConditionsHoldInteractions(root){
       if(state.pointerId == null || event.pointerId !== state.pointerId) return;
       const dx = Math.abs(Number(event.clientX || 0) - state.startX);
       const dy = Math.abs(Number(event.clientY || 0) - state.startY);
-      const cancelThreshold = cardMode ? 22 : 12;
+      const cancelThreshold = cardMode ? 34 : 12;
       if(dx > cancelThreshold || dy > cancelThreshold){
         clearTimer();
         helper.classList.remove('hold-armed');
-        if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_move.cancelled dx=${Math.round(dx)} dy=${Math.round(dy)} threshold=${cancelThreshold}`);
+        state.moveCancelled = true;
+        state.suppressClick = true;
+        if(holdTicker && !state.moveCancelledLogged){
+          setWatchlistHoldTrace(holdTicker, `hold_move.cancelled dx=${Math.round(dx)} dy=${Math.round(dy)} threshold=${cancelThreshold}`);
+          state.moveCancelledLogged = true;
+        }
       }
     });
     const closeOnRelease = event => {
@@ -9863,6 +9919,9 @@ function bindEntryConditionsHoldInteractions(root){
       const didHoldOpen = state.holdOpened;
       if(typeof trigger.releasePointerCapture === 'function'){
         try{ trigger.releasePointerCapture(event.pointerId); }catch(_){}
+      }
+      if(cardMode && !didHoldOpen && state.holdAttempted){
+        state.suppressClick = true;
       }
       resetPointer();
       if(holdTicker) setWatchlistHoldTrace(holdTicker, didHoldOpen ? 'hold_release.close_panel' : 'hold_release.before_threshold');
@@ -9882,6 +9941,8 @@ function bindEntryConditionsHoldInteractions(root){
         state.startX = Number(touch.clientX || 0);
         state.startY = Number(touch.clientY || 0);
         state.holdOpened = false;
+        state.holdAttempted = true;
+        state.moveCancelled = false;
         clearTimer();
         helper.classList.add('hold-armed');
         if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_start.touchstart');
@@ -9893,14 +9954,23 @@ function bindEntryConditionsHoldInteractions(root){
         if(!touch) return;
         const dx = Math.abs(Number(touch.clientX || 0) - state.startX);
         const dy = Math.abs(Number(touch.clientY || 0) - state.startY);
-        if(dx > 20 || dy > 20){
+        const touchCancelThreshold = cardMode ? 32 : 20;
+        if(dx > touchCancelThreshold || dy > touchCancelThreshold){
           clearTimer();
           helper.classList.remove('hold-armed');
-          if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_move.touch_cancelled dx=${Math.round(dx)} dy=${Math.round(dy)} threshold=20`);
+          state.moveCancelled = true;
+          state.suppressClick = true;
+          if(holdTicker && !state.moveCancelledLogged){
+            setWatchlistHoldTrace(holdTicker, `hold_move.touch_cancelled dx=${Math.round(dx)} dy=${Math.round(dy)} threshold=${touchCancelThreshold}`);
+            state.moveCancelledLogged = true;
+          }
         }
       }, {passive:true});
       const touchRelease = () => {
         const didHoldOpen = state.holdOpened;
+        if(cardMode && !didHoldOpen && state.holdAttempted){
+          state.suppressClick = true;
+        }
         clearTimer();
         helper.classList.remove('hold-armed');
         if(holdTicker) setWatchlistHoldTrace(holdTicker, didHoldOpen ? 'hold_release.touch_close_panel' : 'hold_release.touch_before_threshold');
@@ -9913,11 +9983,17 @@ function bindEntryConditionsHoldInteractions(root){
     trigger.addEventListener('click', event => {
       if(state.suppressClick){
         state.suppressClick = false;
-        if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_click.suppressed_after_hold');
+        if(holdTicker) setWatchlistHoldTrace(holdTicker, state.moveCancelled ? 'hold_click.suppressed_after_cancel' : 'hold_click.suppressed_after_hold');
+        state.moveCancelled = false;
+        state.moveCancelledLogged = false;
+        state.holdAttempted = false;
         event.preventDefault();
         event.stopPropagation();
         return;
       }
+      state.moveCancelled = false;
+      state.moveCancelledLogged = false;
+      state.holdAttempted = false;
       if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_click.no_hold');
       if(!cardMode) event.preventDefault();
     });

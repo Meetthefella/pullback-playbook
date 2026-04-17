@@ -4,7 +4,36 @@ const STORE_NAME = 'pullback-playbook';
 const RECORDS_KEY = 'tracked-records';
 const SUBSCRIPTIONS_KEY = 'push-subscriptions';
 
+function manualBlobsClientOptions(){
+  const siteID = String(
+    process.env.NETLIFY_BLOBS_SITE_ID
+    || process.env.SITE_ID
+    || process.env.NETLIFY_SITE_ID
+    || ''
+  ).trim();
+  const token = String(
+    process.env.NETLIFY_BLOBS_TOKEN
+    || process.env.BLOBS_TOKEN
+    || process.env.NETLIFY_AUTH_TOKEN
+    || process.env.NETLIFY_API_TOKEN
+    || ''
+  ).trim();
+  if(!siteID || !token) return null;
+  return {siteID, token};
+}
+
 function storeInstance(){
+  const manualClientOptions = manualBlobsClientOptions();
+  if(manualClientOptions){
+    try{
+      return getStore({
+        name:STORE_NAME,
+        ...manualClientOptions
+      });
+    }catch(error){
+      // Fall through to automatic context resolution below.
+    }
+  }
   try{
     return getStore(STORE_NAME);
   }catch(error){
