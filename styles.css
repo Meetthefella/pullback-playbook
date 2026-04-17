@@ -57,17 +57,27 @@ body{
   gap:8px;
   padding:8px 10px;
   border-radius:10px;
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(255,255,255,.04);
-  color:#ffb347;
+  border:1px solid rgba(251,191,36,.45);
+  background:rgba(28,32,48,.94);
+  color:#ffb347 !important;
   font-size:.94rem;
   font-weight:600;
+  position:fixed;
+  top:max(8px, env(safe-area-inset-top));
+  left:50%;
+  transform:translateX(-50%);
+  width:min(calc(100vw - 18px), 1080px);
+  z-index:2200;
+  pointer-events:none;
 }
 .live-process-banner__label{
   font-size:11px;
   text-transform:uppercase;
   letter-spacing:.04em;
-  color:#ffc16a;
+  color:#ffc16a !important;
+}
+#liveProcessStatusText{
+  color:#ffb347 !important;
 }
 .live-process-banner[data-live-process="running_scan"],
 .live-process-banner[data-live-process="refreshing_watchlist"]{
