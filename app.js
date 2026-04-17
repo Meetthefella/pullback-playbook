@@ -288,6 +288,9 @@ uiState.verdictCapAudit = uiState.verdictCapAudit && typeof uiState.verdictCapAu
   ? uiState.verdictCapAudit
   : {};
 uiState.verdictCapAuditLastSignature = String(uiState.verdictCapAuditLastSignature || '');
+uiState.liveProcessStatus = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+  ? uiState.liveProcessStatus
+  : {state:'idle', message:'Idle.', updatedAt:''};
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -329,6 +332,7 @@ const US_MARKET_CALENDAR_CONFIG = {
 const DIARY_SETUP_TAG_OPTIONS = ['20MA bounce', '50MA reclaim', 'first pullback', 'post-earnings continuation', 'weak-market exception', 'countertrend avoid'];
 const DIARY_MISTAKE_TAG_OPTIONS = ['early entry', 'chased breakout', 'ignored weak market', 'stop too tight', 'stop moved', 'oversize position', 'took subpar setup', 'sold too early', 'held too long'];
 const DIARY_LESSON_TAG_OPTIONS = ['wait for bounce confirmation', '50MA setups need extra patience', 'weak tape needs stricter filtering', 'best setups come from strong RS names', 'avoid loose structure under 20MA'];
+const LIVE_PROCESS_COMPLETE_TO_IDLE_MS = 2200;
 const ALERT_PRIORITY = {
   closed:1,
   entered:2,
@@ -339,6 +343,7 @@ const ALERT_PRIORITY = {
   watchlist_progressed:7,
   expired:8
 };
+let liveProcessIdleTimer = null;
 const APP_FETCH_TIMEOUT_MS = 12000;
 const BACKEND_REVIEW_POLL_MS = 10 * 60 * 1000;
 const MARKET_CACHE_SCHEMA_VERSION = 3;
@@ -2755,6 +2760,9 @@ function loadState(){
   refreshRiskContextForActiveSetups();
   if(startupRefreshTickers.length){
     setStatus('scannerSelectionStatus', `<span class="ok">Refreshing ${escapeHtml(String(startupRefreshTickers.length))} watchlist ticker${startupRefreshTickers.length === 1 ? '' : 's'} from live data...</span>`);
+    setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
+  }else{
+    setLiveProcessStatus('idle', 'Idle.');
   }
   refreshWatchlistRecordsFromSourceOfTruth({
     source:'startup_restore',
@@ -2768,8 +2776,14 @@ function loadState(){
       ? `Startup refresh checked ${summary.refreshed}/${summary.attempted} watchlist ticker${summary.attempted === 1 ? '' : 's'} from live data.`
       : `Startup refresh checked ${summary.refreshed} watchlist ticker${summary.refreshed === 1 ? '' : 's'} from live data.`;
     setStatus('scannerSelectionStatus', `<span class="${summary.failed ? 'warntext' : 'ok'}">${escapeHtml(message)}</span>`);
+    if(summary.failed && summary.refreshed === 0){
+      setLiveProcessStatus('error', 'Refresh failed.');
+    }else{
+      setLiveProcessStatus('idle', 'Idle.');
+    }
   }).catch(() => {
     setStatus('scannerSelectionStatus', '<span class="warntext">Startup watchlist refresh could not complete. Kept saved watchlist state active locally.</span>');
+    setLiveProcessStatus('error', 'Refresh failed.');
   });
 }
 
@@ -4750,6 +4764,7 @@ function scannerEmptyState(message){
   renderCards();
   renderScannerRulesPanel();
   setStatus('apiStatus', message || 'Add tickers to the scanner universe first.');
+  setLiveProcessStatus('idle', 'Idle.');
 }
 
 async function runScannerWorkflow(options = {}){
@@ -4763,6 +4778,14 @@ async function runScannerWorkflow(options = {}){
   });
   clearScannerSessionState({suppressed:false});
   saveState();
+  const pendingBeforeScan = pendingWatchlistRefreshTickers();
+  if(pendingBeforeScan.length){
+    setLiveProcessStatus('waiting_for_refresh_before_scan', 'Waiting for watchlist refresh before running scan.');
+    const settled = await waitForWatchlistRefreshSettlement();
+    if(!settled){
+      setLiveProcessStatus('error', 'Refresh failed.');
+    }
+  }
   const {parsed, universe, blocked} = prepareScannerUniverse(options);
   if(blocked) return {done:0, failed:0, rejected:0};
   if(!options.syncInput) updateTickerInputFromState();
@@ -4783,6 +4806,7 @@ async function runScannerWorkflow(options = {}){
     : (mode === 'combined' ? 'Combined universe' : 'Curated Core 8 fallback universe');
   setStatus('inputStatus', `<span class="ok">${universe.length} ticker${universe.length === 1 ? '' : 's'} ready in the ${modeLabel}.</span>`);
   setStatus('apiStatus', `<span class="warntext">Running Quality Pullback Scanner on ${universe.length} ticker${universe.length === 1 ? '' : 's'}...</span>`);
+  setLiveProcessStatus('running_scan', 'Running scan.');
   let result;
   try{
     result = await refreshMarketDataForTickers(universe, options);
@@ -4795,6 +4819,7 @@ async function runScannerWorkflow(options = {}){
         options
       }
     });
+    setLiveProcessStatus('error', 'Scan failed.');
     throw err;
   }
   state.dismissedFocusTickers = [];
@@ -4811,6 +4836,7 @@ async function runScannerWorkflow(options = {}){
   renderScannerResults();
   renderFocusQueue();
   setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} ranked, ${result.rejected} avoid, ${result.failed} failed.`);
+  setLiveProcessStatus('scan_complete', 'Scan complete.', {autoIdleMs:LIVE_PROCESS_COMPLETE_TO_IDLE_MS});
   pushRuntimeDebugEntry('scanner.complete', {
     message:'Run Scan finished',
     extra:result
@@ -4838,6 +4864,62 @@ function syncScannerUniverseDraft(options = {}){
 function setStatus(id, html){
   const el = $(id);
   if(el) el.innerHTML = html;
+}
+
+function renderLiveProcessStatusBanner(){
+  const banner = $('liveProcessStatusBanner');
+  const text = $('liveProcessStatusText');
+  const status = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+    ? uiState.liveProcessStatus
+    : {state:'idle', message:'Idle.'};
+  if(banner){
+    banner.setAttribute('data-live-process', String(status.state || 'idle'));
+  }
+  if(text){
+    text.textContent = String(status.message || 'Idle.');
+  }
+}
+
+function setLiveProcessStatus(stateKey, message, options = {}){
+  const nextState = String(stateKey || 'idle');
+  const nextMessage = String(message || 'Idle.');
+  uiState.liveProcessStatus = {
+    state:nextState,
+    message:nextMessage,
+    updatedAt:new Date().toISOString()
+  };
+  if(liveProcessIdleTimer){
+    clearTimeout(liveProcessIdleTimer);
+    liveProcessIdleTimer = null;
+  }
+  renderLiveProcessStatusBanner();
+  if(Number.isFinite(options.autoIdleMs) && options.autoIdleMs > 0){
+    liveProcessIdleTimer = setTimeout(() => {
+      if(uiState.liveProcessStatus && uiState.liveProcessStatus.state === nextState){
+        setLiveProcessStatus('idle', 'Idle.');
+      }
+    }, Math.floor(options.autoIdleMs));
+  }
+}
+
+function pendingWatchlistRefreshTickers(){
+  const pending = uiState.watchlistLiveRefreshPending && typeof uiState.watchlistLiveRefreshPending === 'object'
+    ? uiState.watchlistLiveRefreshPending
+    : {};
+  return Object.keys(pending).filter(ticker => !!pending[ticker]);
+}
+
+async function waitForWatchlistRefreshSettlement(options = {}){
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Math.max(1000, Number(options.timeoutMs)) : 60000;
+  const pollMs = Number.isFinite(Number(options.pollMs)) ? Math.max(100, Number(options.pollMs)) : 250;
+  const startedAt = Date.now();
+  while(pendingWatchlistRefreshTickers().length){
+    if((Date.now() - startedAt) > timeoutMs){
+      return false;
+    }
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+  }
+  return true;
 }
 
 function formatRuntimeDebugValue(value, depth = 0){
@@ -9066,15 +9148,15 @@ function stateLabelForDecisionSummary(finalVerdict){
 
 function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, derivedStates}){
   const verdict = normalizeVerdict(finalVerdict || '');
-  if(verdict === 'entry') return 'Entry - your plan fits.';
-  if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
+  if(verdict === 'entry') return 'Entry: confirmation is in place. Setup is ready to act on.';
+  if(verdict === 'near_entry') return 'Near Entry: stabilising near support. Buyers are starting to respond.';
   if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
   const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
   const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
   const developingState = structuralState === 'developing' || ['developing','developing_loose','developing_clean'].includes(structureState);
   return developingState
-    ? 'Developing - still forming. Buyers have not taken control yet.'
-    : 'Monitor - still forming. Buyers have not taken control yet.';
+    ? 'Developing: still forming. Buyers have not taken control yet.'
+    : 'Monitor: still forming. Buyers have not taken control yet.';
 }
 
 function isWatchlistAvoidBucket(bucket){
@@ -9510,8 +9592,8 @@ function buildEntryConditionsSummary({
   const futureStateLine = `Upgrades to: ${nextUpgrade}.`;
   const footer = `${triggerLine} ${futureStateLine}`;
   const normalizedHeader = (structuralState === 'developing' || structureState === 'developing_loose')
-    ? '\uD83C\uDF31 Developing - still forming'
-    : (verdict === 'near_entry' ? '\uD83C\uDFAF Near Entry - Almost there' : '\uD83D\uDFE1 Monitor - Not ready');
+    ? '\uD83C\uDF31 Developing - Still forming'
+    : (verdict === 'near_entry' ? '\uD83C\uDFAF Near Entry - Stabilising near support' : '\uD83D\uDFE1 Monitor - Still forming');
 
   return {
     show:true,
@@ -13395,6 +13477,7 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
   if(!symbol) return {symbol:'', ok:false, skipped:true, reason:'invalid_ticker', record:null, snapshot:null, verdict:null};
   const record = upsertTickerRecord(symbol);
   const source = String(options.source || 'manual_refresh');
+  setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
   if(options.clearReviewOverride !== false && activeReviewTicker() === symbol) uiState.activeReviewVerdictOverride = '';
   if(options.markPending) setWatchlistLiveRefreshPending(symbol, true);
   try{
@@ -13427,6 +13510,7 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       verdict:refreshedVerdict
     };
   }catch(error){
+    setLiveProcessStatus('error', 'Refresh failed.');
     runWatchlistLifecycleEvaluation({
       source,
       tickers:[symbol],
@@ -13444,6 +13528,13 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
     };
   }finally{
     if(options.markPending) clearWatchlistLiveRefreshPending(symbol);
+    const pending = pendingWatchlistRefreshTickers();
+    if(
+      !pending.length
+      && (!uiState.liveProcessStatus || (uiState.liveProcessStatus.state !== 'running_scan' && uiState.liveProcessStatus.state !== 'error'))
+    ){
+      setLiveProcessStatus('idle', 'Idle.');
+    }
   }
 }
 
@@ -13454,6 +13545,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
       .filter(Boolean)
   );
   if(!tickers.length) return {source, attempted:0, refreshed:0, failed:0, results:[]};
+  setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
   const markPending = options.markPending !== false && source === 'startup_restore';
   if(markPending) setWatchlistLiveRefreshPending(tickers, true);
   const results = [];
@@ -13477,13 +13569,19 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     renderCards();
     if(activeReviewTicker()) renderReviewWorkspace();
   }
-  return {
+  const summary = {
     source,
     attempted:tickers.length,
     refreshed:results.filter(result => result.ok).length,
     failed:results.filter(result => !result.ok).length,
     results
   };
+  if(summary.failed && summary.refreshed === 0){
+    setLiveProcessStatus('error', 'Refresh failed.');
+  }else{
+    setLiveProcessStatus('idle', 'Idle.');
+  }
+  return summary;
 }
 
 async function refreshWatchlistTicker(ticker){
@@ -15227,6 +15325,7 @@ function renderAppFromState(options = {}){
   renderReviewWorkspace();
   renderReviewLifecycleSummary(activeReviewTicker());
   updateTickerSearchStatus();
+  renderLiveProcessStatusBanner();
 }
 
 function clearTransientSessionState(options = {}){
@@ -15916,6 +16015,126 @@ function capSeverityFromEvaluation(capCode, blockerFlags = {}){
   return 'hard';
 }
 
+function buildPromotionGateTrace(context = {}){
+  const structureState = String(context.structureState || '').toLowerCase();
+  const pullbackState = String(context.pullbackState || '').toLowerCase();
+  const stabilisationState = String(context.stabilisationState || '').toLowerCase();
+  const bounceState = String(context.bounceState || '').toLowerCase();
+  const planStateKey = String(context.planStateKey || '').toLowerCase();
+  const riskTooWide = !!context.riskTooWide;
+  const hardBlockers = !!context.hardBlockers;
+  const tradeStructureClearEnough = context.tradeStructureClearEnough === true;
+  const hasPriceablePlanValues = context.hasPriceablePlanValues === true;
+
+  const gate_structure_ok_for_near = ['strong','intact','developing_clean'].includes(structureState);
+  const gate_pullback_zone_ok_for_near = ['near_20ma','near_50ma'].includes(pullbackState);
+  const gate_stabilisation_ok_for_near = ['clear','present','early'].includes(stabilisationState) && stabilisationState !== 'none';
+  const gate_bounce_ok_for_near = ['early','attempt','confirmed'].includes(bounceState) && bounceState !== 'none';
+  const gate_plan_ok_for_near = ['valid','needs_adjustment'].includes(planStateKey);
+  const gate_risk_width_ok_for_near = !riskTooWide;
+  const gate_hard_blockers_clear_for_near = !hardBlockers;
+  const gate_not_weakening_for_near = structureState !== 'weakening';
+  const gate_trade_structure_clear_enough = tradeStructureClearEnough;
+
+  const promotion_watch_to_near_allowed = !!(
+    gate_structure_ok_for_near
+    && gate_pullback_zone_ok_for_near
+    && gate_stabilisation_ok_for_near
+    && gate_bounce_ok_for_near
+    && gate_plan_ok_for_near
+    && gate_risk_width_ok_for_near
+    && gate_hard_blockers_clear_for_near
+    && gate_not_weakening_for_near
+    && gate_trade_structure_clear_enough
+  );
+
+  const gate_structure_ok_for_entry = ['strong','intact'].includes(structureState);
+  const gate_bounce_confirmed_for_entry = bounceState === 'confirmed';
+  const gate_stabilisation_clear_for_entry = stabilisationState === 'clear';
+  const gate_plan_valid_for_entry = planStateKey === 'valid';
+  const gate_prices_all_defined_for_entry = hasPriceablePlanValues;
+  const gate_blockers_clear_for_entry = !hardBlockers && tradeStructureClearEnough;
+
+  const promotion_near_to_entry_allowed = !!(
+    gate_structure_ok_for_entry
+    && gate_bounce_confirmed_for_entry
+    && gate_stabilisation_clear_for_entry
+    && gate_plan_valid_for_entry
+    && gate_prices_all_defined_for_entry
+    && gate_blockers_clear_for_entry
+  );
+
+  let promotion_watch_to_near_reason = '';
+  if(promotion_watch_to_near_allowed){
+    promotion_watch_to_near_reason = 'Promoted to Near Entry: valid pullback, stabilisation present, and buyers starting to respond.';
+  }else if(!gate_plan_ok_for_near){
+    promotion_watch_to_near_reason = 'Stayed Monitor: plan is not valid or adjustable yet.';
+  }else if(!gate_trade_structure_clear_enough){
+    promotion_watch_to_near_reason = (bounceState === 'attempt')
+      ? 'Stayed Monitor: bounce attempt present but trade structure not clear enough.'
+      : 'Stayed Monitor: trade structure is not clear enough yet.';
+  }else if(!gate_bounce_ok_for_near){
+    promotion_watch_to_near_reason = 'Stayed Monitor: still forming - buyers have not taken control yet.';
+  }else if(!gate_stabilisation_ok_for_near){
+    promotion_watch_to_near_reason = 'Stayed Monitor: stabilisation is not established yet.';
+  }else if(!gate_not_weakening_for_near){
+    promotion_watch_to_near_reason = 'Stayed Monitor: trend is weakening - no reliable stop level yet.';
+  }else if(!gate_risk_width_ok_for_near){
+    promotion_watch_to_near_reason = 'Stayed Monitor: bounce is too weak to price cleanly.';
+  }else if(!gate_hard_blockers_clear_for_near){
+    promotion_watch_to_near_reason = 'Stayed Monitor: hard blockers are still active.';
+  }else{
+    promotion_watch_to_near_reason = 'Stayed Monitor: setup is still forming.';
+  }
+
+  let promotion_near_to_entry_reason = '';
+  if(promotion_near_to_entry_allowed){
+    promotion_near_to_entry_reason = 'Promoted to Entry: confirmation, clear stabilisation, and full plan pricing available.';
+  }else if(!gate_bounce_confirmed_for_entry){
+    promotion_near_to_entry_reason = 'Stayed Near Entry: bounce not confirmed yet.';
+  }else if(!gate_stabilisation_clear_for_entry){
+    promotion_near_to_entry_reason = 'Stayed Near Entry: stabilisation is not clear yet.';
+  }else if(!gate_plan_valid_for_entry || !gate_prices_all_defined_for_entry){
+    promotion_near_to_entry_reason = 'Stayed Near Entry: plan pricing is not fully defined yet.';
+  }else if(!gate_structure_ok_for_entry){
+    promotion_near_to_entry_reason = 'Stayed Near Entry: structure is not strong/intact enough for Entry.';
+  }else if(!gate_blockers_clear_for_entry){
+    promotion_near_to_entry_reason = 'Stayed Near Entry: blocker flags are still active.';
+  }else{
+    promotion_near_to_entry_reason = 'Stayed Near Entry: confirmation gates are not fully met.';
+  }
+
+  return {
+    audit_structure_state:structureState,
+    audit_pullback_zone:pullbackState,
+    audit_stabilisation_state:stabilisationState,
+    audit_bounce_state:bounceState,
+    audit_plan_state:planStateKey,
+    audit_risk_too_wide:riskTooWide,
+    audit_hard_blockers:hardBlockers,
+    audit_trade_structure_clear_enough:tradeStructureClearEnough,
+    gate_structure_ok_for_near,
+    gate_pullback_zone_ok_for_near,
+    gate_stabilisation_ok_for_near,
+    gate_bounce_ok_for_near,
+    gate_plan_ok_for_near,
+    gate_risk_width_ok_for_near,
+    gate_hard_blockers_clear_for_near,
+    gate_not_weakening_for_near,
+    gate_trade_structure_clear_enough,
+    gate_structure_ok_for_entry,
+    gate_bounce_confirmed_for_entry,
+    gate_stabilisation_clear_for_entry,
+    gate_plan_valid_for_entry,
+    gate_prices_all_defined_for_entry,
+    gate_blockers_clear_for_entry,
+    promotion_watch_to_near_allowed,
+    promotion_near_to_entry_allowed,
+    promotion_watch_to_near_reason,
+    promotion_near_to_entry_reason
+  };
+}
+
 function capVerdictByBlockingFactors(requestedVerdict, context = {}){
   const verdict = normalizeAnalysisVerdict(requestedVerdict || 'Watch');
   const structureState = String(context.structureState || '').toLowerCase();
@@ -15924,20 +16143,30 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
   const displayedPlanStatus = String(context.displayedPlanStatus || '').toLowerCase();
   const pullbackState = String(context.pullbackState || '').toLowerCase();
   const stabilisationState = String(context.stabilisationState || '').toLowerCase();
-  const buyersNotInControl = ['none','unconfirmed','attempt','early'].includes(bounceState);
+  const buyersNotInControl = ['none','unconfirmed'].includes(bounceState);
   const bounceImproving = ['attempt','early','unconfirmed'].includes(bounceState);
   const bounceAbsent = bounceState === 'none';
-  const weakeningStructure = ['weakening','weak','broken','developing_loose'].includes(structureState);
-  const entryStructureStrong = ['strong','intact'].includes(structureState);
+  const weakeningStructure = structureState === 'weakening';
   const nearEntryStructure = ['strong','intact','developing_clean'].includes(structureState);
-  const pullbackValid = ['near_20ma','near_50ma','at_20ma','at_50ma'].includes(pullbackState);
-  const stabilisationImproving = ['early','clear'].includes(stabilisationState);
-  const planNotReady = ['missing','invalid','needs_adjustment','too_wide','unrealistic_rr'].includes(planStateKey)
+  const pullbackValid = ['near_20ma','near_50ma'].includes(pullbackState);
+  const stabilisationImproving = ['clear','present','early'].includes(stabilisationState);
+  const hardBlockers = !!context.hardBlockers;
+  const tradeStructureClearEnough = context.tradeStructureClearEnough === true;
+  const planNotReady = ['missing','invalid','too_wide','unrealistic_rr'].includes(planStateKey)
     || displayedPlanStatus !== 'valid'
-    || context.riskTooWide
     || !context.hasPlanValues;
-  const tradeStructureUnclear = !!(context.weakControl || planNotReady);
-  const cannotPriceRiskCleanly = !!(planNotReady || context.riskTooWide || !context.hasPlanValues);
+  const cannotPriceRiskCleanly = !!(context.riskTooWide || !context.hasPriceablePlanValues);
+  const gateTrace = buildPromotionGateTrace({
+    structureState,
+    pullbackState,
+    stabilisationState,
+    bounceState,
+    planStateKey,
+    riskTooWide:!!context.riskTooWide,
+    hardBlockers,
+    tradeStructureClearEnough,
+    hasPriceablePlanValues:!!context.hasPriceablePlanValues
+  });
   const blockerFlags = {
     structureState,
     bounceState,
@@ -15949,15 +16178,17 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
     bounceImproving,
     bounceAbsent,
     weakeningStructure,
-    entryStructureStrong,
     nearEntryStructure,
     pullbackValid,
     stabilisationImproving,
     planNotReady,
-    tradeStructureUnclear,
     cannotPriceRiskCleanly,
+    hardBlockers,
+    tradeStructureClearEnough,
     riskTooWide:!!context.riskTooWide,
-    hasPlanValues:!!context.hasPlanValues
+    hasPlanValues:!!context.hasPlanValues,
+    hasPriceablePlanValues:!!context.hasPriceablePlanValues,
+    ...gateTrace
   };
   if(verdict === 'Avoid'){
     return {
@@ -15971,25 +16202,16 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
   }
 
   if(verdict === 'Entry'){
-    const entryBlocked = !entryStructureStrong
-      || bounceState !== 'confirmed'
-      || cannotPriceRiskCleanly
-      || displayedPlanStatus !== 'valid';
+    const entryBlocked = !gateTrace.promotion_near_to_entry_allowed;
     if(entryBlocked){
-      const nearEntryEligible = nearEntryStructure
-        && !weakeningStructure
-        && !bounceAbsent
-        && (bounceImproving || bounceState === 'confirmed')
-        && ['valid','needs_adjustment'].includes(planStateKey)
-        && !!context.hasPlanValues
-        && !context.riskTooWide;
+      const nearEntryEligible = gateTrace.promotion_watch_to_near_allowed;
       if(nearEntryEligible){
         const capCode = 'entry_to_near_entry';
         return {
           verdict:'Near Entry',
           capApplied:true,
           capCode,
-          capReason:'Close to trigger, but confirmation is still developing.',
+          capReason:gateTrace.promotion_near_to_entry_reason || 'Stayed Near Entry: confirmation gates are not fully met.',
           capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
           blockerFlags
         };
@@ -15999,7 +16221,7 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
         verdict:'Watch',
         capApplied:true,
         capCode,
-        capReason:'Trade structure is not clear enough to price safely yet.',
+        capReason:gateTrace.promotion_watch_to_near_reason || 'Still forming - buyers have not taken control yet.',
         capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
         blockerFlags
       };
@@ -16008,57 +16230,13 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
   }
 
   if(verdict === 'Near Entry'){
-    if(weakeningStructure){
+    if(!gateTrace.promotion_watch_to_near_allowed){
       const capCode = 'weakening_structure';
       return {
         verdict:'Watch',
         capApplied:true,
         capCode,
-        capReason:'Structure still weakening.',
-        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
-        blockerFlags
-      };
-    }
-    if(bounceAbsent){
-      const capCode = 'buyers_not_in_control';
-      return {
-        verdict:'Watch',
-        capApplied:true,
-        capCode,
-        capReason:'Buyers have not taken control yet.',
-        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
-        blockerFlags
-      };
-    }
-    if(buyersNotInControl && !bounceImproving && bounceState !== 'confirmed'){
-      const capCode = 'buyers_not_in_control';
-      return {
-        verdict:'Watch',
-        capApplied:true,
-        capCode,
-        capReason:'Buyers have not taken control yet.',
-        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
-        blockerFlags
-      };
-    }
-    if(!nearEntryStructure){
-      const capCode = 'structure_not_ready';
-      return {
-        verdict:'Watch',
-        capApplied:true,
-        capCode,
-        capReason:'Structure is not clean enough yet.',
-        capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
-        blockerFlags
-      };
-    }
-    if(tradeStructureUnclear || cannotPriceRiskCleanly){
-      const capCode = 'risk_not_priceable';
-      return {
-        verdict:'Watch',
-        capApplied:true,
-        capCode,
-        capReason:'Trade structure is not clear enough to price safely yet.',
+        capReason:gateTrace.promotion_watch_to_near_reason || 'Still forming - buyers have not taken control yet.',
         capSeverity:capSeverityFromEvaluation(capCode, blockerFlags),
         blockerFlags
       };
@@ -16115,7 +16293,7 @@ function resolveFinalStateContract(record, options = {}){
   const capitalHeavy = executionCapitalHeavy(displayedPlan);
   const weakVolume = volumeState === 'weak';
   const weakControl = !!(qualityAdjustments.lowControlSetup || qualityAdjustments.tooWideForQualityPullback);
-  const bounceUnconfirmed = ['none','unconfirmed','attempt','early'].includes(bounceState);
+  const bounceUnconfirmed = ['none','unconfirmed'].includes(bounceState);
   const nearReadyStructure = ['strong','intact','developing_clean'].includes(structureState);
   const hardStructureBroken = !!(
     deadCheck.dead
@@ -16129,6 +16307,22 @@ function resolveFinalStateContract(record, options = {}){
     && effectivePlan.entry != null
     && effectivePlan.stop != null
     && effectivePlan.firstTarget != null
+  );
+  const planEntry = numericOrNull(effectivePlan && effectivePlan.entry);
+  const planStop = numericOrNull(effectivePlan && effectivePlan.stop);
+  const planTarget = numericOrNull(effectivePlan && effectivePlan.firstTarget);
+  const hasPriceablePlanValues = !!(
+    Number.isFinite(planEntry)
+    && Number.isFinite(planStop)
+    && Number.isFinite(planTarget)
+    && planEntry > planStop
+    && planTarget > planEntry
+  );
+  const hardBlockers = !!(hardStructureBroken || avoidSubtype === 'terminal');
+  const tradeStructureClearEnough = !!(
+    !hardBlockers
+    && !weakControl
+    && ['strong','intact','developing_clean'].includes(structureState)
   );
 
   let planStateKey = 'valid';
@@ -16145,9 +16339,15 @@ function resolveFinalStateContract(record, options = {}){
     displayedPlanStatus:displayedPlan.status,
     hasPlanValues,
     riskTooWide,
-    weakControl
+    weakControl,
+    hardBlockers,
+    tradeStructureClearEnough,
+    hasPriceablePlanValues
   });
   const finalVerdict = verdictCap.verdict;
+  const promotionTrace = verdictCap.blockerFlags && typeof verdictCap.blockerFlags === 'object'
+    ? verdictCap.blockerFlags
+    : {};
   const rrResolution = options.rrResolution || {
     rr_label:planStateKey !== 'valid' ? 'Invalid plan' : 'Low confidence',
     rawResolverVerdict:finalVerdict,
@@ -16166,9 +16366,9 @@ function resolveFinalStateContract(record, options = {}){
   let structuralStateKey = 'developing';
   if(hardStructureBroken){
     structuralStateKey = 'dead';
-  }else if(finalVerdict === 'Entry' && nearReadyStructure && !bounceUnconfirmed && !weakVolume && !marketWeak && !weakControl && planStateKey === 'valid'){
+  }else if(finalVerdict === 'Entry' && promotionTrace.promotion_near_to_entry_allowed){
     structuralStateKey = 'entry';
-  }else if(finalVerdict === 'Near Entry' && nearReadyStructure && !bounceUnconfirmed && !weakVolume){
+  }else if(finalVerdict === 'Near Entry' && promotionTrace.promotion_watch_to_near_allowed){
     structuralStateKey = 'near_entry';
   }
 
@@ -16203,16 +16403,13 @@ function resolveFinalStateContract(record, options = {}){
       : (({
         missing:'Plan not defined',
         invalid:'Invalid plan',
-        needs_adjustment:'Plan needs adjustment',
+        needs_adjustment:'Bounce is too weak to price cleanly.',
         unrealistic_rr:'R:R is not realistic'
       })[planStateKey] || 'Plan needs adjustment');
     addReason(blockerReason);
   }else if(
     finalVerdict === 'Entry'
-    && !bounceUnconfirmed
-    && !weakVolume
-    && !marketWeak
-    && !weakControl
+    && promotionTrace.promotion_near_to_entry_allowed
   ){
     actionStateKey = 'ready_to_act';
     actionLabel = 'Ready to act';
@@ -16225,7 +16422,10 @@ function resolveFinalStateContract(record, options = {}){
     actionTone = 'warning';
     if(bounceUnconfirmed){
       blockerCode = 'bounce_not_confirmed';
-      blockerReason = 'Needs stronger bounce confirmation';
+      blockerReason = 'Still forming - buyers have not taken control yet.';
+    }else if(structureState === 'weakening'){
+      blockerCode = 'weakening_structure';
+      blockerReason = 'Trend is weakening - no reliable stop level yet.';
     }else if(weakVolume){
       blockerCode = 'weak_volume';
       blockerReason = 'Needs stronger volume';
@@ -16237,10 +16437,10 @@ function resolveFinalStateContract(record, options = {}){
       blockerReason = 'Structure needs tighter control';
     }else if(finalVerdict === 'Near Entry'){
       blockerCode = 'near_trigger';
-      blockerReason = 'Close to trigger';
+      blockerReason = 'Stabilising near support. Buyers are starting to respond.';
     }else{
       blockerCode = 'early_confirmation';
-      blockerReason = 'Needs better confirmation';
+      blockerReason = 'Still forming - buyers have not taken control yet.';
     }
     addReason(blockerReason);
   }
@@ -16275,7 +16475,7 @@ function resolveFinalStateContract(record, options = {}){
       ? '🟡 Hold for entry conditions'
       : (actionStateKey === 'ready_to_act'
         ? '\uD83D\uDE80 Entry'
-        : (structuralStateKey === 'near_entry' ? '\uD83C\uDFAF Near Entry' : '\uD83C\uDF31 Developing')));
+        : (structuralStateKey === 'near_entry' ? '\uD83C\uDFAF Near Entry' : '\uD83E\uDDD0 Monitor')));
 
   const tradeabilityVerdict = structuralStateKey === 'dead'
     ? 'Avoid'
@@ -16296,6 +16496,10 @@ function resolveFinalStateContract(record, options = {}){
     capCode:verdictCap.capCode || '',
     capSeverity:verdictCap.capSeverity || '',
     capBlockers:verdictCap.blockerFlags || {},
+    promotion_watch_to_near_allowed:!!promotionTrace.promotion_watch_to_near_allowed,
+    promotion_near_to_entry_allowed:!!promotionTrace.promotion_near_to_entry_allowed,
+    promotion_watch_to_near_reason:String(promotionTrace.promotion_watch_to_near_reason || ''),
+    promotion_near_to_entry_reason:String(promotionTrace.promotion_near_to_entry_reason || ''),
     rawResolverVerdict:rrResolution.rawResolverVerdict || rrResolution.status || finalVerdict,
     finalDisplayState:structuralLabel,
     primaryState:structuralStateKey,
@@ -16551,6 +16755,10 @@ function summarizeVerdictCapUsage(records = allTickerRecords()){
     const planState = String(blockers.planStateKey || resolved.planStateKey || '').toLowerCase();
     const pullback = String(blockers.pullbackState || derivedStates.pullbackZone || '').toLowerCase();
     const stabilisation = String(blockers.stabilisationState || derivedStates.stabilisationState || '').toLowerCase();
+    const promotionWatchToNearAllowed = blockers.promotion_watch_to_near_allowed === true;
+    const promotionNearToEntryAllowed = blockers.promotion_near_to_entry_allowed === true;
+    const promotionWatchToNearReason = String(blockers.promotion_watch_to_near_reason || resolved.promotion_watch_to_near_reason || '').trim();
+    const promotionNearToEntryReason = String(blockers.promotion_near_to_entry_reason || resolved.promotion_near_to_entry_reason || '').trim();
 
     if(!['Entry','Near Entry'].includes(requested)) return;
     summary.requestedEntryOrNearEntry += 1;
@@ -16594,7 +16802,11 @@ function summarizeVerdictCapUsage(records = allTickerRecords()){
         bounce,
         plan_state:planState,
         pullback,
-        stabilisation
+        stabilisation,
+        promotion_watch_to_near_allowed:promotionWatchToNearAllowed,
+        promotion_near_to_entry_allowed:promotionNearToEntryAllowed,
+        promotion_watch_to_near_reason:promotionWatchToNearReason || '(none)',
+        promotion_near_to_entry_reason:promotionNearToEntryReason || '(none)'
       });
     }
   });
@@ -16628,6 +16840,7 @@ function runVerdictCapAudit(options = {}){
       derivedStates,
       displayedPlan
     });
+    const blockers = resolved.capBlockers && typeof resolved.capBlockers === 'object' ? resolved.capBlockers : {};
     return {
       ticker:item.ticker || '',
       lastScannedAt:String(item.scan && item.scan.lastScannedAt || ''),
@@ -16635,7 +16848,34 @@ function runVerdictCapAudit(options = {}){
       legacyScannerVerdict:String(item.scan && item.scan.verdict || ''),
       resolvedScannerVerdict:String(item.scan && item.scan.resolvedVerdict || ''),
       requestedVerdictBeforeCap:resolved.requestedVerdictBeforeCap || resolved.finalVerdict || '',
-      cappedVerdictAfterCap:resolved.cappedVerdictAfterCap || resolved.finalVerdict || ''
+      cappedVerdictAfterCap:resolved.cappedVerdictAfterCap || resolved.finalVerdict || '',
+      promotion_watch_to_near_allowed:!!blockers.promotion_watch_to_near_allowed,
+      promotion_near_to_entry_allowed:!!blockers.promotion_near_to_entry_allowed,
+      promotion_watch_to_near_reason:String(blockers.promotion_watch_to_near_reason || resolved.promotion_watch_to_near_reason || ''),
+      promotion_near_to_entry_reason:String(blockers.promotion_near_to_entry_reason || resolved.promotion_near_to_entry_reason || ''),
+      gate_structure_ok_for_near:!!blockers.gate_structure_ok_for_near,
+      gate_pullback_zone_ok_for_near:!!blockers.gate_pullback_zone_ok_for_near,
+      gate_stabilisation_ok_for_near:!!blockers.gate_stabilisation_ok_for_near,
+      gate_bounce_ok_for_near:!!blockers.gate_bounce_ok_for_near,
+      gate_plan_ok_for_near:!!blockers.gate_plan_ok_for_near,
+      gate_risk_width_ok_for_near:!!blockers.gate_risk_width_ok_for_near,
+      gate_hard_blockers_clear_for_near:!!blockers.gate_hard_blockers_clear_for_near,
+      gate_not_weakening_for_near:!!blockers.gate_not_weakening_for_near,
+      gate_trade_structure_clear_enough:!!blockers.gate_trade_structure_clear_enough,
+      gate_structure_ok_for_entry:!!blockers.gate_structure_ok_for_entry,
+      gate_bounce_confirmed_for_entry:!!blockers.gate_bounce_confirmed_for_entry,
+      gate_stabilisation_clear_for_entry:!!blockers.gate_stabilisation_clear_for_entry,
+      gate_plan_valid_for_entry:!!blockers.gate_plan_valid_for_entry,
+      gate_prices_all_defined_for_entry:!!blockers.gate_prices_all_defined_for_entry,
+      gate_blockers_clear_for_entry:!!blockers.gate_blockers_clear_for_entry,
+      audit_structure_state:String(blockers.audit_structure_state || derivedStates.structureState || ''),
+      audit_pullback_zone:String(blockers.audit_pullback_zone || derivedStates.pullbackZone || ''),
+      audit_stabilisation_state:String(blockers.audit_stabilisation_state || derivedStates.stabilisationState || ''),
+      audit_bounce_state:String(blockers.audit_bounce_state || derivedStates.bounceState || ''),
+      audit_plan_state:String(blockers.audit_plan_state || resolved.planStateKey || ''),
+      audit_risk_too_wide:!!blockers.audit_risk_too_wide,
+      audit_hard_blockers:!!blockers.audit_hard_blockers,
+      audit_trade_structure_clear_enough:!!blockers.audit_trade_structure_clear_enough
     };
   });
   console.groupCollapsed(`[VerdictCapAuditTrace] ${source} | records=${finalRecordTickers.length}`);

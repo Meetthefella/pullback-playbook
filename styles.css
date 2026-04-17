@@ -51,6 +51,39 @@ body{
 .grid{grid-template-columns:1fr 1fr}
 .contextstrip,.contextmain{display:grid;gap:12px}
 .contexttitle p{margin-bottom:0}
+.live-process-banner{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 10px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);
+  color:var(--text-secondary);
+  font-size:.84rem;
+}
+.live-process-banner__label{
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  color:var(--text-muted);
+}
+.live-process-banner[data-live-process="running_scan"],
+.live-process-banner[data-live-process="refreshing_watchlist"]{
+  border-color:rgba(251,191,36,.35);
+  background:rgba(251,191,36,.12);
+  color:#ffe3ae;
+}
+.live-process-banner[data-live-process="scan_complete"]{
+  border-color:rgba(74,222,128,.35);
+  background:rgba(74,222,128,.12);
+  color:#c8ffea;
+}
+.live-process-banner[data-live-process="error"]{
+  border-color:rgba(248,113,113,.35);
+  background:rgba(248,113,113,.12);
+  color:#ffd1d1;
+}
 .control-focus-rail{
   display:flex;
   gap:8px;
