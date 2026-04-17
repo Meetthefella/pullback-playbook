@@ -52,11 +52,11 @@ body{
 .contextstrip,.contextmain{display:grid;gap:12px}
 .contexttitle p{margin-bottom:0}
 .live-process-banner{
-  display:flex;
+  display:inline-flex;
   align-items:center;
   gap:8px;
   padding:8px 10px;
-  border-radius:10px;
+  border-radius:999px;
   border:1px solid rgba(251,191,36,.45);
   background:rgba(28,32,48,.94);
   color:#ffb347 !important;
@@ -64,20 +64,30 @@ body{
   font-weight:600;
   position:fixed;
   top:max(8px, env(safe-area-inset-top));
-  left:50%;
-  transform:translateX(-50%);
-  width:min(calc(100vw - 18px), 1080px);
+  right:10px;
+  left:auto;
+  transform:translateY(0);
+  width:auto;
+  max-width:min(calc(100vw - 18px), 760px);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  box-shadow:0 10px 24px rgba(5,11,24,.35);
   z-index:2200;
   pointer-events:none;
+  transition:opacity .24s ease, transform .24s ease, max-width .24s ease, padding .24s ease, border-width .24s ease;
 }
 .live-process-banner__label{
   font-size:11px;
   text-transform:uppercase;
   letter-spacing:.04em;
   color:#ffc16a !important;
+  flex:0 0 auto;
 }
 #liveProcessStatusText{
   color:#ffb347 !important;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .live-process-banner[data-live-process="running_scan"],
 .live-process-banner[data-live-process="refreshing_watchlist"]{
@@ -91,6 +101,15 @@ body{
 .live-process-banner[data-live-process="error"]{
   border-color:rgba(248,113,113,.35);
   background:rgba(248,113,113,.12);
+}
+.live-process-banner.is-idle-hidden{
+  opacity:0;
+  transform:translateY(-8px);
+  max-width:0;
+  padding-left:0;
+  padding-right:0;
+  border-width:0;
+  gap:0;
 }
 .control-focus-rail{
   display:flex;

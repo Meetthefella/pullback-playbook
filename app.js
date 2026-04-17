@@ -333,6 +333,7 @@ const DIARY_SETUP_TAG_OPTIONS = ['20MA bounce', '50MA reclaim', 'first pullback'
 const DIARY_MISTAKE_TAG_OPTIONS = ['early entry', 'chased breakout', 'ignored weak market', 'stop too tight', 'stop moved', 'oversize position', 'took subpar setup', 'sold too early', 'held too long'];
 const DIARY_LESSON_TAG_OPTIONS = ['wait for bounce confirmation', '50MA setups need extra patience', 'weak tape needs stricter filtering', 'best setups come from strong RS names', 'avoid loose structure under 20MA'];
 const LIVE_PROCESS_COMPLETE_TO_IDLE_MS = 2200;
+const LIVE_PROCESS_IDLE_FADE_MS = 1500;
 const ALERT_PRIORITY = {
   closed:1,
   entered:2,
@@ -344,6 +345,7 @@ const ALERT_PRIORITY = {
   expired:8
 };
 let liveProcessIdleTimer = null;
+let liveProcessHideTimer = null;
 const APP_FETCH_TIMEOUT_MS = 12000;
 const BACKEND_REVIEW_POLL_MS = 10 * 60 * 1000;
 const MARKET_CACHE_SCHEMA_VERSION = 3;
@@ -4874,9 +4876,25 @@ function renderLiveProcessStatusBanner(){
     : {state:'idle', message:'Idle.'};
   if(banner){
     banner.setAttribute('data-live-process', String(status.state || 'idle'));
+    if(status.state !== 'idle'){
+      banner.classList.remove('is-idle-hidden');
+    }
   }
   if(text){
     text.textContent = String(status.message || 'Idle.');
+  }
+  if(
+    banner
+    && status.state === 'idle'
+    && !banner.classList.contains('is-idle-hidden')
+    && !liveProcessHideTimer
+  ){
+    liveProcessHideTimer = setTimeout(() => {
+      liveProcessHideTimer = null;
+      if(!uiState.liveProcessStatus || uiState.liveProcessStatus.state !== 'idle') return;
+      const currentBanner = $('liveProcessStatusBanner');
+      if(currentBanner) currentBanner.classList.add('is-idle-hidden');
+    }, LIVE_PROCESS_IDLE_FADE_MS);
   }
 }
 
@@ -4892,6 +4910,14 @@ function setLiveProcessStatus(stateKey, message, options = {}){
     clearTimeout(liveProcessIdleTimer);
     liveProcessIdleTimer = null;
   }
+  if(liveProcessHideTimer){
+    clearTimeout(liveProcessHideTimer);
+    liveProcessHideTimer = null;
+  }
+  const banner = $('liveProcessStatusBanner');
+  if(banner){
+    banner.classList.remove('is-idle-hidden');
+  }
   renderLiveProcessStatusBanner();
   if(Number.isFinite(options.autoIdleMs) && options.autoIdleMs > 0){
     liveProcessIdleTimer = setTimeout(() => {
@@ -4900,6 +4926,31 @@ function setLiveProcessStatus(stateKey, message, options = {}){
       }
     }, Math.floor(options.autoIdleMs));
   }
+  if(nextState === 'idle' && !liveProcessHideTimer){
+    liveProcessHideTimer = setTimeout(() => {
+      liveProcessHideTimer = null;
+      if(!uiState.liveProcessStatus || uiState.liveProcessStatus.state !== 'idle') return;
+      const currentBanner = $('liveProcessStatusBanner');
+      if(currentBanner) currentBanner.classList.add('is-idle-hidden');
+    }, LIVE_PROCESS_IDLE_FADE_MS);
+  }
+}
+
+function bindLiveProcessButtonStatusHooks(){
+  document.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if(!button || button.disabled) return;
+    const currentState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+      ? String(uiState.liveProcessStatus.state || '')
+      : '';
+    if(['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentState)) return;
+    const rawLabel = String(button.getAttribute('data-live-status-label') || button.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if(!rawLabel) return;
+    const label = rawLabel.length > 72 ? `${rawLabel.slice(0, 69)}...` : rawLabel;
+    setLiveProcessStatus('action', `${label}...`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+  });
 }
 
 function pendingWatchlistRefreshTickers(){
@@ -15880,6 +15931,7 @@ on('ocrReviewInput', 'input', syncOcrReviewVisibility);
   }
 }
 bindRiskQuickControls();
+bindLiveProcessButtonStatusHooks();
 on('tickerInput', 'input', () => {
   syncUniverseFromInputs();
   if(!uniqueTickers(state.tickers || []).length){
