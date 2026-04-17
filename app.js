@@ -9751,6 +9751,15 @@ function holdTargetDescriptor(target){
   return `${tag}${id}${cls}`;
 }
 
+function shouldIgnoreHoldStartTarget(target, helper, cardMode){
+  if(!target || !target.closest) return false;
+  const interactiveSelector = 'button,a,input,textarea,select,label,[contenteditable="true"],[role="button"],.entry-conditions-panel,[data-hold-entry-helper]';
+  if(target.closest(interactiveSelector)) return true;
+  if(cardMode && target.closest('.watchlist-actions')) return true;
+  if(cardMode && helper && target.closest('[data-entry-hold-helper]') !== helper) return true;
+  return false;
+}
+
 function bindEntryConditionsHoldInteractions(root){
   const scopeRoot = root && typeof root.querySelectorAll === 'function' ? root : document;
   if(!entryConditionsOutsideCloseBound){
@@ -9819,10 +9828,9 @@ function bindEntryConditionsHoldInteractions(root){
       state.startY = 0;
       helper.classList.remove('hold-armed');
     };
-    const ignoreSelector = 'button,a,input,textarea,select,summary,details,.compact-details,.watchlist-card__details,.entry-conditions-panel';
     trigger.addEventListener('pointerdown', event => {
       if(event.pointerType === 'mouse' && event.button !== 0) return;
-      if(cardMode && event.target && event.target.closest && event.target.closest(ignoreSelector)){
+      if(cardMode && shouldIgnoreHoldStartTarget(event.target, helper, cardMode)){
         if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_start.ignored_interactive_target target=${holdTargetDescriptor(event.target)}`);
         return;
       }
@@ -9865,7 +9873,7 @@ function bindEntryConditionsHoldInteractions(root){
     trigger.addEventListener('pointerleave', closeOnRelease);
     if(typeof window !== 'undefined' && !('PointerEvent' in window)){
       trigger.addEventListener('touchstart', event => {
-        if(cardMode && event.target && event.target.closest && event.target.closest(ignoreSelector)){
+        if(cardMode && shouldIgnoreHoldStartTarget(event.target, helper, cardMode)){
           if(holdTicker) setWatchlistHoldTrace(holdTicker, `hold_start.touch_ignored_interactive_target target=${holdTargetDescriptor(event.target)}`);
           return;
         }
