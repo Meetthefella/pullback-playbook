@@ -23,11 +23,6 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="card resetcard">
-    <div class="actions" style="margin-top:0">
-      <button class="danger" id="resetAllBtn">Reset All</button>
-    </div>
-  </div>
   <div class="card contextstrip">
     <div class="contextmain">
       <div class="contexttitle">
@@ -85,10 +80,6 @@
         </div>
         <div class="market-session-detail" id="marketSessionDetail">Next open 9:30 AM ET</div>
       </div>
-      <div id="liveProcessStatusBanner" class="live-process-banner" data-live-process="idle" aria-live="polite">
-        <span class="live-process-banner__label">Status</span>
-        <span id="liveProcessStatusText">Idle.</span>
-      </div>
       <select id="marketStatus" hidden>
         <option>S&amp;P above 50 MA</option>
         <option>S&amp;P near 50 MA</option>
@@ -140,6 +131,10 @@
       <a class="tablink tablink--secondary" href="#diarySection">Diary</a>
       <a class="tablink tablink--secondary" href="#alertsSection">Alerts</a>
       <a class="tablink tablink--secondary" href="#advancedSection">Advanced</a>
+    </div>
+    <div id="liveProcessStatusBanner" class="live-process-banner" data-live-process="idle" aria-live="polite">
+      <span class="live-process-banner__label">Status</span>
+      <span id="liveProcessStatusText">Idle.</span>
     </div>
   </div>
 
@@ -315,6 +310,7 @@
           <div class="actions">
             <button class="secondary" id="refreshViewBtn" type="button">Refresh View</button>
             <button class="secondary" id="clearSessionBtn" type="button">Clear Session State</button>
+            <button class="danger" id="resetAllBtn" type="button">Reset All</button>
             <button class="danger" id="hardResetAppBtn" type="button">Hard Reset App Data</button>
           </div>
           <div id="resetStatus" class="subtle">Refresh rerenders only. Session clear drops shortlist/review working state. Hard reset also clears scanner caches and reloads.</div>
