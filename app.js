@@ -13600,6 +13600,7 @@ function loadTickerIntoReview(ticker, options = {}){
   setScannerCardClickTrace(symbol, 'loadTickerIntoReview.enter', `includeInScannerUniverse=${options.includeInScannerUniverse === true} recompute=${options.recompute === true}`);
   const record = upsertTickerRecord(symbol);
   const inWatchlist = !!(record && record.watchlist && record.watchlist.inWatchlist);
+  const sourceContext = String(options.sourceContext || '');
   const skipAutoScroll = options.skipAutoScroll === true;
   uiState.activeReviewAddsToScannerUniverse = options.includeInScannerUniverse !== false;
   uiState.activeReviewVerdictOverride = options.useSourceVerdict !== false
@@ -13616,7 +13617,7 @@ function loadTickerIntoReview(ticker, options = {}){
     renderScannerResults();
     setScannerCardClickTrace(symbol, 'loadTickerIntoReview.before_loadCard', `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_rendered`);
     loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll});
-    if(inWatchlist){
+    if(inWatchlist && sourceContext === 'scanner'){
       setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
       setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
     }
@@ -13632,7 +13633,8 @@ function openRankedResultInReview(ticker, options = {}){
   loadTickerIntoReview(ticker, {
     includeInScannerUniverse:options.includeInScannerUniverse === true,
     recompute:options.recompute === true,
-    sourceVerdict:options.sourceVerdict || ''
+    sourceVerdict:options.sourceVerdict || '',
+    sourceContext:'scanner'
   });
 }
 
@@ -13641,7 +13643,7 @@ function reviewWatchlistTicker(ticker){
   if(!symbol) return;
   const record = getTickerRecord(symbol) || upsertTickerRecord(symbol);
   const sourceVerdict = reviewVerdictOverrideFromView(projectTickerForCard(record));
-  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false, sourceVerdict, skipAutoScroll:true});
+  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false, sourceVerdict, skipAutoScroll:true, sourceContext:'watchlist'});
   setStatus('scannerSelectionStatus', `<span class="ok">Loaded saved ${escapeHtml(symbol)} review state.</span>`);
 }
 
@@ -15961,6 +15963,12 @@ function attemptScanCardActivation(ticker, sourceVerdict){
     return false;
   }
   if(!allowScannerActivation(ticker)) return false;
+  const record = getTickerRecord(ticker) || upsertTickerRecord(ticker);
+  if(record && record.watchlist && record.watchlist.inWatchlist){
+    setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+    setScannerCardClickTrace(ticker, 'results.click.watchlist_blocked', 'item already in watchlist');
+    return false;
+  }
   openRankedResultInReview(ticker, {sourceVerdict});
   return true;
 }
