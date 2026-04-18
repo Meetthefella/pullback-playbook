@@ -902,7 +902,6 @@ async function pullTrackedRecordsFromBackend(options = {}){
         renderWatchlist();
         renderFocusQueue();
         renderReviewWorkspace();
-        renderWorkflowAlerts();
       }
     }
     updateBackendTrackedVersions(trackedState.records);
@@ -939,15 +938,6 @@ async function fetchPushConfig(){
   return pushConfigPromise;
 }
 
-function pushPermissionSummary(){
-  if(!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)){
-    return 'Alerts unavailable on this browser';
-  }
-  if(Notification.permission === 'granted') return 'Entry alerts enabled';
-  if(Notification.permission === 'denied') return 'Alerts blocked in browser settings';
-  return 'Entry alerts off';
-}
-
 async function ensurePushSubscription(registration, options = {}){
   if(!registration || !('PushManager' in window) || !('Notification' in window)) return;
   let config;
@@ -980,22 +970,6 @@ async function ensurePushSubscription(registration, options = {}){
       body:JSON.stringify({subscription})
     });
   }catch(error){}
-}
-
-async function enableEntryAlerts(){
-  if(!('serviceWorker' in navigator) || !('Notification' in window)){
-    setStatus('apiStatus', '<span class="warntext">Entry alerts are not available in this browser.</span>');
-    renderWorkflowAlerts();
-    return false;
-  }
-  try{
-    const registration = await navigator.serviceWorker.ready;
-    await ensurePushSubscription(registration, {allowPermissionRequest:true});
-  }catch(error){
-    setStatus('apiStatus', '<span class="warntext">Could not enable entry alerts right now. Please retry.</span>');
-  }
-  renderWorkflowAlerts();
-  return Notification.permission === 'granted';
 }
 
 function bootstrapBackgroundMonitoring(){
@@ -2755,7 +2729,6 @@ function loadState(){
   const startupRefreshTickers = watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker).filter(Boolean);
   setWatchlistLiveRefreshPending(startupRefreshTickers, true);
   renderWatchlist();
-  renderWorkflowAlerts();
   renderTradeDiary();
   renderPatternAnalytics();
   renderPlannerPlanSummary();
@@ -4025,7 +3998,6 @@ function runWatchlistLifecycleEvaluation(options = {}){
     if(changed && options.persist !== false) commitTickerState();
     if(options.render !== false && (changed || options.forceRender === true)){
       renderWatchlist();
-      renderWorkflowAlerts();
       renderFocusQueue();
       if(activeReviewTicker()) renderReviewLifecycleSummary(activeReviewTicker());
     }
@@ -4455,7 +4427,6 @@ function renderWatchlist(){
     box.innerHTML = showExpired
       ? '<div class="summary">No watchlist entries match this filter right now.</div>'
       : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
-    renderWorkflowAlerts();
     return;
   }
   box.innerHTML = '';
@@ -4629,7 +4600,6 @@ function renderWatchlist(){
     });
     box.appendChild(section);
   });
-  renderWorkflowAlerts();
   return;
   records.forEach(record => {
     const entry = tickerRecordToWatchlistEntry(record);
@@ -4653,7 +4623,6 @@ function renderWatchlist(){
     div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
     box.appendChild(div);
   });
-  renderWorkflowAlerts();
 }
 
 function reviewHeaderContextChip(record, warningState){
@@ -5427,196 +5396,6 @@ function renderAnalyticRows(items, renderer){
   return `<div class="analyticrows">${items.map(renderer).join('')}</div>`;
 }
 
-// ============================================================================
-// Alerts / attention
-// ============================================================================
-function isActionableAlertStage(stage){
-  return ['planned','entered'].includes(String(stage || ''));
-}
-
-function alertIdForRecord(record, type, createdAt, extra = ''){
-  return [normalizeTicker(record.ticker), type, String(createdAt || ''), String(extra || '')].join('|');
-}
-
-function deriveWorkflowAlerts(){
-  const alerts = [];
-  const hostileMarket = /below 50 ma/i.test(String(state.marketStatus || ''));
-  allTickerRecords().forEach(record => {
-    const item = normalizeTickerRecord(record);
-    const stage = String(item.lifecycle.stage || '');
-    const status = String(item.lifecycle.status || '');
-    const changedAt = String(item.lifecycle.stageUpdatedAt || item.meta.updatedAt || '');
-    const expiresAt = String(item.lifecycle.expiresAt || '');
-    const remainingTradingDays = expiresAt ? countTradingDaysBetween(todayIsoDate(), expiresAt) : null;
-    const hasValidPlan = !!item.plan.hasValidPlan;
-    const needsReview = ['watchlist','shortlisted','reviewed'].includes(stage) && !hasValidPlan && status !== 'closed' && stage !== 'expired';
-
-    if(stage === 'planned' && hasValidPlan){
-      alerts.push({
-        id:alertIdForRecord(item, 'became_ready', changedAt, stage),
-        ticker:item.ticker,
-        alertType:'became_ready',
-        severity:'action',
-        createdAt:changedAt,
-        message:'Valid plan saved. This setup is ready for focused review.',
-        stage,
-        status
-      });
-    }
-
-    if(needsReview){
-      alerts.push({
-        id:alertIdForRecord(item, 'needs_review', changedAt, stage),
-        ticker:item.ticker,
-        alertType:'needs_review',
-        severity:stage === 'reviewed' ? 'warning' : 'info',
-        createdAt:changedAt,
-        message:stage === 'reviewed'
-          ? 'Reviewed setup still needs a valid plan or decision.'
-          : 'This name is still active in the workflow and needs review.',
-        stage,
-        status
-      });
-    }
-
-    if(stage === 'planned' && hasValidPlan && Number.isFinite(remainingTradingDays) && remainingTradingDays <= 1 && remainingTradingDays >= 0){
-      alerts.push({
-        id:alertIdForRecord(item, 'plan_near_expiry', expiresAt, remainingTradingDays),
-        ticker:item.ticker,
-        alertType:'plan_near_expiry',
-        severity:'warning',
-        createdAt:expiresAt || changedAt,
-        message:remainingTradingDays === 0 ? 'Planned setup expires today.' : 'Planned setup expires within 1 trading day.',
-        stage,
-        status
-      });
-    }
-
-    const lifecycleStages = compressLifecycleStages(item);
-    if(item.watchlist.inWatchlist && ['shortlisted','reviewed','planned'].includes(stage) && lifecycleStages.includes('watchlist')){
-      alerts.push({
-        id:alertIdForRecord(item, 'watchlist_progressed', changedAt, stage),
-        ticker:item.ticker,
-        alertType:'watchlist_progressed',
-        severity:stage === 'planned' ? 'action' : 'info',
-        createdAt:changedAt,
-        message:`Watchlist setup progressed to ${stage}.`,
-        stage,
-        status
-      });
-    }
-
-    if(stage === 'expired'){
-      alerts.push({
-        id:alertIdForRecord(item, 'expired', changedAt, stage),
-        ticker:item.ticker,
-        alertType:'expired',
-        severity:'warning',
-        createdAt:changedAt,
-        message:'This setup expired and left the active workflow.',
-        stage,
-        status
-      });
-    }
-
-    if(stage === 'entered'){
-      alerts.push({
-        id:alertIdForRecord(item, 'entered', changedAt, stage),
-        ticker:item.ticker,
-        alertType:'entered',
-        severity:'action',
-        createdAt:changedAt,
-        message:'Trade has actual execution details recorded.',
-        stage,
-        status
-      });
-    }
-
-    if(['exited','cancelled'].includes(stage) || (status === 'closed' && !isActionableAlertStage(stage))){
-      alerts.push({
-        id:alertIdForRecord(item, 'closed', changedAt, stage),
-        ticker:item.ticker,
-        alertType:stage === 'cancelled' ? 'closed' : 'closed',
-        severity:'info',
-        createdAt:changedAt,
-        message:stage === 'cancelled' ? 'Planned trade was cancelled.' : 'Trade is now closed.',
-        stage,
-        status
-      });
-    }
-
-    const resolvedDisplayStage = normalizeAnalysisVerdict(displayStageForRecord(item));
-    if(hostileMarket && ['planned','reviewed'].includes(stage) && (resolvedDisplayStage === 'Entry' || resolvedDisplayStage === 'Near Entry')){
-      alerts.push({
-        id:alertIdForRecord(item, 'regime_warning', String(state.marketStatus), `${stage}-${resolvedDisplayStage}`),
-        ticker:item.ticker,
-        alertType:'regime_warning',
-        severity:'warning',
-        createdAt:changedAt || new Date().toISOString(),
-        message:'Market regime is hostile. Treat action-stage setups with extra caution.',
-        stage,
-        status
-      });
-    }
-  });
-  const dismissed = new Set(Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds : []);
-  return alerts
-    .filter(alert => !dismissed.has(alert.id))
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || a.ticker.localeCompare(b.ticker));
-}
-
-function isAlertNew(alert){
-  const lastSeen = String(state.lastAlertsSeenAt || '');
-  if(!lastSeen) return false;
-  return String(alert.createdAt || '') > lastSeen;
-}
-
-function markAlertsSeen(){
-  state.lastAlertsSeenAt = new Date().toISOString();
-  commitTickerState();
-  renderWorkflowAlerts();
-}
-
-function dismissAlert(alertId){
-  if(!alertId) return;
-  const set = new Set(Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds : []);
-  set.add(alertId);
-  state.dismissedAlertIds = [...set].slice(-200);
-  commitTickerState();
-  renderWorkflowAlerts();
-}
-
-function alertGroups(alerts){
-  return {
-    actionNow:alerts.filter(alert => ['became_ready','entered'].includes(alert.alertType)),
-    needsReview:alerts.filter(alert => ['needs_review','watchlist_progressed','regime_warning'].includes(alert.alertType)),
-    expiringSoon:alerts.filter(alert => ['plan_near_expiry','expired'].includes(alert.alertType)),
-    recent:alerts.filter(isAlertNew)
-  };
-}
-
-function renderAlertRows(items, allowDismiss = true){
-  if(!items.length) return '<div class="summary">Nothing here right now.</div>';
-  return `<div class="alertgroup">${items.map(alert => `<div class="alertcard"><div class="alerthead"><div><div class="alertmeta"><span class="badge severity-${escapeHtml(alert.severity)}">${escapeHtml(alert.alertType.replaceAll('_', ' '))}</span><strong>${escapeHtml(alert.ticker)}</strong><span class="badge ${escapeHtml(alert.stateClass || 'watch')}">${escapeHtml(alert.stateLabel || '🧐 Monitor')}</span>${isAlertNew(alert) ? '<span class="pill">New</span>' : ''}</div><div class="tiny">${escapeHtml(alert.message)}</div><div class="tiny">Stage ${escapeHtml(alert.stage || 'untracked')} | ${escapeHtml(alert.status || 'inactive')}${alert.createdAt ? ` | ${escapeHtml(formatLocalTimestamp(alert.createdAt) || alert.createdAt)}` : ''}</div></div><div class="actions" style="margin-top:0"><button class="secondary compactbutton" type="button" data-act="alert-review" data-ticker="${escapeHtml(alert.ticker)}">Open Review</button>${allowDismiss && alert.severity !== 'action' ? `<button class="ghost compactbutton" type="button" data-act="alert-dismiss" data-id="${escapeHtml(alert.id)}">Dismiss</button>` : ''}</div></div></div>`).join('')}</div>`;
-}
-
-function legacyRenderWorkflowAlertsPrePriority(){
-  const box = $('alertsList');
-  const badge = $('newAlertsCount');
-  if(!box) return;
-  const alerts = deriveWorkflowAlerts();
-  const groups = alertGroups(alerts);
-  const newCount = alerts.filter(isAlertNew).length;
-  if(badge) badge.textContent = `${newCount} new`;
-  box.innerHTML = `<div class="alertsection"><strong>Action now</strong>${renderAlertRows(groups.actionNow, false)}</div><div class="alertsection"><strong>Needs review</strong>${renderAlertRows(groups.needsReview)}</div><div class="alertsection"><strong>Expiring soon</strong>${renderAlertRows(groups.expiringSoon)}</div><div class="alertsection"><strong>Recently changed</strong>${renderAlertRows(groups.recent)}</div>`;
-  box.querySelectorAll('[data-act="alert-review"]').forEach(button => {
-    button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
-  });
-  box.querySelectorAll('[data-act="alert-dismiss"]').forEach(button => {
-    button.onclick = () => dismissAlert(button.getAttribute('data-id') || '');
-  });
-}
-
 function legacyRenderPatternAnalyticsPreLowSample(){
   const box = $('patternAnalytics');
   if(!box) return;
@@ -6353,80 +6132,6 @@ function syncResultsToggleLabel(){
   resultsToggleText.textContent = resultsToggle.open ? '- Hide Ranked Results' : '- Show Ranked Results';
 }
 
-function deriveWorkflowAlerts(){
-  const dismissed = new Set(Array.isArray(state.dismissedAlertIds) ? state.dismissedAlertIds : []);
-  return allTickerRecords()
-    .map(record => normalizeTickerRecord(record))
-    .filter(item => item.action.stage !== 'avoid')
-    .map(item => {
-      const stage = String(item.lifecycle.stage || '');
-      const status = String(item.lifecycle.status || '');
-      const createdAt = String(item.lifecycle.stageUpdatedAt || item.meta.updatedAt || new Date().toISOString());
-      const hostileMarket = item.setup.marketCaution ? ' Weak market conditions.' : '';
-      let alertType = item.action.stage;
-      let severity = 'info';
-      let message = 'Watchlist or review candidate.';
-      if(item.action.stage === 'action_now'){
-        alertType = 'action_now';
-        severity = 'action';
-        message = `Ready to act.${hostileMarket}`;
-      }else if(item.action.stage === 'near_entry'){
-        alertType = 'near_entry';
-        severity = 'warning';
-        message = `Near entry.${hostileMarket}`;
-      }else if(item.action.stage === 'needs_plan'){
-        alertType = 'needs_plan';
-        severity = 'info';
-        message = `Needs a valid trade plan.${hostileMarket}`;
-      }else{
-        alertType = 'watch';
-        severity = 'info';
-        message = `Worth watching.${hostileMarket}`;
-      }
-      const alertPresentation = resolveEmojiPresentation(item, {context:'alert'});
-      return {
-        id:alertIdForRecord(item, alertType, createdAt, item.action.stage),
-        ticker:item.ticker,
-        alertType,
-        severity,
-        createdAt,
-        message:message.trim(),
-        stateLabel:alertPresentation.primaryText,
-        stateModifiers:alertPresentation.modifiers,
-        stateClass:alertPresentation.badgeClass,
-        stage,
-        status
-      };
-    })
-    .filter(alert => !dismissed.has(alert.id))
-    .sort((a, b) => actionPriority(a.alertType) - actionPriority(b.alertType) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || a.ticker.localeCompare(b.ticker));
-}
-
-function renderWorkflowAlerts(){
-  const box = $('alertsList');
-  const badge = $('newAlertsCount');
-  if(!box) return;
-  const alerts = deriveWorkflowAlerts();
-  const groups = {
-    actionNow:alerts.filter(alert => alert.alertType === 'action_now'),
-    nearEntry:alerts.filter(alert => alert.alertType === 'near_entry'),
-    needsPlan:alerts.filter(alert => alert.alertType === 'needs_plan'),
-    watch:alerts.filter(alert => alert.alertType === 'watch')
-  };
-  const newCount = alerts.filter(isAlertNew).length;
-  if(badge) badge.textContent = `${newCount} new`;
-  box.innerHTML = `<div class="summary"><button class="secondary compactbutton" type="button" data-act="enable-alerts">Enable Entry Alerts</button> <span class="tiny">${escapeHtml(pushPermissionSummary())}</span></div><div class="alertsection"><strong>Action now</strong>${renderAlertRows(groups.actionNow, false)}</div><div class="alertsection"><strong>Near entry</strong>${renderAlertRows(groups.nearEntry)}</div><div class="alertsection"><strong>Needs plan</strong>${renderAlertRows(groups.needsPlan)}</div><div class="alertsection"><strong>Watch</strong>${renderAlertRows(groups.watch)}</div>`;
-  box.querySelectorAll('[data-act="enable-alerts"]').forEach(button => {
-    button.onclick = () => enableEntryAlerts();
-  });
-  box.querySelectorAll('[data-act="alert-review"]').forEach(button => {
-    button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '');
-  });
-  box.querySelectorAll('[data-act="alert-dismiss"]').forEach(button => {
-    button.onclick = () => dismissAlert(button.getAttribute('data-id') || '');
-  });
-}
-
 function renderPatternAnalytics(){
   const box = $('patternAnalytics');
   if(!box) return;
@@ -6809,7 +6514,6 @@ function removeCard(ticker){
   renderCards();
   renderScannerResults();
   renderFocusQueue();
-  renderWorkflowAlerts();
 }
 
 function scoreAndStatusFromChecks(checks){
@@ -14147,7 +13851,6 @@ function renderScannerResults(){
       return;
     }
     box.innerHTML = '<div class="summary"><strong>No scan results yet</strong><div class="tiny" style="margin-top:8px">Run a fresh scan or import tickers to generate new opportunities for review.</div></div>';
-    renderWorkflowAlerts();
     return;
   }
   const sections = scannerResultSectionsImpl(finalViews, scannerResultsSupportBridgeDeps());
@@ -14260,7 +13963,6 @@ function renderScannerResults(){
     box.appendChild(wrap);
   });
   updateScannerSelectionStatus();
-  renderWorkflowAlerts();
 }
 
 function contextualResultEmptyState(bucket){
@@ -15609,7 +15311,6 @@ function renderAppFromState(options = {}){
   renderFocusQueue();
   renderCards();
   renderWatchlist();
-  renderWorkflowAlerts();
   renderTradeDiary();
   renderPatternAnalytics();
   renderPlannerPlanSummary();
@@ -16041,7 +15742,6 @@ click('jumpToDiaryBtn', () => {
   const diarySection = $('diarySection');
   if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});
 });
-click('markAlertsSeenBtn', markAlertsSeen);
 click('exportDiaryBtn', exportTradeDiary);
 on('resultsToggle', 'toggle', syncResultsToggleLabel);
 click('saveReviewBtn', saveReview);
