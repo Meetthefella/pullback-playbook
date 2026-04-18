@@ -13352,6 +13352,8 @@ function statusRank(status){
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
+  uiState.reviewLoadToken = Number(uiState.reviewLoadToken || 0) + 1;
+  const reviewLoadToken = Number(uiState.reviewLoadToken || 0);
   setScannerCardClickTrace(symbol, 'loadTickerIntoReview.enter', `includeInScannerUniverse=${options.includeInScannerUniverse === true} recompute=${options.recompute === true}`);
   const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
     ? String(uiState.liveProcessStatus.state || '')
@@ -13366,6 +13368,10 @@ function loadTickerIntoReview(ticker, options = {}){
     setLiveProcessStatus('action', `Review pending: ${symbol}`);
   }
   const runReviewLoad = () => {
+    if(reviewLoadToken !== Number(uiState.reviewLoadToken || 0)){
+      setScannerCardClickTrace(symbol, 'loadTickerIntoReview.stale_run_skipped', `token=${reviewLoadToken}`);
+      return;
+    }
     const record = upsertTickerRecord(symbol);
     const inWatchlist = !!(record && record.watchlist && record.watchlist.inWatchlist);
     const sourceContext = String(options.sourceContext || '');
@@ -13385,8 +13391,15 @@ function loadTickerIntoReview(ticker, options = {}){
       renderScannerResults();
       setScannerCardClickTrace(symbol, 'loadTickerIntoReview.before_loadCard', `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_rendered`);
       const completeLoad = () => {
+        if(reviewLoadToken !== Number(uiState.reviewLoadToken || 0)){
+          setScannerCardClickTrace(symbol, 'loadTickerIntoReview.stale_complete_skipped', `token=${reviewLoadToken}`);
+          return;
+        }
         try{
-          loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll, preScrolled:skipAutoScroll !== true});
+          loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll, preScrolled:true});
+          if(skipAutoScroll !== true){
+            scheduleReviewScrollAfterLoad(symbol, 'loadTickerIntoReview.post');
+          }
           if(inWatchlist && sourceContext === 'scanner'){
             setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
             setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
@@ -13401,16 +13414,7 @@ function loadTickerIntoReview(ticker, options = {}){
           setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_render_error', error && error.message ? error.message : 'unknown_error');
         }
       };
-      if(skipAutoScroll !== true && typeof window !== 'undefined'){
-        scrollReviewSectionIntoView(symbol, 'loadTickerIntoReview.pre', {immediate:true});
-        if(typeof window.requestAnimationFrame === 'function'){
-          window.requestAnimationFrame(() => completeLoad());
-        }else{
-          setTimeout(() => completeLoad(), 0);
-        }
-      }else{
-        completeLoad();
-      }
+      completeLoad();
     }catch(error){
       if(allowReviewLoadingStatus){
         setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
@@ -13423,6 +13427,47 @@ function loadTickerIntoReview(ticker, options = {}){
     window.requestAnimationFrame(() => runReviewLoad());
   }else{
     runReviewLoad();
+  }
+}
+
+function reviewWorkspaceReadyForTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return false;
+  const box = $('reviewWorkspace');
+  if(!box || !box.childElementCount) return false;
+  const selected = normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
+  if(selected && selected !== symbol) return false;
+  return !!box.querySelector('#selectedTicker');
+}
+
+function scheduleReviewScrollAfterLoad(ticker, context = 'review_open'){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  uiState.reviewScrollToken = Number(uiState.reviewScrollToken || 0) + 1;
+  const token = Number(uiState.reviewScrollToken || 0);
+  let attempts = 0;
+  const maxAttempts = 6;
+  const run = () => {
+    if(token !== Number(uiState.reviewScrollToken || 0)) return;
+    attempts += 1;
+    if(reviewWorkspaceReadyForTicker(symbol)){
+      scrollReviewSectionIntoView(symbol, `${context}.ready`, {immediate:true});
+      return;
+    }
+    if(attempts >= maxAttempts){
+      scrollReviewSectionIntoView(symbol, `${context}.fallback`, {immediate:true});
+      return;
+    }
+    if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+      window.requestAnimationFrame(run);
+    }else{
+      setTimeout(run, 40);
+    }
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(run);
+  }else{
+    setTimeout(run, 0);
   }
 }
 
