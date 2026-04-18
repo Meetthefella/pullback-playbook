@@ -13598,6 +13598,13 @@ function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   setScannerCardClickTrace(symbol, 'loadTickerIntoReview.enter', `includeInScannerUniverse=${options.includeInScannerUniverse === true} recompute=${options.recompute === true}`);
+  const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+    ? String(uiState.liveProcessStatus.state || '')
+    : '';
+  const allowReviewLoadingStatus = !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
+  if(allowReviewLoadingStatus){
+    setLiveProcessStatus('action', `Loading review ${symbol}...`);
+  }
   const record = upsertTickerRecord(symbol);
   const inWatchlist = !!(record && record.watchlist && record.watchlist.inWatchlist);
   const sourceContext = String(options.sourceContext || '');
@@ -13620,9 +13627,14 @@ function loadTickerIntoReview(ticker, options = {}){
     if(inWatchlist && sourceContext === 'scanner'){
       setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
       setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
+    }else if(allowReviewLoadingStatus){
+      setLiveProcessStatus('action', `Review ${symbol} loaded.`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
     }
     setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_loadCard', 'review_loaded');
   }catch(error){
+    if(allowReviewLoadingStatus){
+      setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+    }
     setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_render_error', error && error.message ? error.message : 'unknown_error');
     throw error;
   }
@@ -13643,7 +13655,7 @@ function reviewWatchlistTicker(ticker){
   if(!symbol) return;
   const record = getTickerRecord(symbol) || upsertTickerRecord(symbol);
   const sourceVerdict = reviewVerdictOverrideFromView(projectTickerForCard(record));
-  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false, sourceVerdict, skipAutoScroll:true, sourceContext:'watchlist'});
+  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false, sourceVerdict, sourceContext:'watchlist'});
   setStatus('scannerSelectionStatus', `<span class="ok">Loaded saved ${escapeHtml(symbol)} review state.</span>`);
 }
 
