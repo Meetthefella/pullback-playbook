@@ -14902,6 +14902,8 @@ function scrollReviewSectionIntoView(ticker, context = 'review_open'){
 function loadCard(ticker, options = {}){
   const record = getTickerRecord(ticker);
   if(!record) return;
+  const preserveScrollOnSkip = options.skipAutoScroll === true && typeof window !== 'undefined';
+  const preservedScrollY = preserveScrollOnSkip ? Number(window.scrollY || window.pageYOffset || 0) : 0;
   setScannerCardClickTrace(ticker, 'loadCard.enter', `touchLifecycle=${options.touchLifecycle === true} recompute=${options.recompute === true}`);
   console.debug('RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
   setActiveReviewTicker(record.ticker);
@@ -14926,6 +14928,17 @@ function loadCard(ticker, options = {}){
   renderReviewLifecycleSummary(record.ticker);
   if(options.skipAutoScroll === true){
     setScannerCardClickTrace(ticker, 'loadCard.scroll_skipped', 'skipAutoScroll=true');
+    if(preserveScrollOnSkip && Number.isFinite(preservedScrollY)){
+      const restoreScroll = attempt => {
+        window.scrollTo({top:preservedScrollY, behavior:'auto'});
+        setScannerCardClickTrace(ticker, 'loadCard.scroll_restored', `top=${Math.round(preservedScrollY)} attempt=${attempt}`);
+      };
+      if(typeof window.requestAnimationFrame === 'function'){
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => restoreScroll('raf')));
+      }else{
+        setTimeout(() => restoreScroll('timeout'), 0);
+      }
+    }
   }else{
     scrollReviewSectionIntoView(record.ticker, 'loadCard');
   }
