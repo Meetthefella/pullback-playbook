@@ -13661,57 +13661,64 @@ function loadTickerIntoReview(ticker, options = {}){
   if(allowReviewLoadingStatus){
     setLiveProcessStatus('action', `Review pending: ${symbol}`);
   }
-  const record = upsertTickerRecord(symbol);
-  const inWatchlist = !!(record && record.watchlist && record.watchlist.inWatchlist);
-  const sourceContext = String(options.sourceContext || '');
-  const skipAutoScroll = options.skipAutoScroll === true;
-  uiState.activeReviewAddsToScannerUniverse = options.includeInScannerUniverse !== false;
-  uiState.activeReviewVerdictOverride = options.useSourceVerdict !== false
-    ? reviewVerdictOverrideFromLabel(options.sourceVerdict || '')
-    : '';
-  setActiveReviewTicker(symbol);
-  record.review.cardOpen = true;
-  if(options.includeInScannerUniverse === true && !state.tickers.includes(symbol)) state.tickers.push(symbol);
-  delete uiState.selectedScanner[symbol];
-  updateTickerInputFromState();
-  commitTickerState();
-  try{
-    renderTickerQuickLists();
-    renderScannerResults();
-    setScannerCardClickTrace(symbol, 'loadTickerIntoReview.before_loadCard', `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_rendered`);
-    const completeLoad = () => {
-      try{
-        loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll, preScrolled:skipAutoScroll !== true});
-        if(inWatchlist && sourceContext === 'scanner'){
-          setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
-          setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
-        }else if(allowReviewLoadingStatus){
-          setLiveProcessStatus('action', `Review loaded: ${symbol}`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+  const runReviewLoad = () => {
+    const record = upsertTickerRecord(symbol);
+    const inWatchlist = !!(record && record.watchlist && record.watchlist.inWatchlist);
+    const sourceContext = String(options.sourceContext || '');
+    const skipAutoScroll = options.skipAutoScroll === true;
+    uiState.activeReviewAddsToScannerUniverse = options.includeInScannerUniverse !== false;
+    uiState.activeReviewVerdictOverride = options.useSourceVerdict !== false
+      ? reviewVerdictOverrideFromLabel(options.sourceVerdict || '')
+      : '';
+    setActiveReviewTicker(symbol);
+    record.review.cardOpen = true;
+    if(options.includeInScannerUniverse === true && !state.tickers.includes(symbol)) state.tickers.push(symbol);
+    delete uiState.selectedScanner[symbol];
+    updateTickerInputFromState();
+    commitTickerState();
+    try{
+      renderTickerQuickLists();
+      renderScannerResults();
+      setScannerCardClickTrace(symbol, 'loadTickerIntoReview.before_loadCard', `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_rendered`);
+      const completeLoad = () => {
+        try{
+          loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll, preScrolled:skipAutoScroll !== true});
+          if(inWatchlist && sourceContext === 'scanner'){
+            setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+            setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
+          }else if(allowReviewLoadingStatus){
+            setLiveProcessStatus('action', `Review loaded: ${symbol}`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+          }
+          setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_loadCard', 'review_loaded');
+        }catch(error){
+          if(allowReviewLoadingStatus){
+            setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+          }
+          setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_render_error', error && error.message ? error.message : 'unknown_error');
         }
-        setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_loadCard', 'review_loaded');
-      }catch(error){
-        if(allowReviewLoadingStatus){
-          setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+      };
+      if(skipAutoScroll !== true && typeof window !== 'undefined'){
+        scrollReviewSectionIntoView(symbol, 'loadTickerIntoReview.pre', {immediate:true});
+        if(typeof window.requestAnimationFrame === 'function'){
+          window.requestAnimationFrame(() => completeLoad());
+        }else{
+          setTimeout(() => completeLoad(), 0);
         }
-        setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_render_error', error && error.message ? error.message : 'unknown_error');
-      }
-    };
-    if(skipAutoScroll !== true && typeof window !== 'undefined'){
-      scrollReviewSectionIntoView(symbol, 'loadTickerIntoReview.pre', {immediate:true});
-      if(typeof window.requestAnimationFrame === 'function'){
-        window.requestAnimationFrame(() => completeLoad());
       }else{
-        setTimeout(() => completeLoad(), 0);
+        completeLoad();
       }
-    }else{
-      completeLoad();
+    }catch(error){
+      if(allowReviewLoadingStatus){
+        setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+      }
+      setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_render_error', error && error.message ? error.message : 'unknown_error');
+      throw error;
     }
-  }catch(error){
-    if(allowReviewLoadingStatus){
-      setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
-    }
-    setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_render_error', error && error.message ? error.message : 'unknown_error');
-    throw error;
+  };
+  if(allowReviewLoadingStatus && typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(() => runReviewLoad());
+  }else{
+    runReviewLoad();
   }
 }
 
