@@ -13659,7 +13659,7 @@ function loadTickerIntoReview(ticker, options = {}){
   }
   const allowReviewLoadingStatus = !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
   if(allowReviewLoadingStatus){
-    setLiveProcessStatus('action', `Loading review ${symbol}...`);
+    setLiveProcessStatus('action', `Review pending: ${symbol}`);
   }
   const record = upsertTickerRecord(symbol);
   const inWatchlist = !!(record && record.watchlist && record.watchlist.inWatchlist);
@@ -13686,7 +13686,7 @@ function loadTickerIntoReview(ticker, options = {}){
           setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
           setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
         }else if(allowReviewLoadingStatus){
-          setLiveProcessStatus('action', `Review ${symbol} loaded.`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+          setLiveProcessStatus('action', `Review loaded: ${symbol}`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
         }
         setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_loadCard', 'review_loaded');
       }catch(error){
