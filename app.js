@@ -12362,11 +12362,40 @@ function recomputeRiskContextForRecord(record){
 }
 
 function refreshRiskContextForActiveSetups(options = {}){
+  const source = String(options.source || 'risk_context');
+  const riskDiagnosticRequested = /risk|account|max_loss|whole_shares|risk_/i.test(source);
+  const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+    ? String(uiState.liveProcessStatus.state || '')
+    : '';
+  const canPublishRiskDiagnostic = riskDiagnosticRequested && !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
+  const records = allTickerRecords();
+  const watchlistTickers = records
+    .filter(record => {
+      const item = normalizeTickerRecord(record);
+      return !!(item.watchlist && item.watchlist.inWatchlist);
+    })
+    .map(record => normalizeTickerRecord(record).ticker)
+    .filter(Boolean);
+  const watchlistTickerSet = new Set(watchlistTickers);
+  if(canPublishRiskDiagnostic){
+    if(watchlistTickers.length){
+      setLiveProcessStatus('action', `Recalculating watchlist ticker ${watchlistTickers[0]} plan to fit new risk...`);
+    }else{
+      setLiveProcessStatus('action', 'Recalculating plans to fit new risk...');
+    }
+  }
   state.userRiskPerTrade = currentMaxLoss();
   state.maxRisk = state.userRiskPerTrade;
-  allTickerRecords().forEach(recomputeRiskContextForRecord);
+  records.forEach(record => {
+    recomputeRiskContextForRecord(record);
+    if(!canPublishRiskDiagnostic) return;
+    const ticker = normalizeTickerRecord(record).ticker;
+    if(watchlistTickerSet.has(ticker)){
+      setLiveProcessStatus('action', `Recalculating watchlist ticker ${ticker} plan to fit new risk...`);
+    }
+  });
   runWatchlistLifecycleEvaluation({
-    source:String(options.source || 'risk_context'),
+    source,
     persist:false,
     render:false,
     force:options.force === true
@@ -12377,6 +12406,9 @@ function refreshRiskContextForActiveSetups(options = {}){
   renderCards();
   renderWatchlist();
   renderFocusQueue();
+  if(canPublishRiskDiagnostic){
+    setLiveProcessStatus('action', 'Risk recalculation complete.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+  }
 }
 
 async function testApiConnection(){
@@ -16048,7 +16080,7 @@ on('universeMode', 'change', () => {
 
 ['accountSize','riskPercent','maxLossOverride'].forEach(id => on(id, 'change', () => {
   saveState();
-  refreshRiskContextForActiveSetups();
+  refreshRiskContextForActiveSetups({source:'risk_settings_change'});
 }));
 on('marketStatus', 'change', () => {
   state.marketStatusMode = 'manual';
@@ -16080,7 +16112,7 @@ on('scannerSetupType', 'change', () => {
 });
 on('wholeSharesOnly', 'change', () => {
   saveState();
-  refreshRiskContextForActiveSetups();
+  refreshRiskContextForActiveSetups({source:'whole_shares_change'});
 });
 ['listName','apiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
 on('dataProvider', 'change', () => {
