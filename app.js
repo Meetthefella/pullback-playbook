@@ -13623,14 +13623,33 @@ function loadTickerIntoReview(ticker, options = {}){
     renderTickerQuickLists();
     renderScannerResults();
     setScannerCardClickTrace(symbol, 'loadTickerIntoReview.before_loadCard', `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_rendered`);
-    loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll});
-    if(inWatchlist && sourceContext === 'scanner'){
-      setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
-      setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
-    }else if(allowReviewLoadingStatus){
-      setLiveProcessStatus('action', `Review ${symbol} loaded.`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+    const completeLoad = () => {
+      try{
+        loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll, preScrolled:skipAutoScroll !== true});
+        if(inWatchlist && sourceContext === 'scanner'){
+          setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+          setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
+        }else if(allowReviewLoadingStatus){
+          setLiveProcessStatus('action', `Review ${symbol} loaded.`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+        }
+        setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_loadCard', 'review_loaded');
+      }catch(error){
+        if(allowReviewLoadingStatus){
+          setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+        }
+        setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_render_error', error && error.message ? error.message : 'unknown_error');
+      }
+    };
+    if(skipAutoScroll !== true && typeof window !== 'undefined'){
+      scrollReviewSectionIntoView(symbol, 'loadTickerIntoReview.pre', {immediate:true});
+      if(typeof window.requestAnimationFrame === 'function'){
+        window.requestAnimationFrame(() => completeLoad());
+      }else{
+        setTimeout(() => completeLoad(), 0);
+      }
+    }else{
+      completeLoad();
     }
-    setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_loadCard', 'review_loaded');
   }catch(error){
     if(allowReviewLoadingStatus){
       setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
@@ -14894,7 +14913,7 @@ async function importLatestChart(ticker){
   }
 }
 
-function scrollReviewSectionIntoView(ticker, context = 'review_open'){
+function scrollReviewSectionIntoView(ticker, context = 'review_open', options = {}){
   const symbol = normalizeTicker(ticker);
   const runScroll = attempt => {
     const scrollTarget = $('reviewWorkspace') || $('reviewSection');
@@ -14905,6 +14924,10 @@ function scrollReviewSectionIntoView(ticker, context = 'review_open'){
     scrollTarget.scrollIntoView({behavior:'smooth', block:'start'});
     setScannerCardClickTrace(symbol, `${context}.scrolled`, `${scrollTarget.id || 'reviewWorkspace'} attempt=${attempt}`);
   };
+  if(options.immediate === true){
+    runScroll('immediate');
+    return;
+  }
   if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => runScroll('raf')));
     setTimeout(() => runScroll('timeout'), 80);
@@ -14918,7 +14941,7 @@ function loadCard(ticker, options = {}){
   if(!record) return;
   const preserveScrollOnSkip = options.skipAutoScroll === true && typeof window !== 'undefined';
   const preservedScrollY = preserveScrollOnSkip ? Number(window.scrollY || window.pageYOffset || 0) : 0;
-  if(options.skipAutoScroll !== true){
+  if(options.skipAutoScroll !== true && options.preScrolled !== true){
     scrollReviewSectionIntoView(record.ticker, 'loadCard.pre');
   }
   setScannerCardClickTrace(ticker, 'loadCard.enter', `touchLifecycle=${options.touchLifecycle === true} recompute=${options.recompute === true}`);
