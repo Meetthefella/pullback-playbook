@@ -4898,9 +4898,48 @@ function renderLiveProcessStatusBanner(){
   }
 }
 
+function isLiveProcessBusyState(state){
+  return ['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(String(state || '').trim());
+}
+
+function withPendingReviewMessage(baseMessage, ticker){
+  const symbol = normalizeTicker(ticker);
+  const base = String(baseMessage || '').replace(/\s*\|\s*Review pending:[^|]*$/i, '').trim() || 'Working...';
+  if(!symbol) return base;
+  return `${base} | Review pending: ${symbol}`;
+}
+
+function queuePendingReviewRequest(ticker, options = {}){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  const nextOptions = options && typeof options === 'object' ? {...options} : {};
+  delete nextOptions.forceNow;
+  uiState.pendingReviewRequest = {
+    ticker:symbol,
+    options:nextOptions,
+    queuedAt:new Date().toISOString()
+  };
+  const liveStatus = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+    ? uiState.liveProcessStatus
+    : {state:'action', message:'Working...'};
+  const stateKey = String(liveStatus.state || 'action');
+  const message = withPendingReviewMessage(liveStatus.message || 'Working...', symbol);
+  if(isLiveProcessBusyState(stateKey)){
+    setLiveProcessStatus(stateKey, message);
+  }else{
+    setLiveProcessStatus('action', message, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+  }
+}
+
 function setLiveProcessStatus(stateKey, message, options = {}){
   const nextState = String(stateKey || 'idle');
-  const nextMessage = String(message || 'Idle.');
+  const pendingReview = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+    ? uiState.pendingReviewRequest
+    : null;
+  const requestedMessage = String(message || 'Idle.');
+  const nextMessage = isLiveProcessBusyState(nextState) && pendingReview
+    ? withPendingReviewMessage(requestedMessage, pendingReview.ticker)
+    : requestedMessage;
   uiState.liveProcessStatus = {
     state:nextState,
     message:nextMessage,
@@ -4933,6 +4972,18 @@ function setLiveProcessStatus(stateKey, message, options = {}){
       const currentBanner = $('liveProcessStatusBanner');
       if(currentBanner) currentBanner.classList.add('is-idle-hidden');
     }, LIVE_PROCESS_IDLE_FADE_MS);
+  }
+  if(!isLiveProcessBusyState(nextState) && uiState.pendingReviewRequest && options.deferPendingReviewFlush !== true){
+    const pending = uiState.pendingReviewRequest;
+    uiState.pendingReviewRequest = null;
+    const runPendingReview = () => {
+      loadTickerIntoReview(pending.ticker, {...(pending.options || {}), forceNow:true});
+    };
+    if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+      window.requestAnimationFrame(() => runPendingReview());
+    }else{
+      setTimeout(runPendingReview, 0);
+    }
   }
 }
 
@@ -13601,6 +13652,11 @@ function loadTickerIntoReview(ticker, options = {}){
   const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
     ? String(uiState.liveProcessStatus.state || '')
     : '';
+  if(!options.forceNow && isLiveProcessBusyState(currentLiveState)){
+    queuePendingReviewRequest(symbol, options);
+    setScannerCardClickTrace(symbol, 'loadTickerIntoReview.deferred', `busy=${currentLiveState || '(none)'}`);
+    return;
+  }
   const allowReviewLoadingStatus = !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
   if(allowReviewLoadingStatus){
     setLiveProcessStatus('action', `Loading review ${symbol}...`);
