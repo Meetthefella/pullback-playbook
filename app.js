@@ -14918,6 +14918,9 @@ function loadCard(ticker, options = {}){
   if(!record) return;
   const preserveScrollOnSkip = options.skipAutoScroll === true && typeof window !== 'undefined';
   const preservedScrollY = preserveScrollOnSkip ? Number(window.scrollY || window.pageYOffset || 0) : 0;
+  if(options.skipAutoScroll !== true){
+    scrollReviewSectionIntoView(record.ticker, 'loadCard.pre');
+  }
   setScannerCardClickTrace(ticker, 'loadCard.enter', `touchLifecycle=${options.touchLifecycle === true} recompute=${options.recompute === true}`);
   console.debug('RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
   setActiveReviewTicker(record.ticker);
@@ -14953,8 +14956,6 @@ function loadCard(ticker, options = {}){
         setTimeout(() => restoreScroll('timeout'), 0);
       }
     }
-  }else{
-    scrollReviewSectionIntoView(record.ticker, 'loadCard');
   }
   setScannerCardClickTrace(ticker, 'loadCard.complete', `selectedTicker=${(($('selectedTicker') && $('selectedTicker').value) || '(none)')}`);
 }
