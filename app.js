@@ -4878,14 +4878,44 @@ function withPendingReviewMessage(baseMessage, ticker){
   return `${base} | Review pending: ${symbol}`;
 }
 
+function nextReviewRequestToken(){
+  uiState.reviewRequestSeq = Number(uiState.reviewRequestSeq || 0) + 1;
+  return `review-${uiState.reviewRequestSeq}-${Date.now()}`;
+}
+
+function releaseScannerSelectionStatusLockForSupersededRequest(request){
+  const pending = request && typeof request === 'object' ? request : null;
+  if(!pending) return;
+  const pendingToken = String(pending.reviewRequestToken || '');
+  if(!pendingToken) return;
+  const statusLock = uiState.scannerSelectionStatusLock && typeof uiState.scannerSelectionStatusLock === 'object'
+    ? uiState.scannerSelectionStatusLock
+    : null;
+  if(!statusLock || statusLock.kind !== 'review_pending') return;
+  const lockToken = String(statusLock.reviewRequestToken || '');
+  if(!lockToken || lockToken !== pendingToken) return;
+  delete uiState.scannerSelectionStatusLock;
+  updateScannerSelectionStatus();
+}
+
 function queuePendingReviewRequest(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   const nextOptions = options && typeof options === 'object' ? {...options} : {};
   delete nextOptions.forceNow;
+  const reviewRequestToken = String(nextOptions.reviewRequestToken || nextReviewRequestToken());
+  nextOptions.reviewRequestToken = reviewRequestToken;
+  const previousPending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+    ? uiState.pendingReviewRequest
+    : null;
+  if(previousPending && String(previousPending.reviewRequestToken || '') !== reviewRequestToken){
+    releaseScannerSelectionStatusLockForSupersededRequest(previousPending);
+  }
   uiState.pendingReviewRequest = {
     ticker:symbol,
     options:nextOptions,
+    sourceContext:String(nextOptions.sourceContext || ''),
+    reviewRequestToken,
     queuedAt:new Date().toISOString()
   };
   const liveStatus = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
@@ -4946,7 +4976,11 @@ function setLiveProcessStatus(stateKey, message, options = {}){
     const pending = uiState.pendingReviewRequest;
     uiState.pendingReviewRequest = null;
     const runPendingReview = () => {
-      loadTickerIntoReview(pending.ticker, {...(pending.options || {}), forceNow:true});
+      loadTickerIntoReview(pending.ticker, {
+        ...(pending.options || {}),
+        forceNow:true,
+        reviewRequestToken:pending.reviewRequestToken || ((pending.options && pending.options.reviewRequestToken) || '')
+      });
     };
     if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
       window.requestAnimationFrame(() => runPendingReview());
@@ -13356,6 +13390,7 @@ function statusRank(status){
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
+  const reviewRequestToken = String(options.reviewRequestToken || nextReviewRequestToken());
   uiState.reviewLoadToken = Number(uiState.reviewLoadToken || 0) + 1;
   const reviewLoadToken = Number(uiState.reviewLoadToken || 0);
   setScannerCardClickTrace(symbol, 'loadTickerIntoReview.enter', `includeInScannerUniverse=${options.includeInScannerUniverse === true} recompute=${options.recompute === true}`);
@@ -13363,7 +13398,7 @@ function loadTickerIntoReview(ticker, options = {}){
     ? String(uiState.liveProcessStatus.state || '')
     : '';
   if(!options.forceNow && isLiveProcessBusyState(currentLiveState)){
-    queuePendingReviewRequest(symbol, options);
+    queuePendingReviewRequest(symbol, {...options, reviewRequestToken});
     setScannerCardClickTrace(symbol, 'loadTickerIntoReview.deferred', `busy=${currentLiveState || '(none)'}`);
     return;
   }
@@ -13373,6 +13408,9 @@ function loadTickerIntoReview(ticker, options = {}){
   }
   const runReviewLoad = () => {
     if(reviewLoadToken !== Number(uiState.reviewLoadToken || 0)){
+      if(String(options.sourceContext || '') === 'watchlist'){
+        settleScannerSelectionStatusReviewPending(symbol, {superseded:true, reviewRequestToken});
+      }
       setScannerCardClickTrace(symbol, 'loadTickerIntoReview.stale_run_skipped', `token=${reviewLoadToken}`);
       return;
     }
@@ -13396,6 +13434,9 @@ function loadTickerIntoReview(ticker, options = {}){
       setScannerCardClickTrace(symbol, 'loadTickerIntoReview.before_loadCard', `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_rendered`);
       const completeLoad = () => {
         if(reviewLoadToken !== Number(uiState.reviewLoadToken || 0)){
+          if(sourceContext === 'watchlist'){
+            settleScannerSelectionStatusReviewPending(symbol, {superseded:true, reviewRequestToken});
+          }
           setScannerCardClickTrace(symbol, 'loadTickerIntoReview.stale_complete_skipped', `token=${reviewLoadToken}`);
           return;
         }
@@ -13407,10 +13448,16 @@ function loadTickerIntoReview(ticker, options = {}){
                 if(allowReviewLoadingStatus && !(inWatchlist && sourceContext === 'scanner')){
                   scheduleReviewLoadedStatus(symbol);
                 }
+                if(sourceContext === 'watchlist'){
+                  settleScannerSelectionStatusReviewPending(symbol, {failed:false, reviewRequestToken});
+                }
               }
             });
           }else if(allowReviewLoadingStatus && !(inWatchlist && sourceContext === 'scanner')){
             scheduleReviewLoadedStatus(symbol);
+            if(sourceContext === 'watchlist'){
+              settleScannerSelectionStatusReviewPending(symbol, {failed:false, reviewRequestToken});
+            }
           }
           if(inWatchlist && sourceContext === 'scanner'){
             setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
@@ -13418,6 +13465,9 @@ function loadTickerIntoReview(ticker, options = {}){
           }
           setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_loadCard', 'review_loaded');
         }catch(error){
+          if(sourceContext === 'watchlist'){
+            settleScannerSelectionStatusReviewPending(symbol, {failed:true, reviewRequestToken});
+          }
           if(allowReviewLoadingStatus){
             setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
           }
@@ -13426,6 +13476,9 @@ function loadTickerIntoReview(ticker, options = {}){
       };
       completeLoad();
     }catch(error){
+      if(sourceContext === 'watchlist'){
+        settleScannerSelectionStatusReviewPending(symbol, {failed:true, reviewRequestToken});
+      }
       if(allowReviewLoadingStatus){
         setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
       }
@@ -13528,8 +13581,9 @@ function reviewWatchlistTicker(ticker){
   if(!symbol) return;
   const record = getTickerRecord(symbol) || upsertTickerRecord(symbol);
   const sourceVerdict = reviewVerdictOverrideFromView(projectTickerForCard(record));
-  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false, sourceVerdict, sourceContext:'watchlist'});
-  setStatus('scannerSelectionStatus', `<span class="ok">Loaded saved ${escapeHtml(symbol)} review state.</span>`);
+  const reviewRequestToken = nextReviewRequestToken();
+  setScannerSelectionStatusReviewPending(symbol, {reviewRequestToken, sourceContext:'watchlist'});
+  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false, sourceVerdict, sourceContext:'watchlist', reviewRequestToken});
 }
 
 async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
@@ -13733,6 +13787,16 @@ function selectedScannerTickers(){
 function updateScannerSelectionStatus(){
   const resultCount = rankedTickerRecords().length;
   if(!$('scannerSelectionStatus')) return;
+  const statusLock = uiState.scannerSelectionStatusLock && typeof uiState.scannerSelectionStatusLock === 'object'
+    ? uiState.scannerSelectionStatusLock
+    : null;
+  if(statusLock && statusLock.kind === 'review_pending'){
+    const lockTicker = normalizeTicker(statusLock.ticker || '');
+    if(lockTicker){
+      setStatus('scannerSelectionStatus', `<span class="ok">Review pending: ${escapeHtml(lockTicker)}</span>`);
+      return;
+    }
+  }
   const lastScanLabel = uiState.scannerLastScanAt ? ` Last scanned: ${formatLocalTimestamp(uiState.scannerLastScanAt)}.` : '';
   if(uiState.scannerShortlistSuppressed){
     setStatus('scannerSelectionStatus', `Shortlist cleared.${lastScanLabel}`);
@@ -13745,6 +13809,48 @@ function updateScannerSelectionStatus(){
     return;
   }
   setStatus('scannerSelectionStatus', `${resultCount} scan result${resultCount === 1 ? '' : 's'} ready.${lastScanLabel}`);
+}
+
+function setScannerSelectionStatusReviewPending(ticker, options = {}){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  const reviewRequestToken = String(options.reviewRequestToken || nextReviewRequestToken());
+  uiState.scannerSelectionStatusLock = {
+    kind:'review_pending',
+    ticker:symbol,
+    sourceContext:String(options.sourceContext || ''),
+    reviewRequestToken,
+    setAt:new Date().toISOString()
+  };
+  setStatus('scannerSelectionStatus', `<span class="ok">Review pending: ${escapeHtml(symbol)}</span>`);
+}
+
+function settleScannerSelectionStatusReviewPending(ticker, options = {}){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  const reviewRequestToken = String(options.reviewRequestToken || '');
+  const statusLock = uiState.scannerSelectionStatusLock && typeof uiState.scannerSelectionStatusLock === 'object'
+    ? uiState.scannerSelectionStatusLock
+    : null;
+  const lockTicker = normalizeTicker(statusLock && statusLock.ticker || '');
+  const lockToken = String(statusLock && statusLock.reviewRequestToken || '');
+  const lockMatches = !!(
+    statusLock
+    && statusLock.kind === 'review_pending'
+    && lockTicker === symbol
+    && (!reviewRequestToken || !lockToken || lockToken === reviewRequestToken)
+  );
+  if(!lockMatches) return;
+  delete uiState.scannerSelectionStatusLock;
+  if(options.superseded === true){
+    updateScannerSelectionStatus();
+    return;
+  }
+  if(options.failed === true){
+    setStatus('scannerSelectionStatus', `<span class="warntext">Could not load saved ${escapeHtml(symbol)} review state.</span>`);
+    return;
+  }
+  setStatus('scannerSelectionStatus', `<span class="ok">Loaded saved ${escapeHtml(symbol)} review state.</span>`);
 }
 
 function renderReviewRecomputeDiagnostics(record){
@@ -14695,7 +14801,7 @@ function renderReviewWorkspace(options = {}){
     </div>
   </div>`;
   bindReviewWorkspaceActions(record);
-  refreshReview();
+  refreshReview({skipWatchlistLifecycle:options.skipWatchlistLifecycle === true});
   renderReviewLifecycleSummary(record.ticker);
   calculate({persist:false});
 }
@@ -14791,6 +14897,7 @@ function scrollReviewSectionIntoView(ticker, context = 'review_open', options = 
 function loadCard(ticker, options = {}){
   const record = getTickerRecord(ticker);
   if(!record) return;
+  const displayOnlyReviewOpen = options.recompute !== true && options.touchLifecycle !== true;
   const preserveScrollOnSkip = options.skipAutoScroll === true && typeof window !== 'undefined';
   const preservedScrollY = preserveScrollOnSkip ? Number(window.scrollY || window.pageYOffset || 0) : 0;
   if(options.skipAutoScroll !== true && options.preScrolled !== true){
@@ -14803,7 +14910,10 @@ function loadCard(ticker, options = {}){
     refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
     commitTickerState();
   }
-  renderReviewWorkspace({recompute:options.recompute === true});
+  renderReviewWorkspace({
+    recompute:options.recompute === true,
+    skipWatchlistLifecycle:displayOnlyReviewOpen
+  });
   setScannerCardClickTrace(ticker, 'loadCard.after_renderReviewWorkspace', 'workspace_rendered');
   const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : null;
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
@@ -14812,7 +14922,7 @@ function loadCard(ticker, options = {}){
     if(input) input.checked = !!reviewChecks[id];
   });
   setScannerCardClickTrace(ticker, 'loadCard.after_syncChecks', 'checks_synced');
-  refreshReview();
+  refreshReview({skipWatchlistLifecycle:displayOnlyReviewOpen});
   setScannerCardClickTrace(ticker, 'loadCard.after_refreshReview', 'review_refreshed');
   syncPlannerFromTicker(record.ticker);
   const hydratedPlan = getCanonicalTradeSnapshot(record.ticker);
@@ -14835,7 +14945,7 @@ function loadCard(ticker, options = {}){
   setScannerCardClickTrace(ticker, 'loadCard.complete', `selectedTicker=${(($('selectedTicker') && $('selectedTicker').value) || '(none)')}`);
 }
 
-function refreshReview(){
+function refreshReview(options = {}){
   const checks = currentChecks();
   const result = scoreAndStatusFromChecks(checks);
   $('summaryBox').textContent = buildSummary(checks, result.status);
@@ -14850,7 +14960,7 @@ function refreshReview(){
     reviewNotes.classList.toggle('review-notes--ai', aiBusy);
     reviewNotes.placeholder = aiBusy ? '🤖 AI analysis in progress...' : 'Add ticker-specific notes here.';
   }
-  if(record && record.watchlist && record.watchlist.inWatchlist){
+  if(record && record.watchlist && record.watchlist.inWatchlist && options.skipWatchlistLifecycle !== true){
     runWatchlistLifecycleEvaluation({
       source:'auto_recompute',
       tickers:[ticker],
