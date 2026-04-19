@@ -13408,7 +13408,7 @@ function loadTickerIntoReview(ticker, options = {}){
             setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
             setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
           }else if(allowReviewLoadingStatus){
-            setLiveProcessStatus('action', `Review loaded: ${symbol}`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+            scheduleReviewLoadedStatus(symbol);
           }
           setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_loadCard', 'review_loaded');
         }catch(error){
@@ -13472,6 +13472,26 @@ function scheduleReviewScrollAfterLoad(ticker, context = 'review_open'){
     window.requestAnimationFrame(run);
   }else{
     setTimeout(run, 0);
+  }
+}
+
+function scheduleReviewLoadedStatus(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  const applyLoadedStatus = () => {
+    const current = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+      ? uiState.liveProcessStatus
+      : {state:'', message:''};
+    const currentState = String(current.state || '');
+    const currentMessage = String(current.message || '');
+    if(isLiveProcessBusyState(currentState)) return;
+    if(!/^review pending:/i.test(currentMessage)) return;
+    setLiveProcessStatus('action', `Review loaded: ${symbol}`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(() => applyLoadedStatus());
+  }else{
+    setTimeout(() => applyLoadedStatus(), 0);
   }
 }
 
