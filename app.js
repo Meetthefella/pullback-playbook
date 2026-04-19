@@ -4960,14 +4960,18 @@ function bindLiveProcessButtonStatusHooks(){
   document.addEventListener('click', event => {
     const button = event.target.closest('button');
     if(!button || button.disabled) return;
-    const currentState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
-      ? String(uiState.liveProcessStatus.state || '')
-      : '';
+    const liveStatus = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+      ? uiState.liveProcessStatus
+      : {state:'', message:''};
+    const currentState = String(liveStatus.state || '');
     if(['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentState)) return;
     const rawLabel = String(button.getAttribute('data-live-status-label') || button.textContent || '')
       .replace(/\s+/g, ' ')
       .trim();
     if(!rawLabel) return;
+    const normalizedLabel = rawLabel.replace(/\.\.\.$/, '').trim().toLowerCase();
+    const currentMessage = String(liveStatus.message || '').trim();
+    if(normalizedLabel === 'review' && /^review pending:/i.test(currentMessage)) return;
     const label = rawLabel.length > 72 ? `${rawLabel.slice(0, 69)}...` : rawLabel;
     setLiveProcessStatus('action', `${label}...`, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
   });
