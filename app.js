@@ -13402,13 +13402,19 @@ function loadTickerIntoReview(ticker, options = {}){
         try{
           loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll, preScrolled:true});
           if(skipAutoScroll !== true){
-            scheduleReviewScrollAfterLoad(symbol, 'loadTickerIntoReview.post');
+            scheduleReviewScrollAfterLoad(symbol, 'loadTickerIntoReview.post', {
+              onSettled:() => {
+                if(allowReviewLoadingStatus && !(inWatchlist && sourceContext === 'scanner')){
+                  scheduleReviewLoadedStatus(symbol);
+                }
+              }
+            });
+          }else if(allowReviewLoadingStatus && !(inWatchlist && sourceContext === 'scanner')){
+            scheduleReviewLoadedStatus(symbol);
           }
           if(inWatchlist && sourceContext === 'scanner'){
             setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
             setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
-          }else if(allowReviewLoadingStatus){
-            scheduleReviewLoadedStatus(symbol);
           }
           setScannerCardClickTrace(symbol, 'loadTickerIntoReview.post_loadCard', 'review_loaded');
         }catch(error){
@@ -13444,22 +13450,34 @@ function reviewWorkspaceReadyForTicker(ticker){
   return !!box.querySelector('#selectedTicker');
 }
 
-function scheduleReviewScrollAfterLoad(ticker, context = 'review_open'){
+function scheduleReviewScrollAfterLoad(ticker, context = 'review_open', options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
+  const onSettled = typeof options.onSettled === 'function' ? options.onSettled : null;
+  let settled = false;
+  const settle = () => {
+    if(settled) return;
+    settled = true;
+    if(onSettled) onSettled();
+  };
   uiState.reviewScrollToken = Number(uiState.reviewScrollToken || 0) + 1;
   const token = Number(uiState.reviewScrollToken || 0);
   let attempts = 0;
   const maxAttempts = 6;
   const run = () => {
-    if(token !== Number(uiState.reviewScrollToken || 0)) return;
+    if(token !== Number(uiState.reviewScrollToken || 0)){
+      settle();
+      return;
+    }
     attempts += 1;
     if(reviewWorkspaceReadyForTicker(symbol)){
       scrollReviewSectionIntoView(symbol, `${context}.ready`, {immediate:true});
+      settle();
       return;
     }
     if(attempts >= maxAttempts){
       scrollReviewSectionIntoView(symbol, `${context}.fallback`, {immediate:true});
+      settle();
       return;
     }
     if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
