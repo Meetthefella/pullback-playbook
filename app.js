@@ -2603,6 +2603,7 @@ function setScannerSessionResults(tickers, scannedAt){
 }
 
 function loadState(){
+  startStartupStatusContextCycle();
   const fullStorageInfo = inspectStorageKey(key);
   const liteStorageInfo = inspectStorageKey(liteKey);
   const settingsStorageInfo = inspectStorageKey(settingsKey);
@@ -2733,7 +2734,6 @@ function loadState(){
   renderPatternAnalytics();
   renderPlannerPlanSummary();
   refreshRiskContextForActiveSetups();
-  startStartupStatusContextCycle();
   if(startupRefreshTickers.length){
     setStatus('scannerSelectionStatus', `<span class="ok">Refreshing ${escapeHtml(String(startupRefreshTickers.length))} watchlist ticker${startupRefreshTickers.length === 1 ? '' : 's'} from live data...</span>`);
     setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
