@@ -11502,21 +11502,23 @@ function getReviewAnalysisState(record){
     reviewedAt: String(sourceState.reviewedAt || item.review.lastReviewedAt || ''),
     hasSavedAnalysis: !!(normalizedAnalysis || rawAnalysis)
   };
-  console.log('REVIEW_WORKSPACE_READ', {
-    ticker:item.ticker,
-        reviewFields:{
-      aiAnalysisRawLength:analysisState.rawAnalysis.length,
-      normalizedAnalysisExists:!!analysisState.normalizedAnalysis,
-      lastError:analysisState.error,
-      lastReviewedAt:analysisState.reviewedAt,
-      lastPromptLength:analysisState.promptPreview.length
-    },
-    hasSavedAnalysis:analysisState.hasSavedAnalysis,
-    hasNormalizedAnalysis:!!analysisState.normalizedAnalysis,
-    rawAnalysisLength:analysisState.rawAnalysis.length,
-    promptLength:analysisState.promptPreview.length,
-    error:analysisState.error
-  });
+  if(window.DEBUG_REVIEW_WORKSPACE){
+    console.log('REVIEW_WORKSPACE_READ', {
+      ticker:item.ticker,
+          reviewFields:{
+        aiAnalysisRawLength:analysisState.rawAnalysis.length,
+        normalizedAnalysisExists:!!analysisState.normalizedAnalysis,
+        lastError:analysisState.error,
+        lastReviewedAt:analysisState.reviewedAt,
+        lastPromptLength:analysisState.promptPreview.length
+      },
+      hasSavedAnalysis:analysisState.hasSavedAnalysis,
+      hasNormalizedAnalysis:!!analysisState.normalizedAnalysis,
+      rawAnalysisLength:analysisState.rawAnalysis.length,
+      promptLength:analysisState.promptPreview.length,
+      error:analysisState.error
+    });
+  }
   return analysisState;
 }
 
