@@ -4636,6 +4636,28 @@ function renderWatchlist(){
   });
 }
 
+let watchlistRenderScheduled = false;
+let watchlistRenderNeedsFocusQueue = false;
+
+function requestWatchlistRender(options = {}){
+  const includeFocusQueue = options.includeFocusQueue === true;
+  watchlistRenderNeedsFocusQueue = watchlistRenderNeedsFocusQueue || includeFocusQueue;
+  if(watchlistRenderScheduled) return;
+  watchlistRenderScheduled = true;
+  const flush = () => {
+    watchlistRenderScheduled = false;
+    const renderFocus = watchlistRenderNeedsFocusQueue;
+    watchlistRenderNeedsFocusQueue = false;
+    renderWatchlist();
+    if(renderFocus) renderFocusQueue();
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(flush);
+  }else{
+    setTimeout(flush, 0);
+  }
+}
+
 function reviewHeaderContextChip(record, warningState){
   if(warningState && warningState.showWarning){
     return {
@@ -13298,8 +13320,7 @@ async function analyseSetup(ticker){
     if(activeReviewTicker() === ticker) uiState.activeReviewVerdictOverride = '';
     uiState.loadingTicker = '';
     setScannerCardClickTrace(ticker, 'analyseSetup.finally', 'loadingTicker_cleared');
-    renderWatchlist();
-    renderFocusQueue();
+    requestWatchlistRender({includeFocusQueue:true});
     renderCards();
   }
 }
@@ -13472,13 +13493,25 @@ function loadTickerIntoReview(ticker, options = {}){
     setActiveReviewTicker(symbol);
     record.review.cardOpen = true;
     if(options.includeInScannerUniverse === true && !state.tickers.includes(symbol)) state.tickers.push(symbol);
+    const selectedBefore = !!uiState.selectedScanner[symbol];
     delete uiState.selectedScanner[symbol];
+    const shouldRefreshScannerSurfaces = (
+      options.includeInScannerUniverse === true
+      || sourceContext === 'scanner'
+      || selectedBefore
+    );
     updateTickerInputFromState();
     commitTickerState();
     try{
-      renderTickerQuickLists();
-      renderScannerResults();
-      setScannerCardClickTrace(symbol, 'loadTickerIntoReview.before_loadCard', `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_rendered`);
+      if(shouldRefreshScannerSurfaces){
+        renderTickerQuickLists();
+        renderScannerResults();
+      }
+      setScannerCardClickTrace(
+        symbol,
+        'loadTickerIntoReview.before_loadCard',
+        `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_refresh=${shouldRefreshScannerSurfaces ? 'yes' : 'no'}`
+      );
       const completeLoad = () => {
         if(reviewLoadToken !== Number(uiState.reviewLoadToken || 0)){
           if(sourceContext === 'watchlist'){
@@ -13533,10 +13566,10 @@ function loadTickerIntoReview(ticker, options = {}){
       throw error;
     }
   };
-  if(allowReviewLoadingStatus && typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
     window.requestAnimationFrame(() => runReviewLoad());
   }else{
-    runReviewLoad();
+    setTimeout(() => runReviewLoad(), 0);
   }
 }
 
@@ -14748,7 +14781,7 @@ function renderReviewWorkspace(options = {}){
   box.dataset.visualTone = visualState.visual_tone || '';
   box.dataset.visualState = visualState.state || '';
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
-    if(activeReviewTicker() === record.ticker) calculate();
+    if(activeReviewTicker() === record.ticker) calculate({persist:false});
   });
   box.innerHTML = `<div class="reviewworkspace ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(visualState.visual_tone || '')}" data-visual-state="${escapeHtml(visualState.state || '')}">
     <div class="panelbox review-section review-section--snapshot">
@@ -15036,8 +15069,7 @@ function refreshReview(options = {}){
       render:false,
       force:true
     });
-    renderWatchlist();
-    renderFocusQueue();
+    requestWatchlistRender({includeFocusQueue:true});
   }
 }
 
@@ -15312,7 +15344,11 @@ function reactivateSelectedTickerLifecycle(){
 
 function calculate(options = {}){
   const persist = options.persist !== false;
-  saveState();
+  if(persist){
+    saveState();
+  }else{
+    syncStateFromDom();
+  }
   const ticker = activeReviewTicker();
   const entry = numericOrNull($('entryPrice').value);
   const stop = numericOrNull($('stopPrice').value);
@@ -15349,8 +15385,7 @@ function calculate(options = {}){
     }
     commitTickerState();
     if(record.watchlist && record.watchlist.inWatchlist){
-      renderWatchlist();
-      renderFocusQueue();
+      requestWatchlistRender({includeFocusQueue:true});
     }
     renderReviewLifecycleSummary(ticker);
   }
