@@ -2739,27 +2739,35 @@ function loadState(){
   }else{
     setLiveProcessStatus('idle', 'Idle.');
   }
-  refreshWatchlistRecordsFromSourceOfTruth({
-    source:'startup_restore',
-    persist:true,
-    render:true,
-    renderProgress:true,
-    clearReviewOverride:false
-  }).then(summary => {
-    if(!summary || !summary.attempted) return;
-    const message = summary.failed
-      ? `Startup refresh checked ${summary.refreshed}/${summary.attempted} watchlist ticker${summary.attempted === 1 ? '' : 's'} from live data.`
-      : `Startup refresh checked ${summary.refreshed} watchlist ticker${summary.refreshed === 1 ? '' : 's'} from live data.`;
-    setStatus('scannerSelectionStatus', `<span class="${summary.failed ? 'warntext' : 'ok'}">${escapeHtml(message)}</span>`);
-    if(summary.failed && summary.refreshed === 0){
+  const runStartupWatchlistRefresh = () => {
+    refreshWatchlistRecordsFromSourceOfTruth({
+      source:'startup_restore',
+      persist:true,
+      render:true,
+      renderProgress:true,
+      clearReviewOverride:false
+    }).then(summary => {
+      if(!summary || !summary.attempted) return;
+      const message = summary.failed
+        ? `Startup refresh checked ${summary.refreshed}/${summary.attempted} watchlist ticker${summary.attempted === 1 ? '' : 's'} from live data.`
+        : `Startup refresh checked ${summary.refreshed} watchlist ticker${summary.refreshed === 1 ? '' : 's'} from live data.`;
+      setStatus('scannerSelectionStatus', `<span class="${summary.failed ? 'warntext' : 'ok'}">${escapeHtml(message)}</span>`);
+      if(summary.failed && summary.refreshed === 0){
+        setLiveProcessStatus('error', 'Refresh failed.');
+      }else{
+        setLiveProcessStatus('idle', 'Idle.');
+      }
+    }).catch(() => {
+      setStatus('scannerSelectionStatus', '<span class="warntext">Startup watchlist refresh could not complete. Kept saved watchlist state active locally.</span>');
       setLiveProcessStatus('error', 'Refresh failed.');
-    }else{
-      setLiveProcessStatus('idle', 'Idle.');
-    }
-  }).catch(() => {
-    setStatus('scannerSelectionStatus', '<span class="warntext">Startup watchlist refresh could not complete. Kept saved watchlist state active locally.</span>');
-    setLiveProcessStatus('error', 'Refresh failed.');
-  });
+    });
+  };
+  // Let persisted UI paint first; startup market refresh runs as background enhancement.
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(() => runStartupWatchlistRefresh());
+  }else{
+    setTimeout(runStartupWatchlistRefresh, 0);
+  }
 }
 
 function renderStats(){
