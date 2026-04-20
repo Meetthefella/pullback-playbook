@@ -4422,6 +4422,57 @@ function clearSavedScannerUniverseList(){
   setStatus('inputStatus', '<span class="ok">Saved scanner universe snapshot cleared from this device.</span>');
 }
 
+function watchlistRecordRenderSignature(record, pendingMap = {}){
+  const item = normalizeTickerRecord(record);
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const watch = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : {};
+  const life = item.lifecycle && typeof item.lifecycle === 'object' ? item.lifecycle : {};
+  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const analysisState = review.analysisState && typeof review.analysisState === 'object'
+    ? review.analysisState
+    : {};
+  const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
+  const ticker = normalizeTicker(item.ticker || '');
+  return [
+    ticker,
+    watch.inWatchlist ? 1 : 0,
+    String(watch.updatedAt || ''),
+    String(watch.dateAdded || ''),
+    String(watch.verdictWhenAdded || ''),
+    String(watch.scoreWhenAdded ?? ''),
+    String(life.stage || ''),
+    String(life.status || ''),
+    String(life.expiresAt || ''),
+    String(life.changedAt || ''),
+    String(plan.source || ''),
+    String(plan.planValidationState || ''),
+    plan.hasValidPlan ? 1 : 0,
+    plan.invalidatedState ? 1 : 0,
+    plan.missedState ? 1 : 0,
+    String(plan.triggerState || ''),
+    String(scan.resolvedVerdict || ''),
+    String(scan.verdict || ''),
+    String(scan.score ?? ''),
+    String(review.savedVerdict || ''),
+    String(review.savedScore ?? ''),
+    String(review.lastReviewedAt || ''),
+    String(analysisState.reviewedAt || ''),
+    String(marketData.updatedAt || ''),
+    pendingMap[ticker] ? 1 : 0
+  ].join('~');
+}
+
+function buildWatchlistRenderSignature(records, options = {}){
+  const pendingMap = uiState.watchlistLiveRefreshPending && typeof uiState.watchlistLiveRefreshPending === 'object'
+    ? uiState.watchlistLiveRefreshPending
+    : {};
+  const showExpired = options.showExpired === true ? 1 : 0;
+  const parts = [`showExpired=${showExpired}`, `day=${todayIsoDate()}`, `count=${records.length}`];
+  records.forEach(record => parts.push(watchlistRecordRenderSignature(record, pendingMap)));
+  return parts.join('|');
+}
+
 function renderWatchlist(){
   syncWatchlistLifecycleBeforeRender('auto_recompute');
   purgeExpiredWatchlistEntries();
@@ -4441,9 +4492,20 @@ function renderWatchlist(){
   });
   logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
   if(!records.length){
+    const emptySignature = `showExpired=${showExpired ? 1 : 0}|count=0`;
+    uiState.watchlistRenderSignature = emptySignature;
+    box.dataset.watchlistSignature = emptySignature;
     box.innerHTML = showExpired
       ? '<div class="summary">No watchlist entries match this filter right now.</div>'
       : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+    return;
+  }
+  const renderSignature = buildWatchlistRenderSignature(records, {showExpired});
+  if(
+    uiState.watchlistRenderSignature === renderSignature
+    && box.dataset.watchlistSignature === renderSignature
+    && box.childElementCount > 0
+  ){
     return;
   }
   box.innerHTML = '';
@@ -4617,6 +4679,8 @@ function renderWatchlist(){
     });
     box.appendChild(section);
   });
+  uiState.watchlistRenderSignature = renderSignature;
+  box.dataset.watchlistSignature = renderSignature;
   return;
   records.forEach(record => {
     const entry = tickerRecordToWatchlistEntry(record);
