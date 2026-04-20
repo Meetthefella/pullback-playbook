@@ -13591,11 +13591,16 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
   if(!symbol) return {symbol:'', ok:false, skipped:true, reason:'invalid_ticker', record:null, snapshot:null, verdict:null};
   const record = upsertTickerRecord(symbol);
   const source = String(options.source || 'manual_refresh');
-  setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
+  const suppressLiveStatus = options.suppressLiveStatus === true;
+  if(!suppressLiveStatus){
+    setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
+  }
   if(options.clearReviewOverride !== false && activeReviewTicker() === symbol) uiState.activeReviewVerdictOverride = '';
   if(options.markPending) setWatchlistLiveRefreshPending(symbol, true);
   try{
-    const {card} = await refreshCardMarketData(symbol, {force:true});
+    const forceRefresh = options.force === true
+      || (options.force !== false && source !== 'startup_restore');
+    const {card} = await refreshCardMarketData(symbol, {force:forceRefresh});
     mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
     const normalizedRecord = normalizeTickerRecord(record);
     state.tickerRecords[symbol] = normalizedRecord;
@@ -13624,7 +13629,9 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       verdict:refreshedVerdict
     };
   }catch(error){
-    setLiveProcessStatus('error', 'Refresh failed.');
+    if(!suppressLiveStatus){
+      setLiveProcessStatus('error', 'Refresh failed.');
+    }
     runWatchlistLifecycleEvaluation({
       source,
       tickers:[symbol],
@@ -13644,7 +13651,9 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
     if(options.markPending) clearWatchlistLiveRefreshPending(symbol);
     const pending = pendingWatchlistRefreshTickers();
     if(
-      !pending.length
+      !suppressLiveStatus
+      && !options.deferIdleStatus
+      && !pending.length
       && (!uiState.liveProcessStatus || (uiState.liveProcessStatus.state !== 'running_scan' && uiState.liveProcessStatus.state !== 'error'))
     ){
       setLiveProcessStatus('idle', 'Idle.');
@@ -13663,17 +13672,29 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
   const markPending = options.markPending !== false && source === 'startup_restore';
   if(markPending) setWatchlistLiveRefreshPending(tickers, true);
   const results = [];
-  for(const symbol of tickers){
-    const result = await refreshWatchlistRecordFromSourceOfTruth(symbol, {
-      source,
-      clearReviewOverride:options.clearReviewOverride,
-      markPending
+  let settledCount = 0;
+  for(let index = 0; index < tickers.length; index += SCAN_BATCH_SIZE){
+    const batch = tickers.slice(index, index + SCAN_BATCH_SIZE);
+    const outcomes = await Promise.all(batch.map(symbol => (
+      refreshWatchlistRecordFromSourceOfTruth(symbol, {
+        source,
+        clearReviewOverride:options.clearReviewOverride,
+        markPending,
+        force:options.force,
+        suppressLiveStatus:true,
+        deferIdleStatus:true
+      })
+    )));
+    outcomes.forEach(result => {
+      results.push(result);
+      settledCount += 1;
+      if(options.renderProgress){
+        setStatus(
+          'scannerSelectionStatus',
+          `<span class="ok">Refreshing watchlist from live data... ${escapeHtml(String(settledCount))}/${escapeHtml(String(tickers.length))}</span>`
+        );
+      }
     });
-    results.push(result);
-    if(options.renderProgress){
-      renderWatchlist();
-      if(activeReviewTicker()) renderReviewWorkspace();
-    }
   }
   if(options.persist !== false) commitTickerState();
   if(options.render !== false){
