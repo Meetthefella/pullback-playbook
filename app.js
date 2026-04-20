@@ -334,7 +334,6 @@ const DIARY_MISTAKE_TAG_OPTIONS = ['early entry', 'chased breakout', 'ignored we
 const DIARY_LESSON_TAG_OPTIONS = ['wait for bounce confirmation', '50MA setups need extra patience', 'weak tape needs stricter filtering', 'best setups come from strong RS names', 'avoid loose structure under 20MA'];
 const LIVE_PROCESS_COMPLETE_TO_IDLE_MS = 2200;
 const LIVE_PROCESS_IDLE_FADE_MS = 1500;
-const STARTUP_CONTEXT_ROTATE_MS = 1500;
 const ALERT_PRIORITY = {
   closed:1,
   entered:2,
@@ -347,7 +346,6 @@ const ALERT_PRIORITY = {
 };
 let liveProcessIdleTimer = null;
 let liveProcessHideTimer = null;
-let startupStatusRotateTimer = null;
 const APP_FETCH_TIMEOUT_MS = 12000;
 const BACKEND_REVIEW_POLL_MS = 10 * 60 * 1000;
 const MARKET_CACHE_SCHEMA_VERSION = 3;
@@ -4850,40 +4848,24 @@ function setStatus(id, html){
   if(el) el.innerHTML = html;
 }
 
-function startupStatusContextMessages(){
-  return [
-    `Setup: ${setupTypeChipLabel(state.setupType)}`,
-    `Risk: ${formatPound(state.userRiskPerTrade || currentMaxLoss())}`,
-    `Universe: ${scannerModeChipLabel(effectiveUniverseMode())}`
-  ];
+function startupStatusContextMessage(){
+  const parts = [];
+  const setup = String(setupTypeChipLabel(state.setupType || '') || '').trim();
+  const risk = String(formatPound(state.userRiskPerTrade || currentMaxLoss()) || '').trim();
+  const universe = String(scannerModeChipLabel(effectiveUniverseMode()) || '').trim();
+  if(setup) parts.push(`Setup: ${setup}`);
+  if(risk) parts.push(`Risk: ${risk}`);
+  if(universe) parts.push(`Universe: ${universe}`);
+  return parts.length ? parts.join(' | ') : 'Loading';
 }
 
 function startStartupStatusContextCycle(){
   uiState.startupStatusActive = true;
-  uiState.startupStatusIndex = Number(uiState.startupStatusIndex || 0);
-  if(startupStatusRotateTimer){
-    clearInterval(startupStatusRotateTimer);
-    startupStatusRotateTimer = null;
-  }
-  startupStatusRotateTimer = setInterval(() => {
-    if(!uiState.startupStatusActive){
-      clearInterval(startupStatusRotateTimer);
-      startupStatusRotateTimer = null;
-      return;
-    }
-    uiState.startupStatusIndex = Number(uiState.startupStatusIndex || 0) + 1;
-    renderLiveProcessStatusBanner();
-  }, STARTUP_CONTEXT_ROTATE_MS);
   renderLiveProcessStatusBanner();
 }
 
 function stopStartupStatusContextCycle(){
   uiState.startupStatusActive = false;
-  uiState.startupStatusIndex = 0;
-  if(startupStatusRotateTimer){
-    clearInterval(startupStatusRotateTimer);
-    startupStatusRotateTimer = null;
-  }
   renderLiveProcessStatusBanner();
 }
 
@@ -4898,12 +4880,8 @@ function renderLiveProcessStatusBanner(){
   let displayState = statusState;
   let displayMessage = String(status.message || 'Idle.');
   if(startupActive && statusState === 'idle'){
-    const messages = startupStatusContextMessages();
-    if(messages.length){
-      const index = Math.abs(Number(uiState.startupStatusIndex || 0)) % messages.length;
-      displayState = 'startup';
-      displayMessage = String(messages[index] || messages[0] || displayMessage);
-    }
+    displayState = 'startup';
+    displayMessage = startupStatusContextMessage();
   }
   if(banner){
     banner.setAttribute('data-live-process', displayState);
