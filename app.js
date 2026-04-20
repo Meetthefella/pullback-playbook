@@ -377,6 +377,12 @@ const tradingViewConfig = {
     // 'VOD.L':'LSE:VOD'
   }
 };
+const TRADINGVIEW_US_PRIMARY_EXCHANGE_ALLOWLIST = new Set(['NASDAQ', 'NYSE', 'AMEX']);
+const TRADINGVIEW_US_NON_PRIMARY_EXCHANGE_BLOCKLIST = new Set([
+  'BATS','BATSZX','BZX','CBOE','CBOEBZX','EDGX','EDGA',
+  'ARCA','NYSEARCA',
+  'OTC','OTCMKTS','OTCQX','OTCQB','OTCBB','PINK','GREY','GREYMARKET','EXPERT'
+]);
 const providerConfigs = {
   fmp:{
     id:'fmp',
@@ -13200,22 +13206,99 @@ function formatApproxBytes(bytes){
   return `${Math.ceil(bytes / 1024)} KB`;
 }
 
+function normalizeTradingViewExchange(exchange){
+  const value = String(exchange || '').trim().toUpperCase();
+  if(!value) return '';
+  const compact = value.replace(/[\s_-]+/g, '');
+  const aliasMap = {
+    NASDAQ:'NASDAQ',
+    XNAS:'NASDAQ',
+    NASDAQGS:'NASDAQ',
+    NASDAQGM:'NASDAQ',
+    NASDAQCM:'NASDAQ',
+    NMS:'NASDAQ',
+    NYSE:'NYSE',
+    XNYS:'NYSE',
+    NYQ:'NYSE',
+    NYSEMKT:'AMEX',
+    NYSEAMERICAN:'AMEX',
+    AMEX:'AMEX',
+    ASE:'AMEX',
+    XASE:'AMEX'
+  };
+  if(aliasMap[compact]) return aliasMap[compact];
+  if(TRADINGVIEW_US_NON_PRIMARY_EXCHANGE_BLOCKLIST.has(compact)) return '__US_NON_PRIMARY__';
+  return compact;
+}
+
+function parseTradingViewSymbol(value){
+  const match = String(value || '').trim().toUpperCase().match(/^([A-Z0-9_]+):([A-Z0-9.-]+)$/);
+  if(!match) return null;
+  return {
+    exchange:match[1],
+    ticker:match[2]
+  };
+}
+
+function isLikelyUsEquityTicker(symbol){
+  const ticker = String(symbol || '').trim().toUpperCase();
+  if(!ticker) return false;
+  if(ticker.includes('.')) return false;
+  if(Object.keys(tradingViewConfig.suffixMap || {}).some(suffix => suffix && ticker.endsWith(String(suffix).toUpperCase()))) return false;
+  return /^[A-Z][A-Z0-9-]*$/.test(ticker);
+}
+
 function tradingViewSymbolForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return '';
-  const isValidTvSymbol = value => /^[A-Z0-9_]+:[A-Z0-9.-]+$/.test(String(value || '').trim().toUpperCase());
+  const symbolUpper = symbol.toUpperCase();
+  const toTvSymbol = exchange => `${exchange}:${symbolUpper}`;
   const record = getTickerRecord(symbol);
-  if(record && record.meta.exchange && isValidTvSymbol(record.meta.tradingViewSymbol)) return record.meta.tradingViewSymbol;
   const meta = getStoredTickerMeta(symbol);
-  if(meta && meta.exchange && isValidTvSymbol(meta.tradingViewSymbol)) return meta.tradingViewSymbol;
-  if(tradingViewConfig.symbolOverrides[symbol]) return tradingViewConfig.symbolOverrides[symbol];
+  const recordTv = record && record.meta ? parseTradingViewSymbol(record.meta.tradingViewSymbol) : null;
+  const metaTv = parseTradingViewSymbol(meta && meta.tradingViewSymbol);
+  const recordExchange = normalizeTradingViewExchange(record && record.meta && record.meta.exchange);
+  const metaExchange = normalizeTradingViewExchange(meta && meta.exchange);
+  const primaryFromCandidates = [recordExchange, metaExchange, recordTv && normalizeTradingViewExchange(recordTv.exchange), metaTv && normalizeTradingViewExchange(metaTv.exchange)]
+    .find(exchange => TRADINGVIEW_US_PRIMARY_EXCHANGE_ALLOWLIST.has(exchange));
+
+  if(recordTv){
+    const tvExchange = normalizeTradingViewExchange(recordTv.exchange);
+    if(tvExchange !== '__US_NON_PRIMARY__') return `${tvExchange || recordTv.exchange}:${recordTv.ticker}`;
+  }
+  if(metaTv){
+    const tvExchange = normalizeTradingViewExchange(metaTv.exchange);
+    if(tvExchange !== '__US_NON_PRIMARY__') return `${tvExchange || metaTv.exchange}:${metaTv.ticker}`;
+  }
+  if(tradingViewConfig.symbolOverrides[symbol]){
+    const overrideParsed = parseTradingViewSymbol(tradingViewConfig.symbolOverrides[symbol]);
+    if(overrideParsed){
+      const tvExchange = normalizeTradingViewExchange(overrideParsed.exchange);
+      if(tvExchange !== '__US_NON_PRIMARY__') return `${tvExchange || overrideParsed.exchange}:${overrideParsed.ticker}`;
+    }
+  }
   for(const [suffix, exchange] of Object.entries(tradingViewConfig.suffixMap)){
-    if(symbol.endsWith(suffix)){
+    if(symbolUpper.endsWith(String(suffix || '').toUpperCase())){
       const baseSymbol = symbol.slice(0, -suffix.length) || symbol;
       return `${exchange}:${baseSymbol}`;
     }
   }
-  return symbol;
+
+  if(TRADINGVIEW_US_PRIMARY_EXCHANGE_ALLOWLIST.has(recordExchange)) return toTvSymbol(recordExchange);
+  if(TRADINGVIEW_US_PRIMARY_EXCHANGE_ALLOWLIST.has(metaExchange)) return toTvSymbol(metaExchange);
+  if(primaryFromCandidates) return toTvSymbol(primaryFromCandidates);
+
+  const explicitNonUsExchange = [recordExchange, metaExchange]
+    .filter(Boolean)
+    .some(exchange => exchange !== '__US_NON_PRIMARY__' && !TRADINGVIEW_US_PRIMARY_EXCHANGE_ALLOWLIST.has(exchange));
+  if(explicitNonUsExchange) return symbolUpper;
+  if(symbolUpper.includes('.')) return symbolUpper;
+
+  if(recordExchange === '__US_NON_PRIMARY__' || metaExchange === '__US_NON_PRIMARY__' || isLikelyUsEquityTicker(symbolUpper)){
+    return toTvSymbol('NASDAQ');
+  }
+
+  return symbolUpper;
 }
 
 function openTickerChart(ticker){
