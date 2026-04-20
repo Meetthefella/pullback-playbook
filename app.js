@@ -334,6 +334,7 @@ const DIARY_MISTAKE_TAG_OPTIONS = ['early entry', 'chased breakout', 'ignored we
 const DIARY_LESSON_TAG_OPTIONS = ['wait for bounce confirmation', '50MA setups need extra patience', 'weak tape needs stricter filtering', 'best setups come from strong RS names', 'avoid loose structure under 20MA'];
 const LIVE_PROCESS_COMPLETE_TO_IDLE_MS = 2200;
 const LIVE_PROCESS_IDLE_FADE_MS = 1500;
+const STARTUP_CONTEXT_ROTATE_MS = 1500;
 const ALERT_PRIORITY = {
   closed:1,
   entered:2,
@@ -346,6 +347,7 @@ const ALERT_PRIORITY = {
 };
 let liveProcessIdleTimer = null;
 let liveProcessHideTimer = null;
+let startupStatusRotateTimer = null;
 const APP_FETCH_TIMEOUT_MS = 12000;
 const BACKEND_REVIEW_POLL_MS = 10 * 60 * 1000;
 const MARKET_CACHE_SCHEMA_VERSION = 3;
@@ -2733,6 +2735,7 @@ function loadState(){
   renderPatternAnalytics();
   renderPlannerPlanSummary();
   refreshRiskContextForActiveSetups();
+  startStartupStatusContextCycle();
   if(startupRefreshTickers.length){
     setStatus('scannerSelectionStatus', `<span class="ok">Refreshing ${escapeHtml(String(startupRefreshTickers.length))} watchlist ticker${startupRefreshTickers.length === 1 ? '' : 's'} from live data...</span>`);
     setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
@@ -2760,6 +2763,8 @@ function loadState(){
     }).catch(() => {
       setStatus('scannerSelectionStatus', '<span class="warntext">Startup watchlist refresh could not complete. Kept saved watchlist state active locally.</span>');
       setLiveProcessStatus('error', 'Refresh failed.');
+    }).finally(() => {
+      stopStartupStatusContextCycle();
     });
   };
   // Let persisted UI paint first; startup market refresh runs as background enhancement.
@@ -4845,24 +4850,77 @@ function setStatus(id, html){
   if(el) el.innerHTML = html;
 }
 
+function startupStatusContextMessages(){
+  return [
+    `Setup: ${setupTypeChipLabel(state.setupType)}`,
+    `Risk: ${formatPound(state.userRiskPerTrade || currentMaxLoss())}`,
+    `Universe: ${scannerModeChipLabel(effectiveUniverseMode())}`
+  ];
+}
+
+function startStartupStatusContextCycle(){
+  uiState.startupStatusActive = true;
+  uiState.startupStatusIndex = Number(uiState.startupStatusIndex || 0);
+  if(startupStatusRotateTimer){
+    clearInterval(startupStatusRotateTimer);
+    startupStatusRotateTimer = null;
+  }
+  startupStatusRotateTimer = setInterval(() => {
+    if(!uiState.startupStatusActive){
+      clearInterval(startupStatusRotateTimer);
+      startupStatusRotateTimer = null;
+      return;
+    }
+    uiState.startupStatusIndex = Number(uiState.startupStatusIndex || 0) + 1;
+    renderLiveProcessStatusBanner();
+  }, STARTUP_CONTEXT_ROTATE_MS);
+  renderLiveProcessStatusBanner();
+}
+
+function stopStartupStatusContextCycle(){
+  uiState.startupStatusActive = false;
+  uiState.startupStatusIndex = 0;
+  if(startupStatusRotateTimer){
+    clearInterval(startupStatusRotateTimer);
+    startupStatusRotateTimer = null;
+  }
+  renderLiveProcessStatusBanner();
+}
+
 function renderLiveProcessStatusBanner(){
   const banner = $('liveProcessStatusBanner');
   const text = $('liveProcessStatusText');
   const status = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
     ? uiState.liveProcessStatus
     : {state:'idle', message:'Idle.'};
+  const startupActive = !!uiState.startupStatusActive;
+  const statusState = String(status.state || 'idle');
+  let displayState = statusState;
+  let displayMessage = String(status.message || 'Idle.');
+  if(startupActive && statusState === 'idle'){
+    const messages = startupStatusContextMessages();
+    if(messages.length){
+      const index = Math.abs(Number(uiState.startupStatusIndex || 0)) % messages.length;
+      displayState = 'startup';
+      displayMessage = String(messages[index] || messages[0] || displayMessage);
+    }
+  }
   if(banner){
-    banner.setAttribute('data-live-process', String(status.state || 'idle'));
-    if(status.state !== 'idle'){
+    banner.setAttribute('data-live-process', displayState);
+    if(displayState !== 'idle'){
       banner.classList.remove('is-idle-hidden');
     }
   }
   if(text){
-    text.textContent = String(status.message || 'Idle.');
+    text.textContent = displayMessage;
+  }
+  if(startupActive && displayState !== 'idle' && liveProcessHideTimer){
+    clearTimeout(liveProcessHideTimer);
+    liveProcessHideTimer = null;
   }
   if(
     banner
-    && status.state === 'idle'
+    && displayState === 'idle'
     && !banner.classList.contains('is-idle-hidden')
     && !liveProcessHideTimer
   ){
@@ -9602,6 +9660,7 @@ function holdTargetDescriptor(target){
 
 function shouldIgnoreHoldStartTarget(target, helper, cardMode){
   if(!target || !target.closest) return false;
+  if(cardMode && target.closest('.watchlist-card__details')) return true;
   const interactiveSelector = 'button,a,input,textarea,select,summary,[contenteditable="true"],.entry-conditions-panel,[data-hold-entry-helper]';
   if(target.closest(interactiveSelector)) return true;
   if(cardMode && helper && target.closest('[data-entry-hold-helper]') !== helper) return true;
