@@ -14197,7 +14197,7 @@ function attachScannerCardSwipeHandler(node, ticker){
   if(!node || !ticker) return;
   const threshold = 65;
   const assistDistance = 45;
-  const swipeRemoveAnimationMs = 140;
+  const swipeRemoveAnimationMs = 120;
   const cancelSelectors = ['button', 'summary', 'input', 'textarea'];
   const gestureState = {
     startX:0,
@@ -14218,6 +14218,12 @@ function attachScannerCardSwipeHandler(node, ticker){
     node.style.transition = `transform ${swipeRemoveAnimationMs}ms ease, opacity ${swipeRemoveAnimationMs}ms ease`;
     node.style.transform = '';
     node.style.opacity = '';
+    node.style.maxHeight = '';
+    node.style.paddingTop = '';
+    node.style.paddingBottom = '';
+    node.style.marginTop = '';
+    node.style.marginBottom = '';
+    node.style.overflow = '';
     gestureState.maxDistance = 0;
   };
   const shouldIgnore = target => cancelSelectors.some(selector => target && target.closest(selector));
@@ -14247,9 +14253,19 @@ function attachScannerCardSwipeHandler(node, ticker){
   const removeWithAnimation = (distance) => {
     if(removing) return;
     removing = true;
-    node.style.transition = `transform ${swipeRemoveAnimationMs}ms ease, opacity ${swipeRemoveAnimationMs}ms ease`;
+    const cardHeight = Math.max(0, Math.ceil(node.getBoundingClientRect().height || node.offsetHeight || 0));
+    if(cardHeight > 0){
+      node.style.maxHeight = `${cardHeight}px`;
+      node.style.overflow = 'hidden';
+    }
+    node.style.transition = `transform ${swipeRemoveAnimationMs}ms ease, opacity ${swipeRemoveAnimationMs}ms ease, max-height ${swipeRemoveAnimationMs}ms ease, padding ${swipeRemoveAnimationMs}ms ease, margin ${swipeRemoveAnimationMs}ms ease`;
     node.style.transform = 'translateX(-150%)';
     node.style.opacity = '0';
+    node.style.maxHeight = '0px';
+    node.style.paddingTop = '0px';
+    node.style.paddingBottom = '0px';
+    node.style.marginTop = '0px';
+    node.style.marginBottom = '0px';
     setSwipeFeedback(ticker, {
       removed:true,
       distance,
