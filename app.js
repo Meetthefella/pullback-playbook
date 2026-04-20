@@ -14197,7 +14197,8 @@ function attachScannerCardSwipeHandler(node, ticker){
   if(!node || !ticker) return;
   const threshold = 65;
   const assistDistance = 45;
-  const swipeRemoveAnimationMs = 120;
+  const swipeExitAnimationMs = 110;
+  const swipeCollapseAnimationMs = 110;
   const cancelSelectors = ['button', 'summary', 'input', 'textarea'];
   const gestureState = {
     startX:0,
@@ -14215,7 +14216,7 @@ function attachScannerCardSwipeHandler(node, ticker){
   let startTime = 0;
   let removing = false;
   const reset = () => {
-    node.style.transition = `transform ${swipeRemoveAnimationMs}ms ease, opacity ${swipeRemoveAnimationMs}ms ease`;
+    node.style.transition = `transform ${swipeExitAnimationMs}ms ease, opacity ${swipeExitAnimationMs}ms ease`;
     node.style.transform = '';
     node.style.opacity = '';
     node.style.maxHeight = '';
@@ -14258,14 +14259,9 @@ function attachScannerCardSwipeHandler(node, ticker){
       node.style.maxHeight = `${cardHeight}px`;
       node.style.overflow = 'hidden';
     }
-    node.style.transition = `transform ${swipeRemoveAnimationMs}ms ease, opacity ${swipeRemoveAnimationMs}ms ease, max-height ${swipeRemoveAnimationMs}ms ease, padding ${swipeRemoveAnimationMs}ms ease, margin ${swipeRemoveAnimationMs}ms ease`;
+    node.style.transition = `transform ${swipeExitAnimationMs}ms ease, opacity ${swipeExitAnimationMs}ms ease`;
     node.style.transform = 'translateX(-150%)';
     node.style.opacity = '0';
-    node.style.maxHeight = '0px';
-    node.style.paddingTop = '0px';
-    node.style.paddingBottom = '0px';
-    node.style.marginTop = '0px';
-    node.style.marginBottom = '0px';
     setSwipeFeedback(ticker, {
       removed:true,
       distance,
@@ -14276,7 +14272,16 @@ function attachScannerCardSwipeHandler(node, ticker){
     gestureState.suppressClick = true;
     recordGestureDebug(ticker, 'card removed by horizontal swipe; review blocked');
     closeScanCardMenu();
-    setTimeout(() => removeCard(ticker), swipeRemoveAnimationMs);
+    setTimeout(() => {
+      if(!removing) return;
+      node.style.transition = `max-height ${swipeCollapseAnimationMs}ms ease, padding ${swipeCollapseAnimationMs}ms ease, margin ${swipeCollapseAnimationMs}ms ease`;
+      node.style.maxHeight = '0px';
+      node.style.paddingTop = '0px';
+      node.style.paddingBottom = '0px';
+      node.style.marginTop = '0px';
+      node.style.marginBottom = '0px';
+    }, swipeExitAnimationMs);
+    setTimeout(() => removeCard(ticker), swipeExitAnimationMs + swipeCollapseAnimationMs);
   };
   const finalize = event => {
     if(pointerId === null) return;
