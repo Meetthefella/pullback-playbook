@@ -521,7 +521,7 @@ function persistState(){
   if(!liteSaved && !settingsSaved && !recordsSaved){
     console.warn('STATE_PERSIST_FAILED', {key, liteKey, settingsKey, recordsLiteKey});
   }else{
-    console.warn('STATE_PERSIST_FALLBACK_ONLY', {
+    logDebugWarn('DEBUG_STORAGE', 'STATE_PERSIST_FALLBACK_ONLY', {
       key,
       liteKey,
       settingsKey,
@@ -9751,7 +9751,6 @@ function holdTargetDescriptor(target){
 
 function shouldIgnoreHoldStartTarget(target, helper, cardMode){
   if(!target || !target.closest) return false;
-  if(cardMode && target.closest('.watchlist-card__details')) return true;
   const interactiveSelector = 'button,a,input,textarea,select,summary,[contenteditable="true"],.entry-conditions-panel,[data-hold-entry-helper]';
   if(target.closest(interactiveSelector)) return true;
   if(cardMode && helper && target.closest('[data-entry-hold-helper]') !== helper) return true;
