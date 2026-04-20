@@ -1675,6 +1675,18 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 .watchlist-card[data-entry-hold-helper="1"]{
   touch-action:pan-y;
 }
+.watchlist-card[data-entry-hold-helper="1"] .watchlist-card__header,
+.watchlist-card[data-entry-hold-helper="1"] .watchlist-card__status,
+.watchlist-card[data-entry-hold-helper="1"] .watchlist-card__company,
+.watchlist-card[data-entry-hold-helper="1"] .watchlist-card__priority,
+.watchlist-card[data-entry-hold-helper="1"] .watchlist-signal-row,
+.watchlist-card[data-entry-hold-helper="1"] .watchlist-card__reason,
+.watchlist-card[data-entry-hold-helper="1"] .watchlist-plan-meta,
+.watchlist-card[data-entry-hold-helper="1"] .watchlist-card__detail{
+  user-select:none;
+  -webkit-user-select:none;
+  -webkit-touch-callout:none;
+}
 .watchlist-card[data-entry-hold-helper="1"]::after{
   content:'👆';
   position:absolute;
