@@ -291,6 +291,12 @@ uiState.verdictCapAuditLastSignature = String(uiState.verdictCapAuditLastSignatu
 uiState.liveProcessStatus = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
   ? uiState.liveProcessStatus
   : {state:'idle', message:'Idle.', updatedAt:''};
+if(typeof window !== 'undefined'){
+  window.DEBUG_RENDER = window.DEBUG_RENDER === true;
+  window.DEBUG_ANALYSIS = window.DEBUG_ANALYSIS === true;
+  window.DEBUG_LIFECYCLE = window.DEBUG_LIFECYCLE === true;
+  window.DEBUG_AUDIT = window.DEBUG_AUDIT === true;
+}
 const marketDataCache = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
@@ -2539,7 +2545,7 @@ function syncLegacyCollectionsFromTickerRecords(){
 }
 
 function commitTickerState(){
-  console.debug('PROJECTION_FROM_TICKER_RECORD', 'syncLegacyCollections');
+  logDebug('DEBUG_RENDER', 'PROJECTION_FROM_TICKER_RECORD', 'syncLegacyCollections');
   syncLegacyCollectionsFromTickerRecords();
   persistState();
   scheduleTrackedRecordsSync();
@@ -3312,7 +3318,7 @@ function queueDebugSnapshot(options = {}){
 }
 
 function logQueueMutation(action, beforeSnapshot, options = {}){
-  console.debug(action, {
+  logDebug('DEBUG_LIFECYCLE', action, {
     before:beforeSnapshot,
     after:queueDebugSnapshot(options)
   });
@@ -4433,7 +4439,7 @@ function renderWatchlist(){
     if(showExpired) return true;
     return !['dead','expired'].includes(lifecycle.state);
   });
-  console.debug('RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
   if(!records.length){
     box.innerHTML = showExpired
       ? '<div class="summary">No watchlist entries match this filter right now.</div>'
@@ -4506,7 +4512,7 @@ function renderWatchlist(){
       });
       const reviewPresentation = resolveEmojiPresentation(record, {context:'review'});
       if(reviewPresentation.primaryText !== watchlistPresentation.primaryText){
-        console.warn('EMOJI_SURFACE_DISAGREEMENT', {ticker:record.ticker, watchlist:watchlistPresentation.primaryText, review:reviewPresentation.primaryText});
+        logDebugWarn('DEBUG_RENDER', 'EMOJI_SURFACE_DISAGREEMENT', {ticker:record.ticker, watchlist:watchlistPresentation.primaryText, review:reviewPresentation.primaryText});
       }
       const reasoning = decisionReasoningForRecord(record, {
         reviewVerdict:view.displayStage,
@@ -4870,10 +4876,25 @@ function setStatus(id, html){
   if(el) el.innerHTML = html;
 }
 
+function debugFlagEnabled(flagName){
+  return typeof window !== 'undefined' && window && window[flagName] === true;
+}
+
+function logDebug(flagName, ...args){
+  try{
+    if(debugFlagEnabled(flagName)) console.log(...args);
+  }catch(error){}
+}
+
+function logDebugWarn(flagName, ...args){
+  try{
+    if(debugFlagEnabled(flagName)) console.warn(...args);
+  }catch(error){}
+}
+
 function logAnalysisDebug(label, payload){
-  if(window.DEBUG_ANALYSIS_PIPELINE){
-    console.log(label, payload);
-  }
+  logDebug('DEBUG_ANALYSIS', label, payload);
+  logDebug('DEBUG_ANALYSIS_PIPELINE', label, payload);
 }
 
 function startupStatusContextMessage(){
@@ -6324,7 +6345,7 @@ function legacyRenderTradeDiaryPreOutcomeEngine(){
   const box = $('tradeDiary');
   if(!box) return;
   const diaryItems = diaryTradeRecords();
-  console.debug('RENDER_FROM_TICKER_RECORD', 'tradeDiary', diaryItems.length);
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'tradeDiary', diaryItems.length);
   if(!diaryItems.length){
     box.innerHTML = '<div class="summary">No trade records yet. Save an analysed setup from a ticker card.</div>';
     renderPatternAnalytics();
@@ -6372,7 +6393,7 @@ function legacyRenderTradeDiaryExpanded(){
   const box = $('tradeDiary');
   if(!box) return;
   const diaryItems = diaryTradeRecords();
-  console.debug('RENDER_FROM_TICKER_RECORD', 'tradeDiary', diaryItems.length);
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'tradeDiary', diaryItems.length);
   if(!diaryItems.length){
     box.innerHTML = '<div class="summary">No trade records yet. Save an analysed setup from a ticker card.</div>';
     return;
@@ -6404,7 +6425,7 @@ function renderTradeDiary(){
   const box = $('tradeDiary');
   if(!box) return;
   const diaryItems = diaryTradeRecords();
-  console.debug('RENDER_FROM_TICKER_RECORD', 'tradeDiary', diaryItems.length);
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'tradeDiary', diaryItems.length);
   if(!diaryItems.length){
     box.innerHTML = '<div class="summary">No trade records yet. Save an analysed setup from the review workspace.</div>';
     return;
@@ -8012,7 +8033,7 @@ function legacyFinalVerdictForRecord(record, options = {}){
     ? executionDowngradeVerdictForRecord(item, {displayedPlan, planUiState})
     : '';
   const finalVerdict = mostConservativeVerdict(baseVerdict, advisoryVerdict, executionVerdict);
-  console.debug('FINAL_VERDICT_TRACE', {
+  logDebug('DEBUG_AUDIT', 'FINAL_VERDICT_TRACE', {
     ticker:item.ticker,
     baseVerdict,
     advisoryVerdict,
@@ -8147,13 +8168,13 @@ function legacyResolveEmojiPresentation(record, options = {}){
   const primaryText = `${primaryEmoji} ${primaryLabel}`;
 
   if(['monitor','developing'].includes(primaryState) && primaryEmoji === '💀'){
-    console.warn('EMOJI_STATE_MISMATCH', {ticker:item.ticker, finalVerdict, primaryState, primaryEmoji});
+    logDebugWarn('DEBUG_RENDER', 'EMOJI_STATE_MISMATCH', {ticker:item.ticker, finalVerdict, primaryState, primaryEmoji});
   }
   if(finalVerdict === 'Avoid' && deadCheck.dead && primaryEmoji !== '💀'){
-    console.warn('EMOJI_STATE_MISMATCH', {ticker:item.ticker, finalVerdict, avoidSubtype, primaryEmoji, deadReasonCode:deadCheck.reasonCode});
+    logDebugWarn('DEBUG_RENDER', 'EMOJI_STATE_MISMATCH', {ticker:item.ticker, finalVerdict, avoidSubtype, primaryEmoji, deadReasonCode:deadCheck.reasonCode});
   }
   if(primaryState === 'dead' && !deadCheck.dead){
-    console.warn('DEAD_CLASSIFICATION_SOFT_BLOCKER', {
+    logDebugWarn('DEBUG_RENDER', 'DEAD_CLASSIFICATION_SOFT_BLOCKER', {
       ticker:item.ticker,
       finalVerdict,
       avoidSubtype,
@@ -8176,7 +8197,7 @@ function legacyResolveEmojiPresentation(record, options = {}){
     const code = String(modifier && modifier.code || '').trim();
     const key = `${String(modifier && modifier.emoji || '').trim()}|${String(modifier && modifier.label || '').trim()}`;
     if((code && seenModifierCodes.has(code)) || seenModifierKeys.has(key)){
-      console.warn('EMOJI_MODIFIER_DUPLICATE', {ticker:item.ticker, code, key});
+      logDebugWarn('DEBUG_RENDER', 'EMOJI_MODIFIER_DUPLICATE', {ticker:item.ticker, code, key});
       return;
     }
     if(code) seenModifierCodes.add(code);
@@ -8205,7 +8226,7 @@ function emojiModifierMarkup(presentation){
     const code = String(modifier && modifier.code || '').trim();
     const key = `${String(modifier && modifier.emoji || '').trim()}|${String(modifier && modifier.label || '').trim()}`;
     if((code && seenCodes.has(code)) || seenKeys.has(key)){
-      console.warn('EMOJI_RENDER_DUPLICATE', {code, key});
+      logDebugWarn('DEBUG_RENDER', 'EMOJI_RENDER_DUPLICATE', {code, key});
       return;
     }
     if(code) seenCodes.add(code);
@@ -8215,7 +8236,7 @@ function emojiModifierMarkup(presentation){
   const limitedModifiers = modifiers.slice(0, 2);
   const duplicateCodes = limitedModifiers.map(modifier => modifier.code).filter(Boolean);
   if(new Set(duplicateCodes).size !== duplicateCodes.length){
-    console.warn('EMOJI_RENDER_DUPLICATE', {duplicateCodes});
+    logDebugWarn('DEBUG_RENDER', 'EMOJI_RENDER_DUPLICATE', {duplicateCodes});
   }
   if(!limitedModifiers.length) return '';
   return limitedModifiers.map(modifier => `<span class="pill ${escapeHtml(modifier.className || 'near')}">${escapeHtml(`${modifier.emoji} ${modifier.label}`)}</span>`).join('');
@@ -8707,7 +8728,7 @@ function actionPresentationForRecord(record, options = {}){
     finalVerdict:options.finalVerdict || reviewHeaderVerdictForRecord(item)
   });
   if(['monitor','developing'].includes(resolved.primaryState) && /ignore|dead|💀|💩/i.test(String(resolved.actionLabel || ''))){
-    console.warn('REVIEW_ACTION_TERMINAL_LEAK', {
+    logDebugWarn('DEBUG_LIFECYCLE', 'REVIEW_ACTION_TERMINAL_LEAK', {
       ticker:item.ticker,
       finalVerdict:resolved.finalVerdict,
       primaryState:resolved.primaryState,
@@ -11530,7 +11551,7 @@ function getReviewAnalysisState(record){
     reviewedAt: String(sourceState.reviewedAt || item.review.lastReviewedAt || ''),
     hasSavedAnalysis: !!(normalizedAnalysis || rawAnalysis)
   };
-  if(window.DEBUG_REVIEW_WORKSPACE){
+  if(debugFlagEnabled('DEBUG_REVIEW_WORKSPACE') || debugFlagEnabled('DEBUG_ANALYSIS')){
     console.log('REVIEW_WORKSPACE_READ', {
       ticker:item.ticker,
           reviewFields:{
@@ -12052,7 +12073,7 @@ async function refreshCardMarketData(ticker, options = {}){
     if(!card.stop && Number.isFinite(tradePlan.stop)) card.stop = tradePlan.stop.toFixed(2);
     if(!card.target && Number.isFinite(tradePlan.target)) card.target = tradePlan.target.toFixed(2);
   }
-  console.log('FINAL_ANALYSIS', {
+  logDebug('DEBUG_ANALYSIS', 'FINAL_ANALYSIS', {
     ticker:card.ticker,
     quality_score:card.score,
     chart_verdict:card.chartVerdict,
@@ -13432,7 +13453,7 @@ function renderAnalysisPanelFromRecord(record){
     return `<div class="responsegrid"><div class="mutebox tiny">${escapeHtml(advisory.advisoryNote)}</div>${advisory.reviewMoreConservative ? '<div class="mutebox warntext"><strong>Final review is more conservative than the saved AI read.</strong></div>' : ''}${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Metrics</summary><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div>${planMarkup}</div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
   }
   if(!analysisState.rawAnalysis) return '<div class="tiny">No AI analysis saved yet.</div>';
-  console.debug('LEGACY_PATH_STILL_IN_USE', 'renderAnalysisPanelFromRecord-fallback', item.ticker);
+  logDebug('DEBUG_RENDER', 'LEGACY_PATH_STILL_IN_USE', 'renderAnalysisPanelFromRecord-fallback', item.ticker);
   return `<div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div>`;
 }
 
@@ -14141,7 +14162,7 @@ function renderScannerResults(){
   if(resultsToggle){
     syncResultsToggleLabel();
   }
-  console.debug('RENDER_FROM_TICKER_RECORD', 'rankedResults', records.length);
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'rankedResults', records.length);
   if(!records.length){
     updateScannerSelectionStatus();
     if(uiState.scannerShortlistSuppressed){
@@ -14272,7 +14293,7 @@ function legacyRenderCardsFromCardList(){
   if(!box) return;
   box.innerHTML = '';
   const records = activeReviewTicker() ? [getTickerRecord(activeReviewTicker())].filter(Boolean) : [];
-  console.debug('RENDER_FROM_TICKER_RECORD', 'cards', records.length);
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'cards', records.length);
   if(!records.length){
     box.innerHTML = (state.tickers || []).length
       ? '<div class="summary">Open one ranked result to load it into the review workspace.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>'
@@ -14626,7 +14647,7 @@ function renderReviewWorkspace(options = {}){
     warningState:scannerView && scannerView.warningState
   });
   if(scannerPresentation.primaryText !== reviewBadgeLabel){
-    console.warn('EMOJI_SURFACE_DISAGREEMENT', {ticker:record.ticker, scanner:scannerPresentation.primaryText, review:reviewBadgeLabel});
+    logDebugWarn('DEBUG_RENDER', 'EMOJI_SURFACE_DISAGREEMENT', {ticker:record.ticker, scanner:scannerPresentation.primaryText, review:reviewBadgeLabel});
   }
   const downgradeSummary = reviewDowngradeSummaryForRecord(record, {
     scannerStatus,
@@ -14637,13 +14658,13 @@ function renderReviewWorkspace(options = {}){
     warningState
   });
   if(displayStage === 'Watch' && /ignore/i.test(String(reviewAction.label || ''))){
-    console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:reviewAction.label});
+    logDebugWarn('DEBUG_RENDER', 'REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:reviewAction.label});
   }
   if(displayStage === 'Watch' && avoidSubtype === 'terminal'){
-    console.warn('REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, avoidSubtype});
+    logDebugWarn('DEBUG_RENDER', 'REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, avoidSubtype});
   }
   if((displayStage !== 'Avoid' && resolvedContract.primaryState === 'dead') || (displayStage === 'Avoid' && resolvedContract.primaryState !== 'dead' && avoidSubtype === 'terminal')){
-    console.warn('REVIEW_HEADER_DISAGREEMENT', {ticker:record.ticker, finalVerdict:displayStage, reviewBadgeLabel, headline:decisionReasoning.headline, nextAction:reviewAction.label});
+    logDebugWarn('DEBUG_RENDER', 'REVIEW_HEADER_DISAGREEMENT', {ticker:record.ticker, finalVerdict:displayStage, reviewBadgeLabel, headline:decisionReasoning.headline, nextAction:reviewAction.label});
   }
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
@@ -15009,7 +15030,7 @@ function loadCard(ticker, options = {}){
     scrollReviewSectionIntoView(record.ticker, 'loadCard.pre');
   }
   setScannerCardClickTrace(ticker, 'loadCard.enter', `touchLifecycle=${options.touchLifecycle === true} recompute=${options.recompute === true}`);
-  console.debug('RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
   setActiveReviewTicker(record.ticker);
   if(options.touchLifecycle === true){
     refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
@@ -16986,28 +17007,30 @@ function runScannerVerdictResolutionAudit(options = {}){
     ? allTickerRecords()
     : requestedTickers.map(ticker => getTickerRecord(ticker)).filter(Boolean);
   const rows = records.map(scannerStageVerdictDiagnosticsForRecord);
-  console.groupCollapsed(`[ScannerVerdictAudit] tickers=${rows.length}`);
-  console.info('requestedTickers', requestedTickers);
-  console.table(rows.map(row => ({
-    ticker:row.ticker,
-    structureState:row.structureState,
-    bounceState:row.bounceState,
-    stabilisationState:row.stabilisationState,
-    pullbackState:row.pullbackState,
-    pullbackZone:row.pullbackZone,
-    planState:row.planState,
-    tradeability:row.tradeability,
-    scannerRawBaseVerdict:row.scannerRawBaseVerdict,
-    legacyScannerVerdict:row.legacyScannerVerdict,
-    resolvedScannerVerdict:row.resolvedScannerVerdict,
-    recomputedScannerVerdict:row.recomputedScannerVerdict,
-    avoidTriggerSource:row.avoidTriggerSource,
-    avoidReason:row.avoidReason
-  })));
-  rows.forEach(row => {
-    console.info(`[ScannerVerdictAudit:${row.ticker}]`, row);
-  });
-  console.groupEnd();
+  if(debugFlagEnabled('DEBUG_AUDIT')){
+    console.groupCollapsed(`[ScannerVerdictAudit] tickers=${rows.length}`);
+    console.info('requestedTickers', requestedTickers);
+    console.table(rows.map(row => ({
+      ticker:row.ticker,
+      structureState:row.structureState,
+      bounceState:row.bounceState,
+      stabilisationState:row.stabilisationState,
+      pullbackState:row.pullbackState,
+      pullbackZone:row.pullbackZone,
+      planState:row.planState,
+      tradeability:row.tradeability,
+      scannerRawBaseVerdict:row.scannerRawBaseVerdict,
+      legacyScannerVerdict:row.legacyScannerVerdict,
+      resolvedScannerVerdict:row.resolvedScannerVerdict,
+      recomputedScannerVerdict:row.recomputedScannerVerdict,
+      avoidTriggerSource:row.avoidTriggerSource,
+      avoidReason:row.avoidReason
+    })));
+    rows.forEach(row => {
+      console.info(`[ScannerVerdictAudit:${row.ticker}]`, row);
+    });
+    console.groupEnd();
+  }
   return rows;
 }
 
@@ -17180,12 +17203,14 @@ function runVerdictCapAudit(options = {}){
       audit_trade_structure_clear_enough:!!blockers.audit_trade_structure_clear_enough
     };
   });
-  console.groupCollapsed(`[VerdictCapAuditTrace] ${source} | records=${finalRecordTickers.length}`);
-  console.info('scannerSessionTickers', scannerSessionTickers);
-  console.info('rankedTickerRecords', rankedTickers);
-  console.info('finalAuditRecords', finalRecordTickers);
-  console.table(auditRows);
-  console.groupEnd();
+  if(debugFlagEnabled('DEBUG_AUDIT')){
+    console.groupCollapsed(`[VerdictCapAuditTrace] ${source} | records=${finalRecordTickers.length}`);
+    console.info('scannerSessionTickers', scannerSessionTickers);
+    console.info('rankedTickerRecords', rankedTickers);
+    console.info('finalAuditRecords', finalRecordTickers);
+    console.table(auditRows);
+    console.groupEnd();
+  }
   const summary = summarizeVerdictCapUsage(records);
   uiState.verdictCapAudit = {
     ...summary,
@@ -17207,12 +17232,14 @@ function runVerdictCapAudit(options = {}){
   });
   if(signature !== uiState.verdictCapAuditLastSignature){
     uiState.verdictCapAuditLastSignature = signature;
-    console.groupCollapsed(`[VerdictCapAudit] ${source} | requested=${summary.requestedEntryOrNearEntry} capped=${summary.cappedApplied}`);
-    console.table(uiState.verdictCapAudit.samples || []);
-    console.table(uiState.verdictCapAudit.topCapCodes || []);
-    console.table(uiState.verdictCapAudit.topPreventedCombos || []);
-    console.info('overblockingCandidate', uiState.verdictCapAudit.overblockingCandidate);
-    console.groupEnd();
+    if(debugFlagEnabled('DEBUG_AUDIT')){
+      console.groupCollapsed(`[VerdictCapAudit] ${source} | requested=${summary.requestedEntryOrNearEntry} capped=${summary.cappedApplied}`);
+      console.table(uiState.verdictCapAudit.samples || []);
+      console.table(uiState.verdictCapAudit.topCapCodes || []);
+      console.table(uiState.verdictCapAudit.topPreventedCombos || []);
+      console.info('overblockingCandidate', uiState.verdictCapAudit.overblockingCandidate);
+      console.groupEnd();
+    }
   }
   return uiState.verdictCapAudit;
 }

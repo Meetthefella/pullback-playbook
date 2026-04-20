@@ -210,3 +210,8 @@ The following hook points are ready for the next step:
 - The OpenAI key remains server-side only.
 - The provider API keys remain server-side only.
 - MarketData.app currently powers snapshots from delayed quotes plus daily candles. Name, exchange, and search coverage are still stronger on FMP.
+- Console logs can be re-enabled at runtime with:
+      - window.DEBUG_RENDER = true
+      - window.DEBUG_ANALYSIS = true
+      - window.DEBUG_LIFECYCLE = true
+      - window.DEBUG_AUDIT = true
