@@ -13224,187 +13224,194 @@ function openTickerChart(ticker){
 }
 
 async function analyseSetup(ticker){
-  if(uiState.loadingTicker) return;
-  setScannerCardClickTrace(ticker, 'analyseSetup.enter', 'starting');
-  syncStateFromDom();
-  const record = upsertTickerRecord(ticker);
-  record.review.cardOpen = true;
-  let card = tickerRecordToLegacyCard(record);
-  const previousTickerState = normalizeCard(card);
-  const notesEl = $('reviewNotes') || $(`notes-${ticker}`);
-  if(notesEl){
-    record.review.notes = notesEl.value;
-    card.notes = notesEl.value;
-  }
-  card.lastPrompt = buildTickerPrompt(card);
-  setReviewAnalysisState(record, {prompt:card.lastPrompt});
-  card.lastError = '';
-  card.lastResponse = '';
-  card.lastAnalysis = null;
-  setReviewAnalysisState(record, {raw:'', normalized:null, error:''});
-  uiState.loadingTicker = ticker;
-  setScannerCardClickTrace(ticker, 'analyseSetup.loading', 'loadingTicker_set');
-  uiState.responseOpen[ticker] = true;
-  renderCards();
-  const endpoints = analysisEndpoints();
-  if(!endpoints.length){
-    card.lastError = 'AI analysis failed: add an AI endpoint URL first.';
-    setReviewAnalysisState(record, {
-      raw:'',
-      normalized:null,
-      error:card.lastError,
-      prompt:card.lastPrompt,
-      reviewedAt:new Date().toISOString()
-    });
-    uiState.loadingTicker = '';
-    setScannerCardClickTrace(ticker, 'analyseSetup.no_endpoint', 'loadingTicker_cleared');
-    renderCards();
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  ticker = symbol;
+  const activeLoadingTicker = normalizeTicker(uiState.loadingTicker || '');
+  if(activeLoadingTicker){
+    setScannerCardClickTrace(ticker, 'analyseSetup.skipped', `loadingTicker=${activeLoadingTicker}`);
     return;
   }
-  let lastFailureData = null;
+  uiState.loadingTicker = ticker;
+  setScannerCardClickTrace(ticker, 'analyseSetup.loading', 'loadingTicker_set');
   try{
-    let response = null;
-    let data = {};
-    let lastError = 'Analysis request failed.';
-    for(const endpoint of endpoints){
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
-      try{
-        response = await fetch(endpoint, {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          signal:controller.signal,
-          body:JSON.stringify({
-            payload:buildAnalysisPayload(card),
-            prompt:card.lastPrompt,
-            chartRef:card.chartRef ? {name:card.chartRef.name, type:card.chartRef.type, dataUrl:card.chartRef.dataUrl} : null
-          })
-        });
-        data = await response.json().catch(() => ({}));
-        logAnalysisDebug('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data });
-        if(!response.ok) throw new Error(buildAnalysisErrorMessage(response.status, data, 'Analysis request failed.'));
-        lastError = '';
-        lastFailureData = null;
-        break;
-      }catch(err){
-        lastFailureData = data && typeof data === 'object' ? data : null;
-        lastError = err && err.name === 'AbortError'
-          ? 'The analysis request timed out. Retry the setup.'
-          : String(err.message || 'Analysis request failed.');
-        response = null;
-      }finally{
-        clearTimeout(timer);
-      }
+    setScannerCardClickTrace(ticker, 'analyseSetup.enter', 'starting');
+    syncStateFromDom();
+    const record = upsertTickerRecord(ticker);
+    record.review.cardOpen = true;
+    let card = tickerRecordToLegacyCard(record);
+    const previousTickerState = normalizeCard(card);
+    const notesEl = $('reviewNotes') || $(`notes-${ticker}`);
+    if(notesEl){
+      record.review.notes = notesEl.value;
+      card.notes = notesEl.value;
     }
-    if(!response) throw new Error(lastError);
-    if(!data || !data.analysis || typeof data.analysis !== 'object'){
-      throw new Error('The AI endpoint returned no analysis payload.');
-    }
-    setScannerCardClickTrace(ticker, 'analyseSetup.success', 'analysis_received');
-    logAnalysisDebug('RAW_ANALYSIS_RESULT', data.analysis || null);
-    logAnalysisDebug('PREVIOUS_TICKER_STATE', previousTickerState);
-    const analysis = normalizeAnalysisResult(data.analysis, previousTickerState);
-    logAnalysisDebug('NORMALIZED_ANALYSIS_OBJECT', analysis);
-    card.lastResponse = JSON.stringify(data.analysis || {}, null, 2);
-    card.lastAnalysis = analysis;
+    card.lastPrompt = buildTickerPrompt(card);
+    setReviewAnalysisState(record, {prompt:card.lastPrompt});
     card.lastError = '';
-    card.marketStatus = state.marketStatus;
-    card.updatedAt = new Date().toISOString();
-    if(analysis){
-      card.entry = analysis.entry || '';
-      card.stop = analysis.stop || '';
-      card.target = analysis.first_target || '';
-    }
-    setReviewAnalysisState(record, {
-      prompt:card.lastPrompt,
-      raw:card.lastResponse,
-      normalized:analysis,
-      error:'',
-      reviewedAt:card.updatedAt
-    });
-    record.review.cardOpen = true;
-    record.meta.marketStatus = state.marketStatus;
-    record.meta.updatedAt = card.updatedAt;
-    const existingPlanPresent = [record.plan.entry, record.plan.stop, record.plan.firstTarget].some(Number.isFinite);
-    const proposedPlan = analysis && analysis.plan_fields_present
-      ? {
-        entry:analysis.entry,
-        stop:analysis.stop,
-        firstTarget:analysis.first_target
-      }
-      : (!existingPlanPresent ? (() => {
-        const fallbackPlan = fallbackPlanProposalForCard(card);
-        return fallbackPlan ? {
-          entry:fallbackPlan.entry,
-          stop:fallbackPlan.stop,
-          firstTarget:fallbackPlan.first_target
-        } : null;
-      })() : null);
-    if(proposedPlan){
-      applyPlanCandidateToRecord(record, proposedPlan, {
-        source:'analysis',
-        updatedAt:card.updatedAt,
-        lastPlannedAt:card.updatedAt
-      });
-      card.entry = String(proposedPlan.entry || '');
-      card.stop = String(proposedPlan.stop || '');
-      card.target = String(proposedPlan.firstTarget || '');
-    }
-    refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
-    logAnalysisDebug('ANALYSIS_STATE_WRITE', {
-      ticker:record.ticker,
-      apiResponse:data,
-      lastPrompt:record.review.analysisState.prompt,
-      aiAnalysisRaw:record.review.analysisState.raw,
-      normalizedAnalysis:record.review.analysisState.normalized,
-      lastError:record.review.analysisState.error,
-      lastReviewedAt:record.review.analysisState.reviewedAt
-    });
-    runWatchlistLifecycleEvaluation({
-      source:'analyse_setup',
-      tickers:[record.ticker],
-      persist:false,
-      render:false,
-      force:true
-    });
-    commitTickerState();
-    // renderCards() in finally re-renders the review workspace and syncs planner fields.
-  }catch(err){
-    setScannerCardClickTrace(ticker, 'analyseSetup.error', err && err.message ? err.message : 'unknown_error');
-    const baseMessage = err && err.name === 'AbortError'
-      ? 'The analysis request timed out. Retry the setup.'
-      : String(err.message || 'Analysis request failed.');
-    card.lastError = isAnalysisErrorMessage(baseMessage) ? baseMessage : `AI analysis failed: ${baseMessage}`;
-    card.lastResponse = lastFailureData && typeof lastFailureData.raw === 'string' && lastFailureData.raw.trim()
-      ? lastFailureData.raw.trim()
-      : '';
+    card.lastResponse = '';
     card.lastAnalysis = null;
-    setReviewAnalysisState(record, {
-      raw:card.lastResponse,
-      normalized:null,
-      error:card.lastError,
-      prompt:card.lastPrompt,
-      reviewedAt:new Date().toISOString()
-    });
-    record.review.cardOpen = true;
-    record.meta.updatedAt = record.review.analysisState.reviewedAt;
-    refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
-    logAnalysisDebug('ANALYSIS_STATE_WRITE', {
-      ticker:record.ticker,
-      lastPrompt:record.review.analysisState.prompt,
-      aiAnalysisRaw:record.review.analysisState.raw,
-      normalizedAnalysis:record.review.analysisState.normalized,
-      lastError:record.review.analysisState.error,
-      lastReviewedAt:record.review.analysisState.reviewedAt
-    });
-    runWatchlistLifecycleEvaluation({
-      source:'analyse_setup',
-      tickers:[record.ticker],
-      persist:false,
-      render:false,
-      force:true
-    });
-    commitTickerState();
+    setReviewAnalysisState(record, {raw:'', normalized:null, error:''});
+    uiState.responseOpen[ticker] = true;
+    renderCards();
+    const endpoints = analysisEndpoints();
+    if(!endpoints.length){
+      card.lastError = 'AI analysis failed: add an AI endpoint URL first.';
+      setReviewAnalysisState(record, {
+        raw:'',
+        normalized:null,
+        error:card.lastError,
+        prompt:card.lastPrompt,
+        reviewedAt:new Date().toISOString()
+      });
+      setScannerCardClickTrace(ticker, 'analyseSetup.no_endpoint', 'no_endpoint');
+      return;
+    }
+    let lastFailureData = null;
+    try{
+      let response = null;
+      let data = {};
+      let lastError = 'Analysis request failed.';
+      for(const endpoint of endpoints){
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
+        try{
+          response = await fetch(endpoint, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            signal:controller.signal,
+            body:JSON.stringify({
+              payload:buildAnalysisPayload(card),
+              prompt:card.lastPrompt,
+              chartRef:card.chartRef ? {name:card.chartRef.name, type:card.chartRef.type, dataUrl:card.chartRef.dataUrl} : null
+            })
+          });
+          data = await response.json().catch(() => ({}));
+          logAnalysisDebug('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data });
+          if(!response.ok) throw new Error(buildAnalysisErrorMessage(response.status, data, 'Analysis request failed.'));
+          lastError = '';
+          lastFailureData = null;
+          break;
+        }catch(err){
+          lastFailureData = data && typeof data === 'object' ? data : null;
+          lastError = err && err.name === 'AbortError'
+            ? 'The analysis request timed out. Retry the setup.'
+            : String(err.message || 'Analysis request failed.');
+          response = null;
+        }finally{
+          clearTimeout(timer);
+        }
+      }
+      if(!response) throw new Error(lastError);
+      if(!data || !data.analysis || typeof data.analysis !== 'object'){
+        throw new Error('The AI endpoint returned no analysis payload.');
+      }
+      setScannerCardClickTrace(ticker, 'analyseSetup.success', 'analysis_received');
+      logAnalysisDebug('RAW_ANALYSIS_RESULT', data.analysis || null);
+      logAnalysisDebug('PREVIOUS_TICKER_STATE', previousTickerState);
+      const analysis = normalizeAnalysisResult(data.analysis, previousTickerState);
+      logAnalysisDebug('NORMALIZED_ANALYSIS_OBJECT', analysis);
+      card.lastResponse = JSON.stringify(data.analysis || {}, null, 2);
+      card.lastAnalysis = analysis;
+      card.lastError = '';
+      card.marketStatus = state.marketStatus;
+      card.updatedAt = new Date().toISOString();
+      if(analysis){
+        card.entry = analysis.entry || '';
+        card.stop = analysis.stop || '';
+        card.target = analysis.first_target || '';
+      }
+      setReviewAnalysisState(record, {
+        prompt:card.lastPrompt,
+        raw:card.lastResponse,
+        normalized:analysis,
+        error:'',
+        reviewedAt:card.updatedAt
+      });
+      record.review.cardOpen = true;
+      record.meta.marketStatus = state.marketStatus;
+      record.meta.updatedAt = card.updatedAt;
+      const existingPlanPresent = [record.plan.entry, record.plan.stop, record.plan.firstTarget].some(Number.isFinite);
+      const proposedPlan = analysis && analysis.plan_fields_present
+        ? {
+          entry:analysis.entry,
+          stop:analysis.stop,
+          firstTarget:analysis.first_target
+        }
+        : (!existingPlanPresent ? (() => {
+          const fallbackPlan = fallbackPlanProposalForCard(card);
+          return fallbackPlan ? {
+            entry:fallbackPlan.entry,
+            stop:fallbackPlan.stop,
+            firstTarget:fallbackPlan.first_target
+          } : null;
+        })() : null);
+      if(proposedPlan){
+        applyPlanCandidateToRecord(record, proposedPlan, {
+          source:'analysis',
+          updatedAt:card.updatedAt,
+          lastPlannedAt:card.updatedAt
+        });
+        card.entry = String(proposedPlan.entry || '');
+        card.stop = String(proposedPlan.stop || '');
+        card.target = String(proposedPlan.firstTarget || '');
+      }
+      refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
+      logAnalysisDebug('ANALYSIS_STATE_WRITE', {
+        ticker:record.ticker,
+        apiResponse:data,
+        lastPrompt:record.review.analysisState.prompt,
+        aiAnalysisRaw:record.review.analysisState.raw,
+        normalizedAnalysis:record.review.analysisState.normalized,
+        lastError:record.review.analysisState.error,
+        lastReviewedAt:record.review.analysisState.reviewedAt
+      });
+      runWatchlistLifecycleEvaluation({
+        source:'analyse_setup',
+        tickers:[record.ticker],
+        persist:false,
+        render:false,
+        force:true
+      });
+      commitTickerState();
+      // renderCards() in outer finally re-renders the review workspace and syncs planner fields.
+    }catch(err){
+      setScannerCardClickTrace(ticker, 'analyseSetup.error', err && err.message ? err.message : 'unknown_error');
+      const baseMessage = err && err.name === 'AbortError'
+        ? 'The analysis request timed out. Retry the setup.'
+        : String(err.message || 'Analysis request failed.');
+      card.lastError = isAnalysisErrorMessage(baseMessage) ? baseMessage : `AI analysis failed: ${baseMessage}`;
+      card.lastResponse = lastFailureData && typeof lastFailureData.raw === 'string' && lastFailureData.raw.trim()
+        ? lastFailureData.raw.trim()
+        : '';
+      card.lastAnalysis = null;
+      setReviewAnalysisState(record, {
+        raw:card.lastResponse,
+        normalized:null,
+        error:card.lastError,
+        prompt:card.lastPrompt,
+        reviewedAt:new Date().toISOString()
+      });
+      record.review.cardOpen = true;
+      record.meta.updatedAt = record.review.analysisState.reviewedAt;
+      refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
+      logAnalysisDebug('ANALYSIS_STATE_WRITE', {
+        ticker:record.ticker,
+        lastPrompt:record.review.analysisState.prompt,
+        aiAnalysisRaw:record.review.analysisState.raw,
+        normalizedAnalysis:record.review.analysisState.normalized,
+        lastError:record.review.analysisState.error,
+        lastReviewedAt:record.review.analysisState.reviewedAt
+      });
+      runWatchlistLifecycleEvaluation({
+        source:'analyse_setup',
+        tickers:[record.ticker],
+        persist:false,
+        render:false,
+        force:true
+      });
+      commitTickerState();
+    }
   }finally{
     if(activeReviewTicker() === ticker) uiState.activeReviewVerdictOverride = '';
     uiState.loadingTicker = '';
