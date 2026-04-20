@@ -414,6 +414,9 @@ let backendRefreshTimer = null;
 let pushConfigPromise = null;
 let watchlistLifecycleTimer = null;
 let watchlistLifecycleListenersBound = false;
+let watchlistLifecycleResumeScheduled = false;
+let watchlistLifecycleLastResumeAt = 0;
+const WATCHLIST_LIFECYCLE_RESUME_COALESCE_MS = 900;
 let marketStatusTimer = null;
 let riskQuickRefreshRaf = 0;
 
@@ -4357,11 +4360,34 @@ function startWatchlistLifecycleAutomation(){
 
 function handleWatchlistLifecycleVisibility(){
   if(document.visibilityState === 'visible'){
-    runWatchlistLifecycleEvaluation({source:'focus'});
-    startWatchlistLifecycleAutomation();
+    scheduleWatchlistLifecycleResume('focus');
     return;
   }
   stopWatchlistLifecycleAutomation();
+}
+
+function scheduleWatchlistLifecycleResume(source = 'focus'){
+  if(typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+  if(watchlistLifecycleResumeScheduled) return;
+  watchlistLifecycleResumeScheduled = true;
+  const run = () => {
+    watchlistLifecycleResumeScheduled = false;
+    if(typeof document !== 'undefined' && document.visibilityState !== 'visible'){
+      stopWatchlistLifecycleAutomation();
+      return;
+    }
+    const now = Date.now();
+    if((now - watchlistLifecycleLastResumeAt) >= WATCHLIST_LIFECYCLE_RESUME_COALESCE_MS){
+      watchlistLifecycleLastResumeAt = now;
+      runWatchlistLifecycleEvaluation({source});
+    }
+    startWatchlistLifecycleAutomation();
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(() => setTimeout(run, 0));
+  }else{
+    setTimeout(run, 0);
+  }
 }
 
 function bootstrapWatchlistLifecycleAutomation(){
@@ -4369,8 +4395,7 @@ function bootstrapWatchlistLifecycleAutomation(){
     document.addEventListener('visibilitychange', handleWatchlistLifecycleVisibility);
     window.addEventListener('focus', () => {
       if(document.visibilityState !== 'visible') return;
-      runWatchlistLifecycleEvaluation({source:'focus'});
-      startWatchlistLifecycleAutomation();
+      scheduleWatchlistLifecycleResume('focus');
     });
     watchlistLifecycleListenersBound = true;
   }
