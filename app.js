@@ -9932,12 +9932,17 @@ function bindEntryConditionsHoldInteractions(root){
     }
     trigger.addEventListener('contextmenu', event => event.preventDefault());
     trigger.addEventListener('click', event => {
+      const isInteractiveTarget = cardMode && shouldIgnoreHoldStartTarget(event.target, helper, cardMode);
       if(state.suppressClick){
         state.suppressClick = false;
         if(holdTicker) setWatchlistHoldTrace(holdTicker, state.moveCancelled ? 'hold_click.suppressed_after_cancel' : 'hold_click.suppressed_after_hold');
         state.moveCancelled = false;
         state.moveCancelledLogged = false;
         state.holdAttempted = false;
+        if(isInteractiveTarget){
+          if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_click.allow_interactive_target');
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         return;
