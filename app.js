@@ -4870,6 +4870,12 @@ function setStatus(id, html){
   if(el) el.innerHTML = html;
 }
 
+function logAnalysisDebug(label, payload){
+  if(window.DEBUG_ANALYSIS_PIPELINE){
+    console.log(label, payload);
+  }
+}
+
 function startupStatusContextMessage(){
   const parts = [];
   const setup = String(setupTypeChipLabel(state.setupType || '') || '').trim();
@@ -13190,7 +13196,7 @@ async function analyseSetup(ticker){
           })
         });
         data = await response.json().catch(() => ({}));
-        console.log('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data });
+        logAnalysisDebug('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data });
         if(!response.ok) throw new Error(buildAnalysisErrorMessage(response.status, data, 'Analysis request failed.'));
         lastError = '';
         lastFailureData = null;
@@ -13210,10 +13216,10 @@ async function analyseSetup(ticker){
       throw new Error('The AI endpoint returned no analysis payload.');
     }
     setScannerCardClickTrace(ticker, 'analyseSetup.success', 'analysis_received');
-    console.log('RAW_ANALYSIS_RESULT', data.analysis || null);
-    console.log('PREVIOUS_TICKER_STATE', previousTickerState);
+    logAnalysisDebug('RAW_ANALYSIS_RESULT', data.analysis || null);
+    logAnalysisDebug('PREVIOUS_TICKER_STATE', previousTickerState);
     const analysis = normalizeAnalysisResult(data.analysis, previousTickerState);
-    console.log('NORMALIZED_ANALYSIS_OBJECT', analysis);
+    logAnalysisDebug('NORMALIZED_ANALYSIS_OBJECT', analysis);
     card.lastResponse = JSON.stringify(data.analysis || {}, null, 2);
     card.lastAnalysis = analysis;
     card.lastError = '';
@@ -13260,7 +13266,7 @@ async function analyseSetup(ticker){
       card.target = String(proposedPlan.firstTarget || '');
     }
     refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
-    console.log('ANALYSIS_STATE_WRITE', {
+    logAnalysisDebug('ANALYSIS_STATE_WRITE', {
       ticker:record.ticker,
       apiResponse:data,
       lastPrompt:record.review.analysisState.prompt,
@@ -13277,9 +13283,7 @@ async function analyseSetup(ticker){
       force:true
     });
     commitTickerState();
-    if(($('selectedTicker') && normalizeTicker($('selectedTicker').value) === card.ticker) || !normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '')){
-      syncPlannerFromTicker(card.ticker);
-    }
+    // renderCards() in finally re-renders the review workspace and syncs planner fields.
   }catch(err){
     setScannerCardClickTrace(ticker, 'analyseSetup.error', err && err.message ? err.message : 'unknown_error');
     const baseMessage = err && err.name === 'AbortError'
@@ -13300,7 +13304,7 @@ async function analyseSetup(ticker){
     record.review.cardOpen = true;
     record.meta.updatedAt = record.review.analysisState.reviewedAt;
     refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
-    console.log('ANALYSIS_STATE_WRITE', {
+    logAnalysisDebug('ANALYSIS_STATE_WRITE', {
       ticker:record.ticker,
       lastPrompt:record.review.analysisState.prompt,
       aiAnalysisRaw:record.review.analysisState.raw,
@@ -13349,7 +13353,7 @@ function renderAnalysisPanel(card){
     const planMarkup = showPlanNumbers
       ? `<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div>`
       : '<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Bounce is too weak to price cleanly.</div><div class="tiny">Waiting for a reclaim and stronger close.</div></div>';
-    console.log('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
+    logAnalysisDebug('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
     return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div>${planMarkup}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
@@ -13388,7 +13392,7 @@ function savedAiPlanNumbersAllowed(record){
 function renderAnalysisPanelFromRecord(record){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
-  console.log('ANALYSIS_PANEL_RENDER_FIELDS', {
+  logAnalysisDebug('ANALYSIS_PANEL_RENDER_FIELDS', {
     ticker:item.ticker,
     analysisResult:{
       aiAnalysisRawLength:analysisState.rawAnalysis.length,
