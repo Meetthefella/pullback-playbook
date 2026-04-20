@@ -11066,13 +11066,15 @@ function setCachedMarketData(symbol, data){
   const ticker = normalizeTicker(symbol);
   if(!ticker || !data) return;
   const provider = normalizeDataProvider(data.sourceProvider || data.dataProvider || state.dataProvider);
+  const cacheStoredAt = new Date().toISOString();
   const cacheKey = `${provider}:${ticker}`;
   const payload = {
     ...data,
     ticker,
     dataProvider:provider,
     sourceProvider:provider,
-    fetchedAt:data.fetchedAt || new Date().toISOString(),
+    sourceFetchedAt:String(data.fetchedAt || ''),
+    fetchedAt:cacheStoredAt,
     cacheVersion:MARKET_CACHE_SCHEMA_VERSION
   };
   marketDataCache.set(cacheKey, payload);
