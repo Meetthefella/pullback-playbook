@@ -11220,6 +11220,69 @@ async function fetchMarketData(symbol, options = {}){
   throw new Error(lastError || `Market data request failed for ${ticker}.`);
 }
 
+async function fetchMarketDataBatch(symbols, options = {}){
+  const requested = uniqueTickers(symbols);
+  if(!requested.length) return {};
+  const provider = normalizeDataProvider(state.dataProvider);
+  const plan = String(state.apiPlan || DEFAULT_API_PLAN);
+  const resultByTicker = {};
+  const missing = [];
+  requested.forEach(ticker => {
+    if(!options.force){
+      const cached = getCachedMarketData(ticker);
+      if(cached){
+        resultByTicker[ticker] = cached;
+        return;
+      }
+    }
+    missing.push(ticker);
+  });
+  if(!missing.length) return resultByTicker;
+  let lastError = '';
+  for(const endpoint of marketDataEndpoints()){
+    try{
+      const params = new URLSearchParams({
+        symbols:missing.join(','),
+        provider,
+        plan
+      });
+      const response = await fetchJsonWithTimeout(`${endpoint}?${params.toString()}`);
+      const payload = await response.json().catch(() => ({}));
+      if(!response.ok){
+        throw new Error(payload && payload.error ? payload.error : 'Batch market-data request failed.');
+      }
+      const rows = Array.isArray(payload && payload.results) ? payload.results : [];
+      if(!rows.length){
+        throw new Error(payload && payload.error ? payload.error : 'Batch market-data request returned no usable data.');
+      }
+      rows.forEach(row => {
+        const ticker = normalizeTicker(row && (row.symbol || row.ticker));
+        if(!ticker) return;
+        const safeData = row && row.data && typeof row.data === 'object' ? row.data : {symbol:ticker, ticker};
+        const normalized = normalizeMarketSnapshot(safeData, payload && payload.provider || provider);
+        rememberTickerMeta(normalized);
+        if(row && row.ok !== false){
+          setCachedMarketData(ticker, normalized);
+        }else{
+          normalized.__error = String(row && row.error || `Market data is incomplete for ${ticker}.`);
+        }
+        resultByTicker[ticker] = normalized;
+      });
+      missing.forEach(ticker => {
+        if(resultByTicker[ticker]) return;
+        resultByTicker[ticker] = {
+          ...normalizeMarketSnapshot({symbol:ticker, ticker}, payload && payload.provider || provider),
+          __error:String(payload && payload.error || `Market data request returned no usable data for ${ticker}.`)
+        };
+      });
+      return resultByTicker;
+    }catch(error){
+      lastError = String(error && error.message || 'Batch market-data request failed.');
+    }
+  }
+  throw new Error(lastError || 'Batch market-data request failed.');
+}
+
 async function fetchTickerSuggestions(query){
   const provider = normalizeDataProvider(state.dataProvider);
   const plan = String(state.apiPlan || DEFAULT_API_PLAN);
@@ -12057,18 +12120,18 @@ function applyMarketDataToCard(card, data){
   card.rsi14 = numericOrNull(data.rsi14);
 }
 
-async function refreshCardMarketData(ticker, options = {}){
+async function refreshCardMarketDataFromSnapshot(ticker, data, options = {}){
+  const safeData = data && typeof data === 'object' ? data : {};
   const record = getTickerRecord(ticker);
   const card = normalizeCard(record ? tickerRecordToLegacyCard(record) : baseCard(ticker));
   const meta = getStoredTickerMeta(ticker);
   if(meta) applyTickerMetaToCard(card, meta);
-  const data = await fetchMarketData(ticker, options);
-  applyMarketDataToCard(card, data);
-  const scan = await evaluateScannerForData(data);
+  applyMarketDataToCard(card, safeData);
+  const scan = await evaluateScannerForData(safeData);
   card.checks = scan.checks;
-  const suitability = !data.__error && hasUsableScannerData(data) ? scoreSuitability(card, data, scan.checks) : null;
-  const derivedStates = deriveSetupStates(card, data, scan.checks, suitability ? suitability.tradePlan : null);
-  const tradePlan = suitability ? suitability.tradePlan : deriveTradePlan(data, derivedStates.scan_type === 'unknown' ? '20MA' : derivedStates.scan_type);
+  const suitability = !safeData.__error && hasUsableScannerData(safeData) ? scoreSuitability(card, safeData, scan.checks) : null;
+  const derivedStates = deriveSetupStates(card, safeData, scan.checks, suitability ? suitability.tradePlan : null);
+  const tradePlan = suitability ? suitability.tradePlan : deriveTradePlan(safeData, derivedStates.scan_type === 'unknown' ? '20MA' : derivedStates.scan_type);
   const riskFit = evaluateRiskFit({
     entry:tradePlan.entry,
     stop:tradePlan.stop,
@@ -12110,21 +12173,21 @@ async function refreshCardMarketData(ticker, options = {}){
   card.marketStatus = state.marketStatus;
   card.updatedAt = new Date().toISOString();
   card.scannerUpdatedAt = card.updatedAt;
-  if(data.__error){
-    card.lastError = data.__error;
+  if(safeData.__error){
+    card.lastError = safeData.__error;
   }
   card.analysis = {
-    price:data.price,
-    sma20:data.sma20,
-    sma50:data.sma50,
-    sma200:data.sma200,
-    avgVolume30d:data.avgVolume30d,
-    perf1w:data.perf1w,
-    perf1m:data.perf1m,
-    perf3m:data.perf3m,
-    perf6m:data.perf6m,
-    perfYtd:data.perfYtd,
-    rsi14:data.rsi14,
+    price:safeData.price,
+    sma20:safeData.sma20,
+    sma50:safeData.sma50,
+    sma200:safeData.sma200,
+    avgVolume30d:safeData.avgVolume30d,
+    perf1w:safeData.perf1w,
+    perf1m:safeData.perf1m,
+    perf3m:safeData.perf3m,
+    perf6m:safeData.perf6m,
+    perfYtd:safeData.perfYtd,
+    rsi14:safeData.rsi14,
     passedRules:scan.passedRules,
     totalRules:scan.totalRules,
     breakdown:scan.breakdown,
@@ -12189,6 +12252,11 @@ async function refreshCardMarketData(ticker, options = {}){
   return {card, scan};
 }
 
+async function refreshCardMarketData(ticker, options = {}){
+  const data = await fetchMarketData(ticker, options);
+  return refreshCardMarketDataFromSnapshot(ticker, data, options);
+}
+
 async function refreshMarketDataForTickers(tickers, options = {}){
   const unique = uniqueTickers(tickers);
   if(!unique.length) return {done:0, failed:0, rejected:0};
@@ -12200,9 +12268,22 @@ async function refreshMarketDataForTickers(tickers, options = {}){
   // Fetch in coarse batches so scans do not re-render and persist on every ticker.
   for(let index = 0; index < unique.length; index += SCAN_BATCH_SIZE){
     const batch = unique.slice(index, index + SCAN_BATCH_SIZE);
+    let batchSnapshots = null;
+    try{
+      batchSnapshots = await fetchMarketDataBatch(batch, options);
+    }catch(error){
+      logDebug('DEBUG_ANALYSIS', 'MARKET_DATA_BATCH_FETCH_FAILED', {
+        batch,
+        message:String(error && error.message || 'Batch market-data request failed.')
+      });
+    }
     const outcomes = await Promise.all(batch.map(async ticker => {
       try{
-        const result = await refreshCardMarketData(ticker, options);
+        const symbol = normalizeTicker(ticker);
+        const snapshot = batchSnapshots && symbol ? batchSnapshots[symbol] : null;
+        const result = snapshot
+          ? await refreshCardMarketDataFromSnapshot(symbol, snapshot, options)
+          : await refreshCardMarketData(symbol, options);
         return {ok:true, ticker, ...result};
       }catch(err){
         return {ok:false, ticker, error:err};
