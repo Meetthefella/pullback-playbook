@@ -284,6 +284,7 @@ uiState.reviewCapitalSimulation = uiState.reviewCapitalSimulation && typeof uiSt
   ? uiState.reviewCapitalSimulation
   : {ticker:'', usagePercent:null};
 uiState.riskQuickOpen = !!uiState.riskQuickOpen;
+uiState.scanInProgress = !!uiState.scanInProgress;
 uiState.verdictCapAudit = uiState.verdictCapAudit && typeof uiState.verdictCapAudit === 'object'
   ? uiState.verdictCapAudit
   : {};
@@ -6738,22 +6739,36 @@ function queueTickerSuggestions(){
   }, SEARCH_DEBOUNCE_MS);
 }
 
-function buildCards(){
+function setScanInProgress(next){
+  uiState.scanInProgress = !!next;
+  const button = $('buildBtn');
+  if(button) button.disabled = uiState.scanInProgress;
+}
+
+async function buildCards(){
+  if(uiState.scanInProgress){
+    setStatus('apiStatus', '<span class="warntext">Scan already running...</span>');
+    return {done:0, failed:0, rejected:0};
+  }
+  setScanInProgress(true);
   uiState.selectedScanner = {};
-  return runScannerWorkflow({force:true, syncInput:true})
-    .then(() => {
-      const resultsToggle = $('resultsToggle');
-      const resultsSection = $('resultsSection');
-      if(resultsToggle) resultsToggle.open = true;
-      if(resultsSection) resultsSection.scrollIntoView({behavior:'smooth', block:'start'});
-    })
-    .catch(err => {
-      pushRuntimeDebugEntry('buildCards.catch', {
-        message:err && err.message ? err.message : 'buildCards failed',
-        stack:err && err.stack ? err.stack : ''
-      });
-      setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
+  try{
+    const result = await runScannerWorkflow({force:true, syncInput:true});
+    const resultsToggle = $('resultsToggle');
+    const resultsSection = $('resultsSection');
+    if(resultsToggle) resultsToggle.open = true;
+    if(resultsSection) resultsSection.scrollIntoView({behavior:'smooth', block:'start'});
+    return result;
+  }catch(err){
+    pushRuntimeDebugEntry('buildCards.catch', {
+      message:err && err.message ? err.message : 'buildCards failed',
+      stack:err && err.stack ? err.stack : ''
     });
+    setStatus('apiStatus', `<span class="badtext">${escapeHtml(err.message || 'Scanner failed.')}</span>`);
+    return {done:0, failed:0, rejected:0};
+  }finally{
+    setScanInProgress(false);
+  }
 }
 
 function addTicker(rawTicker, meta){
@@ -16387,6 +16402,7 @@ function registerPwa(){
 
 click('addTickerBtn', addTickerFromSearch);
 click('buildBtn', buildCards);
+setScanInProgress(false);
 click('saveBtn', saveScannerUniverseList);
 click('loadBtn', loadSavedScannerUniverseList);
 click('clearFocusBtn', () => {

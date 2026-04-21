@@ -1563,6 +1563,32 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 .watchlist-card{display:flex;flex-direction:column;gap:14px;padding:16px;position:relative}
 .watchlistgroup .watchlist-card + .watchlist-card{margin-top:14px}
 .watchlist-card>*{width:100%;min-width:0}
+#watchlistList{
+  touch-action:pan-y;
+  padding-bottom:14px;
+}
+#watchlistList::after{
+  content:'';
+  display:block;
+  width:100%;
+  height:14px;
+  user-select:none;
+  -webkit-user-select:none;
+  -webkit-touch-callout:none;
+  pointer-events:none;
+}
+.watchlistgroup{
+  user-select:none;
+  -webkit-user-select:none;
+  -webkit-touch-callout:none;
+}
+.watchlist-card{
+  -webkit-tap-highlight-color:transparent;
+  -webkit-touch-callout:none;
+  touch-action:pan-y;
+  user-select:none;
+  -webkit-user-select:none;
+}
 .watchlist-card__header{display:flex;flex-direction:column;gap:8px}
 .watchlist-card__header-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:nowrap;min-width:0}
 .watchlist-card__ticker{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1582,6 +1608,25 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 .watchlist-card__detail{margin-top:6px;color:var(--text-secondary)}
 .watchlist-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .watchlist-actions button{flex:0 0 auto}
+.watchlist-card__header,
+.watchlist-card__status,
+.watchlist-card__company,
+.watchlist-signal-row,
+.watchlist-card__reason,
+.watchlist-card__priority,
+.watchlist-plan-meta,
+.watchlist-card__detail,
+.watchlist-actions,
+.watchlist-card__details{
+  user-select:none;
+  -webkit-user-select:none;
+  -webkit-touch-callout:none;
+}
+.watchlist-actions button,
+.watchlist-card__details>summary{
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
 .watchlist-actions .primary{
   box-shadow:none;
   min-width:92px;
