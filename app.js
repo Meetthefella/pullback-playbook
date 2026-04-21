@@ -295,6 +295,13 @@ uiState.verdictCapAuditLastSignature = String(uiState.verdictCapAuditLastSignatu
 uiState.liveProcessStatus = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
   ? uiState.liveProcessStatus
   : {state:'idle', message:'Idle.', updatedAt:''};
+uiState.analysisRequestSeq = Number.isFinite(Number(uiState.analysisRequestSeq)) ? Number(uiState.analysisRequestSeq) : 0;
+uiState.analysisActiveRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
+  ? uiState.analysisActiveRequest
+  : null;
+uiState.analysisLoadingStageByTicker = uiState.analysisLoadingStageByTicker && typeof uiState.analysisLoadingStageByTicker === 'object'
+  ? uiState.analysisLoadingStageByTicker
+  : {};
 if(typeof window !== 'undefined'){
   window.DEBUG_RENDER = window.DEBUG_RENDER === true;
   window.DEBUG_ANALYSIS = window.DEBUG_ANALYSIS === true;
@@ -12130,6 +12137,31 @@ function reviewAnalysisUiStateForRecord(record){
   return 'ready';
 }
 
+function setAnalysisLoadingStage(ticker, message){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  uiState.analysisLoadingStageByTicker = uiState.analysisLoadingStageByTicker && typeof uiState.analysisLoadingStageByTicker === 'object'
+    ? uiState.analysisLoadingStageByTicker
+    : {};
+  uiState.analysisLoadingStageByTicker[symbol] = String(message || '').trim() || 'Analysing...';
+}
+
+function getAnalysisLoadingStage(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return '';
+  const map = uiState.analysisLoadingStageByTicker && typeof uiState.analysisLoadingStageByTicker === 'object'
+    ? uiState.analysisLoadingStageByTicker
+    : {};
+  return String(map[symbol] || '').trim();
+}
+
+function clearAnalysisLoadingStage(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  if(!uiState.analysisLoadingStageByTicker || typeof uiState.analysisLoadingStageByTicker !== 'object') return;
+  delete uiState.analysisLoadingStageByTicker[symbol];
+}
+
 function queueAutoAnalysisForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
@@ -13233,9 +13265,6 @@ function buildAnalysisPayload(card){
     entryDefined:derivedStates.entry_defined,
     stopDefined:derivedStates.stop_defined,
     targetDefined:derivedStates.target_defined,
-    derivedStates,
-    checklist:checklistIds.reduce((out, id) => { out[id] = !!safeCard.checks[id]; return out; }, {}),
-    checklistLabels,
     notes:safeCard.notes || '',
     accountSize:state.accountSize,
     maxRisk:state.userRiskPerTrade || currentMaxLoss(),
@@ -13806,15 +13835,42 @@ async function analyseSetup(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   ticker = symbol;
+  const activeRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
+    ? uiState.analysisActiveRequest
+    : null;
   const activeLoadingTicker = normalizeTicker(uiState.loadingTicker || '');
   if(activeLoadingTicker){
-    setScannerCardClickTrace(ticker, 'analyseSetup.skipped', `loadingTicker=${activeLoadingTicker}`);
-    return;
+    if(activeLoadingTicker === ticker){
+      setScannerCardClickTrace(ticker, 'analyseSetup.skipped', `loadingTicker=${activeLoadingTicker}`);
+      return;
+    }
+    if(activeRequest && activeRequest.controller && typeof activeRequest.controller.abort === 'function' && !activeRequest.controller.signal.aborted){
+      activeRequest.cancelReason = 'superseded';
+      try{
+        activeRequest.controller.abort('superseded');
+      }catch(error){}
+    }
+    clearAnalysisLoadingStage(activeLoadingTicker);
   }
+  uiState.analysisRequestSeq = Number(uiState.analysisRequestSeq || 0) + 1;
+  const analysisRequestId = `analysis-${uiState.analysisRequestSeq}-${Date.now()}`;
+  const requestController = new AbortController();
+  uiState.analysisActiveRequest = {
+    id:analysisRequestId,
+    ticker,
+    controller:requestController,
+    cancelReason:''
+  };
   uiState.loadingTicker = ticker;
-  setScannerCardClickTrace(ticker, 'analyseSetup.loading', 'loadingTicker_set');
+  setAnalysisLoadingStage(ticker, 'Reading chart...');
+  const liveAnalyseButton = $('analyseActiveBtn');
+  if(liveAnalyseButton){
+    liveAnalyseButton.disabled = true;
+    liveAnalyseButton.textContent = 'Analysing...';
+  }
+  setScannerCardClickTrace(ticker, 'analyseSetup.loading', `loadingTicker_set request=${analysisRequestId}`);
   try{
-    setScannerCardClickTrace(ticker, 'analyseSetup.enter', 'starting');
+    setScannerCardClickTrace(ticker, 'analyseSetup.enter', `request=${analysisRequestId}`);
     syncStateFromDom();
     const record = upsertTickerRecord(ticker);
     record.review.cardOpen = true;
@@ -13825,6 +13881,7 @@ async function analyseSetup(ticker){
       record.review.notes = notesEl.value;
       card.notes = notesEl.value;
     }
+    setAnalysisLoadingStage(ticker, 'Checking structure...');
     card.lastPrompt = buildTickerPrompt(card);
     setReviewAnalysisState(record, {prompt:card.lastPrompt});
     card.lastError = '';
@@ -13852,36 +13909,66 @@ async function analyseSetup(ticker){
       let data = {};
       let lastError = 'Analysis request failed.';
       for(const endpoint of endpoints){
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
+        let timer = null;
         try{
+          setAnalysisLoadingStage(ticker, 'Building analysis...');
+          timer = setTimeout(() => {
+            const currentRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
+              ? uiState.analysisActiveRequest
+              : null;
+            if(!currentRequest || currentRequest.id !== analysisRequestId) return;
+            currentRequest.cancelReason = 'timeout';
+            if(!requestController.signal.aborted){
+              try{
+                requestController.abort('timeout');
+              }catch(error){}
+            }
+          }, ANALYSIS_TIMEOUT_MS);
           response = await fetch(endpoint, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            signal:controller.signal,
+            signal:requestController.signal,
             body:JSON.stringify({
               payload:buildAnalysisPayload(card),
               prompt:card.lastPrompt,
               chartRef:card.chartRef ? {name:card.chartRef.name, type:card.chartRef.type, dataUrl:card.chartRef.dataUrl} : null
             })
           });
+          if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
+            setScannerCardClickTrace(ticker, 'analyseSetup.stale_response_ignored', `request=${analysisRequestId}`);
+            return;
+          }
           data = await response.json().catch(() => ({}));
           logAnalysisDebug('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data });
           if(!response.ok) throw new Error(buildAnalysisErrorMessage(response.status, data, 'Analysis request failed.'));
+          setAnalysisLoadingStage(ticker, 'Applying analysis...');
           lastError = '';
           lastFailureData = null;
           break;
         }catch(err){
           lastFailureData = data && typeof data === 'object' ? data : null;
-          lastError = err && err.name === 'AbortError'
-            ? 'The analysis request timed out. Retry the setup.'
-            : String(err.message || 'Analysis request failed.');
+          const activeMeta = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object' && uiState.analysisActiveRequest.id === analysisRequestId
+            ? uiState.analysisActiveRequest
+            : null;
+          const abortReason = String((activeMeta && activeMeta.cancelReason) || requestController.signal.reason || '').trim().toLowerCase();
+          if(err && err.name === 'AbortError'){
+            lastError = abortReason === 'superseded'
+              ? 'Analysis request superseded.'
+              : 'The analysis request timed out. Retry the setup.';
+          }else{
+            lastError = String(err.message || 'Analysis request failed.');
+          }
           response = null;
+          if(abortReason === 'superseded') break;
         }finally{
-          clearTimeout(timer);
+          if(timer) clearTimeout(timer);
         }
       }
       if(!response) throw new Error(lastError);
+      if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
+        setScannerCardClickTrace(ticker, 'analyseSetup.stale_apply_ignored', `request=${analysisRequestId}`);
+        return;
+      }
       if(!data || !data.analysis || typeof data.analysis !== 'object'){
         throw new Error('The AI endpoint returned no analysis payload.');
       }
@@ -13955,6 +14042,20 @@ async function analyseSetup(ticker){
       commitTickerState();
       // renderCards() in outer finally re-renders the review workspace and syncs planner fields.
     }catch(err){
+      const activeMeta = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object' && uiState.analysisActiveRequest.id === analysisRequestId
+        ? uiState.analysisActiveRequest
+        : null;
+      const abortReason = String((activeMeta && activeMeta.cancelReason) || requestController.signal.reason || '').trim().toLowerCase();
+      const supersededAbort = (err && err.name === 'AbortError' && abortReason === 'superseded')
+        || /superseded/i.test(String(err && err.message || ''));
+      if(supersededAbort){
+        setScannerCardClickTrace(ticker, 'analyseSetup.aborted', `superseded request=${analysisRequestId}`);
+        return;
+      }
+      if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
+        setScannerCardClickTrace(ticker, 'analyseSetup.stale_error_ignored', `request=${analysisRequestId}`);
+        return;
+      }
       setScannerCardClickTrace(ticker, 'analyseSetup.error', err && err.message ? err.message : 'unknown_error');
       const baseMessage = err && err.name === 'AbortError'
         ? 'The analysis request timed out. Retry the setup.'
@@ -13992,9 +14093,19 @@ async function analyseSetup(ticker){
       commitTickerState();
     }
   }finally{
-    if(activeReviewTicker() === ticker) uiState.activeReviewVerdictOverride = '';
-    uiState.loadingTicker = '';
-    setScannerCardClickTrace(ticker, 'analyseSetup.finally', 'loadingTicker_cleared');
+    const currentRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
+      ? uiState.analysisActiveRequest
+      : null;
+    const ownsActiveRequest = !!(currentRequest && currentRequest.id === analysisRequestId);
+    if(ownsActiveRequest && activeReviewTicker() === ticker) uiState.activeReviewVerdictOverride = '';
+    if(ownsActiveRequest){
+      uiState.loadingTicker = '';
+      clearAnalysisLoadingStage(ticker);
+      uiState.analysisActiveRequest = null;
+      setScannerCardClickTrace(ticker, 'analyseSetup.finally', `loadingTicker_cleared request=${analysisRequestId}`);
+    }else{
+      setScannerCardClickTrace(ticker, 'analyseSetup.finally', `stale_request_preserved request=${analysisRequestId}`);
+    }
     requestWatchlistRender({includeFocusQueue:true});
     renderCards();
   }
@@ -14536,7 +14647,8 @@ async function refreshWatchlistTicker(ticker){
 
 function analyseActiveReviewTicker(){
   const ticker = activeReviewTicker();
-  if(!ticker || uiState.loadingTicker) return;
+  if(!ticker) return;
+  if(normalizeTicker(uiState.loadingTicker || '') === ticker) return;
   if(!String(uiState.activeReviewVerdictOverride || '').trim()){
     uiState.activeReviewVerdictOverride = displayStageForRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker), {includeExecutionDowngrade:false});
   }
@@ -15034,10 +15146,13 @@ function legacyRenderCardsFromCardList(){
     const riskMeta = renderPlanProjectionFromRecord(record);
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead" style="${escapeHtml(cardVisualStyleAttr(view && view.setupScore, view && view.setupUiState && view.setupUiState.state))}"><div class="ticker">${escapeHtml(record.ticker)}</div><div><div>${escapeHtml(currentRuntimeSummaryForRecord(record) || savedReviewSummaryForRecord(record) || 'No review saved yet.')}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${record.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${record.review.chartRef && record.review.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${record.ticker}">Notes</label><textarea id="notes-${record.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${analysisBusy && !loading ? 'disabled' : ''}>${analyseLabel}</button></div><details class="responsepanel" id="response-${record.ticker}" ${(((uiState.responseOpen[record.ticker] ?? !!record.review.aiAnalysisRaw) || !!record.review.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button><button class="secondary" data-act="add-watchlist">Add to Watchlist</button></div><details class="promptdetails" id="prompt-${record.ticker}" ${(uiState.promptOpen[record.ticker] ?? !!record.review.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${record.ticker}">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></div></div>`;
+    div.innerHTML = `<div class="resulthead" style="${escapeHtml(cardVisualStyleAttr(view && view.setupScore, view && view.setupUiState && view.setupUiState.state))}"><div class="ticker">${escapeHtml(record.ticker)}</div><div><div>${escapeHtml(currentRuntimeSummaryForRecord(record) || savedReviewSummaryForRecord(record) || 'No review saved yet.')}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${record.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${record.review.chartRef && record.review.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${record.ticker}">Notes</label><textarea id="notes-${record.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${(analysisBusy || loading) ? 'disabled' : ''}>${analyseLabel}</button></div><details class="responsepanel" id="response-${record.ticker}" ${(((uiState.responseOpen[record.ticker] ?? !!record.review.aiAnalysisRaw) || !!record.review.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button><button class="secondary" data-act="add-watchlist">Add to Watchlist</button></div><details class="promptdetails" id="prompt-${record.ticker}" ${(uiState.promptOpen[record.ticker] ?? !!record.review.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${record.ticker}">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(record.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeCard(record.ticker);
-    div.querySelector('[data-act="analyse"]').onclick = () => { if(!uiState.loadingTicker) analyseSetup(record.ticker); };
+    div.querySelector('[data-act="analyse"]').onclick = () => {
+      if(normalizeTicker(uiState.loadingTicker || '') === record.ticker) return;
+      analyseSetup(record.ticker);
+    };
     div.querySelector('[data-act="save-trade"]').onclick = () => {
       const liveRecord = upsertTickerRecord(record.ticker);
       const notesEl = $(`notes-${record.ticker}`);
@@ -15380,11 +15495,13 @@ function renderReviewWorkspace(options = {}){
   const analysisBusy = !!uiState.loadingTicker;
   const notesPlaceholder = loading ? '🤖 AI analysis in progress...' : 'Add ticker-specific notes here.';
   const analysisUiState = reviewAnalysisUiStateForRecord(record);
-  const analyseLabel = analysisUiState === 'complete'
-    ? 'Re-run analysis'
-    : (analysisUiState === 'error' ? 'Analyse Setup' : 'Analyse Setup');
-  const showAnalyseButton = analysisUiState !== 'running';
-  const analyseDisabled = analysisUiState === 'idle' || (analysisBusy && !loading);
+  const analysisLoadingStage = getAnalysisLoadingStage(record.ticker) || 'Building analysis...';
+  const analyseLabel = loading
+    ? 'Analysing...'
+    : (analysisUiState === 'complete'
+      ? 'Re-run analysis'
+      : (analysisUiState === 'error' ? 'Analyse Setup' : 'Analyse Setup'));
+  const analyseDisabled = analysisUiState === 'idle' || loading || (analysisBusy && !loading);
   const diagnosticsToneClass = planUI.diagnosticsTone === 'danger'
     ? 'avoid'
     : (planUI.diagnosticsTone === 'neutral' ? 'watch' : `analysis-state-${analysisUiState}`);
@@ -15394,7 +15511,7 @@ function renderReviewWorkspace(options = {}){
     : (analysisUiState === 'ready'
       ? '<div class="tiny">Screenshot attached. AI analysis will start automatically.</div>'
       : (analysisUiState === 'running'
-        ? '<div class="summary ai-progress-text">🤖 AI analysis in progress<span class="ai-loading-dots"><span>.</span><span>.</span><span>.</span></span></div><div class="tiny ai-progress-subtext">Reading chart and building trade plan.</div>'
+        ? `<div class="summary ai-progress-text">🤖 ${escapeHtml(analysisLoadingStage)}</div><div class="tiny ai-progress-subtext">${analysisState.hasSavedAnalysis ? 'Refreshing saved analysis...' : 'Analysing current setup...'}</div>`
         : (analysisUiState === 'complete'
           ? '<div class="summary">Analysis complete</div><div class="tiny">Review AI read and trade plan below.</div>'
           : '<div class="summary">Analysis failed</div><div class="tiny">Try again.</div>')));
@@ -15579,7 +15696,7 @@ function renderReviewWorkspace(options = {}){
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
       <div class="reviewsectionhead"><strong>Confidence / Diagnostics</strong></div>
       ${diagnosticsPanelBody}
-      ${showAnalyseButton ? `<div class="reviewactions reviewactions-top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>` : '<div class="reviewactions reviewactions-top"><button class="ghost" id="resetReviewBtn">Remove</button></div>'}
+      <div class="reviewactions reviewactions-top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
       <textarea id="reviewNotes" class="${loading ? 'review-notes--ai' : ''}" placeholder="${escapeHtml(notesPlaceholder)}">${escapeHtml(record.review.notes || '')}</textarea>
       ${renderReviewRecomputeDiagnostics(record)}
       <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
@@ -16365,6 +16482,8 @@ function clearTransientSessionState(options = {}){
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
   uiState.loadingTicker = '';
+  uiState.analysisActiveRequest = null;
+  uiState.analysisLoadingStageByTicker = {};
   uiState.selectedScanner = {};
   uiState.promptOpen = {};
   uiState.responseOpen = {};
@@ -16565,17 +16684,13 @@ function buildPromptBody(payload){
     '- Structure and confirmation take priority over reward',
     '',
     'Structured output discipline:',
-    '- If your chart read contains cautionary language, you must include corresponding bullet items in risks',
-    '- Do not return an empty risks array when you have described meaningful concerns in the chart read',
+    '- If your chart read contains cautionary language, include matching items in risks',
+    '- Do not return an empty risks array when meaningful concerns are present',
     '- weakening structure -> include a risk about weakening structure',
     '- low volume -> include a risk about weak volume / low conviction',
     '- market below 50MA -> include a risk about hostile market regime',
     '- pullback deeper than preferred -> include a risk about setup quality / depth of pullback',
-    '- key_reasons explains what is constructive',
-    '- risks explains what could go wrong or why caution is warranted',
-    '- If the setup is cautious overall, at least one item should appear in risks',
-    '- High reward:risk does not erase risks; meaningful concerns must still appear in risks',
-    '- Keep risks concise, factual, and non-duplicative',
+    '- Keep key_reasons constructive and risks concise, factual, and non-duplicative',
     '',
     'Chart verification:',
     '- If a chart image is attached, first check whether it plausibly matches the supplied ticker',
@@ -16613,8 +16728,7 @@ function buildPromptBody(payload){
     '- chart_match_status must be: match | mismatch | unclear',
     '- if chart_match_status = mismatch, final_verdict should be Avoid',
     '- risks must always be present as an array',
-    '- risks: array of concise risk items that match the cautionary content in the chart read',
-    '- Do not output an empty risks array if you mention caution, weak structure, weak volume, hostile market, deeper-than-preferred pullback, incomplete confirmation, or similar concerns anywhere else in the response',
+    '- risks: concise items that match cautionary content in chart read',
     '- Only use an empty risks array if the setup is genuinely clean and low-risk relative to the strategy',
     '- If unknown -> null',
     '- Keep explanations short and practical'
