@@ -296,6 +296,7 @@ if(typeof window !== 'undefined'){
   window.DEBUG_ANALYSIS = window.DEBUG_ANALYSIS === true;
   window.DEBUG_LIFECYCLE = window.DEBUG_LIFECYCLE === true;
   window.DEBUG_AUDIT = window.DEBUG_AUDIT === true;
+  window.DEBUG_STORAGE = window.DEBUG_STORAGE === true;
 }
 const marketDataCache = new Map();
 const fxRateCache = new Map();
@@ -411,6 +412,11 @@ let suggestionRequestToken = 0;
 let tesseractLoaderPromise = null;
 let backendSyncTimer = null;
 let backendRefreshTimer = null;
+let trackedStatePersistScheduled = false;
+let trackedStatePersistInFlight = false;
+let trackedStatePersistFollowUp = false;
+let trackedStatePersistLastSuccessfulSignature = '';
+let trackedStatePersistLastAttemptSignature = '';
 let pushConfigPromise = null;
 let watchlistLifecycleTimer = null;
 let watchlistLifecycleListenersBound = false;
@@ -869,6 +875,18 @@ function syncBackendTrackedOwnership(remoteRecords){
 
 async function pushTrackedRecordsToBackend(){
   const payload = trackedTickerRecordsPayload();
+  const payloadSignature = trackedStatePersistSignature(payload);
+  if(payloadSignature === trackedStatePersistLastSuccessfulSignature){
+    logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_SKIP_UNCHANGED', {reason:'signature_unchanged'});
+    return false;
+  }
+  if(trackedStatePersistInFlight){
+    trackedStatePersistFollowUp = true;
+    logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_SKIP_IN_FLIGHT', {reason:'in_flight'});
+    return false;
+  }
+  trackedStatePersistInFlight = true;
+  trackedStatePersistLastAttemptSignature = payloadSignature;
   const localTrackedTickers = Object.keys(payload.records).map(normalizeTicker);
   try{
     const response = await fetchJsonWithTimeout(trackedStateEndpoint(), {
@@ -881,15 +899,58 @@ async function pushTrackedRecordsToBackend(){
       updateBackendTrackedVersions(body.trackedState.records);
       state.backendLocalTrackedTickers = localTrackedTickers;
       persistState();
+      trackedStatePersistLastSuccessfulSignature = payloadSignature;
+      logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_OK', {
+        trackedTickers:localTrackedTickers.length
+      });
+      return true;
     }
-  }catch(error){}
+  }catch(error){
+    logDebugWarn('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_ERROR', {
+      message:String(error && error.message || 'tracked_state_persist_failed')
+    });
+  }finally{
+    trackedStatePersistInFlight = false;
+    if(trackedStatePersistFollowUp){
+      trackedStatePersistFollowUp = false;
+      requestTrackedStatePersist({reason:'follow_up'});
+    }
+  }
+  return false;
 }
 
 function scheduleTrackedRecordsSync(delayMs = 800){
-  clearTimeout(backendSyncTimer);
-  backendSyncTimer = setTimeout(() => {
+  requestTrackedStatePersist({delayMs, reason:'legacy_schedule'});
+}
+
+function requestTrackedStatePersist(options = {}){
+  const delayMs = Number.isFinite(Number(options.delayMs)) ? Math.max(0, Number(options.delayMs)) : 0;
+  const reason = String(options.reason || 'unspecified');
+  if(trackedStatePersistInFlight){
+    trackedStatePersistFollowUp = true;
+    logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_QUEUE_FOLLOW_UP', {reason});
+    return;
+  }
+  if(trackedStatePersistScheduled){
+    logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_COALESCED', {reason});
+    return;
+  }
+  trackedStatePersistScheduled = true;
+  const flush = () => {
+    trackedStatePersistScheduled = false;
+    if(isScannerWorkflowPersistBurstActive()){
+      trackedStatePersistFollowUp = true;
+      logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_DEFER_SCAN', {reason});
+      return;
+    }
     pushTrackedRecordsToBackend();
-  }, delayMs);
+  };
+  if(delayMs > 0){
+    clearTimeout(backendSyncTimer);
+    backendSyncTimer = setTimeout(flush, delayMs);
+    return;
+  }
+  setTimeout(flush, 0);
 }
 
 async function pullTrackedRecordsFromBackend(options = {}){
@@ -1712,6 +1773,36 @@ function analysisDerivedStatesFromRecord(record){
     setupTypeOverlapDetected:String(analysisProjection.setup_type_overlap_detected || normalizedAnalysis.setup_type_overlap_detected || '').trim().toLowerCase(),
     setupTypeReason:String(analysisProjection.setup_type_reason || normalizedAnalysis.setup_type_reason || '').trim()
   };
+}
+
+function stableStringifyForPersistSignature(value){
+  if(value === null) return 'null';
+  if(value === undefined) return '"__undefined__"';
+  if(Array.isArray(value)){
+    return `[${value.map(item => stableStringifyForPersistSignature(item)).join(',')}]`;
+  }
+  if(typeof value === 'object'){
+    const keys = Object.keys(value).sort();
+    return `{${keys.map(key => `${JSON.stringify(key)}:${stableStringifyForPersistSignature(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function trackedStatePersistSignature(payload){
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const signaturePayload = {
+    settings:safePayload.settings && typeof safePayload.settings === 'object' ? safePayload.settings : {},
+    records:safePayload.records && typeof safePayload.records === 'object' ? safePayload.records : {},
+    removedRecords:safePayload.removedRecords && typeof safePayload.removedRecords === 'object' ? safePayload.removedRecords : {}
+  };
+  return stableStringifyForPersistSignature(signaturePayload);
+}
+
+function isScannerWorkflowPersistBurstActive(){
+  const live = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+    ? String(uiState.liveProcessStatus.state || '')
+    : '';
+  return live === 'running_scan';
 }
 
 function normalizeTickerRecord(record){
@@ -2596,7 +2687,6 @@ function syncStateFromDom(){
 function saveState(){
   syncStateFromDom();
   commitTickerState();
-  scheduleTrackedRecordsSync();
   renderStats();
   renderFinalUniversePreview();
 }
@@ -4925,6 +5015,7 @@ async function runScannerWorkflow(options = {}){
       }
     });
     setLiveProcessStatus('error', 'Scan failed.');
+    requestTrackedStatePersist({reason:'scan_failed'});
     throw err;
   }
   state.dismissedFocusTickers = [];
@@ -4942,6 +5033,7 @@ async function runScannerWorkflow(options = {}){
   renderFocusQueue();
   setStatus('apiStatus', `<span class="ok">Quality Pullback Scanner finished.</span> ${result.done} ranked, ${result.rejected} avoid, ${result.failed} failed.`);
   setLiveProcessStatus('scan_complete', 'Scan complete.', {autoIdleMs:LIVE_PROCESS_COMPLETE_TO_IDLE_MS});
+  requestTrackedStatePersist({reason:'scan_complete'});
   pushRuntimeDebugEntry('scanner.complete', {
     message:'Run Scan finished',
     extra:result
