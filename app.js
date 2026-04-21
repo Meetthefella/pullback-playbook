@@ -280,6 +280,9 @@ uiState.scannerCardClickTraceHistory = uiState.scannerCardClickTraceHistory && t
 uiState.watchlistLiveRefreshPending = uiState.watchlistLiveRefreshPending && typeof uiState.watchlistLiveRefreshPending === 'object'
   ? uiState.watchlistLiveRefreshPending
   : {};
+uiState.watchlistManualRefreshInProgress = uiState.watchlistManualRefreshInProgress && typeof uiState.watchlistManualRefreshInProgress === 'object'
+  ? uiState.watchlistManualRefreshInProgress
+  : {};
 uiState.reviewCapitalSimulation = uiState.reviewCapitalSimulation && typeof uiState.reviewCapitalSimulation === 'object'
   ? uiState.reviewCapitalSimulation
   : {ticker:'', usagePercent:null};
@@ -300,6 +303,7 @@ if(typeof window !== 'undefined'){
   window.DEBUG_STORAGE = window.DEBUG_STORAGE === true;
 }
 const marketDataCache = new Map();
+const inFlightBatchRequests = new Map();
 const fxRateCache = new Map();
 const fxRatePending = new Map();
 const MAX_CHART_BYTES = 4 * 1024 * 1024;
@@ -2533,6 +2537,22 @@ function isWatchlistLiveRefreshPending(ticker){
   return !!(uiState.watchlistLiveRefreshPending && uiState.watchlistLiveRefreshPending[symbol]);
 }
 
+function setManualWatchlistRefreshInProgress(ticker, inProgress = true){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  uiState.watchlistManualRefreshInProgress = uiState.watchlistManualRefreshInProgress && typeof uiState.watchlistManualRefreshInProgress === 'object'
+    ? uiState.watchlistManualRefreshInProgress
+    : {};
+  if(inProgress) uiState.watchlistManualRefreshInProgress[symbol] = true;
+  else delete uiState.watchlistManualRefreshInProgress[symbol];
+}
+
+function isManualWatchlistRefreshInProgress(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return false;
+  return !!(uiState.watchlistManualRefreshInProgress && uiState.watchlistManualRefreshInProgress[symbol]);
+}
+
 function diaryTradeRecords(){
   return allTickerRecords()
     .flatMap(record => (record.diary && Array.isArray(record.diary.records) ? record.diary.records.map(item => ({record, trade:normalizeTradeRecord(item)})) : []))
@@ -2833,6 +2853,7 @@ function loadState(){
   renderCards();
   renderScannerRulesPanel();
   uiState.watchlistLiveRefreshPending = {};
+  uiState.watchlistManualRefreshInProgress = {};
   const startupRefreshTickers = watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker).filter(Boolean);
   setWatchlistLiveRefreshPending(startupRefreshTickers, true);
   renderWatchlist();
@@ -4544,7 +4565,7 @@ function clearSavedScannerUniverseList(){
   setStatus('inputStatus', '<span class="ok">Saved scanner universe snapshot cleared from this device.</span>');
 }
 
-function watchlistRecordRenderSignature(record, pendingMap = {}){
+function watchlistRecordRenderSignature(record, pendingMap = {}, manualRefreshMap = {}){
   const item = normalizeTickerRecord(record);
   const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
   const watch = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : {};
@@ -4581,7 +4602,8 @@ function watchlistRecordRenderSignature(record, pendingMap = {}){
     String(review.lastReviewedAt || ''),
     String(analysisState.reviewedAt || ''),
     String(marketData.updatedAt || ''),
-    pendingMap[ticker] ? 1 : 0
+    pendingMap[ticker] ? 1 : 0,
+    manualRefreshMap[ticker] ? 1 : 0
   ].join('~');
 }
 
@@ -4589,9 +4611,12 @@ function buildWatchlistRenderSignature(records, options = {}){
   const pendingMap = uiState.watchlistLiveRefreshPending && typeof uiState.watchlistLiveRefreshPending === 'object'
     ? uiState.watchlistLiveRefreshPending
     : {};
+  const manualRefreshMap = uiState.watchlistManualRefreshInProgress && typeof uiState.watchlistManualRefreshInProgress === 'object'
+    ? uiState.watchlistManualRefreshInProgress
+    : {};
   const showExpired = options.showExpired === true ? 1 : 0;
   const parts = [`showExpired=${showExpired}`, `day=${todayIsoDate()}`, `count=${records.length}`];
-  records.forEach(record => parts.push(watchlistRecordRenderSignature(record, pendingMap)));
+  records.forEach(record => parts.push(watchlistRecordRenderSignature(record, pendingMap, manualRefreshMap)));
   return parts.join('|');
 }
 
@@ -4650,6 +4675,7 @@ function renderWatchlist(){
       if(!entry) return;
       const view = buildFinalSetupView(record);
       const liveRefreshPending = isWatchlistLiveRefreshPending(record.ticker);
+      const manualRefreshBusy = isManualWatchlistRefreshInProgress(record.ticker);
       const remaining = getTradingDaysRemaining(entry);
       const lifecycleText = lifecycleLabel(record);
       const lifecycleSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
@@ -4761,6 +4787,8 @@ function renderWatchlist(){
         ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
         : '';
       const decisionSummary = watchlistVisualState.decision_summary;
+      const refreshButtonLabel = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
+      const refreshButtonDisabled = manualRefreshBusy ? ' disabled' : '';
       const planUI = resolvePlanVisibility({
         state:watchlistVisualState.finalVerdict,
         bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
@@ -4780,7 +4808,7 @@ function renderWatchlist(){
       div.style.cssText = watchlistVisualState.styleAttr || '';
       div.dataset.visualTone = watchlistVisualState.visual_tone || '';
       div.dataset.visualState = watchlistVisualState.state || '';
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life">Refresh</button></div></details>`;
+      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -11328,66 +11356,80 @@ async function fetchMarketData(symbol, options = {}){
 }
 
 async function fetchMarketDataBatch(symbols, options = {}){
-  const requested = uniqueTickers(symbols);
+  const requested = uniqueTickers(symbols).sort();
   if(!requested.length) return {};
   const provider = normalizeDataProvider(state.dataProvider);
   const plan = String(state.apiPlan || DEFAULT_API_PLAN);
-  const resultByTicker = {};
-  const missing = [];
-  requested.forEach(ticker => {
-    if(!options.force){
-      const cached = getCachedMarketData(ticker);
-      if(cached){
-        resultByTicker[ticker] = cached;
-        return;
+  const requestKey = `${requested.join(',')}|force:${options.force === true}|provider:${provider}|plan:${plan}`;
+  if(inFlightBatchRequests.has(requestKey)){
+    return inFlightBatchRequests.get(requestKey);
+  }
+  const requestPromise = (async () => {
+    const resultByTicker = {};
+    const missing = [];
+    requested.forEach(ticker => {
+      if(!options.force){
+        const cached = getCachedMarketData(ticker);
+        if(cached){
+          resultByTicker[ticker] = cached;
+          return;
+        }
+      }
+      missing.push(ticker);
+    });
+    if(!missing.length) return resultByTicker;
+    let lastError = '';
+    for(const endpoint of marketDataEndpoints()){
+      try{
+        const params = new URLSearchParams({
+          symbols:missing.join(','),
+          provider,
+          plan
+        });
+        const response = await fetchJsonWithTimeout(`${endpoint}?${params.toString()}`);
+        const payload = await response.json().catch(() => ({}));
+        if(!response.ok){
+          throw new Error(payload && payload.error ? payload.error : 'Batch market-data request failed.');
+        }
+        const rows = Array.isArray(payload && payload.results) ? payload.results : [];
+        if(!rows.length){
+          throw new Error(payload && payload.error ? payload.error : 'Batch market-data request returned no usable data.');
+        }
+        rows.forEach(row => {
+          const ticker = normalizeTicker(row && (row.symbol || row.ticker));
+          if(!ticker) return;
+          const safeData = row && row.data && typeof row.data === 'object' ? row.data : {symbol:ticker, ticker};
+          const normalized = normalizeMarketSnapshot(safeData, payload && payload.provider || provider);
+          rememberTickerMeta(normalized);
+          if(row && row.ok !== false){
+            setCachedMarketData(ticker, normalized);
+          }else{
+            normalized.__error = String(row && row.error || `Market data is incomplete for ${ticker}.`);
+          }
+          resultByTicker[ticker] = normalized;
+        });
+        missing.forEach(ticker => {
+          if(resultByTicker[ticker]) return;
+          resultByTicker[ticker] = {
+            ...normalizeMarketSnapshot({symbol:ticker, ticker}, payload && payload.provider || provider),
+            __error:String(payload && payload.error || `Market data request returned no usable data for ${ticker}.`)
+          };
+        });
+        return resultByTicker;
+      }catch(error){
+        lastError = String(error && error.message || 'Batch market-data request failed.');
       }
     }
-    missing.push(ticker);
-  });
-  if(!missing.length) return resultByTicker;
-  let lastError = '';
-  for(const endpoint of marketDataEndpoints()){
-    try{
-      const params = new URLSearchParams({
-        symbols:missing.join(','),
-        provider,
-        plan
-      });
-      const response = await fetchJsonWithTimeout(`${endpoint}?${params.toString()}`);
-      const payload = await response.json().catch(() => ({}));
-      if(!response.ok){
-        throw new Error(payload && payload.error ? payload.error : 'Batch market-data request failed.');
-      }
-      const rows = Array.isArray(payload && payload.results) ? payload.results : [];
-      if(!rows.length){
-        throw new Error(payload && payload.error ? payload.error : 'Batch market-data request returned no usable data.');
-      }
-      rows.forEach(row => {
-        const ticker = normalizeTicker(row && (row.symbol || row.ticker));
-        if(!ticker) return;
-        const safeData = row && row.data && typeof row.data === 'object' ? row.data : {symbol:ticker, ticker};
-        const normalized = normalizeMarketSnapshot(safeData, payload && payload.provider || provider);
-        rememberTickerMeta(normalized);
-        if(row && row.ok !== false){
-          setCachedMarketData(ticker, normalized);
-        }else{
-          normalized.__error = String(row && row.error || `Market data is incomplete for ${ticker}.`);
-        }
-        resultByTicker[ticker] = normalized;
-      });
-      missing.forEach(ticker => {
-        if(resultByTicker[ticker]) return;
-        resultByTicker[ticker] = {
-          ...normalizeMarketSnapshot({symbol:ticker, ticker}, payload && payload.provider || provider),
-          __error:String(payload && payload.error || `Market data request returned no usable data for ${ticker}.`)
-        };
-      });
-      return resultByTicker;
-    }catch(error){
-      lastError = String(error && error.message || 'Batch market-data request failed.');
+    throw new Error(lastError || 'Batch market-data request failed.');
+  })();
+  inFlightBatchRequests.set(requestKey, requestPromise);
+  try{
+    return await requestPromise;
+  }finally{
+    if(inFlightBatchRequests.get(requestKey) === requestPromise){
+      inFlightBatchRequests.delete(requestKey);
     }
   }
-  throw new Error(lastError || 'Batch market-data request failed.');
 }
 
 async function fetchTickerSuggestions(query){
@@ -14200,23 +14242,33 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
 async function refreshWatchlistTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
-  setStatus('scannerSelectionStatus', `Refreshing ${escapeHtml(symbol)}...`);
-  const result = await refreshWatchlistRecordFromSourceOfTruth(symbol, {
-    source:'manual_refresh',
-    clearReviewOverride:true
-  });
-  if(result.ok){
-    setStatus('scannerSelectionStatus', `<span class="ok">${escapeHtml(symbol)} refreshed from saved market data.</span>`);
-  }else{
-    setStatus('scannerSelectionStatus', `<span class="warntext">Could not refresh ${escapeHtml(symbol)} right now. Kept the watchlist entry active locally.</span>`);
+  if(isManualWatchlistRefreshInProgress(symbol)){
+    setStatus('scannerSelectionStatus', '<span class="warntext">Refresh already running...</span>');
+    return;
   }
-  commitTickerState();
-  requeueTickerForToday(symbol);
+  setManualWatchlistRefreshInProgress(symbol, true);
   renderWatchlist();
-  renderFocusQueue();
-  renderScannerResults();
-  renderCards();
-  if(activeReviewTicker() === symbol) renderReviewWorkspace();
+  try{
+    setStatus('scannerSelectionStatus', `Refreshing ${escapeHtml(symbol)}...`);
+    const result = await refreshWatchlistRecordFromSourceOfTruth(symbol, {
+      source:'manual_refresh',
+      clearReviewOverride:true
+    });
+    if(result.ok){
+      setStatus('scannerSelectionStatus', `<span class="ok">${escapeHtml(symbol)} refreshed from saved market data.</span>`);
+    }else{
+      setStatus('scannerSelectionStatus', `<span class="warntext">Could not refresh ${escapeHtml(symbol)} right now. Kept the watchlist entry active locally.</span>`);
+    }
+    commitTickerState();
+    requeueTickerForToday(symbol);
+    renderFocusQueue();
+    renderScannerResults();
+    renderCards();
+    if(activeReviewTicker() === symbol) renderReviewWorkspace();
+  }finally{
+    setManualWatchlistRefreshInProgress(symbol, false);
+    renderWatchlist();
+  }
 }
 
 function analyseActiveReviewTicker(){
