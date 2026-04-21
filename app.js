@@ -2665,11 +2665,11 @@ function syncLegacyCollectionsFromTickerRecords(){
     .slice(0, 100);
 }
 
-function commitTickerState(){
+function commitTickerState(options = {}){
   logDebug('DEBUG_RENDER', 'PROJECTION_FROM_TICKER_RECORD', 'syncLegacyCollections');
   syncLegacyCollectionsFromTickerRecords();
   persistState();
-  scheduleTrackedRecordsSync();
+  if(options.syncTracked !== false) scheduleTrackedRecordsSync();
 }
 
 function syncCardDraftsFromDom(){
@@ -4812,7 +4812,17 @@ function renderWatchlist(){
       div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
       div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
       div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
-      div.querySelector('[data-act="refresh-life"]').onclick = () => { refreshWatchlistTicker(entry.ticker).catch(() => {}); };
+      const refreshButton = div.querySelector('[data-act="refresh-life"]');
+      if(refreshButton){
+        refreshButton.disabled = manualRefreshBusy;
+        refreshButton.textContent = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
+        refreshButton.onclick = () => {
+          if(refreshButton.disabled) return;
+          refreshButton.disabled = true;
+          refreshButton.textContent = 'Refreshing...';
+          refreshWatchlistTicker(entry.ticker).catch(() => {});
+        };
+      }
       div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
       if(watchlistEntryConditionsHelper){
         div.setAttribute('data-entry-hold-helper', '1');
@@ -14247,7 +14257,6 @@ async function refreshWatchlistTicker(ticker){
     return;
   }
   setManualWatchlistRefreshInProgress(symbol, true);
-  renderWatchlist();
   try{
     setStatus('scannerSelectionStatus', `Refreshing ${escapeHtml(symbol)}...`);
     const result = await refreshWatchlistRecordFromSourceOfTruth(symbol, {
@@ -14259,15 +14268,20 @@ async function refreshWatchlistTicker(ticker){
     }else{
       setStatus('scannerSelectionStatus', `<span class="warntext">Could not refresh ${escapeHtml(symbol)} right now. Kept the watchlist entry active locally.</span>`);
     }
-    commitTickerState();
+    commitTickerState({syncTracked:false});
     requeueTickerForToday(symbol);
-    renderFocusQueue();
     renderScannerResults();
     renderCards();
     if(activeReviewTicker() === symbol) renderReviewWorkspace();
+    if(result.ok){
+      requestTrackedStatePersist({
+        reason:'manual_watchlist_refresh',
+        delayMs:350
+      });
+    }
   }finally{
     setManualWatchlistRefreshInProgress(symbol, false);
-    renderWatchlist();
+    requestWatchlistRender({includeFocusQueue:true});
   }
 }
 
