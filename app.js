@@ -4620,6 +4620,227 @@ function buildWatchlistRenderSignature(records, options = {}){
   return parts.join('|');
 }
 
+function shouldDisplayWatchlistRecordForCurrentFilter(record){
+  const showExpired = !!state.showExpiredWatchlist;
+  const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+  if(showExpired) return true;
+  return !['dead','expired'].includes(lifecycle.state);
+}
+
+function watchlistPlacementSnapshot(record){
+  const item = normalizeTickerRecord(record || {});
+  const lifecycle = syncWatchlistLifecycle(item) || watchlistLifecycleSnapshot(item);
+  return {
+    visible:shouldDisplayWatchlistRecordForCurrentFilter(item),
+    bucket:watchlistPresentationBucketForRecord(item),
+    lifecycleRank:Number.isFinite(lifecycle && lifecycle.rank) ? lifecycle.rank : 99,
+    priority:watchlistPriorityForRecord(item).score
+  };
+}
+
+function findWatchlistCardNodeByTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return null;
+  const cards = document.querySelectorAll('.watchlist-card[data-watchlist-ticker]');
+  for(const node of cards){
+    if(normalizeTicker(node.getAttribute('data-watchlist-ticker') || '') === symbol) return node;
+  }
+  return null;
+}
+
+function setWatchlistCardRefreshButtonState(ticker, busy = false){
+  const card = findWatchlistCardNodeByTicker(ticker);
+  if(!card) return false;
+  const button = card.querySelector('[data-act="refresh-life"]');
+  if(!button) return false;
+  button.disabled = !!busy;
+  button.textContent = busy ? 'Refreshing...' : 'Refresh';
+  return true;
+}
+
+function renderWatchlistCardElement(record){
+  const entry = tickerRecordToWatchlistEntry(record);
+  if(!entry) return null;
+  const view = buildFinalSetupView(record);
+  const liveRefreshPending = isWatchlistLiveRefreshPending(record.ticker);
+  const manualRefreshBusy = isManualWatchlistRefreshInProgress(record.ticker);
+  const remaining = getTradingDaysRemaining(entry);
+  const lifecycleText = lifecycleLabel(record);
+  const lifecycleSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+  const expired = lifecycleSnapshot.state === 'expired' || record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
+  const expiryDate = record.lifecycle.expiresAt || 'Not set';
+  const priority = watchlistPriorityForRecord(record);
+  const avoidSubtype = avoidSubtypeForRecord(record);
+  const derivedStates = analysisDerivedStatesFromRecord(record);
+  const displayedPlan = applySetupConfirmationPlanGate(record, deriveCurrentPlanState(
+    record.plan && record.plan.entry,
+    record.plan && record.plan.stop,
+    record.plan && record.plan.firstTarget,
+    record.marketData && record.marketData.currency
+  ), derivedStates);
+  const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
+  const rrResolution = resolveScannerStateWithTrace(record);
+  const resolvedContract = resolveFinalStateContract(record, {
+    context:'watchlist',
+    finalVerdict:view.displayStage,
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    rrResolution
+  });
+  const watchlistPresentation = resolveEmojiPresentation(record, {
+    context:'watchlist',
+    finalVerdict:view.displayStage,
+    setupUiState:view.setupUiState,
+    displayedPlan:view.displayedPlan,
+    derivedStates:view.setupStates,
+    warningState:view.warningState,
+    avoidSubtype
+  });
+  watchlistPresentation.primaryText = resolvedContract.badgeText;
+  watchlistPresentation.badgeClass = resolvedContract.badgeClass;
+  watchlistPresentation.modifiers = resolvedContract.modifiers || watchlistPresentation.modifiers;
+  const watchlistBadgeClass = ['expired','dead'].includes(lifecycleSnapshot.state) ? 'avoid' : resolvedContract.badgeClass;
+  const watchlistBadgeLabel = lifecycleSnapshot.state === 'expired'
+    ? 'Expired'
+    : (lifecycleSnapshot.state === 'dead' ? '💀 Dead' : watchlistPresentation.primaryText);
+  const watchlistSignalMarkup = emojiModifierMarkup({
+    ...watchlistPresentation,
+    modifiers:prioritizedSignalModifiers(watchlistPresentation, 2)
+  });
+  const reviewPresentation = resolveEmojiPresentation(record, {context:'review'});
+  if(reviewPresentation.primaryText !== watchlistPresentation.primaryText){
+    logDebugWarn('DEBUG_RENDER', 'EMOJI_SURFACE_DISAGREEMENT', {ticker:record.ticker, watchlist:watchlistPresentation.primaryText, review:reviewPresentation.primaryText});
+  }
+  const reasoning = decisionReasoningForRecord(record, {
+    reviewVerdict:view.displayStage,
+    avoidSubtype
+  });
+  const shortAction = watchlistActionSummary({
+    label:resolvedContract.actionLabel,
+    shortLabel:resolvedContract.actionShortLabel
+  });
+  const decisionCopy = watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reasoning, shortAction);
+  const visualState = resolveVisualState(record, 'watchlist', {
+    resolvedContract,
+    derivedStates,
+    displayedPlan,
+    pendingResolution:liveRefreshPending,
+    setupScore:view && view.setupScore
+  });
+  const globalVerdict = liveRefreshPending ? null : resolveGlobalVerdict(record);
+  const watchlistVisualState = liveRefreshPending
+    ? {
+      ...visualState,
+      watchlist_presentation_source:'pending_passthrough'
+    }
+    : reconcileWatchlistPresentation({
+      record,
+      visualState,
+      globalVerdict,
+      lifecycleSnapshot,
+      resolvedContract,
+      derivedStates,
+      displayedPlan
+    });
+  const shortReason = decisionCopy.reason;
+  const watchlistSignalRowMarkup = liveRefreshPending || watchlistVisualState.watchlist_presentation_source === 'strict_reconciled'
+    ? ''
+    : watchlistSignalMarkup;
+  record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+  if(!record.watchlist.debug.holdTrace){
+    const seededAt = new Date().toISOString();
+    record.watchlist.debug.holdTrace = `hold_helper.rendered | ${seededAt}`;
+    const history = Array.isArray(record.watchlist.debug.holdTraceHistory) ? record.watchlist.debug.holdTraceHistory : [];
+    record.watchlist.debug.holdTraceHistory = [`hold_helper.rendered | ${seededAt}`, ...history].slice(0, 8);
+  }
+  const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    rrResolution,
+    resolvedContract,
+    globalVisual:watchlistVisualState
+  });
+  const div = document.createElement('div');
+  const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
+  const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
+  const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
+  const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
+  const watchlistScoreText = liveRefreshPending
+    ? 'Refreshing...'
+    : (expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''));
+  const watchlistScoreClass = liveRefreshPending ? 's-neutral' : 'visual-score';
+  const liveRefreshNote = liveRefreshPending
+    ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
+    : '';
+  const decisionSummary = watchlistVisualState.decision_summary;
+  const refreshButtonLabel = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
+  const refreshButtonDisabled = manualRefreshBusy ? ' disabled' : '';
+  const planUI = resolvePlanVisibility({
+    state:watchlistVisualState.finalVerdict,
+    bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
+    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
+  });
+  const entryConditionsSummary = buildEntryConditionsSummary({
+    ticker:entry.ticker,
+    finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
+    resolvedContract,
+    globalVerdict,
+    derivedStates,
+    displayedPlan
+  });
+  const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
+  const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
+  div.className = `resultcompact watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
+  div.style.cssText = watchlistVisualState.styleAttr || '';
+  div.dataset.visualTone = watchlistVisualState.visual_tone || '';
+  div.dataset.visualState = watchlistVisualState.state || '';
+  div.dataset.watchlistTicker = entry.ticker;
+  div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
+  div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
+  div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
+  div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
+  const refreshButton = div.querySelector('[data-act="refresh-life"]');
+  if(refreshButton){
+    refreshButton.disabled = manualRefreshBusy;
+    refreshButton.textContent = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
+    refreshButton.onclick = () => {
+      if(refreshButton.disabled) return;
+      refreshButton.disabled = true;
+      refreshButton.textContent = 'Refreshing...';
+      refreshWatchlistTicker(entry.ticker).catch(() => {});
+    };
+  }
+  div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
+  if(watchlistEntryConditionsHelper){
+    div.setAttribute('data-entry-hold-helper', '1');
+    div.setAttribute('data-hold-card-trigger', '1');
+    div.setAttribute('data-hold-ticker', entry.ticker);
+    div.setAttribute('data-panel-id', watchlistPanelId);
+    div.setAttribute('data-hold-ms', '550');
+    const holdWrapper = document.createElement('div');
+    holdWrapper.innerHTML = watchlistEntryConditionsHelper;
+    if(holdWrapper.firstElementChild) div.appendChild(holdWrapper.firstElementChild);
+  }
+  bindEntryConditionsHoldInteractions(div);
+  return div;
+}
+
+function updateWatchlistCardForTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return false;
+  const existingCard = findWatchlistCardNodeByTicker(symbol);
+  if(!existingCard) return false;
+  const record = getTickerRecord(symbol);
+  if(!record || !record.watchlist || !record.watchlist.inWatchlist) return false;
+  if(!shouldDisplayWatchlistRecordForCurrentFilter(record)) return false;
+  const replacement = renderWatchlistCardElement(record);
+  if(!replacement) return false;
+  existingCard.replaceWith(replacement);
+  return true;
+}
+
 function renderWatchlist(){
   syncWatchlistLifecycleBeforeRender('auto_recompute');
   purgeExpiredWatchlistEntries();
@@ -4671,6 +4892,10 @@ function renderWatchlist(){
     section.className = 'watchlistgroup';
     section.innerHTML = `<div class="summary" style="margin:12px 0 8px"><strong>${escapeHtml(group.title)}</strong> <span class="tiny">${escapeHtml(group.hint)}</span></div>`;
     groupRecords.forEach(record => {
+      const cardElement = renderWatchlistCardElement(record);
+      if(!cardElement) return;
+      section.appendChild(cardElement);
+      return;
       const entry = tickerRecordToWatchlistEntry(record);
       if(!entry) return;
       const view = buildFinalSetupView(record);
@@ -14256,7 +14481,11 @@ async function refreshWatchlistTicker(ticker){
     setStatus('scannerSelectionStatus', '<span class="warntext">Refresh already running...</span>');
     return;
   }
+  const beforeRecord = getTickerRecord(symbol);
+  const beforePlacement = beforeRecord ? watchlistPlacementSnapshot(beforeRecord) : null;
+  let requireFullWatchlistRender = true;
   setManualWatchlistRefreshInProgress(symbol, true);
+  setWatchlistCardRefreshButtonState(symbol, true);
   try{
     setStatus('scannerSelectionStatus', `Refreshing ${escapeHtml(symbol)}...`);
     const result = await refreshWatchlistRecordFromSourceOfTruth(symbol, {
@@ -14279,9 +14508,29 @@ async function refreshWatchlistTicker(ticker){
         delayMs:350
       });
     }
+    const afterRecord = getTickerRecord(symbol);
+    const afterPlacement = afterRecord ? watchlistPlacementSnapshot(afterRecord) : null;
+    const placementStable = !!(
+      beforePlacement
+      && afterPlacement
+      && beforePlacement.visible === afterPlacement.visible
+      && beforePlacement.bucket === afterPlacement.bucket
+      && beforePlacement.lifecycleRank === afterPlacement.lifecycleRank
+      && beforePlacement.priority === afterPlacement.priority
+    );
+    if(placementStable){
+      requireFullWatchlistRender = !updateWatchlistCardForTicker(symbol);
+    }else{
+      requireFullWatchlistRender = true;
+    }
   }finally{
     setManualWatchlistRefreshInProgress(symbol, false);
-    requestWatchlistRender({includeFocusQueue:true});
+    if(requireFullWatchlistRender){
+      requestWatchlistRender({includeFocusQueue:true});
+    }else{
+      renderFocusQueue();
+      setWatchlistCardRefreshButtonState(symbol, false);
+    }
   }
 }
 
