@@ -42,7 +42,9 @@ if(!window.ScannerInteractionState) throw new Error('ScannerInteractionState fai
 if(!window.ScannerResultsSupport) throw new Error('ScannerResultsSupport failed to load.');
 if(!window.ReviewPresentation) throw new Error('ReviewPresentation failed to load.');
 if(!window.AppPersistDomain) throw new Error('AppPersistDomain failed to load.');
+if(!window.AnalysisService) throw new Error('AnalysisService failed to load.');
 if(!window.TrackedStateService) throw new Error('TrackedStateService failed to load.');
+if(!window.ReviewAnalysisFeature) throw new Error('ReviewAnalysisFeature failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -205,8 +207,14 @@ const {
   trackedStatePersistSignature
 } = window.AppPersistDomain;
 const {
+  createAnalysisService
+} = window.AnalysisService;
+const {
   createTrackedStateService
 } = window.TrackedStateService;
+const {
+  createReviewAnalysisFeature
+} = window.ReviewAnalysisFeature;
 
 // ---------------------------------------------------------------------------
 // End extracted bridge bindings. App.js remains the orchestrator for now.
@@ -834,6 +842,16 @@ const trackedStateService = createTrackedStateService({
   renderFocusQueue,
   renderReviewWorkspace,
   isPersistBurstActive:isScannerWorkflowPersistBurstActive
+});
+const analysisService = createAnalysisService();
+const reviewAnalysisFeature = createReviewAnalysisFeature({
+  uiState,
+  normalizeTicker,
+  activeReviewTicker,
+  displayStageForRecord,
+  getTickerRecord,
+  upsertTickerRecord,
+  analyseSetup
 });
 
 function trackedStateEndpoint(){
@@ -11963,28 +11981,15 @@ function reviewAnalysisUiStateForRecord(record){
 }
 
 function setAnalysisLoadingStage(ticker, message){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return;
-  uiState.analysisLoadingStageByTicker = uiState.analysisLoadingStageByTicker && typeof uiState.analysisLoadingStageByTicker === 'object'
-    ? uiState.analysisLoadingStageByTicker
-    : {};
-  uiState.analysisLoadingStageByTicker[symbol] = String(message || '').trim() || 'Analysing...';
+  reviewAnalysisFeature.setLoadingStage(ticker, message);
 }
 
 function getAnalysisLoadingStage(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return '';
-  const map = uiState.analysisLoadingStageByTicker && typeof uiState.analysisLoadingStageByTicker === 'object'
-    ? uiState.analysisLoadingStageByTicker
-    : {};
-  return String(map[symbol] || '').trim();
+  return reviewAnalysisFeature.getLoadingStage(ticker);
 }
 
 function clearAnalysisLoadingStage(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return;
-  if(!uiState.analysisLoadingStageByTicker || typeof uiState.analysisLoadingStageByTicker !== 'object') return;
-  delete uiState.analysisLoadingStageByTicker[symbol];
+  reviewAnalysisFeature.clearLoadingStage(ticker);
 }
 
 function queueAutoAnalysisForTicker(ticker){
@@ -13730,66 +13735,48 @@ async function analyseSetup(ticker){
     }
     let lastFailureData = null;
     try{
-      let response = null;
-      let data = {};
-      let lastError = 'Analysis request failed.';
-      for(const endpoint of endpoints){
-        let timer = null;
-        try{
-          setAnalysisLoadingStage(ticker, 'Building analysis...');
-          timer = setTimeout(() => {
-            const currentRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
-              ? uiState.analysisActiveRequest
-              : null;
-            if(!currentRequest || currentRequest.id !== analysisRequestId) return;
-            currentRequest.cancelReason = 'timeout';
-            if(!requestController.signal.aborted){
-              try{
-                requestController.abort('timeout');
-              }catch(error){}
-            }
-          }, ANALYSIS_TIMEOUT_MS);
-          response = await fetch(endpoint, {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            signal:requestController.signal,
-            body:JSON.stringify({
-              payload:buildAnalysisPayload(card),
-              prompt:card.lastPrompt,
-              chartRef:card.chartRef ? {name:card.chartRef.name, type:card.chartRef.type, dataUrl:card.chartRef.dataUrl} : null
-            })
-          });
-          if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
-            setScannerCardClickTrace(ticker, 'analyseSetup.stale_response_ignored', `request=${analysisRequestId}`);
-            return;
-          }
-          data = await response.json().catch(() => ({}));
-          logAnalysisDebug('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data });
-          if(!response.ok) throw new Error(buildAnalysisErrorMessage(response.status, data, 'Analysis request failed.'));
-          setAnalysisLoadingStage(ticker, 'Applying analysis...');
-          lastError = '';
-          lastFailureData = null;
-          break;
-        }catch(err){
-          lastFailureData = data && typeof data === 'object' ? data : null;
+      const analysisRequestResult = await analysisService.requestAnalysisFromEndpoints({
+        endpoints,
+        timeoutMs:ANALYSIS_TIMEOUT_MS,
+        controller:requestController,
+        isRequestCurrent:() => !!(uiState.analysisActiveRequest && uiState.analysisActiveRequest.id === analysisRequestId),
+        buildRequestBody:() => ({
+          payload:buildAnalysisPayload(card),
+          prompt:card.lastPrompt,
+          chartRef:card.chartRef ? {name:card.chartRef.name, type:card.chartRef.type, dataUrl:card.chartRef.dataUrl} : null
+        }),
+        classifyAbortReason:() => {
           const activeMeta = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object' && uiState.analysisActiveRequest.id === analysisRequestId
             ? uiState.analysisActiveRequest
             : null;
           const abortReason = String((activeMeta && activeMeta.cancelReason) || requestController.signal.reason || '').trim().toLowerCase();
-          if(err && err.name === 'AbortError'){
-            lastError = abortReason === 'superseded'
-              ? 'Analysis request superseded.'
-              : 'The analysis request timed out. Retry the setup.';
-          }else{
-            lastError = String(err.message || 'Analysis request failed.');
+          if(abortReason === 'timeout'){
+            const currentRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
+              ? uiState.analysisActiveRequest
+              : null;
+            if(currentRequest && currentRequest.id === analysisRequestId){
+              currentRequest.cancelReason = 'timeout';
+            }
           }
-          response = null;
-          if(abortReason === 'superseded') break;
-        }finally{
-          if(timer) clearTimeout(timer);
-        }
+          return abortReason;
+        },
+        onStage:message => setAnalysisLoadingStage(ticker, message),
+        onApiResponse:({endpoint, response, data}) => {
+          logAnalysisDebug('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data });
+        },
+        buildErrorMessage:(status, data, fallback) => buildAnalysisErrorMessage(status, data, fallback)
+      });
+      if(analysisRequestResult.status === 'stale'){
+        setScannerCardClickTrace(ticker, 'analyseSetup.stale_response_ignored', `request=${analysisRequestId}`);
+        return;
       }
-      if(!response) throw new Error(lastError);
+      if(analysisRequestResult.status !== 'ok'){
+        lastFailureData = analysisRequestResult.lastFailureData;
+        throw new Error(analysisRequestResult.errorMessage || 'Analysis request failed.');
+      }
+      const data = analysisRequestResult.data && typeof analysisRequestResult.data === 'object'
+        ? analysisRequestResult.data
+        : {};
       if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
         setScannerCardClickTrace(ticker, 'analyseSetup.stale_apply_ignored', `request=${analysisRequestId}`);
         return;
@@ -14471,13 +14458,7 @@ async function refreshWatchlistTicker(ticker){
 }
 
 function analyseActiveReviewTicker(){
-  const ticker = activeReviewTicker();
-  if(!ticker) return;
-  if(normalizeTicker(uiState.loadingTicker || '') === ticker) return;
-  if(!String(uiState.activeReviewVerdictOverride || '').trim()){
-    uiState.activeReviewVerdictOverride = displayStageForRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker), {includeExecutionDowngrade:false});
-  }
-  analyseSetup(ticker);
+  reviewAnalysisFeature.analyseActiveReviewTicker();
 }
 
 function addActiveReviewTickerToWatchlist(){
