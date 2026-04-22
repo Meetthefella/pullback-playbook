@@ -14820,8 +14820,17 @@ function currentPaperTradeContextForTicker(ticker){
     setupUiState,
     avoidSubtype
   });
+  const visualState = resolveVisualState(record, 'review', {
+    resolvedContract,
+    derivedStates,
+    displayedPlan,
+    setupScore:setupScoreForRecord(record)
+  });
+  const reviewFinalVerdict = normalizeAnalysisVerdict(
+    visualState.finalVerdict || visualState.final_verdict || finalVerdict
+  );
   const eligibility = paperTradeEligibility.evaluatePaperTradeEligibility({
-    finalVerdict,
+    finalVerdict:reviewFinalVerdict,
     planStatus:displayedPlan.status,
     entry:displayedPlan.entry,
     stop:displayedPlan.stop,
@@ -14839,7 +14848,7 @@ function currentPaperTradeContextForTicker(ticker){
     ticker:symbol,
     record,
     displayedPlan,
-    finalVerdict,
+    finalVerdict:reviewFinalVerdict,
     derivedStates,
     setupScore:setupScoreForRecord(record),
     resolvedContract,
@@ -15185,8 +15194,17 @@ function renderReviewWorkspace(options = {}){
     : '';
   const globalVerdict = resolveGlobalVerdict(record);
   const watchlistEligibility = watchlistEligibilityForRecord(record);
+  const visualState = resolveVisualState(record, 'review', {
+    resolvedContract,
+    derivedStates:analysisDerivedStatesFromRecord(record),
+    displayedPlan,
+    setupScore
+  });
+  const reviewFinalVerdictForPaperTrade = normalizeAnalysisVerdict(
+    visualState.finalVerdict || visualState.final_verdict || displayStage
+  );
   const paperTradeEligibilityState = paperTradeEligibility.evaluatePaperTradeEligibility({
-    finalVerdict:displayStage,
+    finalVerdict:reviewFinalVerdictForPaperTrade,
     planStatus:displayedPlan.status,
     entry:displayedPlan.entry,
     stop:displayedPlan.stop,
@@ -15213,7 +15231,7 @@ function renderReviewWorkspace(options = {}){
   const paperTradePrimaryReason = paperTradeEligibilityState.reasons[0] || '';
   const paperTradeDisabledReason = !paperTradeEligible
     ? (
-      String(displayStage || '').trim().toLowerCase() !== 'entry'
+      String(reviewFinalVerdictForPaperTrade || '').trim().toLowerCase() !== 'entry'
         ? 'Not actionable - setup is not Entry-ready'
         : 'Trade plan not valid'
     )
@@ -15273,12 +15291,6 @@ function renderReviewWorkspace(options = {}){
   const paperTradePreviewMarkup = paperTradePreviewModel
     ? `<div class="tiny">Ticker ${escapeHtml(paperTradePreviewModel.ticker)} | Side ${escapeHtml(paperTradePreviewModel.side)} | Qty ${escapeHtml(String(paperTradePreviewModel.quantity))}</div><div class="tiny">Entry ${escapeHtml(fmtPrice(paperTradePreviewModel.entry))} | Stop ${escapeHtml(fmtPrice(paperTradePreviewModel.stop))} | Target ${escapeHtml(fmtPrice(paperTradePreviewModel.target))}</div><div class="tiny">Max loss ${escapeHtml(Number.isFinite(paperTradePreviewModel.maxLoss) ? formatGbp(paperTradePreviewModel.maxLoss) : 'n/a')} | RR ${escapeHtml(Number.isFinite(paperTradePreviewModel.rrRatio) ? `${paperTradePreviewModel.rrRatio.toFixed(2)}R` : 'n/a')}</div><div class="tiny">Capital ${escapeHtml(paperTradePreviewModel.capitalLabel)} | Market ${escapeHtml(paperTradePreviewModel.marketStatus || '')}</div>`
     : `<div class="tiny warntext">${escapeHtml(paperTradePrimaryReason || 'Unable to build paper-trade preview for this setup.')}</div>`;
-  const visualState = resolveVisualState(record, 'review', {
-    resolvedContract,
-    derivedStates:analysisDerivedStatesFromRecord(record),
-    displayedPlan,
-    setupScore
-  });
   const decisionSummary = visualState.decision_summary;
   const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
   const reviewAction = getActions(visualState.finalVerdict || visualState.final_verdict);
@@ -15573,14 +15585,14 @@ function renderReviewWorkspace(options = {}){
       </div>
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       <div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>
-      <details class="compact-details" id="paperTradePreview" ${paperTradePanelOpen ? 'open' : ''}>
+      ${paperTradeEligible ? `<details class="compact-details" id="paperTradePreview" ${paperTradePanelOpen ? 'open' : ''}>
         <summary>Paper Trade Preview</summary>
         ${paperTradePreviewMarkup}
         <div class="actions" style="margin-top:10px">
           <button class="primary compactbutton" id="paperTradeConfirmBtn" type="button" ${paperTradePreviewModel && !paperTradeSubmitting ? '' : 'disabled'}>Confirm Paper Trade</button>
           <button class="secondary compactbutton" id="paperTradeCancelBtn" type="button">Close Preview</button>
         </div>
-      </details>
+      </details>` : ''}
       <details class="compact-details">
         <summary>Workspace Status</summary>
         <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
