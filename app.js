@@ -42,6 +42,7 @@ if(!window.ScannerInteractionState) throw new Error('ScannerInteractionState fai
 if(!window.ScannerResultsSupport) throw new Error('ScannerResultsSupport failed to load.');
 if(!window.ReviewPresentation) throw new Error('ReviewPresentation failed to load.');
 if(!window.AppPersistDomain) throw new Error('AppPersistDomain failed to load.');
+if(!window.AppShell) throw new Error('AppShell failed to load.');
 if(!window.AnalysisService) throw new Error('AnalysisService failed to load.');
 if(!window.TrackedStateService) throw new Error('TrackedStateService failed to load.');
 if(!window.ReviewAnalysisFeature) throw new Error('ReviewAnalysisFeature failed to load.');
@@ -208,6 +209,9 @@ const {
   trackedStatePersistSignature
 } = window.AppPersistDomain;
 const {
+  createAppShell
+} = window.AppShell;
+const {
   createAnalysisService
 } = window.AnalysisService;
 const {
@@ -322,12 +326,57 @@ uiState.analysisActiveRequest = uiState.analysisActiveRequest && typeof uiState.
 uiState.analysisLoadingStageByTicker = uiState.analysisLoadingStageByTicker && typeof uiState.analysisLoadingStageByTicker === 'object'
   ? uiState.analysisLoadingStageByTicker
   : {};
+uiState.activeWorkspaceTab = ['scan', 'review', 'track', 'diary'].includes(String(uiState.activeWorkspaceTab || '').toLowerCase())
+  ? String(uiState.activeWorkspaceTab).toLowerCase()
+  : 'scan';
 if(typeof window !== 'undefined'){
   window.DEBUG_RENDER = window.DEBUG_RENDER === true;
   window.DEBUG_ANALYSIS = window.DEBUG_ANALYSIS === true;
   window.DEBUG_LIFECYCLE = window.DEBUG_LIFECYCLE === true;
   window.DEBUG_AUDIT = window.DEBUG_AUDIT === true;
   window.DEBUG_STORAGE = window.DEBUG_STORAGE === true;
+}
+const appShell = createAppShell({uiState});
+const workspaceAnchorTabMap = {
+  '#resultsSection':'scan',
+  '#reviewSection':'review',
+  '#watchlistSection':'track',
+  '#tradeDiarySection':'diary'
+};
+let workspaceAnchorBridgeBound = false;
+
+function setActiveWorkspaceTab(tab, options = {}){
+  if(appShell && appShell.isEnabled && appShell.isEnabled()){
+    return appShell.setActiveWorkspace(tab, options);
+  }
+  const nextTab = String(tab || '').trim().toLowerCase();
+  uiState.activeWorkspaceTab = ['scan', 'review', 'track', 'diary'].includes(nextTab) ? nextTab : 'scan';
+  return uiState.activeWorkspaceTab;
+}
+
+function activeWorkspaceTab(){
+  if(appShell && appShell.isEnabled && appShell.isEnabled() && typeof appShell.getActiveWorkspace === 'function'){
+    return appShell.getActiveWorkspace();
+  }
+  return ['scan', 'review', 'track', 'diary'].includes(String(uiState.activeWorkspaceTab || '').toLowerCase())
+    ? String(uiState.activeWorkspaceTab).toLowerCase()
+    : 'scan';
+}
+
+function bindWorkspaceAnchorBridge(){
+  if(workspaceAnchorBridgeBound || typeof document === 'undefined') return;
+  workspaceAnchorBridgeBound = true;
+  document.addEventListener('click', event => {
+    const anchor = event.target && typeof event.target.closest === 'function'
+      ? event.target.closest('a[href^="#"]')
+      : null;
+    if(!anchor) return;
+    const href = String(anchor.getAttribute('href') || '').trim();
+    const tab = workspaceAnchorTabMap[href];
+    if(!tab) return;
+    event.preventDefault();
+    setActiveWorkspaceTab(tab);
+  });
 }
 const marketDataCache = new Map();
 const inFlightBatchRequests = new Map();
@@ -14081,6 +14130,7 @@ function statusRank(status){
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
+  setActiveWorkspaceTab('review', {focusTop:false});
   const reviewRequestToken = String(options.reviewRequestToken || nextReviewRequestToken());
   uiState.reviewLoadToken = Number(uiState.reviewLoadToken || 0) + 1;
   const reviewLoadToken = Number(uiState.reviewLoadToken || 0);
@@ -15601,6 +15651,11 @@ async function importLatestChart(ticker){
 
 function scrollReviewSectionIntoView(ticker, context = 'review_open', options = {}){
   const symbol = normalizeTicker(ticker);
+  if(appShell && appShell.isEnabled && appShell.isEnabled()){
+    setActiveWorkspaceTab('review', {focusTop:false});
+    setScannerCardClickTrace(symbol, `${context}.workspace_tab`, 'review');
+    return;
+  }
   const runScroll = attempt => {
     const scrollTarget = $('reviewWorkspace') || $('reviewSection');
     if(!scrollTarget){
@@ -18328,6 +18383,8 @@ function reviewHeaderVerdictForRecord(record){
 
 installRuntimeDebugHooks();
 registerPwa();
+appShell.init();
+bindWorkspaceAnchorBridge();
 loadState();
 renderRuntimeDebugPanel();
 setControlFocus(uiState.controlStripPanel || 'market', {scroll:false, instant:true});

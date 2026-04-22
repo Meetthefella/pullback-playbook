@@ -126,21 +126,14 @@
         </div>
       </div>
     </details>
-    <div class="navtabs">
-      <a class="tablink tablink--primary" href="#dailyInput">Scan</a>
-      <a class="tablink tablink--primary" href="#resultsSection">Shortlist</a>
-      <a class="tablink tablink--primary" href="#reviewSection">Review</a>
-      <a class="tablink tablink--primary" href="#watchlistSection">Watchlist</a>
-      <a class="tablink tablink--secondary" href="#diarySection">Diary</a>
-      <a class="tablink tablink--secondary" href="#advancedSection">Advanced</a>
-    </div>
     <div id="liveProcessStatusBanner" class="live-process-banner" data-live-process="startup" aria-live="polite">
       <span class="live-process-banner__label">Status</span>
       <span id="liveProcessStatusText">Loading context...</span>
     </div>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <main id="workspaceArea" class="workspace-area">
+  <div class="card app-workspace-card" data-workspace-card="scan" style="margin-top:14px">
     <h2 id="dailyInput">2) Scan List</h2>
     <div class="scan-primary-stack" style="margin-top:10px">
       <strong>Import From Screenshot</strong>
@@ -218,7 +211,7 @@
     </details>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="scan" style="margin-top:14px">
     <details id="resultsToggle" open>
       <summary><strong id="resultsSection">3) All Scan Results</strong> <span class="tiny" id="resultsToggleText">- Show Ranked Results</span></summary>
       <p class="tiny" style="margin-top:10px">Primary scan output for review. Use this list to open a ticker into the review workspace.</p>
@@ -227,13 +220,13 @@
     </details>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="review" style="margin-top:14px">
     <h2 id="reviewSection">4) Selected Ticker Review Workspace</h2>
     <p class="tiny">One active ticker at a time. Review the chart, notes, checklist, and trade plan in one place.</p>
     <div id="reviewWorkspace" class="list" style="margin-top:14px"></div>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="track" style="margin-top:14px">
     <h2 id="watchlistSection">5) Watchlist</h2>
     <p class="tiny">Decision output area for reviewed setups. Entries expire after 5 trading days unless refreshed.</p>
     <div class="actions" style="margin-top:10px">
@@ -242,7 +235,7 @@
     <div id="watchlistList" class="list"></div>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
       <h2 id="diarySection" style="margin-bottom:0">6) Trade Diary</h2>
       <div class="actions" style="margin-top:0">
@@ -255,7 +248,7 @@
     <div id="tradeDiary" class="list"></div>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
     <details>
       <summary><strong id="analyticsSection">8) Pattern Review</strong></summary>
       <p class="tiny" style="margin-top:10px">Pattern review stays available, but secondary to the active trading workflow.</p>
@@ -263,7 +256,7 @@
     </details>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
     <details>
       <summary><strong id="advancedSection">9) Advanced / API Utilities</strong></summary>
       <div class="grid" style="margin-top:12px">
@@ -324,6 +317,14 @@
       </div>
     </details>
   </div>
+  </main>
+
+  <nav id="bottomRibbonNav" class="bottom-ribbon-nav" aria-label="Primary navigation" role="tablist">
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="true" data-workspace-tab="scan">Scan</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="review">Review</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="track">Track</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="diary">Diary</button>
+  </nav>
 </div>
 <script defer src="./js/utils.js?v=4.4.5"></script>
 <script defer src="./js/date-utils.js?v=4.4.5"></script>
@@ -345,6 +346,7 @@
 <script defer src="./js/scanner-results-support.js?v=4.4.8"></script>
 <script defer src="./js/review-presentation.js?v=4.4.8"></script>
 <script defer src="./js/domain/persist-signature.js?v=4.4.8"></script>
+<script defer src="./js/shell/app-shell.js?v=4.4.8"></script>
 <script defer src="./js/services/analysis-service.js?v=4.4.8"></script>
 <script defer src="./js/services/tracked-state-service.js?v=4.4.8"></script>
 <script defer src="./js/features/review/review-analysis-feature.js?v=4.4.8"></script>

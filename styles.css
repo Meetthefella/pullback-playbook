@@ -1992,3 +1992,48 @@ details>summary::-webkit-details-marker{display:none}
   .watchlist-debug-grid{grid-template-columns:1fr}
   .watchlist-debug-pane>summary{max-width:100%}
 }
+
+.workspace-area{
+  display:block;
+}
+
+.app-workspace-card[hidden]{
+  display:none !important;
+}
+
+.bottom-ribbon-nav{
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:0;
+  z-index:1200;
+  display:grid;
+  grid-template-columns:repeat(4, minmax(0,1fr));
+  gap:8px;
+  padding:10px 12px max(10px, env(safe-area-inset-bottom));
+  border-top:1px solid rgba(255,255,255,.12);
+  background:rgba(10,16,28,.96);
+  backdrop-filter:blur(10px);
+}
+
+.bottom-ribbon-nav__tab{
+  appearance:none;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:12px;
+  background:rgba(255,255,255,.02);
+  color:#cfd8ea;
+  font-weight:700;
+  min-height:44px;
+  padding:10px 8px;
+}
+
+.bottom-ribbon-nav__tab.is-active,
+.bottom-ribbon-nav__tab[aria-selected="true"]{
+  border-color:rgba(245,158,11,.6);
+  background:rgba(245,158,11,.16);
+  color:#ffd89a;
+}
+
+.wrap{
+  padding-bottom:calc(96px + env(safe-area-inset-bottom));
+}
