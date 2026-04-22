@@ -45,6 +45,7 @@ if(!window.AppPersistDomain) throw new Error('AppPersistDomain failed to load.')
 if(!window.AnalysisService) throw new Error('AnalysisService failed to load.');
 if(!window.TrackedStateService) throw new Error('TrackedStateService failed to load.');
 if(!window.ReviewAnalysisFeature) throw new Error('ReviewAnalysisFeature failed to load.');
+if(!window.TrackWatchlistFeature) throw new Error('TrackWatchlistFeature failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -215,6 +216,9 @@ const {
 const {
   createReviewAnalysisFeature
 } = window.ReviewAnalysisFeature;
+const {
+  createTrackWatchlistFeature
+} = window.TrackWatchlistFeature;
 
 // ---------------------------------------------------------------------------
 // End extracted bridge bindings. App.js remains the orchestrator for now.
@@ -852,6 +856,27 @@ const reviewAnalysisFeature = createReviewAnalysisFeature({
   getTickerRecord,
   upsertTickerRecord,
   analyseSetup
+});
+const trackWatchlistFeature = createTrackWatchlistFeature({
+  normalizeTicker,
+  escapeHtml,
+  isManualWatchlistRefreshInProgress,
+  setManualWatchlistRefreshInProgress,
+  setWatchlistCardRefreshButtonState,
+  setStatus,
+  getTickerRecord,
+  watchlistPlacementSnapshot,
+  refreshWatchlistRecordFromSourceOfTruth,
+  commitTickerState,
+  requeueTickerForToday,
+  renderScannerResults,
+  renderCards,
+  activeReviewTicker,
+  renderReviewWorkspace,
+  requestTrackedStatePersist,
+  updateWatchlistCardForTicker,
+  requestWatchlistRender,
+  renderFocusQueue
 });
 
 function trackedStateEndpoint(){
@@ -14398,63 +14423,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
 }
 
 async function refreshWatchlistTicker(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return;
-  if(isManualWatchlistRefreshInProgress(symbol)){
-    setStatus('scannerSelectionStatus', '<span class="warntext">Refresh already running...</span>');
-    return;
-  }
-  const beforeRecord = getTickerRecord(symbol);
-  const beforePlacement = beforeRecord ? watchlistPlacementSnapshot(beforeRecord) : null;
-  let requireFullWatchlistRender = true;
-  setManualWatchlistRefreshInProgress(symbol, true);
-  setWatchlistCardRefreshButtonState(symbol, true);
-  try{
-    setStatus('scannerSelectionStatus', `Refreshing ${escapeHtml(symbol)}...`);
-    const result = await refreshWatchlistRecordFromSourceOfTruth(symbol, {
-      source:'manual_refresh',
-      clearReviewOverride:true
-    });
-    if(result.ok){
-      setStatus('scannerSelectionStatus', `<span class="ok">${escapeHtml(symbol)} refreshed from saved market data.</span>`);
-    }else{
-      setStatus('scannerSelectionStatus', `<span class="warntext">Could not refresh ${escapeHtml(symbol)} right now. Kept the watchlist entry active locally.</span>`);
-    }
-    commitTickerState({syncTracked:false});
-    requeueTickerForToday(symbol);
-    renderScannerResults();
-    renderCards();
-    if(activeReviewTicker() === symbol) renderReviewWorkspace();
-    if(result.ok){
-      requestTrackedStatePersist({
-        reason:'manual_watchlist_refresh',
-        delayMs:350
-      });
-    }
-    const afterRecord = getTickerRecord(symbol);
-    const afterPlacement = afterRecord ? watchlistPlacementSnapshot(afterRecord) : null;
-    const placementStable = !!(
-      beforePlacement
-      && afterPlacement
-      && beforePlacement.visible === afterPlacement.visible
-      && beforePlacement.bucket === afterPlacement.bucket
-      && beforePlacement.lifecycleRank === afterPlacement.lifecycleRank
-      && beforePlacement.priority === afterPlacement.priority
-    );
-    if(placementStable){
-      requireFullWatchlistRender = !updateWatchlistCardForTicker(symbol);
-    }else{
-      requireFullWatchlistRender = true;
-    }
-  }finally{
-    setManualWatchlistRefreshInProgress(symbol, false);
-    if(requireFullWatchlistRender){
-      requestWatchlistRender({includeFocusQueue:true});
-    }else{
-      renderFocusQueue();
-      setWatchlistCardRefreshButtonState(symbol, false);
-    }
-  }
+  return trackWatchlistFeature.refreshTicker(ticker);
 }
 
 function analyseActiveReviewTicker(){
