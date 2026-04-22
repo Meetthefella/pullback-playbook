@@ -42,11 +42,14 @@ if(!window.ScannerInteractionState) throw new Error('ScannerInteractionState fai
 if(!window.ScannerResultsSupport) throw new Error('ScannerResultsSupport failed to load.');
 if(!window.ReviewPresentation) throw new Error('ReviewPresentation failed to load.');
 if(!window.AppPersistDomain) throw new Error('AppPersistDomain failed to load.');
+if(!window.DiarySchema) throw new Error('DiarySchema failed to load.');
 if(!window.AppShell) throw new Error('AppShell failed to load.');
 if(!window.AnalysisService) throw new Error('AnalysisService failed to load.');
 if(!window.TrackedStateService) throw new Error('TrackedStateService failed to load.');
+if(!window.DiaryService) throw new Error('DiaryService failed to load.');
 if(!window.ReviewAnalysisFeature) throw new Error('ReviewAnalysisFeature failed to load.');
 if(!window.TrackWatchlistFeature) throw new Error('TrackWatchlistFeature failed to load.');
+if(!window.DiaryFeature) throw new Error('DiaryFeature failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -209,6 +212,9 @@ const {
   trackedStatePersistSignature
 } = window.AppPersistDomain;
 const {
+  createDiarySchema
+} = window.DiarySchema;
+const {
   createAppShell
 } = window.AppShell;
 const {
@@ -218,11 +224,17 @@ const {
   createTrackedStateService
 } = window.TrackedStateService;
 const {
+  createDiaryService
+} = window.DiaryService;
+const {
   createReviewAnalysisFeature
 } = window.ReviewAnalysisFeature;
 const {
   createTrackWatchlistFeature
 } = window.TrackWatchlistFeature;
+const {
+  createDiaryFeature
+} = window.DiaryFeature;
 
 // ---------------------------------------------------------------------------
 // End extracted bridge bindings. App.js remains the orchestrator for now.
@@ -927,6 +939,30 @@ const trackWatchlistFeature = createTrackWatchlistFeature({
   requestWatchlistRender,
   renderFocusQueue
 });
+const diaryService = createDiaryService({
+  allTickerRecords,
+  upsertTickerRecord,
+  mergeDiaryRecordIntoRecord,
+  commitTickerState,
+  normalizeTicker,
+  normalizeImportedStatus,
+  todayIsoDate,
+  isClosedOutcome
+});
+const diaryFeature = createDiaryFeature({
+  $,
+  escapeHtml,
+  statusClass,
+  normalizeTicker,
+  todayIsoDate,
+  setStatus,
+  downloadJsonFile,
+  getCanonicalTradeSnapshot,
+  getTickerRecord,
+  renderPatternAnalytics,
+  diaryService,
+  setActiveWorkspaceTab
+});
 
 function trackedStateEndpoint(){
   return trackedStateService.trackedStateEndpoint();
@@ -1278,306 +1314,34 @@ function applyOcrTickers(){
   setOcrImportStatus('<span class="ok">OCR tickers confirmed. Press Refresh Scanner Now when you are ready.</span>');
 }
 
-function createTradeRecord(values){
-  return {
-    id:`trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    ticker:'',
-    date:new Date().toISOString().slice(0, 10),
-    verdict:'Watch',
-    chartVerdict:'Watch',
-    qualityScore:'',
-    entry:'',
-    stop:'',
-    firstTarget:'',
-    maxLoss:'',
-    riskPerShare:'',
-    rewardPerShare:'',
-    rrRatio:'',
-    rrState:'',
-    firstTargetTooClose:false,
-    positionSize:'',
-    riskStatus:'',
-    accountSize:'',
-    marketStatus:'',
-    scanType:'',
-    notes:'',
-    outcome:'',
-    lesson:'',
-    plannedEntry:'',
-    plannedStop:'',
-    plannedFirstTarget:'',
-    plannedRiskPerShare:'',
-    plannedRewardPerShare:'',
-    plannedRR:'',
-    plannedPositionSize:'',
-    plannedMaxLoss:'',
-    plannedAt:'',
-    actualEntry:'',
-    actualExit:'',
-    actualStop:'',
-    actualQuantity:'',
-    grossPnL:'',
-    netPnL:'',
-    resultR:'',
-    outcomeReason:'',
-    heldDays:'',
-    executionQuality:'',
-    setupQuality:'',
-    mistakeTags:[],
-    lessonTags:[],
-    setupTags:[],
-    beforeImage:'',
-    afterImage:'',
-    openedAt:'',
-    closedAt:'',
-    reviewedAt:'',
-    ...values
-  };
+const diarySchema = createDiarySchema({
+  normalizeTicker,
+  normalizeImportedStatus,
+  normalizeScanType,
+  numericOrNull,
+  todayIsoDate,
+  countTradingDaysBetween,
+  isClosedOutcome
+});
+if(typeof window !== 'undefined'){
+  window.__ppDiarySchema = diarySchema;
 }
-
-function baseTradeOutcome(){
-  return {
-    hasTrade:false,
-    entryPlanned:null,
-    stopPlanned:null,
-    targetPlanned:null,
-    entryActual:null,
-    exitActual:null,
-    stopActual:null,
-    quantity:null,
-    grossPnL:null,
-    netPnL:null,
-    resultR:null,
-    outcome:null,
-    outcomeReason:null,
-    heldDays:null,
-    executionQuality:null,
-    setupQuality:null,
-    mistakes:[],
-    lessons:[],
-    tags:[],
-    beforeImage:null,
-    afterImage:null,
-    openedAt:null,
-    closedAt:null,
-    reviewedAt:null
-  };
-}
-
-function normalizeTradeOutcomeValue(value){
-  const text = String(value || '').trim().toLowerCase();
-  if(text === 'open') return 'Open';
-  if(text === 'win') return 'Win';
-  if(text === 'loss') return 'Loss';
-  if(text === 'scratch') return 'Scratch';
-  if(text === 'cancelled' || text === 'canceled') return 'Cancelled';
-  return '';
-}
-
-function parseTagList(value){
-  if(Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
-  return String(value || '').split(',').map(item => item.trim()).filter(Boolean);
-}
-
-function formatTagList(value){
-  return parseTagList(value).join(', ');
-}
-
-function computeTradeOutcomeMetrics(record){
-  const actualEntry = numericOrNull(record.actualEntry);
-  const actualExit = numericOrNull(record.actualExit);
-  const actualQuantity = numericOrNull(record.actualQuantity);
-  const plannedRiskPerShare = numericOrNull(record.plannedRiskPerShare || record.riskPerShare);
-  const grossPnL = Number.isFinite(actualEntry) && Number.isFinite(actualExit) && Number.isFinite(actualQuantity)
-    ? (actualExit - actualEntry) * actualQuantity
-    : null;
-  const netPnL = Number.isFinite(numericOrNull(record.netPnL)) ? numericOrNull(record.netPnL) : grossPnL;
-  const resultR = Number.isFinite(plannedRiskPerShare) && plannedRiskPerShare > 0 && Number.isFinite(actualQuantity) && actualQuantity > 0 && Number.isFinite(netPnL)
-    ? netPnL / (plannedRiskPerShare * actualQuantity)
-    : null;
-  let heldDays = null;
-  if(/^\d{4}-\d{2}-\d{2}$/.test(String(record.openedAt || '')) && /^\d{4}-\d{2}-\d{2}$/.test(String(record.closedAt || ''))){
-    heldDays = countTradingDaysBetween(String(record.openedAt), String(record.closedAt));
-  }
-  return {grossPnL, netPnL, resultR, heldDays};
-}
-
-function tradeRecordHasExecutedTrade(record){
-  const actualEntry = numericOrNull(record && record.actualEntry);
-  const actualExit = numericOrNull(record && record.actualExit);
-  const actualStop = numericOrNull(record && record.actualStop);
-  const actualQuantity = numericOrNull(record && record.actualQuantity);
-  return Number.isFinite(actualEntry)
-    || Number.isFinite(actualExit)
-    || Number.isFinite(actualStop)
-    || (Number.isFinite(actualQuantity) && actualQuantity > 0);
-}
-
-function buildTradeOutcomeSnapshot(record){
-  const normalized = normalizeTradeRecord(record);
-  const executed = tradeRecordHasExecutedTrade(normalized);
-  const outcome = normalizeTradeOutcomeValue(normalized.outcome);
-  const base = baseTradeOutcome();
-  return {
-    ...base,
-    hasTrade:executed,
-    entryPlanned:numericOrNull(normalized.plannedEntry),
-    stopPlanned:numericOrNull(normalized.plannedStop),
-    targetPlanned:numericOrNull(normalized.plannedFirstTarget),
-    entryActual:numericOrNull(normalized.actualEntry),
-    exitActual:numericOrNull(normalized.actualExit),
-    stopActual:numericOrNull(normalized.actualStop),
-    quantity:numericOrNull(normalized.actualQuantity),
-    grossPnL:numericOrNull(normalized.grossPnL),
-    netPnL:numericOrNull(normalized.netPnL),
-    resultR:numericOrNull(normalized.resultR),
-    outcome:outcome || null,
-    outcomeReason:String(normalized.outcomeReason || '').trim() || null,
-    heldDays:numericOrNull(normalized.heldDays),
-    executionQuality:String(normalized.executionQuality || '').trim() || null,
-    setupQuality:String(normalized.setupQuality || '').trim() || null,
-    mistakes:parseTagList(normalized.mistakeTags),
-    lessons:parseTagList(normalized.lessonTags),
-    tags:parseTagList(normalized.setupTags),
-    beforeImage:String(normalized.beforeImage || '').trim() || null,
-    afterImage:String(normalized.afterImage || '').trim() || null,
-    openedAt:String(normalized.openedAt || '').trim() || null,
-    closedAt:String(normalized.closedAt || '').trim() || null,
-    reviewedAt:String(normalized.reviewedAt || '').trim() || null
-  };
-}
-
-function normalizeStoredTradeOutcome(outcome){
-  const base = baseTradeOutcome();
-  if(!outcome || typeof outcome !== 'object') return base;
-  return {
-    ...base,
-    ...outcome,
-    hasTrade:!!outcome.hasTrade,
-    entryPlanned:numericOrNull(outcome.entryPlanned),
-    stopPlanned:numericOrNull(outcome.stopPlanned),
-    targetPlanned:numericOrNull(outcome.targetPlanned),
-    entryActual:numericOrNull(outcome.entryActual),
-    exitActual:numericOrNull(outcome.exitActual),
-    stopActual:numericOrNull(outcome.stopActual),
-    quantity:numericOrNull(outcome.quantity),
-    grossPnL:numericOrNull(outcome.grossPnL),
-    netPnL:numericOrNull(outcome.netPnL),
-    resultR:numericOrNull(outcome.resultR),
-    outcome:normalizeTradeOutcomeValue(outcome.outcome) || null,
-    outcomeReason:String(outcome.outcomeReason || '').trim() || null,
-    heldDays:numericOrNull(outcome.heldDays),
-    executionQuality:String(outcome.executionQuality || '').trim() || null,
-    setupQuality:String(outcome.setupQuality || '').trim() || null,
-    mistakes:parseTagList(outcome.mistakes),
-    lessons:parseTagList(outcome.lessons),
-    tags:parseTagList(outcome.tags),
-    beforeImage:String(outcome.beforeImage || '').trim() || null,
-    afterImage:String(outcome.afterImage || '').trim() || null,
-    openedAt:String(outcome.openedAt || '').trim() || null,
-    closedAt:String(outcome.closedAt || '').trim() || null,
-    reviewedAt:String(outcome.reviewedAt || '').trim() || null
-  };
-}
-
-function deriveDiaryLifecycleState(record){
-  const normalized = normalizeTradeRecord(record);
-  const outcome = normalizeTradeOutcomeValue(normalized.outcome);
-  const executed = tradeRecordHasExecutedTrade(normalized);
-  if(outcome === 'Cancelled' && !executed){
-    return {
-      stage:'cancelled',
-      status:'closed',
-      changedAt:`${(normalized.closedAt || normalized.reviewedAt || normalized.date || todayIsoDate())}T12:00:00.000Z`,
-      reason:'Planned trade was cancelled before entry.',
-      source:'diary'
-    };
-  }
-  if(isClosedOutcome(outcome)){
-    return {
-      stage:'exited',
-      status:'closed',
-      changedAt:`${(normalized.closedAt || normalized.date || todayIsoDate())}T12:00:00.000Z`,
-      reason:`Trade outcome set to ${outcome}.`,
-      source:'diary'
-    };
-  }
-  if(executed || outcome === 'Open'){
-    return {
-      stage:'entered',
-      status:'active',
-      changedAt:`${(normalized.openedAt || normalized.date || todayIsoDate())}T12:00:00.000Z`,
-      reason:'Trade has actual execution details recorded.',
-      source:'diary'
-    };
-  }
-  return {
-    stage:'planned',
-    status:'active',
-    changedAt:`${(normalized.plannedAt || normalized.date || todayIsoDate())}T12:00:00.000Z`,
-    reason:'Planned trade snapshot saved for later review.',
-    source:'diary'
-  };
-}
-
-function normalizeTradeRecord(record){
-  const normalized = createTradeRecord(record || {});
-  normalized.ticker = normalizeTicker(normalized.ticker);
-  normalized.date = String(normalized.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
-  normalized.verdict = normalizeImportedStatus(normalized.verdict);
-  normalized.chartVerdict = normalizeImportedStatus(normalized.chartVerdict || normalized.verdict);
-  normalized.qualityScore = String(normalized.qualityScore || '');
-  normalized.entry = String(normalized.entry || '');
-  normalized.stop = String(normalized.stop || '');
-  normalized.firstTarget = String(normalized.firstTarget || '');
-  normalized.maxLoss = String(normalized.maxLoss || '');
-  normalized.riskPerShare = String(normalized.riskPerShare || '');
-  normalized.rewardPerShare = String(normalized.rewardPerShare || '');
-  normalized.rrRatio = String(normalized.rrRatio || '');
-  normalized.rrState = String(normalized.rrState || '');
-  normalized.firstTargetTooClose = !!normalized.firstTargetTooClose;
-  normalized.positionSize = String(normalized.positionSize || '');
-  normalized.riskStatus = String(normalized.riskStatus || '');
-  normalized.accountSize = String(normalized.accountSize || '');
-  normalized.marketStatus = String(normalized.marketStatus || '');
-  normalized.scanType = normalizeScanType(normalized.scanType);
-  normalized.notes = String(normalized.notes || '');
-  normalized.outcome = normalizeTradeOutcomeValue(normalized.outcome);
-  normalized.lesson = String(normalized.lesson || '');
-  normalized.plannedEntry = String(normalized.plannedEntry || normalized.entry || '');
-  normalized.plannedStop = String(normalized.plannedStop || normalized.stop || '');
-  normalized.plannedFirstTarget = String(normalized.plannedFirstTarget || normalized.firstTarget || '');
-  normalized.plannedRiskPerShare = String(normalized.plannedRiskPerShare || normalized.riskPerShare || '');
-  normalized.plannedRewardPerShare = String(normalized.plannedRewardPerShare || normalized.rewardPerShare || '');
-  normalized.plannedRR = String(normalized.plannedRR || normalized.rrRatio || '');
-  normalized.plannedPositionSize = String(normalized.plannedPositionSize || normalized.positionSize || '');
-  normalized.plannedMaxLoss = String(normalized.plannedMaxLoss || normalized.maxLoss || '');
-  normalized.plannedAt = String(normalized.plannedAt || normalized.date || '');
-  normalized.actualEntry = String(normalized.actualEntry || '');
-  normalized.actualExit = String(normalized.actualExit || '');
-  normalized.actualStop = String(normalized.actualStop || '');
-  normalized.actualQuantity = String(normalized.actualQuantity || normalized.quantity || '');
-  normalized.outcomeReason = String(normalized.outcomeReason || '');
-  normalized.executionQuality = String(normalized.executionQuality || '');
-  normalized.setupQuality = String(normalized.setupQuality || '');
-  normalized.beforeImage = String(normalized.beforeImage || '');
-  normalized.afterImage = String(normalized.afterImage || '');
-  normalized.openedAt = String(normalized.openedAt || '').slice(0, 10);
-  normalized.closedAt = String(normalized.closedAt || '').slice(0, 10);
-  normalized.reviewedAt = String(normalized.reviewedAt || '').slice(0, 10);
-  if(!normalized.openedAt && (normalized.outcome === 'Open' || tradeRecordHasExecutedTrade(normalized))){
-    normalized.openedAt = String(normalized.date || todayIsoDate()).slice(0, 10);
-  }
-  normalized.mistakeTags = parseTagList(normalized.mistakeTags);
-  normalized.lessonTags = parseTagList(normalized.lessonTags);
-  normalized.setupTags = parseTagList(normalized.setupTags);
-  const metrics = computeTradeOutcomeMetrics(normalized);
-  normalized.grossPnL = Number.isFinite(metrics.grossPnL) ? String(Number(metrics.grossPnL.toFixed(2))) : '';
-  normalized.netPnL = Number.isFinite(metrics.netPnL) ? String(Number(metrics.netPnL.toFixed(2))) : '';
-  normalized.resultR = Number.isFinite(metrics.resultR) ? String(Number(metrics.resultR.toFixed(2))) : '';
-  normalized.heldDays = Number.isFinite(metrics.heldDays) ? String(metrics.heldDays) : '';
-  return normalized;
-}
+const {
+  createTradeRecord,
+  baseTradeOutcome,
+  normalizeTradeOutcomeValue,
+  parseTagList,
+  formatTagList,
+  computeTradeOutcomeMetrics,
+  tradeRecordHasExecutedTrade,
+  buildTradeOutcomeSnapshot,
+  normalizeStoredTradeOutcome,
+  deriveDiaryLifecycleState,
+  normalizeTradeRecord,
+  createDiaryEntryFromManualInput,
+  createDiaryEntryFromReviewContext,
+  createDiaryEntryFromPaperTradePayload
+} = diarySchema;
 
 function baseCard(ticker){
   return {
@@ -2478,9 +2242,7 @@ function isManualWatchlistRefreshInProgress(ticker){
 }
 
 function diaryTradeRecords(){
-  return allTickerRecords()
-    .flatMap(record => (record.diary && Array.isArray(record.diary.records) ? record.diary.records.map(item => ({record, trade:normalizeTradeRecord(item)})) : []))
-    .sort((a, b) => String(b.trade.date || '').localeCompare(String(a.trade.date || '')) || String(b.trade.id).localeCompare(String(a.trade.id)));
+  return diaryService.listTradeRecords();
 }
 
 function recordRrValue(record){
@@ -6648,19 +6410,7 @@ function renderPatternAnalytics(){
 }
 
 function saveTradeFromCard(ticker){
-  const tickerRecord = getTickerRecord(ticker);
-  if(!tickerRecord) return;
-  const snapshot = getCanonicalTradeSnapshot(ticker);
-  const tradeRecord = normalizeTradeRecord(createTradeRecord({
-    ...snapshot,
-    reviewedAt:todayIsoDate()
-  }));
-  mergeDiaryRecordIntoRecord(upsertTickerRecord(ticker), tradeRecord);
-  commitTickerState();
-  renderTradeDiary();
-  renderPatternAnalytics();
-  const diarySection = $('diarySection');
-  if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});
+  diaryFeature.saveTradeFromCard(ticker);
 }
 
 // Legacy diary handlers kept temporarily for comparison during refactor cleanup.
@@ -6683,37 +6433,12 @@ function legacyUpdateTradeRecordPreOutcomeEngine(recordId, field, value){
 }
 
 function deleteTradeRecord(recordId){
-  allTickerRecords().forEach(record => {
-    record.diary.records = record.diary.records.filter(item => item.id !== recordId);
-    record.diary.diaryIds = record.diary.records.map(item => item.id);
-    record.diary.hasDiary = !!record.diary.records.length;
-  });
-  commitTickerState();
-  renderTradeDiary();
-  renderPatternAnalytics();
+  diaryFeature.deleteTradeRecord(recordId);
 }
 
 // Active structured diary handlers.
 function updateTradeRecord(recordId, field, value){
-  const found = diaryTradeRecords().find(item => item.trade.id === recordId);
-  if(!found) return;
-  const tradeRecord = normalizeTradeRecord(found.trade);
-  const currentRecord = upsertTickerRecord(found.record.ticker);
-  currentRecord.diary.records = currentRecord.diary.records.filter(item => item.id !== recordId);
-  if(field === 'ticker') tradeRecord.ticker = normalizeTicker(value);
-  else if(field === 'verdict') tradeRecord.verdict = normalizeImportedStatus(value);
-  else if(['mistakeTags','lessonTags','setupTags'].includes(field)) tradeRecord[field] = parseTagList(value);
-  else tradeRecord[field] = value;
-  if(field === 'outcome' && isClosedOutcome(value) && !tradeRecord.closedAt) tradeRecord.closedAt = todayIsoDate();
-  if((field === 'outcome' && String(value) === 'Open') || (['actualEntry','actualExit','actualStop','actualQuantity'].includes(field) && String(value || '').trim())){
-    if(!tradeRecord.openedAt) tradeRecord.openedAt = todayIsoDate();
-  }
-  if(['mistakeTags','lessonTags','setupTags','lesson','notes','outcomeReason','executionQuality','setupQuality','beforeImage','afterImage','outcome'].includes(field)){
-    tradeRecord.reviewedAt = todayIsoDate();
-  }
-  mergeDiaryRecordIntoRecord(upsertTickerRecord(tradeRecord.ticker), tradeRecord);
-  commitTickerState();
-  renderTradeDiary();
+  diaryFeature.updateTradeRecord(recordId, field, value);
 }
 
 function legacyRenderTradeDiaryPreOutcomeEngine(){
@@ -6797,35 +6522,8 @@ function legacyRenderTradeDiaryExpanded(){
 }
 
 function renderTradeDiary(){
-  const box = $('tradeDiary');
-  if(!box) return;
-  const diaryItems = diaryTradeRecords();
-  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'tradeDiary', diaryItems.length);
-  if(!diaryItems.length){
-    box.innerHTML = '<div class="summary">No trade records yet. Save an analysed setup from the review workspace.</div>';
-    return;
-  }
-  box.innerHTML = '';
-  diaryItems.forEach(({record: tickerRecord, trade: record}) => {
-    const outcomeLabel = record.outcome || 'Not set';
-    const resultRText = record.resultR ? `${record.resultR}R` : 'R n/a';
-    const plannedSummary = `${record.plannedEntry || 'n/a'} / ${record.plannedStop || 'n/a'} / ${record.plannedFirstTarget || 'n/a'}`;
-    const actualSummary = `${record.actualEntry || 'n/a'} / ${record.actualExit || 'n/a'} / ${record.actualQuantity || 'n/a'}`;
-    const tagSummary = [formatTagList(record.setupTags), formatTagList(record.mistakeTags), formatTagList(record.lessonTags)].filter(Boolean).join(' | ') || 'No tags yet';
-    const div = document.createElement('details');
-    div.className = 'diarycard';
-    div.innerHTML = `<summary class="diaryhead"><div class="diarymeta"><span class="badge ${statusClass(record.chartVerdict || record.verdict)}">${escapeHtml(record.chartVerdict || record.verdict)}</span><strong>${escapeHtml(record.ticker || 'Ticker')}</strong><span class="tiny">${escapeHtml(record.date || '')}</span><span class="tiny">${escapeHtml(tickerRecord.lifecycle.stage || '')}</span></div><div class="tiny">Outcome ${escapeHtml(outcomeLabel)} | ${escapeHtml(resultRText)}</div></summary><div class="tiny">Outcome ${escapeHtml(outcomeLabel)} | ${escapeHtml(resultRText)} | Gross ${escapeHtml(record.grossPnL || 'n/a')} | Net ${escapeHtml(record.netPnL || 'n/a')} | Held ${escapeHtml(record.heldDays || 'n/a')} day(s)</div><div class="tiny">Planned ${escapeHtml(plannedSummary)} | Actual ${escapeHtml(actualSummary)}</div><div class="tiny">Tags: ${escapeHtml(tagSummary)}</div><div class="actions"><button class="danger compactbutton" data-act="delete-trade" type="button">Delete</button></div><div class="diarygrid"><div><label>Opened</label><input data-field="openedAt" type="date" value="${escapeHtml(record.openedAt)}" /></div><div><label>Closed</label><input data-field="closedAt" type="date" value="${escapeHtml(record.closedAt)}" /></div><div><label>Verdict</label><select data-field="verdict"><option ${record.verdict === 'Watch' ? 'selected' : ''}>Watch</option><option ${record.verdict === 'Near Entry' ? 'selected' : ''}>Near Entry</option><option ${record.verdict === 'Entry' ? 'selected' : ''}>Entry</option><option ${record.verdict === 'Avoid' ? 'selected' : ''}>Avoid</option></select></div><div><label>Outcome</label><select data-field="outcome"><option value="" ${record.outcome === '' ? 'selected' : ''}>Not set</option><option ${record.outcome === 'Open' ? 'selected' : ''}>Open</option><option ${record.outcome === 'Win' ? 'selected' : ''}>Win</option><option ${record.outcome === 'Loss' ? 'selected' : ''}>Loss</option><option ${record.outcome === 'Scratch' ? 'selected' : ''}>Scratch</option><option ${record.outcome === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div></div><div class="diarygrid"><div><label>Planned Entry</label><input data-field="plannedEntry" value="${escapeHtml(record.plannedEntry)}" placeholder="123.45" /></div><div><label>Planned Stop</label><input data-field="plannedStop" value="${escapeHtml(record.plannedStop)}" placeholder="119.80" /></div><div><label>Planned Target</label><input data-field="plannedFirstTarget" value="${escapeHtml(record.plannedFirstTarget)}" placeholder="130.00" /></div><div><label>Planned Risk/Share</label><input data-field="plannedRiskPerShare" value="${escapeHtml(record.plannedRiskPerShare)}" placeholder="3.65" /></div></div><div class="diarygrid"><div><label>Actual Entry</label><input data-field="actualEntry" value="${escapeHtml(record.actualEntry)}" placeholder="123.60" /></div><div><label>Actual Exit</label><input data-field="actualExit" value="${escapeHtml(record.actualExit)}" placeholder="129.90" /></div><div><label>Actual Stop</label><input data-field="actualStop" value="${escapeHtml(record.actualStop)}" placeholder="119.80" /></div><div><label>Quantity</label><input data-field="actualQuantity" value="${escapeHtml(record.actualQuantity)}" placeholder="10" /></div></div><div class="diarygrid"><div><label>Outcome Reason</label><select data-field="outcomeReason"><option value="" ${record.outcomeReason === '' ? 'selected' : ''}>Not set</option><option ${record.outcomeReason === 'target hit' ? 'selected' : ''}>target hit</option><option ${record.outcomeReason === 'stop hit' ? 'selected' : ''}>stop hit</option><option ${record.outcomeReason === 'manual exit' ? 'selected' : ''}>manual exit</option><option ${record.outcomeReason === 'invalidation' ? 'selected' : ''}>invalidation</option><option ${record.outcomeReason === 'expired' ? 'selected' : ''}>expired</option></select></div><div><label>Execution Quality</label><select data-field="executionQuality"><option value="" ${record.executionQuality === '' ? 'selected' : ''}>Not set</option><option ${record.executionQuality === 'followed_plan' ? 'selected' : ''}>followed_plan</option><option ${record.executionQuality === 'early_entry' ? 'selected' : ''}>early_entry</option><option ${record.executionQuality === 'late_entry' ? 'selected' : ''}>late_entry</option><option ${record.executionQuality === 'early_exit' ? 'selected' : ''}>early_exit</option><option ${record.executionQuality === 'late_exit' ? 'selected' : ''}>late_exit</option><option ${record.executionQuality === 'partial' ? 'selected' : ''}>partial</option></select></div><div><label>Setup Quality</label><select data-field="setupQuality"><option value="" ${record.setupQuality === '' ? 'selected' : ''}>Not set</option><option ${record.setupQuality === 'A' ? 'selected' : ''}>A</option><option ${record.setupQuality === 'B' ? 'selected' : ''}>B</option><option ${record.setupQuality === 'C' ? 'selected' : ''}>C</option></select></div><div><label>Reviewed</label><input data-field="reviewedAt" type="date" value="${escapeHtml(record.reviewedAt)}" /></div></div><div class="diarygrid"><div><label>Setup Tags</label><input data-field="setupTags" value="${escapeHtml(formatTagList(record.setupTags))}" placeholder="20MA bounce, first pullback" /></div><div><label>Mistake Tags</label><input data-field="mistakeTags" value="${escapeHtml(formatTagList(record.mistakeTags))}" placeholder="early entry, stop moved" /></div><div><label>Lesson Tags</label><input data-field="lessonTags" value="${escapeHtml(formatTagList(record.lessonTags))}" placeholder="wait for bounce confirmation" /></div><div><label>Lesson Learned</label><input data-field="lesson" value="${escapeHtml(record.lesson)}" placeholder="Wait for cleaner bounce" /></div></div><div class="diarygrid"><div><label>Before Image Ref</label><input data-field="beforeImage" value="${escapeHtml(record.beforeImage)}" placeholder="stored chart / ref" /></div><div><label>After Image Ref</label><input data-field="afterImage" value="${escapeHtml(record.afterImage)}" placeholder="exit screenshot / ref" /></div><div><label>Gross PnL</label><input value="${escapeHtml(record.grossPnL || '')}" readonly /></div><div><label>Result in R</label><input value="${escapeHtml(record.resultR || '')}" readonly /></div></div><div><label>Notes</label><textarea data-field="notes" placeholder="Why this setup was worth tracking.">${escapeHtml(record.notes)}</textarea></div>`;
-    div.querySelector('[data-act="delete-trade"]').onclick = () => deleteTradeRecord(record.id);
-    div.querySelectorAll('[data-field]').forEach(field => {
-      field.addEventListener('change', event => updateTradeRecord(record.id, event.target.getAttribute('data-field'), event.target.value));
-      field.addEventListener('input', event => {
-        if(event.target.tagName === 'TEXTAREA' || ['lesson','setupTags','mistakeTags','lessonTags','notes','beforeImage','afterImage'].includes(event.target.getAttribute('data-field'))){
-          updateTradeRecord(record.id, event.target.getAttribute('data-field'), event.target.value);
-        }
-      });
-    });
-    box.appendChild(div);
-  });
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'tradeDiary', diaryTradeRecords().length);
+  diaryFeature.renderTradeDiary();
 }
 
 function downloadJsonFile(filename, data){
@@ -6846,10 +6544,7 @@ function downloadJsonFile(filename, data){
 }
 
 function exportTradeDiary(){
-  const ok = downloadJsonFile(`pullback-playbook-trade-diary-${todayIsoDate()}.json`, diaryTradeRecords().map(item => item.trade));
-  setStatus('inputStatus', ok
-    ? '<span class="ok">Trade diary exported as JSON.</span>'
-    : '<span class="warntext">Direct file access is browser-limited here. Use your browser download prompt to save the diary export.</span>');
+  diaryFeature.exportTradeDiary();
 }
 
 function updateTickerSearchStatus(){
