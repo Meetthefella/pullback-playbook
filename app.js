@@ -41,6 +41,8 @@ if(!window.ScannerCardShell) throw new Error('ScannerCardShell failed to load.')
 if(!window.ScannerInteractionState) throw new Error('ScannerInteractionState failed to load.');
 if(!window.ScannerResultsSupport) throw new Error('ScannerResultsSupport failed to load.');
 if(!window.ReviewPresentation) throw new Error('ReviewPresentation failed to load.');
+if(!window.AppPersistDomain) throw new Error('AppPersistDomain failed to load.');
+if(!window.TrackedStateService) throw new Error('TrackedStateService failed to load.');
 const {
   numericOrNull,
   escapeHtml,
@@ -199,6 +201,12 @@ const {
   renderTradeStatusMarkup: renderTradeStatusMarkupImpl,
   tradeStatusMetricText: tradeStatusMetricTextImpl
 } = window.ReviewPresentation;
+const {
+  trackedStatePersistSignature
+} = window.AppPersistDomain;
+const {
+  createTrackedStateService
+} = window.TrackedStateService;
 
 // ---------------------------------------------------------------------------
 // End extracted bridge bindings. App.js remains the orchestrator for now.
@@ -422,13 +430,6 @@ let scannerPresetPromise = null;
 let suggestionTimer = null;
 let suggestionRequestToken = 0;
 let tesseractLoaderPromise = null;
-let backendSyncTimer = null;
-let backendRefreshTimer = null;
-let trackedStatePersistScheduled = false;
-let trackedStatePersistInFlight = false;
-let trackedStatePersistFollowUp = false;
-let trackedStatePersistLastSuccessfulSignature = '';
-let trackedStatePersistLastAttemptSignature = '';
 let pushConfigPromise = null;
 let watchlistLifecycleTimer = null;
 let watchlistLifecycleListenersBound = false;
@@ -802,10 +803,6 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = APP_FETCH_TIM
   throw new Error('Request failed.');
 }
 
-function trackedStateEndpoint(){
-  return defaultTrackedStateEndpoint;
-}
-
 function pushConfigEndpoint(){
   return defaultPushConfigEndpoint;
 }
@@ -814,190 +811,45 @@ function pushSubscribeEndpoint(){
   return defaultPushSubscribeEndpoint;
 }
 
-function shouldSyncTickerRecordToBackend(record){
-  const item = normalizeTickerRecord(record || {});
-  return !!(
-    item.watchlist.inWatchlist
-    || item.review.manualReview
-    || item.plan.hasValidPlan
-    || ['watchlist','reviewed','planned','shortlisted'].includes(String(item.lifecycle.stage || ''))
-  );
-}
+const trackedStateService = createTrackedStateService({
+  state,
+  defaultTrackedStateEndpoint,
+  DEFAULT_API_PLAN,
+  normalizeTicker,
+  normalizeTickerRecord,
+  normalizeTickerRecordsMap,
+  uniqueTickers,
+  currentAccountSizeGbp,
+  numericOrNull,
+  normalizeDataProvider,
+  trackedStatePersistSignature,
+  fetchJsonWithTimeout,
+  persistState,
+  logDebug,
+  logDebugWarn,
+  getTickerRecord,
+  syncLegacyCollectionsFromTickerRecords,
+  renderScannerResults,
+  renderWatchlist,
+  renderFocusQueue,
+  renderReviewWorkspace,
+  isPersistBurstActive:isScannerWorkflowPersistBurstActive
+});
 
-function trackedTickerRecordsPayload(){
-  const records = {};
-  Object.values(normalizeTickerRecordsMap(state.tickerRecords || {})).forEach(record => {
-    if(shouldSyncTickerRecordToBackend(record)) records[record.ticker] = record;
-  });
-  const removedRecords = {};
-  const currentTickers = new Set(Object.keys(records));
-  const localTrackedTickers = uniqueTickers(state.backendLocalTrackedTickers || []);
-  const knownVersions = state.backendTrackedVersions && typeof state.backendTrackedVersions === 'object' ? state.backendTrackedVersions : {};
-  localTrackedTickers.forEach(ticker => {
-    if(!currentTickers.has(ticker)) removedRecords[ticker] = String(knownVersions[ticker] || '');
-  });
-  return {
-    settings:{
-      accountSize:currentAccountSizeGbp(),
-      riskPercent:numericOrNull(state.riskPercent) || 0.01,
-      maxLossOverride:numericOrNull(state.maxLossOverride),
-      wholeSharesOnly:state.wholeSharesOnly !== false,
-      marketStatus:String(state.marketStatus || ''),
-      dataProvider:normalizeDataProvider(state.dataProvider),
-      apiPlan:String(state.apiPlan || DEFAULT_API_PLAN)
-    },
-    records,
-    removedRecords
-  };
-}
-
-function updateBackendTrackedVersions(records){
-  const next = {};
-  Object.entries(records && typeof records === 'object' ? records : {}).forEach(([ticker, record]) => {
-    next[normalizeTicker(ticker)] = String(record && record.meta && record.meta.updatedAt || '');
-  });
-  state.backendTrackedVersions = next;
-}
-
-function syncBackendTrackedOwnership(remoteRecords){
-  const remoteTickers = uniqueTickers(Object.keys(remoteRecords && typeof remoteRecords === 'object' ? remoteRecords : {}));
-  const backendOwned = new Set(uniqueTickers(state.backendLocalTrackedTickers || []));
-  const remoteTickerSet = new Set(remoteTickers);
-  let changed = false;
-  backendOwned.forEach(ticker => {
-    if(remoteTickerSet.has(ticker)) return;
-    const localRecord = state.tickerRecords && state.tickerRecords[ticker] ? normalizeTickerRecord(state.tickerRecords[ticker]) : null;
-    const syncedUpdatedAt = String((state.backendTrackedVersions && state.backendTrackedVersions[ticker]) || '');
-    const localUpdatedAt = String(localRecord && localRecord.meta && localRecord.meta.updatedAt || '');
-    const hasNewerLocalWork = !!(localRecord && localUpdatedAt && syncedUpdatedAt && localUpdatedAt > syncedUpdatedAt);
-    if(localRecord && !hasNewerLocalWork){
-      delete state.tickerRecords[ticker];
-      changed = true;
-      backendOwned.delete(ticker);
-      return;
-    }
-    if(!localRecord){
-      backendOwned.delete(ticker);
-    }
-  });
-  remoteTickers.forEach(ticker => backendOwned.add(ticker));
-  state.backendLocalTrackedTickers = [...backendOwned];
-  return changed;
-}
-
-async function pushTrackedRecordsToBackend(){
-  const payload = trackedTickerRecordsPayload();
-  const payloadSignature = trackedStatePersistSignature(payload);
-  if(payloadSignature === trackedStatePersistLastSuccessfulSignature){
-    logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_SKIP_UNCHANGED', {reason:'signature_unchanged'});
-    return false;
-  }
-  if(trackedStatePersistInFlight){
-    trackedStatePersistFollowUp = true;
-    logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_SKIP_IN_FLIGHT', {reason:'in_flight'});
-    return false;
-  }
-  trackedStatePersistInFlight = true;
-  trackedStatePersistLastAttemptSignature = payloadSignature;
-  const localTrackedTickers = Object.keys(payload.records).map(normalizeTicker);
-  try{
-    const response = await fetchJsonWithTimeout(trackedStateEndpoint(), {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload)
-    });
-    const body = await response.json().catch(() => ({}));
-    if(response.ok && body && body.trackedState){
-      updateBackendTrackedVersions(body.trackedState.records);
-      state.backendLocalTrackedTickers = localTrackedTickers;
-      persistState();
-      trackedStatePersistLastSuccessfulSignature = payloadSignature;
-      logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_OK', {
-        trackedTickers:localTrackedTickers.length
-      });
-      return true;
-    }
-  }catch(error){
-    logDebugWarn('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_ERROR', {
-      message:String(error && error.message || 'tracked_state_persist_failed')
-    });
-  }finally{
-    trackedStatePersistInFlight = false;
-    if(trackedStatePersistFollowUp){
-      trackedStatePersistFollowUp = false;
-      requestTrackedStatePersist({reason:'follow_up'});
-    }
-  }
-  return false;
+function trackedStateEndpoint(){
+  return trackedStateService.trackedStateEndpoint();
 }
 
 function scheduleTrackedRecordsSync(delayMs = 800){
-  requestTrackedStatePersist({delayMs, reason:'legacy_schedule'});
+  trackedStateService.scheduleTrackedRecordsSync(delayMs);
 }
 
 function requestTrackedStatePersist(options = {}){
-  const delayMs = Number.isFinite(Number(options.delayMs)) ? Math.max(0, Number(options.delayMs)) : 0;
-  const reason = String(options.reason || 'unspecified');
-  if(trackedStatePersistInFlight){
-    trackedStatePersistFollowUp = true;
-    logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_QUEUE_FOLLOW_UP', {reason});
-    return;
-  }
-  if(trackedStatePersistScheduled){
-    logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_COALESCED', {reason});
-    return;
-  }
-  trackedStatePersistScheduled = true;
-  const flush = () => {
-    trackedStatePersistScheduled = false;
-    if(isScannerWorkflowPersistBurstActive()){
-      trackedStatePersistFollowUp = true;
-      logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_DEFER_SCAN', {reason});
-      return;
-    }
-    pushTrackedRecordsToBackend();
-  };
-  if(delayMs > 0){
-    clearTimeout(backendSyncTimer);
-    backendSyncTimer = setTimeout(flush, delayMs);
-    return;
-  }
-  setTimeout(flush, 0);
+  trackedStateService.requestTrackedStatePersist(options);
 }
 
 async function pullTrackedRecordsFromBackend(options = {}){
-  try{
-    const response = await fetchJsonWithTimeout(trackedStateEndpoint(), {method:'GET'});
-    const payload = await response.json().catch(() => ({}));
-    if(!response.ok || !payload || payload.ok === false || !payload.trackedState) return false;
-    const trackedState = payload.trackedState;
-    let changed = syncBackendTrackedOwnership(trackedState.records);
-    Object.entries((trackedState.records && typeof trackedState.records === 'object') ? trackedState.records : {}).forEach(([ticker, incoming]) => {
-      const symbol = normalizeTicker(ticker);
-      if(!symbol || !incoming || typeof incoming !== 'object') return;
-      const local = getTickerRecord(symbol);
-      const incomingUpdatedAt = String(incoming.meta && incoming.meta.updatedAt || '');
-      const localUpdatedAt = String(local && local.meta && local.meta.updatedAt || '');
-      if(!local || !localUpdatedAt || (incomingUpdatedAt && incomingUpdatedAt >= localUpdatedAt)){
-        state.tickerRecords[symbol] = normalizeTickerRecord({...incoming, ticker:symbol});
-        changed = true;
-      }
-    });
-    if(changed){
-      syncLegacyCollectionsFromTickerRecords();
-      if(options.render !== false){
-        renderScannerResults();
-        renderWatchlist();
-        renderFocusQueue();
-        renderReviewWorkspace();
-      }
-    }
-    updateBackendTrackedVersions(trackedState.records);
-    persistState();
-    return changed;
-  }catch(error){
-    return false;
-  }
+  return trackedStateService.pullTrackedRecordsFromBackend(options);
 }
 
 function urlBase64ToUint8Array(base64String){
@@ -1061,11 +913,7 @@ async function ensurePushSubscription(registration, options = {}){
 }
 
 function bootstrapBackgroundMonitoring(){
-  pullTrackedRecordsFromBackend();
-  clearInterval(backendRefreshTimer);
-  backendRefreshTimer = setInterval(() => {
-    pullTrackedRecordsFromBackend();
-  }, BACKEND_REVIEW_POLL_MS);
+  trackedStateService.bootstrapBackgroundMonitoring(BACKEND_REVIEW_POLL_MS);
 }
 
 function bootstrapMarketStatusClock(){
@@ -1785,29 +1633,6 @@ function analysisDerivedStatesFromRecord(record){
     setupTypeOverlapDetected:String(analysisProjection.setup_type_overlap_detected || normalizedAnalysis.setup_type_overlap_detected || '').trim().toLowerCase(),
     setupTypeReason:String(analysisProjection.setup_type_reason || normalizedAnalysis.setup_type_reason || '').trim()
   };
-}
-
-function stableStringifyForPersistSignature(value){
-  if(value === null) return 'null';
-  if(value === undefined) return '"__undefined__"';
-  if(Array.isArray(value)){
-    return `[${value.map(item => stableStringifyForPersistSignature(item)).join(',')}]`;
-  }
-  if(typeof value === 'object'){
-    const keys = Object.keys(value).sort();
-    return `{${keys.map(key => `${JSON.stringify(key)}:${stableStringifyForPersistSignature(value[key])}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function trackedStatePersistSignature(payload){
-  const safePayload = payload && typeof payload === 'object' ? payload : {};
-  const signaturePayload = {
-    settings:safePayload.settings && typeof safePayload.settings === 'object' ? safePayload.settings : {},
-    records:safePayload.records && typeof safePayload.records === 'object' ? safePayload.records : {},
-    removedRecords:safePayload.removedRecords && typeof safePayload.removedRecords === 'object' ? safePayload.removedRecords : {}
-  };
-  return stableStringifyForPersistSignature(signaturePayload);
 }
 
 function isScannerWorkflowPersistBurstActive(){
