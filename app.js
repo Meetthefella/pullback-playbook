@@ -14902,7 +14902,7 @@ async function submitPaperTradeFromReview(ticker){
   if(paperTradeUiStateForTicker(context.ticker).state === 'submitting') return;
   if(!context.eligibility.eligible){
     const reason = context.eligibility.reasons[0] || 'Setup is not eligible for paper trading.';
-    setPaperTradeUiState(context.ticker, {state:'submit_error', previewOpen:true, message:reason});
+    setPaperTradeUiState(context.ticker, {state:'submit_error', previewOpen:false, message:reason});
     renderReviewWorkspace();
     return;
   }
@@ -15201,13 +15201,25 @@ function renderReviewWorkspace(options = {}){
     hardBlocker:resolvedContract.blockerReason
   });
   const paperTradeUi = paperTradeUiStateForTicker(record.ticker);
+  const paperTradeEligible = paperTradeEligibilityState.eligible === true;
+  if(!paperTradeEligible && paperTradeUi.previewOpen === true){
+    setPaperTradeUiState(record.ticker, {previewOpen:false});
+    paperTradeUi.previewOpen = false;
+  }
   const paperTradeSubmitting = paperTradeUi.state === 'submitting';
-  const paperTradeButtonDisabled = !paperTradeEligibilityState.eligible || paperTradeSubmitting;
+  const paperTradeButtonDisabled = !paperTradeEligible || paperTradeSubmitting;
   const paperTradeButtonLabel = paperTradeSubmitting ? 'Submitting...' : 'Paper Trade';
-  const paperTradePanelOpen = paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error';
+  const paperTradePanelOpen = paperTradeEligible && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
   const paperTradePrimaryReason = paperTradeEligibilityState.reasons[0] || '';
+  const paperTradeDisabledReason = !paperTradeEligible
+    ? (
+      String(displayStage || '').trim().toLowerCase() !== 'entry'
+        ? 'Not actionable - setup is not Entry-ready'
+        : 'Trade plan not valid'
+    )
+    : '';
   const paperTradeStatusText = paperTradeUi.message
-    || (paperTradeEligibilityState.eligible
+    || (paperTradeEligible
       ? 'Ready for paper-trade preview.'
       : (paperTradePrimaryReason || 'Setup is not eligible for paper trading.'));
   const paperTradeStatusClass = paperTradeUi.state === 'submit_error'
@@ -15249,7 +15261,7 @@ function renderReviewWorkspace(options = {}){
     controlQuality:qualityAdjustments.controlQuality,
     capitalEfficiency:qualityAdjustments.capitalEfficiency
   });
-  const paperTradePreviewModel = paperTradeEligibilityState.eligible
+  const paperTradePreviewModel = paperTradeEligible
     ? buildPaperTradePreviewModel({
       ticker:record.ticker,
       eligibility:paperTradeEligibilityState
@@ -15559,6 +15571,7 @@ function renderReviewWorkspace(options = {}){
         <button class="secondary" id="saveReviewBtn">Save Review</button>
         <button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button>
       </div>
+      ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       <div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>
       <details class="compact-details" id="paperTradePreview" ${paperTradePanelOpen ? 'open' : ''}>
         <summary>Paper Trade Preview</summary>
