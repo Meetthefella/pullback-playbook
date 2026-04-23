@@ -95,6 +95,9 @@
         || (tradeRecord.executionMeta && tradeRecord.executionMeta.status)
         || ''
       ).trim().toLowerCase();
+      const outcomeKey = String(tradeRecord.outcome || '').trim().toLowerCase();
+      const isClosedOutcome = ['win','loss','scratch','cancelled','canceled'].includes(outcomeKey);
+      if(isClosedOutcome) return normalizeTradeRecord(tradeRecord);
       if(currentStatus !== 'submitted') return normalizeTradeRecord(tradeRecord);
       tradeRecord.status = 'cancelled';
       tradeRecord.outcome = 'Cancelled';

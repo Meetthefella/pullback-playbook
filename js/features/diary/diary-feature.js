@@ -75,7 +75,11 @@
       diaryItems.forEach(({record: tickerRecord, trade: record}) => {
         const outcomeLabel = record.outcome || 'Not set';
         const paperTradeStatus = String(record.status || (record.executionMeta && record.executionMeta.status) || '').trim().toLowerCase();
-        const canCancelPaperTrade = String(record.sourceType || '').trim().toLowerCase() === 'paper_trade' && paperTradeStatus === 'submitted';
+        const outcomeKey = String(record.outcome || '').trim().toLowerCase();
+        const isClosedOutcome = ['win','loss','scratch','cancelled','canceled'].includes(outcomeKey);
+        const canCancelPaperTrade = String(record.sourceType || '').trim().toLowerCase() === 'paper_trade'
+          && paperTradeStatus === 'submitted'
+          && !isClosedOutcome;
         const resultRText = record.resultR ? `${record.resultR}R` : 'R n/a';
         const plannedSummary = `${diarySummaryValue(record.plannedEntry)} / ${diarySummaryValue(record.plannedStop)} / ${diarySummaryValue(record.plannedFirstTarget)}`;
         const actualSummary = `${diarySummaryValue(record.actualEntry)} / ${diarySummaryValue(record.actualExit)} / ${diarySummaryValue(record.actualQuantity)}`;
