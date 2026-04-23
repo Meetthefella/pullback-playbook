@@ -2902,7 +2902,7 @@ async function refreshAutomaticMarketStatus(options = {}){
 }
 
 function setupTypeChipLabel(type){
-  return normalizeScanType(type) || 'Unknown';
+  return normalizeScanType(type) || 'Setup not set';
 }
 
 function controlFocusConfig(focusKey){
@@ -2935,7 +2935,7 @@ function controlFocusConfig(focusKey){
       label:'Setup Type',
       selected:normalizeScanType(state.setupType),
       options:[
-        {value:'', label:'Unknown'},
+        {value:'', label:'Setup not set'},
         {value:'20MA', label:'20MA'},
         {value:'50MA', label:'50MA'}
       ]
@@ -3052,16 +3052,9 @@ function updateControlFocusRailVisuals(container){
   if(!rail) return;
   const items = controlFocusRailItems(rail);
   if(!items.length) return;
-  const center = rail.scrollLeft + (rail.clientWidth / 2);
-  const maxDist = Math.max(rail.clientWidth / 2, 1);
   items.forEach(item => {
-    const itemCenter = item.offsetLeft + (item.offsetWidth / 2);
-    const dist = Math.abs(center - itemCenter);
-    const ratio = Math.max(0, 1 - (dist / maxDist));
-    const scale = 0.9 + (ratio * 0.2);
-    const opacity = 0.5 + (ratio * 0.5);
-    item.style.transform = `scale(${scale.toFixed(3)})`;
-    item.style.opacity = opacity.toFixed(3);
+    item.style.transform = 'none';
+    item.style.opacity = '1';
   });
 }
 
