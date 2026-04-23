@@ -32,6 +32,28 @@
         <h1>Pullback Playbook v4.4.8</h1>
         <p>Scan, shortlist, review, decide, then track.</p>
       </div>
+      <div class="ledger-strip" id="headerLedgerStrip" aria-live="polite">
+        <div class="ledger-strip__market">
+          <span class="ledger-strip__label">Market</span>
+          <strong class="ledger-strip__market-value" id="marketStatusLedger">S&amp;P above 50 MA</strong>
+        </div>
+        <div class="ledger-strip__meta">
+          <span class="ledger-chip">
+            <span class="ledger-chip__label">Account / Risk</span>
+            <strong class="ledger-chip__value" id="accountRiskLedger">GBP 4,000 | &pound;40</strong>
+          </span>
+          <span class="ledger-chip">
+            <span class="ledger-chip__label">Mode</span>
+            <strong class="ledger-chip__value" id="scannerModeLedger">Curated Core</strong>
+          </span>
+          <span class="ledger-chip">
+            <span class="ledger-chip__label">Setup</span>
+            <strong class="ledger-chip__value" id="setupTypeLedger">Unknown</strong>
+          </span>
+        </div>
+      </div>
+      <details class="header-control-surface" id="headerControlSurface">
+        <summary><strong>Context Controls</strong> | Edit market, mode, setup, and risk</summary>
       <div class="control-focus-rail" id="controlFocusRail" aria-label="Control focus rail">
         <button class="focus-rail-item" id="marketStatusPill" type="button" data-control-strip="market">
           <span class="focus-rail-label" id="marketStatusSection">Market</span>
@@ -83,6 +105,30 @@
         </div>
         <div class="market-session-detail" id="marketSessionDetail">Next open 9:30 AM ET</div>
       </div>
+      <details class="compact-settings" id="headerRiskSettings">
+        <summary><strong>Risk Settings</strong> | Edit account controls</summary>
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>Account Size (GBP)</label>
+            <input id="accountSize" type="number" value="4000" min="1" />
+          </div>
+          <div>
+            <label>Risk %</label>
+            <input id="riskPercent" type="number" value="0.01" min="0.001" step="0.001" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div>
+            <label>Max Loss Override (GBP)</label>
+            <input id="maxLossOverride" type="number" min="1" step="1" placeholder="Optional" />
+          </div>
+          <div class="panelbox">
+            <label class="checkitem" style="padding:0"><input id="wholeSharesOnly" type="checkbox" checked> Whole shares only</label>
+            <div class="tiny" style="margin-top:8px">Top context stays slim. Edit risk controls here when you need them.</div>
+          </div>
+        </div>
+      </details>
+      </details>
       <select id="marketStatus" hidden>
         <option>S&amp;P above 50 MA</option>
         <option>S&amp;P near 50 MA</option>
@@ -103,29 +149,6 @@
         <option value="50MA">50MA</option>
       </select>
     </div>
-    <details class="compact-settings" id="headerRiskSettings" style="margin-top:12px">
-      <summary><strong>Risk Settings</strong> | Edit account controls</summary>
-      <div class="row" style="margin-top:12px">
-        <div>
-          <label>Account Size (GBP)</label>
-          <input id="accountSize" type="number" value="4000" min="1" />
-        </div>
-        <div>
-          <label>Risk %</label>
-          <input id="riskPercent" type="number" value="0.01" min="0.001" step="0.001" />
-        </div>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <div>
-          <label>Max Loss Override (GBP)</label>
-          <input id="maxLossOverride" type="number" min="1" step="1" placeholder="Optional" />
-        </div>
-        <div class="panelbox">
-          <label class="checkitem" style="padding:0"><input id="wholeSharesOnly" type="checkbox" checked> Whole shares only</label>
-          <div class="tiny" style="margin-top:8px">Top context stays slim. Edit risk controls here when you need them.</div>
-        </div>
-      </div>
-    </details>
     <div id="liveProcessStatusBanner" class="live-process-banner" data-live-process="startup" aria-live="polite">
       <span class="live-process-banner__label">Status</span>
       <span id="liveProcessStatusText">Loading context...</span>

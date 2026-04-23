@@ -2630,13 +2630,21 @@ function renderStats(){
   state.userRiskPerTrade = currentMaxLoss();
   state.maxRisk = state.userRiskPerTrade;
   const pct = state.accountSize ? ((state.maxRisk / state.accountSize) * 100).toFixed(1) : '0.0';
+  const marketSummary = marketStatusDisplayValue();
+  const accountRiskSummary = `${formatGbp(state.accountSize)} | ${formatPound(state.userRiskPerTrade || currentMaxLoss())}`;
+  const scannerModeSummary = scannerModeChipLabel(effectiveUniverseMode());
+  const setupTypeSummary = setupTypeChipLabel(state.setupType);
   if($('accountStat')) $('accountStat').textContent = formatGbp(state.accountSize);
   if($('riskStat')) $('riskStat').textContent = formatGbp(state.maxRisk);
   if($('riskPctStat')) $('riskPctStat').textContent = `${pct}%`;
-  if($('accountRiskStrip')) $('accountRiskStrip').textContent = `${formatGbp(state.accountSize)}`;
-  if($('marketStatusStrip')) $('marketStatusStrip').textContent = marketStatusDisplayValue();
-  if($('scannerModeStrip')) $('scannerModeStrip').textContent = scannerModeChipLabel(effectiveUniverseMode());
-  if($('setupTypeStrip')) $('setupTypeStrip').textContent = setupTypeChipLabel(state.setupType);
+  if($('accountRiskStrip')) $('accountRiskStrip').textContent = accountRiskSummary;
+  if($('marketStatusStrip')) $('marketStatusStrip').textContent = marketSummary;
+  if($('scannerModeStrip')) $('scannerModeStrip').textContent = scannerModeSummary;
+  if($('setupTypeStrip')) $('setupTypeStrip').textContent = setupTypeSummary;
+  if($('accountRiskLedger')) $('accountRiskLedger').textContent = accountRiskSummary;
+  if($('marketStatusLedger')) $('marketStatusLedger').textContent = marketSummary;
+  if($('scannerModeLedger')) $('scannerModeLedger').textContent = scannerModeSummary;
+  if($('setupTypeLedger')) $('setupTypeLedger').textContent = setupTypeSummary;
   renderRiskQuickPanel();
   renderControlStripSelector();
   refreshMarketContextWidgets();
@@ -3082,6 +3090,8 @@ function renderControlStripSelector(){
       button.onclick = event => {
         event.preventDefault();
         event.stopPropagation();
+        const controlSurface = $('headerControlSurface');
+        if(controlSurface) controlSurface.open = true;
         const settings = $('headerRiskSettings');
         if(!settings) return;
         settings.open = true;

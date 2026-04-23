@@ -111,15 +111,87 @@ body{
   border-width:0;
   gap:0;
 }
+.ledger-strip{
+  display:grid;
+  gap:10px;
+  padding:12px 14px;
+  border-radius:14px;
+  background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+}
+.ledger-strip__market{
+  display:grid;
+  gap:3px;
+}
+.ledger-strip__label{
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  color:var(--text-muted);
+}
+.ledger-strip__market-value{
+  font-size:1rem;
+  line-height:1.25;
+  color:var(--text-primary);
+}
+.ledger-strip__meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.ledger-chip{
+  display:grid;
+  gap:2px;
+  min-width:150px;
+  padding:8px 10px;
+  border-radius:12px;
+  background:rgba(255,255,255,.03);
+}
+.ledger-chip__label{
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  color:var(--text-muted);
+}
+.ledger-chip__value{
+  font-size:.9rem;
+  color:var(--text-primary);
+}
+.header-control-surface{
+  margin-top:6px;
+  padding:0;
+  border:0;
+  background:transparent;
+}
+.header-control-surface>summary{
+  display:inline-flex;
+  align-items:center;
+  min-height:36px;
+  padding:7px 12px;
+  border-radius:999px;
+  background:rgba(255,255,255,.04);
+  color:var(--text-secondary);
+  font-size:.85rem;
+  cursor:pointer;
+  list-style:none;
+}
+.header-control-surface>summary::-webkit-details-marker{display:none}
+.header-control-surface[open]>summary{
+  background:rgba(255,255,255,.08);
+  color:var(--text-primary);
+}
+.header-control-surface[open]{
+  display:grid;
+  gap:10px;
+}
 .control-focus-rail{
   display:flex;
   gap:8px;
   overflow-x:auto;
-  padding:2px 18vw 6px;
+  padding:2px 8px 6px;
   scrollbar-width:none;
   -webkit-overflow-scrolling:touch;
   scroll-snap-type:x mandatory;
-  scroll-padding-inline:18vw;
+  scroll-padding-inline:8px;
   overscroll-behavior-x:contain;
 }
 .control-focus-rail::-webkit-scrollbar{display:none}
@@ -382,6 +454,15 @@ details{
   border-radius:16px;
   box-shadow:none;
   backdrop-filter:none;
+}
+.header-control-surface{
+  background:transparent;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+}
+.header-control-surface[open]{
+  background:transparent;
 }
 .card{padding:16px}
 .resetcard{padding:12px 16px}
@@ -1963,8 +2044,10 @@ details>summary::-webkit-details-marker{display:none}
 }
 @media (max-width:640px){
     .wrap{padding:16px 12px 28px}
-    .control-focus-rail{padding-inline:14vw;scroll-padding-inline:14vw}
-    .focus-rail-item{flex-basis:min(68vw, 210px)}
+    .control-focus-rail{padding-inline:4px;scroll-padding-inline:4px}
+    .focus-rail-item{flex-basis:min(78vw, 240px)}
+    .ledger-chip{min-width:unset;flex:1 1 100%}
+    .header-control-surface>summary{width:100%;justify-content:center}
     .searchaddrow{grid-template-columns:minmax(0,1fr) auto}
   .searchaddaction{justify-content:flex-start}
   .compactbutton{padding-inline:14px}
