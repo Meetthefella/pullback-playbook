@@ -350,6 +350,8 @@ uiState.analysisLoadingStageByTicker = uiState.analysisLoadingStageByTicker && t
 uiState.paperTradeStateByTicker = uiState.paperTradeStateByTicker && typeof uiState.paperTradeStateByTicker === 'object'
   ? uiState.paperTradeStateByTicker
   : {};
+uiState.trackedStateBackendUnavailable = uiState.trackedStateBackendUnavailable === true;
+uiState.trackedStateBackendUnavailableNotified = uiState.trackedStateBackendUnavailableNotified === true;
 uiState.activeWorkspaceTab = ['scan', 'review', 'track', 'diary'].includes(String(uiState.activeWorkspaceTab || '').toLowerCase())
   ? String(uiState.activeWorkspaceTab).toLowerCase()
   : 'scan';
@@ -373,6 +375,9 @@ if(typeof window !== 'undefined'){
       DEBUG_PAPER_TRADE:window.DEBUG_PAPER_TRADE === true,
       DEBUG_FORCE_PAPER_TRADE_ELIGIBLE:window.DEBUG_FORCE_PAPER_TRADE_ELIGIBLE === true
     };
+  };
+  window.retryTrackedStateBackendSync = function retryTrackedStateBackendSync(){
+    return pullTrackedRecordsFromBackend({force:true, reason:'manual_retry'});
   };
 }
 const appShell = createAppShell({uiState});
@@ -933,7 +938,10 @@ const trackedStateService = createTrackedStateService({
   renderWatchlist,
   renderFocusQueue,
   renderReviewWorkspace,
-  isPersistBurstActive:isScannerWorkflowPersistBurstActive
+  isPersistBurstActive:isScannerWorkflowPersistBurstActive,
+  onTrackedStateBackendUnavailable:() => {
+    setStatus('scannerSelectionStatus', '<span class="warntext">Tracked-state backend unavailable in this preview session. Watchlist persistence may be limited on draft builds.</span>');
+  }
 });
 const analysisService = createAnalysisService();
 const reviewAnalysisFeature = createReviewAnalysisFeature({

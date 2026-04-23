@@ -6,6 +6,42 @@
     let trackedStatePersistInFlight = false;
     let trackedStatePersistFollowUp = false;
     let trackedStatePersistLastSuccessfulSignature = '';
+    let trackedStateBackendUnavailable = !!(deps.state && deps.state.trackedStateBackendUnavailable === true);
+    let trackedStateBackendUnavailableNotified = !!(deps.state && deps.state.trackedStateBackendUnavailableNotified === true);
+
+    function updateTrackedStateBackendAvailability(unavailable, detail = {}){
+      const nextUnavailable = unavailable === true;
+      trackedStateBackendUnavailable = nextUnavailable;
+      if(deps.state && typeof deps.state === 'object'){
+        deps.state.trackedStateBackendUnavailable = nextUnavailable;
+        if(nextUnavailable && !trackedStateBackendUnavailableNotified){
+          deps.state.trackedStateBackendUnavailableNotified = true;
+        }
+      }
+      if(nextUnavailable){
+        if(!trackedStateBackendUnavailableNotified){
+          trackedStateBackendUnavailableNotified = true;
+          deps.logDebugWarn('DEBUG_STORAGE', 'TRACKED_STATE_BACKEND_UNAVAILABLE', {
+            status:Number.isFinite(Number(detail.status)) ? Number(detail.status) : null,
+            source:String(detail.source || '')
+          });
+          if(typeof deps.onTrackedStateBackendUnavailable === 'function'){
+            deps.onTrackedStateBackendUnavailable({
+              status:Number.isFinite(Number(detail.status)) ? Number(detail.status) : null,
+              source:String(detail.source || '')
+            });
+          }
+        }
+        return;
+      }
+      if(trackedStateBackendUnavailableNotified && typeof deps.onTrackedStateBackendRecovered === 'function'){
+        deps.onTrackedStateBackendRecovered();
+      }
+      trackedStateBackendUnavailableNotified = false;
+      if(deps.state && typeof deps.state === 'object'){
+        deps.state.trackedStateBackendUnavailableNotified = false;
+      }
+    }
 
     function trackedStateEndpoint(){
       return deps.defaultTrackedStateEndpoint;
@@ -82,7 +118,11 @@
       return changed;
     }
 
-    async function pushTrackedRecordsToBackend(){
+    async function pushTrackedRecordsToBackend(options = {}){
+      if(trackedStateBackendUnavailable && options.force !== true){
+        deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_SKIP_BACKEND_UNAVAILABLE', {reason:String(options.reason || 'backend_unavailable')});
+        return false;
+      }
       const payload = trackedTickerRecordsPayload();
       const payloadSignature = deps.trackedStatePersistSignature(payload);
       if(payloadSignature === trackedStatePersistLastSuccessfulSignature){
@@ -103,7 +143,12 @@
           body:JSON.stringify(payload)
         });
         const body = await response.json().catch(() => ({}));
+        if(response.status === 403 || response.status === 401){
+          updateTrackedStateBackendAvailability(true, {status:response.status, source:'persist'});
+          return false;
+        }
         if(response.ok && body && body.trackedState){
+          updateTrackedStateBackendAvailability(false, {status:response.status, source:'persist'});
           updateBackendTrackedVersions(body.trackedState.records);
           deps.state.backendLocalTrackedTickers = localTrackedTickers;
           deps.persistState();
@@ -128,6 +173,10 @@
     }
 
     function requestTrackedStatePersist(options = {}){
+      if(trackedStateBackendUnavailable && options.force !== true){
+        deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_SKIP_BACKEND_UNAVAILABLE', {reason:String(options.reason || 'backend_unavailable')});
+        return;
+      }
       const delayMs = Number.isFinite(Number(options.delayMs)) ? Math.max(0, Number(options.delayMs)) : 0;
       const reason = String(options.reason || 'unspecified');
       if(trackedStatePersistInFlight){
@@ -147,7 +196,7 @@
           deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_DEFER_SCAN', {reason});
           return;
         }
-        pushTrackedRecordsToBackend();
+        pushTrackedRecordsToBackend({reason});
       };
       if(delayMs > 0){
         clearTimeout(backendSyncTimer);
@@ -162,10 +211,19 @@
     }
 
     async function pullTrackedRecordsFromBackend(options = {}){
+      if(trackedStateBackendUnavailable && options.force !== true){
+        deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PULL_SKIP_BACKEND_UNAVAILABLE', {reason:String(options.reason || 'backend_unavailable')});
+        return false;
+      }
       try{
         const response = await deps.fetchJsonWithTimeout(trackedStateEndpoint(), {method:'GET'});
+        if(response.status === 403 || response.status === 401){
+          updateTrackedStateBackendAvailability(true, {status:response.status, source:'pull'});
+          return false;
+        }
         const payload = await response.json().catch(() => ({}));
         if(!response.ok || !payload || payload.ok === false || !payload.trackedState) return false;
+        updateTrackedStateBackendAvailability(false, {status:response.status, source:'pull'});
         const trackedState = payload.trackedState;
         let changed = syncBackendTrackedOwnership(trackedState.records);
         Object.entries((trackedState.records && typeof trackedState.records === 'object') ? trackedState.records : {}).forEach(([ticker, incoming]) => {
@@ -209,7 +267,8 @@
       scheduleTrackedRecordsSync,
       requestTrackedStatePersist,
       pullTrackedRecordsFromBackend,
-      bootstrapBackgroundMonitoring
+      bootstrapBackgroundMonitoring,
+      isTrackedStateBackendUnavailable:() => trackedStateBackendUnavailable
     };
   }
 
