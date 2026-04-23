@@ -164,6 +164,14 @@ body{
   display:flex;
   justify-content:flex-end;
 }
+.context-utility-row{
+  display:grid;
+  gap:10px;
+}
+.context-utility-row .risk-quick-anchor{
+  margin-top:0;
+  justify-content:flex-start;
+}
 .header-control-surface{
   margin-top:6px;
   padding:0;
@@ -2028,6 +2036,11 @@ details>summary::-webkit-details-marker{display:none}
   .market-session-widget{
     max-width:560px;
   }
+  .context-utility-row{
+    grid-template-columns:auto minmax(260px, 560px);
+    align-items:start;
+    justify-content:space-between;
+  }
   .navtabs{
     position:static;
     top:auto;
@@ -2062,6 +2075,7 @@ details>summary::-webkit-details-marker{display:none}
     .ledger-chip{min-width:unset;flex:1 1 100%}
     .header-ledger-actions{justify-content:stretch}
     .header-ledger-actions #editContextBtn{width:100%}
+    .context-utility-row{grid-template-columns:1fr}
     .searchaddrow{grid-template-columns:minmax(0,1fr) auto}
   .searchaddaction{justify-content:flex-start}
   .compactbutton{padding-inline:14px}

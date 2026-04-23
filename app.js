@@ -2646,6 +2646,7 @@ function renderStats(){
   if($('marketStatusLedger')) $('marketStatusLedger').textContent = marketSummary;
   if($('scannerModeLedger')) $('scannerModeLedger').textContent = scannerModeSummary;
   if($('setupTypeLedger')) $('setupTypeLedger').textContent = setupTypeSummary;
+  ensureHeaderUtilityLayout();
   renderContextHeaderMode();
   renderRiskQuickPanel();
   renderControlStripSelector();
@@ -2656,8 +2657,23 @@ function renderContextHeaderMode(){
   const ledgerView = $('headerLedgerView');
   const controlSurface = $('headerControlSurface');
   const editMode = uiState.contextEditMode === true;
-  if(ledgerView) ledgerView.hidden = editMode;
-  if(controlSurface) controlSurface.hidden = !editMode;
+  if(ledgerView){
+    ledgerView.hidden = editMode;
+    ledgerView.style.display = editMode ? 'none' : 'grid';
+  }
+  if(controlSurface){
+    controlSurface.hidden = !editMode;
+    controlSurface.style.display = editMode ? 'grid' : 'none';
+  }
+}
+
+function ensureHeaderUtilityLayout(){
+  const utilityRow = $('contextUtilityRow');
+  const riskAnchor = $('riskQuickAnchor');
+  const marketWidget = $('marketSessionWidget');
+  if(!utilityRow || !riskAnchor || !marketWidget) return;
+  if(riskAnchor.parentElement !== utilityRow) utilityRow.appendChild(riskAnchor);
+  if(marketWidget.parentElement !== utilityRow) utilityRow.appendChild(marketWidget);
 }
 
 function setContextEditMode(enabled){
