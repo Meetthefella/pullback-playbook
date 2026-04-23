@@ -332,7 +332,7 @@ uiState.reviewCapitalSimulation = uiState.reviewCapitalSimulation && typeof uiSt
   ? uiState.reviewCapitalSimulation
   : {ticker:'', usagePercent:null};
 uiState.riskQuickOpen = !!uiState.riskQuickOpen;
-uiState.contextEditMode = false;
+uiState.contextSettingsOpen = false;
 uiState.scanInProgress = !!uiState.scanInProgress;
 uiState.verdictCapAudit = uiState.verdictCapAudit && typeof uiState.verdictCapAudit === 'object'
   ? uiState.verdictCapAudit
@@ -2646,7 +2646,6 @@ function renderStats(){
   if($('marketStatusLedger')) $('marketStatusLedger').textContent = marketSummary;
   if($('scannerModeLedger')) $('scannerModeLedger').textContent = scannerModeSummary;
   if($('setupTypeLedger')) $('setupTypeLedger').textContent = setupTypeSummary;
-  ensureHeaderUtilityLayout();
   renderContextHeaderMode();
   renderRiskQuickPanel();
   renderControlStripSelector();
@@ -2654,35 +2653,53 @@ function renderStats(){
 }
 
 function renderContextHeaderMode(){
-  const ledgerView = $('headerLedgerView');
   const controlSurface = $('headerControlSurface');
-  const editMode = uiState.contextEditMode === true;
-  if(ledgerView){
-    ledgerView.hidden = editMode;
-    ledgerView.style.display = editMode ? 'none' : 'grid';
-  }
+  const backdrop = $('contextSettingsBackdrop');
+  const toggle = $('contextSettingsToggle');
+  const open = uiState.contextSettingsOpen === true;
   if(controlSurface){
-    controlSurface.hidden = !editMode;
-    controlSurface.style.display = editMode ? 'grid' : 'none';
+    controlSurface.hidden = !open;
+    controlSurface.classList.toggle('is-open', open);
+  }
+  if(backdrop){
+    backdrop.hidden = !open;
+    backdrop.classList.toggle('is-open', open);
+  }
+  if(toggle){
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 }
 
-function ensureHeaderUtilityLayout(){
-  const utilityRow = $('contextUtilityRow');
-  const riskAnchor = $('riskQuickAnchor');
-  const marketWidget = $('marketSessionWidget');
-  if(!utilityRow || !riskAnchor || !marketWidget) return;
-  if(riskAnchor.parentElement !== utilityRow) utilityRow.appendChild(riskAnchor);
-  if(marketWidget.parentElement !== utilityRow) utilityRow.appendChild(marketWidget);
+function updateLedgerSessionPill(session){
+  const pill = $('marketSessionLedgerState');
+  if(!pill || !session) return;
+  pill.textContent = session.label || 'Market Closed';
+  if(String(session.key || '') === 'open'){
+    pill.style.background = 'rgba(52,211,153,.15)';
+    pill.style.color = '#9fe6c8';
+  }else if(['pre-market','after-hours','early-close'].includes(String(session.key || ''))){
+    pill.style.background = 'rgba(251,191,36,.14)';
+    pill.style.color = '#e8c56d';
+  }else{
+    pill.style.background = 'rgba(148,163,184,.14)';
+    pill.style.color = '#cbd5e1';
+  }
 }
 
-function setContextEditMode(enabled){
+function toUkFocusedSessionDetail(session){
+  if(!session) return 'Market timing unavailable';
+  const detail = String(session.detail || '').replace(/\s*\([^)]*ET\)/g, '').trim();
+  if(!detail) return 'Market timing unavailable';
+  return detail;
+}
+
+function setContextSettingsPanelOpen(enabled){
   const next = enabled === true;
-  if(uiState.contextEditMode === next){
+  if(uiState.contextSettingsOpen === next){
     renderContextHeaderMode();
     return;
   }
-  uiState.contextEditMode = next;
+  uiState.contextSettingsOpen = next;
   if(!next && uiState.riskQuickOpen) closeRiskQuickPanel();
   renderContextHeaderMode();
 }
@@ -3127,7 +3144,7 @@ function renderControlStripSelector(){
       button.onclick = event => {
         event.preventDefault();
         event.stopPropagation();
-        setContextEditMode(true);
+        setContextSettingsPanelOpen(true);
         const settings = $('headerRiskSettings');
         if(!settings) return;
         settings.scrollIntoView({behavior:'smooth', block:'nearest'});
@@ -10725,12 +10742,18 @@ function renderMarketSessionStatus(){
   const badge = $('marketSessionBadge');
   const hours = $('marketSessionHours');
   const detail = $('marketSessionDetail');
-  if(!badge || !hours || !detail) return;
+  const contextLive = $('contextMarketLiveStatus');
+  const ledgerTiming = $('marketTimingLedger');
   const session = getMarketSessionStatus(new Date());
-  badge.textContent = session.label;
-  badge.setAttribute('data-session-state', session.key);
-  hours.textContent = session.hours;
-  detail.textContent = session.detail;
+  if(badge){
+    badge.textContent = session.label;
+    badge.setAttribute('data-session-state', session.key);
+  }
+  if(hours) hours.textContent = session.hours;
+  if(detail) detail.textContent = session.detail;
+  if(contextLive) contextLive.textContent = `${session.label} · ${toUkFocusedSessionDetail(session)}`;
+  if(ledgerTiming) ledgerTiming.textContent = toUkFocusedSessionDetail(session);
+  updateLedgerSessionPill(session);
 }
 
 function renderMarketCalendarWidget(){
@@ -16826,16 +16849,41 @@ click('resetAllBtn', () => {
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
 click('clearRuntimeDebugBtn', clearRuntimeDebugLog);
-click('editContextBtn', () => setContextEditMode(true));
-click('cancelContextEditBtn', () => setContextEditMode(false));
-click('saveContextEditBtn', () => {
-  saveState();
-  setContextEditMode(false);
-});
+click('contextSettingsToggle', () => setContextSettingsPanelOpen(!(uiState.contextSettingsOpen === true)));
+click('contextSettingsCloseBtn', () => setContextSettingsPanelOpen(false));
+click('contextSettingsBackdrop', () => setContextSettingsPanelOpen(false));
 click('marketStatusPill', () => setControlFocus('market'));
 click('accountRiskPill', () => setControlFocus('account'));
 click('scannerModePill', () => setControlFocus('mode'));
 click('setupTypePill', () => setControlFocus('setup'));
+document.addEventListener('keydown', event => {
+  if(event.key === 'Escape' && uiState.contextSettingsOpen === true){
+    setContextSettingsPanelOpen(false);
+  }
+});
+{
+  const panel = $('headerControlSurface');
+  if(panel){
+    let touchStartX = null;
+    panel.addEventListener('touchstart', event => {
+      const touch = event.touches && event.touches[0];
+      touchStartX = touch ? Number(touch.clientX) : null;
+    }, {passive:true});
+    panel.addEventListener('touchmove', event => {
+      if(touchStartX == null || uiState.contextSettingsOpen !== true) return;
+      const touch = event.touches && event.touches[0];
+      if(!touch) return;
+      const deltaX = Number(touch.clientX) - touchStartX;
+      if(deltaX > 70){
+        touchStartX = null;
+        setContextSettingsPanelOpen(false);
+      }
+    }, {passive:true});
+    panel.addEventListener('touchend', () => {
+      touchStartX = null;
+    }, {passive:true});
+  }
+}
 click('exportDiaryBtn', exportTradeDiary);
 on('resultsToggle', 'toggle', syncResultsToggleLabel);
 click('saveReviewBtn', saveReview);

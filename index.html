@@ -29,39 +29,42 @@
   <div class="card contextstrip">
     <div class="contextmain">
       <div class="contexttitle">
-        <h1>Pullback Playbook v4.4.8</h1>
+        <div class="contexttitle-row">
+          <h1>Pullback Playbook v4.4.8</h1>
+          <button class="context-settings-toggle" type="button" id="contextSettingsToggle" aria-label="Open context settings" aria-expanded="false" aria-controls="headerControlSurface">
+            <span></span><span></span><span></span>
+          </button>
+        </div>
         <p>Scan, shortlist, review, decide, then track.</p>
       </div>
       <div class="header-ledger-view" id="headerLedgerView">
         <div class="ledger-strip" id="headerLedgerStrip" aria-live="polite">
           <div class="ledger-strip__market">
             <span class="ledger-strip__label">Market</span>
-            <strong class="ledger-strip__market-value" id="marketStatusLedger">S&amp;P above 50 MA</strong>
+            <div class="ledger-strip__primary-row">
+              <strong class="ledger-strip__market-value" id="marketStatusLedger">S&amp;P above 50 MA</strong>
+              <span class="ledger-session-pill" id="marketSessionLedgerState">Market Closed</span>
+            </div>
           </div>
           <div class="ledger-strip__meta">
-            <span class="ledger-chip">
-              <span class="ledger-chip__label">Account / Risk</span>
-              <strong class="ledger-chip__value" id="accountRiskLedger">GBP 4,000 | &pound;40</strong>
-            </span>
-            <span class="ledger-chip">
-              <span class="ledger-chip__label">Mode</span>
-              <strong class="ledger-chip__value" id="scannerModeLedger">Curated Core</strong>
-            </span>
-            <span class="ledger-chip">
-              <span class="ledger-chip__label">Setup</span>
-              <strong class="ledger-chip__value" id="setupTypeLedger">Unknown</strong>
-            </span>
+            <span class="ledger-meta-item" id="marketTimingLedger">Opens 14:30 UK</span>
+            <span class="ledger-meta-item" id="accountRiskLedger">GBP 4,000 | &pound;40</span>
+            <span class="ledger-meta-item" id="scannerModeLedger">Curated Core</span>
+            <span class="ledger-meta-item" id="setupTypeLedger">Unknown</span>
           </div>
-        </div>
-        <div class="header-ledger-actions">
-          <button class="secondary compactbutton" type="button" id="editContextBtn">Edit Context</button>
         </div>
       </div>
       <div class="header-control-surface context-edit-panel" id="headerControlSurface" hidden>
         <div class="context-edit-head">
-          <strong>Edit Context</strong>
+          <div class="context-edit-head__row">
+            <strong>Context Settings</strong>
+            <button class="context-settings-close" type="button" id="contextSettingsCloseBtn" aria-label="Close context settings">✕</button>
+          </div>
           <span class="tiny">Adjust market, account/risk, scanner mode, and setup defaults.</span>
         </div>
+      <div class="context-panel-section">
+        <div class="context-panel-section__title">Market</div>
+        <div class="tiny" id="contextMarketLiveStatus">Market state loading...</div>
       <div class="control-focus-rail" id="controlFocusRail" aria-label="Control focus rail">
         <button class="focus-rail-item" id="marketStatusPill" type="button" data-control-strip="market">
           <span class="focus-rail-label" id="marketStatusSection">Market</span>
@@ -106,6 +109,9 @@
         <div class="control-focus-tray__label" id="controlStripSelectorLabel">Market</div>
         <div class="control-focus-tray__body" id="controlStripSelectorOptions"></div>
       </div>
+      </div>
+      <div class="context-panel-section">
+        <div class="context-panel-section__title">Account &amp; Risk</div>
       <div class="compact-settings compact-settings--panel" id="headerRiskSettings">
         <strong class="compact-settings-title">Risk Settings</strong>
         <div class="row" style="margin-top:12px">
@@ -129,12 +135,12 @@
           </div>
         </div>
       </div>
-      <div class="context-edit-actions">
-        <button class="secondary compactbutton" type="button" id="cancelContextEditBtn">Cancel</button>
-        <button class="primary compactbutton" type="button" id="saveContextEditBtn">Save</button>
+      </div>
+      <div class="context-panel-section">
+        <div class="context-panel-section__title">Mode &amp; Setup</div>
+        <div class="tiny">Use the Mode and Setup controls in the Market section above to adjust scanner defaults.</div>
       </div>
       </div>
-      <div class="context-utility-row" id="contextUtilityRow"></div>
       <select id="marketStatus" hidden>
         <option>S&amp;P above 50 MA</option>
         <option>S&amp;P near 50 MA</option>
@@ -155,6 +161,7 @@
         <option value="50MA">50MA</option>
       </select>
     </div>
+    <div class="context-settings-backdrop" id="contextSettingsBackdrop" hidden></div>
     <div id="liveProcessStatusBanner" class="live-process-banner" data-live-process="startup" aria-live="polite">
       <span class="live-process-banner__label">Status</span>
       <span id="liveProcessStatusText">Loading context...</span>
