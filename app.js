@@ -2693,6 +2693,12 @@ function toUkFocusedSessionDetail(session){
   return detail;
 }
 
+function marketCardSessionDetail(session){
+  if(!session) return 'Market timing unavailable';
+  const hours = String(session.hours || '').trim();
+  return hours || 'Market timing unavailable';
+}
+
 function setContextSettingsPanelOpen(enabled){
   const next = enabled === true;
   if(uiState.contextSettingsOpen === next){
@@ -10744,7 +10750,7 @@ function renderMarketSessionStatus(){
   }
   if(hours) hours.textContent = session.hours;
   if(detail) detail.textContent = session.detail;
-  if(contextLive) contextLive.textContent = `${session.label} · ${toUkFocusedSessionDetail(session)}`;
+  if(contextLive) contextLive.textContent = marketCardSessionDetail(session);
   if(ledgerTiming) ledgerTiming.textContent = toUkFocusedSessionDetail(session);
   updateLedgerSessionPill(session);
 }
