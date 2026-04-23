@@ -15306,6 +15306,7 @@ function renderReviewWorkspace(options = {}){
   const paperTradeButtonDisabled = !paperTradeEligible || paperTradeSubmitting;
   const paperTradeButtonLabel = paperTradeSubmitting ? 'Submitting...' : 'Paper Trade';
   const paperTradePanelOpen = paperTradeEligible && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
+  const paperTradePreviewVisible = paperTradePanelOpen;
   const paperTradePrimaryReason = mergedPaperTradeEligibilityState.reasons[0] || '';
   const paperTradeDisabledReason = !paperTradeEligible
     ? (
@@ -15667,14 +15668,14 @@ function renderReviewWorkspace(options = {}){
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}
       <div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>
-      ${paperTradeEligible ? `<details class="compact-details" id="paperTradePreview" ${paperTradePanelOpen ? 'open' : ''}>
-        <summary>Paper Trade Preview</summary>
+      ${paperTradePreviewVisible ? `<div class="compact-details" id="paperTradePreview">
+        <div class="tiny" style="margin-bottom:8px;"><strong>Paper Trade Preview</strong></div>
         ${paperTradePreviewMarkup}
         <div class="actions" style="margin-top:10px">
           <button class="primary compactbutton" id="paperTradeConfirmBtn" type="button" ${paperTradePreviewModel && !paperTradeSubmitting ? '' : 'disabled'}>Confirm Paper Trade</button>
           <button class="secondary compactbutton" id="paperTradeCancelBtn" type="button">Close Preview</button>
         </div>
-      </details>` : ''}
+      </div>` : ''}
       <details class="compact-details">
         <summary>Workspace Status</summary>
         <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
