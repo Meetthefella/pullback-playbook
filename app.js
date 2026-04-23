@@ -332,6 +332,7 @@ uiState.reviewCapitalSimulation = uiState.reviewCapitalSimulation && typeof uiSt
   ? uiState.reviewCapitalSimulation
   : {ticker:'', usagePercent:null};
 uiState.riskQuickOpen = !!uiState.riskQuickOpen;
+uiState.contextEditMode = false;
 uiState.scanInProgress = !!uiState.scanInProgress;
 uiState.verdictCapAudit = uiState.verdictCapAudit && typeof uiState.verdictCapAudit === 'object'
   ? uiState.verdictCapAudit
@@ -2645,9 +2646,29 @@ function renderStats(){
   if($('marketStatusLedger')) $('marketStatusLedger').textContent = marketSummary;
   if($('scannerModeLedger')) $('scannerModeLedger').textContent = scannerModeSummary;
   if($('setupTypeLedger')) $('setupTypeLedger').textContent = setupTypeSummary;
+  renderContextHeaderMode();
   renderRiskQuickPanel();
   renderControlStripSelector();
   refreshMarketContextWidgets();
+}
+
+function renderContextHeaderMode(){
+  const ledgerView = $('headerLedgerView');
+  const controlSurface = $('headerControlSurface');
+  const editMode = uiState.contextEditMode === true;
+  if(ledgerView) ledgerView.hidden = editMode;
+  if(controlSurface) controlSurface.hidden = !editMode;
+}
+
+function setContextEditMode(enabled){
+  const next = enabled === true;
+  if(uiState.contextEditMode === next){
+    renderContextHeaderMode();
+    return;
+  }
+  uiState.contextEditMode = next;
+  if(!next && uiState.riskQuickOpen) closeRiskQuickPanel();
+  renderContextHeaderMode();
 }
 
 function normalizedRiskQuickValue(value){
@@ -3090,11 +3111,9 @@ function renderControlStripSelector(){
       button.onclick = event => {
         event.preventDefault();
         event.stopPropagation();
-        const controlSurface = $('headerControlSurface');
-        if(controlSurface) controlSurface.open = true;
+        setContextEditMode(true);
         const settings = $('headerRiskSettings');
         if(!settings) return;
-        settings.open = true;
         settings.scrollIntoView({behavior:'smooth', block:'nearest'});
       };
     }
@@ -16791,6 +16810,12 @@ click('resetAllBtn', () => {
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
 click('clearRuntimeDebugBtn', clearRuntimeDebugLog);
+click('editContextBtn', () => setContextEditMode(true));
+click('cancelContextEditBtn', () => setContextEditMode(false));
+click('saveContextEditBtn', () => {
+  saveState();
+  setContextEditMode(false);
+});
 click('marketStatusPill', () => setControlFocus('market'));
 click('accountRiskPill', () => setControlFocus('account'));
 click('scannerModePill', () => setControlFocus('mode'));

@@ -156,32 +156,48 @@ body{
   font-size:.9rem;
   color:var(--text-primary);
 }
+.header-ledger-view{
+  display:grid;
+  gap:10px;
+}
+.header-ledger-actions{
+  display:flex;
+  justify-content:flex-end;
+}
 .header-control-surface{
   margin-top:6px;
   padding:0;
   border:0;
   background:transparent;
 }
-.header-control-surface>summary{
-  display:inline-flex;
-  align-items:center;
-  min-height:36px;
-  padding:7px 12px;
-  border-radius:999px;
-  background:rgba(255,255,255,.04);
-  color:var(--text-secondary);
-  font-size:.85rem;
-  cursor:pointer;
-  list-style:none;
-}
-.header-control-surface>summary::-webkit-details-marker{display:none}
-.header-control-surface[open]>summary{
-  background:rgba(255,255,255,.08);
-  color:var(--text-primary);
-}
-.header-control-surface[open]{
+.context-edit-panel{
   display:grid;
   gap:10px;
+  padding:12px 14px;
+  border-radius:14px;
+  background:rgba(255,255,255,.03);
+}
+.context-edit-head{
+  display:grid;
+  gap:2px;
+}
+.context-edit-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.compact-settings--panel{
+  display:grid;
+  gap:8px;
+  padding:10px 12px;
+  border-radius:12px;
+  background:rgba(255,255,255,.02);
+}
+.compact-settings-title{
+  color:var(--text-primary);
+  font-size:.92rem;
+  font-weight:700;
 }
 .control-focus-rail{
   display:flex;
@@ -460,9 +476,6 @@ details{
   border:0;
   border-radius:0;
   box-shadow:none;
-}
-.header-control-surface[open]{
-  background:transparent;
 }
 .card{padding:16px}
 .resetcard{padding:12px 16px}
@@ -2047,7 +2060,8 @@ details>summary::-webkit-details-marker{display:none}
     .control-focus-rail{padding-inline:4px;scroll-padding-inline:4px}
     .focus-rail-item{flex-basis:min(78vw, 240px)}
     .ledger-chip{min-width:unset;flex:1 1 100%}
-    .header-control-surface>summary{width:100%;justify-content:center}
+    .header-ledger-actions{justify-content:stretch}
+    .header-ledger-actions #editContextBtn{width:100%}
     .searchaddrow{grid-template-columns:minmax(0,1fr) auto}
   .searchaddaction{justify-content:flex-start}
   .compactbutton{padding-inline:14px}

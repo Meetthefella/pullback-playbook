@@ -32,28 +32,36 @@
         <h1>Pullback Playbook v4.4.8</h1>
         <p>Scan, shortlist, review, decide, then track.</p>
       </div>
-      <div class="ledger-strip" id="headerLedgerStrip" aria-live="polite">
-        <div class="ledger-strip__market">
-          <span class="ledger-strip__label">Market</span>
-          <strong class="ledger-strip__market-value" id="marketStatusLedger">S&amp;P above 50 MA</strong>
+      <div class="header-ledger-view" id="headerLedgerView">
+        <div class="ledger-strip" id="headerLedgerStrip" aria-live="polite">
+          <div class="ledger-strip__market">
+            <span class="ledger-strip__label">Market</span>
+            <strong class="ledger-strip__market-value" id="marketStatusLedger">S&amp;P above 50 MA</strong>
+          </div>
+          <div class="ledger-strip__meta">
+            <span class="ledger-chip">
+              <span class="ledger-chip__label">Account / Risk</span>
+              <strong class="ledger-chip__value" id="accountRiskLedger">GBP 4,000 | &pound;40</strong>
+            </span>
+            <span class="ledger-chip">
+              <span class="ledger-chip__label">Mode</span>
+              <strong class="ledger-chip__value" id="scannerModeLedger">Curated Core</strong>
+            </span>
+            <span class="ledger-chip">
+              <span class="ledger-chip__label">Setup</span>
+              <strong class="ledger-chip__value" id="setupTypeLedger">Unknown</strong>
+            </span>
+          </div>
         </div>
-        <div class="ledger-strip__meta">
-          <span class="ledger-chip">
-            <span class="ledger-chip__label">Account / Risk</span>
-            <strong class="ledger-chip__value" id="accountRiskLedger">GBP 4,000 | &pound;40</strong>
-          </span>
-          <span class="ledger-chip">
-            <span class="ledger-chip__label">Mode</span>
-            <strong class="ledger-chip__value" id="scannerModeLedger">Curated Core</strong>
-          </span>
-          <span class="ledger-chip">
-            <span class="ledger-chip__label">Setup</span>
-            <strong class="ledger-chip__value" id="setupTypeLedger">Unknown</strong>
-          </span>
+        <div class="header-ledger-actions">
+          <button class="secondary compactbutton" type="button" id="editContextBtn">Edit Context</button>
         </div>
       </div>
-      <details class="header-control-surface" id="headerControlSurface">
-        <summary><strong>Context Controls</strong> | Edit market, mode, setup, and risk</summary>
+      <div class="header-control-surface context-edit-panel" id="headerControlSurface" hidden>
+        <div class="context-edit-head">
+          <strong>Edit Context</strong>
+          <span class="tiny">Adjust market, account/risk, scanner mode, and setup defaults.</span>
+        </div>
       <div class="control-focus-rail" id="controlFocusRail" aria-label="Control focus rail">
         <button class="focus-rail-item" id="marketStatusPill" type="button" data-control-strip="market">
           <span class="focus-rail-label" id="marketStatusSection">Market</span>
@@ -105,8 +113,8 @@
         </div>
         <div class="market-session-detail" id="marketSessionDetail">Next open 9:30 AM ET</div>
       </div>
-      <details class="compact-settings" id="headerRiskSettings">
-        <summary><strong>Risk Settings</strong> | Edit account controls</summary>
+      <div class="compact-settings compact-settings--panel" id="headerRiskSettings">
+        <strong class="compact-settings-title">Risk Settings</strong>
         <div class="row" style="margin-top:12px">
           <div>
             <label>Account Size (GBP)</label>
@@ -127,8 +135,12 @@
             <div class="tiny" style="margin-top:8px">Top context stays slim. Edit risk controls here when you need them.</div>
           </div>
         </div>
-      </details>
-      </details>
+      </div>
+      <div class="context-edit-actions">
+        <button class="secondary compactbutton" type="button" id="cancelContextEditBtn">Cancel</button>
+        <button class="primary compactbutton" type="button" id="saveContextEditBtn">Save</button>
+      </div>
+      </div>
       <select id="marketStatus" hidden>
         <option>S&amp;P above 50 MA</option>
         <option>S&amp;P near 50 MA</option>
