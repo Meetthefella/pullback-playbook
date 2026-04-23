@@ -2000,6 +2000,21 @@ details>summary::-webkit-details-marker{display:none}
 .app-workspace-card[hidden]{
   display:none !important;
 }
+.workspace-area .app-workspace-card > h2{
+  margin:0 0 6px;
+}
+.workspace-area .app-workspace-card > p.tiny{
+  margin:0 0 10px;
+}
+#paperTradeStatusLine{
+  margin-top:2px;
+}
+#paperTradePreview{
+  margin-top:6px;
+}
+.diarycard .actions{
+  margin-top:8px;
+}
 
 .bottom-ribbon-nav{
   position:fixed;

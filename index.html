@@ -134,7 +134,7 @@
 
   <main id="workspaceArea" class="workspace-area">
   <div class="card app-workspace-card" data-workspace-card="scan" style="margin-top:14px">
-    <h2 id="dailyInput">2) Scan List</h2>
+    <h2 id="dailyInput">Scan</h2>
     <div class="scan-primary-stack" style="margin-top:10px">
       <strong>Import From Screenshot</strong>
       <div class="tiny" style="margin-top:6px">Upload a TradingView screenshot to extract tickers for review before scanning.</div>
@@ -213,22 +213,22 @@
 
   <div class="card app-workspace-card" data-workspace-card="scan" style="margin-top:14px">
     <details id="resultsToggle" open>
-      <summary><strong id="resultsSection">3) All Scan Results</strong> <span class="tiny" id="resultsToggleText">- Show Ranked Results</span></summary>
-      <p class="tiny" style="margin-top:10px">Primary scan output for review. Use this list to open a ticker into the review workspace.</p>
+      <summary><strong id="resultsSection">Ranked Results</strong> <span class="tiny" id="resultsToggleText">- Show Ranked Results</span></summary>
+      <p class="tiny" style="margin-top:10px">Triage candidates here, then open one into Review.</p>
       <div class="statusline tiny" id="scannerSelectionStatus">Open any ranked setup to jump straight into review.</div>
       <div id="results" class="list"></div>
     </details>
   </div>
 
   <div class="card app-workspace-card" data-workspace-card="review" style="margin-top:14px">
-    <h2 id="reviewSection">4) Selected Ticker Review Workspace</h2>
-    <p class="tiny">One active ticker at a time. Review the chart, notes, checklist, and trade plan in one place.</p>
+    <h2 id="reviewSection">Review</h2>
+    <p class="tiny">One active ticker at a time: chart, verdict, plan, and next action.</p>
     <div id="reviewWorkspace" class="list" style="margin-top:14px"></div>
   </div>
 
   <div class="card app-workspace-card" data-workspace-card="track" style="margin-top:14px">
-    <h2 id="watchlistSection">5) Watchlist</h2>
-    <p class="tiny">Decision output area for reviewed setups. Entries expire after 5 trading days unless refreshed.</p>
+    <h2 id="watchlistSection">Track</h2>
+    <p class="tiny">Monitor active setups, refresh lifecycle state, and reopen names in Review.</p>
     <div class="actions" style="margin-top:10px">
       <label class="checkitem" style="padding:0"><input id="showExpiredWatchlist" type="checkbox"> Show expired</label>
     </div>
@@ -237,20 +237,18 @@
 
   <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="diarySection" style="margin-bottom:0">6) Trade Diary</h2>
+      <h2 id="diarySection" style="margin-bottom:0">Diary</h2>
       <div class="actions" style="margin-top:0">
-        <button class="secondary" id="jumpToDiaryBtn">Diary Section</button>
         <button class="secondary" id="exportDiaryBtn">Export Diary JSON</button>
       </div>
     </div>
-    <p class="tiny">Diary records stay compact by default. Expand a record only when you want to edit the full trade outcome.</p>
-    <p class="tiny">Browser storage cannot expose a direct file path here, so use <strong>Export Diary JSON</strong> to save a local copy.</p>
+    <p class="tiny">Journal outcomes and lessons here. Entries stay compact by default; expand only when editing details.</p>
     <div id="tradeDiary" class="list"></div>
   </div>
 
   <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
     <details>
-      <summary><strong id="analyticsSection">8) Pattern Review</strong></summary>
+      <summary><strong id="analyticsSection">Pattern Review</strong></summary>
       <p class="tiny" style="margin-top:10px">Pattern review stays available, but secondary to the active trading workflow.</p>
       <div id="patternAnalytics" class="list"></div>
     </details>
@@ -258,7 +256,7 @@
 
   <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
     <details>
-      <summary><strong id="advancedSection">9) Advanced / API Utilities</strong></summary>
+      <summary><strong id="advancedSection">Advanced / API Utilities</strong></summary>
       <div class="grid" style="margin-top:12px">
         <div class="panelbox">
           <strong id="apiSettings">API Settings Utility</strong>

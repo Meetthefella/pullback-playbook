@@ -4523,7 +4523,7 @@ function renderWatchlistCardElement(record){
   div.dataset.visualTone = watchlistVisualState.visual_tone || '';
   div.dataset.visualState = watchlistVisualState.state || '';
   div.dataset.watchlistTicker = entry.ticker;
-  div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
+  div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Log to Diary</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
   div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
   div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
   div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -4621,200 +4621,11 @@ function renderWatchlist(){
       const cardElement = renderWatchlistCardElement(record);
       if(!cardElement) return;
       section.appendChild(cardElement);
-      return;
-      const entry = tickerRecordToWatchlistEntry(record);
-      if(!entry) return;
-      const view = buildFinalSetupView(record);
-      const liveRefreshPending = isWatchlistLiveRefreshPending(record.ticker);
-      const manualRefreshBusy = isManualWatchlistRefreshInProgress(record.ticker);
-      const remaining = getTradingDaysRemaining(entry);
-      const lifecycleText = lifecycleLabel(record);
-      const lifecycleSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
-      const expired = lifecycleSnapshot.state === 'expired' || record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
-      const expiryDate = record.lifecycle.expiresAt || 'Not set';
-      const priority = watchlistPriorityForRecord(record);
-      const avoidSubtype = avoidSubtypeForRecord(record);
-      const derivedStates = analysisDerivedStatesFromRecord(record);
-      const displayedPlan = applySetupConfirmationPlanGate(record, deriveCurrentPlanState(
-        record.plan && record.plan.entry,
-        record.plan && record.plan.stop,
-        record.plan && record.plan.firstTarget,
-        record.marketData && record.marketData.currency
-      ), derivedStates);
-      const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
-      const rrResolution = resolveScannerStateWithTrace(record);
-      const resolvedContract = resolveFinalStateContract(record, {
-        context:'watchlist',
-        finalVerdict:view.displayStage,
-        derivedStates,
-        displayedPlan,
-        qualityAdjustments,
-        rrResolution
-      });
-      const watchlistPresentation = resolveEmojiPresentation(record, {
-        context:'watchlist',
-        finalVerdict:view.displayStage,
-        setupUiState:view.setupUiState,
-        displayedPlan:view.displayedPlan,
-        derivedStates:view.setupStates,
-        warningState:view.warningState,
-        avoidSubtype
-      });
-      watchlistPresentation.primaryText = resolvedContract.badgeText;
-      watchlistPresentation.badgeClass = resolvedContract.badgeClass;
-      watchlistPresentation.modifiers = resolvedContract.modifiers || watchlistPresentation.modifiers;
-      const watchlistBadgeClass = ['expired','dead'].includes(lifecycleSnapshot.state) ? 'avoid' : resolvedContract.badgeClass;
-      const watchlistBadgeLabel = lifecycleSnapshot.state === 'expired'
-        ? 'Expired'
-        : (lifecycleSnapshot.state === 'dead' ? '💀 Dead' : watchlistPresentation.primaryText);
-      const watchlistSignalMarkup = emojiModifierMarkup({
-        ...watchlistPresentation,
-        modifiers:prioritizedSignalModifiers(watchlistPresentation, 2)
-      });
-      const reviewPresentation = resolveEmojiPresentation(record, {context:'review'});
-      if(reviewPresentation.primaryText !== watchlistPresentation.primaryText){
-        logDebugWarn('DEBUG_RENDER', 'EMOJI_SURFACE_DISAGREEMENT', {ticker:record.ticker, watchlist:watchlistPresentation.primaryText, review:reviewPresentation.primaryText});
-      }
-      const reasoning = decisionReasoningForRecord(record, {
-        reviewVerdict:view.displayStage,
-        avoidSubtype
-      });
-      const shortAction = watchlistActionSummary({
-        label:resolvedContract.actionLabel,
-        shortLabel:resolvedContract.actionShortLabel
-      });
-      const decisionCopy = watchlistDecisionPresentation(resolvedContract, lifecycleSnapshot, reasoning, shortAction);
-      const visualState = resolveVisualState(record, 'watchlist', {
-        resolvedContract,
-        derivedStates,
-        displayedPlan,
-        pendingResolution:liveRefreshPending,
-        setupScore:view && view.setupScore
-      });
-      const globalVerdict = liveRefreshPending ? null : resolveGlobalVerdict(record);
-      const watchlistVisualState = liveRefreshPending
-        ? {
-          ...visualState,
-          watchlist_presentation_source:'pending_passthrough'
-        }
-        : reconcileWatchlistPresentation({
-          record,
-          visualState,
-          globalVerdict,
-          lifecycleSnapshot,
-          resolvedContract,
-          derivedStates,
-          displayedPlan
-        });
-      const shortReason = decisionCopy.reason;
-      const watchlistSignalRowMarkup = liveRefreshPending || watchlistVisualState.watchlist_presentation_source === 'strict_reconciled'
-        ? ''
-        : watchlistSignalMarkup;
-      record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
-      if(!record.watchlist.debug.holdTrace){
-        const seededAt = new Date().toISOString();
-        record.watchlist.debug.holdTrace = `hold_helper.rendered | ${seededAt}`;
-        const history = Array.isArray(record.watchlist.debug.holdTraceHistory) ? record.watchlist.debug.holdTraceHistory : [];
-        record.watchlist.debug.holdTraceHistory = [`hold_helper.rendered | ${seededAt}`, ...history].slice(0, 8);
-      }
-      const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
-        derivedStates,
-        displayedPlan,
-        qualityAdjustments,
-        rrResolution,
-        resolvedContract,
-        globalVisual:watchlistVisualState
-      });
-      const div = document.createElement('div');
-      const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
-      const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
-      const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
-      const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
-      const watchlistScoreText = liveRefreshPending
-        ? 'Refreshing...'
-        : (expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''));
-      const watchlistScoreClass = liveRefreshPending ? 's-neutral' : 'visual-score';
-      const liveRefreshNote = liveRefreshPending
-        ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
-        : '';
-      const decisionSummary = watchlistVisualState.decision_summary;
-      const refreshButtonLabel = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
-      const refreshButtonDisabled = manualRefreshBusy ? ' disabled' : '';
-      const planUI = resolvePlanVisibility({
-        state:watchlistVisualState.finalVerdict,
-        bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
-        structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
-      });
-      const entryConditionsSummary = buildEntryConditionsSummary({
-        ticker:entry.ticker,
-        finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
-        resolvedContract,
-        globalVerdict,
-        derivedStates,
-        displayedPlan
-      });
-      const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
-      const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
-      div.className = `resultcompact watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
-      div.style.cssText = watchlistVisualState.styleAttr || '';
-      div.dataset.visualTone = watchlistVisualState.visual_tone || '';
-      div.dataset.visualState = watchlistVisualState.state || '';
-      div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span><span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span><span class="tiny watchlist-card__priority">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Save</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
-      div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
-      div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
-      div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
-      const refreshButton = div.querySelector('[data-act="refresh-life"]');
-      if(refreshButton){
-        refreshButton.disabled = manualRefreshBusy;
-        refreshButton.textContent = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
-        refreshButton.onclick = () => {
-          if(refreshButton.disabled) return;
-          refreshButton.disabled = true;
-          refreshButton.textContent = 'Refreshing...';
-          refreshWatchlistTicker(entry.ticker).catch(() => {});
-        };
-      }
-      div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
-      if(watchlistEntryConditionsHelper){
-        div.setAttribute('data-entry-hold-helper', '1');
-        div.setAttribute('data-hold-card-trigger', '1');
-        div.setAttribute('data-hold-ticker', entry.ticker);
-        div.setAttribute('data-panel-id', watchlistPanelId);
-        div.setAttribute('data-hold-ms', '550');
-        const holdWrapper = document.createElement('div');
-        holdWrapper.innerHTML = watchlistEntryConditionsHelper;
-        if(holdWrapper.firstElementChild) div.appendChild(holdWrapper.firstElementChild);
-      }
-      section.appendChild(div);
-      bindEntryConditionsHoldInteractions(div);
     });
     box.appendChild(section);
   });
   uiState.watchlistRenderSignature = renderSignature;
   box.dataset.watchlistSignature = renderSignature;
-  return;
-  records.forEach(record => {
-    const entry = tickerRecordToWatchlistEntry(record);
-    if(!entry) return;
-    const view = buildFinalSetupView(record);
-    const warningState = evaluateWarningState(record, getReviewAnalysisState(record).normalizedAnalysis);
-    const remaining = getTradingDaysRemaining(entry);
-    const lifecycleText = lifecycleLabel(record);
-    const expired = record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
-    const cautionChip = warningState.showWarning
-      ? '⚠️ Weak market'
-      : (record.setup.marketCaution ? '⚠️ Weak market' : view.convictionTier);
-    const expiryDate = record.lifecycle.expiresAt || 'Not set';
-    const div = document.createElement('div');
-    div.className = 'resultcompact';
-    div.innerHTML = `<div class="resulthead" style="${escapeHtml(cardVisualStyleAttr(view && view.setupScore, view && view.setupUiState && view.setupUiState.state))}"><div class="watchlistidentity inline-status" style="justify-content:space-between;align-items:flex-start"><div class="ticker">${escapeHtml(entry.ticker)}</div><div class="inline-status"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(view.setupUiState.label)}</span><span class="score watchlistscore ${expired ? 's-low' : scoreClass(view.setupScore || 0)}">${escapeHtml(expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''))}</span></div></div><div class="tiny">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div><div class="inline-status" style="margin-top:8px"><span class="pill">${escapeHtml(cautionChip)}</span><span class="pill">${escapeHtml(view.planStateLabel)}</span></div><div class="tiny" style="margin-top:8px">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div><div class="resultreview inline-status" style="margin-top:10px"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="save-diary">Save to Diary</button><button class="secondary" data-act="refresh-life">Refresh</button><button class="danger" data-act="remove-watch">Remove</button></div></div>`;
-    div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
-    div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
-    div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
-    div.querySelector('[data-act="refresh-life"]').onclick = () => { refreshWatchlistTicker(entry.ticker).catch(() => {}); };
-    div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
-    box.appendChild(div);
-  });
 }
 
 let watchlistRenderScheduled = false;
@@ -15434,10 +15245,18 @@ function renderReviewWorkspace(options = {}){
         : 'Trade plan not valid'
     )
     : '';
-  const paperTradeStatusText = paperTradeUi.message
-    || (paperTradeEligible
-      ? 'Ready for paper-trade preview.'
-      : (paperTradePrimaryReason || 'Setup is not eligible for paper trading.'));
+  const paperTradeHasRuntimeStatus = !!paperTradeUi.message
+    || paperTradeUi.state === 'submitting'
+    || paperTradeUi.state === 'submit_success'
+    || paperTradeUi.state === 'submit_error';
+  const paperTradeStatusText = paperTradeHasRuntimeStatus
+    ? (
+      paperTradeUi.message
+      || (paperTradeSubmitting
+        ? 'Submitting paper trade...'
+        : (paperTradeUi.state === 'submit_success' ? 'Paper trade submitted.' : 'Paper trade update required.'))
+    )
+    : '';
   const paperTradeStatusClass = paperTradeUi.state === 'submit_error'
     ? 'warntext'
     : (paperTradeUi.state === 'submit_success' ? 'ok' : 'tiny');
@@ -15505,6 +15324,7 @@ function renderReviewWorkspace(options = {}){
   const decisionSummary = visualState.decision_summary;
   const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
   const reviewAction = getActions(visualState.finalVerdict || visualState.final_verdict);
+  const reviewNextActionLabel = String(reviewAction && reviewAction.label || '').trim() || 'Review setup inputs';
   const reviewBadgeLabel = reviewBadge.text;
   const planUI = resolvePlanVisibility({
     state:visualState.finalVerdict,
@@ -15746,7 +15566,7 @@ function renderReviewWorkspace(options = {}){
       <div class="tiny" id="calcNote">${escapeHtml(planUI.showPlan ? 'Enter planned entry, stop, and first target to calculate size.' : nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary))}</div>
     </div>
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
-      <div class="reviewsectionhead"><strong>Confidence / Diagnostics</strong></div>
+      <div class="reviewsectionhead"><strong>Analysis</strong></div>
       ${diagnosticsPanelBody}
       <div class="reviewactions reviewactions-top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
       <textarea id="reviewNotes" class="${loading ? 'review-notes--ai' : ''}" placeholder="${escapeHtml(notesPlaceholder)}">${escapeHtml(record.review.notes || '')}</textarea>
@@ -15756,7 +15576,10 @@ function renderReviewWorkspace(options = {}){
         ${renderAnalysisPanelFromRecord(record)}
       </details>
       <div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary))}</div>
-      <div class="tiny" id="planRealismReasons">${escapeHtml(planRealismReasons)}</div>
+      <details class="compact-details" id="planRealismReasonsPanel" ${planRealismReasons ? '' : 'hidden'}>
+        <summary>Why this call</summary>
+        <div class="tiny" id="planRealismReasons">${escapeHtml(planRealismReasons)}</div>
+      </details>
       <details class="compact-details">
         <summary>Plan Diagnostics</summary>
         <div class="reviewmeta-grid">
@@ -15794,9 +15617,10 @@ function renderReviewWorkspace(options = {}){
         <button class="secondary" id="saveReviewBtn">Save Review</button>
         <button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button>
       </div>
+      <div class="tiny review-next-action-primary">Next: ${escapeHtml(reviewNextActionLabel)}</div>
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}
-      <div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>
+      ${paperTradeHasRuntimeStatus ? `<div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>` : ''}
       ${paperTradePreviewVisible ? `<div class="compact-details" id="paperTradePreview">
         <div class="tiny" style="margin-bottom:8px;"><strong>Paper Trade Preview</strong></div>
         ${paperTradePreviewMarkup}
@@ -16202,7 +16026,9 @@ function syncPlanDisplayMeta(){
   if($('planRealismSummary')) $('planRealismSummary').textContent = planUI.showPlan
     ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
     : nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary);
-  if($('planRealismReasons')) $('planRealismReasons').textContent = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
+  const planReasonText = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
+  if($('planRealismReasons')) $('planRealismReasons').textContent = planReasonText;
+  if($('planRealismReasonsPanel')) $('planRealismReasonsPanel').hidden = !planReasonText;
 }
 
 function refreshSelectedTickerLifecycle(){
@@ -16420,7 +16246,9 @@ function calculate(options = {}){
   if($('planRealismSummary')) $('planRealismSummary').textContent = planUI.showPlan
     ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
     : nonPlanRealismSummaryText(planUI.diagnosticsMessage, plannerDecisionSummary);
-  if($('planRealismReasons')) $('planRealismReasons').textContent = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
+  const plannerReasonText = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
+  if($('planRealismReasons')) $('planRealismReasons').textContent = plannerReasonText;
+  if($('planRealismReasonsPanel')) $('planRealismReasonsPanel').hidden = !plannerReasonText;
   if(!planUI.showPlan){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
@@ -16957,10 +16785,6 @@ click('marketStatusPill', () => setControlFocus('market'));
 click('accountRiskPill', () => setControlFocus('account'));
 click('scannerModePill', () => setControlFocus('mode'));
 click('setupTypePill', () => setControlFocus('setup'));
-click('jumpToDiaryBtn', () => {
-  const diarySection = $('diarySection');
-  if(diarySection) diarySection.scrollIntoView({behavior:'smooth', block:'start'});
-});
 click('exportDiaryBtn', exportTradeDiary);
 on('resultsToggle', 'toggle', syncResultsToggleLabel);
 click('saveReviewBtn', saveReview);
@@ -18634,6 +18458,7 @@ bootstrapMarketStatusClock();
 bootstrapWatchlistLifecycleAutomation();
 updateTickerSearchStatus();
 updateProviderStatusNote();
+
 
 
 
