@@ -2631,25 +2631,22 @@ function renderStats(){
   state.userRiskPerTrade = currentMaxLoss();
   state.maxRisk = state.userRiskPerTrade;
   const pct = state.accountSize ? ((state.maxRisk / state.accountSize) * 100).toFixed(1) : '0.0';
-  const marketSummary = marketStatusDisplayValue();
-  const accountRiskSummary = `${formatGbp(state.accountSize)} | ${formatPound(state.userRiskPerTrade || currentMaxLoss())}`;
-  const scannerModeSummary = scannerModeChipLabel(effectiveUniverseMode());
-  const setupTypeSummary = setupTypeChipLabel(state.setupType);
+  const marketContextModel = buildMarketContextDisplayModel();
   if($('accountStat')) $('accountStat').textContent = formatGbp(state.accountSize);
   if($('riskStat')) $('riskStat').textContent = formatGbp(state.maxRisk);
   if($('riskPctStat')) $('riskPctStat').textContent = `${pct}%`;
-  if($('accountRiskStrip')) $('accountRiskStrip').textContent = accountRiskSummary;
-  if($('marketStatusStrip')) $('marketStatusStrip').textContent = marketSummary;
-  if($('scannerModeStrip')) $('scannerModeStrip').textContent = scannerModeSummary;
-  if($('setupTypeStrip')) $('setupTypeStrip').textContent = setupTypeSummary;
-  if($('accountRiskLedger')) $('accountRiskLedger').textContent = accountRiskSummary;
-  if($('marketStatusLedger')) $('marketStatusLedger').textContent = marketSummary;
-  if($('scannerModeLedger')) $('scannerModeLedger').textContent = scannerModeSummary;
-  if($('setupTypeLedger')) $('setupTypeLedger').textContent = setupTypeSummary;
+  if($('accountRiskStrip')) $('accountRiskStrip').textContent = marketContextModel.accountLabel;
+  if($('marketStatusStrip')) $('marketStatusStrip').textContent = marketContextModel.regimeLabel;
+  if($('scannerModeStrip')) $('scannerModeStrip').textContent = marketContextModel.universeLabel;
+  if($('setupTypeStrip')) $('setupTypeStrip').textContent = marketContextModel.setupLabel;
+  if($('accountRiskLedger')) $('accountRiskLedger').textContent = marketContextModel.accountLabel;
+  if($('marketStatusLedger')) $('marketStatusLedger').textContent = marketContextModel.regimeLabel;
+  if($('scannerModeLedger')) $('scannerModeLedger').textContent = marketContextModel.universeLabel;
+  if($('setupTypeLedger')) $('setupTypeLedger').textContent = marketContextModel.setupLabel;
   renderContextHeaderMode();
   renderRiskQuickPanel();
   renderControlStripSelector();
-  refreshMarketContextWidgets();
+  refreshMarketContextWidgets(marketContextModel);
 }
 
 function renderContextHeaderMode(){
@@ -2697,6 +2694,20 @@ function marketCardSessionDetail(session){
   if(!session) return 'Market timing unavailable';
   const hours = String(session.hours || '').trim();
   return hours || 'Market timing unavailable';
+}
+
+function buildMarketContextDisplayModel(session = getMarketSessionStatus(new Date())){
+  const resolvedSession = session || getMarketSessionStatus(new Date());
+  return {
+    regimeLabel: marketStatusDisplayValue(),
+    sessionLabel: String(resolvedSession.label || 'Market Closed'),
+    timingLabel: toUkFocusedSessionDetail(resolvedSession),
+    detailLabel: marketCardSessionDetail(resolvedSession),
+    accountLabel: `${formatGbp(state.accountSize)} | ${formatPound(state.userRiskPerTrade || currentMaxLoss())}`,
+    universeLabel: scannerModeChipLabel(effectiveUniverseMode()),
+    setupLabel: setupTypeChipLabel(state.setupType),
+    session: resolvedSession
+  };
 }
 
 function setContextSettingsPanelOpen(enabled){
@@ -10737,21 +10748,25 @@ function buildMarketCalendarDays(isoDate){
   });
 }
 
-function renderMarketSessionStatus(){
+function renderMarketSessionStatus(displayModel = buildMarketContextDisplayModel()){
   const badge = $('marketSessionBadge');
   const hours = $('marketSessionHours');
   const detail = $('marketSessionDetail');
   const contextLive = $('contextMarketLiveStatus');
   const ledgerTiming = $('marketTimingLedger');
-  const session = getMarketSessionStatus(new Date());
+  const session = displayModel && displayModel.session ? displayModel.session : getMarketSessionStatus(new Date());
   if(badge){
-    badge.textContent = session.label;
+    badge.textContent = displayModel && displayModel.sessionLabel ? displayModel.sessionLabel : session.label;
     badge.setAttribute('data-session-state', session.key);
+    badge.hidden = true;
   }
-  if(hours) hours.textContent = session.hours;
-  if(detail) detail.textContent = session.detail;
-  if(contextLive) contextLive.textContent = marketCardSessionDetail(session);
-  if(ledgerTiming) ledgerTiming.textContent = toUkFocusedSessionDetail(session);
+  if(hours) hours.textContent = displayModel && displayModel.detailLabel ? displayModel.detailLabel : session.hours;
+  if(detail){
+    detail.textContent = '';
+    detail.hidden = true;
+  }
+  if(contextLive) contextLive.textContent = displayModel && displayModel.detailLabel ? displayModel.detailLabel : marketCardSessionDetail(session);
+  if(ledgerTiming) ledgerTiming.textContent = displayModel && displayModel.timingLabel ? displayModel.timingLabel : toUkFocusedSessionDetail(session);
   updateLedgerSessionPill(session);
 }
 
@@ -10779,8 +10794,8 @@ function renderMarketCalendarWidget(){
   grid.innerHTML = headers + days;
 }
 
-function refreshMarketContextWidgets(){
-  renderMarketSessionStatus();
+function refreshMarketContextWidgets(displayModel = buildMarketContextDisplayModel()){
+  renderMarketSessionStatus(displayModel);
   renderMarketCalendarWidget();
 }
 
