@@ -14776,7 +14776,7 @@ function legacyRenderCardsFromCardList(){
 
 function paperTradeUiStateForTicker(ticker){
   const symbol = normalizeTicker(ticker);
-  if(!symbol) return {state:'idle', message:'', previewOpen:false, lastResult:null, updatedAt:''};
+  if(!symbol) return {state:'idle', message:'', previewOpen:false, lastResult:null, snapshot:null, updatedAt:''};
   const map = uiState.paperTradeStateByTicker && typeof uiState.paperTradeStateByTicker === 'object'
     ? uiState.paperTradeStateByTicker
     : {};
@@ -14786,6 +14786,7 @@ function paperTradeUiStateForTicker(ticker){
     message:String(entry.message || ''),
     previewOpen:entry.previewOpen === true,
     lastResult:entry.lastResult && typeof entry.lastResult === 'object' ? entry.lastResult : null,
+    snapshot:entry.snapshot && typeof entry.snapshot === 'object' ? entry.snapshot : null,
     updatedAt:String(entry.updatedAt || '')
   };
 }
@@ -14941,19 +14942,102 @@ function buildPaperTradePreviewModel(context = {}, options = {}){
   };
 }
 
+function buildPaperTradeConfirmedSnapshot(context = {}){
+  const previewModel = buildPaperTradePreviewModel({
+    ticker:context.ticker,
+    eligibility:context.eligibility
+  }, {
+    marketStatus:context.record && context.record.meta ? (context.record.meta.marketStatus || state.marketStatus || '') : (state.marketStatus || '')
+  });
+  if(!previewModel) return null;
+  return Object.freeze({
+    ticker:String(previewModel.ticker || ''),
+    side:String(previewModel.side || 'BUY'),
+    entry:Number(previewModel.entry),
+    stop:Number(previewModel.stop),
+    target:Number(previewModel.target),
+    size:Math.max(1, Math.floor(Number(previewModel.quantity || 0))),
+    maxLoss:Number.isFinite(Number(previewModel.maxLoss)) ? Number(previewModel.maxLoss) : null,
+    rr:Number.isFinite(Number(previewModel.rrRatio)) ? Number(previewModel.rrRatio) : null,
+    marketStatus:String(previewModel.marketStatus || ''),
+    sourceContext:context.eligibility && context.eligibility.debugForced === true ? 'debug_paper_trade' : 'trading212_paper_trade',
+    debugForced:context.eligibility && context.eligibility.debugForced === true
+  });
+}
+
+function paperTradePreviewModelFromSnapshot(snapshot, options = {}){
+  if(!snapshot || typeof snapshot !== 'object') return null;
+  if(!Number.isFinite(Number(snapshot.entry)) || !Number.isFinite(Number(snapshot.stop)) || !Number.isFinite(Number(snapshot.target))) return null;
+  if(!Number.isFinite(Number(snapshot.size)) || Number(snapshot.size) < 1) return null;
+  return {
+    ticker:String(snapshot.ticker || ''),
+    side:String(snapshot.side || 'BUY'),
+    quantity:Math.max(1, Math.floor(Number(snapshot.size))),
+    entry:Number(snapshot.entry),
+    stop:Number(snapshot.stop),
+    target:Number(snapshot.target),
+    maxLoss:Number.isFinite(Number(snapshot.maxLoss)) ? Number(snapshot.maxLoss) : null,
+    rrRatio:Number.isFinite(Number(snapshot.rr)) ? Number(snapshot.rr) : null,
+    debugForced:snapshot.debugForced === true,
+    capitalLabel:String(options.capitalLabel || 'Unknown'),
+    marketStatus:String(snapshot.marketStatus || options.marketStatus || '')
+  };
+}
+
+function isDuplicatePaperTradeSubmission({
+  ticker,
+  snapshot,
+  existingDiaryEntries,
+  recentWindowMs = 5 * 60 * 1000
+} = {}){
+  if(!ticker || !snapshot || !Array.isArray(existingDiaryEntries)) return false;
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return false;
+  const now = Date.now();
+  const snapshotEntry = Number(snapshot.entry);
+  const snapshotStop = Number(snapshot.stop);
+  const snapshotTarget = Number(snapshot.target);
+  const snapshotSize = Number(snapshot.size);
+  return existingDiaryEntries.some(entry => {
+    if(!entry || typeof entry !== 'object') return false;
+    if(normalizeTicker(entry.ticker) !== symbol) return false;
+    if(String(entry.sourceType || '').trim().toLowerCase() !== 'paper_trade') return false;
+    const submittedAt = Date.parse(String(entry.createdAt || entry.date || ''));
+    if(!Number.isFinite(submittedAt)) return false;
+    if((now - submittedAt) > recentWindowMs) return false;
+    const sameEntry = Number(entry.plannedEntry) === snapshotEntry;
+    const sameStop = Number(entry.plannedStop) === snapshotStop;
+    const sameTarget = Number(entry.plannedFirstTarget || entry.plannedTarget) === snapshotTarget;
+    const sameSize = Number(entry.plannedPositionSize || (entry.executionMeta && entry.executionMeta.quantity) || entry.quantity) === snapshotSize;
+    return sameEntry && sameStop && sameTarget && sameSize;
+  });
+}
+
 function openPaperTradePreview(ticker){
   const context = currentPaperTradeContextForTicker(ticker);
   if(!context) return;
   if(!context.eligibility.eligible){
     const reason = context.eligibility.reasons[0] || 'Setup is not eligible for paper trading.';
-    setPaperTradeUiState(context.ticker, {state:'idle', previewOpen:false, message:reason});
+    setPaperTradeUiState(context.ticker, {state:'idle', previewOpen:false, snapshot:null, message:reason});
     setStatus('reviewWorkspaceStatus', `<span class="warntext">${escapeHtml(reason)}</span>`);
+    renderReviewWorkspace();
+    return;
+  }
+  const snapshot = buildPaperTradeConfirmedSnapshot(context);
+  if(!snapshot){
+    setPaperTradeUiState(context.ticker, {
+      state:'submit_error',
+      previewOpen:false,
+      snapshot:null,
+      message:'Unable to build paper-trade preview for this setup.'
+    });
     renderReviewWorkspace();
     return;
   }
   setPaperTradeUiState(context.ticker, {
     state:'preview_open',
     previewOpen:true,
+    snapshot,
     message:'Review the paper-trade preview and confirm.'
   });
   renderReviewWorkspace();
@@ -14964,18 +15048,48 @@ function closePaperTradePreview(ticker){
   if(!symbol) return;
   const ui = paperTradeUiStateForTicker(symbol);
   const stateValue = ui.state === 'submit_success' ? 'submit_success' : 'idle';
-  setPaperTradeUiState(symbol, {state:stateValue, previewOpen:false});
+  setPaperTradeUiState(symbol, {state:stateValue, previewOpen:false, snapshot:null});
   renderReviewWorkspace();
 }
 
 async function submitPaperTradeFromReview(ticker){
   const context = currentPaperTradeContextForTicker(ticker);
   if(!context) return;
-  if(paperTradeUiStateForTicker(context.ticker).state === 'submitting') return;
+  const currentUiState = paperTradeUiStateForTicker(context.ticker);
+  if(currentUiState.state === 'submitting') return;
   const mockMode = typeof window !== 'undefined' && window.DEBUG_PAPER_TRADE === true;
+  const frozenSnapshot = currentUiState.snapshot && typeof currentUiState.snapshot === 'object'
+    ? currentUiState.snapshot
+    : buildPaperTradeConfirmedSnapshot(context);
   if(!context.eligibility.eligible){
     const reason = context.eligibility.reasons[0] || 'Setup is not eligible for paper trading.';
-    setPaperTradeUiState(context.ticker, {state:'submit_error', previewOpen:false, message:reason});
+    setPaperTradeUiState(context.ticker, {state:'submit_error', previewOpen:false, snapshot:null, message:reason});
+    renderReviewWorkspace();
+    return;
+  }
+  if(!frozenSnapshot){
+    setPaperTradeUiState(context.ticker, {
+      state:'submit_error',
+      previewOpen:false,
+      snapshot:null,
+      message:'Unable to build paper-trade preview for this setup.'
+    });
+    renderReviewWorkspace();
+    return;
+  }
+  const duplicateRecent = isDuplicatePaperTradeSubmission({
+    ticker:context.ticker,
+    snapshot:frozenSnapshot,
+    existingDiaryEntries:diaryService.listTrades(),
+    recentWindowMs:5 * 60 * 1000
+  });
+  if(duplicateRecent){
+    setPaperTradeUiState(context.ticker, {
+      state:'submit_error',
+      previewOpen:true,
+      snapshot:frozenSnapshot,
+      message:'Paper trade already submitted recently for this setup. Create a new setup or change the trade plan before submitting again.'
+    });
     renderReviewWorkspace();
     return;
   }
@@ -14983,21 +15097,22 @@ async function submitPaperTradeFromReview(ticker){
     setPaperTradeUiState(context.ticker, {
       state:'submit_error',
       previewOpen:false,
+      snapshot:null,
       message:'Debug paper-trade test mode requires DEBUG_PAPER_TRADE mock mode.'
     });
     renderReviewWorkspace();
     return;
   }
-  setPaperTradeUiState(context.ticker, {state:'submitting', previewOpen:true, message:'Submitting paper trade...'});
+  setPaperTradeUiState(context.ticker, {state:'submitting', previewOpen:true, snapshot:frozenSnapshot, message:'Submitting paper trade...'});
   renderReviewWorkspace();
   const request = {
-    ticker:context.ticker,
-    symbol:context.ticker,
-    side:'BUY',
-    quantity:Math.max(1, Math.floor(Number(context.eligibility.preview.positionSize || 0))),
-    limitPrice:Number(context.eligibility.preview.entry),
-    stopLoss:Number(context.eligibility.preview.stop),
-    takeProfit:Number(context.eligibility.preview.target),
+    ticker:frozenSnapshot.ticker,
+    symbol:frozenSnapshot.ticker,
+    side:frozenSnapshot.side || 'BUY',
+    quantity:Math.max(1, Math.floor(Number(frozenSnapshot.size || 0))),
+    limitPrice:Number(frozenSnapshot.entry),
+    stopLoss:Number(frozenSnapshot.stop),
+    takeProfit:Number(frozenSnapshot.target),
     clientOrderId:`pbp-${context.ticker}-${Date.now()}`,
     note:`Pullback Playbook paper trade | ${context.finalVerdict}`
   };
@@ -15009,6 +15124,7 @@ async function submitPaperTradeFromReview(ticker){
     setPaperTradeUiState(context.ticker, {
       state:'submit_error',
       previewOpen:true,
+      snapshot:frozenSnapshot,
       message:result && result.message ? result.message : 'Paper trade submission failed.'
     });
     renderReviewWorkspace();
@@ -15016,7 +15132,7 @@ async function submitPaperTradeFromReview(ticker){
   }
   const entry = createDiaryEntryFromPaperTradePayload({
     ticker:context.ticker,
-    sourceContext:context.eligibility.debugForced === true ? 'debug_paper_trade' : 'trading212_paper_trade',
+    sourceContext:frozenSnapshot.sourceContext || 'trading212_paper_trade',
     sourceRef:String(result.orderId || result.clientOrderId || ''),
     date:todayIsoDate(),
     reviewedAt:todayIsoDate(),
@@ -15027,25 +15143,25 @@ async function submitPaperTradeFromReview(ticker){
     setupState:context.resolvedContract && context.resolvedContract.primaryState ? String(context.resolvedContract.primaryState) : '',
     structureState:context.derivedStates && context.derivedStates.structureState ? String(context.derivedStates.structureState) : '',
     bounceState:context.derivedStates && context.derivedStates.bounceState ? String(context.derivedStates.bounceState) : '',
-    marketStatus:String(context.record.meta.marketStatus || state.marketStatus || ''),
+    marketStatus:String(frozenSnapshot.marketStatus || context.record.meta.marketStatus || state.marketStatus || ''),
     scanType:String(context.record.scan.scanType || ''),
-    plannedEntry:Number.isFinite(context.displayedPlan.entry) ? String(context.displayedPlan.entry) : '',
-    plannedStop:Number.isFinite(context.displayedPlan.stop) ? String(context.displayedPlan.stop) : '',
-    plannedFirstTarget:Number.isFinite(context.displayedPlan.target) ? String(context.displayedPlan.target) : '',
+    plannedEntry:Number.isFinite(Number(frozenSnapshot.entry)) ? String(frozenSnapshot.entry) : '',
+    plannedStop:Number.isFinite(Number(frozenSnapshot.stop)) ? String(frozenSnapshot.stop) : '',
+    plannedFirstTarget:Number.isFinite(Number(frozenSnapshot.target)) ? String(frozenSnapshot.target) : '',
     plannedRiskPerShare:Number.isFinite(context.displayedPlan.rewardRisk && context.displayedPlan.rewardRisk.riskPerShare)
       ? String(context.displayedPlan.rewardRisk.riskPerShare)
       : '',
     plannedRewardPerShare:Number.isFinite(context.displayedPlan.rewardRisk && context.displayedPlan.rewardRisk.rewardPerShare)
       ? String(context.displayedPlan.rewardRisk.rewardPerShare)
       : '',
-    plannedRR:Number.isFinite(context.displayedPlan.rewardRisk && context.displayedPlan.rewardRisk.rrRatio)
-      ? String(context.displayedPlan.rewardRisk.rrRatio)
+    plannedRR:Number.isFinite(Number(frozenSnapshot.rr))
+      ? String(frozenSnapshot.rr)
       : '',
-    plannedPositionSize:Number.isFinite(context.displayedPlan.riskFit && context.displayedPlan.riskFit.position_size)
-      ? String(Math.max(1, Math.floor(context.displayedPlan.riskFit.position_size)))
+    plannedPositionSize:Number.isFinite(Number(frozenSnapshot.size))
+      ? String(Math.max(1, Math.floor(Number(frozenSnapshot.size))))
       : '',
-    plannedMaxLoss:Number.isFinite(context.displayedPlan.riskFit && context.displayedPlan.riskFit.max_loss)
-      ? String(context.displayedPlan.riskFit.max_loss)
+    plannedMaxLoss:Number.isFinite(Number(frozenSnapshot.maxLoss))
+      ? String(frozenSnapshot.maxLoss)
       : '',
     notes:`Paper trade submitted via Trading 212 (${result.status || 'submitted'}).`,
     executionMeta:{
@@ -15063,6 +15179,7 @@ async function submitPaperTradeFromReview(ticker){
   setPaperTradeUiState(context.ticker, {
     state:'submit_success',
     previewOpen:false,
+    snapshot:null,
     message:`Paper trade submitted${result.orderId ? ` (Order ${result.orderId})` : '.'}`,
     lastResult:result
   });
@@ -15299,8 +15416,9 @@ function renderReviewWorkspace(options = {}){
   const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true;
   const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
   if(!paperTradeEligible && paperTradeUi.previewOpen === true){
-    setPaperTradeUiState(record.ticker, {previewOpen:false});
+    setPaperTradeUiState(record.ticker, {previewOpen:false, snapshot:null});
     paperTradeUi.previewOpen = false;
+    paperTradeUi.snapshot = null;
   }
   const paperTradeSubmitting = paperTradeUi.state === 'submitting';
   const paperTradeButtonDisabled = !paperTradeEligible || paperTradeSubmitting;
@@ -15358,14 +15476,24 @@ function renderReviewWorkspace(options = {}){
     controlQuality:qualityAdjustments.controlQuality,
     capitalEfficiency:qualityAdjustments.capitalEfficiency
   });
+  const activePaperTradeSnapshot = (paperTradePreviewVisible && paperTradeUi.snapshot && typeof paperTradeUi.snapshot === 'object')
+    ? paperTradeUi.snapshot
+    : null;
   const paperTradePreviewModel = paperTradeEligible
-    ? buildPaperTradePreviewModel({
-      ticker:record.ticker,
-      eligibility:mergedPaperTradeEligibilityState
-    }, {
-      capitalLabel:capitalComfort.label || 'Unknown',
-      marketStatus:record.meta.marketStatus || state.marketStatus || ''
-    })
+    ? (
+      activePaperTradeSnapshot
+        ? paperTradePreviewModelFromSnapshot(activePaperTradeSnapshot, {
+          capitalLabel:capitalComfort.label || 'Unknown',
+          marketStatus:record.meta.marketStatus || state.marketStatus || ''
+        })
+        : buildPaperTradePreviewModel({
+          ticker:record.ticker,
+          eligibility:mergedPaperTradeEligibilityState
+        }, {
+          capitalLabel:capitalComfort.label || 'Unknown',
+          marketStatus:record.meta.marketStatus || state.marketStatus || ''
+        })
+    )
     : null;
   const paperTradeDebugLabel = paperTradeDebugForced
     ? `<div class="tiny warntext" id="paperTradeDebugModeLabel">Debug paper-trade test mode enabled. Simulated Entry-ready preview.</div>`
