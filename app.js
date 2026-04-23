@@ -14844,6 +14844,10 @@ function currentPaperTradeContextForTicker(ticker){
     primaryState:resolvedContract.primaryState,
     hardBlocker:resolvedContract.blockerReason
   });
+  const mergedEligibility = applyPaperTradeEligibilityDebugOverride(eligibility, {
+    ticker:symbol,
+    marketStatus:record.meta.marketStatus || state.marketStatus || ''
+  });
   return {
     ticker:symbol,
     record,
@@ -14852,7 +14856,43 @@ function currentPaperTradeContextForTicker(ticker){
     derivedStates,
     setupScore:setupScoreForRecord(record),
     resolvedContract,
-    eligibility
+    eligibility:mergedEligibility
+  };
+}
+
+function isPaperTradeDebugForceEnabled(){
+  return typeof window !== 'undefined'
+    && window.DEBUG_FORCE_PAPER_TRADE_ELIGIBLE === true
+    && window.DEBUG_PAPER_TRADE === true;
+}
+
+function buildDebugPaperTradePreviewModel(context = {}){
+  const fallbackEntry = 100;
+  const fallbackStop = 96;
+  const fallbackTarget = 108;
+  return {
+    entry:fallbackEntry,
+    stop:fallbackStop,
+    target:fallbackTarget,
+    positionSize:10,
+    maxLoss:40,
+    rrRatio:2,
+    marketStatus:String(context.marketStatus || 'debug')
+  };
+}
+
+function applyPaperTradeEligibilityDebugOverride(eligibility = {}, context = {}){
+  const base = eligibility && typeof eligibility === 'object'
+    ? eligibility
+    : {eligible:false, reasons:[], preview:null};
+  if(!isPaperTradeDebugForceEnabled()) return base;
+  if(base.eligible) return {...base, debugForced:false};
+  return {
+    ...base,
+    eligible:true,
+    debugForced:true,
+    reasons:['Debug paper-trade test mode enabled. Simulated Entry-ready preview.'],
+    preview:buildDebugPaperTradePreviewModel(context)
   };
 }
 
@@ -14873,6 +14913,7 @@ function buildPaperTradePreviewModel(context = {}, options = {}){
     target:preview.target,
     maxLoss:Number.isFinite(preview.maxLoss) ? preview.maxLoss : null,
     rrRatio:Number.isFinite(preview.rrRatio) ? preview.rrRatio : null,
+    debugForced:eligibility && eligibility.debugForced === true,
     capitalLabel:String(options.capitalLabel || 'Unknown'),
     marketStatus:String(options.marketStatus || '')
   };
@@ -14909,9 +14950,19 @@ async function submitPaperTradeFromReview(ticker){
   const context = currentPaperTradeContextForTicker(ticker);
   if(!context) return;
   if(paperTradeUiStateForTicker(context.ticker).state === 'submitting') return;
+  const mockMode = typeof window !== 'undefined' && window.DEBUG_PAPER_TRADE === true;
   if(!context.eligibility.eligible){
     const reason = context.eligibility.reasons[0] || 'Setup is not eligible for paper trading.';
     setPaperTradeUiState(context.ticker, {state:'submit_error', previewOpen:false, message:reason});
+    renderReviewWorkspace();
+    return;
+  }
+  if(context.eligibility.debugForced === true && !mockMode){
+    setPaperTradeUiState(context.ticker, {
+      state:'submit_error',
+      previewOpen:false,
+      message:'Debug paper-trade test mode requires DEBUG_PAPER_TRADE mock mode.'
+    });
     renderReviewWorkspace();
     return;
   }
@@ -14930,7 +14981,7 @@ async function submitPaperTradeFromReview(ticker){
   };
   const result = await trading212Service.submitPaperTrade(request, {
     endpoint:defaultPaperTradeEndpoint,
-    mock:typeof window !== 'undefined' && window.DEBUG_PAPER_TRADE === true
+    mock:mockMode
   });
   if(!result || result.ok !== true){
     setPaperTradeUiState(context.ticker, {
@@ -14943,7 +14994,7 @@ async function submitPaperTradeFromReview(ticker){
   }
   const entry = createDiaryEntryFromPaperTradePayload({
     ticker:context.ticker,
-    sourceContext:'trading212_paper_trade',
+    sourceContext:context.eligibility.debugForced === true ? 'debug_paper_trade' : 'trading212_paper_trade',
     sourceRef:String(result.orderId || result.clientOrderId || ''),
     date:todayIsoDate(),
     reviewedAt:todayIsoDate(),
@@ -15218,8 +15269,13 @@ function renderReviewWorkspace(options = {}){
     primaryState:resolvedContract.primaryState,
     hardBlocker:resolvedContract.blockerReason
   });
+  const mergedPaperTradeEligibilityState = applyPaperTradeEligibilityDebugOverride(paperTradeEligibilityState, {
+    ticker:record.ticker,
+    marketStatus:record.meta.marketStatus || state.marketStatus || ''
+  });
   const paperTradeUi = paperTradeUiStateForTicker(record.ticker);
-  const paperTradeEligible = paperTradeEligibilityState.eligible === true;
+  const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true;
+  const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
   if(!paperTradeEligible && paperTradeUi.previewOpen === true){
     setPaperTradeUiState(record.ticker, {previewOpen:false});
     paperTradeUi.previewOpen = false;
@@ -15228,7 +15284,7 @@ function renderReviewWorkspace(options = {}){
   const paperTradeButtonDisabled = !paperTradeEligible || paperTradeSubmitting;
   const paperTradeButtonLabel = paperTradeSubmitting ? 'Submitting...' : 'Paper Trade';
   const paperTradePanelOpen = paperTradeEligible && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
-  const paperTradePrimaryReason = paperTradeEligibilityState.reasons[0] || '';
+  const paperTradePrimaryReason = mergedPaperTradeEligibilityState.reasons[0] || '';
   const paperTradeDisabledReason = !paperTradeEligible
     ? (
       String(reviewFinalVerdictForPaperTrade || '').trim().toLowerCase() !== 'entry'
@@ -15282,14 +15338,17 @@ function renderReviewWorkspace(options = {}){
   const paperTradePreviewModel = paperTradeEligible
     ? buildPaperTradePreviewModel({
       ticker:record.ticker,
-      eligibility:paperTradeEligibilityState
+      eligibility:mergedPaperTradeEligibilityState
     }, {
       capitalLabel:capitalComfort.label || 'Unknown',
       marketStatus:record.meta.marketStatus || state.marketStatus || ''
     })
     : null;
+  const paperTradeDebugLabel = paperTradeDebugForced
+    ? `<div class="tiny warntext" id="paperTradeDebugModeLabel">Debug paper-trade test mode enabled. Simulated Entry-ready preview.</div>`
+    : '';
   const paperTradePreviewMarkup = paperTradePreviewModel
-    ? `<div class="tiny">Ticker ${escapeHtml(paperTradePreviewModel.ticker)} | Side ${escapeHtml(paperTradePreviewModel.side)} | Qty ${escapeHtml(String(paperTradePreviewModel.quantity))}</div><div class="tiny">Entry ${escapeHtml(fmtPrice(paperTradePreviewModel.entry))} | Stop ${escapeHtml(fmtPrice(paperTradePreviewModel.stop))} | Target ${escapeHtml(fmtPrice(paperTradePreviewModel.target))}</div><div class="tiny">Max loss ${escapeHtml(Number.isFinite(paperTradePreviewModel.maxLoss) ? formatGbp(paperTradePreviewModel.maxLoss) : 'n/a')} | RR ${escapeHtml(Number.isFinite(paperTradePreviewModel.rrRatio) ? `${paperTradePreviewModel.rrRatio.toFixed(2)}R` : 'n/a')}</div><div class="tiny">Capital ${escapeHtml(paperTradePreviewModel.capitalLabel)} | Market ${escapeHtml(paperTradePreviewModel.marketStatus || '')}</div>`
+    ? `${paperTradePreviewModel.debugForced ? '<div class="tiny warntext">Simulated Entry-ready preview (debug).</div>' : ''}<div class="tiny">Ticker ${escapeHtml(paperTradePreviewModel.ticker)} | Side ${escapeHtml(paperTradePreviewModel.side)} | Qty ${escapeHtml(String(paperTradePreviewModel.quantity))}</div><div class="tiny">Entry ${escapeHtml(fmtPrice(paperTradePreviewModel.entry))} | Stop ${escapeHtml(fmtPrice(paperTradePreviewModel.stop))} | Target ${escapeHtml(fmtPrice(paperTradePreviewModel.target))}</div><div class="tiny">Max loss ${escapeHtml(Number.isFinite(paperTradePreviewModel.maxLoss) ? formatGbp(paperTradePreviewModel.maxLoss) : 'n/a')} | RR ${escapeHtml(Number.isFinite(paperTradePreviewModel.rrRatio) ? `${paperTradePreviewModel.rrRatio.toFixed(2)}R` : 'n/a')}</div><div class="tiny">Capital ${escapeHtml(paperTradePreviewModel.capitalLabel)} | Market ${escapeHtml(paperTradePreviewModel.marketStatus || '')}</div>`
     : `<div class="tiny warntext">${escapeHtml(paperTradePrimaryReason || 'Unable to build paper-trade preview for this setup.')}</div>`;
   const decisionSummary = visualState.decision_summary;
   const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
@@ -15584,6 +15643,7 @@ function renderReviewWorkspace(options = {}){
         <button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button>
       </div>
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
+      ${paperTradeDebugLabel}
       <div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>
       ${paperTradeEligible ? `<details class="compact-details" id="paperTradePreview" ${paperTradePanelOpen ? 'open' : ''}>
         <summary>Paper Trade Preview</summary>
