@@ -360,6 +360,20 @@ if(typeof window !== 'undefined'){
   window.DEBUG_AUDIT = window.DEBUG_AUDIT === true;
   window.DEBUG_STORAGE = window.DEBUG_STORAGE === true;
   window.DEBUG_PAPER_TRADE = window.DEBUG_PAPER_TRADE === true;
+  window.DEBUG_FORCE_PAPER_TRADE_ELIGIBLE = window.DEBUG_FORCE_PAPER_TRADE_ELIGIBLE === true;
+  window.setPaperTradeDebugTestMode = function setPaperTradeDebugTestMode(enabled){
+    const active = enabled === true;
+    window.DEBUG_PAPER_TRADE = active;
+    window.DEBUG_FORCE_PAPER_TRADE_ELIGIBLE = active;
+    try{
+      if(typeof setActiveWorkspaceTab === 'function') setActiveWorkspaceTab('review', {focusWorkspace:false});
+      if(typeof renderReviewWorkspace === 'function') renderReviewWorkspace();
+    }catch(error){}
+    return {
+      DEBUG_PAPER_TRADE:window.DEBUG_PAPER_TRADE === true,
+      DEBUG_FORCE_PAPER_TRADE_ELIGIBLE:window.DEBUG_FORCE_PAPER_TRADE_ELIGIBLE === true
+    };
+  };
 }
 const appShell = createAppShell({uiState});
 const workspaceAnchorTabMap = {
