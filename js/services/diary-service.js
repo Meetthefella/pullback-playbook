@@ -84,12 +84,42 @@
       return true;
     }
 
+    function cancelPaperTradeRecordById(recordId){
+      const {normalizeTradeRecord} = schemaBindings();
+      const found = listTradeRecords().find(item => item.trade.id === recordId);
+      if(!found) return null;
+      const tradeRecord = normalizeTradeRecord(found.trade);
+      if(String(tradeRecord.sourceType || '').trim().toLowerCase() !== 'paper_trade') return null;
+      const currentStatus = String(
+        tradeRecord.status
+        || (tradeRecord.executionMeta && tradeRecord.executionMeta.status)
+        || ''
+      ).trim().toLowerCase();
+      if(currentStatus !== 'submitted') return normalizeTradeRecord(tradeRecord);
+      tradeRecord.status = 'cancelled';
+      tradeRecord.outcome = 'Cancelled';
+      tradeRecord.closedAt = todayIsoDate();
+      tradeRecord.reviewedAt = todayIsoDate();
+      tradeRecord.updatedAt = new Date().toISOString();
+      tradeRecord.executionMeta = {
+        ...(tradeRecord.executionMeta && typeof tradeRecord.executionMeta === 'object' ? tradeRecord.executionMeta : {}),
+        status:'cancelled',
+        cancelledAt:new Date().toISOString()
+      };
+      const currentRecord = upsertTickerRecord(found.record.ticker);
+      currentRecord.diary.records = currentRecord.diary.records.filter(item => item.id !== recordId);
+      mergeDiaryRecordIntoRecord(currentRecord, tradeRecord);
+      commitTickerState();
+      return normalizeTradeRecord(tradeRecord);
+    }
+
     return {
       listTradeRecords,
       listTrades,
       saveTradeRecordForTicker,
       updateTradeField,
-      deleteTradeRecordById
+      deleteTradeRecordById,
+      cancelPaperTradeRecordById
     };
   }
 

@@ -15133,6 +15133,7 @@ async function submitPaperTradeFromReview(ticker){
   const entry = createDiaryEntryFromPaperTradePayload({
     ticker:context.ticker,
     sourceContext:frozenSnapshot.sourceContext || 'trading212_paper_trade',
+    status:'submitted',
     sourceRef:String(result.orderId || result.clientOrderId || ''),
     date:todayIsoDate(),
     reviewedAt:todayIsoDate(),
