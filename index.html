@@ -32,7 +32,7 @@
         <div class="contexttitle-row">
           <h1>Pullback Playbook v4.4.8</h1>
           <button class="context-settings-toggle" type="button" id="contextSettingsToggle" aria-label="Open context settings" aria-expanded="false" aria-controls="headerControlSurface">
-            <span></span><span></span><span></span>
+            <span class="context-settings-dot"></span><span class="context-settings-dot"></span><span class="context-settings-dot"></span>
           </button>
         </div>
         <p>Scan, shortlist, review, decide, then track.</p>
@@ -54,11 +54,42 @@
           </div>
         </div>
       </div>
+      <div class="context-utility-row" id="contextUtilityRow">
+        <div class="market-session-widget" id="marketSessionWidget">
+          <div class="market-session-widget__top">
+            <span class="market-session-badge" id="marketSessionBadge" data-session-state="closed">Market Closed</span>
+            <strong id="marketSessionHours">14:30 UK - 21:00 UK</strong>
+          </div>
+          <div class="tiny" id="marketSessionDetail">Opens 14:30 UK</div>
+        </div>
+        <div class="risk-quick-anchor" id="riskQuickAnchor">
+          <button class="risk-quick-pill" id="riskQuickToggle" type="button" aria-expanded="false" aria-controls="riskQuickPanel">Risk £--</button>
+          <div class="risk-quick-panel" id="riskQuickPanel" hidden>
+            <div class="risk-quick-panel__row">
+              <strong>Risk per trade</strong>
+              <span id="riskQuickValue">£--</span>
+            </div>
+            <input id="riskQuickSlider" type="range" min="10" max="100" step="1" value="40" />
+            <div class="risk-quick-presets" id="riskQuickPresets">
+              <button type="button" data-risk-preset="10">£10</button>
+              <button type="button" data-risk-preset="20">£20</button>
+              <button type="button" data-risk-preset="30">£30</button>
+              <button type="button" data-risk-preset="40">£40</button>
+              <button type="button" data-risk-preset="50">£50</button>
+              <button type="button" data-risk-preset="60">£60</button>
+              <button type="button" data-risk-preset="70">£70</button>
+              <button type="button" data-risk-preset="80">£80</button>
+              <button type="button" data-risk-preset="90">£90</button>
+              <button type="button" data-risk-preset="100">£100</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="header-control-surface context-edit-panel" id="headerControlSurface" hidden>
         <div class="context-edit-head">
           <div class="context-edit-head__row">
             <strong>Context Settings</strong>
-            <button class="context-settings-close" type="button" id="contextSettingsCloseBtn" aria-label="Close context settings">✕</button>
+            <button class="context-settings-close" type="button" id="contextSettingsCloseBtn" aria-label="Close context settings">&times;</button>
           </div>
           <span class="tiny">Adjust market, account/risk, scanner mode, and setup defaults.</span>
         </div>
@@ -82,28 +113,6 @@
           <span class="focus-rail-label">Setup</span>
           <strong class="focus-rail-value" id="setupTypeStrip">Setup not set</strong>
         </button>
-      </div>
-      <div class="risk-quick-anchor" id="riskQuickAnchor">
-        <button class="risk-quick-pill" id="riskQuickToggle" type="button" aria-expanded="false" aria-controls="riskQuickPanel">Risk £--</button>
-        <div class="risk-quick-panel" id="riskQuickPanel" hidden>
-          <div class="risk-quick-panel__row">
-            <strong>Risk per trade</strong>
-            <span id="riskQuickValue">£--</span>
-          </div>
-          <input id="riskQuickSlider" type="range" min="10" max="100" step="1" value="40" />
-          <div class="risk-quick-presets" id="riskQuickPresets">
-            <button type="button" data-risk-preset="10">£10</button>
-            <button type="button" data-risk-preset="20">£20</button>
-            <button type="button" data-risk-preset="30">£30</button>
-            <button type="button" data-risk-preset="40">£40</button>
-            <button type="button" data-risk-preset="50">£50</button>
-            <button type="button" data-risk-preset="60">£60</button>
-            <button type="button" data-risk-preset="70">£70</button>
-            <button type="button" data-risk-preset="80">£80</button>
-            <button type="button" data-risk-preset="90">£90</button>
-            <button type="button" data-risk-preset="100">£100</button>
-          </div>
-        </div>
       </div>
       <div class="control-focus-tray" id="controlStripSelector">
         <div class="control-focus-tray__label" id="controlStripSelectorLabel">Market</div>
@@ -135,10 +144,6 @@
           </div>
         </div>
       </div>
-      </div>
-      <div class="context-panel-section">
-        <div class="context-panel-section__title">Mode &amp; Setup</div>
-        <div class="tiny">Use the Mode and Setup controls in the Market section above to adjust scanner defaults.</div>
       </div>
       </div>
       <select id="marketStatus" hidden>
