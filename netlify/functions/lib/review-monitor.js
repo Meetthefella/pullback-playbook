@@ -35,9 +35,20 @@ function convertQuoteValueToGbp(value, quoteCurrency){
   return {gbpValue:null, conversion:'unsupported'};
 }
 
+function normalizeRiskPercent(value, fallback = 1){
+  const numeric = numericOrNull(value);
+  if(!Number.isFinite(numeric) || numeric <= 0) return fallback;
+  return numeric;
+}
+
+function riskPercentToFraction(value){
+  const normalized = normalizeRiskPercent(value, 0);
+  return normalized > 0 ? normalized / 100 : 0;
+}
+
 function currentRiskSettings(settings = {}){
   const accountSize = numericOrNull(settings.accountSize) || 4000;
-  const riskPercent = numericOrNull(settings.riskPercent) || 0.01;
+  const riskPercent = normalizeRiskPercent(settings.riskPercent, 1);
   const override = numericOrNull(settings.maxLossOverride);
   return {
     account_size:accountSize,
@@ -51,9 +62,11 @@ function evaluateRiskFit({entry, stop, account_size, risk_percent, max_loss_over
   const numericEntry = numericOrNull(entry);
   const numericStop = numericOrNull(stop);
   const accountSize = numericOrNull(account_size) || 0;
-  const riskPercent = numericOrNull(risk_percent) || 0;
+  const riskPercent = normalizeRiskPercent(risk_percent, 0);
   const override = numericOrNull(max_loss_override);
-  const max_loss = Number.isFinite(override) && override > 0 ? override : (accountSize > 0 && riskPercent > 0 ? accountSize * riskPercent : 0);
+  const max_loss = Number.isFinite(override) && override > 0
+    ? override
+    : (accountSize > 0 && riskPercent > 0 ? accountSize * riskPercentToFraction(riskPercent) : 0);
   if(!Number.isFinite(numericEntry) || !Number.isFinite(numericStop)) return {max_loss, risk_per_share:null, position_size:0, risk_status:'plan_missing'};
   const risk_per_share = numericEntry - numericStop;
   if(!Number.isFinite(risk_per_share) || risk_per_share <= 0) return {max_loss, risk_per_share, position_size:0, risk_status:'invalid_plan'};

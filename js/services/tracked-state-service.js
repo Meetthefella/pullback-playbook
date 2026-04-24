@@ -47,6 +47,12 @@
       return deps.defaultTrackedStateEndpoint;
     }
 
+    function normalizedRiskPercentForPersist(value){
+      const numeric = deps.numericOrNull(value);
+      if(!Number.isFinite(numeric) || numeric <= 0) return 1;
+      return numeric;
+    }
+
     function shouldSyncTickerRecordToBackend(record){
       const item = deps.normalizeTickerRecord(record || {});
       return !!(
@@ -72,7 +78,7 @@
       return {
         settings:{
           accountSize:deps.currentAccountSizeGbp(),
-          riskPercent:deps.numericOrNull(deps.state.riskPercent) || 0.01,
+          riskPercent:normalizedRiskPercentForPersist(deps.state.riskPercent),
           maxLossOverride:deps.numericOrNull(deps.state.maxLossOverride),
           wholeSharesOnly:deps.state.wholeSharesOnly !== false,
           marketStatus:String(deps.state.marketStatus || ''),

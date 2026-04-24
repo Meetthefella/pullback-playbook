@@ -269,7 +269,7 @@ const DEFAULT_STATE = {
   accountSize:4000,
   maxRisk:40,
   userRiskPerTrade:40,
-  riskPercent:0.01,
+  riskPercent:1,
   maxLossOverride:'',
   wholeSharesOnly:true,
   marketStatus:'S&P above 50 MA',
@@ -555,6 +555,24 @@ function formatPound(value){
   return `£${amount.toLocaleString(undefined, {maximumFractionDigits:2})}`;
 }
 
+function normalizeRiskPercentInput(value, fallback = 1){
+  const numeric = numericOrNull(value);
+  if(!Number.isFinite(numeric) || numeric <= 0) return fallback;
+  return numeric;
+}
+
+function riskPercentToFraction(value){
+  const normalized = normalizeRiskPercentInput(value, 0);
+  return normalized > 0 ? normalized / 100 : 0;
+}
+
+function calculateMaxLossFromRiskPercent(accountSize, riskPercent){
+  const account = numericOrNull(accountSize) || 0;
+  const fraction = riskPercentToFraction(riskPercent);
+  if(!(account > 0) || !(fraction > 0)) return 0;
+  return account * fraction;
+}
+
 function currentSetupType(){
   return normalizeScanType(state.setupType) || 'unknown';
 }
@@ -575,14 +593,14 @@ function setActiveReviewTicker(ticker){
 
 function currentMaxLoss(){
   const accountSize = numericOrNull(state.accountSize);
-  const riskPercent = numericOrNull(state.riskPercent);
+  const riskPercent = normalizeRiskPercentInput(state.riskPercent, 1);
   const override = numericOrNull(state.maxLossOverride);
   const persisted = numericOrNull(state.userRiskPerTrade);
   let resolvedRisk = 0;
   if(Number.isFinite(override) && override > 0){
     resolvedRisk = override;
   }else if(Number.isFinite(accountSize) && Number.isFinite(riskPercent) && accountSize > 0 && riskPercent > 0){
-    resolvedRisk = accountSize * riskPercent;
+    resolvedRisk = calculateMaxLossFromRiskPercent(accountSize, riskPercent);
   }else if(Number.isFinite(persisted) && persisted > 0){
     resolvedRisk = persisted;
   }else{
@@ -599,7 +617,7 @@ function riskSettingsValid(){
 function currentRiskSettings(){
   return {
     account_size:numericOrNull(state.accountSize) || 0,
-    risk_percent:numericOrNull(state.riskPercent) || 0,
+    risk_percent:normalizeRiskPercentInput(state.riskPercent, 1),
     max_loss_override:numericOrNull(state.userRiskPerTrade || currentMaxLoss()),
     whole_shares_only:state.wholeSharesOnly !== false
   };
@@ -2413,7 +2431,7 @@ function syncCardDraftsFromDom(){
 function syncStateFromDom(){
   syncCardDraftsFromDom();
   state.accountSize = Number($('accountSize').value || 0);
-  state.riskPercent = Number($('riskPercent').value || 0);
+  state.riskPercent = normalizeRiskPercentInput($('riskPercent').value, 1);
   state.maxLossOverride = $('maxLossOverride') ? $('maxLossOverride').value.trim() : '';
   state.wholeSharesOnly = $('wholeSharesOnly') ? !!$('wholeSharesOnly').checked : true;
   state.userRiskPerTrade = currentMaxLoss();
@@ -2475,8 +2493,10 @@ function loadState(){
   state.dataProvider = normalizeDataProvider(state.dataProvider);
   state.apiPlan = String(state.apiPlan || DEFAULT_API_PLAN);
   state.riskPercent = Number.isFinite(Number(state.riskPercent)) && Number(state.riskPercent) > 0
-    ? Number(state.riskPercent)
-    : ((Number(state.accountSize) > 0 && Number(state.maxRisk) > 0) ? Number(state.maxRisk) / Number(state.accountSize) : 0.01);
+    ? normalizeRiskPercentInput(state.riskPercent, 1)
+    : ((Number(state.accountSize) > 0 && Number(state.maxRisk) > 0)
+      ? Number((((Number(state.maxRisk) / Number(state.accountSize)) * 100)).toFixed(4))
+      : 1);
   state.maxLossOverride = state.maxLossOverride == null ? '' : String(state.maxLossOverride);
   state.userRiskPerTrade = Number.isFinite(Number(state.userRiskPerTrade)) && Number(state.userRiskPerTrade) > 0
     ? Number(state.userRiskPerTrade)
@@ -2811,7 +2831,7 @@ function applyUserRiskPerTrade(value, options = {}){
   state.maxRisk = nextRisk;
   state.maxLossOverride = String(nextRisk);
   if(Number.isFinite(Number(state.accountSize)) && Number(state.accountSize) > 0){
-    state.riskPercent = nextRisk / Number(state.accountSize);
+    state.riskPercent = Number((((nextRisk / Number(state.accountSize)) * 100)).toFixed(4));
   }
   if($('maxLossOverride')) $('maxLossOverride').value = String(nextRisk);
   if($('riskPercent')) $('riskPercent').value = String(state.riskPercent || '');
