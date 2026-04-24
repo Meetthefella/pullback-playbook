@@ -38,6 +38,8 @@ const startupCoordinator = {
   backgroundMonitoringStarted:false,
   renderedTabs:{},
   trackHydratedRendered:false,
+  trackNeedsHydratedRender:false,
+  trackDeferredRenderSkipped:false,
   diaryAnalyticsRendered:false,
   startupRiskRefreshRunning:false,
   startupWatchlistRefreshDeferred:false,
@@ -3221,10 +3223,32 @@ function renderWorkspaceSurface(tab, options = {}){
     return;
   }
   if(targetTab === 'track'){
+    const safeReason = String(options.reason || 'workspace_surface');
+    const activeTab = activeWorkspaceTab();
+    const hiddenStartupTrackAttempt = activeTab !== 'track'
+      && options.userOpened !== true
+      && (
+        options.hydrated === true
+        || /startup|deferred|hydration/i.test(safeReason)
+      );
+    if(hiddenStartupTrackAttempt){
+      startupCoordinator.renderedTabs.track = false;
+      startupCoordinator.trackHydratedRendered = false;
+      startupCoordinator.trackNeedsHydratedRender = true;
+      startupCoordinator.trackDeferredRenderSkipped = true;
+      if(PP_PERF_DEBUG){
+        console.debug('[PP_PERF] skipped_hidden_track_render', {
+          source:safeReason,
+          activeTab,
+          ...startupDebugRenderState()
+        });
+      }
+      return;
+    }
     const trackRenderKind = options.userOpened === true
       ? 'user_opened'
       : (options.hydrated === true ? 'hydrated' : 'deferred');
-    measureTrackRender(trackRenderKind, options.reason || 'workspace_surface', () => {
+    measureTrackRender(trackRenderKind, safeReason, () => {
       perfMark('pp_watchlist_render_start');
       renderWatchlist();
       renderFocusQueue();
@@ -3233,6 +3257,8 @@ function renderWorkspaceSurface(tab, options = {}){
     });
     startupCoordinator.renderedTabs.track = true;
     if(options.hydrated === true) startupCoordinator.trackHydratedRendered = true;
+    startupCoordinator.trackNeedsHydratedRender = false;
+    startupCoordinator.trackDeferredRenderSkipped = false;
     if(options.userOpened === true){
       maybeStartDeferredTrackStartupRefresh(options.reason || 'track_user_open');
     }
@@ -3291,6 +3317,7 @@ function applyTrackedStateHydrationMerge(){
   renderSavedScannerUniverseSnapshot();
   startupCoordinator.trackHydratedRendered = false;
   startupCoordinator.renderedTabs.track = false;
+  startupCoordinator.trackNeedsHydratedRender = true;
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] track_invalidated', {
       watchlistRecords:trackRenderRecordCount(),
@@ -3346,6 +3373,9 @@ function scheduleDeferredStartupHydration(){
   scheduleNamedDeferredStartupTask('track_deferred_prerender', async () => {
     if(activeWorkspaceTab() !== 'track'){
       const startupRefreshTickers = await collectStartupWatchlistRefreshTickersChunked();
+      startupCoordinator.renderedTabs.track = false;
+      startupCoordinator.trackNeedsHydratedRender = true;
+      startupCoordinator.trackDeferredRenderSkipped = true;
       deferStartupTrackRefresh(startupRefreshTickers, 'startup_track_hidden');
       return;
     }
