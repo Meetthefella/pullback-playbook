@@ -20,6 +20,9 @@ const DEFAULT_PROVIDER = 'fmp';
 const DEFAULT_API_PLAN = 'scanner';
 const WATCHLIST_REFRESH_BATCH_SIZE = 8;
 const WATCHLIST_RENDER_BATCH_SIZE = 6;
+const WATCHLIST_REFRESH_BATCH_SIZE_BACKGROUND = 12;
+const TRACK_FIRST_OPEN_REFRESH_COOLDOWN_MS = 3000;
+const WATCHLIST_STALE_AGE_MS = 10 * 60 * 1000;
 function readPersistentPerfDebugFlag(){
   if(typeof window === 'undefined') return false;
   try{
@@ -47,7 +50,10 @@ const startupCoordinator = {
   startupWatchlistRefreshDeferred:false,
   startupWatchlistRefreshRunning:false,
   startupWatchlistRefreshState:'idle',
-  startupWatchlistRefreshPromise:null
+  startupWatchlistRefreshPromise:null,
+  startupWatchlistRefreshTimer:null,
+  lastTrackUserOpenedAt:0,
+  nextAllowedStartupTrackRefreshAt:0
 };
 const deferredStartupQueue = [];
 let deferredStartupQueueRunning = false;
@@ -159,6 +165,36 @@ function scheduleAfterFirstTrackPaint(callback){
     return;
   }
   run();
+}
+
+function watchlistRecordsAreStale(maxAgeMs = WATCHLIST_STALE_AGE_MS){
+  const records = watchlistTickerRecordsFast();
+  if(!records.length) return false;
+  const now = Date.now();
+  for(let index = 0; index < records.length; index += 1){
+    const record = normalizeTickerRecord(records[index]);
+    const updatedAt = String(
+      (record.watchlist && record.watchlist.updatedAt)
+      || (record.marketData && record.marketData.asOf)
+      || (record.scan && record.scan.lastScannedAt)
+      || ''
+    );
+    const updatedMs = Date.parse(updatedAt);
+    if(!Number.isFinite(updatedMs)) return true;
+    if((now - updatedMs) > maxAgeMs) return true;
+  }
+  return false;
+}
+
+function shouldRunStartupUserOpenRefresh(){
+  const hydrationComplete = startupCoordinator.trackedStateHydrationResolved === true;
+  const riskRefreshComplete = startupCoordinator.startupRiskRefreshRunning !== true;
+  const stale = watchlistRecordsAreStale();
+  return !(
+    hydrationComplete
+    && riskRefreshComplete
+    && !stale
+  );
 }
 
 function yieldUiChunk(){
@@ -575,7 +611,65 @@ function runStartupWatchlistRefreshCoordinator(options = {}){
   const source = String(options.source || 'startup_refresh');
   const trigger = String(options.trigger || 'scheduled');
   const requireTrackVisible = options.requireTrackVisible !== false;
+  const bypassCooldown = options.bypassCooldown === true;
   const isTrackActive = activeWorkspaceTab() === 'track';
+  const now = Date.now();
+  if(
+    now < Number(startupCoordinator.nextAllowedStartupTrackRefreshAt || 0)
+    && !bypassCooldown
+    && (source === 'startup_refresh_full_user_open' || source === 'startup_refresh_full_scheduled')
+  ){
+    const waitMs = Math.max(0, Number(startupCoordinator.nextAllowedStartupTrackRefreshAt || 0) - now);
+    if(source === 'startup_refresh_full_scheduled'){
+      if(startupCoordinator.startupWatchlistRefreshTimer == null){
+        startupCoordinator.startupWatchlistRefreshTimer = setTimeout(() => {
+          startupCoordinator.startupWatchlistRefreshTimer = null;
+          runStartupWatchlistRefreshCoordinator({
+            source:'startup_refresh_full_scheduled',
+            trigger:`${trigger}_delayed`,
+            requireTrackVisible,
+            bypassCooldown:true
+          });
+        }, waitMs);
+      }
+      if(PP_PERF_DEBUG){
+        console.debug('[PP_PERF] startup_refresh_delayed_by_cooldown', {
+          source,
+          trigger,
+          waitMs,
+          activeTab:activeWorkspaceTab(),
+          ...startupDebugRenderState()
+        });
+      }
+      return Promise.resolve(null);
+    }
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] startup_refresh_debounce_track_open', {
+        source,
+        trigger,
+        waitMs,
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+    return Promise.resolve(null);
+  }
+  if(
+    (source === 'startup_refresh_full_user_open' || source === 'startup_refresh_full_scheduled')
+    && !shouldRunStartupUserOpenRefresh()
+  ){
+    setStartupWatchlistRefreshState('complete', source, {trigger, skipped:'fresh_hydrated'});
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] startup_refresh_skip_already_complete', {
+        source,
+        trigger,
+        reasonCode:'fresh_hydrated',
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+    return Promise.resolve(null);
+  }
   if(requireTrackVisible && !isTrackActive){
     return Promise.resolve({mode:'lightweight', skipped:true, reason:'track_hidden'});
   }
@@ -629,7 +723,10 @@ function runStartupWatchlistRefreshCoordinator(options = {}){
       render:true,
       renderProgress:true,
       clearReviewOverride:false,
-      mode:'full'
+      mode:'full',
+      refreshBatchSize:source === 'startup_refresh_full_user_open' ? WATCHLIST_REFRESH_BATCH_SIZE_BACKGROUND : WATCHLIST_REFRESH_BATCH_SIZE,
+      renderStrategy:source === 'startup_refresh_full_user_open' ? 'patch' : 'full',
+      bypassCooldown:options.bypassCooldown === true
     });
     completedFullRefresh = true;
     return summary;
@@ -646,6 +743,34 @@ function runStartupWatchlistRefreshCoordinator(options = {}){
 
 function maybeStartDeferredTrackStartupRefresh(reason = 'track_open'){
   if(!startupCoordinator.startupWatchlistRefreshDeferred) return;
+  const now = Date.now();
+  if(now < Number(startupCoordinator.nextAllowedStartupTrackRefreshAt || 0)){
+    const waitMs = Math.max(0, Number(startupCoordinator.nextAllowedStartupTrackRefreshAt || 0) - now);
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] startup_refresh_debounce_track_open', {
+        reason,
+        waitMs,
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+    setTimeout(() => maybeStartDeferredTrackStartupRefresh(`${reason}_debounced`), waitMs);
+    return;
+  }
+  if(!shouldRunStartupUserOpenRefresh()){
+    startupCoordinator.startupWatchlistRefreshDeferred = false;
+    setStartupWatchlistRefreshState('complete', 'startup_refresh_full_user_open', {trigger:reason, skipped:'fresh_hydrated'});
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] startup_refresh_skip_already_complete', {
+        source:'startup_refresh_full_user_open',
+        trigger:reason,
+        reasonCode:'fresh_hydrated',
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+    return;
+  }
   startupCoordinator.startupWatchlistRefreshDeferred = false;
   runStartupWatchlistRefreshCoordinator({
     source:'startup_refresh_full_user_open',
@@ -3335,6 +3460,10 @@ function renderWorkspaceSurface(tab, options = {}){
       ? 'user_opened'
       : (options.hydrated === true ? 'hydrated' : 'deferred');
     const firstUserOpen = options.userOpened === true && startupCoordinator.renderedTabs.track !== true;
+    if(options.userOpened === true){
+      startupCoordinator.lastTrackUserOpenedAt = Date.now();
+      startupCoordinator.nextAllowedStartupTrackRefreshAt = startupCoordinator.lastTrackUserOpenedAt + TRACK_FIRST_OPEN_REFRESH_COOLDOWN_MS;
+    }
     measureTrackRender(trackRenderKind, safeReason, () => {
       perfMark('pp_watchlist_render_start');
       if(firstUserOpen){
@@ -3345,10 +3474,11 @@ function renderWorkspaceSurface(tab, options = {}){
             lightweight:true
           })
         }).catch(() => {});
+        scheduleAfterFirstTrackPaint(() => renderFocusQueue());
       }else{
         renderWatchlist();
+        renderFocusQueue();
       }
-      renderFocusQueue();
       perfMark('pp_watchlist_render_end');
       perfMeasure('pp_watchlist_render', 'pp_watchlist_render_start', 'pp_watchlist_render_end');
     });
@@ -15121,6 +15251,7 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return {symbol:'', ok:false, skipped:true, reason:'invalid_ticker', record:null, snapshot:null, verdict:null};
   const record = upsertTickerRecord(symbol);
+  const beforeSignature = watchlistRecordRenderSignature(record);
   const source = String(options.source || 'manual_refresh');
   const suppressLiveStatus = options.suppressLiveStatus === true;
   if(!suppressLiveStatus){
@@ -15145,7 +15276,10 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
     });
     const refreshedVerdict = resolveGlobalVerdict(normalizedRecord);
     const refreshedSnapshot = syncWatchlistLifecycle(normalizedRecord) || watchlistLifecycleSnapshot(normalizedRecord);
-    markWatchlistDirty([symbol], `${source}_result`);
+    const afterSignature = watchlistRecordRenderSignature(normalizedRecord);
+    if(beforeSignature !== afterSignature){
+      markWatchlistDirty([symbol], `${source}_result`);
+    }
     appendWatchlistDebugEvent(normalizedRecord, {
       at:new Date().toISOString(),
       source:`${source}_result`,
@@ -15170,7 +15304,10 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       persist:false,
       render:false
     });
-    markWatchlistDirty([symbol], `${source}_error`);
+    const afterSignature = watchlistRecordRenderSignature(record);
+    if(beforeSignature !== afterSignature){
+      markWatchlistDirty([symbol], `${source}_error`);
+    }
     return {
       symbol,
       ok:false,
@@ -15199,6 +15336,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
   const mode = String(options.mode || 'full');
   const refreshBatchSize = Math.max(1, Number(options.refreshBatchSize) || WATCHLIST_REFRESH_BATCH_SIZE);
   const renderBatchSize = Math.max(1, Number(options.renderBatchSize) || WATCHLIST_RENDER_BATCH_SIZE);
+  const renderStrategy = String(options.renderStrategy || 'full');
   perfMark('pp_watchlist_refresh_start');
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] watchlist_refresh', {
@@ -15233,6 +15371,14 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     (options.tickers || watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker))
       .filter(Boolean)
   );
+  const beforePlacement = {};
+  const beforeSignatures = {};
+  tickers.forEach(ticker => {
+    const record = getTickerRecord(ticker);
+    if(!record) return;
+    beforeSignatures[ticker] = watchlistRecordRenderSignature(record);
+    beforePlacement[ticker] = watchlistPlacementSnapshot(record);
+  });
   if(!tickers.length) return finishWatchlistRefreshLog({source, attempted:0, refreshed:0, failed:0, results:[]});
   setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
   const markPending = options.markPending !== false && source === 'startup_restore';
@@ -15287,15 +15433,78 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
   }
   if(options.persist !== false) commitTickerState();
   if(options.render !== false){
+    const changedTickers = tickers.filter(ticker => {
+      const record = getTickerRecord(ticker);
+      if(!record) return false;
+      const afterSignature = watchlistRecordRenderSignature(record);
+      return beforeSignatures[ticker] !== afterSignature;
+    });
     const trackOnlyRefresh = source === 'startup_refresh_full_user_open';
     const renderStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
-    await renderWatchlistChunked({
-      source,
-      batchSize:renderBatchSize,
-      model:prepareWatchlistRenderModel(source, {
-        lightweight:trackOnlyRefresh
-      })
-    });
+    let patchedCards = 0;
+    let patchedFailed = 0;
+    const fallbackTickers = [];
+    if(renderStrategy === 'patch'){
+      if(activeWorkspaceTab() === 'track'){
+        changedTickers.forEach(ticker => {
+          const record = getTickerRecord(ticker);
+          if(!record){
+            patchedFailed += 1;
+            fallbackTickers.push(ticker);
+            return;
+          }
+          const afterPlacement = watchlistPlacementSnapshot(record);
+          const previousPlacement = beforePlacement[ticker];
+          const placementStable = !previousPlacement || (
+            previousPlacement.visible === afterPlacement.visible
+            && previousPlacement.bucket === afterPlacement.bucket
+            && previousPlacement.lifecycleRank === afterPlacement.lifecycleRank
+            && previousPlacement.priority === afterPlacement.priority
+          );
+          if(!placementStable){
+            patchedFailed += 1;
+            fallbackTickers.push(ticker);
+            return;
+          }
+          if(updateWatchlistCardForTicker(ticker)) patchedCards += 1;
+          else{
+            patchedFailed += 1;
+            fallbackTickers.push(ticker);
+          }
+        });
+      }else{
+        patchedFailed = changedTickers.length;
+        fallbackTickers.push(...changedTickers);
+      }
+      if(patchedFailed > 0){
+        markWatchlistDirty(fallbackTickers.length ? fallbackTickers : changedTickers, 'watchlist_refresh_patch_fallback');
+        if(activeWorkspaceTab() === 'track'){
+          if(PP_PERF_DEBUG){
+            console.debug('[PP_PERF] watchlist_patch_fallback_full_render', {
+              source,
+              mode,
+              failedTickers:fallbackTickers.length,
+              changedTickers:changedTickers.length
+            });
+          }
+          await renderWatchlistChunked({
+            source:`${source}_patch_fallback`,
+            batchSize:renderBatchSize
+          });
+        }
+      }else if(changedTickers.length){
+        const changedRecords = changedTickers.map(ticker => getTickerRecord(ticker)).filter(Boolean);
+        clearWatchlistDirtyForRecords(changedRecords);
+      }
+    }else{
+      await renderWatchlistChunked({
+        source,
+        batchSize:renderBatchSize,
+        model:prepareWatchlistRenderModel(source, {
+          lightweight:trackOnlyRefresh
+        })
+      });
+    }
     const focusStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     renderFocusQueue();
     const focusEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
@@ -15309,7 +15518,11 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
       console.debug('[PP_PERF] watchlist_refresh_render', {
         source,
         mode,
+        renderStrategy,
         trackOnlyRefresh,
+        changedTickers:changedTickers.length,
+        patchedCards,
+        patchedFailed,
         durationMs:Number((renderEndedAt - renderStartedAt).toFixed(1)),
         watchlistRenderDurationMs:Number((focusStartedAt - renderStartedAt).toFixed(1)),
         focusQueueDurationMs:Number((focusEndedAt - focusStartedAt).toFixed(1)),
