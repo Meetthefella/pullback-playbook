@@ -4969,10 +4969,21 @@ function addToWatchlist(tickerData){
     render:false,
     force:true
   });
+  markWatchlistDirty([entry.ticker], 'watchlist_add');
   commitTickerState();
   requeueTickerForToday(entry.ticker);
-  renderWatchlist();
-  renderFocusQueue();
+  if(activeWorkspaceTab() === 'track'){
+    renderWatchlist();
+    renderFocusQueue();
+    startupCoordinator.pendingWatchlistPatchFallback = false;
+    startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
+    if(!hasWatchlistDirtyRecords()){
+      startupCoordinator.trackNeedsFullRender = false;
+    }
+  }else{
+    startupCoordinator.renderedTabs.track = false;
+    startupCoordinator.trackHydratedRendered = false;
+  }
   record.watchlist.debug.lastAddResult = wasInWatchlist ? 'already_present' : 'added';
   record.watchlist.debug.lastAddMessage = wasInWatchlist
     ? 'Already in watchlist.'
@@ -16101,6 +16112,16 @@ function addActiveReviewTickerToWatchlist(){
     return;
   }
   const liveRecord = upsertTickerRecord(ticker);
+  const activeTabBeforeAdd = activeWorkspaceTab();
+  const watchlistVersionBeforeAdd = Number(startupCoordinator.currentWatchlistDataVersion || 0);
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] review_add_to_watchlist', {
+      ticker:liveRecord.ticker,
+      activeTab:activeTabBeforeAdd,
+      watchlistVersionBefore:watchlistVersionBeforeAdd,
+      trackRendered:startupCoordinator.renderedTabs.track === true
+    });
+  }
   const eligibility = watchlistEligibilityForRecord(liveRecord);
   const reviewNotes = $('reviewNotes');
   if(reviewNotes) liveRecord.review.notes = reviewNotes.value;
@@ -16134,6 +16155,35 @@ function addActiveReviewTickerToWatchlist(){
   const statusMarkup = entry && entry.updated
     ? `<span class="ok">${escapeHtml(ticker)} is already in the watchlist.</span>`
     : `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`;
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] track_marked_dirty_from_review_add', {
+      ticker:liveRecord.ticker,
+      activeTab:activeWorkspaceTab(),
+      watchlistVersionBefore:watchlistVersionBeforeAdd,
+      watchlistVersionAfter:Number(startupCoordinator.currentWatchlistDataVersion || 0),
+      watchlistDirty:hasWatchlistDirtyRecords(),
+      trackNeedsFullRender:startupCoordinator.trackNeedsFullRender === true,
+      renderedTrack:startupCoordinator.renderedTabs.track === true
+    });
+  }
+  if(activeWorkspaceTab() === 'track'){
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] track_visible_patch_or_render_after_review_add', {
+        ticker:liveRecord.ticker,
+        strategy:'full_render',
+        activeTab:activeWorkspaceTab(),
+        owner:'addToWatchlist'
+      });
+    }
+  }else if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] track_hidden_dirty_after_review_add', {
+      ticker:liveRecord.ticker,
+      activeTab:activeWorkspaceTab(),
+      watchlistDirty:hasWatchlistDirtyRecords(),
+      trackNeedsFullRender:startupCoordinator.trackNeedsFullRender === true,
+      renderedTrack:startupCoordinator.renderedTabs.track === true
+    });
+  }
   setStatus('reviewWorkspaceStatus', statusMarkup);
   setStatus('inputStatus', statusMarkup);
   renderReviewWorkspace();
