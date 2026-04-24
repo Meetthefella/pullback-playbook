@@ -18,7 +18,16 @@ const savedScannerUniverseKey = 'pp_scanner_universe_saved';
 const savedScannerUniverseMetaKey = 'pp_scanner_universe_saved_meta';
 const DEFAULT_PROVIDER = 'fmp';
 const DEFAULT_API_PLAN = 'scanner';
-const PP_PERF_DEBUG = typeof window !== 'undefined' && window.PP_PERF_DEBUG === true;
+function readPersistentPerfDebugFlag(){
+  if(typeof window === 'undefined') return false;
+  try{
+    if(window.PP_PERF_DEBUG === true) return true;
+    if(window.sessionStorage && window.sessionStorage.getItem('PP_PERF_DEBUG') === '1') return true;
+    if(window.localStorage && window.localStorage.getItem('PP_PERF_DEBUG') === '1') return true;
+  }catch(error){}
+  return false;
+}
+const PP_PERF_DEBUG = readPersistentPerfDebugFlag();
 const startupCoordinator = {
   shellRendered:false,
   localStateLoaded:false,
