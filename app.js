@@ -37,8 +37,12 @@ const startupCoordinator = {
   backgroundMonitoringStarted:false,
   renderedTabs:{},
   trackHydratedRendered:false,
-  diaryAnalyticsRendered:false
+  diaryAnalyticsRendered:false,
+  startupRiskRefreshRunning:false
 };
+const deferredStartupQueue = [];
+let deferredStartupQueueRunning = false;
+let deferredStartupTaskSeq = 0;
 
 function perfMark(name){
   if(typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
@@ -65,26 +69,100 @@ function trackRenderRecordCount(){
   return watchlistTickerRecords().length;
 }
 
-function measureTrackRender(kind, callback){
+function measureTrackRender(kind, source, callback){
   const safeKind = String(kind || 'unknown');
+  const safeSource = String(source || 'workspace_surface');
   const startMark = `pp_track_${safeKind}_start`;
   const endMark = `pp_track_${safeKind}_end`;
   const measureName = `pp_track_${safeKind}`;
   const recordCountBefore = trackRenderRecordCount();
+  const stateBefore = startupDebugRenderState();
   perfMark(startMark);
+  logStartupDebugRender('track', {
+    phase:'start',
+    source:safeSource,
+    kind:safeKind,
+    durationMs:null,
+    recordCountBefore:recordCountBefore,
+    recordCountAfter:null,
+    ...stateBefore
+  });
   callback();
   perfMark(endMark);
   const entry = perfMeasure(measureName, startMark, endMark);
+  const recordCountAfter = trackRenderRecordCount();
+  const stateAfter = startupDebugRenderState();
+  logStartupDebugRender('track', {
+    phase:'end',
+    source:safeSource,
+    kind:safeKind,
+    durationMs:entry ? Number(entry.duration.toFixed(1)) : null,
+    recordCountBefore:recordCountBefore,
+    recordCountAfter:recordCountAfter,
+    ...stateAfter
+  });
   if(PP_PERF_DEBUG){
-    const recordCountAfter = trackRenderRecordCount();
     console.debug('[PP_PERF] track_render', {
       kind:safeKind,
+      source:safeSource,
       durationMs:entry ? Number(entry.duration.toFixed(1)) : null,
       watchlistRecords:recordCountAfter,
       watchlistRecordsBefore:recordCountBefore,
-      watchlistRecordsAfter:recordCountAfter
+      watchlistRecordsAfter:recordCountAfter,
+      ...stateAfter
     });
   }
+}
+
+function startupDebugRenderState(){
+  return {
+    hydrationComplete:startupCoordinator.trackedStateHydrationPromise !== null,
+    riskRefreshComplete:startupCoordinator.startupRiskRefreshRunning !== true
+  };
+}
+
+function startupDebugRecordCountForWorkspace(name){
+  if(name === 'track') return watchlistTickerRecords().length;
+  if(name === 'scan') return rankedTickerRecords().length;
+  if(name === 'review') return activeReviewTicker() ? 1 : 0;
+  return allTickerRecords().length;
+}
+
+function logStartupDebugRender(name, payload = {}){
+  if(!PP_PERF_DEBUG) return;
+  console.debug(`[PP_PERF] render_${name}`, payload);
+}
+
+function measureWorkspaceRender(name, source, callback){
+  const safeName = String(name || 'workspace');
+  const safeSource = String(source || 'unspecified');
+  const startMark = `pp_render_${safeName}_start`;
+  const endMark = `pp_render_${safeName}_end`;
+  const measureName = `pp_render_${safeName}`;
+  const beforeCount = startupDebugRecordCountForWorkspace(safeName);
+  const stateBefore = startupDebugRenderState();
+  perfMark(startMark);
+  logStartupDebugRender(safeName, {
+    phase:'start',
+    source:safeSource,
+    durationMs:null,
+    recordCountBefore:beforeCount,
+    recordCountAfter:null,
+    ...stateBefore
+  });
+  callback();
+  perfMark(endMark);
+  const entry = perfMeasure(measureName, startMark, endMark);
+  const afterCount = startupDebugRecordCountForWorkspace(safeName);
+  const stateAfter = startupDebugRenderState();
+  logStartupDebugRender(safeName, {
+    phase:'end',
+    source:safeSource,
+    durationMs:entry ? Number(entry.duration.toFixed(1)) : null,
+    recordCountBefore:beforeCount,
+    recordCountAfter:afterCount,
+    ...stateAfter
+  });
 }
 
 function logDeferredStartupJob(name, detail = {}){
@@ -95,13 +173,18 @@ function logDeferredStartupJob(name, detail = {}){
   });
 }
 
-async function runNamedDeferredStartupJob(name, callback){
+async function runNamedDeferredStartupJob(name, callback, meta = {}){
   const safeName = String(name || 'unnamed');
   const startMark = `pp_startup_job_${safeName}_start`;
   const endMark = `pp_startup_job_${safeName}_end`;
   const measureName = `pp_startup_job_${safeName}`;
   perfMark(startMark);
-  logDeferredStartupJob(safeName, {phase:'start'});
+  logDeferredStartupJob(safeName, {
+    phase:'start',
+    durationMs:null,
+    queueLength:deferredStartupQueue.length,
+    taskId:meta.taskId || null
+  });
   try{
     return await callback();
   } finally {
@@ -109,14 +192,58 @@ async function runNamedDeferredStartupJob(name, callback){
     const entry = perfMeasure(measureName, startMark, endMark);
     logDeferredStartupJob(safeName, {
       phase:'end',
-      durationMs:entry ? Number(entry.duration.toFixed(1)) : null
+      durationMs:entry ? Number(entry.duration.toFixed(1)) : null,
+      queueLength:deferredStartupQueue.length,
+      taskId:meta.taskId || null
     });
   }
 }
 
+function scheduleDeferredStartupQueueFlush(options = {}){
+  if(deferredStartupQueueRunning || !deferredStartupQueue.length) return;
+  const flushNext = () => {
+    if(deferredStartupQueueRunning || !deferredStartupQueue.length) return;
+    deferredStartupQueueRunning = true;
+    const task = deferredStartupQueue.shift();
+    runNamedDeferredStartupJob(task.name, task.callback, {taskId:task.id}).catch(() => {}).finally(() => {
+      deferredStartupQueueRunning = false;
+      if(deferredStartupQueue.length){
+        const nextTask = deferredStartupQueue[0];
+        scheduleDeferredStartupQueueFlush({
+          idle:nextTask ? nextTask.idle : options.idle,
+          timeoutMs:nextTask ? nextTask.timeoutMs : options.timeoutMs
+        });
+      }
+    });
+  };
+  if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function' && options.idle !== false){
+    window.requestIdleCallback(() => flushNext(), {timeout:Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 150});
+    return;
+  }
+  setTimeout(flushNext, 0);
+}
+
+function enqueueDeferredStartupTask(name, callback, options = {}){
+  const task = {
+    id:`startup-task-${++deferredStartupTaskSeq}`,
+    name:String(name || 'unnamed'),
+    callback,
+    idle:options.idle !== false,
+    timeoutMs:Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 150
+  };
+  deferredStartupQueue.push(task);
+  logDeferredStartupJob(task.name, {
+    phase:'queued',
+    durationMs:null,
+    queueLength:deferredStartupQueue.length,
+    taskId:task.id
+  });
+  scheduleDeferredStartupQueueFlush(options);
+}
+
 function scheduleNamedDeferredStartupTask(name, callback, options = {}){
   scheduleDeferredStartupTask(() => {
-    runNamedDeferredStartupJob(name, callback).catch(() => {});
+    enqueueDeferredStartupTask(name, callback, options);
   }, options);
 }
 
@@ -141,12 +268,116 @@ async function collectStartupWatchlistRefreshTickersChunked(){
   return tickers;
 }
 
+async function runStartupRiskRefreshChunked(){
+  const source = 'startup_restore';
+  const riskRefreshStartMark = 'pp_startup_risk_refresh_start';
+  perfMark(riskRefreshStartMark);
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] startup_risk_refresh', {
+      phase:'start',
+      source,
+      chunkIndex:0,
+      durationMs:null,
+      recordCount:allTickerRecords().length,
+      ...startupDebugRenderState()
+    });
+  }
+  const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+    ? String(uiState.liveProcessStatus.state || '')
+    : '';
+  const canPublishRiskDiagnostic = !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
+  const records = allTickerRecords();
+  const watchlistTickers = records
+    .filter(record => {
+      const item = normalizeTickerRecord(record);
+      return !!(item.watchlist && item.watchlist.inWatchlist);
+    })
+    .map(record => normalizeTickerRecord(record).ticker)
+    .filter(Boolean);
+  const watchlistTickerSet = new Set(watchlistTickers);
+  if(canPublishRiskDiagnostic){
+    if(watchlistTickers.length){
+      setLiveProcessStatus('action', `Recalculating watchlist ticker ${watchlistTickers[0]} plan to fit new risk...`);
+    }else{
+      setLiveProcessStatus('action', 'Recalculating plans to fit new risk...');
+    }
+  }
+  state.userRiskPerTrade = currentMaxLoss();
+  state.maxRisk = state.userRiskPerTrade;
+  for(let index = 0; index < records.length; index += 1){
+    if(PP_PERF_DEBUG && index % 25 === 0){
+      console.debug('[PP_PERF] startup_risk_refresh', {
+        phase:'chunk_start',
+        source,
+        chunkIndex:Math.floor(index / 25),
+        durationMs:null,
+        recordCount:records.length,
+        processed:index,
+        ...startupDebugRenderState()
+      });
+    }
+    const record = records[index];
+    recomputeRiskContextForRecord(record);
+    if(canPublishRiskDiagnostic){
+      const ticker = normalizeTickerRecord(record).ticker;
+      if(watchlistTickerSet.has(ticker)){
+        setLiveProcessStatus('action', `Recalculating watchlist ticker ${ticker} plan to fit new risk...`);
+      }
+    }
+    if(index > 0 && index % 25 === 0){
+      if(PP_PERF_DEBUG){
+        console.debug('[PP_PERF] startup_risk_refresh', {
+          phase:'chunk_end',
+          source,
+          chunkIndex:Math.floor(index / 25),
+          durationMs:null,
+          recordCount:records.length,
+          processed:index,
+          ...startupDebugRenderState()
+        });
+      }
+      await yieldDeferredStartupChunk();
+    }
+  }
+  runWatchlistLifecycleEvaluation({
+    source,
+    persist:false,
+    render:false,
+    force:false
+  });
+  commitTickerState();
+  await yieldDeferredStartupChunk();
+  renderStats();
+  renderScannerResults();
+  renderCards();
+  renderWatchlist();
+  renderFocusQueue();
+  perfMark('pp_startup_risk_refresh_end');
+  const riskEntry = perfMeasure('pp_startup_risk_refresh', riskRefreshStartMark, 'pp_startup_risk_refresh_end');
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] startup_risk_refresh', {
+      phase:'complete',
+      source,
+      durationMs:riskEntry ? Number(riskEntry.duration.toFixed(1)) : null,
+      recordCount:records.length,
+      ...startupDebugRenderState()
+    });
+  }
+  if(canPublishRiskDiagnostic){
+    setLiveProcessStatus('action', 'Risk recalculation complete.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+  }
+}
+
+function startStartupRiskRefreshBackground(){
+  if(startupCoordinator.startupRiskRefreshRunning) return;
+  startupCoordinator.startupRiskRefreshRunning = true;
+  runStartupRiskRefreshChunked().catch(() => {}).finally(() => {
+    startupCoordinator.startupRiskRefreshRunning = false;
+  });
+}
+
 function scheduleDeferredStartupTask(callback, options = {}){
   const runner = () => {
-    if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function' && options.idle !== false){
-      window.requestIdleCallback(() => callback(), {timeout:Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 1000});
-      return;
-    }
     setTimeout(callback, 0);
   };
   const delayMs = Number.isFinite(Number(options.delayMs)) ? Math.max(0, Number(options.delayMs)) : 0;
@@ -2777,11 +3008,13 @@ function renderWorkspaceSurface(tab, options = {}){
     ? String(tab).toLowerCase()
     : 'scan';
   if(targetTab === 'scan'){
-    perfMark('pp_scanner_render_start');
-    renderScannerResults();
-    renderScannerRulesPanel();
-    perfMark('pp_scanner_render_end');
-    perfMeasure('pp_scanner_render', 'pp_scanner_render_start', 'pp_scanner_render_end');
+    measureWorkspaceRender('scan', options.reason || 'workspace_surface', () => {
+      perfMark('pp_scanner_render_start');
+      renderScannerResults();
+      renderScannerRulesPanel();
+      perfMark('pp_scanner_render_end');
+      perfMeasure('pp_scanner_render', 'pp_scanner_render_start', 'pp_scanner_render_end');
+    });
     startupCoordinator.renderedTabs.scan = true;
     return;
   }
@@ -2794,7 +3027,7 @@ function renderWorkspaceSurface(tab, options = {}){
     const trackRenderKind = options.userOpened === true
       ? 'user_opened'
       : (options.hydrated === true ? 'hydrated' : 'deferred');
-    measureTrackRender(trackRenderKind, () => {
+    measureTrackRender(trackRenderKind, options.reason || 'workspace_surface', () => {
       perfMark('pp_watchlist_render_start');
       renderWatchlist();
       renderFocusQueue();
@@ -2843,6 +3076,15 @@ function handleWorkspaceTabChange(tab){
 
 function applyTrackedStateHydrationMerge(){
   perfMark('pp_remote_merge_start');
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] hydration_merge', {
+      phase:'start',
+      source:'tracked_state_hydration',
+      durationMs:null,
+      recordCount:allTickerRecords().length,
+      ...startupDebugRenderState()
+    });
+  }
   renderStats();
   renderTickerQuickLists();
   renderFinalUniversePreview();
@@ -2857,7 +3099,16 @@ function applyTrackedStateHydrationMerge(){
   }
   renderActiveWorkspaceSurface({reason:'startup_remote_merge'});
   perfMark('pp_remote_merge_end');
-  perfMeasure('pp_remote_merge', 'pp_remote_merge_start', 'pp_remote_merge_end');
+  const hydrationEntry = perfMeasure('pp_remote_merge', 'pp_remote_merge_start', 'pp_remote_merge_end');
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] hydration_merge', {
+      phase:'end',
+      source:'tracked_state_hydration',
+      durationMs:hydrationEntry ? Number(hydrationEntry.duration.toFixed(1)) : null,
+      recordCount:allTickerRecords().length,
+      ...startupDebugRenderState()
+    });
+  }
 }
 
 function requestStartupTrackedStateHydration(){
@@ -2898,7 +3149,7 @@ function scheduleDeferredStartupHydration(){
     renderPlannerPlanSummary();
   }, {delayMs:260});
   scheduleNamedDeferredStartupTask('startup_risk_refresh', () => {
-    refreshRiskContextForActiveSetups({source:'startup_restore'});
+    startStartupRiskRefreshBackground();
   }, {delayMs:320});
   scheduleNamedDeferredStartupTask('tracked_state_hydration', () => {
     requestStartupTrackedStateHydration().finally(() => {
@@ -14413,11 +14664,39 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
 
 async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
   const source = String(options.source || 'startup_restore');
+  perfMark('pp_watchlist_refresh_start');
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] watchlist_refresh', {
+      phase:'start',
+      source,
+      durationMs:null,
+      recordCount:watchlistTickerRecords().length,
+      ...startupDebugRenderState()
+    });
+  }
+  const finishWatchlistRefreshLog = (summary, extra = {}) => {
+    perfMark('pp_watchlist_refresh_end');
+    const watchlistRefreshEntry = perfMeasure('pp_watchlist_refresh', 'pp_watchlist_refresh_start', 'pp_watchlist_refresh_end');
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] watchlist_refresh', {
+        phase:'end',
+        source,
+        durationMs:watchlistRefreshEntry ? Number(watchlistRefreshEntry.duration.toFixed(1)) : null,
+        recordCount:watchlistTickerRecords().length,
+        attempted:summary && summary.attempted,
+        refreshed:summary && summary.refreshed,
+        failed:summary && summary.failed,
+        ...startupDebugRenderState(),
+        ...extra
+      });
+    }
+    return summary;
+  };
   const tickers = uniqueTickers(
     (options.tickers || watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker))
       .filter(Boolean)
   );
-  if(!tickers.length) return {source, attempted:0, refreshed:0, failed:0, results:[]};
+  if(!tickers.length) return finishWatchlistRefreshLog({source, attempted:0, refreshed:0, failed:0, results:[]});
   setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
   const markPending = options.markPending !== false && source === 'startup_restore';
   if(markPending) setWatchlistLiveRefreshPending(tickers, true);
@@ -14466,7 +14745,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
   }else{
     setLiveProcessStatus('idle', 'Idle.');
   }
-  return summary;
+  return finishWatchlistRefreshLog(summary);
 }
 
 async function refreshWatchlistTicker(ticker){
@@ -15528,6 +15807,30 @@ function bindReviewWorkspaceActions(record){
 function renderReviewWorkspace(options = {}){
   const box = $('reviewWorkspace');
   if(!box) return;
+  perfMark('pp_review_workspace_render_start');
+  const reviewRenderSource = String(options.source || options.reason || 'direct');
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] render_review', {
+      phase:'start',
+      source:reviewRenderSource,
+      durationMs:null,
+      recordCount:activeReviewTicker() ? 1 : 0,
+      ...startupDebugRenderState()
+    });
+  }
+  const finishReviewRenderLog = () => {
+    perfMark('pp_review_workspace_render_end');
+    const reviewRenderEntry = perfMeasure('pp_review_workspace_render', 'pp_review_workspace_render_start', 'pp_review_workspace_render_end');
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] render_review', {
+        phase:'end',
+        source:reviewRenderSource,
+        durationMs:reviewRenderEntry ? Number(reviewRenderEntry.duration.toFixed(1)) : null,
+        recordCount:activeReviewTicker() ? 1 : 0,
+        ...startupDebugRenderState()
+      });
+    }
+  };
   box.className = 'list reviewworkspace-shell';
   box.innerHTML = '';
   const ticker = activeReviewTicker();
@@ -15538,11 +15841,13 @@ function renderReviewWorkspace(options = {}){
       box.querySelectorAll('[data-act="resume-review"]').forEach(button => {
         button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '', {includeInScannerUniverse:false});
       });
+      finishReviewRenderLog();
       return;
     }
     box.innerHTML = (state.tickers || []).length
       ? '<div class="summary">Open one ranked result to load it into the review workspace.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>'
       : '<div class="summary">Run a scan first, then open a shortlisted ticker here for focused review.</div><a class="helperbutton" href="#dailyInput">Go To Scan List</a>';
+    finishReviewRenderLog();
     return;
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
@@ -16096,6 +16401,7 @@ function renderReviewWorkspace(options = {}){
   refreshReview({skipWatchlistLifecycle:options.skipWatchlistLifecycle === true});
   renderReviewLifecycleSummary(record.ticker);
   calculate({persist:false});
+  finishReviewRenderLog();
 }
 
 function renderCards(){
