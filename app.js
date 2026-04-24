@@ -45,6 +45,10 @@ const startupCoordinator = {
   trackHydratedRendered:false,
   trackNeedsHydratedRender:false,
   trackDeferredRenderSkipped:false,
+  trackNeedsFullRender:false,
+  pendingWatchlistPatchFallback:false,
+  currentWatchlistDataVersion:0,
+  lastTrackRenderVersion:0,
   diaryAnalyticsRendered:false,
   startupRiskRefreshRunning:false,
   startupWatchlistRefreshDeferred:false,
@@ -133,9 +137,19 @@ function ensureWatchlistDirtyState(){
     : {};
 }
 
+function hasWatchlistDirtyRecords(){
+  ensureWatchlistDirtyState();
+  if(uiState.watchlistDirtyTickers['*']) return true;
+  return Object.keys(uiState.watchlistDirtyTickers).length > 0;
+}
+
 function markWatchlistDirty(tickers = null, reason = 'unknown'){
   ensureWatchlistDirtyState();
   uiState.watchlistDirtyEpoch += 1;
+  startupCoordinator.currentWatchlistDataVersion = Number.isFinite(Number(startupCoordinator.currentWatchlistDataVersion))
+    ? Number(startupCoordinator.currentWatchlistDataVersion) + 1
+    : 1;
+  startupCoordinator.trackNeedsFullRender = true;
   if(Array.isArray(tickers) && tickers.length){
     uniqueTickers(tickers).forEach(ticker => {
       uiState.watchlistDirtyTickers[ticker] = reason;
@@ -155,6 +169,14 @@ function clearWatchlistDirtyForRecords(records = []){
     const ticker = normalizeTicker(record && record.ticker);
     if(ticker) delete uiState.watchlistDirtyTickers[ticker];
   });
+}
+
+function clearAllTrackFreshnessFlagsAfterSuccessfulRender(){
+  uiState.watchlistDirtyTickers = {};
+  startupCoordinator.trackNeedsFullRender = false;
+  startupCoordinator.trackNeedsHydratedRender = false;
+  startupCoordinator.pendingWatchlistPatchFallback = false;
+  startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
 }
 
 function scheduleAfterFirstTrackPaint(callback){
@@ -226,6 +248,51 @@ function measureTrackRender(kind, source, callback){
     ...stateBefore
   });
   callback();
+  perfMark(endMark);
+  const entry = perfMeasure(measureName, startMark, endMark);
+  const recordCountAfter = trackRenderRecordCount();
+  const stateAfter = startupDebugRenderState();
+  logStartupDebugRender('track', {
+    phase:'end',
+    source:safeSource,
+    kind:safeKind,
+    durationMs:entry ? Number(entry.duration.toFixed(1)) : null,
+    recordCountBefore:recordCountBefore,
+    recordCountAfter:recordCountAfter,
+    ...stateAfter
+  });
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] track_render', {
+      kind:safeKind,
+      source:safeSource,
+      durationMs:entry ? Number(entry.duration.toFixed(1)) : null,
+      watchlistRecords:recordCountAfter,
+      watchlistRecordsBefore:recordCountBefore,
+      watchlistRecordsAfter:recordCountAfter,
+      ...stateAfter
+    });
+  }
+}
+
+async function measureTrackRenderAsync(kind, source, callback){
+  const safeKind = String(kind || 'unknown');
+  const safeSource = String(source || 'workspace_surface');
+  const startMark = `pp_track_${safeKind}_start`;
+  const endMark = `pp_track_${safeKind}_end`;
+  const measureName = `pp_track_${safeKind}`;
+  const recordCountBefore = trackRenderRecordCount();
+  const stateBefore = startupDebugRenderState();
+  perfMark(startMark);
+  logStartupDebugRender('track', {
+    phase:'start',
+    source:safeSource,
+    kind:safeKind,
+    durationMs:null,
+    recordCountBefore:recordCountBefore,
+    recordCountAfter:null,
+    ...stateBefore
+  });
+  await callback();
   perfMark(endMark);
   const entry = perfMeasure(measureName, startMark, endMark);
   const recordCountAfter = trackRenderRecordCount();
@@ -3460,11 +3527,13 @@ function renderWorkspaceSurface(tab, options = {}){
       ? 'user_opened'
       : (options.hydrated === true ? 'hydrated' : 'deferred');
     const firstUserOpen = options.userOpened === true && startupCoordinator.renderedTabs.track !== true;
+    const shouldClearDirtyAfterRender = !firstUserOpen && options.userOpened === true;
     if(options.userOpened === true){
       startupCoordinator.lastTrackUserOpenedAt = Date.now();
       startupCoordinator.nextAllowedStartupTrackRefreshAt = startupCoordinator.lastTrackUserOpenedAt + TRACK_FIRST_OPEN_REFRESH_COOLDOWN_MS;
     }
-    measureTrackRender(trackRenderKind, safeReason, () => {
+    try{
+      measureTrackRender(trackRenderKind, safeReason, () => {
       perfMark('pp_watchlist_render_start');
       if(firstUserOpen){
         renderWatchlistChunked({
@@ -3481,7 +3550,20 @@ function renderWorkspaceSurface(tab, options = {}){
       }
       perfMark('pp_watchlist_render_end');
       perfMeasure('pp_watchlist_render', 'pp_watchlist_render_start', 'pp_watchlist_render_end');
-    });
+      });
+      if(shouldClearDirtyAfterRender){
+        clearAllTrackFreshnessFlagsAfterSuccessfulRender();
+      }
+    }catch(error){
+      if(PP_PERF_DEBUG){
+        console.debug('[PP_PERF] track_render_failed_preserve_dirty', {
+          source:safeReason,
+          error:error && error.message ? String(error.message) : 'unknown_error',
+          ...startupDebugRenderState()
+        });
+      }
+      throw error;
+    }
     startupCoordinator.renderedTabs.track = true;
     if(options.hydrated === true) startupCoordinator.trackHydratedRendered = true;
     startupCoordinator.trackNeedsHydratedRender = false;
@@ -3510,11 +3592,120 @@ function renderActiveWorkspaceSurface(options = {}){
   });
 }
 
+async function renderTrackWorkspaceForcedFull(options = {}){
+  const safeReason = String(options.reason || 'track_open_forced_full_render_dirty');
+  if(activeWorkspaceTab() !== 'track'){
+    return {
+      ok:false,
+      skipped:true,
+      reason:'hidden'
+    };
+  }
+  try{
+    await measureTrackRenderAsync('user_opened', safeReason, async () => {
+      perfMark('pp_watchlist_render_start');
+      await renderWatchlistChunked({
+        source:'track_forced_full_open',
+        batchSize:WATCHLIST_RENDER_BATCH_SIZE,
+        model:prepareWatchlistRenderModel('track_forced_full_open', {
+          lightweight:false,
+          allowCache:false
+        })
+      });
+      renderFocusQueue();
+      perfMark('pp_watchlist_render_end');
+      perfMeasure('pp_watchlist_render', 'pp_watchlist_render_start', 'pp_watchlist_render_end');
+    });
+    clearAllTrackFreshnessFlagsAfterSuccessfulRender();
+    startupCoordinator.renderedTabs.track = true;
+    if(options.hydrated === true) startupCoordinator.trackHydratedRendered = true;
+    startupCoordinator.trackDeferredRenderSkipped = false;
+    scheduleAfterFirstTrackPaint(() => {
+      maybeStartDeferredTrackStartupRefresh(options.reason || 'track_user_open_forced');
+    });
+    return {
+      ok:true,
+      skipped:false
+    };
+  }catch(error){
+    return {
+      ok:false,
+      skipped:false,
+      error:error && error.message ? String(error.message) : 'unknown_error'
+    };
+  }
+}
+
 function handleWorkspaceTabChange(tab){
   if(!startupCoordinator.localStateLoaded) return;
   const nextTab = String(tab || '').toLowerCase();
   if(nextTab === 'track'){
-    if(startupCoordinator.renderedTabs.track && startupCoordinator.trackHydratedRendered) return;
+    const watchlistDirty = hasWatchlistDirtyRecords();
+    const versionStale = Number(startupCoordinator.lastTrackRenderVersion || 0) !== Number(startupCoordinator.currentWatchlistDataVersion || 0);
+    const forceFullRender = (
+      watchlistDirty
+      || startupCoordinator.trackNeedsHydratedRender === true
+      || startupCoordinator.trackNeedsFullRender === true
+      || startupCoordinator.pendingWatchlistPatchFallback === true
+      || versionStale
+    );
+    if(startupCoordinator.renderedTabs.track && !forceFullRender) return;
+    if(forceFullRender && PP_PERF_DEBUG){
+      console.debug('[PP_PERF] track_open_forced_full_render_dirty', {
+        watchlistDirty,
+        trackNeedsHydratedRender:startupCoordinator.trackNeedsHydratedRender === true,
+        trackNeedsFullRender:startupCoordinator.trackNeedsFullRender === true,
+        pendingWatchlistPatchFallback:startupCoordinator.pendingWatchlistPatchFallback === true,
+        versionStale,
+        lastTrackRenderVersion:Number(startupCoordinator.lastTrackRenderVersion || 0),
+        currentWatchlistDataVersion:Number(startupCoordinator.currentWatchlistDataVersion || 0),
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+    if(forceFullRender){
+      scheduleDeferredStartupTask(() => {
+        renderTrackWorkspaceForcedFull({
+          reason:'track_open_forced_full_render_dirty',
+          hydrated:startupCoordinator.trackedStateHydrationResolved === true,
+          userOpened:true
+        }).then(result => {
+          if(!PP_PERF_DEBUG) return;
+          if(result && result.ok){
+            console.debug('[PP_PERF] track_forced_full_render_success', {
+              source:'track_open_forced_full_render_dirty',
+              activeTab:activeWorkspaceTab(),
+              ...startupDebugRenderState()
+            });
+            return;
+          }
+          if(result && result.skipped){
+            console.debug('[PP_PERF] track_forced_full_render_skipped_hidden', {
+              source:'track_open_forced_full_render_dirty',
+              reason:result.reason || 'hidden',
+              activeTab:activeWorkspaceTab(),
+              ...startupDebugRenderState()
+            });
+            return;
+          }
+          console.debug('[PP_PERF] track_forced_full_render_failed', {
+            source:'track_open_forced_full_render_dirty',
+            error:result && result.error ? result.error : 'unknown_error',
+            activeTab:activeWorkspaceTab(),
+            ...startupDebugRenderState()
+          });
+        });
+      }, {idle:false});
+      return;
+    }
+    scheduleDeferredStartupTask(() => {
+      renderWorkspaceSurface(tab, {
+        includeAnalytics:false,
+        hydrated:startupCoordinator.trackedStateHydrationResolved === true,
+        userOpened:true
+      });
+    }, {idle:false});
+    return;
   }else if(nextTab === 'diary'){
     if(startupCoordinator.renderedTabs.diary && startupCoordinator.diaryAnalyticsRendered) return;
   }else if(startupCoordinator.renderedTabs[nextTab]){
@@ -15477,6 +15668,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
         fallbackTickers.push(...changedTickers);
       }
       if(patchedFailed > 0){
+        startupCoordinator.pendingWatchlistPatchFallback = true;
         markWatchlistDirty(fallbackTickers.length ? fallbackTickers : changedTickers, 'watchlist_refresh_patch_fallback');
         if(activeWorkspaceTab() === 'track'){
           if(PP_PERF_DEBUG){
@@ -15491,10 +15683,22 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
             source:`${source}_patch_fallback`,
             batchSize:renderBatchSize
           });
+          startupCoordinator.pendingWatchlistPatchFallback = false;
+          startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
+          if(!hasWatchlistDirtyRecords()){
+            startupCoordinator.trackNeedsFullRender = false;
+          }
         }
       }else if(changedTickers.length){
         const changedRecords = changedTickers.map(ticker => getTickerRecord(ticker)).filter(Boolean);
         clearWatchlistDirtyForRecords(changedRecords);
+        if(activeWorkspaceTab() === 'track'){
+          startupCoordinator.pendingWatchlistPatchFallback = false;
+          startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
+          if(!hasWatchlistDirtyRecords()){
+            startupCoordinator.trackNeedsFullRender = false;
+          }
+        }
       }
     }else{
       await renderWatchlistChunked({
@@ -15504,6 +15708,13 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
           lightweight:trackOnlyRefresh
         })
       });
+      if(activeWorkspaceTab() === 'track'){
+        startupCoordinator.pendingWatchlistPatchFallback = false;
+        startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
+        if(!hasWatchlistDirtyRecords()){
+          startupCoordinator.trackNeedsFullRender = false;
+        }
+      }
     }
     const focusStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     renderFocusQueue();
