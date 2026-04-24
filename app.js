@@ -78,6 +78,60 @@ function measureTrackRender(kind, callback){
   }
 }
 
+function logDeferredStartupJob(name, detail = {}){
+  if(!PP_PERF_DEBUG) return;
+  console.debug('[PP_PERF] deferred_startup_job', {
+    name:String(name || 'unnamed'),
+    ...detail
+  });
+}
+
+async function runNamedDeferredStartupJob(name, callback){
+  const safeName = String(name || 'unnamed');
+  const startMark = `pp_startup_job_${safeName}_start`;
+  const endMark = `pp_startup_job_${safeName}_end`;
+  const measureName = `pp_startup_job_${safeName}`;
+  perfMark(startMark);
+  logDeferredStartupJob(safeName, {phase:'start'});
+  try{
+    return await callback();
+  } finally {
+    perfMark(endMark);
+    const entry = perfMeasure(measureName, startMark, endMark);
+    logDeferredStartupJob(safeName, {
+      phase:'end',
+      durationMs:entry ? Number(entry.duration.toFixed(1)) : null
+    });
+  }
+}
+
+function scheduleNamedDeferredStartupTask(name, callback, options = {}){
+  scheduleDeferredStartupTask(() => {
+    runNamedDeferredStartupJob(name, callback).catch(() => {});
+  }, options);
+}
+
+function yieldDeferredStartupChunk(timeoutMs = 100){
+  return new Promise(resolve => {
+    if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+      window.requestIdleCallback(() => resolve(), {timeout:timeoutMs});
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
+async function collectStartupWatchlistRefreshTickersChunked(){
+  const records = Object.values(normalizeTickerRecordsMap(state.tickerRecords || {}));
+  const tickers = [];
+  for(let index = 0; index < records.length; index += 1){
+    const record = normalizeTickerRecord(records[index]);
+    if(record.watchlist && record.watchlist.inWatchlist && record.ticker) tickers.push(record.ticker);
+    if(index > 0 && index % 40 === 0) await yieldDeferredStartupChunk();
+  }
+  return tickers;
+}
+
 function scheduleDeferredStartupTask(callback, options = {}){
   const runner = () => {
     if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function' && options.idle !== false){
@@ -2825,26 +2879,28 @@ function startBackgroundMonitoringIfNeeded(){
 function scheduleDeferredStartupHydration(){
   if(startupCoordinator.deferredHydrationStarted) return;
   startupCoordinator.deferredHydrationStarted = true;
-  scheduleDeferredStartupTask(() => {
+  scheduleNamedDeferredStartupTask('track_deferred_prerender', () => {
     renderWorkspaceSurface('track', {hydrated:false});
   }, {delayMs:80});
-  scheduleDeferredStartupTask(() => {
+  scheduleNamedDeferredStartupTask('diary_deferred_prerender', () => {
     renderWorkspaceSurface('diary', {includeAnalytics:false});
   }, {delayMs:180});
-  scheduleDeferredStartupTask(() => {
+  scheduleNamedDeferredStartupTask('planner_summary', () => {
     renderPlannerPlanSummary();
-    refreshRiskContextForActiveSetups({source:'startup_restore'});
   }, {delayMs:260});
-  scheduleDeferredStartupTask(() => {
+  scheduleNamedDeferredStartupTask('startup_risk_refresh', () => {
+    refreshRiskContextForActiveSetups({source:'startup_restore'});
+  }, {delayMs:320});
+  scheduleNamedDeferredStartupTask('tracked_state_hydration', () => {
     requestStartupTrackedStateHydration().finally(() => {
       startBackgroundMonitoringIfNeeded();
     });
   }, {delayMs:360, idle:false});
-  scheduleDeferredStartupTask(() => {
+  scheduleNamedDeferredStartupTask('tracked_state_persist_schedule', () => {
     scheduleTrackedRecordsSync(800);
   }, {delayMs:1200, idle:false});
-  scheduleDeferredStartupTask(() => {
-    const startupRefreshTickers = watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker).filter(Boolean);
+  scheduleNamedDeferredStartupTask('startup_watchlist_refresh', async () => {
+    const startupRefreshTickers = await collectStartupWatchlistRefreshTickersChunked();
     setWatchlistLiveRefreshPending(startupRefreshTickers, true);
     if(startupRefreshTickers.length){
       setStatus('scannerSelectionStatus', `<span class="ok">Refreshing ${escapeHtml(String(startupRefreshTickers.length))} watchlist ticker${startupRefreshTickers.length === 1 ? '' : 's'} from live data...</span>`);
@@ -2855,7 +2911,7 @@ function scheduleDeferredStartupHydration(){
       startupCoordinator.deferredHydrationComplete = true;
       return;
     }
-    refreshWatchlistRecordsFromSourceOfTruth({
+    return refreshWatchlistRecordsFromSourceOfTruth({
       source:'startup_restore',
       persist:true,
       render:true,
@@ -2894,7 +2950,7 @@ function startApplication(){
   setControlFocus(uiState.controlStripPanel || 'market', {scroll:false, instant:true});
   updateControlFocusRailVisuals($('controlFocusRail'));
   consumeResetNotice();
-  scheduleDeferredStartupTask(() => {
+  scheduleNamedDeferredStartupTask('startup_post_shell_bootstrap', () => {
     bootstrapMarketStatusClock();
     bootstrapWatchlistLifecycleAutomation();
     updateTickerSearchStatus();
@@ -18866,7 +18922,7 @@ function reviewHeaderVerdictForRecord(record){
 
 installRuntimeDebugHooks();
 registerPwa();
-scheduleDeferredStartupTask(startApplication, {idle:false});
+scheduleNamedDeferredStartupTask('startup_application_boot', startApplication, {idle:false});
 
 
 
