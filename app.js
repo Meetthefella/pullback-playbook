@@ -34,15 +34,27 @@ const startupCoordinator = {
   deferredHydrationStarted:false,
   deferredHydrationComplete:false,
   trackedStateHydrationPromise:null,
+  trackedStateHydrationResolved:false,
   backgroundMonitoringStarted:false,
   renderedTabs:{},
   trackHydratedRendered:false,
   diaryAnalyticsRendered:false,
-  startupRiskRefreshRunning:false
+  startupRiskRefreshRunning:false,
+  startupWatchlistRefreshDeferred:false,
+  startupWatchlistRefreshRunning:false,
+  startupWatchlistRefreshState:'idle',
+  startupWatchlistRefreshPromise:null
 };
 const deferredStartupQueue = [];
 let deferredStartupQueueRunning = false;
 let deferredStartupTaskSeq = 0;
+const STARTUP_HYDRATION_READY_FALLBACK_MS = 2500;
+let startupHydrationReadyResolved = false;
+let startupHydrationReadyResolve = null;
+let startupHydrationReadyFallbackTimer = null;
+const startupHydrationReadyPromise = new Promise(resolve => {
+  startupHydrationReadyResolve = resolve;
+});
 
 function perfMark(name){
   if(typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
@@ -67,6 +79,16 @@ function perfMeasure(name, startMark, endMark){
 
 function trackRenderRecordCount(){
   return watchlistTickerRecords().length;
+}
+
+function lightweightWatchlistRecordCount(){
+  const records = normalizeTickerRecordsMap(state.tickerRecords || {});
+  let count = 0;
+  Object.values(records).forEach(record => {
+    const normalized = normalizeTickerRecord(record);
+    if(normalized.watchlist && normalized.watchlist.inWatchlist) count += 1;
+  });
+  return count;
 }
 
 function measureTrackRender(kind, source, callback){
@@ -116,7 +138,7 @@ function measureTrackRender(kind, source, callback){
 
 function startupDebugRenderState(){
   return {
-    hydrationComplete:startupCoordinator.trackedStateHydrationPromise !== null,
+    hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
     riskRefreshComplete:startupCoordinator.startupRiskRefreshRunning !== true
   };
 }
@@ -304,12 +326,13 @@ async function runStartupRiskRefreshChunked(){
   }
   state.userRiskPerTrade = currentMaxLoss();
   state.maxRisk = state.userRiskPerTrade;
+  const chunkSize = 5;
   for(let index = 0; index < records.length; index += 1){
-    if(PP_PERF_DEBUG && index % 25 === 0){
+    if(PP_PERF_DEBUG && index % chunkSize === 0){
       console.debug('[PP_PERF] startup_risk_refresh', {
         phase:'chunk_start',
         source,
-        chunkIndex:Math.floor(index / 25),
+        chunkIndex:Math.floor(index / chunkSize),
         durationMs:null,
         recordCount:records.length,
         processed:index,
@@ -324,12 +347,12 @@ async function runStartupRiskRefreshChunked(){
         setLiveProcessStatus('action', `Recalculating watchlist ticker ${ticker} plan to fit new risk...`);
       }
     }
-    if(index > 0 && index % 25 === 0){
+    if(index > 0 && index % chunkSize === 0){
       if(PP_PERF_DEBUG){
         console.debug('[PP_PERF] startup_risk_refresh', {
           phase:'chunk_end',
           source,
-          chunkIndex:Math.floor(index / 25),
+          chunkIndex:Math.floor(index / chunkSize),
           durationMs:null,
           recordCount:records.length,
           processed:index,
@@ -348,10 +371,28 @@ async function runStartupRiskRefreshChunked(){
   commitTickerState();
   await yieldDeferredStartupChunk();
   renderStats();
-  renderScannerResults();
-  renderCards();
-  renderWatchlist();
-  renderFocusQueue();
+  if(activeWorkspaceTab() === 'track'){
+    renderWatchlist();
+    renderFocusQueue();
+  }else{
+    startupCoordinator.renderedTabs.track = false;
+    startupCoordinator.trackHydratedRendered = false;
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] track_render_skipped_hidden', {
+        source:'startup_risk_refresh',
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+  }
+  if(activeWorkspaceTab() === 'scan'){
+    renderScannerResults();
+    renderScannerRulesPanel();
+  }else if(activeWorkspaceTab() === 'review'){
+    renderCards();
+  }else if(activeWorkspaceTab() === 'diary'){
+    renderTradeDiary();
+  }
   perfMark('pp_startup_risk_refresh_end');
   const riskEntry = perfMeasure('pp_startup_risk_refresh', riskRefreshStartMark, 'pp_startup_risk_refresh_end');
   if(PP_PERF_DEBUG){
@@ -373,6 +414,162 @@ function startStartupRiskRefreshBackground(){
   startupCoordinator.startupRiskRefreshRunning = true;
   runStartupRiskRefreshChunked().catch(() => {}).finally(() => {
     startupCoordinator.startupRiskRefreshRunning = false;
+  });
+}
+
+function setStartupWatchlistRefreshState(nextState, source = '', extra = {}){
+  const stateValue = String(nextState || 'idle');
+  startupCoordinator.startupWatchlistRefreshState = stateValue;
+  startupCoordinator.startupWatchlistRefreshRunning = stateValue === 'running' || stateValue === 'waiting_for_hydration' || stateValue === 'scheduled';
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] startup_watchlist_refresh_state', {
+      state:stateValue,
+      source:String(source || ''),
+      activeTab:activeWorkspaceTab(),
+      ...startupDebugRenderState(),
+      ...extra
+    });
+  }
+}
+
+function resolveStartupHydrationReady(reason = 'unknown'){
+  if(startupHydrationReadyResolved) return;
+  startupHydrationReadyResolved = true;
+  startupCoordinator.trackedStateHydrationResolved = true;
+  if(startupHydrationReadyFallbackTimer){
+    clearTimeout(startupHydrationReadyFallbackTimer);
+    startupHydrationReadyFallbackTimer = null;
+  }
+  if(startupHydrationReadyResolve){
+    startupHydrationReadyResolve(true);
+    startupHydrationReadyResolve = null;
+  }
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] startup_hydration_ready', {
+      reason:String(reason || 'unknown'),
+      activeTab:activeWorkspaceTab(),
+      ...startupDebugRenderState()
+    });
+  }
+}
+
+function getTrackedStateHydrationReadyPromise(reason = 'startup_watchlist_refresh'){
+  if(startupHydrationReadyResolved) return Promise.resolve(true);
+  if(!startupHydrationReadyFallbackTimer){
+    startupHydrationReadyFallbackTimer = setTimeout(() => {
+      resolveStartupHydrationReady('fallback_timeout');
+    }, STARTUP_HYDRATION_READY_FALLBACK_MS);
+  }
+  if(!startupCoordinator.trackedStateHydrationPromise){
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] startup_refresh_wait_hydration', {
+        source:String(reason || 'startup_watchlist_refresh'),
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+    requestStartupTrackedStateHydration().finally(() => resolveStartupHydrationReady('hydration_complete'));
+  }
+  return startupHydrationReadyPromise;
+}
+
+function deferStartupTrackRefresh(tickers = [], reason = 'startup_hidden'){
+  startupCoordinator.startupWatchlistRefreshDeferred = Array.isArray(tickers) && tickers.length > 0;
+  setStartupWatchlistRefreshState('skipped_hidden', reason, {
+    deferred:startupCoordinator.startupWatchlistRefreshDeferred === true,
+    tickers:Array.isArray(tickers) ? tickers.length : 0
+  });
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] startup_refresh_lightweight_hidden', {
+      reason,
+      deferred:startupCoordinator.startupWatchlistRefreshDeferred === true,
+      tickers:Array.isArray(tickers) ? tickers.length : 0,
+      activeTab:activeWorkspaceTab(),
+      ...startupDebugRenderState()
+    });
+  }
+}
+
+function runStartupWatchlistRefreshCoordinator(options = {}){
+  const source = String(options.source || 'startup_refresh');
+  const trigger = String(options.trigger || 'scheduled');
+  const requireTrackVisible = options.requireTrackVisible !== false;
+  const isTrackActive = activeWorkspaceTab() === 'track';
+  if(requireTrackVisible && !isTrackActive){
+    return Promise.resolve({mode:'lightweight', skipped:true, reason:'track_hidden'});
+  }
+  const currentState = String(startupCoordinator.startupWatchlistRefreshState || 'idle');
+  if(currentState === 'complete'){
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] startup_refresh_skip_already_complete', {
+        source,
+        trigger,
+        state:currentState,
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+    return Promise.resolve(startupCoordinator.startupWatchlistRefreshPromise || null);
+  }
+  if(startupCoordinator.startupWatchlistRefreshPromise){
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] startup_refresh_join_existing', {
+        source,
+        trigger,
+        state:currentState,
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+    return startupCoordinator.startupWatchlistRefreshPromise;
+  }
+  setStartupWatchlistRefreshState('scheduled', source, {trigger});
+  let completedFullRefresh = false;
+  startupCoordinator.startupWatchlistRefreshPromise = Promise.resolve().then(async () => {
+    setStartupWatchlistRefreshState('waiting_for_hydration', source, {trigger});
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] startup_refresh_wait_hydration', {
+        source,
+        trigger,
+        activeTab:activeWorkspaceTab(),
+        ...startupDebugRenderState()
+      });
+    }
+    await getTrackedStateHydrationReadyPromise(source);
+    if(activeWorkspaceTab() !== 'track'){
+      startupCoordinator.startupWatchlistRefreshDeferred = true;
+      setStartupWatchlistRefreshState('skipped_hidden', source, {trigger, reason:'track_hidden_after_hydration'});
+      return {mode:'lightweight', skipped:true, reason:'track_hidden_after_hydration'};
+    }
+    setStartupWatchlistRefreshState('running', source, {trigger});
+    const summary = await refreshWatchlistRecordsFromSourceOfTruth({
+      source,
+      persist:true,
+      render:true,
+      renderProgress:true,
+      clearReviewOverride:false,
+      mode:'full'
+    });
+    completedFullRefresh = true;
+    return summary;
+  }).catch(() => null).finally(() => {
+    startupCoordinator.startupWatchlistRefreshPromise = null;
+    if(completedFullRefresh){
+      setStartupWatchlistRefreshState('complete', source, {trigger});
+    }else if(String(startupCoordinator.startupWatchlistRefreshState || '') !== 'skipped_hidden'){
+      setStartupWatchlistRefreshState('idle', source, {trigger});
+    }
+  });
+  return startupCoordinator.startupWatchlistRefreshPromise;
+}
+
+function maybeStartDeferredTrackStartupRefresh(reason = 'track_open'){
+  if(!startupCoordinator.startupWatchlistRefreshDeferred) return;
+  startupCoordinator.startupWatchlistRefreshDeferred = false;
+  runStartupWatchlistRefreshCoordinator({
+    source:'startup_refresh_full_user_open',
+    trigger:String(reason || 'user_open'),
+    requireTrackVisible:true
   });
 }
 
@@ -3036,6 +3233,9 @@ function renderWorkspaceSurface(tab, options = {}){
     });
     startupCoordinator.renderedTabs.track = true;
     if(options.hydrated === true) startupCoordinator.trackHydratedRendered = true;
+    if(options.userOpened === true){
+      maybeStartDeferredTrackStartupRefresh(options.reason || 'track_user_open');
+    }
     return;
   }
   renderTradeDiary();
@@ -3092,8 +3292,9 @@ function applyTrackedStateHydrationMerge(){
   startupCoordinator.trackHydratedRendered = false;
   startupCoordinator.renderedTabs.track = false;
   if(PP_PERF_DEBUG){
-    console.debug('[PP_PERF] track_invalidated_after_hydration', {
+    console.debug('[PP_PERF] track_invalidated', {
       watchlistRecords:trackRenderRecordCount(),
+      reason:'tracked_state_hydration',
       activeTab:activeWorkspaceTab()
     });
   }
@@ -3113,6 +3314,7 @@ function applyTrackedStateHydrationMerge(){
 
 function requestStartupTrackedStateHydration(){
   if(startupCoordinator.trackedStateHydrationPromise) return startupCoordinator.trackedStateHydrationPromise;
+  startupCoordinator.trackedStateHydrationResolved = false;
   perfMark('pp_tracked_state_fetch_start');
   startupCoordinator.trackedStateHydrationPromise = pullTrackedRecordsFromBackend({
     reason:'startup_hydration',
@@ -3126,6 +3328,8 @@ function requestStartupTrackedStateHydration(){
     perfMark('pp_tracked_state_fetch_end');
     perfMeasure('pp_tracked_state_fetch', 'pp_tracked_state_fetch_start', 'pp_tracked_state_fetch_end');
     return false;
+  }).finally(() => {
+    resolveStartupHydrationReady('hydration_complete');
   });
   return startupCoordinator.trackedStateHydrationPromise;
 }
@@ -3139,8 +3343,13 @@ function startBackgroundMonitoringIfNeeded(){
 function scheduleDeferredStartupHydration(){
   if(startupCoordinator.deferredHydrationStarted) return;
   startupCoordinator.deferredHydrationStarted = true;
-  scheduleNamedDeferredStartupTask('track_deferred_prerender', () => {
-    renderWorkspaceSurface('track', {hydrated:false});
+  scheduleNamedDeferredStartupTask('track_deferred_prerender', async () => {
+    if(activeWorkspaceTab() !== 'track'){
+      const startupRefreshTickers = await collectStartupWatchlistRefreshTickersChunked();
+      deferStartupTrackRefresh(startupRefreshTickers, 'startup_track_hidden');
+      return;
+    }
+    renderWorkspaceSurface('track', {hydrated:false, reason:'track_deferred_prerender'});
   }, {delayMs:80});
   scheduleNamedDeferredStartupTask('diary_deferred_prerender', () => {
     renderWorkspaceSurface('diary', {includeAnalytics:false});
@@ -3160,23 +3369,39 @@ function scheduleDeferredStartupHydration(){
     scheduleTrackedRecordsSync(800);
   }, {delayMs:1200, idle:false});
   scheduleNamedDeferredStartupTask('startup_watchlist_refresh', async () => {
-    const startupRefreshTickers = await collectStartupWatchlistRefreshTickersChunked();
-    setWatchlistLiveRefreshPending(startupRefreshTickers, true);
-    if(startupRefreshTickers.length){
-      setStatus('scannerSelectionStatus', `<span class="ok">Refreshing ${escapeHtml(String(startupRefreshTickers.length))} watchlist ticker${startupRefreshTickers.length === 1 ? '' : 's'} from live data...</span>`);
-      setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
-    }else{
+    const mode = activeWorkspaceTab() === 'track' ? 'full' : 'lightweight';
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] watchlist_refresh', {
+        phase:'start',
+        source:'startup_watchlist_refresh',
+        mode,
+        durationMs:null,
+        recordCount:lightweightWatchlistRecordCount(),
+        ...startupDebugRenderState()
+      });
+    }
+    if(activeWorkspaceTab() !== 'track'){
+      const startupRefreshTickers = await collectStartupWatchlistRefreshTickersChunked();
+      deferStartupTrackRefresh(startupRefreshTickers, 'startup_watchlist_hidden');
       setLiveProcessStatus('idle', 'Idle.');
       stopStartupStatusContextCycle();
       startupCoordinator.deferredHydrationComplete = true;
+      if(PP_PERF_DEBUG){
+        console.debug('[PP_PERF] watchlist_refresh', {
+          phase:'end',
+          source:'startup_watchlist_refresh',
+          mode:'lightweight',
+          durationMs:null,
+          recordCount:lightweightWatchlistRecordCount(),
+          ...startupDebugRenderState()
+        });
+      }
       return;
     }
-    return refreshWatchlistRecordsFromSourceOfTruth({
-      source:'startup_restore',
-      persist:true,
-      render:true,
-      renderProgress:true,
-      clearReviewOverride:false
+    return runStartupWatchlistRefreshCoordinator({
+      source:'startup_refresh_full_scheduled',
+      trigger:'scheduled',
+      requireTrackVisible:true
     }).then(summary => {
       if(!summary || !summary.attempted) return;
       const message = summary.failed
@@ -14664,11 +14889,13 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
 
 async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
   const source = String(options.source || 'startup_restore');
+  const mode = String(options.mode || 'full');
   perfMark('pp_watchlist_refresh_start');
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] watchlist_refresh', {
       phase:'start',
       source,
+      mode,
       durationMs:null,
       recordCount:watchlistTickerRecords().length,
       ...startupDebugRenderState()
@@ -14681,6 +14908,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
       console.debug('[PP_PERF] watchlist_refresh', {
         phase:'end',
         source,
+        mode,
         durationMs:watchlistRefreshEntry ? Number(watchlistRefreshEntry.duration.toFixed(1)) : null,
         recordCount:watchlistTickerRecords().length,
         attempted:summary && summary.attempted,
