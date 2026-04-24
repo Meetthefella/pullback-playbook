@@ -18,6 +18,82 @@ const savedScannerUniverseKey = 'pp_scanner_universe_saved';
 const savedScannerUniverseMetaKey = 'pp_scanner_universe_saved_meta';
 const DEFAULT_PROVIDER = 'fmp';
 const DEFAULT_API_PLAN = 'scanner';
+const PP_PERF_DEBUG = typeof window !== 'undefined' && window.PP_PERF_DEBUG === true;
+const startupCoordinator = {
+  shellRendered:false,
+  localStateLoaded:false,
+  deferredHydrationStarted:false,
+  deferredHydrationComplete:false,
+  trackedStateHydrationPromise:null,
+  backgroundMonitoringStarted:false,
+  renderedTabs:{},
+  trackHydratedRendered:false,
+  diaryAnalyticsRendered:false
+};
+
+function perfMark(name){
+  if(typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
+  try{
+    performance.mark(name);
+    if(PP_PERF_DEBUG) console.debug(`[PP_PERF] mark ${name}`);
+  }catch(error){}
+}
+
+function perfMeasure(name, startMark, endMark){
+  if(typeof performance === 'undefined' || typeof performance.measure !== 'function') return null;
+  try{
+    performance.measure(name, startMark, endMark);
+    const entries = performance.getEntriesByName(name);
+    const entry = entries && entries.length ? entries[entries.length - 1] : null;
+    if(PP_PERF_DEBUG && entry) console.debug(`[PP_PERF] ${name}: ${entry.duration.toFixed(1)}ms`);
+    return entry;
+  }catch(error){
+    return null;
+  }
+}
+
+function trackRenderRecordCount(){
+  return watchlistTickerRecords().length;
+}
+
+function measureTrackRender(kind, callback){
+  const safeKind = String(kind || 'unknown');
+  const startMark = `pp_track_${safeKind}_start`;
+  const endMark = `pp_track_${safeKind}_end`;
+  const measureName = `pp_track_${safeKind}`;
+  const recordCountBefore = trackRenderRecordCount();
+  perfMark(startMark);
+  callback();
+  perfMark(endMark);
+  const entry = perfMeasure(measureName, startMark, endMark);
+  if(PP_PERF_DEBUG){
+    const recordCountAfter = trackRenderRecordCount();
+    console.debug('[PP_PERF] track_render', {
+      kind:safeKind,
+      durationMs:entry ? Number(entry.duration.toFixed(1)) : null,
+      watchlistRecords:recordCountAfter,
+      watchlistRecordsBefore:recordCountBefore,
+      watchlistRecordsAfter:recordCountAfter
+    });
+  }
+}
+
+function scheduleDeferredStartupTask(callback, options = {}){
+  const runner = () => {
+    if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function' && options.idle !== false){
+      window.requestIdleCallback(() => callback(), {timeout:Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 1000});
+      return;
+    }
+    setTimeout(callback, 0);
+  };
+  const delayMs = Number.isFinite(Number(options.delayMs)) ? Math.max(0, Number(options.delayMs)) : 0;
+  if(delayMs > 0){
+    setTimeout(runner, delayMs);
+    return;
+  }
+  runner();
+}
+perfMark('pp_script_start');
 
 // ---------------------------------------------------------------------------
 // Bridge modules extracted from app.js.
@@ -381,7 +457,10 @@ if(typeof window !== 'undefined'){
     return pullTrackedRecordsFromBackend({force:true, reason:'manual_retry'});
   };
 }
-const appShell = createAppShell({uiState});
+const appShell = createAppShell({
+  uiState,
+  onTabChange:handleWorkspaceTabChange
+});
 const workspaceAnchorTabMap = {
   '#resultsSection':'scan',
   '#reviewSection':'review',
@@ -1100,7 +1179,10 @@ async function ensurePushSubscription(registration, options = {}){
 }
 
 function bootstrapBackgroundMonitoring(){
-  trackedStateService.bootstrapBackgroundMonitoring(BACKEND_REVIEW_POLL_MS);
+  trackedStateService.bootstrapBackgroundMonitoring(BACKEND_REVIEW_POLL_MS, {
+    initialPull:false,
+    reason:'startup_background_monitoring'
+  });
 }
 
 function bootstrapMarketStatusClock(){
@@ -2474,6 +2556,7 @@ function setScannerSessionResults(tickers, scannedAt){
 }
 
 function loadState(){
+  perfMark('pp_local_state_restore_start');
   startStartupStatusContextCycle();
   const fullStorageInfo = inspectStorageKey(key);
   const liteStorageInfo = inspectStorageKey(liteKey);
@@ -2560,7 +2643,6 @@ function loadState(){
     });
   });
   ensureActiveQueueCycle();
-  scheduleTrackedRecordsSync(200);
   persistState();
   $('accountSize').value = state.accountSize;
   if($('riskPercent')) $('riskPercent').value = state.riskPercent;
@@ -2596,55 +2678,13 @@ function loadState(){
   renderSavedScannerUniverseSnapshot();
   clearOcrReview();
   syncOcrReviewVisibility();
-  renderScannerResults();
-  renderCards();
-  renderScannerRulesPanel();
+  renderActiveWorkspaceSurface({reason:'startup_local_restore'});
   uiState.watchlistLiveRefreshPending = {};
   uiState.watchlistManualRefreshInProgress = {};
-  const startupRefreshTickers = watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker).filter(Boolean);
-  setWatchlistLiveRefreshPending(startupRefreshTickers, true);
-  renderWatchlist();
-  renderTradeDiary();
-  renderPatternAnalytics();
-  renderPlannerPlanSummary();
-  refreshRiskContextForActiveSetups();
-  if(startupRefreshTickers.length){
-    setStatus('scannerSelectionStatus', `<span class="ok">Refreshing ${escapeHtml(String(startupRefreshTickers.length))} watchlist ticker${startupRefreshTickers.length === 1 ? '' : 's'} from live data...</span>`);
-    setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
-  }else{
-    setLiveProcessStatus('idle', 'Idle.');
-  }
-  const runStartupWatchlistRefresh = () => {
-    refreshWatchlistRecordsFromSourceOfTruth({
-      source:'startup_restore',
-      persist:true,
-      render:true,
-      renderProgress:true,
-      clearReviewOverride:false
-    }).then(summary => {
-      if(!summary || !summary.attempted) return;
-      const message = summary.failed
-        ? `Startup refresh checked ${summary.refreshed}/${summary.attempted} watchlist ticker${summary.attempted === 1 ? '' : 's'} from live data.`
-        : `Startup refresh checked ${summary.refreshed} watchlist ticker${summary.refreshed === 1 ? '' : 's'} from live data.`;
-      setStatus('scannerSelectionStatus', `<span class="${summary.failed ? 'warntext' : 'ok'}">${escapeHtml(message)}</span>`);
-      if(summary.failed && summary.refreshed === 0){
-        setLiveProcessStatus('error', 'Refresh failed.');
-      }else{
-        setLiveProcessStatus('idle', 'Idle.');
-      }
-    }).catch(() => {
-      setStatus('scannerSelectionStatus', '<span class="warntext">Startup watchlist refresh could not complete. Kept saved watchlist state active locally.</span>');
-      setLiveProcessStatus('error', 'Refresh failed.');
-    }).finally(() => {
-      stopStartupStatusContextCycle();
-    });
-  };
-  // Let persisted UI paint first; startup market refresh runs as background enhancement.
-  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-    window.requestAnimationFrame(() => runStartupWatchlistRefresh());
-  }else{
-    setTimeout(runStartupWatchlistRefresh, 0);
-  }
+  perfMark('pp_local_state_restore_end');
+  perfMeasure('pp_local_state_restore', 'pp_local_state_restore_start', 'pp_local_state_restore_end');
+  startupCoordinator.localStateLoaded = true;
+  scheduleDeferredStartupHydration();
 }
 
 function renderStats(){
@@ -2667,6 +2707,199 @@ function renderStats(){
   renderRiskQuickPanel();
   renderControlStripSelector();
   refreshMarketContextWidgets(marketContextModel);
+}
+
+function renderWorkspaceSurface(tab, options = {}){
+  const targetTab = ['scan', 'review', 'track', 'diary'].includes(String(tab || '').toLowerCase())
+    ? String(tab).toLowerCase()
+    : 'scan';
+  if(targetTab === 'scan'){
+    perfMark('pp_scanner_render_start');
+    renderScannerResults();
+    renderScannerRulesPanel();
+    perfMark('pp_scanner_render_end');
+    perfMeasure('pp_scanner_render', 'pp_scanner_render_start', 'pp_scanner_render_end');
+    startupCoordinator.renderedTabs.scan = true;
+    return;
+  }
+  if(targetTab === 'review'){
+    renderCards();
+    startupCoordinator.renderedTabs.review = true;
+    return;
+  }
+  if(targetTab === 'track'){
+    const trackRenderKind = options.userOpened === true
+      ? 'user_opened'
+      : (options.hydrated === true ? 'hydrated' : 'deferred');
+    measureTrackRender(trackRenderKind, () => {
+      perfMark('pp_watchlist_render_start');
+      renderWatchlist();
+      renderFocusQueue();
+      perfMark('pp_watchlist_render_end');
+      perfMeasure('pp_watchlist_render', 'pp_watchlist_render_start', 'pp_watchlist_render_end');
+    });
+    startupCoordinator.renderedTabs.track = true;
+    if(options.hydrated === true) startupCoordinator.trackHydratedRendered = true;
+    return;
+  }
+  renderTradeDiary();
+  startupCoordinator.renderedTabs.diary = true;
+  if(options.includeAnalytics === true){
+    renderPatternAnalytics();
+    startupCoordinator.diaryAnalyticsRendered = true;
+  }
+}
+
+function renderActiveWorkspaceSurface(options = {}){
+  const tab = activeWorkspaceTab();
+  renderWorkspaceSurface(tab, {
+    ...options,
+    includeAnalytics:options.includeAnalytics === true || tab === 'diary',
+    hydrated:options.hydrated === true || (tab === 'track' && startupCoordinator.trackedStateHydrationPromise !== null)
+  });
+}
+
+function handleWorkspaceTabChange(tab){
+  if(!startupCoordinator.localStateLoaded) return;
+  const nextTab = String(tab || '').toLowerCase();
+  if(nextTab === 'track'){
+    if(startupCoordinator.renderedTabs.track && startupCoordinator.trackHydratedRendered) return;
+  }else if(nextTab === 'diary'){
+    if(startupCoordinator.renderedTabs.diary && startupCoordinator.diaryAnalyticsRendered) return;
+  }else if(startupCoordinator.renderedTabs[nextTab]){
+    return;
+  }
+  scheduleDeferredStartupTask(() => {
+    renderWorkspaceSurface(tab, {
+      includeAnalytics:nextTab === 'diary',
+      hydrated:nextTab === 'track' && startupCoordinator.trackedStateHydrationPromise !== null,
+      userOpened:nextTab === 'track'
+    });
+  }, {idle:false});
+}
+
+function applyTrackedStateHydrationMerge(){
+  perfMark('pp_remote_merge_start');
+  renderStats();
+  renderTickerQuickLists();
+  renderFinalUniversePreview();
+  renderSavedScannerUniverseSnapshot();
+  startupCoordinator.trackHydratedRendered = false;
+  startupCoordinator.renderedTabs.track = false;
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] track_invalidated_after_hydration', {
+      watchlistRecords:trackRenderRecordCount(),
+      activeTab:activeWorkspaceTab()
+    });
+  }
+  renderActiveWorkspaceSurface({reason:'startup_remote_merge'});
+  perfMark('pp_remote_merge_end');
+  perfMeasure('pp_remote_merge', 'pp_remote_merge_start', 'pp_remote_merge_end');
+}
+
+function requestStartupTrackedStateHydration(){
+  if(startupCoordinator.trackedStateHydrationPromise) return startupCoordinator.trackedStateHydrationPromise;
+  perfMark('pp_tracked_state_fetch_start');
+  startupCoordinator.trackedStateHydrationPromise = pullTrackedRecordsFromBackend({
+    reason:'startup_hydration',
+    render:false
+  }).then(changed => {
+    perfMark('pp_tracked_state_fetch_end');
+    perfMeasure('pp_tracked_state_fetch', 'pp_tracked_state_fetch_start', 'pp_tracked_state_fetch_end');
+    if(changed) applyTrackedStateHydrationMerge();
+    return changed;
+  }).catch(error => {
+    perfMark('pp_tracked_state_fetch_end');
+    perfMeasure('pp_tracked_state_fetch', 'pp_tracked_state_fetch_start', 'pp_tracked_state_fetch_end');
+    return false;
+  });
+  return startupCoordinator.trackedStateHydrationPromise;
+}
+
+function startBackgroundMonitoringIfNeeded(){
+  if(startupCoordinator.backgroundMonitoringStarted) return;
+  startupCoordinator.backgroundMonitoringStarted = true;
+  bootstrapBackgroundMonitoring();
+}
+
+function scheduleDeferredStartupHydration(){
+  if(startupCoordinator.deferredHydrationStarted) return;
+  startupCoordinator.deferredHydrationStarted = true;
+  scheduleDeferredStartupTask(() => {
+    renderWorkspaceSurface('track', {hydrated:false});
+  }, {delayMs:80});
+  scheduleDeferredStartupTask(() => {
+    renderWorkspaceSurface('diary', {includeAnalytics:false});
+  }, {delayMs:180});
+  scheduleDeferredStartupTask(() => {
+    renderPlannerPlanSummary();
+    refreshRiskContextForActiveSetups({source:'startup_restore'});
+  }, {delayMs:260});
+  scheduleDeferredStartupTask(() => {
+    requestStartupTrackedStateHydration().finally(() => {
+      startBackgroundMonitoringIfNeeded();
+    });
+  }, {delayMs:360, idle:false});
+  scheduleDeferredStartupTask(() => {
+    scheduleTrackedRecordsSync(800);
+  }, {delayMs:1200, idle:false});
+  scheduleDeferredStartupTask(() => {
+    const startupRefreshTickers = watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker).filter(Boolean);
+    setWatchlistLiveRefreshPending(startupRefreshTickers, true);
+    if(startupRefreshTickers.length){
+      setStatus('scannerSelectionStatus', `<span class="ok">Refreshing ${escapeHtml(String(startupRefreshTickers.length))} watchlist ticker${startupRefreshTickers.length === 1 ? '' : 's'} from live data...</span>`);
+      setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
+    }else{
+      setLiveProcessStatus('idle', 'Idle.');
+      stopStartupStatusContextCycle();
+      startupCoordinator.deferredHydrationComplete = true;
+      return;
+    }
+    refreshWatchlistRecordsFromSourceOfTruth({
+      source:'startup_restore',
+      persist:true,
+      render:true,
+      renderProgress:true,
+      clearReviewOverride:false
+    }).then(summary => {
+      if(!summary || !summary.attempted) return;
+      const message = summary.failed
+        ? `Startup refresh checked ${summary.refreshed}/${summary.attempted} watchlist ticker${summary.attempted === 1 ? '' : 's'} from live data.`
+        : `Startup refresh checked ${summary.refreshed} watchlist ticker${summary.refreshed === 1 ? '' : 's'} from live data.`;
+      setStatus('scannerSelectionStatus', `<span class="${summary.failed ? 'warntext' : 'ok'}">${escapeHtml(message)}</span>`);
+      if(summary.failed && summary.refreshed === 0){
+        setLiveProcessStatus('error', 'Refresh failed.');
+      }else{
+        setLiveProcessStatus('idle', 'Idle.');
+      }
+    }).catch(() => {
+      setStatus('scannerSelectionStatus', '<span class="warntext">Startup watchlist refresh could not complete. Kept saved watchlist state active locally.</span>');
+      setLiveProcessStatus('error', 'Refresh failed.');
+    }).finally(() => {
+      stopStartupStatusContextCycle();
+      startupCoordinator.deferredHydrationComplete = true;
+    });
+  }, {delayMs:700, idle:false});
+}
+
+function startApplication(){
+  perfMark('pp_shell_render_start');
+  appShell.init();
+  bindWorkspaceAnchorBridge();
+  perfMark('pp_shell_render_end');
+  perfMeasure('pp_shell_render', 'pp_shell_render_start', 'pp_shell_render_end');
+  startupCoordinator.shellRendered = true;
+  loadState();
+  renderRuntimeDebugPanel();
+  setControlFocus(uiState.controlStripPanel || 'market', {scroll:false, instant:true});
+  updateControlFocusRailVisuals($('controlFocusRail'));
+  consumeResetNotice();
+  scheduleDeferredStartupTask(() => {
+    bootstrapMarketStatusClock();
+    bootstrapWatchlistLifecycleAutomation();
+    updateTickerSearchStatus();
+    updateProviderStatusNote();
+  }, {delayMs:120, idle:false});
 }
 
 function renderContextHeaderMode(){
@@ -16864,7 +17097,7 @@ function registerPwa(){
       sessionStorage.setItem(reloadGuardKey, '1');
       window.location.reload();
     });
-    navigator.serviceWorker.register(`./service-worker.js?v=${encodeURIComponent(buildVersion)}`, {updateViaCache:'none'}).then(registration => {
+    navigator.serviceWorker.register(`./service-worker.js?v=${encodeURIComponent(buildVersion)}`, {updateViaCache:'imports'}).then(registration => {
       registration.addEventListener('updatefound', () => {
         const worker = registration.installing;
         if(!worker) return;
@@ -16874,7 +17107,6 @@ function registerPwa(){
           }
         });
       });
-      registration.update().catch(() => {});
     }).catch(() => {});
   });
 }
@@ -18634,18 +18866,7 @@ function reviewHeaderVerdictForRecord(record){
 
 installRuntimeDebugHooks();
 registerPwa();
-appShell.init();
-bindWorkspaceAnchorBridge();
-loadState();
-renderRuntimeDebugPanel();
-setControlFocus(uiState.controlStripPanel || 'market', {scroll:false, instant:true});
-updateControlFocusRailVisuals($('controlFocusRail'));
-consumeResetNotice();
-bootstrapBackgroundMonitoring();
-bootstrapMarketStatusClock();
-bootstrapWatchlistLifecycleAutomation();
-updateTickerSearchStatus();
-updateProviderStatusNote();
+scheduleDeferredStartupTask(startApplication, {idle:false});
 
 
 

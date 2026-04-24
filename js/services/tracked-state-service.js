@@ -6,6 +6,7 @@
     let trackedStatePersistInFlight = false;
     let trackedStatePersistFollowUp = false;
     let trackedStatePersistLastSuccessfulSignature = '';
+    let trackedStatePullInFlightPromise = null;
     let trackedStateBackendUnavailable = !!(deps.state && deps.state.trackedStateBackendUnavailable === true);
     let trackedStateBackendUnavailableNotified = !!(deps.state && deps.state.trackedStateBackendUnavailableNotified === true);
 
@@ -217,11 +218,16 @@
     }
 
     async function pullTrackedRecordsFromBackend(options = {}){
+      if(trackedStatePullInFlightPromise){
+        deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PULL_REUSE_IN_FLIGHT', {reason:String(options.reason || 'in_flight')});
+        return trackedStatePullInFlightPromise;
+      }
       if(trackedStateBackendUnavailable && options.force !== true){
         deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PULL_SKIP_BACKEND_UNAVAILABLE', {reason:String(options.reason || 'backend_unavailable')});
         return false;
       }
-      try{
+      trackedStatePullInFlightPromise = (async () => {
+        try{
         const response = await deps.fetchJsonWithTimeout(trackedStateEndpoint(), {method:'GET'});
         if(response.status === 403 || response.status === 401){
           updateTrackedStateBackendAvailability(true, {status:response.status, source:'pull'});
@@ -257,14 +263,18 @@
         return changed;
       }catch(error){
         return false;
+      }finally{
+        trackedStatePullInFlightPromise = null;
       }
+      })();
+      return trackedStatePullInFlightPromise;
     }
 
-    function bootstrapBackgroundMonitoring(pollMs){
-      pullTrackedRecordsFromBackend();
+    function bootstrapBackgroundMonitoring(pollMs, options = {}){
+      if(options.initialPull !== false) pullTrackedRecordsFromBackend({reason:String(options.reason || 'background_bootstrap')});
       clearInterval(backendRefreshTimer);
       backendRefreshTimer = setInterval(() => {
-        pullTrackedRecordsFromBackend();
+        pullTrackedRecordsFromBackend({reason:'background_poll'});
       }, pollMs);
     }
 

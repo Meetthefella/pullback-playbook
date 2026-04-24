@@ -19,6 +19,11 @@ function isStaticAssetRequest(request){
   return ['style', 'script', 'image', 'font'].includes(request.destination);
 }
 
+function isVersionedAssetRequest(request){
+  const url = new URL(request.url);
+  return !!url.searchParams.get('v');
+}
+
 async function putInCache(request, response){
   if(!response || !response.ok) return response;
   const cache = await caches.open(CACHE);
@@ -62,16 +67,17 @@ self.addEventListener('fetch', event => {
   }
 
   if(isStaticAssetRequest(event.request)){
-    if(event.request.destination === 'script'){
-      event.respondWith(
-        fetch(event.request)
-          .then(response => putInCache(event.request, response))
-          .catch(() => caches.match(event.request))
-      );
-      return;
-    }
     event.respondWith(
       caches.match(event.request).then(cached => {
+        const shouldPreferCache = cached && (event.request.destination === 'script' || isVersionedAssetRequest(event.request));
+        if(shouldPreferCache){
+          event.waitUntil(
+            fetch(event.request)
+              .then(response => putInCache(event.request, response))
+              .catch(() => null)
+          );
+          return cached;
+        }
         if(cached) return cached;
         return fetch(event.request).then(response => putInCache(event.request, response));
       })
