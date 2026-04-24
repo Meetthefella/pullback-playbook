@@ -62,10 +62,18 @@ const startupCoordinator = {
 const deferredStartupQueue = [];
 let deferredStartupQueueRunning = false;
 let deferredStartupTaskSeq = 0;
+const RISK_RECALC_DEBOUNCE_MS = 140;
+const RISK_RECALC_CHUNK_BUDGET_MS = 45;
+const RISK_RECALC_MAX_ITEMS_PER_CHUNK = 6;
 const STARTUP_HYDRATION_READY_FALLBACK_MS = 2500;
 let startupHydrationReadyResolved = false;
 let startupHydrationReadyResolve = null;
 let startupHydrationReadyFallbackTimer = null;
+let riskSettingsRecalcTimer = null;
+let riskSettingsRecalcRunning = false;
+let riskSettingsRecalcQueued = false;
+let riskSettingsRecalcSequence = 0;
+let riskSettingsRecalcPendingSource = '';
 const startupHydrationReadyPromise = new Promise(resolve => {
   startupHydrationReadyResolve = resolve;
 });
@@ -76,6 +84,17 @@ function perfMark(name){
     performance.mark(name);
     if(PP_PERF_DEBUG) console.debug(`[PP_PERF] mark ${name}`);
   }catch(error){}
+}
+
+function nowPerfMs(){
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
+function logRiskPerf(eventName, payload = {}){
+  if(!PP_PERF_DEBUG) return;
+  console.debug(`[PP_PERF] ${eventName}`, payload);
 }
 
 function perfMeasure(name, startMark, endMark){
@@ -3338,6 +3357,14 @@ function loadState(){
   const liteState = safeStorageGet(liteKey, {}) || {};
   const fullState = safeStorageGet(key, {}) || {};
   Object.assign(state, createDefaultState(), settingsState, recordsLiteState, liteState, fullState);
+  // Keep risk/account controls resilient when full-state persists lag behind
+  // quick settings writes (for example immediate reload after a risk change).
+  if(Object.prototype.hasOwnProperty.call(settingsState, 'accountSize')) state.accountSize = settingsState.accountSize;
+  if(Object.prototype.hasOwnProperty.call(settingsState, 'riskPercent')) state.riskPercent = settingsState.riskPercent;
+  if(Object.prototype.hasOwnProperty.call(settingsState, 'maxLossOverride')) state.maxLossOverride = settingsState.maxLossOverride;
+  if(Object.prototype.hasOwnProperty.call(settingsState, 'wholeSharesOnly')) state.wholeSharesOnly = settingsState.wholeSharesOnly;
+  if(Object.prototype.hasOwnProperty.call(settingsState, 'userRiskPerTrade')) state.userRiskPerTrade = settingsState.userRiskPerTrade;
+  if(Object.prototype.hasOwnProperty.call(settingsState, 'maxRisk')) state.maxRisk = settingsState.maxRisk;
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
   clearScannerSessionState({suppressed:false});
@@ -3808,6 +3835,13 @@ function scheduleDeferredStartupHydration(){
   scheduleNamedDeferredStartupTask('planner_summary', () => {
     renderPlannerPlanSummary();
   }, {delayMs:260});
+  scheduleNamedDeferredStartupTask('watchlist_model_cache_warmup', () => {
+    if(activeWorkspaceTab() === 'track') return;
+    prepareWatchlistRenderModel('startup_watchlist_cache_warmup', {
+      lightweight:true,
+      allowCache:false
+    });
+  }, {delayMs:300});
   scheduleNamedDeferredStartupTask('startup_risk_refresh', () => {
     startStartupRiskRefreshBackground();
   }, {delayMs:320});
@@ -4045,7 +4079,300 @@ function queueRiskContextRefresh(source = 'risk_quick'){
   }
   riskQuickRefreshRaf = requestAnimationFrame(() => {
     riskQuickRefreshRaf = 0;
-    refreshRiskContextForActiveSetups({source, force:true});
+    scheduleRiskContextRefresh({
+      source,
+      force:true,
+      debounceMs:RISK_RECALC_DEBOUNCE_MS
+    });
+  });
+}
+
+function markHiddenTabsDirtyForRiskRefresh(source = 'risk_settings_change'){
+  const activeTab = activeWorkspaceTab();
+  const hidden = [];
+  if(activeTab !== 'scan'){
+    startupCoordinator.renderedTabs.scan = false;
+    hidden.push('scan');
+  }
+  if(activeTab !== 'review'){
+    startupCoordinator.renderedTabs.review = false;
+    hidden.push('review');
+  }
+  if(activeTab !== 'track'){
+    markWatchlistDirty(null, `${source}_hidden`);
+    startupCoordinator.renderedTabs.track = false;
+    startupCoordinator.trackHydratedRendered = false;
+    startupCoordinator.trackNeedsHydratedRender = true;
+    hidden.push('track');
+  }
+  if(activeTab !== 'diary'){
+    startupCoordinator.renderedTabs.diary = false;
+    startupCoordinator.diaryAnalyticsRendered = false;
+    hidden.push('diary');
+  }
+  logRiskPerf('hidden_tabs_marked_dirty', {
+    source,
+    activeTab,
+    hiddenTabs:hidden,
+    hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
+    riskRefreshComplete:riskSettingsRecalcRunning !== true
+  });
+}
+
+function syncRiskSettingsFromDom(){
+  const accountValue = $('accountSize') ? $('accountSize').value : state.accountSize;
+  const riskPercentValue = $('riskPercent') ? $('riskPercent').value : state.riskPercent;
+  const maxLossOverrideValue = $('maxLossOverride') ? $('maxLossOverride').value : state.maxLossOverride;
+  const wholeSharesValue = $('wholeSharesOnly') ? !!$('wholeSharesOnly').checked : state.wholeSharesOnly !== false;
+  state.accountSize = Number(accountValue || 0);
+  state.riskPercent = normalizeRiskPercentInput(riskPercentValue, 1);
+  state.maxLossOverride = maxLossOverrideValue == null ? '' : String(maxLossOverrideValue).trim();
+  state.wholeSharesOnly = wholeSharesValue !== false;
+  state.userRiskPerTrade = currentMaxLoss();
+  state.maxRisk = state.userRiskPerTrade;
+}
+
+function persistRiskSettingsQuick(){
+  const startedAt = nowPerfMs();
+  safeStorageSet(settingsKey, buildSettingsPersistedState(state));
+  const durationMs = Number((nowPerfMs() - startedAt).toFixed(1));
+  logRiskPerf('risk_settings_storage_write', {
+    durationMs,
+    storage:'localStorage.settings'
+  });
+}
+
+function scheduleRiskContextRefresh(options = {}){
+  const source = String(options.source || 'risk_settings_change');
+  const force = options.force === true;
+  const debounceMs = Number.isFinite(Number(options.debounceMs))
+    ? Math.max(0, Number(options.debounceMs))
+    : RISK_RECALC_DEBOUNCE_MS;
+  riskSettingsRecalcPendingSource = source;
+  if(riskSettingsRecalcTimer){
+    clearTimeout(riskSettingsRecalcTimer);
+    riskSettingsRecalcTimer = null;
+  }
+  const seq = ++riskSettingsRecalcSequence;
+  logRiskPerf('risk_recalc_scheduled', {
+    source,
+    sequence:seq,
+    debounceMs,
+    force,
+    queuePending:riskSettingsRecalcRunning === true
+  });
+  riskSettingsRecalcTimer = setTimeout(() => {
+    riskSettingsRecalcTimer = null;
+    if(riskSettingsRecalcRunning){
+      riskSettingsRecalcQueued = true;
+      return;
+    }
+    runRiskContextRefreshChunked({source:riskSettingsRecalcPendingSource || source, force}).catch(() => {}).finally(() => {
+      if(riskSettingsRecalcQueued){
+        riskSettingsRecalcQueued = false;
+        scheduleRiskContextRefresh({
+          source:riskSettingsRecalcPendingSource || source,
+          force:true,
+          debounceMs:80
+        });
+      }
+    });
+  }, debounceMs);
+}
+
+async function runRiskContextRefreshChunked(options = {}){
+  const source = String(options.source || 'risk_settings_change');
+  const startedAt = nowPerfMs();
+  riskSettingsRecalcRunning = true;
+  try{
+    const riskDiagnosticRequested = /risk|account|max_loss|whole_shares|risk_/i.test(source);
+    const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+      ? String(uiState.liveProcessStatus.state || '')
+      : '';
+    const canPublishRiskDiagnostic = riskDiagnosticRequested && !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
+    const records = allTickerRecords();
+    const watchlistTickers = records
+      .filter(record => {
+        const item = normalizeTickerRecord(record);
+        return !!(item.watchlist && item.watchlist.inWatchlist);
+      })
+      .map(record => normalizeTickerRecord(record).ticker)
+      .filter(Boolean);
+    const watchlistTickerSet = new Set(watchlistTickers);
+    if(canPublishRiskDiagnostic){
+      if(watchlistTickers.length){
+        setLiveProcessStatus('action', `Recalculating watchlist ticker ${watchlistTickers[0]} plan to fit new risk...`);
+      }else{
+        setLiveProcessStatus('action', 'Recalculating plans to fit new risk...');
+      }
+    }
+    state.userRiskPerTrade = currentMaxLoss();
+    state.maxRisk = state.userRiskPerTrade;
+    let processed = 0;
+    let chunkIndex = 0;
+    while(processed < records.length){
+      const chunkStartedAt = nowPerfMs();
+      let inChunk = 0;
+      while(processed < records.length && inChunk < RISK_RECALC_MAX_ITEMS_PER_CHUNK){
+        const record = records[processed];
+        recomputeRiskContextForRecord(record);
+        if(canPublishRiskDiagnostic){
+          const ticker = normalizeTickerRecord(record).ticker;
+          if(watchlistTickerSet.has(ticker)){
+            setLiveProcessStatus('action', `Recalculating watchlist ticker ${ticker} plan to fit new risk...`);
+          }
+        }
+        processed += 1;
+        inChunk += 1;
+        if((nowPerfMs() - chunkStartedAt) >= RISK_RECALC_CHUNK_BUDGET_MS) break;
+      }
+      const chunkDurationMs = Number((nowPerfMs() - chunkStartedAt).toFixed(1));
+      logRiskPerf('risk_recalc_chunk', {
+        source,
+        chunkIndex,
+        durationMs:chunkDurationMs,
+        processed,
+        recordCount:records.length
+      });
+      chunkIndex += 1;
+      if(processed < records.length) await yieldDeferredStartupChunk(50);
+    }
+    const lifecycleStartedAt = nowPerfMs();
+    runWatchlistLifecycleEvaluation({
+      source,
+      persist:false,
+      render:false,
+      force:options.force === true
+    });
+    logRiskPerf('risk_recalc_lifecycle_eval', {
+      source,
+      durationMs:Number((nowPerfMs() - lifecycleStartedAt).toFixed(1))
+    });
+    syncCardDraftsFromDom();
+    const persistStartedAt = nowPerfMs();
+    commitTickerState();
+    logRiskPerf('risk_recalc_storage_write', {
+      source,
+      durationMs:Number((nowPerfMs() - persistStartedAt).toFixed(1))
+    });
+    const activeTab = activeWorkspaceTab();
+    const renderStateBase = {
+      source,
+      activeTab,
+      hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
+      riskRefreshComplete:false
+    };
+    const statsStartedAt = nowPerfMs();
+    renderStats();
+    logRiskPerf('risk_recalc_stats_render', {
+      ...renderStateBase,
+      durationMs:Number((nowPerfMs() - statsStartedAt).toFixed(1))
+    });
+    if(activeTab === 'track'){
+      const trackStartedAt = nowPerfMs();
+      logRiskPerf('renderTrackWorkspace_start', {
+        ...renderStateBase,
+        trigger:'risk_settings_change',
+        recordCount:watchlistTickerRecords().length
+      });
+      await renderWatchlistChunked({
+        source:'risk_settings_visible_track',
+        batchSize:WATCHLIST_RENDER_BATCH_SIZE_BACKGROUND,
+        model:prepareWatchlistRenderModel('risk_settings_visible_track', {
+          lightweight:true,
+          allowCache:true
+        })
+      });
+      renderFocusQueue();
+      clearAllTrackFreshnessFlagsAfterSuccessfulRender();
+      logRiskPerf('renderTrackWorkspace_end', {
+        ...renderStateBase,
+        trigger:'risk_settings_change',
+        durationMs:Number((nowPerfMs() - trackStartedAt).toFixed(1)),
+        recordCount:watchlistTickerRecords().length
+      });
+    }else if(activeTab === 'scan'){
+      const scanStartedAt = nowPerfMs();
+      logRiskPerf('renderScannerWorkspace_start', {
+        ...renderStateBase,
+        trigger:'risk_settings_change',
+        recordCount:rankedTickerRecords().length
+      });
+      renderScannerResults();
+      renderScannerRulesPanel();
+      logRiskPerf('renderScannerWorkspace_end', {
+        ...renderStateBase,
+        trigger:'risk_settings_change',
+        durationMs:Number((nowPerfMs() - scanStartedAt).toFixed(1)),
+        recordCount:rankedTickerRecords().length
+      });
+    }else if(activeTab === 'review'){
+      const reviewStartedAt = nowPerfMs();
+      logRiskPerf('renderReviewWorkspace_start', {
+        ...renderStateBase,
+        trigger:'risk_settings_change',
+        recordCount:activeReviewTicker() ? 1 : 0
+      });
+      renderCards();
+      logRiskPerf('renderReviewWorkspace_end', {
+        ...renderStateBase,
+        trigger:'risk_settings_change',
+        durationMs:Number((nowPerfMs() - reviewStartedAt).toFixed(1)),
+        recordCount:activeReviewTicker() ? 1 : 0
+      });
+    }else if(activeTab === 'diary'){
+      const diaryStartedAt = nowPerfMs();
+      renderTradeDiary();
+      logRiskPerf('risk_recalc_diary_render', {
+        ...renderStateBase,
+        durationMs:Number((nowPerfMs() - diaryStartedAt).toFixed(1))
+      });
+    }else{
+      markWatchlistDirty(null, `${source}_hidden_track`);
+      startupCoordinator.renderedTabs.track = false;
+      startupCoordinator.trackNeedsHydratedRender = true;
+    }
+    const plannerStartedAt = nowPerfMs();
+    renderPlannerPlanSummary();
+    logRiskPerf('risk_recalc_planner_summary', {
+      ...renderStateBase,
+      durationMs:Number((nowPerfMs() - plannerStartedAt).toFixed(1))
+    });
+    if(canPublishRiskDiagnostic){
+      setLiveProcessStatus('action', 'Risk recalculation complete.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+    }
+    const durationMs = Number((nowPerfMs() - startedAt).toFixed(1));
+    logRiskPerf('risk_recalc_complete', {
+      source,
+      durationMs,
+      affectedRecordCount:records.length,
+      hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
+      riskRefreshComplete:true
+    });
+  } finally {
+    riskSettingsRecalcRunning = false;
+  }
+}
+
+function handleRiskSettingsChange(source = 'risk_settings_change'){
+  const startedAt = nowPerfMs();
+  syncRiskSettingsFromDom();
+  const statsStartedAt = nowPerfMs();
+  renderStats();
+  logRiskPerf('risk_change_stats_immediate', {
+    source,
+    durationMs:Number((nowPerfMs() - statsStartedAt).toFixed(1))
+  });
+  persistRiskSettingsQuick();
+  markHiddenTabsDirtyForRiskRefresh(source);
+  scheduleRiskContextRefresh({
+    source,
+    force:true,
+    debounceMs:RISK_RECALC_DEBOUNCE_MS
+  });
+  logRiskPerf('risk_change_handler_duration', {
+    source,
+    durationMs:Number((nowPerfMs() - startedAt).toFixed(1))
   });
 }
 
@@ -4060,9 +4387,12 @@ function applyUserRiskPerTrade(value, options = {}){
   }
   if($('maxLossOverride')) $('maxLossOverride').value = String(nextRisk);
   if($('riskPercent')) $('riskPercent').value = String(state.riskPercent || '');
+  renderStats();
   renderRiskQuickPanel();
   if(options.skipRefresh === true) return;
   if(Math.abs(previous - nextRisk) < 0.01 && options.force !== true) return;
+  persistRiskSettingsQuick();
+  markHiddenTabsDirtyForRiskRefresh(String(options.source || 'risk_quick'));
   queueRiskContextRefresh(String(options.source || 'risk_quick'));
 }
 
@@ -18741,8 +19071,7 @@ on('universeMode', 'change', () => {
 });
 
 ['accountSize','riskPercent','maxLossOverride'].forEach(id => on(id, 'change', () => {
-  saveState();
-  refreshRiskContextForActiveSetups({source:'risk_settings_change'});
+  handleRiskSettingsChange('risk_settings_change');
 }));
 on('marketStatus', 'change', () => {
   state.marketStatusMode = 'manual';
@@ -18773,8 +19102,7 @@ on('scannerSetupType', 'change', () => {
   setStatus('inputStatus', 'Setup mode updated for future scans only. Existing results keep their stored scan context until rescanned.');
 });
 on('wholeSharesOnly', 'change', () => {
-  saveState();
-  refreshRiskContextForActiveSetups({source:'whole_shares_change'});
+  handleRiskSettingsChange('whole_shares_change');
 });
 ['listName','apiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
 on('dataProvider', 'change', () => {
