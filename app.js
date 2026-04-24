@@ -18,6 +18,8 @@ const savedScannerUniverseKey = 'pp_scanner_universe_saved';
 const savedScannerUniverseMetaKey = 'pp_scanner_universe_saved_meta';
 const DEFAULT_PROVIDER = 'fmp';
 const DEFAULT_API_PLAN = 'scanner';
+const WATCHLIST_REFRESH_BATCH_SIZE = 8;
+const WATCHLIST_RENDER_BATCH_SIZE = 6;
 function readPersistentPerfDebugFlag(){
   if(typeof window === 'undefined') return false;
   try{
@@ -91,6 +93,16 @@ function lightweightWatchlistRecordCount(){
     if(normalized.watchlist && normalized.watchlist.inWatchlist) count += 1;
   });
   return count;
+}
+
+function yieldUiChunk(){
+  return new Promise(resolve => {
+    if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+      window.requestIdleCallback(() => resolve(), {timeout:60});
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
 }
 
 function measureTrackRender(kind, source, callback){
@@ -5514,11 +5526,24 @@ function updateWatchlistCardForTicker(ticker){
   return true;
 }
 
-function renderWatchlist(){
+function watchlistRenderGroups(showExpired){
+  const groups = [
+    {key:'tradeable_entry', title:'Tradeable / Entry', hint:'Near-entry and entry-grade watchlist records.'},
+    {key:'monitor_watch', title:'Monitor / Watch', hint:'Structurally alive setups worth keeping on the watchlist.'},
+    {key:'low_priority_avoid', title:'Low Priority / Avoid', hint:'Downgraded or failed watchlist records.'}
+  ];
+  if(showExpired){
+    groups.push({key:'inactive', title:'Dead / Expired', hint:'Technically failed or aged-out watchlist records.'});
+  }
+  return groups;
+}
+
+function prepareWatchlistRenderModel(source = 'watchlist_render'){
+  const prepStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
   syncWatchlistLifecycleBeforeRender('auto_recompute');
   purgeExpiredWatchlistEntries();
   const box = $('watchlistList');
-  if(!box) return;
+  if(!box) return {box:null, empty:true};
   let gatingChanged = false;
   watchlistTickerRecords().forEach(record => {
     const gated = applyGlobalVerdictGates(record, {source:'auto_recompute'});
@@ -5531,35 +5556,32 @@ function renderWatchlist(){
     if(showExpired) return true;
     return !['dead','expired'].includes(lifecycle.state);
   });
-  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
-  if(!records.length){
-    const emptySignature = `showExpired=${showExpired ? 1 : 0}|count=0`;
-    uiState.watchlistRenderSignature = emptySignature;
-    box.dataset.watchlistSignature = emptySignature;
-    box.innerHTML = showExpired
-      ? '<div class="summary">No watchlist entries match this filter right now.</div>'
-      : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
-    return;
+  const renderSignature = records.length
+    ? buildWatchlistRenderSignature(records, {showExpired})
+    : `showExpired=${showExpired ? 1 : 0}|count=0`;
+  if(PP_PERF_DEBUG){
+    const prepEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    console.debug('[PP_PERF] watchlist_render_prepare', {
+      source:String(source || 'watchlist_render'),
+      durationMs:Number((prepEndedAt - prepStartedAt).toFixed(1)),
+      recordCount:records.length,
+      showExpired
+    });
   }
-  const renderSignature = buildWatchlistRenderSignature(records, {showExpired});
-  if(
-    uiState.watchlistRenderSignature === renderSignature
-    && box.dataset.watchlistSignature === renderSignature
-    && box.childElementCount > 0
-  ){
-    return;
-  }
-  box.innerHTML = '';
-  const groups = [
-    {key:'tradeable_entry', title:'Tradeable / Entry', hint:'Near-entry and entry-grade watchlist records.'},
-    {key:'monitor_watch', title:'Monitor / Watch', hint:'Structurally alive setups worth keeping on the watchlist.'},
-    {key:'low_priority_avoid', title:'Low Priority / Avoid', hint:'Downgraded or failed watchlist records.'}
-  ];
-  if(showExpired){
-    groups.push({key:'inactive', title:'Dead / Expired', hint:'Technically failed or aged-out watchlist records.'});
-  }
+  return {box, showExpired, records, renderSignature};
+}
+
+function buildWatchlistSectionsFragment(records, showExpired){
+  const groups = watchlistRenderGroups(showExpired);
+  const grouped = {};
+  groups.forEach(group => { grouped[group.key] = []; });
+  records.forEach(record => {
+    const bucket = watchlistPresentationBucketForRecord(record);
+    if(grouped[bucket]) grouped[bucket].push(record);
+  });
+  const fragment = document.createDocumentFragment();
   groups.forEach(group => {
-    const groupRecords = records.filter(record => watchlistPresentationBucketForRecord(record) === group.key);
+    const groupRecords = grouped[group.key] || [];
     if(!groupRecords.length) return;
     const section = document.createElement('div');
     section.className = 'watchlistgroup';
@@ -5569,8 +5591,105 @@ function renderWatchlist(){
       if(!cardElement) return;
       section.appendChild(cardElement);
     });
-    box.appendChild(section);
+    fragment.appendChild(section);
   });
+  return fragment;
+}
+
+async function renderWatchlistChunked(options = {}){
+  const source = String(options.source || 'watchlist_refresh');
+  const batchSize = Math.max(1, Number(options.batchSize) || WATCHLIST_RENDER_BATCH_SIZE);
+  const model = options.model || prepareWatchlistRenderModel(source);
+  const {box, showExpired, records, renderSignature} = model;
+  if(!box) return;
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
+  if(!records.length){
+    uiState.watchlistRenderSignature = renderSignature;
+    box.dataset.watchlistSignature = renderSignature;
+    box.innerHTML = showExpired
+      ? '<div class="summary">No watchlist entries match this filter right now.</div>'
+      : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+    return;
+  }
+  if(
+    uiState.watchlistRenderSignature === renderSignature
+    && box.dataset.watchlistSignature === renderSignature
+    && box.childElementCount > 0
+  ){
+    return;
+  }
+  const groups = watchlistRenderGroups(showExpired);
+  const grouped = {};
+  groups.forEach(group => { grouped[group.key] = []; });
+  records.forEach(record => {
+    const bucket = watchlistPresentationBucketForRecord(record);
+    if(grouped[bucket]) grouped[bucket].push(record);
+  });
+  const sectionMeta = [];
+  groups.forEach(group => {
+    const groupRecords = grouped[group.key] || [];
+    if(!groupRecords.length) return;
+    const section = document.createElement('div');
+    section.className = 'watchlistgroup';
+    section.innerHTML = `<div class="summary" style="margin:12px 0 8px"><strong>${escapeHtml(group.title)}</strong> <span class="tiny">${escapeHtml(group.hint)}</span></div>`;
+    sectionMeta.push({section, records:groupRecords});
+  });
+  box.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  sectionMeta.forEach(meta => fragment.appendChild(meta.section));
+  box.appendChild(fragment);
+  let batchIndex = 0;
+  for(let sectionIndex = 0; sectionIndex < sectionMeta.length; sectionIndex += 1){
+    const meta = sectionMeta[sectionIndex];
+    for(let index = 0; index < meta.records.length; index += batchSize){
+      const batchStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+      const slice = meta.records.slice(index, index + batchSize);
+      const batchFragment = document.createDocumentFragment();
+      slice.forEach(record => {
+        const cardElement = renderWatchlistCardElement(record);
+        if(cardElement) batchFragment.appendChild(cardElement);
+      });
+      meta.section.appendChild(batchFragment);
+      const batchEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+      if(PP_PERF_DEBUG){
+        console.debug('[PP_PERF] watchlist_render_batch', {
+          source,
+          batchIndex,
+          durationMs:Number((batchEndedAt - batchStartedAt).toFixed(1)),
+          recordsInBatch:slice.length,
+          batchSize
+        });
+      }
+      batchIndex += 1;
+      await yieldUiChunk();
+    }
+  }
+  uiState.watchlistRenderSignature = renderSignature;
+  box.dataset.watchlistSignature = renderSignature;
+}
+
+function renderWatchlist(){
+  const model = prepareWatchlistRenderModel('watchlist_render');
+  const {box, showExpired, records, renderSignature} = model;
+  if(!box) return;
+  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
+  if(!records.length){
+    uiState.watchlistRenderSignature = renderSignature;
+    box.dataset.watchlistSignature = renderSignature;
+    box.innerHTML = showExpired
+      ? '<div class="summary">No watchlist entries match this filter right now.</div>'
+      : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+    return;
+  }
+  if(
+    uiState.watchlistRenderSignature === renderSignature
+    && box.dataset.watchlistSignature === renderSignature
+    && box.childElementCount > 0
+  ){
+    return;
+  }
+  box.innerHTML = '';
+  box.appendChild(buildWatchlistSectionsFragment(records, showExpired));
   uiState.watchlistRenderSignature = renderSignature;
   box.dataset.watchlistSignature = renderSignature;
 }
@@ -14920,6 +15039,8 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
 async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
   const source = String(options.source || 'startup_restore');
   const mode = String(options.mode || 'full');
+  const refreshBatchSize = Math.max(1, Number(options.refreshBatchSize) || WATCHLIST_REFRESH_BATCH_SIZE);
+  const renderBatchSize = Math.max(1, Number(options.renderBatchSize) || WATCHLIST_RENDER_BATCH_SIZE);
   perfMark('pp_watchlist_refresh_start');
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] watchlist_refresh', {
@@ -14960,8 +15081,10 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
   if(markPending) setWatchlistLiveRefreshPending(tickers, true);
   const results = [];
   let settledCount = 0;
-  for(let index = 0; index < tickers.length; index += SCAN_BATCH_SIZE){
-    const batch = tickers.slice(index, index + SCAN_BATCH_SIZE);
+  const processingStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+  for(let index = 0; index < tickers.length; index += refreshBatchSize){
+    const batchStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    const batch = tickers.slice(index, index + refreshBatchSize);
     const outcomes = await Promise.all(batch.map(symbol => (
       refreshWatchlistRecordFromSourceOfTruth(symbol, {
         source,
@@ -14972,6 +15095,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
         deferIdleStatus:true
       })
     )));
+    const batchEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     outcomes.forEach(result => {
       results.push(result);
       settledCount += 1;
@@ -14982,14 +15106,51 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
         );
       }
     });
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] watchlist_refresh_batch', {
+        source,
+        mode,
+        batchIndex:Math.floor(index / refreshBatchSize),
+        durationMs:Number((batchEndedAt - batchStartedAt).toFixed(1)),
+        recordsInBatch:batch.length,
+        batchSize:refreshBatchSize
+      });
+    }
+    await yieldUiChunk();
+  }
+  if(PP_PERF_DEBUG){
+    const processingEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    console.debug('[PP_PERF] watchlist_refresh_processing', {
+      source,
+      mode,
+      durationMs:Number((processingEndedAt - processingStartedAt).toFixed(1)),
+      recordCount:tickers.length
+    });
   }
   if(options.persist !== false) commitTickerState();
   if(options.render !== false){
-    renderWatchlist();
+    const renderStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    await renderWatchlistChunked({
+      source,
+      batchSize:renderBatchSize
+    });
+    const focusStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     renderFocusQueue();
+    const focusEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     renderScannerResults();
     renderCards();
     if(activeReviewTicker()) renderReviewWorkspace();
+    if(PP_PERF_DEBUG){
+      const renderEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+      console.debug('[PP_PERF] watchlist_refresh_render', {
+        source,
+        mode,
+        durationMs:Number((renderEndedAt - renderStartedAt).toFixed(1)),
+        watchlistRenderDurationMs:Number((focusStartedAt - renderStartedAt).toFixed(1)),
+        focusQueueDurationMs:Number((focusEndedAt - focusStartedAt).toFixed(1)),
+        renderBatchSize
+      });
+    }
   }
   const summary = {
     source,
