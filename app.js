@@ -2721,6 +2721,57 @@ function setContextSettingsPanelOpen(enabled){
   renderContextHeaderMode();
 }
 
+let contextSectionHighlightTimer = 0;
+
+function contextSettingsSectionTarget(sectionKey){
+  if(sectionKey === 'account') return $('contextSectionAccount') || $('headerRiskSettings');
+  return $('contextSectionMarket');
+}
+
+function highlightContextSettingsSection(target){
+  if(!target) return;
+  if(contextSectionHighlightTimer){
+    clearTimeout(contextSectionHighlightTimer);
+    contextSectionHighlightTimer = 0;
+  }
+  target.classList.remove('context-panel-section--highlight');
+  void target.offsetWidth;
+  target.classList.add('context-panel-section--highlight');
+  contextSectionHighlightTimer = setTimeout(() => {
+    target.classList.remove('context-panel-section--highlight');
+    contextSectionHighlightTimer = 0;
+  }, 1400);
+}
+
+function openContextSettings(sectionKey = 'market'){
+  const nextSection = ['market','account','mode','setup'].includes(String(sectionKey || ''))
+    ? String(sectionKey)
+    : 'market';
+  setContextSettingsPanelOpen(true);
+  setControlFocus(nextSection, {scroll:false, instant:true});
+  const target = contextSettingsSectionTarget(nextSection);
+  if(!target) return;
+  requestAnimationFrame(() => {
+    target.scrollIntoView({behavior:'smooth', block:'nearest'});
+    highlightContextSettingsSection(target);
+  });
+}
+
+function openMarketCalendarShortcut(){
+  setActiveWorkspaceTab('diary', {focusTop:false, focusWorkspace:false});
+  const advancedDetails = $('advancedUtilitiesDetails');
+  if(advancedDetails) advancedDetails.open = true;
+  const target = $('marketCalendarPanel') || $('marketCalendarGrid') || $('marketCalendarSummary') || $('advancedSection');
+  if(!target) return;
+  requestAnimationFrame(() => {
+    target.scrollIntoView({behavior:'smooth', block:'start'});
+    highlightContextSettingsSection(target.closest && target.closest('.panelbox') ? target.closest('.panelbox') : target);
+  });
+  if(typeof setLiveProcessStatus === 'function'){
+    setLiveProcessStatus('action', 'opened market calendar', {autoIdleMs:1200});
+  }
+}
+
 function normalizedRiskQuickValue(value){
   const numeric = Number(value);
   const maxConfigured = numericOrNull(state.riskQuickMax);
@@ -16866,6 +16917,10 @@ click('clearRuntimeDebugBtn', clearRuntimeDebugLog);
 click('contextSettingsToggle', () => setContextSettingsPanelOpen(!(uiState.contextSettingsOpen === true)));
 click('contextSettingsCloseBtn', () => setContextSettingsPanelOpen(false));
 click('contextSettingsBackdrop', () => setContextSettingsPanelOpen(false));
+click('marketTimingLedger', openMarketCalendarShortcut);
+click('accountRiskLedger', () => openContextSettings('account'));
+click('scannerModeLedger', () => openContextSettings('mode'));
+click('setupTypeLedger', () => openContextSettings('setup'));
 click('marketStatusPill', () => setControlFocus('market'));
 click('accountRiskPill', () => setControlFocus('account'));
 click('scannerModePill', () => setControlFocus('mode'));
