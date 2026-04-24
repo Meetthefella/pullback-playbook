@@ -95,6 +95,72 @@ function lightweightWatchlistRecordCount(){
   return count;
 }
 
+function watchlistPriorityScoreCached(record){
+  const item = normalizeTickerRecord(record || {});
+  const cached = numericOrNull(item.watchlist && item.watchlist.watchlist_priority_score);
+  if(Number.isFinite(cached)) return Number(cached);
+  return 0;
+}
+
+function watchlistLifecycleRankCached(record){
+  const item = normalizeTickerRecord(record || {});
+  const rank = numericOrNull(item.lifecycle && item.lifecycle.rank);
+  return Number.isFinite(rank) ? Number(rank) : 99;
+}
+
+function watchlistTickerRecordsFast(){
+  return Object.values(normalizeTickerRecordsMap(state.tickerRecords || {}))
+    .map(record => normalizeTickerRecord(record))
+    .filter(record => record.watchlist && record.watchlist.inWatchlist)
+    .sort((a, b) => {
+      return watchlistLifecycleRankCached(a) - watchlistLifecycleRankCached(b)
+        || watchlistPriorityScoreCached(b) - watchlistPriorityScoreCached(a)
+        || String(b.watchlist.addedAt || '').localeCompare(String(a.watchlist.addedAt || ''))
+        || a.ticker.localeCompare(b.ticker);
+    });
+}
+
+function ensureWatchlistDirtyState(){
+  uiState.watchlistDirtyEpoch = Number.isFinite(Number(uiState.watchlistDirtyEpoch)) ? Number(uiState.watchlistDirtyEpoch) : 0;
+  uiState.watchlistDirtyTickers = uiState.watchlistDirtyTickers && typeof uiState.watchlistDirtyTickers === 'object'
+    ? uiState.watchlistDirtyTickers
+    : {};
+}
+
+function markWatchlistDirty(tickers = null, reason = 'unknown'){
+  ensureWatchlistDirtyState();
+  uiState.watchlistDirtyEpoch += 1;
+  if(Array.isArray(tickers) && tickers.length){
+    uniqueTickers(tickers).forEach(ticker => {
+      uiState.watchlistDirtyTickers[ticker] = reason;
+    });
+  }else{
+    uiState.watchlistDirtyTickers = {'*':reason};
+  }
+}
+
+function clearWatchlistDirtyForRecords(records = []){
+  ensureWatchlistDirtyState();
+  if(uiState.watchlistDirtyTickers['*']){
+    uiState.watchlistDirtyTickers = {};
+    return;
+  }
+  records.forEach(record => {
+    const ticker = normalizeTicker(record && record.ticker);
+    if(ticker) delete uiState.watchlistDirtyTickers[ticker];
+  });
+}
+
+function scheduleAfterFirstTrackPaint(callback){
+  if(typeof callback !== 'function') return;
+  const run = () => setTimeout(callback, 0);
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(() => run());
+    return;
+  }
+  run();
+}
+
 function yieldUiChunk(){
   return new Promise(resolve => {
     if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
@@ -389,6 +455,7 @@ async function runStartupRiskRefreshChunked(){
     renderWatchlist();
     renderFocusQueue();
   }else{
+    markWatchlistDirty(null, 'startup_risk_refresh');
     startupCoordinator.renderedTabs.track = false;
     startupCoordinator.trackHydratedRendered = false;
     if(PP_PERF_DEBUG){
@@ -934,6 +1001,13 @@ uiState.paperTradeStateByTicker = uiState.paperTradeStateByTicker && typeof uiSt
   : {};
 uiState.trackedStateBackendUnavailable = uiState.trackedStateBackendUnavailable === true;
 uiState.trackedStateBackendUnavailableNotified = uiState.trackedStateBackendUnavailableNotified === true;
+uiState.watchlistDirtyEpoch = Number.isFinite(Number(uiState.watchlistDirtyEpoch)) ? Number(uiState.watchlistDirtyEpoch) : 0;
+uiState.watchlistDirtyTickers = uiState.watchlistDirtyTickers && typeof uiState.watchlistDirtyTickers === 'object'
+  ? uiState.watchlistDirtyTickers
+  : {};
+uiState.watchlistPreparedModelCache = uiState.watchlistPreparedModelCache && typeof uiState.watchlistPreparedModelCache === 'object'
+  ? uiState.watchlistPreparedModelCache
+  : null;
 uiState.activeWorkspaceTab = ['scan', 'review', 'track', 'diary'].includes(String(uiState.activeWorkspaceTab || '').toLowerCase())
   ? String(uiState.activeWorkspaceTab).toLowerCase()
   : 'scan';
@@ -3260,9 +3334,20 @@ function renderWorkspaceSurface(tab, options = {}){
     const trackRenderKind = options.userOpened === true
       ? 'user_opened'
       : (options.hydrated === true ? 'hydrated' : 'deferred');
+    const firstUserOpen = options.userOpened === true && startupCoordinator.renderedTabs.track !== true;
     measureTrackRender(trackRenderKind, safeReason, () => {
       perfMark('pp_watchlist_render_start');
-      renderWatchlist();
+      if(firstUserOpen){
+        renderWatchlistChunked({
+          source:'track_first_open_fast',
+          batchSize:WATCHLIST_RENDER_BATCH_SIZE,
+          model:prepareWatchlistRenderModel('track_first_open_fast', {
+            lightweight:true
+          })
+        }).catch(() => {});
+      }else{
+        renderWatchlist();
+      }
       renderFocusQueue();
       perfMark('pp_watchlist_render_end');
       perfMeasure('pp_watchlist_render', 'pp_watchlist_render_start', 'pp_watchlist_render_end');
@@ -3272,7 +3357,9 @@ function renderWorkspaceSurface(tab, options = {}){
     startupCoordinator.trackNeedsHydratedRender = false;
     startupCoordinator.trackDeferredRenderSkipped = false;
     if(options.userOpened === true){
-      maybeStartDeferredTrackStartupRefresh(options.reason || 'track_user_open');
+      scheduleAfterFirstTrackPaint(() => {
+        maybeStartDeferredTrackStartupRefresh(options.reason || 'track_user_open');
+      });
     }
     return;
   }
@@ -3330,6 +3417,7 @@ function applyTrackedStateHydrationMerge(){
   startupCoordinator.trackHydratedRendered = false;
   startupCoordinator.renderedTabs.track = false;
   startupCoordinator.trackNeedsHydratedRender = true;
+  markWatchlistDirty(null, 'tracked_state_hydration');
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] track_invalidated', {
       watchlistRecords:trackRenderRecordCount(),
@@ -5538,34 +5626,100 @@ function watchlistRenderGroups(showExpired){
   return groups;
 }
 
-function prepareWatchlistRenderModel(source = 'watchlist_render'){
+function prepareWatchlistRenderModel(source = 'watchlist_render', options = {}){
+  const mode = options.lightweight === true ? 'lightweight' : 'full';
   const prepStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
-  syncWatchlistLifecycleBeforeRender('auto_recompute');
-  purgeExpiredWatchlistEntries();
+  const prepSteps = {};
+  const markStep = (name, startAt) => {
+    const now = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    prepSteps[name] = Number((now - startAt).toFixed(1));
+    return now;
+  };
   const box = $('watchlistList');
   if(!box) return {box:null, empty:true};
-  let gatingChanged = false;
-  watchlistTickerRecords().forEach(record => {
-    const gated = applyGlobalVerdictGates(record, {source:'auto_recompute'});
-    if(gated.changed) gatingChanged = true;
-  });
-  if(gatingChanged) commitTickerState();
   const showExpired = !!state.showExpiredWatchlist;
-  const records = watchlistTickerRecords().filter(record => {
-    const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
-    if(showExpired) return true;
-    return !['dead','expired'].includes(lifecycle.state);
-  });
+  ensureWatchlistDirtyState();
+  const cache = uiState.watchlistPreparedModelCache && typeof uiState.watchlistPreparedModelCache === 'object'
+    ? uiState.watchlistPreparedModelCache
+    : null;
+  if(
+    cache
+    && options.allowCache !== false
+    && cache.mode === mode
+    && cache.showExpired === showExpired
+    && cache.dirtyEpoch === uiState.watchlistDirtyEpoch
+    && Array.isArray(cache.records)
+  ){
+    if(PP_PERF_DEBUG){
+      const prepEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+      console.debug('[PP_PERF] watchlist_render_prepare', {
+        source:String(source || 'watchlist_render'),
+        mode,
+        cacheHit:true,
+        durationMs:Number((prepEndedAt - prepStartedAt).toFixed(1)),
+        recordCount:cache.records.length,
+        showExpired
+      });
+    }
+    return {
+      box,
+      showExpired,
+      records:cache.records,
+      renderSignature:cache.renderSignature
+    };
+  }
+  let records = [];
+  if(mode === 'full'){
+    let stepStart = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    syncWatchlistLifecycleBeforeRender('auto_recompute');
+    stepStart = markStep('syncLifecycle', stepStart);
+    purgeExpiredWatchlistEntries();
+    stepStart = markStep('purgeExpired', stepStart);
+    let gatingChanged = false;
+    watchlistTickerRecords().forEach(record => {
+      const gated = applyGlobalVerdictGates(record, {source:'auto_recompute'});
+      if(gated.changed) gatingChanged = true;
+    });
+    if(gatingChanged) commitTickerState();
+    stepStart = markStep('applyGates', stepStart);
+    records = watchlistTickerRecords().filter(record => {
+      const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+      if(showExpired) return true;
+      return !['dead','expired'].includes(lifecycle.state);
+    });
+    markStep('collectRecords', stepStart);
+  }else{
+    const stepStart = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    records = watchlistTickerRecordsFast().filter(record => {
+      const lifecycle = record.lifecycle && typeof record.lifecycle === 'object'
+        ? record.lifecycle
+        : watchlistLifecycleSnapshot(record);
+      if(showExpired) return true;
+      const stateValue = String(lifecycle && lifecycle.state || '').toLowerCase();
+      return !['dead','expired'].includes(stateValue);
+    });
+    markStep('collectRecords', stepStart);
+  }
   const renderSignature = records.length
     ? buildWatchlistRenderSignature(records, {showExpired})
     : `showExpired=${showExpired ? 1 : 0}|count=0`;
+  uiState.watchlistPreparedModelCache = {
+    mode,
+    showExpired,
+    dirtyEpoch:uiState.watchlistDirtyEpoch,
+    renderSignature,
+    records
+  };
   if(PP_PERF_DEBUG){
     const prepEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     console.debug('[PP_PERF] watchlist_render_prepare', {
       source:String(source || 'watchlist_render'),
+      mode,
+      cacheHit:false,
       durationMs:Number((prepEndedAt - prepStartedAt).toFixed(1)),
       recordCount:records.length,
-      showExpired
+      showExpired,
+      steps:prepSteps
     });
   }
   return {box, showExpired, records, renderSignature};
@@ -5666,6 +5820,7 @@ async function renderWatchlistChunked(options = {}){
   }
   uiState.watchlistRenderSignature = renderSignature;
   box.dataset.watchlistSignature = renderSignature;
+  clearWatchlistDirtyForRecords(records);
 }
 
 function renderWatchlist(){
@@ -5692,6 +5847,7 @@ function renderWatchlist(){
   box.appendChild(buildWatchlistSectionsFragment(records, showExpired));
   uiState.watchlistRenderSignature = renderSignature;
   box.dataset.watchlistSignature = renderSignature;
+  clearWatchlistDirtyForRecords(records);
 }
 
 let watchlistRenderScheduled = false;
@@ -14989,6 +15145,7 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
     });
     const refreshedVerdict = resolveGlobalVerdict(normalizedRecord);
     const refreshedSnapshot = syncWatchlistLifecycle(normalizedRecord) || watchlistLifecycleSnapshot(normalizedRecord);
+    markWatchlistDirty([symbol], `${source}_result`);
     appendWatchlistDebugEvent(normalizedRecord, {
       at:new Date().toISOString(),
       source:`${source}_result`,
@@ -15013,6 +15170,7 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       persist:false,
       render:false
     });
+    markWatchlistDirty([symbol], `${source}_error`);
     return {
       symbol,
       ok:false,
@@ -15129,22 +15287,29 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
   }
   if(options.persist !== false) commitTickerState();
   if(options.render !== false){
+    const trackOnlyRefresh = source === 'startup_refresh_full_user_open';
     const renderStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     await renderWatchlistChunked({
       source,
-      batchSize:renderBatchSize
+      batchSize:renderBatchSize,
+      model:prepareWatchlistRenderModel(source, {
+        lightweight:trackOnlyRefresh
+      })
     });
     const focusStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     renderFocusQueue();
     const focusEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
-    renderScannerResults();
-    renderCards();
-    if(activeReviewTicker()) renderReviewWorkspace();
+    if(!trackOnlyRefresh){
+      renderScannerResults();
+      renderCards();
+      if(activeReviewTicker()) renderReviewWorkspace();
+    }
     if(PP_PERF_DEBUG){
       const renderEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
       console.debug('[PP_PERF] watchlist_refresh_render', {
         source,
         mode,
+        trackOnlyRefresh,
         durationMs:Number((renderEndedAt - renderStartedAt).toFixed(1)),
         watchlistRenderDurationMs:Number((focusStartedAt - renderStartedAt).toFixed(1)),
         focusQueueDurationMs:Number((focusEndedAt - focusStartedAt).toFixed(1)),
