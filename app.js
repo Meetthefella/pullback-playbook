@@ -97,6 +97,62 @@ function logRiskPerf(eventName, payload = {}){
   console.debug(`[PP_PERF] ${eventName}`, payload);
 }
 
+function normalizeRiskCalcNumber(value, precision = 6){
+  const numeric = numericOrNull(value);
+  if(!Number.isFinite(numeric)) return null;
+  return Number(numeric.toFixed(precision));
+}
+
+function normalizeRiskCalcText(value){
+  return String(value || '').trim().toUpperCase();
+}
+
+function riskSettingsFingerprintFromState(){
+  return JSON.stringify({
+    accountSize:normalizeRiskCalcNumber(state.accountSize, 4),
+    selectedRiskAmount:normalizeRiskCalcNumber(state.userRiskPerTrade || currentMaxLoss(), 4),
+    selectedRiskPercent:normalizeRiskCalcNumber(normalizeRiskPercentInput(state.riskPercent, 1), 4),
+    maxLossOverride:normalizeRiskCalcNumber(state.maxLossOverride, 4),
+    wholeSharesOnly:state.wholeSharesOnly !== false ? 1 : 0
+  });
+}
+
+function riskCalcSnapshotForRecord(record){
+  const item = normalizeTickerRecord(record || {});
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
+  const quoteCurrency = normalizeQuoteCurrency(plan.quoteCurrency || marketData.currency || '');
+  const fxCached = quoteCurrency && !['GBP','GBX'].includes(quoteCurrency) ? fxRateCache.get(quoteCurrency) : null;
+  return {
+    accountSize:normalizeRiskCalcNumber(state.accountSize, 4),
+    selectedRiskAmount:normalizeRiskCalcNumber(state.userRiskPerTrade || currentMaxLoss(), 4),
+    selectedRiskPercent:normalizeRiskCalcNumber(normalizeRiskPercentInput(state.riskPercent, 1), 4),
+    maxLossOverride:normalizeRiskCalcNumber(state.maxLossOverride, 4),
+    wholeSharesOnly:state.wholeSharesOnly !== false ? 1 : 0,
+    derivedEntry:normalizeRiskCalcNumber(plan.entry, 6),
+    derivedStop:normalizeRiskCalcNumber(plan.stop, 6),
+    derivedTarget:normalizeRiskCalcNumber(plan.firstTarget != null ? plan.firstTarget : plan.target, 6),
+    derivedLatestPrice:normalizeRiskCalcNumber(marketData.price, 6),
+    derivedQuoteCurrency:normalizeRiskCalcText(quoteCurrency || 'GBP'),
+    fxRate:normalizeRiskCalcNumber(fxCached && fxCached.rate, 8)
+  };
+}
+
+function riskCalcChangedInputFields(previousSnapshot, nextSnapshot){
+  const prev = previousSnapshot && typeof previousSnapshot === 'object' ? previousSnapshot : {};
+  const next = nextSnapshot && typeof nextSnapshot === 'object' ? nextSnapshot : {};
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+  const changed = [];
+  keys.forEach(key => {
+    if(prev[key] !== next[key]) changed.push(key);
+  });
+  return changed;
+}
+
+function riskCalcFingerprint(snapshot){
+  return JSON.stringify(snapshot && typeof snapshot === 'object' ? snapshot : {});
+}
+
 function perfMeasure(name, startMark, endMark){
   if(typeof performance === 'undefined' || typeof performance.measure !== 'function') return null;
   try{
@@ -528,7 +584,16 @@ async function runStartupRiskRefreshChunked(){
   }
   state.userRiskPerTrade = currentMaxLoss();
   state.maxRisk = state.userRiskPerTrade;
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] risk_calc_requested', {
+      risk_calc_reason:source,
+      risk_calc_record_count:records.length,
+      risk_calc_changed_input_fields:['selectedRiskAmount','selectedRiskPercent','accountSize','maxLossOverride','wholeSharesOnly']
+    });
+  }
   const chunkSize = 5;
+  let skippedCount = 0;
+  let executedCount = 0;
   for(let index = 0; index < records.length; index += 1){
     if(PP_PERF_DEBUG && index % chunkSize === 0){
       console.debug('[PP_PERF] startup_risk_refresh', {
@@ -542,7 +607,12 @@ async function runStartupRiskRefreshChunked(){
       });
     }
     const record = records[index];
-    recomputeRiskContextForRecord(record);
+    const recomputeMeta = recomputeRiskContextForRecordWithMeta(record, {
+      source,
+      skipIfUnchanged:true
+    });
+    if(recomputeMeta.skipped) skippedCount += 1;
+    else executedCount += 1;
     if(canPublishRiskDiagnostic){
       const ticker = normalizeTickerRecord(record).ticker;
       if(watchlistTickerSet.has(ticker)){
@@ -604,6 +674,9 @@ async function runStartupRiskRefreshChunked(){
       source,
       durationMs:riskEntry ? Number(riskEntry.duration.toFixed(1)) : null,
       recordCount:records.length,
+      risk_calc_record_count:records.length,
+      risk_calc_executed:executedCount,
+      risk_calc_skipped_unchanged:skippedCount,
       ...startupDebugRenderState()
     });
   }
@@ -3094,6 +3167,100 @@ function watchlistTickerRecords(){
     });
 }
 
+function watchlistRecordRecencyTimestamp(record){
+  const item = normalizeTickerRecord(record || {});
+  const candidates = [
+    item.review && item.review.lastReviewedAt,
+    item.review && item.review.analysisState && item.review.analysisState.reviewedAt,
+    item.scan && item.scan.lastScannedAt,
+    item.meta && item.meta.updatedAt,
+    item.watchlist && item.watchlist.addedAt
+  ];
+  for(const value of candidates){
+    const parsed = Date.parse(String(value || ''));
+    if(Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function shouldForceLowerPriorityByViability(globalVerdict, priorityScore){
+  const viability = String(globalVerdict && globalVerdict.viability || '').trim().toLowerCase();
+  const rawFinalVerdict = String(globalVerdict && (globalVerdict.final_verdict || globalVerdict.finalVerdict) || '').trim().toLowerCase();
+  const finalVerdict = normalizeVerdict(rawFinalVerdict);
+  if(viability === 'reject' || viability === 'low_priority') return true;
+  if(Number.isFinite(Number(priorityScore)) && Number(priorityScore) <= 0) return true;
+  if(['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(finalVerdict)) return true;
+  return false;
+}
+
+function isActiveMonitorWatchCandidate(record, globalVerdict, priorityScore){
+  const viability = String(globalVerdict && globalVerdict.viability || '').trim().toLowerCase();
+  const rawFinalVerdict = String(globalVerdict && (globalVerdict.final_verdict || globalVerdict.finalVerdict) || '').trim().toLowerCase();
+  const finalVerdict = normalizeVerdict(rawFinalVerdict);
+  if(viability !== 'watchlist') return false;
+  if(!Number.isFinite(Number(priorityScore)) || Number(priorityScore) <= 0) return false;
+  if(['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(finalVerdict)) return false;
+  return true;
+}
+
+function watchlistGroupSortRankForVerdict(globalVerdict){
+  const rawFinalVerdict = String(globalVerdict && (globalVerdict.final_verdict || globalVerdict.finalVerdict) || '').trim().toLowerCase();
+  const finalVerdict = normalizeVerdict(rawFinalVerdict);
+  if(finalVerdict === 'entry') return 0;
+  if(finalVerdict === 'near_entry') return 1;
+  if(finalVerdict === 'monitor' || rawFinalVerdict === 'watch') return 2;
+  if(finalVerdict === 'avoid' || finalVerdict === 'dead' || rawFinalVerdict === 'reject') return 4;
+  return 3;
+}
+
+function sortWatchlistGroupRecords(records, groupKey){
+  const list = Array.isArray(records) ? records.slice() : [];
+  const cachedVerdicts = new Map();
+  const getVerdict = record => {
+    const symbol = normalizeTicker(record && record.ticker || '');
+    if(cachedVerdicts.has(symbol)) return cachedVerdicts.get(symbol);
+    const verdict = resolveGlobalVerdict(record);
+    cachedVerdicts.set(symbol, verdict);
+    return verdict;
+  };
+  const getPriority = record => Number(watchlistPriorityForRecord(record).score || 0);
+  const getSetupScore = record => Number(setupScoreForRecord(record) || 0);
+  const getRecency = record => watchlistRecordRecencyTimestamp(record);
+
+  if(groupKey === 'tradeable_entry' || groupKey === 'monitor_watch'){
+    return list.sort((a, b) => {
+      const verdictA = getVerdict(a);
+      const verdictB = getVerdict(b);
+      const rankDiff = watchlistGroupSortRankForVerdict(verdictA) - watchlistGroupSortRankForVerdict(verdictB);
+      if(rankDiff !== 0) return rankDiff;
+      const priorityDiff = getPriority(b) - getPriority(a);
+      if(priorityDiff !== 0) return priorityDiff;
+      const setupDiff = getSetupScore(b) - getSetupScore(a);
+      if(setupDiff !== 0) return setupDiff;
+      const recencyDiff = getRecency(b) - getRecency(a);
+      if(recencyDiff !== 0) return recencyDiff;
+      return String(a.ticker || '').localeCompare(String(b.ticker || ''));
+    });
+  }
+
+  if(groupKey === 'low_priority_avoid'){
+    return list.sort((a, b) => {
+      const verdictA = getVerdict(a);
+      const verdictB = getVerdict(b);
+      const avoidA = watchlistGroupSortRankForVerdict(verdictA) >= 4 ? 1 : 0;
+      const avoidB = watchlistGroupSortRankForVerdict(verdictB) >= 4 ? 1 : 0;
+      if(avoidA !== avoidB) return avoidA - avoidB;
+      const setupDiff = getSetupScore(a) - getSetupScore(b);
+      if(setupDiff !== 0) return setupDiff;
+      const recencyDiff = getRecency(a) - getRecency(b);
+      if(recencyDiff !== 0) return recencyDiff;
+      return String(a.ticker || '').localeCompare(String(b.ticker || ''));
+    });
+  }
+
+  return list;
+}
+
 function watchlistPriorityForRecord(record){
   const item = normalizeTickerRecord(record);
   const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(item);
@@ -3119,7 +3286,8 @@ function watchlistPriorityForRecord(record){
   else if(lifecycle.state === 'avoid') score -= 4;
   else if(lifecycle.state === 'dead') score -= 5;
   score = Math.max(0, Math.min(10, Math.round(score)));
-  const bucket = lifecycle.bucket || ({
+  const globalVerdict = resolveGlobalVerdict(item);
+  let bucket = lifecycle.bucket || ({
     entry:'tradeable_entry',
     near_entry:'tradeable_entry',
     watch:'monitor_watch',
@@ -3127,6 +3295,11 @@ function watchlistPriorityForRecord(record){
     avoid:'low_priority_avoid',
     dead:'low_priority_avoid'
   })[String(lifecycle.state || '').toLowerCase()] || 'monitor_watch';
+  if(shouldForceLowerPriorityByViability(globalVerdict, score)){
+    bucket = 'low_priority_avoid';
+  }else if(isActiveMonitorWatchCandidate(item, globalVerdict, score) && bucket !== 'tradeable_entry'){
+    bucket = 'monitor_watch';
+  }
   if(record && record.watchlist && typeof record.watchlist === 'object'){
     record.watchlist.watchlist_priority_score = score;
     record.watchlist.watchlist_priority_bucket = bucket;
@@ -4191,6 +4364,13 @@ async function runRiskContextRefreshChunked(options = {}){
       : '';
     const canPublishRiskDiagnostic = riskDiagnosticRequested && !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
     const records = allTickerRecords();
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] risk_calc_requested', {
+        risk_calc_reason:source,
+        risk_calc_record_count:records.length,
+        risk_calc_changed_input_fields:['selectedRiskAmount','selectedRiskPercent','accountSize','maxLossOverride','wholeSharesOnly']
+      });
+    }
     const watchlistTickers = records
       .filter(record => {
         const item = normalizeTickerRecord(record);
@@ -4210,12 +4390,19 @@ async function runRiskContextRefreshChunked(options = {}){
     state.maxRisk = state.userRiskPerTrade;
     let processed = 0;
     let chunkIndex = 0;
+    let skippedCount = 0;
+    let executedCount = 0;
     while(processed < records.length){
       const chunkStartedAt = nowPerfMs();
       let inChunk = 0;
       while(processed < records.length && inChunk < RISK_RECALC_MAX_ITEMS_PER_CHUNK){
         const record = records[processed];
-        recomputeRiskContextForRecord(record);
+        const recomputeMeta = recomputeRiskContextForRecordWithMeta(record, {
+          source,
+          skipIfUnchanged:true
+        });
+        if(recomputeMeta.skipped) skippedCount += 1;
+        else executedCount += 1;
         if(canPublishRiskDiagnostic){
           const ticker = normalizeTickerRecord(record).ticker;
           if(watchlistTickerSet.has(ticker)){
@@ -4247,6 +4434,12 @@ async function runRiskContextRefreshChunked(options = {}){
     logRiskPerf('risk_recalc_lifecycle_eval', {
       source,
       durationMs:Number((nowPerfMs() - lifecycleStartedAt).toFixed(1))
+    });
+    logRiskPerf('risk_calc_record_count', {
+      risk_calc_reason:source,
+      risk_calc_record_count:records.length,
+      risk_calc_executed:executedCount,
+      risk_calc_skipped_unchanged:skippedCount
     });
     syncCardDraftsFromDom();
     const persistStartedAt = nowPerfMs();
@@ -4356,7 +4549,9 @@ async function runRiskContextRefreshChunked(options = {}){
 
 function handleRiskSettingsChange(source = 'risk_settings_change'){
   const startedAt = nowPerfMs();
+  const previousSettingsFingerprint = riskSettingsFingerprintFromState();
   syncRiskSettingsFromDom();
+  const nextSettingsFingerprint = riskSettingsFingerprintFromState();
   const statsStartedAt = nowPerfMs();
   renderStats();
   logRiskPerf('risk_change_stats_immediate', {
@@ -4364,6 +4559,18 @@ function handleRiskSettingsChange(source = 'risk_settings_change'){
     durationMs:Number((nowPerfMs() - statsStartedAt).toFixed(1))
   });
   persistRiskSettingsQuick();
+  if(previousSettingsFingerprint === nextSettingsFingerprint){
+    logRiskPerf('risk_calc_skipped_unchanged', {
+      risk_calc_reason:source,
+      risk_calc_changed_input_fields:[],
+      risk_calc_record_count:0
+    });
+    logRiskPerf('risk_change_handler_duration', {
+      source,
+      durationMs:Number((nowPerfMs() - startedAt).toFixed(1))
+    });
+    return;
+  }
   markHiddenTabsDirtyForRiskRefresh(source);
   scheduleRiskContextRefresh({
     source,
@@ -6399,10 +6606,11 @@ function buildWatchlistSectionsFragment(records, showExpired){
   groups.forEach(group => {
     const groupRecords = grouped[group.key] || [];
     if(!groupRecords.length) return;
+    const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key);
     const section = document.createElement('div');
     section.className = 'watchlistgroup';
     section.innerHTML = `<div class="summary" style="margin:12px 0 8px"><strong>${escapeHtml(group.title)}</strong> <span class="tiny">${escapeHtml(group.hint)}</span></div>`;
-    groupRecords.forEach(record => {
+    sortedGroupRecords.forEach(record => {
       const cardElement = renderWatchlistCardElement(record);
       if(!cardElement) return;
       section.appendChild(cardElement);
@@ -6445,10 +6653,11 @@ async function renderWatchlistChunked(options = {}){
   groups.forEach(group => {
     const groupRecords = grouped[group.key] || [];
     if(!groupRecords.length) return;
+    const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key);
     const section = document.createElement('div');
     section.className = 'watchlistgroup';
     section.innerHTML = `<div class="summary" style="margin:12px 0 8px"><strong>${escapeHtml(group.title)}</strong> <span class="tiny">${escapeHtml(group.hint)}</span></div>`;
-    sectionMeta.push({section, records:groupRecords});
+    sectionMeta.push({section, records:sortedGroupRecords});
   });
   box.innerHTML = '';
   const fragment = document.createDocumentFragment();
@@ -10993,10 +11202,14 @@ function watchlistPresentationBucketForRecord(record){
   const strictVerdict = resolveGlobalVerdict(item);
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
   const priority = watchlistPriorityForRecord(item);
+  if(shouldForceLowerPriorityByViability(strictVerdict, priority.score)) return 'low_priority_avoid';
   if(['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || '').toLowerCase())){
     return priority.bucket || 'inactive';
   }
   if(watchlistStrictAvoidTruth(item, strictVerdict, lifecycleSnapshot)) return 'low_priority_avoid';
+  if(!isActiveMonitorWatchCandidate(item, strictVerdict, priority.score) && priority.bucket !== 'tradeable_entry'){
+    return 'low_priority_avoid';
+  }
   return priority.bucket || 'monitor_watch';
 }
 
@@ -14182,14 +14395,73 @@ function recomputeRiskContextForCard(card){
   return normalized;
 }
 
-function recomputeRiskContextForRecord(record){
+function recomputeRiskContextForRecordWithMeta(record, options = {}){
+  const source = String(options.source || 'risk_context');
+  const skipIfUnchanged = options.skipIfUnchanged === true;
+  const item = normalizeTickerRecord(record || {});
+  const nextSnapshot = riskCalcSnapshotForRecord(item);
+  const nextFingerprint = riskCalcFingerprint(nextSnapshot);
+  const previousFingerprint = item.meta && typeof item.meta === 'object'
+    ? String(item.meta.lastRiskCalcFingerprint || '')
+    : '';
+  const previousSnapshot = item.meta && item.meta.lastRiskCalcInputSnapshot && typeof item.meta.lastRiskCalcInputSnapshot === 'object'
+    ? item.meta.lastRiskCalcInputSnapshot
+    : null;
+  const changedInputFields = riskCalcChangedInputFields(previousSnapshot, nextSnapshot);
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] risk_calc_requested', {
+      ticker:item.ticker,
+      risk_calc_reason:source,
+      risk_calc_changed_input_fields:changedInputFields,
+      risk_calc_record_count:1
+    });
+  }
+  if(skipIfUnchanged && previousFingerprint && previousFingerprint === nextFingerprint){
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] risk_calc_skipped_unchanged', {
+        ticker:item.ticker,
+        risk_calc_reason:source,
+        risk_calc_changed_input_fields:[],
+        risk_calc_record_count:1
+      });
+    }
+    return {
+      record:item,
+      skipped:true,
+      executed:false,
+      fingerprint:nextFingerprint,
+      changedInputFields:[]
+    };
+  }
   const updatedCard = recomputeRiskContextForCard(tickerRecordToLegacyCard(record));
-  mergeLegacyCardIntoRecord(record, updatedCard, {
+  mergeLegacyCardIntoRecord(item, updatedCard, {
     fromScanner:true,
-    fromCards:record.review.cardOpen,
-    cardOpen:record.review.cardOpen
+    fromCards:item.review.cardOpen,
+    cardOpen:item.review.cardOpen
   });
-  return record;
+  item.meta.lastRiskCalcFingerprint = nextFingerprint;
+  item.meta.lastRiskCalcInputSnapshot = nextSnapshot;
+  item.meta.lastRiskCalcSource = source;
+  item.meta.lastRiskCalcAt = new Date().toISOString();
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] risk_calc_executed', {
+      ticker:item.ticker,
+      risk_calc_reason:source,
+      risk_calc_changed_input_fields:changedInputFields,
+      risk_calc_record_count:1
+    });
+  }
+  return {
+    record:item,
+    skipped:false,
+    executed:true,
+    fingerprint:nextFingerprint,
+    changedInputFields
+  };
+}
+
+function recomputeRiskContextForRecord(record, options = {}){
+  return recomputeRiskContextForRecordWithMeta(record, options).record;
 }
 
 function refreshRiskContextForActiveSetups(options = {}){
@@ -14199,6 +14471,7 @@ function refreshRiskContextForActiveSetups(options = {}){
     ? String(uiState.liveProcessStatus.state || '')
     : '';
   const canPublishRiskDiagnostic = riskDiagnosticRequested && !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
+  const skipIfUnchanged = riskDiagnosticRequested;
   const records = allTickerRecords();
   const watchlistTickers = records
     .filter(record => {
@@ -14215,10 +14488,26 @@ function refreshRiskContextForActiveSetups(options = {}){
       setLiveProcessStatus('action', 'Recalculating plans to fit new risk...');
     }
   }
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] risk_calc_requested', {
+      risk_calc_reason:source,
+      risk_calc_record_count:records.length,
+      risk_calc_changed_input_fields:riskDiagnosticRequested
+        ? ['selectedRiskAmount','selectedRiskPercent','accountSize','maxLossOverride','wholeSharesOnly']
+        : ['non_risk_context']
+    });
+  }
   state.userRiskPerTrade = currentMaxLoss();
   state.maxRisk = state.userRiskPerTrade;
+  let skippedCount = 0;
+  let executedCount = 0;
   records.forEach(record => {
-    recomputeRiskContextForRecord(record);
+    const recomputeMeta = recomputeRiskContextForRecordWithMeta(record, {
+      source,
+      skipIfUnchanged
+    });
+    if(recomputeMeta.skipped) skippedCount += 1;
+    else executedCount += 1;
     if(!canPublishRiskDiagnostic) return;
     const ticker = normalizeTickerRecord(record).ticker;
     if(watchlistTickerSet.has(ticker)){
@@ -14237,6 +14526,14 @@ function refreshRiskContextForActiveSetups(options = {}){
   renderCards();
   renderWatchlist();
   renderFocusQueue();
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] risk_calc_record_count', {
+      risk_calc_reason:source,
+      risk_calc_record_count:records.length,
+      risk_calc_executed:executedCount,
+      risk_calc_skipped_unchanged:skippedCount
+    });
+  }
   if(canPublishRiskDiagnostic){
     setLiveProcessStatus('action', 'Risk recalculation complete.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
   }
