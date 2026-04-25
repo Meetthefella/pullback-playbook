@@ -3225,11 +3225,15 @@ function sortWatchlistGroupRecords(records, groupKey){
     cachedVerdicts.set(symbol, verdict);
     return verdict;
   };
-  const getPriority = record => Number(watchlistPriorityForRecord(record).score || 0);
+  const getPriority = record => {
+    const rawPriority = record && (record.priorityScore ?? record.priority);
+    if(Number.isFinite(Number(rawPriority))) return Number(rawPriority);
+    return Number(watchlistPriorityForRecord(record).score || 0);
+  };
   const getSetupScore = record => Number(setupScoreForRecord(record) || 0);
   const getRecency = record => watchlistRecordRecencyTimestamp(record);
 
-  if(groupKey === 'tradeable_entry' || groupKey === 'monitor_watch'){
+  if(groupKey === 'monitor_watch'){
     return list.sort((a, b) => {
       const verdictA = getVerdict(a);
       const verdictB = getVerdict(b);
@@ -3259,6 +3263,8 @@ function sortWatchlistGroupRecords(records, groupKey){
 
   if(groupKey === 'avoid_dead'){
     return list.sort((a, b) => {
+      const priorityDiff = getPriority(b) - getPriority(a);
+      if(priorityDiff !== 0) return priorityDiff;
       const setupDiff = getSetupScore(b) - getSetupScore(a);
       if(setupDiff !== 0) return setupDiff;
       const recencyDiff = getRecency(b) - getRecency(a);
@@ -3312,6 +3318,9 @@ function watchlistPriorityForRecord(record){
   if(record && record.watchlist && typeof record.watchlist === 'object'){
     record.watchlist.watchlist_priority_score = score;
     record.watchlist.watchlist_priority_bucket = bucket;
+  }
+  if(record && typeof record === 'object'){
+    record.priorityScore = score;
   }
   return {score, bucket};
 }
@@ -6043,6 +6052,8 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Diminishing Track Eligible', value:globalVisual.diminishingTrackEligible ? 'true' : 'false'},
     {label:'Avoid Track Eligible', value:globalVisual.avoidTrackEligible ? 'true' : 'false'},
     {label:'Priority Score', value:Number.isFinite(globalVisual.priorityScore) ? String(globalVisual.priorityScore) : String(priority.score)},
+    {label:'Priority Sort Value', value:Number.isFinite(globalVisual.prioritySortValue) ? String(globalVisual.prioritySortValue) : String(priority.score)},
+    {label:'Hold Enabled', value:globalVisual.holdEnabled === false ? 'false' : 'true'},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || 'n/a'},
     {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
     {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
@@ -6427,6 +6438,16 @@ function renderWatchlistCardElement(record){
   const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
   const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
   const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
+  const presentationBucket = String(watchlistVisualState.presentationBucket || '').toLowerCase();
+  const renderedVerdict = normalizeGlobalVerdictKey(
+    watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || (globalVerdict && globalVerdict.final_verdict) || ''
+  );
+  const holdEnabled = presentationBucket !== 'avoid' && !['avoid','dead','reject'].includes(renderedVerdict);
+  const prioritySortValue = Number.isFinite(Number(record.priorityScore ?? record.priority))
+    ? Number(record.priorityScore ?? record.priority)
+    : Number(priority.score || 0);
+  watchlistVisualState.prioritySortValue = prioritySortValue;
+  watchlistVisualState.holdEnabled = holdEnabled;
   const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
   const watchlistScoreText = liveRefreshPending
     ? 'Refreshing...'
@@ -6474,7 +6495,7 @@ function renderWatchlistCardElement(record){
     };
   }
   div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
-  if(watchlistEntryConditionsHelper){
+  if(watchlistEntryConditionsHelper && holdEnabled){
     div.setAttribute('data-entry-hold-helper', '1');
     div.setAttribute('data-hold-card-trigger', '1');
     div.setAttribute('data-hold-ticker', entry.ticker);
@@ -6484,7 +6505,9 @@ function renderWatchlistCardElement(record){
     holdWrapper.innerHTML = watchlistEntryConditionsHelper;
     if(holdWrapper.firstElementChild) div.appendChild(holdWrapper.firstElementChild);
   }
-  bindEntryConditionsHoldInteractions(div);
+  if(holdEnabled){
+    bindEntryConditionsHoldInteractions(div);
+  }
   return div;
 }
 
@@ -6504,8 +6527,7 @@ function updateWatchlistCardForTicker(ticker){
 
 function watchlistRenderGroups(showExpired){
   const groups = [
-    {key:'tradeable_entry', title:'Tradeable / Entry', hint:'Near-entry and entry-grade watchlist records.'},
-    {key:'monitor_watch', title:'Monitor / Watch', hint:'Structurally alive setups worth keeping on the watchlist.'},
+    {key:'monitor_watch', title:'Active Watchlist', hint:'Live candidates worth active focus.'},
     {key:'diminishing', title:'Diminishing', hint:'Weakening setups kept for review, not active focus.'},
     {key:'avoid_dead', title:'Avoid / Dead', hint:'Failed or invalid setups.'}
   ];
@@ -11222,14 +11244,7 @@ function watchlistPresentationBucketForRecord(record){
   const presentation = resolveTrackPresentationModel(item, strictVerdict, lifecycleSnapshot, priority);
   if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
   if(presentation.presentationBucket === 'diminishing') return 'diminishing';
-  if(['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || '').toLowerCase())){
-    return 'avoid_dead';
-  }
-  if(watchlistStrictAvoidTruth(item, strictVerdict, lifecycleSnapshot)) return 'avoid_dead';
-  if(!presentation.activeTrackEligible && priority.bucket !== 'tradeable_entry'){
-    return presentation.diminishingTrackEligible ? 'diminishing' : 'avoid_dead';
-  }
-  return priority.bucket || 'monitor_watch';
+  return 'monitor_watch';
 }
 
 function getVisualTone(finalState){
@@ -11263,30 +11278,30 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const explicitInvalidationReason = String(verdictSource && verdictSource.explicit_invalidation_reason || '').trim().toLowerCase();
   const explicitInvalidation = explicitInvalidationReason && explicitInvalidationReason !== '(none)';
   const isTerminal = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict) || ['dead','expired'].includes(lifecycleState);
+  const avoidByVerdict = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict);
   const broken = structureEligibility === 'broken' || structureState === 'broken';
+  const avoidByBroken = broken;
+  const avoidByExplicitInvalidation = !!explicitInvalidation;
   const weakening = structureEligibility === 'damaged' || structureState === 'weakening';
   const lowPriorityByViability = String(verdictSource && verdictSource.viability || '').trim().toLowerCase() === 'low_priority';
-  const lowPriorityByScore = resolvedPriority <= 0;
-  let presentationBucket = 'active';
-  if(isTerminal || broken || explicitInvalidation || sourceBucket === 'reject' || String(verdictSource && verdictSource.viability || '').trim().toLowerCase() === 'reject'){
-    presentationBucket = 'avoid';
-  }else if(
-    ['monitor','watch'].includes(normalizedFinalVerdict)
-    && (weakening || lowPriorityByViability || lowPriorityByScore)
-  ){
-    presentationBucket = 'diminishing';
-  }
-  const activeTrackEligible = presentationBucket === 'active'
+  const finalIsMonitorWatch = ['watch','monitor'].includes(rawFinalVerdict) || normalizedFinalVerdict === 'monitor';
+  const activeTrackEligible = finalIsMonitorWatch
+    && structureEligibility !== 'damaged'
+    && structureState !== 'weakening'
     && viability === 'watchlist'
     && resolvedPriority > 0
-    && !isTerminal
-    && !weakening;
-  const diminishingTrackEligible = presentationBucket === 'diminishing'
-    && ['monitor','watch'].includes(normalizedFinalVerdict)
-    && !isTerminal
-    && !broken
-    && !explicitInvalidation;
-  const avoidTrackEligible = presentationBucket === 'avoid';
+    && !avoidByVerdict
+    && !avoidByBroken
+    && !avoidByExplicitInvalidation;
+  const diminishingTrackEligible = finalIsMonitorWatch
+    && (weakening || lowPriorityByViability)
+    && !avoidByVerdict
+    && !avoidByBroken
+    && !avoidByExplicitInvalidation;
+  const avoidTrackEligible = avoidByVerdict || avoidByBroken || avoidByExplicitInvalidation;
+  let presentationBucket = 'active';
+  if(avoidTrackEligible) presentationBucket = 'avoid';
+  else if(diminishingTrackEligible) presentationBucket = 'diminishing';
 
   let presentationTone = 'amber';
   let presentationBadge = 'Monitor';
