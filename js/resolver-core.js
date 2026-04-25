@@ -180,6 +180,134 @@
     return safe || 'structure unchanged';
   }
 
+  function resolveStructureEligibility(ctx = {}){
+    const structureState = String(ctx.structureState || '').trim().toLowerCase();
+    const trendState = String(ctx.trendState || '').trim().toLowerCase();
+    const brokenBelowStop = ctx.brokenBelowStop === true;
+    const brokenStates = ['broken','invalid','failed'];
+    if(brokenBelowStop || brokenStates.includes(structureState) || brokenStates.includes(trendState)){
+      return {
+        structureEligibility:'broken',
+        structureReason:'Structure is broken.'
+      };
+    }
+    if(['weak','weakening','developing_loose'].includes(structureState)){
+      return {
+        structureEligibility:'damaged',
+        structureReason:'Trend is weakening - no reliable stop level yet.'
+      };
+    }
+    return {
+      structureEligibility:'alive',
+      structureReason:'Structure remains technically alive.'
+    };
+  }
+
+  function resolveExtendedState(ctx = {}){
+    const pullbackZone = String(ctx.pullbackZone || '').trim().toLowerCase();
+    const noRecentPullbackStructure = ['','unknown','none','off_level','extended','deep'].includes(pullbackZone);
+    const numericDistance = Number(ctx.priceDistanceFrom20MA);
+    const threshold = Number.isFinite(Number(ctx.threshold)) && Number(ctx.threshold) > 0
+      ? Number(ctx.threshold)
+      : 0.06;
+    const stretchedFrom20 = Number.isFinite(numericDistance) && numericDistance > threshold;
+    return (pullbackZone === 'extended') || (stretchedFrom20 && noRecentPullbackStructure);
+  }
+
+  function resolveWatchlistViability(ctx = {}){
+    const structureEligibility = String(ctx.structureEligibility || '').toLowerCase();
+    const bounceState = String(ctx.bounceState || '').toLowerCase();
+    const pullbackZone = String(ctx.pullbackZone || '').toLowerCase();
+    const setupScore = Number.isFinite(Number(ctx.setupScore)) ? Number(ctx.setupScore) : 0;
+    const planOk = ctx.planOk === true;
+    const rrOk = ctx.rrOk === true;
+    const tradeabilityOk = ctx.tradeabilityOk === true;
+    const volumeOk = ctx.volumeOk !== false;
+    const pullbackOk = ['near_20ma','near_50ma'].includes(pullbackZone);
+    const noBounce = ['none','unconfirmed'].includes(bounceState);
+    const bounceEarly = ['attempt','early'].includes(bounceState);
+    const bounceUseful = bounceEarly || bounceState === 'confirmed';
+    const isExtended = ctx.isExtended === true;
+    const planInvalidLabel = String(ctx.planStatusKey || '').toLowerCase() === 'invalid';
+    const viableRrExists = rrOk || Number.isFinite(Number(ctx.credibleRr)) && Number(ctx.credibleRr) >= 1.5;
+
+    if(structureEligibility === 'broken'){
+      return {
+        viability:'reject',
+        viabilityReason:'Setup no longer viable - structure is broken.',
+        mainBlocker:'Structure is broken.'
+      };
+    }
+    if(structureEligibility === 'damaged' && noBounce && !planOk){
+      return {
+        viability:'reject',
+        viabilityReason:'Setup no longer viable - structure is weakening.',
+        mainBlocker:'Trend is weakening - no reliable stop level yet.'
+      };
+    }
+    if(structureEligibility === 'damaged' && !tradeabilityOk && !rrOk){
+      return {
+        viability:'reject',
+        viabilityReason:'No bounce and no valid plan.',
+        mainBlocker:'Trend is weakening - no reliable stop level yet.'
+      };
+    }
+    if(setupScore < 6 && noBounce){
+      return {
+        viability:'reject',
+        viabilityReason:'Setup has slipped below watchlist quality.',
+        mainBlocker:'No bounce confirmation yet.'
+      };
+    }
+    if(planInvalidLabel && !viableRrExists && !bounceUseful){
+      return {
+        viability:'reject',
+        viabilityReason:'No bounce and no valid plan.',
+        mainBlocker:'Invalid plan with no credible RR.'
+      };
+    }
+
+    if(structureEligibility === 'damaged' && bounceEarly){
+      return {
+        viability:'low_priority',
+        viabilityReason:'Weakening setup - monitor only if it improves.',
+        mainBlocker:'Trend is weakening - no reliable stop level yet.'
+      };
+    }
+    if(setupScore >= 5 && setupScore < 7 && (pullbackOk || bounceEarly || structureEligibility !== 'broken')){
+      return {
+        viability:'low_priority',
+        viabilityReason:'Low-priority watch - needs structure repair.',
+        mainBlocker:structureEligibility === 'damaged'
+          ? 'Trend is weakening - no reliable stop level yet.'
+          : (noBounce ? 'No bounce confirmation yet.' : 'Conditions are not strong enough for active focus.')
+      };
+    }
+    if(isExtended && structureEligibility === 'alive'){
+      return {
+        viability:'low_priority',
+        viabilityReason:'Extended setup - wait for pullback structure.',
+        mainBlocker:'No pullback structure to define entry yet.'
+      };
+    }
+
+    if(structureEligibility === 'alive' && (pullbackOk || bounceEarly || setupScore >= 7)){
+      return {
+        viability:'watchlist',
+        viabilityReason:'Structurally alive - waiting for confirmation.',
+        mainBlocker:noBounce ? 'No bounce confirmation yet.' : 'Needs confirmation before promotion.'
+      };
+    }
+
+    return {
+      viability:'low_priority',
+      viabilityReason:'Conditions are not strong enough for active focus.',
+      mainBlocker:structureEligibility === 'damaged'
+        ? 'Trend is weakening - no reliable stop level yet.'
+        : (noBounce ? 'No bounce confirmation yet.' : 'No pullback structure to define entry yet.')
+    };
+  }
+
   function resolveGlobalVerdict(record, deps = {}){
     const item = record && typeof record === 'object' ? record : {};
     const preLifecycleResolved = deps.resolvePreLifecycleStateContract(item);
@@ -211,11 +339,17 @@
     const tradeabilityState = String(displayedPlan.tradeability || '').toLowerCase();
     const volumeState = String(derivedStates.volumeState || '').toLowerCase();
     const pullbackZone = String(derivedStates.pullbackZone || '').toLowerCase();
-    const rrValue = Number.isFinite(Number(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio))
-      ? Number(displayedPlan.rewardRisk.rrRatio)
-      : null;
     const currentPrice = Number.isFinite(Number(item && item.marketData && item.marketData.price))
       ? Number(item.marketData.price)
+      : null;
+    const ma20 = Number.isFinite(Number(item && item.marketData && item.marketData.ma20))
+      ? Number(item.marketData.ma20)
+      : null;
+    const priceDistanceFrom20MA = Number.isFinite(currentPrice) && Number.isFinite(ma20) && ma20 !== 0
+      ? Math.abs((currentPrice - ma20) / ma20)
+      : null;
+    const rrValue = Number.isFinite(Number(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio))
+      ? Number(displayedPlan.rewardRisk.rrRatio)
       : null;
     const stopPrice = Number.isFinite(Number(item && item.plan && item.plan.stop))
       ? Number(item.plan.stop)
@@ -244,6 +378,15 @@
       || trendState === 'broken'
       || brokenBelowStop
     );
+    const structureLayer = resolveStructureEligibility({
+      structureState,
+      trendState,
+      brokenBelowStop
+    });
+    const isExtended = resolveExtendedState({
+      pullbackZone,
+      priceDistanceFrom20MA
+    });
     const weakStructure = ['weak','weakening','developing_loose'].includes(structureState);
     const tentativeBounce = ['none','unconfirmed','attempt','early'].includes(bounceState);
     const weakVolume = volumeState === 'weak';
@@ -310,8 +453,35 @@
       tradeability:tradeabilityState,
       capital_fit:capitalFit
     });
-    const trackedVerdict = normalizeVerdict(guardedVerdict.final_verdict);
-    const trackedReason = guardedVerdict.reason || reason;
+    let trackedVerdict = normalizeVerdict(guardedVerdict.final_verdict);
+    let trackedReason = guardedVerdict.reason || reason;
+    const viability = resolveWatchlistViability({
+      structureEligibility:structureLayer.structureEligibility,
+      bounceState,
+      pullbackZone,
+      setupScore,
+      planOk:!invalidPlan,
+      rrOk:Number.isFinite(credibleRr) && credibleRr >= 1.5,
+      tradeabilityOk:['tradable', 'entry', 'ready', 'action_now'].includes(tradeabilityState),
+      volumeOk:volumeState !== 'weak',
+      planStatusKey,
+      credibleRr,
+      isExtended
+    });
+    if(trackedVerdict !== 'entry' && trackedVerdict !== 'near_entry'){
+      if(viability.viability === 'reject'){
+        trackedVerdict = 'avoid';
+      }else{
+        trackedVerdict = 'monitor';
+      }
+      if(structureLayer.structureEligibility === 'damaged'){
+        trackedReason = 'Trend is weakening - no reliable stop level yet.';
+      }else if(isExtended && ['strong','intact'].includes(structureState)){
+        trackedReason = 'No pullback structure to define entry yet.';
+      }else{
+        trackedReason = viability.mainBlocker || viability.viabilityReason || trackedReason;
+      }
+    }
     const trackedAvoidTriggerSource = (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
       ? (structurallyBroken ? 'structure_broken' : (trackedVerdict !== baseVerdict ? 'lifecycle' : null))
       : null;
@@ -320,7 +490,7 @@
       && trackedAvoidTriggerSource === 'lifecycle';
     finalVerdict = normalizeVerdict(isTracked ? trackedVerdict : baseVerdict);
     reason = isTracked ? trackedReason : (lifecycleDowngradeSuppressed ? 'Pre-watchlist lifecycle downgrade suppressed.' : trackedReason);
-    const avoidAllowedByStructureConsistencyGuard = structurallyBroken;
+    const avoidAllowedByStructureConsistencyGuard = structurallyBroken || viability.viability === 'reject';
     if(!avoidAllowedByStructureConsistencyGuard && (finalVerdict === 'avoid' || finalVerdict === 'dead')){
       finalVerdict = 'monitor';
       reason = 'Setup is weak and not tradeable yet, but not structurally broken.';
@@ -346,7 +516,9 @@
     const tone = getTone(finalVerdict);
     const badge = getBadge(finalVerdict);
     const action = getActions(finalVerdict);
-    const bucket = getBucket(finalVerdict);
+    const bucket = (finalVerdict === 'monitor' && viability.viability === 'low_priority')
+      ? 'lower_priority'
+      : getBucket(finalVerdict);
     return {
       base_verdict:normalizeVerdict(baseVerdict),
       tracked_verdict:trackedVerdict,
@@ -364,6 +536,9 @@
       allow_plan:action.planAllowed,
       allow_watchlist:action.watchlistAllowed,
       reason,
+      subline:isExtended && ['strong','intact'].includes(structureState)
+        ? 'Buyers in control, but price is stretched away from support'
+        : '',
       final_state_reason:'derived from structureState only',
       avoid_trigger_source:avoidTriggerSource,
       dead_trigger_source:deadTriggerSource,
@@ -380,6 +555,15 @@
       near_entry_gate_reasons:guardedVerdict.near_entry_gate_reasons,
       entry_gate_checks:guardedVerdict.entry_gate_checks,
       setup_score:Number.isFinite(setupScore) ? setupScore : null,
+      priority_score_adjustment:isExtended ? -0.35 : 0,
+      is_extended:isExtended,
+      structure_eligibility:structureLayer.structureEligibility,
+      structure_reason:structureLayer.structureReason,
+      viability:viability.viability,
+      viability_reason:viability.viabilityReason,
+      main_blocker:trackedReason || viability.mainBlocker || '',
+      rejected_by_viability_gate:viability.viability === 'reject',
+      low_priority_by_viability_gate:viability.viability === 'low_priority',
       structure_state:structureState || '',
       bounce_state:bounceState || '',
       pullback_zone:pullbackZone || '',
@@ -410,6 +594,8 @@
     canPromoteToEntry,
     canPromoteToNearEntry,
     applyPromotionGuards,
+    resolveStructureEligibility,
+    resolveWatchlistViability,
     resolveGlobalVerdict
   };
 })(window);

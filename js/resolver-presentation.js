@@ -51,9 +51,19 @@
     if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
     if(verdict === 'avoid' || verdict === 'dead') return 'Avoid - too weak or broken. Leave it alone.';
     const structuralState = String(options && options.structuralState || '').toLowerCase();
-    return structuralState === 'developing'
-      ? 'Developing - still forming. Buyers have not taken control yet.'
-      : 'Monitor - still forming. Buyers have not taken control yet.';
+    const structureState = String(options && options.structureState || '').toLowerCase();
+    const structureEligibility = String(options && options.structureEligibility || '').toLowerCase();
+    const isExtended = options && options.isExtended === true;
+    if(isExtended && ['strong','intact'].includes(structureState)){
+      return 'Extended - waiting for pullback.';
+    }
+    if(structureEligibility === 'damaged' || structureState === 'weakening'){
+      return 'Monitor - structure weakening.';
+    }
+    if(structuralState === 'developing'){
+      return 'Developing - waiting for confirmation.';
+    }
+    return 'Monitor - waiting for confirmation.';
   }
 
   function finalVerdictFromResolvedContract(resolved, derivedStates, deps = {}){
@@ -104,10 +114,13 @@
     });
     const rawVerdict = finalVerdictFromResolvedContract(resolvedContract, derivedStates, deps);
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
+    const canonicalVerdict = legacyVerdict && legacyVerdict.final_verdict
+      ? String(legacyVerdict.final_verdict)
+      : rawVerdict;
     const avoidAllowedByStructureConsistencyGuard = structureState === 'broken';
-    const deadGuardApplied = structureState !== 'broken' && (rawVerdict === 'dead' || rawVerdict === 'avoid');
+    const deadGuardApplied = structureState !== 'broken' && (canonicalVerdict === 'dead' || canonicalVerdict === 'avoid');
     const pendingResolution = options.pendingResolution === true;
-    const finalVerdict = pendingResolution ? 'monitor' : (deadGuardApplied ? 'monitor' : rawVerdict);
+    const finalVerdict = pendingResolution ? 'monitor' : (deadGuardApplied ? 'monitor' : canonicalVerdict);
     const state = pendingResolution ? 'monitor' : visualStateKey(finalVerdict, deps);
     const visual_tone = visualToneForState(state);
     const score = clampScore(options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord));
@@ -115,7 +128,9 @@
     const badge = pendingResolution
       ? {text:'⏳ Reviewing', className:'near'}
       : deps.getBadge(finalVerdict);
-    const bucket = pendingResolution ? 'monitor_watch' : deps.getBucket(finalVerdict);
+    const bucket = pendingResolution
+      ? 'monitor_watch'
+      : (legacyVerdict && legacyVerdict.bucket ? legacyVerdict.bucket : deps.getBucket(finalVerdict));
     const normalizedRenderedVerdict = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict);
     const normalizedLegacyVerdict = legacyVerdict
       ? (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(legacyVerdict.final_verdict || legacyVerdict.finalVerdict || '')
@@ -130,11 +145,19 @@
     const lifecycleDropReason = legacyVerdict && legacyVerdict.lifecycle_drop_reason
       ? String(legacyVerdict.lifecycle_drop_reason)
       : '(none)';
+    const summaryOptions = {
+      structuralState:resolvedContract && resolvedContract.structuralState,
+      structureState,
+      structureEligibility:legacyVerdict && legacyVerdict.structure_eligibility,
+      viability:legacyVerdict && legacyVerdict.viability,
+      isExtended:legacyVerdict && legacyVerdict.is_extended === true
+    };
+    const resolvedSummary = pendingResolution
+      ? 'Reviewing setup with live data before final status.'
+      : decisionSummaryForVerdict(finalVerdict, summaryOptions, deps);
     return {
       state,
-      decision_summary:pendingResolution
-        ? 'Reviewing setup with live data before final status.'
-        : decisionSummaryForVerdict(finalVerdict, {structuralState:resolvedContract && resolvedContract.structuralState}, deps),
+      decision_summary:resolvedSummary,
       visual_tone,
       score,
       className:`visual-state-card visual-state-${state} visual-tone-${visual_tone}`,
@@ -156,7 +179,7 @@
       allow_watchlist:['monitor','near_entry','entry'].includes(finalVerdict),
       reason:pendingResolution
         ? 'Reviewing setup with live data before final status.'
-        : decisionSummaryForVerdict(finalVerdict, {structuralState:resolvedContract && resolvedContract.structuralState}, deps),
+        : (legacyVerdict && legacyVerdict.main_blocker) || resolvedSummary,
       ui_state_source:'resolveFinalStateContract',
       final_verdict_rendered:finalVerdict,
       bucket_rendered:bucket,

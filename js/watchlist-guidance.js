@@ -28,24 +28,36 @@
       rrResolution,
       planUiState:context.planUiState
     });
+    const globalVerdict = typeof deps.resolveGlobalVerdict === 'function'
+      ? deps.resolveGlobalVerdict(item)
+      : null;
+    const structureEligibility = String(globalVerdict && globalVerdict.structure_eligibility || '').toLowerCase();
+    const mainBlocker = String(globalVerdict && globalVerdict.main_blocker || '').trim();
+
     if(['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || '')) || resolved.structuralState === 'dead'){
-      return {nextPossibleState:'None', mainBlocker:resolved.blockerReason || 'Setup is no longer active'};
+      return {nextPossibleState:'None', mainBlocker:mainBlocker || resolved.blockerReason || 'Setup is no longer active'};
+    }
+    if(structureEligibility === 'damaged'){
+      return {
+        nextPossibleState:'\ud83d\udfe1 Monitor',
+        mainBlocker:mainBlocker || 'Trend is weakening - no reliable stop level yet.'
+      };
     }
     if(resolved.actionStateKey === 'recalculate_plan'){
       return {
-        nextPossibleState:'🟡 Hold for entry conditions',
-        mainBlocker:resolved.blockerReason || 'Plan needs adjustment'
+        nextPossibleState:'\ud83d\udfe1 Hold for entry conditions',
+        mainBlocker:mainBlocker || resolved.blockerReason || 'Plan needs adjustment'
       };
     }
     if(resolved.actionStateKey === 'ready_to_act'){
       return {
-        nextPossibleState:'\uD83D\uDE80 Entry',
-        mainBlocker:resolved.blockerReason || 'Ready if trigger is met'
+        nextPossibleState:'\ud83d\ude80 Entry',
+        mainBlocker:mainBlocker || resolved.blockerReason || 'Ready if trigger is met'
       };
     }
     return {
-      nextPossibleState:resolved.structuralState === 'near_entry' ? '\uD83C\uDFAF Near Entry' : '\uD83C\uDF31 Developing',
-      mainBlocker:resolved.blockerReason || 'Needs better confirmation'
+      nextPossibleState:resolved.structuralState === 'near_entry' ? '\ud83c\udfaf Near Entry' : '\ud83c\udf31 Developing',
+      mainBlocker:mainBlocker || resolved.blockerReason || 'Needs better confirmation'
     };
   }
 
