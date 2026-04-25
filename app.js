@@ -3245,15 +3245,20 @@ function sortWatchlistGroupRecords(records, groupKey){
     });
   }
 
-  if(groupKey === 'low_priority_avoid'){
+  if(groupKey === 'diminishing'){
     return list.sort((a, b) => {
-      const verdictA = getVerdict(a);
-      const verdictB = getVerdict(b);
-      const avoidA = watchlistGroupSortRankForVerdict(verdictA) >= 4 ? 1 : 0;
-      const avoidB = watchlistGroupSortRankForVerdict(verdictB) >= 4 ? 1 : 0;
-      if(avoidA !== avoidB) return avoidA - avoidB;
       const priorityDiff = getPriority(b) - getPriority(a);
       if(priorityDiff !== 0) return priorityDiff;
+      const setupDiff = getSetupScore(b) - getSetupScore(a);
+      if(setupDiff !== 0) return setupDiff;
+      const recencyDiff = getRecency(b) - getRecency(a);
+      if(recencyDiff !== 0) return recencyDiff;
+      return String(a.ticker || '').localeCompare(String(b.ticker || ''));
+    });
+  }
+
+  if(groupKey === 'avoid_dead'){
+    return list.sort((a, b) => {
       const setupDiff = getSetupScore(b) - getSetupScore(a);
       if(setupDiff !== 0) return setupDiff;
       const recencyDiff = getRecency(b) - getRecency(a);
@@ -6033,7 +6038,10 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Presentation Tone', value:globalVisual.presentationTone || '(none)'},
     {label:'Presentation Badge', value:globalVisual.presentationBadge || '(none)'},
     {label:'Presentation Reason', value:globalVisual.presentationReason || '(none)'},
+    {label:'Structure Eligibility', value:globalVisual.structureEligibility || globalVerdict.structure_eligibility || '(none)'},
     {label:'Active Track Eligible', value:globalVisual.activeTrackEligible ? 'true' : 'false'},
+    {label:'Diminishing Track Eligible', value:globalVisual.diminishingTrackEligible ? 'true' : 'false'},
+    {label:'Avoid Track Eligible', value:globalVisual.avoidTrackEligible ? 'true' : 'false'},
     {label:'Priority Score', value:Number.isFinite(globalVisual.priorityScore) ? String(globalVisual.priorityScore) : String(priority.score)},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || 'n/a'},
     {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
@@ -6498,11 +6506,9 @@ function watchlistRenderGroups(showExpired){
   const groups = [
     {key:'tradeable_entry', title:'Tradeable / Entry', hint:'Near-entry and entry-grade watchlist records.'},
     {key:'monitor_watch', title:'Monitor / Watch', hint:'Structurally alive setups worth keeping on the watchlist.'},
-    {key:'low_priority_avoid', title:'Low Priority / Avoid', hint:'Downgraded or failed watchlist records.'}
+    {key:'diminishing', title:'Diminishing', hint:'Weakening setups kept for review, not active focus.'},
+    {key:'avoid_dead', title:'Avoid / Dead', hint:'Failed or invalid setups.'}
   ];
-  if(showExpired){
-    groups.push({key:'inactive', title:'Dead / Expired', hint:'Technically failed or aged-out watchlist records.'});
-  }
   return groups;
 }
 
@@ -11185,7 +11191,7 @@ function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, de
 
 function isWatchlistAvoidBucket(bucket){
   const value = String(bucket || '').trim().toLowerCase();
-  return value === 'low_priority_avoid' || value === 'lower_priority' || value === 'avoid' || value === 'dead' || value === 'inactive';
+  return value === 'avoid_dead' || value === 'low_priority_avoid' || value === 'lower_priority' || value === 'avoid' || value === 'dead' || value === 'inactive';
 }
 
 function watchlistStrictAvoidTruth(record, globalVerdict, lifecycleSnapshot){
@@ -11213,15 +11219,32 @@ function watchlistPresentationBucketForRecord(record){
   const strictVerdict = resolveGlobalVerdict(item);
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
   const priority = watchlistPriorityForRecord(item);
-  if(shouldForceLowerPriorityByViability(strictVerdict, priority.score)) return 'low_priority_avoid';
+  const presentation = resolveTrackPresentationModel(item, strictVerdict, lifecycleSnapshot, priority);
+  if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
+  if(presentation.presentationBucket === 'diminishing') return 'diminishing';
   if(['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || '').toLowerCase())){
-    return priority.bucket || 'inactive';
+    return 'avoid_dead';
   }
-  if(watchlistStrictAvoidTruth(item, strictVerdict, lifecycleSnapshot)) return 'low_priority_avoid';
-  if(!isActiveMonitorWatchCandidate(item, strictVerdict, priority.score) && priority.bucket !== 'tradeable_entry'){
-    return 'low_priority_avoid';
+  if(watchlistStrictAvoidTruth(item, strictVerdict, lifecycleSnapshot)) return 'avoid_dead';
+  if(!presentation.activeTrackEligible && priority.bucket !== 'tradeable_entry'){
+    return presentation.diminishingTrackEligible ? 'diminishing' : 'avoid_dead';
   }
   return priority.bucket || 'monitor_watch';
+}
+
+function getVisualTone(finalState){
+  const safe = String(finalState || '').trim().toLowerCase();
+  const map = {
+    entry:{tone:'green', badgeClass:'ready', cardClass:'tone-green'},
+    near_entry:{tone:'teal', badgeClass:'near', cardClass:'tone-teal'},
+    watch:{tone:'purple', badgeClass:'watch', cardClass:'tone-purple'},
+    monitor:{tone:'amber', badgeClass:'watch', cardClass:'tone-amber'},
+    diminishing:{tone:'muted_amber', badgeClass:'watch', cardClass:'tone-muted-amber'},
+    avoid:{tone:'red', badgeClass:'avoid', cardClass:'tone-red'},
+    dead:{tone:'red', badgeClass:'avoid', cardClass:'tone-red'},
+    reject:{tone:'red', badgeClass:'avoid', cardClass:'tone-red'}
+  };
+  return map[safe] || map.monitor;
 }
 
 function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot, priority){
@@ -11232,56 +11255,84 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     : Number(watchlistPriorityForRecord(item).score || 0);
   const viability = String(verdictSource && verdictSource.viability || '').trim().toLowerCase();
   const structureEligibility = String(verdictSource && verdictSource.structure_eligibility || '').trim().toLowerCase();
+  const structureState = String(analysisDerivedStatesFromRecord(item).structureState || '').trim().toLowerCase();
   const rawFinalVerdict = String(verdictSource && (verdictSource.final_verdict || verdictSource.finalVerdict) || '').trim().toLowerCase();
   const normalizedFinalVerdict = normalizeVerdict(rawFinalVerdict);
   const lifecycleState = String(lifecycleSnapshot && lifecycleSnapshot.state || '').trim().toLowerCase();
   const sourceBucket = String(verdictSource && verdictSource.bucket || '').trim().toLowerCase();
+  const explicitInvalidationReason = String(verdictSource && verdictSource.explicit_invalidation_reason || '').trim().toLowerCase();
+  const explicitInvalidation = explicitInvalidationReason && explicitInvalidationReason !== '(none)';
   const isTerminal = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict) || ['dead','expired'].includes(lifecycleState);
-  const forcedLowPriority = shouldForceLowerPriorityByViability(verdictSource, resolvedPriority);
-  const presentationBucket = forcedLowPriority || sourceBucket === 'reject' ? 'low_priority' : 'active';
-  const activeTrackEligible = presentationBucket !== 'low_priority'
+  const broken = structureEligibility === 'broken' || structureState === 'broken';
+  const weakening = structureEligibility === 'damaged' || structureState === 'weakening';
+  const lowPriorityByViability = String(verdictSource && verdictSource.viability || '').trim().toLowerCase() === 'low_priority';
+  const lowPriorityByScore = resolvedPriority <= 0;
+  let presentationBucket = 'active';
+  if(isTerminal || broken || explicitInvalidation || sourceBucket === 'reject' || String(verdictSource && verdictSource.viability || '').trim().toLowerCase() === 'reject'){
+    presentationBucket = 'avoid';
+  }else if(
+    ['monitor','watch'].includes(normalizedFinalVerdict)
+    && (weakening || lowPriorityByViability || lowPriorityByScore)
+  ){
+    presentationBucket = 'diminishing';
+  }
+  const activeTrackEligible = presentationBucket === 'active'
     && viability === 'watchlist'
     && resolvedPriority > 0
-    && !isTerminal;
+    && !isTerminal
+    && !weakening;
+  const diminishingTrackEligible = presentationBucket === 'diminishing'
+    && ['monitor','watch'].includes(normalizedFinalVerdict)
+    && !isTerminal
+    && !broken
+    && !explicitInvalidation;
+  const avoidTrackEligible = presentationBucket === 'avoid';
 
-  let presentationTone = 'orange';
+  let presentationTone = 'amber';
   let presentationBadge = 'Monitor';
-  let presentationBadgeClass = 'watch';
+  let presentationBadgeClass = getVisualTone('monitor').badgeClass;
   let presentationReason = String(verdictSource && verdictSource.reason || '').trim() || 'Monitor - still forming.';
+  let visualToneState = normalizedFinalVerdict === 'watch' ? 'watch' : 'monitor';
 
-  if(isTerminal || viability === 'reject' || sourceBucket === 'reject'){
-    presentationTone = 'red';
+  if(presentationBucket === 'avoid'){
+    visualToneState = 'avoid';
+    presentationTone = getVisualTone('avoid').tone;
     presentationBadge = 'Avoid';
-    presentationBadgeClass = 'avoid';
+    presentationBadgeClass = getVisualTone('avoid').badgeClass;
     presentationReason = 'Avoid - setup no longer viable.';
-  }else if(presentationBucket === 'low_priority' || viability === 'low_priority' || sourceBucket === 'lower_priority'){
-    presentationTone = 'muted_orange';
-    presentationBadge = 'Low priority';
-    presentationBadgeClass = 'watch';
+  }else if(presentationBucket === 'diminishing'){
+    visualToneState = 'diminishing';
+    presentationTone = getVisualTone('diminishing').tone;
+    presentationBadge = 'Diminishing';
+    presentationBadgeClass = getVisualTone('diminishing').badgeClass;
     if(structureEligibility === 'damaged'){
-      presentationReason = 'Low priority - structure weakening.';
+      presentationReason = 'Diminishing - structure weakening.';
     }else{
-      presentationReason = 'Low priority - structure needs repair.';
+      presentationReason = 'Diminishing - structure weakening.';
     }
   }else if(normalizedFinalVerdict === 'entry'){
-    presentationTone = 'green';
+    visualToneState = 'entry';
+    presentationTone = getVisualTone('entry').tone;
     presentationBadge = 'Entry';
-    presentationBadgeClass = 'ready';
+    presentationBadgeClass = getVisualTone('entry').badgeClass;
   }else if(normalizedFinalVerdict === 'near_entry'){
-    presentationTone = 'teal';
+    visualToneState = 'near_entry';
+    presentationTone = getVisualTone('near_entry').tone;
     presentationBadge = 'Near Entry';
-    presentationBadgeClass = 'near';
+    presentationBadgeClass = getVisualTone('near_entry').badgeClass;
   }else{
-    const structureState = String(analysisDerivedStatesFromRecord(item).structureState || '').toLowerCase();
     if(rawFinalVerdict === 'watch' || ['developing','developing_clean','developing_loose'].includes(structureState)){
-      presentationTone = 'purple';
+      visualToneState = 'watch';
+      presentationTone = getVisualTone('watch').tone;
     }else{
-      presentationTone = 'orange';
+      visualToneState = 'monitor';
+      presentationTone = getVisualTone('monitor').tone;
     }
     presentationBadge = rawFinalVerdict === 'watch' ? 'Watch' : 'Monitor';
-    presentationBadgeClass = 'watch';
+    presentationBadgeClass = getVisualTone(visualToneState).badgeClass;
   }
 
+  const visualTone = getVisualTone(visualToneState);
   return {
     finalVerdict:rawFinalVerdict || normalizedFinalVerdict || 'monitor',
     bucket:String(sourceBucket || ''),
@@ -11292,7 +11343,11 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     presentationBadgeClass,
     presentationReason,
     priorityScore:resolvedPriority,
-    activeTrackEligible
+    activeTrackEligible,
+    diminishingTrackEligible,
+    avoidTrackEligible,
+    structureEligibility,
+    visualTone
   };
 }
 
@@ -11315,15 +11370,7 @@ function reconcileWatchlistPresentation({
   const base = visualState && typeof visualState === 'object' ? {...visualState} : {};
   const priority = watchlistPriorityForRecord(item);
   const presentation = resolveTrackPresentationModel(item, globalVerdict, lifecycleSnapshot, priority);
-  const toneClassMap = {
-    red:'tone-red',
-    muted_orange:'tone-yellow',
-    purple:'tone-purple',
-    orange:'tone-orange',
-    teal:'tone-teal',
-    green:'tone-green'
-  };
-  const mappedToneClass = toneClassMap[presentation.presentationTone] || base.toneClass || 'tone-orange';
+  const mappedToneClass = (presentation.visualTone && presentation.visualTone.cardClass) || base.toneClass || 'tone-amber';
   const mappedVisualTone = (function(){
     if(presentation.presentationTone === 'red') return 'danger';
     if(presentation.presentationTone === 'green' || presentation.presentationTone === 'teal') return 'bullish';
@@ -11356,18 +11403,29 @@ function reconcileWatchlistPresentation({
       conflicting_legacy_state_detected:true,
       watchlist_presentation_source:'strict_reconciled',
       ui_state_source:`${base.ui_state_source || 'resolveFinalStateContract'}|strict_reconciled`,
-      presentationBucket:'low_priority',
+      presentationBucket:'avoid',
       presentationTone:'red',
       presentationBadge:'Avoid',
       presentationReason:'Avoid - setup no longer viable.',
       priorityScore:presentation.priorityScore,
-      activeTrackEligible:false
+      activeTrackEligible:false,
+      diminishingTrackEligible:false,
+      avoidTrackEligible:true,
+      structureEligibility:presentation.structureEligibility
     };
   }
   return {
     ...base,
-    bucket_rendered:presentation.presentationBucket === 'low_priority' ? 'low_priority_avoid' : (base.bucket_rendered || base.bucket || 'monitor_watch'),
-    bucket:presentation.presentationBucket === 'low_priority' ? 'low_priority_avoid' : (base.bucket || 'monitor_watch'),
+    bucket_rendered:(function(){
+      if(presentation.presentationBucket === 'diminishing') return 'diminishing';
+      if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
+      return base.bucket_rendered || base.bucket || 'monitor_watch';
+    })(),
+    bucket:(function(){
+      if(presentation.presentationBucket === 'diminishing') return 'diminishing';
+      if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
+      return base.bucket || 'monitor_watch';
+    })(),
     badge:{
       text:presentation.presentationBadge,
       className:presentation.presentationBadgeClass
@@ -11383,7 +11441,10 @@ function reconcileWatchlistPresentation({
     presentationBadge:presentation.presentationBadge,
     presentationReason:presentation.presentationReason,
     priorityScore:presentation.priorityScore,
-    activeTrackEligible:presentation.activeTrackEligible
+    activeTrackEligible:presentation.activeTrackEligible,
+    diminishingTrackEligible:presentation.diminishingTrackEligible,
+    avoidTrackEligible:presentation.avoidTrackEligible,
+    structureEligibility:presentation.structureEligibility
   };
 }
 

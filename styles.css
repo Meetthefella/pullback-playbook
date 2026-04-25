@@ -989,6 +989,11 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   border-color:rgba(245,158,11,0.38) !important;
   background:linear-gradient(160deg, rgba(245,158,11,0.12), rgba(20,28,38,0.92) 66%) !important;
 }
+.tone-amber{
+  --tone-color:rgb(251,191,36);
+  border-color:rgba(251,191,36,0.42) !important;
+  background:linear-gradient(160deg, rgba(251,191,36,0.14), rgba(20,28,38,0.90) 66%) !important;
+}
 .tone-purple{
   --tone-color:rgb(147,51,234);
   border-color:rgba(147,51,234,0.35) !important;
@@ -998,6 +1003,11 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   --tone-color:rgb(250,204,21);
   border-color:rgba(250,204,21,0.38) !important;
   background:linear-gradient(160deg, rgba(250,204,21,0.12), rgba(20,28,38,0.92) 66%) !important;
+}
+.tone-muted-amber{
+  --tone-color:rgb(184,141,55);
+  border-color:rgba(184,141,55,0.24) !important;
+  background:linear-gradient(160deg, rgba(184,141,55,0.08), rgba(18,24,32,0.93) 68%) !important;
 }
 .tone-indigo{
   --tone-color:rgb(99,102,241);
@@ -1021,16 +1031,20 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .result-feed-card.tone-red,
 .result-feed-card.tone-orange,
+.result-feed-card.tone-amber,
 .result-feed-card.tone-purple,
 .result-feed-card.tone-yellow,
+.result-feed-card.tone-muted-amber,
 .result-feed-card.tone-indigo,
 .result-feed-card.tone-blue,
 .result-feed-card.tone-teal,
 .result-feed-card.tone-green,
 .watchlist-card.tone-red,
 .watchlist-card.tone-orange,
+.watchlist-card.tone-amber,
 .watchlist-card.tone-purple,
 .watchlist-card.tone-yellow,
+.watchlist-card.tone-muted-amber,
 .watchlist-card.tone-indigo,
 .watchlist-card.tone-blue,
 .watchlist-card.tone-teal,
@@ -1066,8 +1080,10 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .reviewworkspace-shell.tone-red,
 .reviewworkspace-shell.tone-orange,
+.reviewworkspace-shell.tone-amber,
 .reviewworkspace-shell.tone-purple,
 .reviewworkspace-shell.tone-yellow,
+.reviewworkspace-shell.tone-muted-amber,
 .reviewworkspace-shell.tone-indigo,
 .reviewworkspace-shell.tone-blue,
 .reviewworkspace-shell.tone-teal,
