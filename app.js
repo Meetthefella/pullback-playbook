@@ -11284,7 +11284,9 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const avoidByExplicitInvalidation = !!explicitInvalidation;
   const weakening = structureEligibility === 'damaged' || structureState === 'weakening';
   const lowPriorityByViability = String(verdictSource && verdictSource.viability || '').trim().toLowerCase() === 'low_priority';
-  const finalIsMonitorWatch = ['watch','monitor'].includes(rawFinalVerdict) || normalizedFinalVerdict === 'monitor';
+  const finalVerdictKey = rawFinalVerdict || normalizedFinalVerdict || 'monitor';
+  const finalIsMonitorWatch = ['watch','monitor'].includes(finalVerdictKey);
+  const finalIsEntryNear = normalizedFinalVerdict === 'entry' || normalizedFinalVerdict === 'near_entry';
   const activeTrackEligible = finalIsMonitorWatch
     && structureEligibility !== 'damaged'
     && structureState !== 'weakening'
@@ -11300,8 +11302,17 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     && !avoidByExplicitInvalidation;
   const avoidTrackEligible = avoidByVerdict || avoidByBroken || avoidByExplicitInvalidation;
   let presentationBucket = 'active';
-  if(avoidTrackEligible) presentationBucket = 'avoid';
-  else if(diminishingTrackEligible) presentationBucket = 'diminishing';
+  if(avoidTrackEligible){
+    presentationBucket = 'avoid';
+  }else if(finalIsEntryNear){
+    presentationBucket = 'active';
+  }else if(activeTrackEligible){
+    presentationBucket = 'active';
+  }else if(diminishingTrackEligible || finalIsMonitorWatch){
+    presentationBucket = 'diminishing';
+  }else{
+    presentationBucket = 'active';
+  }
 
   let presentationTone = 'amber';
   let presentationBadge = 'Monitor';
