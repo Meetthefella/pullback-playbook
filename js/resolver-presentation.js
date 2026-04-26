@@ -17,7 +17,10 @@
   function visualToneForState(state){
     if(state === 'entry') return 'entry';
     if(state === 'near_entry') return 'near_entry';
+    if(state === 'watch') return 'watch';
+    if(state === 'diminishing') return 'diminishing';
     if(state === 'monitor') return 'monitor';
+    if(state === 'dead') return 'avoid';
     if(state === 'avoid') return 'avoid';
     return 'neutral';
   }
@@ -29,8 +32,17 @@
     if(state === 'near_entry'){
       return {top:'#35A0A0', bottom:'#020617', border:'rgba(53, 160, 160, 0.42)', glow:'rgba(53, 160, 160, 0.12)'};
     }
+    if(state === 'watch'){
+      return {top:'#7C3AED', bottom:'#020617', border:'rgba(124, 58, 237, 0.34)', glow:'rgba(124, 58, 237, 0.10)'};
+    }
     if(state === 'monitor'){
       return {top:'#FFA000', bottom:'#020617', border:'rgba(255, 160, 0, 0.42)', glow:'rgba(255, 160, 0, 0.10)'};
+    }
+    if(state === 'diminishing'){
+      return {top:'#F97316', bottom:'#020617', border:'rgba(249, 115, 22, 0.46)', glow:'rgba(249, 115, 22, 0.11)'};
+    }
+    if(state === 'dead'){
+      return {top:'#D50032', bottom:'#020617', border:'rgba(213, 0, 50, 0.48)', glow:'rgba(213, 0, 50, 0.12)'};
     }
     if(state === 'avoid'){
       return {top:'#D50032', bottom:'#020617', border:'rgba(213, 0, 50, 0.48)', glow:'rgba(213, 0, 50, 0.12)'};
@@ -48,6 +60,9 @@
   function cardClassForState(state){
     if(state === 'entry') return 'card--entry';
     if(state === 'near_entry') return 'card--near-entry';
+    if(state === 'watch') return 'card--watch';
+    if(state === 'diminishing') return 'card--diminishing';
+    if(state === 'dead') return 'card--dead';
     if(state === 'avoid') return 'card--avoid';
     return 'card--monitor';
   }

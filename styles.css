@@ -1978,15 +1978,26 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   letter-spacing:.2px;
   box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--card-accent, #64748b) 38%, transparent);
 }
-.watchlist-card__header{display:flex;flex-direction:column;gap:8px}
-.watchlist-card__header-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:nowrap;min-width:0;padding-right:44px}
+.watchlist-card__header{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-areas:
+    "ticker status"
+    "company status";
+  gap:6px 12px;
+  align-items:start;
+}
+.watchlist-card__header-row{grid-area:ticker;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:nowrap;min-width:0;padding-right:0}
 .watchlist-card__ticker{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.watchlist-card__status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;white-space:normal;flex:0 0 auto;justify-content:flex-start}
-.watchlist-card__company{width:100%;color:var(--text-secondary)}
+.watchlist-card__status{grid-area:status;display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap;white-space:normal;flex:0 0 auto;justify-content:flex-end;align-self:start;max-width:min(42vw, 190px);min-width:120px}
+.watchlist-card__company{grid-area:company;width:100%;min-width:0;color:var(--text-secondary);overflow-wrap:anywhere}
 .watchlist-card.scan-card .watchlist-card__header{
   display:grid;
-  grid-template-columns:minmax(0,max-content) minmax(0,1fr);
-  gap:10px;
+  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-areas:
+    "ticker status"
+    "company status";
+  gap:6px 12px;
   align-items:start;
 }
 .watchlist-card.scan-card .watchlist-card__status{
@@ -2163,11 +2174,10 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   overflow:hidden;
 }
 .watchlist-card[data-entry-hold-helper="1"] .entry-conditions-trigger::before{
-  content:'...';
+  content:'\01F446';
   display:block;
-  font-size:15px;
+  font-size:16px;
   line-height:34px;
-  letter-spacing:1px;
   text-align:center;
   color:color-mix(in srgb, var(--card-accent, #64748b) 72%, white);
   transform:translateY(-1px);
@@ -2515,4 +2525,16 @@ details>summary::-webkit-details-marker{display:none}
 .watchlist-card[data-entry-hold-helper="1"] .watchlist-card__details>summary::after{
   content:none !important;
   display:none !important;
+}
+
+/* Restore shared tone glow for hold-enabled watchlist cards. */
+.watchlist-card[data-entry-hold-helper="1"]::after{
+  content:"";
+  position:absolute;
+  left:10px;
+  right:0;
+  top:0;
+  height:36%;
+  background:linear-gradient(180deg, var(--card-glow, rgba(100, 116, 139, 0.10)), rgba(0,0,0,0));
+  pointer-events:none;
 }
