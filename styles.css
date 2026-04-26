@@ -1321,6 +1321,28 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   position:relative;
   overflow:hidden;
 }
+.reviewworkspace-shell.card--monitor{
+  border-color:var(--tone-monitor-border);
+  background:
+    linear-gradient(180deg, rgba(245, 158, 11, 0.12) 0%, rgba(20,28,38,.94) 42%, rgba(20,28,38,.94) 100%) !important;
+}
+.reviewworkspace-shell.card--diminishing{
+  border-color:var(--tone-diminishing-border);
+  background:
+    linear-gradient(180deg, rgba(249, 115, 22, 0.14) 0%, rgba(20,28,38,.94) 42%, rgba(20,28,38,.94) 100%) !important;
+}
+.reviewworkspace-shell.card--avoid,
+.reviewworkspace-shell.card--dead{
+  border-color:var(--tone-avoid-border);
+  background:
+    linear-gradient(180deg, rgba(220, 38, 38, 0.14) 0%, rgba(20,28,38,.94) 42%, rgba(20,28,38,.94) 100%) !important;
+}
+.reviewworkspace-shell.card--watch,
+.reviewworkspace-shell.card--near-entry,
+.reviewworkspace-shell.card--entry{
+  background:
+    linear-gradient(180deg, rgba(16, 185, 129, 0.12) 0%, rgba(20,28,38,.94) 42%, rgba(20,28,38,.94) 100%) !important;
+}
 .reviewworkspace-shell > *{
   position:relative;
   z-index:1;
@@ -1410,6 +1432,19 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   -webkit-backdrop-filter:none;
   box-shadow:none;
   border:1px solid rgba(255,255,255,.05);
+}
+.reviewworkspace-shell.card--monitor .panelbox{
+  background:rgba(36,33,20,.78);
+  border-color:rgba(245, 158, 11, 0.16);
+}
+.reviewworkspace-shell.card--diminishing .panelbox{
+  background:rgba(38,29,20,.80);
+  border-color:rgba(249, 115, 22, 0.20);
+}
+.reviewworkspace-shell.card--avoid .panelbox,
+.reviewworkspace-shell.card--dead .panelbox{
+  background:rgba(42,24,28,.80);
+  border-color:rgba(220, 38, 38, 0.18);
 }
 .plannerbox{
   transition:background-color .18s ease, border-color .18s ease;

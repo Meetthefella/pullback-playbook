@@ -11583,7 +11583,7 @@ function guardAnalysisMovingAverageLanguage(chartRead, options = {}){
   const structureState = String(options.structureState || '').trim().toLowerCase();
   const priceVs20 = describePriceVsMovingAverage(price, sma20, 0.015);
   const priceVs50 = describePriceVsMovingAverage(price, sma50, 0.02);
-  const false50Pattern = /(pull(?:ing)? back towards the 50\s*ma|pullback towards the 50\s*ma|pullback to the 50\s*ma|near the 50\s*ma|testing the 50\s*ma as support|using the 50\s*ma as support|holding the 50\s*ma as support)/i;
+  const false50Pattern = /(pull(?:ing)? back towards (?:its |the )?50\s*ma|pull(?:ing)? back toward (?:its |the )?50\s*ma|pullback towards (?:its |the )?50\s*ma|pullback toward (?:its |the )?50\s*ma|pullback to (?:its |the )?50\s*ma|near (?:its |the )?50\s*ma(?: as support)?|testing (?:its |the )?50\s*ma as support|using (?:its |the )?50\s*ma as support|holding (?:its |the )?50\s*ma as support)/i;
   if(!original){
     return {
       text:original,
@@ -11615,7 +11615,7 @@ function guardAnalysisMovingAverageLanguage(chartRead, options = {}){
   }
   const correction = priceVs20 === 'below'
     ? 'Price is below both the 20MA and 50MA. This is no longer a clean pullback to the 50MA.'
-    : 'Price has lost the 50MA. This is no longer a clean pullback to the 50MA.';
+    : 'Price has lost the 50MA. Price is below the 50MA and structure is weakening. This is no longer a clean pullback to the 50MA.';
   const sentences = original
     .split(/(?<=[.!?])\s+/)
     .map(sentence => String(sentence || '').trim())
@@ -11628,6 +11628,28 @@ function guardAnalysisMovingAverageLanguage(chartRead, options = {}){
     reason:'AI 50MA wording corrected because price is below the 50MA.',
     priceVs20,
     priceVs50
+  };
+}
+
+function finalDisplayedAnalysisChartRead(record, analysis){
+  const item = normalizeTickerRecord(record || {});
+  const analysisState = analysis && typeof analysis === 'object' ? analysis : {};
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const correction = guardAnalysisMovingAverageLanguage(
+    analysisState.plain_english_chart_read || analysisState.chart_read || '',
+    {
+      price:item.marketData && item.marketData.price,
+      sma20:item.marketData && item.marketData.sma20,
+      sma50:item.marketData && item.marketData.sma50,
+      structureState:derivedStates.structureState
+    }
+  );
+  return {
+    text:correction.text || String(analysisState.plain_english_chart_read || analysisState.chart_read || '').trim(),
+    applied:correction.applied,
+    reason:correction.reason,
+    priceVs20:correction.priceVs20,
+    priceVs50:correction.priceVs50
   };
 }
 
@@ -15832,7 +15854,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     position_size:0,
     risk_status:hasPlanFields ? 'invalid_plan' : 'plan_missing'
   };
-  const keyReasons = normalizeAnalysisReasons(parsed.key_reasons, hasPlanFields, rewardRisk, previousState, parsed.plain_english_chart_read);
+  const keyReasons = normalizeAnalysisReasons(parsed.key_reasons, hasPlanFields, rewardRisk, previousState, chartReadGuard.text);
   const mismatchStatus = ['match','mismatch','unclear'].includes(parsed.chart_match_status) ? parsed.chart_match_status : '';
   const mismatchWarning = String(parsed.chart_match_warning || '').trim();
   const safeRisks = (Array.isArray(parsed.risks) ? parsed.risks : []).map(item => String(item || '').trim()).filter(Boolean).filter(item => {
@@ -15841,7 +15863,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   });
   if(mismatchStatus === 'mismatch' && mismatchWarning && !safeRisks.includes(mismatchWarning)) safeRisks.unshift(mismatchWarning);
   if(mismatchStatus === 'unclear' && mismatchWarning && !safeRisks.includes(mismatchWarning)) safeRisks.unshift(mismatchWarning);
-  const inferredRisks = safeRisks.length ? [] : inferRisksFromAnalysisText(parsed.plain_english_chart_read, keyReasons);
+  const inferredRisks = safeRisks.length ? [] : inferRisksFromAnalysisText(chartReadGuard.text, keyReasons);
   const finalRisks = safeRisks.length ? safeRisks : inferredRisks;
   return {
     setup_type:parsed.setup_type || previousState.setupType || '',
@@ -15870,6 +15892,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     final_verdict:tightenedVerdict,
     ai_ma_language_guard_applied:chartReadGuard.applied,
     ai_ma_language_guard_reason:chartReadGuard.reason,
+    ai_final_display_text_corrected:chartReadGuard.applied,
     ai_price_vs_20ma:chartReadGuard.priceVs20,
     ai_price_vs_50ma:chartReadGuard.priceVs50,
     warning_state:evaluateWarningState({
@@ -16274,6 +16297,7 @@ function renderAnalysisPanel(card){
   if(!card.lastResponse) return '<div class="tiny">No AI response saved yet.</div>';
   if(card.lastAnalysis){
     const analysis = normalizeAnalysisResult(card.lastAnalysis, card);
+    const chartReadDisplay = finalDisplayedAnalysisChartRead(card, analysis);
     const chartMismatch = analysis.chart_match_status === 'mismatch';
     const chartUnclear = analysis.chart_match_status === 'unclear';
     const chartWarning = analysis.chart_match_warning || '';
@@ -16293,9 +16317,9 @@ function renderAnalysisPanel(card){
     const showPlanNumbers = savedAiPlanNumbersAllowed(card);
     const planMarkup = showPlanNumbers
       ? `<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div>`
-      : '<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Bounce is too weak to price cleanly.</div><div class="tiny">Waiting for a reclaim and stronger close.</div></div>';
+      : '<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Trend is weakening - no reliable stop level yet.</div><div class="tiny">Price has lost the 50MA and the setup is deteriorating.</div></div>';
     logAnalysisDebug('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
-    return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div>${planMarkup}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
+    return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div>${planMarkup}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
@@ -16322,11 +16346,11 @@ function savedAiPlanNumbersAllowed(record){
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const visualState = resolveVisualState(item, 'review', {derivedStates});
   const planUI = resolvePlanVisibility({
-    state:visualState.finalVerdict || visualState.final_verdict,
+    state:visualState.final_verdict_rendered || visualState.finalVerdict || visualState.final_verdict,
     bounce_state:derivedStates.bounceState || (item.setup && item.setup.bounceState),
     structure:derivedStates.structureState || (item.setup && item.setup.structureState)
   });
-  const verdict = normalizeGlobalVerdictKey(visualState.finalVerdict || visualState.final_verdict);
+  const verdict = normalizeGlobalVerdictKey(visualState.final_verdict_rendered || visualState.finalVerdict || visualState.final_verdict);
   return planUI.showPlan && ['entry','near_entry'].includes(verdict);
 }
 
@@ -16351,6 +16375,7 @@ function renderAnalysisPanelFromRecord(record){
   }
   if(analysisState.normalizedAnalysis){
     const analysis = analysisState.normalizedAnalysis;
+    const chartReadDisplay = finalDisplayedAnalysisChartRead(item, analysis);
     const advisory = analysisAdvisoryContextForRecord(item, analysis);
     const chartMismatch = analysis.chart_match_status === 'mismatch';
     const chartUnclear = analysis.chart_match_status === 'unclear';
@@ -16369,8 +16394,8 @@ function renderAnalysisPanelFromRecord(record){
     const showPlanNumbers = savedAiPlanNumbersAllowed(item);
     const planMarkup = showPlanNumbers
       ? `<div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div>`
-      : '<div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Bounce is too weak to price cleanly.</div><div class="tiny">Waiting for a reclaim and stronger close.</div>';
-    return `<div class="responsegrid"><div class="mutebox tiny">${escapeHtml(advisory.advisoryNote)}</div>${advisory.reviewMoreConservative ? '<div class="mutebox warntext"><strong>Final review is more conservative than the saved AI read.</strong></div>' : ''}${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Metrics</summary><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(analysis.plain_english_chart_read || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div>${planMarkup}</div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
+      : '<div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Trend is weakening - no reliable stop level yet.</div><div class="tiny">Price has lost the 50MA and the setup is deteriorating.</div>';
+    return `<div class="responsegrid"><div class="mutebox tiny">${escapeHtml(advisory.advisoryNote)}</div>${advisory.reviewMoreConservative ? '<div class="mutebox warntext"><strong>Final review is more conservative than the saved AI read.</strong></div>' : ''}${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Metrics</summary><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div>${planMarkup}</div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
   }
   if(!analysisState.rawAnalysis) return '<div class="tiny">No AI analysis saved yet.</div>';
   logDebug('DEBUG_RENDER', 'LEGACY_PATH_STILL_IN_USE', 'renderAnalysisPanelFromRecord-fallback', item.ticker);
@@ -18479,8 +18504,11 @@ function renderReviewWorkspace(options = {}){
     {label:'Normalized Analysis Exists', value:String(!!analysisState.normalizedAnalysis)},
     {label:'AI MA Guard Applied', value:analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_language_guard_applied ? 'true' : 'false'},
     {label:'AI MA Guard Reason', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_language_guard_reason) || '(none)'},
+    {label:'AI Final Display Text Corrected', value:analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_final_display_text_corrected ? 'true' : 'false'},
     {label:'AI Price vs 20MA', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_price_vs_20ma) || '(none)'},
     {label:'AI Price vs 50MA', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_price_vs_50ma) || '(none)'},
+    {label:'Primary Blocker Source', value:resolvedContract.primaryBlockerSource || '(none)'},
+    {label:'Primary Blocker Reason', value:resolvedContract.primaryBlockerReason || '(none)'},
     {label:'Last Error', value:analysisState.error || '(none)'},
     {label:'Last Reviewed At', value:record.review.lastReviewedAt || '(none)'}
   ])}${renderDebugSectionMarkup('Capital Simulation (Debug Only)', [
@@ -20384,8 +20412,10 @@ function resolveFinalStateContract(record, options = {}){
   const stabilisationState = String(derivedStates.stabilisationState || '').toLowerCase();
   const volumeState = String(derivedStates.volumeState || '').toLowerCase();
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const sma50 = numericOrNull(item.marketData && item.marketData.sma50);
   const stop = numericOrNull(item.plan && item.plan.stop);
   const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop;
+  const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.9975;
   const marketWeak = !!(
     qualityAdjustments.weakRegimePenalty
     || item.setup.marketCaution
@@ -20485,10 +20515,18 @@ function resolveFinalStateContract(record, options = {}){
   let actionTone = 'warning';
   let blockerCode = '';
   let blockerReason = '';
+  let primaryBlockerSource = '';
+  let primaryBlockerReason = '';
   const reasonParts = [];
   const addReason = value => {
     const text = String(value || '').trim();
     if(text && !reasonParts.includes(text)) reasonParts.push(text);
+  };
+  const setPrimaryBlocker = (code, reason, source) => {
+    blockerCode = code;
+    blockerReason = reason;
+    primaryBlockerSource = source;
+    primaryBlockerReason = reason;
   };
   if(verdictCap.capApplied && verdictCap.capReason){
     addReason(verdictCap.capReason);
@@ -20498,22 +20536,32 @@ function resolveFinalStateContract(record, options = {}){
     actionStateKey = 'rebuild_setup';
     actionLabel = 'Rebuild setup';
     actionTone = 'danger';
-    blockerCode = deadCheck.reasonCode || avoidSubtype || 'broken_structure';
-    blockerReason = structureState === 'broken' ? 'Structure is broken' : 'Setup is no longer technically valid';
+    setPrimaryBlocker(deadCheck.reasonCode || avoidSubtype || 'broken_structure', structureState === 'broken' ? 'Structure is broken' : 'Setup is no longer technically valid', 'terminal_structure');
+    addReason(blockerReason);
+  }else if(structureState === 'weakening' || lost50MaSupport){
+    actionStateKey = 'recalculate_plan';
+    actionLabel = 'Hold for entry conditions';
+    actionTone = 'warning';
+    setPrimaryBlocker(
+      lost50MaSupport ? 'lost_50ma_support' : 'weakening_structure',
+      lost50MaSupport
+        ? 'Price has lost the 50MA and the setup is deteriorating.'
+        : 'Trend is weakening - no reliable stop level yet.',
+      lost50MaSupport ? 'lost_50ma_support' : 'weakening_structure'
+    );
     addReason(blockerReason);
   }else if(planStateKey !== 'valid'){
     actionStateKey = 'recalculate_plan';
     actionLabel = 'Hold for entry conditions';
     actionTone = 'warning';
-    blockerCode = planStateKey;
-    blockerReason = (planStateKey === 'needs_adjustment' && (capitalBlocked || capitalHeavy))
+    setPrimaryBlocker(planStateKey, (planStateKey === 'needs_adjustment' && (capitalBlocked || capitalHeavy))
       ? (capitalConstraintReasonForPlan(displayedPlan) || 'Capital usage is heavy for this account size.')
       : (({
         missing:'Plan not defined',
         invalid:'Invalid plan',
         needs_adjustment:'Bounce is too weak to price cleanly.',
         unrealistic_rr:'R:R is not realistic'
-      })[planStateKey] || 'Plan needs adjustment');
+      })[planStateKey] || 'Plan needs adjustment'), 'plan_state');
     addReason(blockerReason);
   }else if(
     finalVerdict === 'Entry'
@@ -20522,33 +20570,31 @@ function resolveFinalStateContract(record, options = {}){
     actionStateKey = 'ready_to_act';
     actionLabel = 'Ready to act';
     actionTone = 'success';
-    blockerCode = 'ready';
-    blockerReason = 'Trigger conditions are met';
+    setPrimaryBlocker('ready', 'Trigger conditions are met', 'ready');
   }else{
     actionStateKey = 'wait_for_confirmation';
     actionLabel = 'Hold for confirmation';
     actionTone = 'warning';
-    if(bounceUnconfirmed){
-      blockerCode = 'bounce_not_confirmed';
-      blockerReason = 'Still forming - buyers have not taken control yet.';
-    }else if(structureState === 'weakening'){
-      blockerCode = 'weakening_structure';
-      blockerReason = 'Trend is weakening - no reliable stop level yet.';
+    if(structureState === 'weakening' || lost50MaSupport){
+      setPrimaryBlocker(
+        lost50MaSupport ? 'lost_50ma_support' : 'weakening_structure',
+        lost50MaSupport
+          ? 'Price has lost the 50MA and the setup is deteriorating.'
+          : 'Trend is weakening - no reliable stop level yet.',
+        lost50MaSupport ? 'lost_50ma_support' : 'weakening_structure'
+      );
+    }else if(bounceUnconfirmed){
+      setPrimaryBlocker('bounce_not_confirmed', 'Still forming - buyers have not taken control yet.', 'bounce_confirmation');
     }else if(weakVolume){
-      blockerCode = 'weak_volume';
-      blockerReason = 'Needs stronger volume';
+      setPrimaryBlocker('weak_volume', 'Needs stronger volume', 'volume');
     }else if(marketWeak){
-      blockerCode = 'hostile_market';
-      blockerReason = 'Market not supportive';
+      setPrimaryBlocker('hostile_market', 'Market not supportive', 'market');
     }else if(weakControl){
-      blockerCode = 'weak_control';
-      blockerReason = 'Structure needs tighter control';
+      setPrimaryBlocker('weak_control', 'Structure needs tighter control', 'structure_control');
     }else if(finalVerdict === 'Near Entry'){
-      blockerCode = 'near_trigger';
-      blockerReason = 'Stabilising near support. Buyers are starting to respond.';
+      setPrimaryBlocker('near_trigger', 'Stabilising near support. Buyers are starting to respond.', 'near_entry_trigger');
     }else{
-      blockerCode = 'early_confirmation';
-      blockerReason = 'Still forming - buyers have not taken control yet.';
+      setPrimaryBlocker('early_confirmation', 'Still forming - buyers have not taken control yet.', 'generic_confirmation');
     }
     addReason(blockerReason);
   }
@@ -20632,6 +20678,8 @@ function resolveFinalStateContract(record, options = {}){
     actionTone,
     blockerCode,
     blockerReason:blockerReason || reasonParts[0] || '',
+    primaryBlockerSource:primaryBlockerSource || blockerCode || '',
+    primaryBlockerReason:primaryBlockerReason || blockerReason || reasonParts[0] || '',
     reasonParts,
     reasonSummary,
     nextPossibleState,
