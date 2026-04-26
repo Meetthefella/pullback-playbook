@@ -41,8 +41,8 @@
   function visualStyleForState(state, score){
     const palette = visualPaletteForState(state);
     const intensity = clampScore(score) / 10;
-    const lift = (0.05 + intensity * 0.06).toFixed(3);
-    return `--visual-state-background:linear-gradient(180deg, ${palette.top} 0%, rgba(15, 23, 42, ${Number(0.92 - Number(lift)).toFixed(3)}) 46%, ${palette.bottom} 100%);--visual-state-border:${palette.border};--visual-state-glow:${palette.glow};`;
+    const glowBoost = (0.08 + intensity * 0.08).toFixed(3);
+    return `--visual-state-background:${palette.top};--visual-state-border:${palette.border};--visual-state-glow:rgba(0,0,0,${glowBoost});`;
   }
 
   function cardClassForState(state){
