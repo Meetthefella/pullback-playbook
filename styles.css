@@ -36,24 +36,24 @@
   --state-waiting:#f87171;
   --state-dead:#ef4444;
   --tone-entry:#008C89;
-  --tone-entry-soft:rgba(0, 140, 137, 0.14);
-  --tone-entry-border:rgba(0, 140, 137, 0.42);
+  --tone-entry-soft:rgba(0, 140, 137, 0.15);
+  --tone-entry-border:rgba(0, 140, 137, 0.44);
   --tone-near-entry:#35A0A0;
-  --tone-near-entry-soft:rgba(53, 160, 160, 0.14);
-  --tone-near-entry-border:rgba(53, 160, 160, 0.42);
+  --tone-near-entry-soft:rgba(53, 160, 160, 0.15);
+  --tone-near-entry-border:rgba(53, 160, 160, 0.44);
   --tone-monitor:#FFA000;
-  --tone-monitor-soft:rgba(255, 160, 0, 0.12);
-  --tone-monitor-border:rgba(255, 160, 0, 0.42);
+  --tone-monitor-soft:rgba(255, 160, 0, 0.14);
+  --tone-monitor-border:rgba(255, 160, 0, 0.46);
   --tone-diminishing:#F4511E;
-  --tone-diminishing-soft:rgba(244, 81, 30, 0.13);
-  --tone-diminishing-border:rgba(244, 81, 30, 0.46);
+  --tone-diminishing-soft:rgba(244, 81, 30, 0.15);
+  --tone-diminishing-border:rgba(244, 81, 30, 0.48);
   --tone-watch:#A78BFA;
   --tone-watch-soft:rgba(167, 139, 250, 0.16);
   --tone-watch-border:rgba(167, 139, 250, 0.34);
   --tone-avoid:#D50032;
   --tone-avoid-strong:#B0002A;
-  --tone-avoid-soft:rgba(213, 0, 50, 0.14);
-  --tone-avoid-border:rgba(213, 0, 50, 0.48);
+  --tone-avoid-soft:rgba(213, 0, 50, 0.16);
+  --tone-avoid-border:rgba(213, 0, 50, 0.52);
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -1008,6 +1008,11 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   border-color:var(--tone-monitor-border) !important;
   background:linear-gradient(180deg, var(--tone-monitor-soft) 0%, rgba(15, 23, 42, 0.96) 46%, rgba(2, 6, 23, 1) 100%) !important;
 }
+.tone-orange{
+  --tone-color:var(--tone-monitor);
+  border-color:var(--tone-monitor-border) !important;
+  background:linear-gradient(180deg, var(--tone-monitor-soft) 0%, rgba(15, 23, 42, 0.96) 46%, rgba(2, 6, 23, 1) 100%) !important;
+}
 .tone-purple{
   --tone-color:var(--tone-watch);
   border-color:var(--tone-watch-border) !important;
@@ -1071,6 +1076,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .result-feed-card.tone-red,
 .result-feed-card.tone-amber,
+.result-feed-card.tone-orange,
 .result-feed-card.tone-purple,
 .result-feed-card.tone-muted-amber,
 .result-feed-card.tone-indigo,
@@ -1079,6 +1085,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .result-feed-card.tone-green,
 .watchlist-card.tone-red,
 .watchlist-card.tone-amber,
+.watchlist-card.tone-orange,
 .watchlist-card.tone-purple,
 .watchlist-card.tone-muted-amber,
 .watchlist-card.tone-indigo,
@@ -1116,6 +1123,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .reviewworkspace-shell.tone-red,
 .reviewworkspace-shell.tone-amber,
+.reviewworkspace-shell.tone-orange,
 .reviewworkspace-shell.tone-purple,
 .reviewworkspace-shell.tone-muted-amber,
 .reviewworkspace-shell.tone-indigo,
