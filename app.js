@@ -6540,6 +6540,11 @@ function renderWatchlistCardElement(record){
     const holdWrapper = document.createElement('div');
     holdWrapper.innerHTML = watchlistEntryConditionsHelper;
     if(holdWrapper.firstElementChild) div.appendChild(holdWrapper.firstElementChild);
+    const holdAffordance = document.createElement('div');
+    holdAffordance.className = 'entry-conditions-affordance no-card-click';
+    holdAffordance.setAttribute('aria-hidden', 'true');
+    holdAffordance.textContent = '👆';
+    div.appendChild(holdAffordance);
   }
   if(holdEnabled){
     bindEntryConditionsHoldInteractions(div);
@@ -18345,6 +18350,38 @@ function renderReviewWorkspace(options = {}){
   const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary;
   const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
   const reviewRenderedVerdict = String(visualState.final_verdict_rendered || visualState.renderedVerdict || visualState.finalVerdict || visualState.final_verdict || '').trim().toLowerCase();
+  const reviewPresentationStateRaw = String(
+    visualState.review_presentation_state
+    || visualState.final_verdict_rendered
+    || visualState.renderedVerdict
+    || visualState.state
+    || visualState.finalVerdict
+    || visualState.final_verdict
+    || 'monitor'
+  ).trim().toLowerCase();
+  const reviewPresentationState = normalizeGlobalVerdictKey(reviewPresentationStateRaw || 'monitor');
+  const reviewOuterBorderTone = reviewPresentationState === 'diminishing'
+    ? 'diminishing'
+    : (['avoid', 'dead'].includes(reviewPresentationState)
+      ? 'avoid'
+      : (reviewPresentationState === 'watch'
+        ? 'watch'
+        : (reviewPresentationState === 'near_entry'
+          ? 'near_entry'
+          : (reviewPresentationState === 'entry' ? 'entry' : 'monitor'))));
+  const reviewAccentClass = reviewPresentationState === 'diminishing'
+    ? 'card--diminishing'
+    : (reviewOuterBorderTone === 'avoid'
+      ? (reviewPresentationState === 'dead' ? 'card--dead' : 'card--avoid')
+      : (reviewPresentationState === 'watch'
+        ? 'card--watch'
+        : (reviewPresentationState === 'near_entry'
+          ? 'card--near-entry'
+          : (reviewPresentationState === 'entry' ? 'card--entry' : 'card--monitor'))));
+  const reviewOuterShellClass = `visual-state-card visual-state-${reviewPresentationState} visual-tone-${reviewOuterBorderTone} ${reviewAccentClass}`;
+  const reviewShellStyleAttr = reviewPresentationState === 'diminishing'
+    ? '--visual-state-background:#F97316;--visual-state-border:rgba(249, 115, 22, 0.46);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#F97316;'
+    : visualState.styleAttr || '';
   const reviewAction = reviewRenderedVerdict === 'diminishing'
     ? {label:'DIMINISHING', detail:'Weakening setup', planAllowed:false, watchlistAllowed:true}
     : getActions(visualState.finalVerdict || visualState.final_verdict);
@@ -18456,6 +18493,10 @@ function renderReviewWorkspace(options = {}){
     {label:'Review Presentation State', value:visualState.review_presentation_state || '(none)'},
     {label:'Review Presentation Source', value:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || '(none)'},
     {label:'Review Lifecycle Bias', value:reviewLifecycleBias.review_lifecycle_bias || '(none)'},
+    {label:'Review Outer Shell Class', value:reviewOuterShellClass || '(none)'},
+    {label:'Review Outer Border Tone', value:reviewOuterBorderTone || '(none)'},
+    {label:'Review Accent Class', value:reviewAccentClass || '(none)'},
+    {label:'Review Visual Source', value:reviewPresentationState || '(none)'},
     {label:'Copy Override Applied', value:reviewLifecycleBias.review_lifecycle_copy_override_applied ? 'true' : 'false'},
     {label:'Copy Override Reason', value:reviewLifecycleBias.review_lifecycle_copy_reason || '(none)'},
     {label:'Terminal Avoid Applied', value:visualState.terminal_avoid_applied ? 'true' : 'false'},
@@ -18543,14 +18584,16 @@ function renderReviewWorkspace(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
   });
-  box.className = `list reviewworkspace-shell ${visualState.className || visualState.toneClass || ''}`;
-  box.style.cssText = visualState.styleAttr || '';
-  box.dataset.visualTone = visualState.visual_tone || '';
-  box.dataset.visualState = visualState.state || '';
+  box.className = `list reviewworkspace-shell ${reviewOuterShellClass}`;
+  box.style.cssText = reviewShellStyleAttr;
+  box.dataset.visualTone = reviewOuterBorderTone || visualState.visual_tone || '';
+  box.dataset.visualState = reviewPresentationState || visualState.state || '';
+  box.dataset.reviewPresentationState = reviewPresentationState || '';
+  box.dataset.reviewVisualSource = visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || 'resolver';
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate({persist:false});
   });
-  box.innerHTML = `<div class="reviewworkspace ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(visualState.visual_tone || '')}" data-visual-state="${escapeHtml(visualState.state || '')}">
+  box.innerHTML = `<div class="reviewworkspace ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(reviewOuterBorderTone || visualState.visual_tone || '')}" data-visual-state="${escapeHtml(reviewPresentationState || visualState.state || '')}">
     <div class="panelbox review-section review-section--snapshot">
       <div class="reviewsectionhead"><strong>Snapshot</strong></div>
       <div class="reviewhero reviewhero-compact">

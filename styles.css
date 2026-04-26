@@ -2241,6 +2241,25 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   right:14px;
   z-index:4;
 }
+.watchlist-card[data-entry-hold-helper="1"] .entry-conditions-affordance{
+  position:absolute;
+  top:14px;
+  right:14px;
+  z-index:4;
+  width:38px;
+  height:38px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(9,14,24,.76);
+  color:#f8fafc;
+  font-size:18px;
+  line-height:1;
+  box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--card-accent, #64748b) 46%, rgba(148,163,184,.3));
+  text-shadow:0 0 8px color-mix(in srgb, var(--card-accent, #64748b) 45%, transparent);
+  pointer-events:none;
+}
 .watchlist-card[data-entry-hold-helper="1"] .entry-conditions-trigger{
   min-width:38px;
   width:38px;
@@ -2287,6 +2306,12 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 }
 .watchlist-card.hold-open{
   box-shadow:0 0 0 2px rgba(96,165,250,.34), 0 18px 30px rgba(2,6,23,.44);
+}
+.watchlist-card.hold-armed .entry-conditions-affordance{
+  box-shadow:inset 0 0 0 1px rgba(253,230,138,.55), 0 0 0 2px rgba(253,230,138,.16);
+}
+.watchlist-card.hold-open .entry-conditions-affordance{
+  box-shadow:inset 0 0 0 1px rgba(96,165,250,.55), 0 0 0 2px rgba(96,165,250,.18);
 }
 .watchlist-card[data-entry-hold-helper="1"]::after{
   content:none !important;
