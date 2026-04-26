@@ -1128,6 +1128,46 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   justify-content:flex-end;
   margin-top:2px;
 }
+.result-feed-card.scan-card:not(.watchlist-card){
+  color:#111111;
+}
+.result-feed-card.scan-card:not(.watchlist-card) .ticker,
+.result-feed-card.scan-card:not(.watchlist-card) .scan-card__ticker,
+.result-feed-card.scan-card:not(.watchlist-card) .scan-card__company,
+.result-feed-card.scan-card:not(.watchlist-card) .scan-card__technical,
+.result-feed-card.scan-card:not(.watchlist-card) .scan-card__decision,
+.result-feed-card.scan-card:not(.watchlist-card) .resultreason,
+.result-feed-card.scan-card:not(.watchlist-card) .decision-summary,
+.result-feed-card.scan-card:not(.watchlist-card) .visual-score,
+.result-feed-card.scan-card:not(.watchlist-card) .tiny,
+.result-feed-card.scan-card:not(.watchlist-card) .resultsupport{
+  color:#111111 !important;
+}
+.result-feed-card.scan-card:not(.watchlist-card) .badge.state-pill{
+  color:#111111 !important;
+  border-color:rgba(17,17,17,.35);
+}
+.result-feed-card.scan-card:not(.watchlist-card) .card-overflow-button{
+  color:#111111;
+}
+.watchlist-card{
+  color:#111111;
+}
+.watchlist-card .ticker,
+.watchlist-card .watchlist-card__ticker,
+.watchlist-card .watchlist-card__company,
+.watchlist-card .watchlist-card__reason,
+.watchlist-card .watchlist-card__detail,
+.watchlist-card .watchlist-plan-meta,
+.watchlist-card .tiny,
+.watchlist-card .decision-summary,
+.watchlist-card .watchlistscore{
+  color:#111111 !important;
+}
+.watchlist-card .badge.state-pill{
+  color:#111111 !important;
+  border-color:rgba(17,17,17,.35);
+}
 .reviewworkspace-shell.tone-red,
 .reviewworkspace-shell.tone-amber,
 .reviewworkspace-shell.tone-orange,
