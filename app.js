@@ -6076,6 +6076,14 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Priority Score', value:Number.isFinite(globalVisual.priorityScore) ? String(globalVisual.priorityScore) : String(priority.score)},
     {label:'Priority Sort Value', value:Number.isFinite(globalVisual.prioritySortValue) ? String(globalVisual.prioritySortValue) : String(priority.score)},
     {label:'Hold Enabled', value:globalVisual.holdEnabled === false ? 'false' : 'true'},
+    {label:'Current Resolver Verdict', value:globalVisual.currentResolverVerdict || '(none)'},
+    {label:'Stored Lifecycle State', value:globalVisual.storedLifecycleState || '(none)'},
+    {label:'Previous Lifecycle State', value:globalVisual.previousLifecycleState || '(none)'},
+    {label:'Stale Avoid Suppressed', value:globalVisual.staleAvoidSuppressed ? 'true' : 'false'},
+    {label:'Stale Reject Suppressed', value:globalVisual.staleRejectSuppressed ? 'true' : 'false'},
+    {label:'Structural Alive At Refresh', value:typeof globalVisual.structuralAliveAtRefresh === 'boolean' ? (globalVisual.structuralAliveAtRefresh ? 'true' : 'false') : '(none)'},
+    {label:'Avoid Allowed By Structure Guard', value:typeof globalVisual.avoidAllowedByStructureGuard === 'boolean' ? (globalVisual.avoidAllowedByStructureGuard ? 'true' : 'false') : '(none)'},
+    {label:'Explicit Invalidation Reason (Effective)', value:globalVisual.explicitInvalidationReason || '(none)'},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || 'n/a'},
     {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
     {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
@@ -6464,7 +6472,7 @@ function renderWatchlistCardElement(record){
   const renderedVerdict = normalizeGlobalVerdictKey(
     watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || (globalVerdict && globalVerdict.final_verdict) || ''
   );
-  const holdEnabled = presentationBucket !== 'avoid' && !['avoid','dead','reject'].includes(renderedVerdict);
+  const holdEnabled = !['avoid','diminishing'].includes(presentationBucket) && !['avoid','dead','reject'].includes(renderedVerdict);
   const prioritySortValue = Number.isFinite(Number(record.priorityScore ?? record.priority))
     ? Number(record.priorityScore ?? record.priority)
     : Number(priority.score || 0);
@@ -6496,7 +6504,7 @@ function renderWatchlistCardElement(record){
   });
   const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
   const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
-  div.className = `resultcompact watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
+  div.className = `resultcompact result-card result-feed-card watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
   div.style.cssText = watchlistVisualState.styleAttr || '';
   div.dataset.visualTone = watchlistVisualState.visual_tone || '';
   div.dataset.visualState = watchlistVisualState.state || '';
@@ -11319,35 +11327,62 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const structureState = String(analysisDerivedStatesFromRecord(item).structureState || '').trim().toLowerCase();
   const rawFinalVerdict = String(verdictSource && (verdictSource.final_verdict || verdictSource.finalVerdict) || '').trim().toLowerCase();
   const normalizedFinalVerdict = normalizeVerdict(rawFinalVerdict);
+  const currentResolverVerdict = normalizeGlobalVerdictKey(rawFinalVerdict || normalizedFinalVerdict || '');
+  const baseVerdict = normalizeGlobalVerdictKey(String(verdictSource && verdictSource.base_verdict || '').trim().toLowerCase());
   const lifecycleState = String(lifecycleSnapshot && lifecycleSnapshot.state || '').trim().toLowerCase();
+  const previousLifecycleState = String(
+    (record && record.watchlist && record.watchlist.debug && record.watchlist.debug.previousState)
+    || (lifecycleSnapshot && lifecycleSnapshot.previous_state)
+    || ''
+  ).trim().toLowerCase();
   const sourceBucket = String(verdictSource && verdictSource.bucket || '').trim().toLowerCase();
   const explicitInvalidationReason = String(verdictSource && verdictSource.explicit_invalidation_reason || '').trim().toLowerCase();
   const explicitInvalidation = explicitInvalidationReason && explicitInvalidationReason !== '(none)';
+  const structuralAliveAtRefresh = String(lifecycleSnapshot && lifecycleSnapshot.structural_alive_at_refresh || '').trim().toLowerCase() === 'true';
+  const avoidAllowedByStructureGuard = String(lifecycleSnapshot && lifecycleSnapshot.avoid_allowed_by_structure_gate || '').trim().toLowerCase() === 'true';
   const isTerminal = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict) || ['dead','expired'].includes(lifecycleState);
-  const avoidByVerdict = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict);
+  const terminalByVerdict = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict);
   const broken = structureEligibility === 'broken' || ['broken','invalid','failed'].includes(structureState);
   const avoidByBroken = broken;
   const avoidByExplicitInvalidation = !!explicitInvalidation;
   const weakening = structureEligibility === 'damaged' || structureState === 'weakening';
-  const lowPriorityByViability = String(verdictSource && verdictSource.viability || '').trim().toLowerCase() === 'low_priority';
-  const rejectByViability = viability === 'reject';
+  const monitorResolverVerdict = ['monitor','watch'].includes(currentResolverVerdict) || ['monitor','watch'].includes(baseVerdict);
+  const staleAvoidSuppressed = monitorResolverVerdict
+    && structuralAliveAtRefresh
+    && !avoidAllowedByStructureGuard
+    && !explicitInvalidation
+    && structureEligibility !== 'broken'
+    && (lifecycleState === 'avoid' || previousLifecycleState === 'avoid' || sourceBucket === 'avoid_dead' || sourceBucket === 'low_priority_avoid');
+  const staleRejectSuppressed = monitorResolverVerdict
+    && structuralAliveAtRefresh
+    && !avoidAllowedByStructureGuard
+    && !explicitInvalidation
+    && structureEligibility !== 'broken'
+    && viability === 'reject';
+  const effectiveViability = staleRejectSuppressed ? 'low_priority' : viability;
+  const lowPriorityByViability = effectiveViability === 'low_priority';
+  const avoidByVerdict = terminalByVerdict && avoidAllowedByStructureGuard;
   const finalVerdictKey = rawFinalVerdict || normalizedFinalVerdict || 'monitor';
-  const finalIsMonitorWatch = ['watch','monitor'].includes(finalVerdictKey);
+  const effectiveFinalVerdictKey = staleAvoidSuppressed && ['monitor','watch'].includes(baseVerdict)
+    ? baseVerdict
+    : finalVerdictKey;
+  const effectiveDisplayVerdict = normalizeGlobalVerdictKey(effectiveFinalVerdictKey || currentResolverVerdict || 'monitor');
+  const finalIsMonitorWatch = ['watch','monitor'].includes(effectiveFinalVerdictKey);
   const finalIsEntryNear = normalizedFinalVerdict === 'entry' || normalizedFinalVerdict === 'near_entry';
   const activeTrackEligible = finalIsMonitorWatch
     && structureEligibility !== 'damaged'
     && structureState !== 'weakening'
-    && viability === 'watchlist'
+    && effectiveViability === 'watchlist'
     && resolvedPriority > 0
     && !avoidByVerdict
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
   const diminishingTrackEligible = finalIsMonitorWatch
-    && (weakening || lowPriorityByViability)
+    && (weakening || lowPriorityByViability || !activeTrackEligible)
     && !avoidByVerdict
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
-  const avoidTrackEligible = avoidByVerdict || avoidByBroken || avoidByExplicitInvalidation || rejectByViability;
+  const avoidTrackEligible = avoidByVerdict || avoidByBroken || avoidByExplicitInvalidation;
   let presentationBucket = 'active';
   if(avoidTrackEligible){
     presentationBucket = 'avoid';
@@ -11387,9 +11422,9 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     cardClass:presentationCardClass
   };
   return {
-    finalVerdict:rawFinalVerdict || normalizedFinalVerdict || 'monitor',
+    finalVerdict:effectiveDisplayVerdict || 'monitor',
     bucket:String(sourceBucket || ''),
-    viability,
+    viability:effectiveViability,
     presentationBucket,
     presentationTone,
     presentationBadge,
@@ -11402,6 +11437,14 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     diminishingTrackEligible,
     avoidTrackEligible,
     structureEligibility,
+    currentResolverVerdict,
+    storedLifecycleState:lifecycleState || '(none)',
+    previousLifecycleState:previousLifecycleState || '(none)',
+    staleAvoidSuppressed,
+    staleRejectSuppressed,
+    structuralAliveAtRefresh,
+    avoidAllowedByStructureGuard,
+    explicitInvalidationReason:explicitInvalidationReason || '(none)',
     visualTone
   };
 }
@@ -11478,11 +11521,23 @@ function reconcileWatchlistPresentation({
       activeTrackEligible:false,
       diminishingTrackEligible:false,
       avoidTrackEligible:true,
-      structureEligibility:presentation.structureEligibility
+      structureEligibility:presentation.structureEligibility,
+      currentResolverVerdict:presentation.currentResolverVerdict,
+      storedLifecycleState:presentation.storedLifecycleState,
+      previousLifecycleState:presentation.previousLifecycleState,
+      staleAvoidSuppressed:presentation.staleAvoidSuppressed,
+      staleRejectSuppressed:presentation.staleRejectSuppressed,
+      structuralAliveAtRefresh:presentation.structuralAliveAtRefresh,
+      avoidAllowedByStructureGuard:presentation.avoidAllowedByStructureGuard,
+      explicitInvalidationReason:presentation.explicitInvalidationReason
     };
   }
   return {
     ...base,
+    state:presentation.presentationBucket === 'avoid' ? 'avoid' : (presentation.finalVerdict || base.state || 'monitor'),
+    finalVerdict:presentation.finalVerdict || base.finalVerdict || 'monitor',
+    final_verdict:presentation.finalVerdict || base.final_verdict || 'monitor',
+    final_verdict_rendered:presentation.finalVerdict || base.final_verdict_rendered || 'monitor',
     bucket_rendered:(function(){
       if(presentation.presentationBucket === 'diminishing') return 'diminishing';
       if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
@@ -11516,7 +11571,15 @@ function reconcileWatchlistPresentation({
     activeTrackEligible:presentation.activeTrackEligible,
     diminishingTrackEligible:presentation.diminishingTrackEligible,
     avoidTrackEligible:presentation.avoidTrackEligible,
-    structureEligibility:presentation.structureEligibility
+    structureEligibility:presentation.structureEligibility,
+    currentResolverVerdict:presentation.currentResolverVerdict,
+    storedLifecycleState:presentation.storedLifecycleState,
+    previousLifecycleState:presentation.previousLifecycleState,
+    staleAvoidSuppressed:presentation.staleAvoidSuppressed,
+    staleRejectSuppressed:presentation.staleRejectSuppressed,
+    structuralAliveAtRefresh:presentation.structuralAliveAtRefresh,
+    avoidAllowedByStructureGuard:presentation.avoidAllowedByStructureGuard,
+    explicitInvalidationReason:presentation.explicitInvalidationReason
   };
 }
 
