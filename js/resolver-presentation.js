@@ -24,16 +24,16 @@
 
   function visualPaletteForState(state){
     if(state === 'entry'){
-      return {top:'rgba(0, 140, 137, 0.14)', bottom:'rgba(2, 6, 23, 1)', border:'rgba(0, 140, 137, 0.42)', glow:'rgba(0, 140, 137, 0.12)'};
+      return {top:'#008C89', bottom:'#020617', border:'rgba(0, 140, 137, 0.42)', glow:'rgba(0, 140, 137, 0.12)'};
     }
     if(state === 'near_entry'){
-      return {top:'rgba(53, 160, 160, 0.14)', bottom:'rgba(2, 6, 23, 1)', border:'rgba(53, 160, 160, 0.42)', glow:'rgba(53, 160, 160, 0.12)'};
+      return {top:'#35A0A0', bottom:'#020617', border:'rgba(53, 160, 160, 0.42)', glow:'rgba(53, 160, 160, 0.12)'};
     }
     if(state === 'monitor'){
-      return {top:'rgba(255, 160, 0, 0.12)', bottom:'rgba(2, 6, 23, 1)', border:'rgba(255, 160, 0, 0.42)', glow:'rgba(255, 160, 0, 0.10)'};
+      return {top:'#FFA000', bottom:'#020617', border:'rgba(255, 160, 0, 0.42)', glow:'rgba(255, 160, 0, 0.10)'};
     }
     if(state === 'avoid'){
-      return {top:'rgba(213, 0, 50, 0.14)', bottom:'rgba(2, 6, 23, 1)', border:'rgba(213, 0, 50, 0.48)', glow:'rgba(213, 0, 50, 0.12)'};
+      return {top:'#D50032', bottom:'#020617', border:'rgba(213, 0, 50, 0.48)', glow:'rgba(213, 0, 50, 0.12)'};
     }
     return {top:'#2a2a2a', bottom:'#1a1a1a', border:'rgba(148, 163, 184, 0.22)', glow:'rgba(148, 163, 184, 0.06)'};
   }
@@ -42,7 +42,7 @@
     const palette = visualPaletteForState(state);
     const intensity = clampScore(score) / 10;
     const glowBoost = (0.08 + intensity * 0.08).toFixed(3);
-    return `--visual-state-background:${palette.top};--visual-state-border:${palette.border};--visual-state-glow:rgba(0,0,0,${glowBoost});`;
+    return `--visual-state-background:${palette.top};--visual-state-border:${palette.border};--visual-state-glow:rgba(0,0,0,${glowBoost});--state-color:${palette.top};`;
   }
 
   function cardClassForState(state){
