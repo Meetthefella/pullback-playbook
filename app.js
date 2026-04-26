@@ -18360,29 +18360,35 @@ function renderReviewWorkspace(options = {}){
     || 'monitor'
   ).trim().toLowerCase();
   const reviewPresentationState = normalizeGlobalVerdictKey(reviewPresentationStateRaw || 'monitor');
-  const reviewOuterBorderTone = reviewPresentationState === 'diminishing'
-    ? 'diminishing'
-    : (['avoid', 'dead'].includes(reviewPresentationState)
-      ? 'avoid'
-      : (reviewPresentationState === 'watch'
-        ? 'watch'
+  const reviewVisualTone = visualState.terminal_avoid_applied || ['avoid', 'dead'].includes(reviewPresentationState)
+    ? 'avoid'
+    : (reviewPresentationState === 'diminishing'
+      ? 'diminishing'
+      : (reviewPresentationState === 'entry'
+        ? 'entry'
         : (reviewPresentationState === 'near_entry'
           ? 'near_entry'
-          : (reviewPresentationState === 'entry' ? 'entry' : 'monitor'))));
-  const reviewAccentClass = reviewPresentationState === 'diminishing'
+          : (['monitor', 'watch'].includes(reviewPresentationState) ? 'monitor' : 'neutral'))));
+  const reviewOuterBorderTone = reviewVisualTone;
+  const reviewAccentClass = reviewVisualTone === 'diminishing'
     ? 'card--diminishing'
-    : (reviewOuterBorderTone === 'avoid'
+    : (reviewVisualTone === 'avoid'
       ? (reviewPresentationState === 'dead' ? 'card--dead' : 'card--avoid')
-      : (reviewPresentationState === 'watch'
-        ? 'card--watch'
-        : (reviewPresentationState === 'near_entry'
+      : (reviewVisualTone === 'monitor'
+        ? 'card--monitor'
+        : (reviewVisualTone === 'near_entry'
           ? 'card--near-entry'
-          : (reviewPresentationState === 'entry' ? 'card--entry' : 'card--monitor'))));
-  const reviewOuterShellClass = `visual-state-card visual-state-${reviewPresentationState} visual-tone-${reviewOuterBorderTone} ${reviewAccentClass}`;
-  const reviewShellStyleAttr = reviewPresentationState === 'diminishing'
+          : (reviewVisualTone === 'entry' ? 'card--entry' : 'card--watch'))));
+  const reviewRootToneClass = `review-tone--${reviewVisualTone}`;
+  const reviewOuterShellClass = `visual-state-card visual-state-${reviewPresentationState} visual-tone-${reviewOuterBorderTone} ${reviewAccentClass} ${reviewRootToneClass}`;
+  const reviewShellStyleAttr = reviewVisualTone === 'diminishing'
     ? '--visual-state-background:#F97316;--visual-state-border:rgba(249, 115, 22, 0.46);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#F97316;'
-    : visualState.styleAttr || '';
-  const reviewVisualStateSource = visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || 'resolver';
+    : (reviewVisualTone === 'avoid'
+      ? '--visual-state-background:#DC2626;--visual-state-border:rgba(220, 38, 38, 0.48);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#DC2626;'
+      : visualState.styleAttr || '');
+  const reviewVisualStateSource = reviewVisualTone === 'avoid' && visualState.terminal_avoid_applied
+    ? 'terminal_avoid'
+    : (visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || 'resolver');
   const reviewBadgeTone = String((visualState.badge && visualState.badge.className) || reviewBadge.className || '').trim() || '(none)';
   const reviewOuterClassList = reviewOuterShellClass.split(/\s+/).filter(Boolean);
   const originalReviewToneClasses = Array.from(new Set(String(`${visualState.className || ''} ${visualState.toneClass || ''}`)
@@ -18392,10 +18398,8 @@ function renderReviewWorkspace(options = {}){
     if(token.startsWith('visual-tone-')) return token !== `visual-tone-${reviewOuterBorderTone}`;
     return false;
   });
-  const reviewScoreStyleApplied = ['diminishing', 'avoid', 'dead'].includes(reviewPresentationState)
-    ? 'suppressed_for_rendered_state'
-    : plannerToneClass(planRealism.raw_rr);
-  const reviewPanelToneClass = `review-panel-tone-${reviewOuterBorderTone}`;
+  const reviewScoreStyleApplied = 'suppressed_root_review_tone';
+  const reviewPanelToneClass = `review-panel-tone-${reviewVisualTone}`;
   const reviewAction = reviewRenderedVerdict === 'diminishing'
     ? {label:'DIMINISHING', detail:'Weakening setup', planAllowed:false, watchlistAllowed:true}
     : getActions(visualState.finalVerdict || visualState.final_verdict);
@@ -18452,7 +18456,7 @@ function renderReviewWorkspace(options = {}){
   const diagnosticsToneClass = planUI.diagnosticsTone === 'danger'
     ? 'avoid'
     : (planUI.diagnosticsTone === 'neutral' ? 'watch' : `analysis-state-${analysisUiState}`);
-  const analysisPanelClass = `reviewanalysispanel ${reviewPanelToneClass} ${diagnosticsToneClass}`.trim();
+  const analysisPanelClass = `reviewanalysispanel ${reviewPanelToneClass}`.trim();
   const analysisPanelBody = analysisUiState === 'idle'
     ? '<div class="tiny">Add a screenshot to run AI analysis.</div>'
     : (analysisUiState === 'ready'
@@ -18510,10 +18514,12 @@ function renderReviewWorkspace(options = {}){
     {label:'Review Outer Class', value:reviewOuterShellClass || '(none)'},
     {label:'Review Outer Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
     {label:'Review Outer Tone Source', value:reviewPresentationState || '(none)'},
+    {label:'Review Visual Tone', value:reviewVisualTone || '(none)'},
     {label:'Review Shell Tone', value:reviewOuterBorderTone || '(none)'},
     {label:'Review Accent Tone', value:reviewAccentClass || '(none)'},
     {label:'Review Badge Tone', value:reviewBadgeTone},
     {label:'Review Visual State Source', value:reviewVisualStateSource || '(none)'},
+    {label:'Review Root Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
     {label:'Review Score Style Applied', value:reviewScoreStyleApplied || '(none)'},
     {label:'Review State Style Applied', value:reviewPanelToneClass || '(none)'},
     {label:'Review Conflicting Tone Classes Detected', value:reviewConflictingToneClassesDetected ? 'true' : 'false'},
@@ -18647,7 +18653,7 @@ function renderReviewWorkspace(options = {}){
         ${chartPreview}
       </div>
     </div>
-    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)} ${escapeHtml(planUI.showRR && !['diminishing', 'avoid', 'dead'].includes(reviewPresentationState) ? plannerToneClass(planRealism.raw_rr) : 'plannerbox--rr-mid')}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(reviewPresentationState)}">
+    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(reviewPresentationState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">
       <div class="reviewsectionhead"><strong id="plannerSection">Trade Plan</strong></div>
       <div class="summary review-hidden" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div>
       <input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden />
@@ -19383,7 +19389,7 @@ function calculate(options = {}){
     if($('plannerBox')){
       const plannerBox = $('plannerBox');
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
-      plannerBox.className = `panelbox plannerbox ${reviewPanelTone} plannerbox--rr-mid`.trim();
+      plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
     $('calcNote').textContent = nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary);
     return;
@@ -19396,7 +19402,7 @@ function calculate(options = {}){
     if($('plannerBox')){
       const plannerBox = $('plannerBox');
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
-      plannerBox.className = `panelbox plannerbox ${reviewPanelTone} plannerbox--rr-mid`.trim();
+      plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
     $('calcNote').textContent = 'Add planned entry, stop, and first target to complete the trade plan.';
     return;
@@ -19409,7 +19415,7 @@ function calculate(options = {}){
     if($('plannerBox')){
       const plannerBox = $('plannerBox');
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
-      plannerBox.className = `panelbox plannerbox ${reviewPanelTone} plannerbox--rr-mid`.trim();
+      plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
     $('calcNote').textContent = 'Planned entry, stop, and first target must form a valid long plan.';
     return;
@@ -19421,11 +19427,7 @@ function calculate(options = {}){
   if($('plannerBox')){
     const plannerBox = $('plannerBox');
     const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
-    const reviewPresentationState = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPresentationState || '').trim().toLowerCase() : '';
-    const rrToneClass = ['diminishing', 'avoid', 'dead'].includes(reviewPresentationState)
-      ? 'plannerbox--rr-mid'
-      : plannerToneClass(displayedPlan.rewardRisk.rrRatio);
-    plannerBox.className = `panelbox plannerbox ${reviewPanelTone} ${rrToneClass}`.trim();
+    plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
   }
   $('calcNote').textContent = planRealism.plan_realism_reason || (displayedPlan.riskFit.risk_status === 'too_wide'
     ? `Stop would be too wide for ${formatPound(state.userRiskPerTrade || currentMaxLoss())} risk.`
