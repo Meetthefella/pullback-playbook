@@ -26,9 +26,9 @@
     return ({
       entry:'green',
       near_entry:'teal',
-      monitor:'orange',
+      monitor:'amber',
       avoid:'red',
-    })[normalizeVerdict(finalVerdict)] || 'orange';
+    })[normalizeVerdict(finalVerdict)] || 'amber';
   }
 
   function getBucket(finalVerdict){
@@ -43,11 +43,11 @@
   function getBadge(finalVerdict){
     const safeVerdict = normalizeVerdict(finalVerdict);
     return ({
-      entry:{text:'\uD83D\uDE80 Entry', className:'ready'},
-      near_entry:{text:'\uD83C\uDFAF Near Entry', className:'near'},
-      monitor:{text:'\uD83D\uDFE1 Monitor', className:'near'},
-      avoid:{text:'\u26D4 Avoid', className:'avoid'},
-    })[safeVerdict] || {text:'\uD83D\uDFE1 Monitor', className:'near'};
+      entry:{text:'\uD83D\uDE80 Entry', className:'badge--entry ready'},
+      near_entry:{text:'\uD83C\uDFAF Near Entry', className:'badge--near-entry near'},
+      monitor:{text:'\uD83D\uDFE1 Monitor', className:'badge--monitor watch'},
+      avoid:{text:'\u26D4 Avoid', className:'badge--avoid avoid'},
+    })[safeVerdict] || {text:'\uD83D\uDFE1 Monitor', className:'badge--monitor watch'};
   }
 
   function getActions(finalVerdict){

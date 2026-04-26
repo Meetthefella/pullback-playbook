@@ -15,24 +15,25 @@
   }
 
   function visualToneForState(state){
-    if(state === 'entry' || state === 'near_entry') return 'bullish';
-    if(state === 'monitor') return 'caution';
-    if(state === 'avoid') return 'danger';
+    if(state === 'entry') return 'entry';
+    if(state === 'near_entry') return 'near_entry';
+    if(state === 'monitor') return 'monitor';
+    if(state === 'avoid') return 'avoid';
     return 'neutral';
   }
 
   function visualPaletteForState(state){
     if(state === 'entry'){
-      return {top:'#0c2b1d', bottom:'#071a12', border:'rgba(52, 211, 153, 0.34)', glow:'rgba(52, 211, 153, 0.14)'};
+      return {top:'rgba(0, 140, 137, 0.14)', bottom:'rgba(2, 6, 23, 1)', border:'rgba(0, 140, 137, 0.42)', glow:'rgba(0, 140, 137, 0.12)'};
     }
     if(state === 'near_entry'){
-      return {top:'#123524', bottom:'#0a2017', border:'rgba(74, 222, 128, 0.28)', glow:'rgba(74, 222, 128, 0.10)'};
+      return {top:'rgba(53, 160, 160, 0.14)', bottom:'rgba(2, 6, 23, 1)', border:'rgba(53, 160, 160, 0.42)', glow:'rgba(53, 160, 160, 0.12)'};
     }
     if(state === 'monitor'){
-      return {top:'#3a2a12', bottom:'#241a0a', border:'rgba(251, 191, 36, 0.26)', glow:'rgba(245, 158, 11, 0.08)'};
+      return {top:'rgba(255, 160, 0, 0.12)', bottom:'rgba(2, 6, 23, 1)', border:'rgba(255, 160, 0, 0.42)', glow:'rgba(255, 160, 0, 0.10)'};
     }
     if(state === 'avoid'){
-      return {top:'#3a1212', bottom:'#1f0a0a', border:'rgba(248, 113, 113, 0.28)', glow:'rgba(239, 68, 68, 0.10)'};
+      return {top:'rgba(213, 0, 50, 0.14)', bottom:'rgba(2, 6, 23, 1)', border:'rgba(213, 0, 50, 0.48)', glow:'rgba(213, 0, 50, 0.12)'};
     }
     return {top:'#2a2a2a', bottom:'#1a1a1a', border:'rgba(148, 163, 184, 0.22)', glow:'rgba(148, 163, 184, 0.06)'};
   }
@@ -40,9 +41,15 @@
   function visualStyleForState(state, score){
     const palette = visualPaletteForState(state);
     const intensity = clampScore(score) / 10;
-    const highlight = (0.03 + intensity * 0.13).toFixed(3);
-    const lift = (0.015 + intensity * 0.055).toFixed(3);
-    return `--visual-state-background:linear-gradient(to top, rgba(255,255,255,${highlight}), rgba(255,255,255,${lift})), linear-gradient(to top, ${palette.top}, ${palette.bottom});--visual-state-border:${palette.border};--visual-state-glow:${palette.glow};`;
+    const lift = (0.05 + intensity * 0.06).toFixed(3);
+    return `--visual-state-background:linear-gradient(180deg, ${palette.top} 0%, rgba(15, 23, 42, ${Number(0.92 - Number(lift)).toFixed(3)}) 46%, ${palette.bottom} 100%);--visual-state-border:${palette.border};--visual-state-glow:${palette.glow};`;
+  }
+
+  function cardClassForState(state){
+    if(state === 'entry') return 'card--entry';
+    if(state === 'near_entry') return 'card--near-entry';
+    if(state === 'avoid') return 'card--avoid';
+    return 'card--monitor';
   }
 
   function decisionSummaryForVerdict(finalVerdict, options = {}, deps = {}){
@@ -155,14 +162,15 @@
     const resolvedSummary = pendingResolution
       ? 'Reviewing setup with live data before final status.'
       : decisionSummaryForVerdict(finalVerdict, summaryOptions, deps);
+    const cardClass = cardClassForState(state);
     return {
       state,
       decision_summary:resolvedSummary,
       visual_tone,
       score,
-      className:`visual-state-card visual-state-${state} visual-tone-${visual_tone}`,
+      className:`visual-state-card visual-state-${state} visual-tone-${visual_tone} ${cardClass}`,
       tone:visual_tone,
-      toneClass:`visual-state-${state} visual-tone-${visual_tone}`,
+      toneClass:`visual-state-${state} visual-tone-${visual_tone} ${cardClass}`,
       borderClass:'',
       backgroundClass:'',
       badgeToneClass:'',
