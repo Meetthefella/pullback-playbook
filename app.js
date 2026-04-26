@@ -6,7 +6,7 @@ const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.4.8';
+const APP_VERSION = 'v4.4.9';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';
@@ -3233,6 +3233,22 @@ function sortWatchlistGroupRecords(records, groupKey){
   const getSetupScore = record => Number(setupScoreForRecord(record) || 0);
   const getRecency = record => watchlistRecordRecencyTimestamp(record);
 
+  if(groupKey === 'tradeable_entry'){
+    return list.sort((a, b) => {
+      const verdictA = getVerdict(a);
+      const verdictB = getVerdict(b);
+      const rankDiff = watchlistGroupSortRankForVerdict(verdictA) - watchlistGroupSortRankForVerdict(verdictB);
+      if(rankDiff !== 0) return rankDiff;
+      const priorityDiff = getPriority(b) - getPriority(a);
+      if(priorityDiff !== 0) return priorityDiff;
+      const setupDiff = getSetupScore(b) - getSetupScore(a);
+      if(setupDiff !== 0) return setupDiff;
+      const recencyDiff = getRecency(b) - getRecency(a);
+      if(recencyDiff !== 0) return recencyDiff;
+      return String(a.ticker || '').localeCompare(String(b.ticker || ''));
+    });
+  }
+
   if(groupKey === 'monitor_watch'){
     return list.sort((a, b) => {
       const verdictA = getVerdict(a);
@@ -6026,6 +6042,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     structure:globalVerdict.structure_state || (record && record.setup && record.setup.structureState)
   });
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Final Decision', [
+    {label:'App Version', value:APP_VERSION},
     {label:'UI State Source', value:globalVisual.ui_state_source || 'n/a'},
     {label:'Watchlist Presentation Source', value:globalVisual.watchlist_presentation_source || 'n/a'},
     {label:'Final Verdict Rendered', value:globalVisual.final_verdict_rendered || globalVisual.finalVerdict || 'n/a'},
@@ -6044,10 +6061,13 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Bucket', value:lifecycleSnapshot.bucket || globalVerdict.bucket || 'n/a'},
     {label:'Viability', value:globalVerdict.viability || '(none)'},
     {label:'Presentation Bucket', value:globalVisual.presentationBucket || '(none)'},
+    {label:'Track Presentation Bucket', value:globalVisual.trackPresentationBucket || globalVisual.presentationBucket || '(none)'},
+    {label:'Scan Presentation Bucket', value:globalVisual.scanPresentationBucket || '(none)'},
     {label:'Presentation Tone', value:globalVisual.presentationTone || '(none)'},
     {label:'Presentation Badge', value:globalVisual.presentationBadge || '(none)'},
     {label:'Badge Label', value:globalVisual.badgeLabel || globalVisual.presentationBadge || '(none)'},
     {label:'Card Class', value:globalVisual.cardClass || globalVisual.className || globalVisual.toneClass || '(none)'},
+    {label:'Badge Class', value:globalVisual.badgeClass || (globalVisual.badge && globalVisual.badge.className) || '(none)'},
     {label:'Presentation Reason', value:globalVisual.presentationReason || '(none)'},
     {label:'Structure Eligibility', value:globalVisual.structureEligibility || globalVerdict.structure_eligibility || '(none)'},
     {label:'Active Track Eligible', value:globalVisual.activeTrackEligible ? 'true' : 'false'},
@@ -6529,7 +6549,8 @@ function updateWatchlistCardForTicker(ticker){
 
 function watchlistRenderGroups(showExpired){
   const groups = [
-    {key:'monitor_watch', title:'Active Watchlist', hint:'Live candidates worth active focus.'},
+    {key:'tradeable_entry', title:'Entry / Near Entry', hint:'Setups closest to actionable quality.'},
+    {key:'monitor_watch', title:'Monitor / Watch', hint:'Live candidates worth active focus.'},
     {key:'diminishing', title:'Diminishing', hint:'Weakening setups kept for review, not active focus.'},
     {key:'avoid_dead', title:'Avoid / Dead', hint:'Failed or invalid setups.'}
   ];
@@ -11244,7 +11265,14 @@ function watchlistPresentationBucketForRecord(record){
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
   const priority = watchlistPriorityForRecord(item);
   const presentation = resolveTrackPresentationModel(item, strictVerdict, lifecycleSnapshot, priority);
+  const finalVerdict = normalizeGlobalVerdictKey(
+    presentation.finalVerdict
+    || (strictVerdict && strictVerdict.final_verdict)
+    || (strictVerdict && strictVerdict.finalVerdict)
+    || ''
+  );
   if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
+  if(finalVerdict === 'entry' || finalVerdict === 'near_entry') return 'tradeable_entry';
   if(presentation.presentationBucket === 'diminishing') return 'diminishing';
   return 'monitor_watch';
 }
@@ -11397,6 +11425,14 @@ function reconcileWatchlistPresentation({
   const base = visualState && typeof visualState === 'object' ? {...visualState} : {};
   const priority = watchlistPriorityForRecord(item);
   const presentation = resolveTrackPresentationModel(item, globalVerdict, lifecycleSnapshot, priority);
+  const scanVisualState = resolveGlobalVisualState(item, 'scanner', {
+    globalVerdict,
+    lifecycleSnapshot,
+    resolvedContract,
+    derivedStates,
+    displayedPlan
+  });
+  const scanPresentationBucket = String(scanVisualState && scanVisualState.presentationBucket || '').trim().toLowerCase() || '(none)';
   const mappedToneClass = (presentation.visualTone && presentation.visualTone.cardClass) || base.toneClass || 'tone-amber';
   const mappedVisualTone = String(presentation.presentationTone || 'monitor');
   const softVerdict = normalizeVerdict(base.finalVerdict || base.final_verdict || '');
@@ -11430,10 +11466,13 @@ function reconcileWatchlistPresentation({
       watchlist_presentation_source:'strict_reconciled',
       ui_state_source:`${base.ui_state_source || 'resolveFinalStateContract'}|strict_reconciled`,
       presentationBucket:'avoid',
+      trackPresentationBucket:'avoid',
+      scanPresentationBucket,
       presentationTone:strictTone.presentationTone,
       presentationBadge:strictTone.badgeLabel,
       badgeLabel:strictTone.badgeLabel,
       cardClass:strictTone.cardClass,
+      badgeClass:strictTone.badgeClass,
       presentationReason:'Avoid - setup no longer viable.',
       priorityScore:presentation.priorityScore,
       activeTrackEligible:false,
@@ -11465,9 +11504,14 @@ function reconcileWatchlistPresentation({
     reason:presentation.presentationReason || base.reason,
     watchlist_presentation_source:base.watchlist_presentation_source || 'presentation_model',
     presentationBucket:presentation.presentationBucket,
+    trackPresentationBucket:presentation.presentationBucket,
+    scanPresentationBucket,
     presentationTone:presentation.presentationTone,
     presentationBadge:presentation.presentationBadge,
     presentationReason:presentation.presentationReason,
+    badgeLabel:presentation.badgeLabel,
+    cardClass:presentation.cardClass,
+    badgeClass:presentation.presentationBadgeClass,
     priorityScore:presentation.priorityScore,
     activeTrackEligible:presentation.activeTrackEligible,
     diminishingTrackEligible:presentation.diminishingTrackEligible,
