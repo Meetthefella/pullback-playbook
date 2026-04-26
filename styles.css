@@ -1014,6 +1014,18 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   border-color:var(--tone-diminishing-border) !important;
   background:linear-gradient(180deg, rgba(183, 121, 31, 0.10), rgba(15, 23, 42, 0.96)) !important;
 }
+.card--monitor{
+  border-color:var(--tone-monitor-border) !important;
+  background:linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(15, 23, 42, 0.96)) !important;
+}
+.card--diminishing{
+  border-color:var(--tone-diminishing-border) !important;
+  background:linear-gradient(180deg, rgba(183, 121, 31, 0.10), rgba(15, 23, 42, 0.96)) !important;
+}
+.card--avoid{
+  border-color:var(--tone-avoid-border) !important;
+  background:linear-gradient(180deg, rgba(239, 68, 68, 0.14), rgba(15, 23, 42, 0.96)) !important;
+}
 .tone-indigo{
   --tone-color:rgb(99,102,241);
   border-color:rgba(99,102,241,0.35) !important;
@@ -1864,6 +1876,15 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 .watchlist-card__ticker{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .watchlist-card__status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;white-space:normal;flex:0 0 auto;justify-content:flex-start}
 .watchlist-card__company{width:100%;color:var(--text-secondary)}
+.watchlist-card.scan-card .watchlist-card__header{
+  display:grid;
+  grid-template-columns:minmax(0,max-content) minmax(0,1fr);
+  gap:10px;
+  align-items:start;
+}
+.watchlist-card.scan-card .watchlist-card__status{
+  justify-self:end;
+}
 .watchlist-signal-row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;min-width:0}
 .watchlist-signal-row .pill{max-width:100%}
 .watchlist-card__priority{white-space:nowrap}

@@ -6504,7 +6504,7 @@ function renderWatchlistCardElement(record){
   });
   const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
   const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
-  div.className = `resultcompact result-card result-feed-card watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
+  div.className = `resultcompact result-card result-feed-card scan-card watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
   div.style.cssText = watchlistVisualState.styleAttr || '';
   div.dataset.visualTone = watchlistVisualState.visual_tone || '';
   div.dataset.visualState = watchlistVisualState.state || '';
@@ -11413,6 +11413,10 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   if(presentationBucket === 'avoid'){
     presentationReason = 'Avoid - setup no longer viable.';
   }else if(presentationBucket === 'diminishing'){
+    presentationTone = 'diminishing';
+    presentationBadge = 'Diminishing';
+    presentationBadgeClass = 'badge--diminishing';
+    presentationCardClass = 'tone-muted-amber card--diminishing';
     presentationReason = 'Diminishing - structure weakening.';
   }
 
