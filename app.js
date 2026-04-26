@@ -18384,6 +18384,7 @@ function renderReviewWorkspace(options = {}){
     : visualState.styleAttr || '';
   const reviewVisualStateSource = visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || 'resolver';
   const reviewBadgeTone = String((visualState.badge && visualState.badge.className) || reviewBadge.className || '').trim() || '(none)';
+  const reviewOuterClassList = reviewOuterShellClass.split(/\s+/).filter(Boolean);
   const originalReviewToneClasses = Array.from(new Set(String(`${visualState.className || ''} ${visualState.toneClass || ''}`)
     .match(/(?:card--[a-z-]+|visual-tone-[a-z-]+)/g) || []));
   const reviewConflictingToneClassesDetected = originalReviewToneClasses.some(token => {
@@ -18391,6 +18392,9 @@ function renderReviewWorkspace(options = {}){
     if(token.startsWith('visual-tone-')) return token !== `visual-tone-${reviewOuterBorderTone}`;
     return false;
   });
+  const reviewScoreStyleApplied = ['diminishing', 'avoid', 'dead'].includes(reviewPresentationState)
+    ? 'suppressed_for_rendered_state'
+    : plannerToneClass(planRealism.raw_rr);
   const reviewPanelToneClass = `review-panel-tone-${reviewOuterBorderTone}`;
   const reviewAction = reviewRenderedVerdict === 'diminishing'
     ? {label:'DIMINISHING', detail:'Weakening setup', planAllowed:false, watchlistAllowed:true}
@@ -18504,10 +18508,14 @@ function renderReviewWorkspace(options = {}){
     {label:'Review Presentation Source', value:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || '(none)'},
     {label:'Review Lifecycle Bias', value:reviewLifecycleBias.review_lifecycle_bias || '(none)'},
     {label:'Review Outer Class', value:reviewOuterShellClass || '(none)'},
+    {label:'Review Outer Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
+    {label:'Review Outer Tone Source', value:reviewPresentationState || '(none)'},
     {label:'Review Shell Tone', value:reviewOuterBorderTone || '(none)'},
     {label:'Review Accent Tone', value:reviewAccentClass || '(none)'},
     {label:'Review Badge Tone', value:reviewBadgeTone},
     {label:'Review Visual State Source', value:reviewVisualStateSource || '(none)'},
+    {label:'Review Score Style Applied', value:reviewScoreStyleApplied || '(none)'},
+    {label:'Review State Style Applied', value:reviewPanelToneClass || '(none)'},
     {label:'Review Conflicting Tone Classes Detected', value:reviewConflictingToneClassesDetected ? 'true' : 'false'},
     {label:'Copy Override Applied', value:reviewLifecycleBias.review_lifecycle_copy_override_applied ? 'true' : 'false'},
     {label:'Copy Override Reason', value:reviewLifecycleBias.review_lifecycle_copy_reason || '(none)'},
@@ -18639,7 +18647,7 @@ function renderReviewWorkspace(options = {}){
         ${chartPreview}
       </div>
     </div>
-    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)} ${escapeHtml(planUI.showRR ? plannerToneClass(planRealism.raw_rr) : 'plannerbox--rr-mid')}" id="plannerBox">
+    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)} ${escapeHtml(planUI.showRR && !['diminishing', 'avoid', 'dead'].includes(reviewPresentationState) ? plannerToneClass(planRealism.raw_rr) : 'plannerbox--rr-mid')}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(reviewPresentationState)}">
       <div class="reviewsectionhead"><strong id="plannerSection">Trade Plan</strong></div>
       <div class="summary review-hidden" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div>
       <input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden />
@@ -19372,7 +19380,11 @@ function calculate(options = {}){
     $('positionSize').textContent = '-';
     $('rrValue').textContent = 'No actionable plan yet.';
     $('rrValue').className = 'big';
-    if($('plannerBox')) $('plannerBox').className = 'panelbox plannerbox plannerbox--rr-mid';
+    if($('plannerBox')){
+      const plannerBox = $('plannerBox');
+      const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
+      plannerBox.className = `panelbox plannerbox ${reviewPanelTone} plannerbox--rr-mid`.trim();
+    }
     $('calcNote').textContent = nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary);
     return;
   }
@@ -19381,7 +19393,11 @@ function calculate(options = {}){
     $('positionSize').textContent = '-';
     $('rrValue').textContent = 'No actionable plan yet.';
     $('rrValue').className = 'big';
-    if($('plannerBox')) $('plannerBox').className = 'panelbox plannerbox plannerbox--rr-mid';
+    if($('plannerBox')){
+      const plannerBox = $('plannerBox');
+      const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
+      plannerBox.className = `panelbox plannerbox ${reviewPanelTone} plannerbox--rr-mid`.trim();
+    }
     $('calcNote').textContent = 'Add planned entry, stop, and first target to complete the trade plan.';
     return;
   }
@@ -19390,7 +19406,11 @@ function calculate(options = {}){
     $('positionSize').textContent = '-';
     $('rrValue').textContent = 'No actionable plan yet.';
     $('rrValue').className = 'big';
-    if($('plannerBox')) $('plannerBox').className = 'panelbox plannerbox plannerbox--rr-mid';
+    if($('plannerBox')){
+      const plannerBox = $('plannerBox');
+      const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
+      plannerBox.className = `panelbox plannerbox ${reviewPanelTone} plannerbox--rr-mid`.trim();
+    }
     $('calcNote').textContent = 'Planned entry, stop, and first target must form a valid long plan.';
     return;
   }
@@ -19398,7 +19418,15 @@ function calculate(options = {}){
   $('positionSize').textContent = displayedPlan.riskFit.position_size > 0 ? `${displayedPlan.riskFit.position_size} shares` : '0 shares';
   $('rrValue').textContent = displayedPlan.rewardRisk.valid && Number.isFinite(displayedPlan.rewardRisk.rrRatio) ? `${displayedPlan.rewardRisk.rrRatio.toFixed(2)}R` : '-';
   $('rrValue').className = `big ${rrDisplayClass(displayedPlan.rewardRisk.rrRatio)}`.trim();
-  if($('plannerBox')) $('plannerBox').className = `panelbox plannerbox ${plannerToneClass(displayedPlan.rewardRisk.rrRatio)}`.trim();
+  if($('plannerBox')){
+    const plannerBox = $('plannerBox');
+    const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
+    const reviewPresentationState = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPresentationState || '').trim().toLowerCase() : '';
+    const rrToneClass = ['diminishing', 'avoid', 'dead'].includes(reviewPresentationState)
+      ? 'plannerbox--rr-mid'
+      : plannerToneClass(displayedPlan.rewardRisk.rrRatio);
+    plannerBox.className = `panelbox plannerbox ${reviewPanelTone} ${rrToneClass}`.trim();
+  }
   $('calcNote').textContent = planRealism.plan_realism_reason || (displayedPlan.riskFit.risk_status === 'too_wide'
     ? `Stop would be too wide for ${formatPound(state.userRiskPerTrade || currentMaxLoss())} risk.`
     : (displayedPlan.capitalFit.capital_fit === 'too_expensive'
