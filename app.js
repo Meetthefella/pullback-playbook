@@ -7933,6 +7933,10 @@ function resolveVisualState(record, context = 'scanner', options = {}){
     setupScoreForRecord,
     getBadge,
     getBucket,
+    resolveTrackPresentationModel,
+    syncWatchlistLifecycle,
+    watchlistLifecycleSnapshot,
+    watchlistPriorityForRecord,
     normalizeGlobalVerdictKey,
     normalizeVerdict
   });
@@ -11512,6 +11516,23 @@ function resolveReviewLifecycleCopyBias(record, options = {}){
     || structureEligibility === 'damaged'
     || structureState === 'weakening'
     || weakeningLifecycle;
+  const terminalAvoidApplied = presentation.presentationBucket === 'avoid';
+  if(terminalAvoidApplied){
+    return {
+      review_lifecycle_bias:'terminal',
+      review_lifecycle_copy_override_applied:false,
+      review_lifecycle_copy_reason:'Terminal avoid/dead overrides diminishing.',
+      decisionSummary:String(visualState.decision_summary || '').trim(),
+      tradeStatusLine1:'',
+      tradeStatusLine2:'',
+      trackPresentationBucket:presentation.presentationBucket,
+      trackPresentationTone:presentation.presentationTone,
+      review_presentation_source:'terminal_avoid',
+      terminal_avoid_applied:true,
+      terminal_avoid_reason:presentation.terminalAvoidReason || presentation.presentationReason || 'Terminal avoid/dead overrides diminishing.',
+      diminishing_preserved_in_review:false
+    };
+  }
   const overrideAllowed = ['monitor','watch'].includes(verdict) && diminishingLike;
   if(!overrideAllowed){
     return {
@@ -11522,7 +11543,11 @@ function resolveReviewLifecycleCopyBias(record, options = {}){
       tradeStatusLine1:'',
       tradeStatusLine2:'',
       trackPresentationBucket:presentation.presentationBucket,
-      trackPresentationTone:presentation.presentationTone
+      trackPresentationTone:presentation.presentationTone,
+      review_presentation_source:'resolver',
+      terminal_avoid_applied:false,
+      terminal_avoid_reason:'',
+      diminishing_preserved_in_review:false
     };
   }
   return {
@@ -11533,7 +11558,11 @@ function resolveReviewLifecycleCopyBias(record, options = {}){
     tradeStatusLine1:'Trend is weakening - no reliable stop level yet.',
     tradeStatusLine2:'Diminishing - setup quality is fading.',
     trackPresentationBucket:presentation.presentationBucket,
-    trackPresentationTone:presentation.presentationTone
+    trackPresentationTone:presentation.presentationTone,
+    review_presentation_source:'track_lifecycle',
+    terminal_avoid_applied:false,
+    terminal_avoid_reason:'',
+    diminishing_preserved_in_review:true
   };
 }
 
@@ -12409,11 +12438,23 @@ function bindEntryConditionsHoldInteractions(root){
 }
 
 function resolvePlanVisibility(setup){
+  const rawState = String(setup && (setup.state || setup.finalVerdict || '') || '').trim().toLowerCase();
   const state = normalizeGlobalVerdictKey(setup && (setup.state || setup.finalVerdict || '') || '');
   const bounceState = String(setup && setup.bounce_state || '').trim().toLowerCase();
   const structure = String(setup && setup.structure || '').trim().toLowerCase();
   const noConfirmation = bounceState === 'none' || bounceState === 'attempt';
   const weakStructure = structure === 'weakening' || structure === 'broken';
+
+  if(rawState === 'diminishing'){
+    return {
+      showPlan:false,
+      showPositionSize:false,
+      showCapital:false,
+      showRR:false,
+      diagnosticsMessage:'Trend is weakening - no reliable stop level yet.',
+      diagnosticsTone:'danger'
+    };
+  }
 
   if(state === 'monitor' || state === 'watch' || state === 'developing'){
     return {
@@ -18139,7 +18180,7 @@ function renderReviewWorkspace(options = {}){
     setupScore
   });
   const reviewFinalVerdictForPaperTrade = normalizeAnalysisVerdict(
-    visualState.finalVerdict || visualState.final_verdict || displayStage
+    visualState.final_verdict_rendered || visualState.finalVerdict || visualState.final_verdict || displayStage
   );
   const paperTradeEligibilityState = paperTradeEligibility.evaluatePaperTradeEligibility({
     finalVerdict:reviewFinalVerdictForPaperTrade,
@@ -18278,11 +18319,14 @@ function renderReviewWorkspace(options = {}){
   };
   const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary;
   const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
-  const reviewAction = getActions(visualState.finalVerdict || visualState.final_verdict);
+  const reviewRenderedVerdict = String(visualState.final_verdict_rendered || visualState.renderedVerdict || visualState.finalVerdict || visualState.final_verdict || '').trim().toLowerCase();
+  const reviewAction = reviewRenderedVerdict === 'diminishing'
+    ? {label:'DIMINISHING', detail:'Weakening setup', planAllowed:false, watchlistAllowed:true}
+    : getActions(visualState.finalVerdict || visualState.final_verdict);
   const reviewNextActionLabel = String(reviewAction && reviewAction.label || '').trim() || 'Review setup inputs';
   const reviewBadgeLabel = reviewBadge.text;
   const planUI = resolvePlanVisibility({
-    state:visualState.finalVerdict,
+    state:visualState.final_verdict_rendered || visualState.finalVerdict,
     bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
     structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
   });
@@ -18361,6 +18405,7 @@ function renderReviewWorkspace(options = {}){
   const reviewDebug = `<details class="compact-details"><summary>Debug State</summary>${renderDebugSectionMarkup('Final Decision', [
     {label:'UI State Source', value:visualState.ui_state_source || '(none)'},
     {label:'Final Verdict Rendered', value:visualState.final_verdict_rendered || visualState.finalVerdict || '(none)'},
+    {label:'Rendered Verdict', value:visualState.renderedVerdict || visualState.final_verdict_rendered || '(none)'},
     {label:'Bucket Rendered', value:visualState.bucket_rendered || visualState.bucket || '(none)'},
     {label:'Dead Guard Applied', value:visualState.dead_guard_applied ? 'true' : 'false'},
     {label:'Dead Trigger Source', value:visualState.dead_trigger_source || '(none)'},
@@ -18383,9 +18428,14 @@ function renderReviewWorkspace(options = {}){
     {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
     {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
   ])}${renderDebugSectionMarkup('Review Lifecycle Bias', [
+    {label:'Review Presentation State', value:visualState.review_presentation_state || '(none)'},
+    {label:'Review Presentation Source', value:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || '(none)'},
     {label:'Review Lifecycle Bias', value:reviewLifecycleBias.review_lifecycle_bias || '(none)'},
     {label:'Copy Override Applied', value:reviewLifecycleBias.review_lifecycle_copy_override_applied ? 'true' : 'false'},
     {label:'Copy Override Reason', value:reviewLifecycleBias.review_lifecycle_copy_reason || '(none)'},
+    {label:'Terminal Avoid Applied', value:visualState.terminal_avoid_applied ? 'true' : 'false'},
+    {label:'Terminal Avoid Reason', value:visualState.terminal_avoid_reason || reviewLifecycleBias.terminal_avoid_reason || '(none)'},
+    {label:'Diminishing Preserved In Review', value:visualState.diminishing_preserved_in_review ? 'true' : 'false'},
     {label:'Track Presentation Bucket', value:reviewLifecycleBias.trackPresentationBucket || '(none)'},
     {label:'Track Presentation Tone', value:reviewLifecycleBias.trackPresentationTone || '(none)'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
@@ -18976,7 +19026,7 @@ function syncPlanDisplayMeta(){
     track_presentation_tone:reviewLifecycleBias.trackPresentationTone
   };
   const planUI = resolvePlanVisibility({
-    state:visualState.finalVerdict,
+    state:visualState.final_verdict_rendered || visualState.finalVerdict,
     bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
     structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
   });
@@ -19171,7 +19221,7 @@ function calculate(options = {}){
   }) : {finalVerdict:'monitor'};
   const plannerDecisionSummary = plannerVisualState && plannerVisualState.decision_summary ? plannerVisualState.decision_summary : '';
   const planUI = resolvePlanVisibility({
-    state:plannerVisualState.finalVerdict,
+    state:plannerVisualState.final_verdict_rendered || plannerVisualState.finalVerdict,
     bounce_state:plannerDerivedStates.bounceState || (activeRecord && activeRecord.setup && activeRecord.setup.bounceState),
     structure:plannerDerivedStates.structureState || (activeRecord && activeRecord.setup && activeRecord.setup.structureState)
   });

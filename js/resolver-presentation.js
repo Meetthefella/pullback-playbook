@@ -9,7 +9,10 @@
     const normalized = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict || '');
     if(normalized === 'entry') return 'entry';
     if(normalized === 'near_entry') return 'near_entry';
+    if(normalized === 'watch') return 'watch';
+    if(normalized === 'diminishing') return 'diminishing';
     if(normalized === 'monitor') return 'monitor';
+    if(normalized === 'dead') return 'dead';
     if(normalized === 'avoid') return 'avoid';
     return 'monitor';
   }
@@ -71,6 +74,7 @@
     const verdict = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict || '');
     if(verdict === 'entry') return 'Entry - your plan fits.';
     if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
+    if(verdict === 'diminishing') return 'Diminishing - structure is weakening. Setup quality is fading.';
     if(verdict === 'avoid' || verdict === 'dead') return 'Avoid - too weak or broken. Leave it alone.';
     const structuralState = String(options && options.structuralState || '').toLowerCase();
     const structureState = String(options && options.structureState || '').toLowerCase();
@@ -134,26 +138,57 @@
       derivedStates,
       displayedPlan
     });
+    const lifecycleSnapshot = typeof deps.syncWatchlistLifecycle === 'function'
+      ? (deps.syncWatchlistLifecycle(safeRecord) || (typeof deps.watchlistLifecycleSnapshot === 'function' ? deps.watchlistLifecycleSnapshot(safeRecord) : null))
+      : (typeof deps.watchlistLifecycleSnapshot === 'function' ? deps.watchlistLifecycleSnapshot(safeRecord) : null);
+    const priority = typeof deps.watchlistPriorityForRecord === 'function'
+      ? deps.watchlistPriorityForRecord(safeRecord)
+      : {score:0};
     const rawVerdict = finalVerdictFromResolvedContract(resolvedContract, derivedStates, deps);
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
     const canonicalVerdict = legacyVerdict && legacyVerdict.final_verdict
       ? String(legacyVerdict.final_verdict)
       : rawVerdict;
+    const trackPresentation = typeof deps.resolveTrackPresentationModel === 'function'
+      ? deps.resolveTrackPresentationModel(safeRecord, legacyVerdict, lifecycleSnapshot, priority)
+      : null;
     const avoidAllowedByStructureConsistencyGuard = structureState === 'broken';
     const deadGuardApplied = structureState !== 'broken' && (canonicalVerdict === 'dead' || canonicalVerdict === 'avoid');
     const pendingResolution = options.pendingResolution === true;
     const finalVerdict = pendingResolution ? 'monitor' : (deadGuardApplied ? 'monitor' : canonicalVerdict);
-    const state = pendingResolution ? 'monitor' : visualStateKey(finalVerdict, deps);
+    const terminalAvoidApplied = !!(
+      !pendingResolution
+      && context === 'review'
+      && trackPresentation
+      && trackPresentation.presentationBucket === 'avoid'
+    );
+    const diminishingPreservedInReview = !!(
+      !pendingResolution
+      && context === 'review'
+      && trackPresentation
+      && trackPresentation.presentationBucket === 'diminishing'
+      && !terminalAvoidApplied
+    );
+    const renderedVerdict = terminalAvoidApplied
+      ? 'avoid'
+      : (diminishingPreservedInReview ? 'diminishing' : finalVerdict);
+    const state = pendingResolution ? 'monitor' : visualStateKey(renderedVerdict, deps);
     const visual_tone = visualToneForState(state);
     const score = clampScore(options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord));
     const styleAttr = visualStyleForState(state, score);
     const badge = pendingResolution
       ? {text:'⏳ Reviewing', className:'near'}
-      : deps.getBadge(finalVerdict);
+      : (diminishingPreservedInReview
+        ? {text:'Diminishing', className:'badge--diminishing'}
+        : deps.getBadge(renderedVerdict));
     const bucket = pendingResolution
       ? 'monitor_watch'
-      : (legacyVerdict && legacyVerdict.bucket ? legacyVerdict.bucket : deps.getBucket(finalVerdict));
-    const normalizedRenderedVerdict = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(finalVerdict);
+      : (terminalAvoidApplied
+        ? 'avoid_dead'
+        : (diminishingPreservedInReview
+          ? 'diminishing'
+          : (legacyVerdict && legacyVerdict.bucket ? legacyVerdict.bucket : deps.getBucket(renderedVerdict))));
+    const normalizedRenderedVerdict = (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(renderedVerdict);
     const normalizedLegacyVerdict = legacyVerdict
       ? (deps.normalizeVerdict || deps.normalizeGlobalVerdictKey)(legacyVerdict.final_verdict || legacyVerdict.finalVerdict || '')
       : '';
@@ -172,11 +207,13 @@
       structureState,
       structureEligibility:legacyVerdict && legacyVerdict.structure_eligibility,
       viability:legacyVerdict && legacyVerdict.viability,
-      isExtended:legacyVerdict && legacyVerdict.is_extended === true
+      isExtended:legacyVerdict && legacyVerdict.is_extended === true,
+      reviewPresentationState:diminishingPreservedInReview ? 'diminishing' : '',
+      trackPresentationBucket:trackPresentation && trackPresentation.presentationBucket || ''
     };
     const resolvedSummary = pendingResolution
       ? 'Reviewing setup with live data before final status.'
-      : decisionSummaryForVerdict(finalVerdict, summaryOptions, deps);
+      : decisionSummaryForVerdict(renderedVerdict, summaryOptions, deps);
     const cardClass = cardClassForState(state);
     return {
       state,
@@ -195,6 +232,14 @@
       badge,
       finalVerdict,
       final_verdict:finalVerdict,
+      renderedVerdict,
+      review_presentation_state:diminishingPreservedInReview ? 'diminishing' : renderedVerdict,
+      review_presentation_source:diminishingPreservedInReview ? 'track_lifecycle' : 'resolver',
+      terminal_avoid_applied:terminalAvoidApplied,
+      terminal_avoid_reason:terminalAvoidApplied
+        ? (trackPresentation && (trackPresentation.terminalAvoidReason || trackPresentation.presentationReason) || 'Terminal avoid/dead overrides diminishing.')
+        : null,
+      diminishing_preserved_in_review:diminishingPreservedInReview,
       bucket,
       allowPlan:['entry','near_entry'].includes(finalVerdict),
       allow_plan:['entry','near_entry'].includes(finalVerdict),
@@ -204,7 +249,7 @@
         ? 'Reviewing setup with live data before final status.'
         : (legacyVerdict && legacyVerdict.main_blocker) || resolvedSummary,
       ui_state_source:'resolveFinalStateContract',
-      final_verdict_rendered:finalVerdict,
+      final_verdict_rendered:renderedVerdict,
       bucket_rendered:bucket,
       dead_guard_applied:deadGuardApplied,
       dead_trigger_source:rawVerdict === 'dead' || rawVerdict === 'avoid'
@@ -215,6 +260,8 @@
       lifecycle_drop_reason:lifecycleDropReason,
       avoid_allowed_by_structure_consistency_guard:avoidAllowedByStructureConsistencyGuard,
       conflicting_legacy_state_detected:conflictingLegacyStateDetected,
+      trackPresentationBucket:trackPresentation && trackPresentation.presentationBucket || '',
+      trackPresentationTone:trackPresentation && trackPresentation.presentationTone || '',
       resolvedContract,
       legacyVerdict,
       context
