@@ -1963,6 +1963,14 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   touch-action:pan-y;
   user-select:none;
   -webkit-user-select:none;
+  padding-left:16px;
+}
+.watchlist-card::before{
+  width:6px;
+}
+.watchlist-card::after{
+  left:6px;
+  height:24%;
 }
 .watchlist-card__header{display:flex;flex-direction:column;gap:8px}
 .watchlist-card__header-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:nowrap;min-width:0}
@@ -2454,4 +2462,10 @@ details>summary::-webkit-details-marker{display:none}
 
 .wrap{
   padding-bottom:calc(96px + env(safe-area-inset-bottom));
+}
+
+/* Track card hold helper: suppress broken legacy glyph on "More" summary */
+.watchlist-card[data-entry-hold-helper="1"] .watchlist-card__details>summary::after{
+  content:none !important;
+  display:none !important;
 }
