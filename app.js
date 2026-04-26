@@ -6046,6 +6046,8 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Presentation Bucket', value:globalVisual.presentationBucket || '(none)'},
     {label:'Presentation Tone', value:globalVisual.presentationTone || '(none)'},
     {label:'Presentation Badge', value:globalVisual.presentationBadge || '(none)'},
+    {label:'Badge Label', value:globalVisual.badgeLabel || globalVisual.presentationBadge || '(none)'},
+    {label:'Card Class', value:globalVisual.cardClass || globalVisual.className || globalVisual.toneClass || '(none)'},
     {label:'Presentation Reason', value:globalVisual.presentationReason || '(none)'},
     {label:'Structure Eligibility', value:globalVisual.structureEligibility || globalVerdict.structure_eligibility || '(none)'},
     {label:'Active Track Eligible', value:globalVisual.activeTrackEligible ? 'true' : 'false'},
@@ -11247,19 +11249,35 @@ function watchlistPresentationBucketForRecord(record){
   return 'monitor_watch';
 }
 
-function getVisualTone(finalState){
-  const safe = String(finalState || '').trim().toLowerCase();
+function resolvePresentationTone(record = {}){
+  const presentationBucket = String(record.presentationBucket || 'active').trim().toLowerCase();
+  const finalVerdict = String(record.finalVerdict || '').trim().toLowerCase();
+  const structureState = String(record.structureState || '').trim().toLowerCase();
+  const isTerminal = ['avoid','dead','reject'].includes(finalVerdict);
   const map = {
-    entry:{tone:'green', badgeClass:'ready', cardClass:'tone-green'},
-    near_entry:{tone:'teal', badgeClass:'near', cardClass:'tone-teal'},
-    watch:{tone:'purple', badgeClass:'watch', cardClass:'tone-purple'},
-    monitor:{tone:'amber', badgeClass:'watch', cardClass:'tone-amber'},
-    diminishing:{tone:'muted_amber', badgeClass:'watch', cardClass:'tone-muted-amber'},
-    avoid:{tone:'red', badgeClass:'avoid', cardClass:'tone-red'},
-    dead:{tone:'red', badgeClass:'avoid', cardClass:'tone-red'},
-    reject:{tone:'red', badgeClass:'avoid', cardClass:'tone-red'}
+    entry:{presentationTone:'entry', badgeLabel:'Entry', cardClass:'tone-green card--entry', badgeClass:'badge--entry'},
+    near_entry:{presentationTone:'near_entry', badgeLabel:'Near Entry', cardClass:'tone-teal card--near-entry', badgeClass:'badge--near-entry'},
+    watch:{presentationTone:'watch', badgeLabel:'Watch', cardClass:'tone-purple card--watch', badgeClass:'badge--watch'},
+    monitor:{presentationTone:'monitor', badgeLabel:'Monitor', cardClass:'tone-amber card--monitor', badgeClass:'badge--monitor'},
+    diminishing:{presentationTone:'diminishing', badgeLabel:'Diminishing', cardClass:'tone-muted-amber card--diminishing', badgeClass:'badge--diminishing'},
+    avoid:{presentationTone:'avoid', badgeLabel:'Avoid', cardClass:'tone-red card--avoid', badgeClass:'badge--avoid'}
   };
-  return map[safe] || map.monitor;
+  if(presentationBucket === 'avoid' || isTerminal || ['broken','invalid','failed'].includes(structureState)){
+    return {presentationBucket:'avoid', ...map.avoid};
+  }
+  if(presentationBucket === 'diminishing'){
+    return {presentationBucket:'diminishing', ...map.diminishing};
+  }
+  if(finalVerdict === 'entry'){
+    return {presentationBucket:'active', ...map.entry};
+  }
+  if(finalVerdict === 'near_entry'){
+    return {presentationBucket:'active', ...map.near_entry};
+  }
+  if(finalVerdict === 'watch'){
+    return {presentationBucket:'active', ...map.watch};
+  }
+  return {presentationBucket:'active', ...map.monitor};
 }
 
 function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot, priority){
@@ -11279,11 +11297,12 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const explicitInvalidation = explicitInvalidationReason && explicitInvalidationReason !== '(none)';
   const isTerminal = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict) || ['dead','expired'].includes(lifecycleState);
   const avoidByVerdict = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict);
-  const broken = structureEligibility === 'broken' || structureState === 'broken';
+  const broken = structureEligibility === 'broken' || ['broken','invalid','failed'].includes(structureState);
   const avoidByBroken = broken;
   const avoidByExplicitInvalidation = !!explicitInvalidation;
   const weakening = structureEligibility === 'damaged' || structureState === 'weakening';
   const lowPriorityByViability = String(verdictSource && verdictSource.viability || '').trim().toLowerCase() === 'low_priority';
+  const rejectByViability = viability === 'reject';
   const finalVerdictKey = rawFinalVerdict || normalizedFinalVerdict || 'monitor';
   const finalIsMonitorWatch = ['watch','monitor'].includes(finalVerdictKey);
   const finalIsEntryNear = normalizedFinalVerdict === 'entry' || normalizedFinalVerdict === 'near_entry';
@@ -11300,7 +11319,7 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     && !avoidByVerdict
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
-  const avoidTrackEligible = avoidByVerdict || avoidByBroken || avoidByExplicitInvalidation;
+  const avoidTrackEligible = avoidByVerdict || avoidByBroken || avoidByExplicitInvalidation || rejectByViability;
   let presentationBucket = 'active';
   if(avoidTrackEligible){
     presentationBucket = 'avoid';
@@ -11314,51 +11333,31 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     presentationBucket = 'active';
   }
 
-  let presentationTone = 'amber';
+  let presentationTone = 'monitor';
   let presentationBadge = 'Monitor';
-  let presentationBadgeClass = getVisualTone('monitor').badgeClass;
+  let presentationBadgeClass = 'badge--monitor';
+  let presentationCardClass = 'tone-amber card--monitor';
   let presentationReason = String(verdictSource && verdictSource.reason || '').trim() || 'Monitor - still forming.';
-  let visualToneState = normalizedFinalVerdict === 'watch' ? 'watch' : 'monitor';
-
+  const resolvedTone = resolvePresentationTone({
+    presentationBucket,
+    finalVerdict:rawFinalVerdict || normalizedFinalVerdict,
+    structureState
+  });
+  presentationTone = resolvedTone.presentationTone;
+  presentationBadge = resolvedTone.badgeLabel;
+  presentationBadgeClass = resolvedTone.badgeClass;
+  presentationCardClass = resolvedTone.cardClass;
   if(presentationBucket === 'avoid'){
-    visualToneState = 'avoid';
-    presentationTone = getVisualTone('avoid').tone;
-    presentationBadge = 'Avoid';
-    presentationBadgeClass = getVisualTone('avoid').badgeClass;
     presentationReason = 'Avoid - setup no longer viable.';
   }else if(presentationBucket === 'diminishing'){
-    visualToneState = 'diminishing';
-    presentationTone = getVisualTone('diminishing').tone;
-    presentationBadge = 'Diminishing';
-    presentationBadgeClass = getVisualTone('diminishing').badgeClass;
-    if(structureEligibility === 'damaged'){
-      presentationReason = 'Diminishing - structure weakening.';
-    }else{
-      presentationReason = 'Diminishing - structure weakening.';
-    }
-  }else if(normalizedFinalVerdict === 'entry'){
-    visualToneState = 'entry';
-    presentationTone = getVisualTone('entry').tone;
-    presentationBadge = 'Entry';
-    presentationBadgeClass = getVisualTone('entry').badgeClass;
-  }else if(normalizedFinalVerdict === 'near_entry'){
-    visualToneState = 'near_entry';
-    presentationTone = getVisualTone('near_entry').tone;
-    presentationBadge = 'Near Entry';
-    presentationBadgeClass = getVisualTone('near_entry').badgeClass;
-  }else{
-    if(rawFinalVerdict === 'watch' || ['developing','developing_clean','developing_loose'].includes(structureState)){
-      visualToneState = 'watch';
-      presentationTone = getVisualTone('watch').tone;
-    }else{
-      visualToneState = 'monitor';
-      presentationTone = getVisualTone('monitor').tone;
-    }
-    presentationBadge = rawFinalVerdict === 'watch' ? 'Watch' : 'Monitor';
-    presentationBadgeClass = getVisualTone(visualToneState).badgeClass;
+    presentationReason = 'Diminishing - structure weakening.';
   }
 
-  const visualTone = getVisualTone(visualToneState);
+  const visualTone = {
+    tone:presentationTone,
+    badgeClass:presentationBadgeClass,
+    cardClass:presentationCardClass
+  };
   return {
     finalVerdict:rawFinalVerdict || normalizedFinalVerdict || 'monitor',
     bucket:String(sourceBucket || ''),
@@ -11366,6 +11365,8 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     presentationBucket,
     presentationTone,
     presentationBadge,
+    badgeLabel:presentationBadge,
+    cardClass:presentationCardClass,
     presentationBadgeClass,
     presentationReason,
     priorityScore:resolvedPriority,
@@ -11397,15 +11398,15 @@ function reconcileWatchlistPresentation({
   const priority = watchlistPriorityForRecord(item);
   const presentation = resolveTrackPresentationModel(item, globalVerdict, lifecycleSnapshot, priority);
   const mappedToneClass = (presentation.visualTone && presentation.visualTone.cardClass) || base.toneClass || 'tone-amber';
-  const mappedVisualTone = (function(){
-    if(presentation.presentationTone === 'red') return 'danger';
-    if(presentation.presentationTone === 'green' || presentation.presentationTone === 'teal') return 'bullish';
-    if(presentation.presentationTone === 'purple') return 'neutral';
-    return 'caution';
-  })();
+  const mappedVisualTone = String(presentation.presentationTone || 'monitor');
   const softVerdict = normalizeVerdict(base.finalVerdict || base.final_verdict || '');
   const strictAvoidTruth = watchlistStrictAvoidTruth(item, globalVerdict, lifecycleSnapshot);
   if(strictAvoidTruth && softVerdict !== 'avoid'){
+    const strictTone = resolvePresentationTone({
+      presentationBucket:'avoid',
+      finalVerdict:'avoid',
+      structureState:'broken'
+    });
     const summary = buildDecisionSummary({
       finalVerdict:'avoid',
       displayedPlan,
@@ -11420,18 +11421,19 @@ function reconcileWatchlistPresentation({
       final_verdict_rendered:'avoid',
       bucket:'low_priority_avoid',
       bucket_rendered:'low_priority_avoid',
-      badge:getBadge('avoid'),
-      tone:getTone('avoid'),
-      className:'tone-red',
-      toneClass:'tone-red',
-      visual_tone:'danger',
+      badge:{text:strictTone.badgeLabel, className:strictTone.badgeClass},
+      className:strictTone.cardClass,
+      toneClass:strictTone.cardClass,
+      visual_tone:strictTone.presentationTone,
       decision_summary:summary,
       conflicting_legacy_state_detected:true,
       watchlist_presentation_source:'strict_reconciled',
       ui_state_source:`${base.ui_state_source || 'resolveFinalStateContract'}|strict_reconciled`,
       presentationBucket:'avoid',
-      presentationTone:'red',
-      presentationBadge:'Avoid',
+      presentationTone:strictTone.presentationTone,
+      presentationBadge:strictTone.badgeLabel,
+      badgeLabel:strictTone.badgeLabel,
+      cardClass:strictTone.cardClass,
       presentationReason:'Avoid - setup no longer viable.',
       priorityScore:presentation.priorityScore,
       activeTrackEligible:false,
