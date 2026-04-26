@@ -2015,7 +2015,7 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 }
 .watchlist-plan-meta{margin-top:0;color:var(--text-secondary)}
 .watchlist-card__detail{margin-top:6px;color:var(--text-secondary)}
-.watchlist-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.watchlist-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-right:48px}
 .watchlist-actions button{flex:0 0 auto}
 .watchlist-card__header,
 .watchlist-card__status,
@@ -2117,7 +2117,19 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   color:rgba(148,163,184,.95);
   line-height:1.3;
 }
-.watchlist-card__details{width:100%}
+.watchlist-card__details{
+  width:auto;
+  display:inline-block;
+  vertical-align:top;
+  margin-top:-42px;
+  margin-left:168px;
+}
+.watchlist-card__details[open]{
+  display:block;
+  width:100%;
+  margin-top:10px;
+  margin-left:0;
+}
 .watchlist-card__details>summary{
   width:fit-content;
   -webkit-tap-highlight-color:transparent;
@@ -2537,4 +2549,17 @@ details>summary::-webkit-details-marker{display:none}
   height:36%;
   background:linear-gradient(180deg, var(--card-glow, rgba(100, 116, 139, 0.10)), rgba(0,0,0,0));
   pointer-events:none;
+}
+
+@media (max-width: 560px){
+  .watchlist-card__status{
+    max-width:min(46vw, 176px);
+    min-width:110px;
+  }
+  .watchlist-actions{
+    padding-right:42px;
+  }
+  .watchlist-card__details{
+    margin-left:154px;
+  }
 }
