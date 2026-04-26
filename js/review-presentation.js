@@ -35,10 +35,20 @@
     const structureEligibility = String(globalVerdict && globalVerdict.structure_eligibility || '').toLowerCase();
     const isExtended = globalVerdict && globalVerdict.is_extended === true;
     const mainBlocker = String(globalVerdict && globalVerdict.main_blocker || '').trim();
+    const reviewLifecycleBias = String(globalVerdict && globalVerdict.review_lifecycle_bias || '').trim().toLowerCase();
+    const reviewLifecycleLine1 = String(globalVerdict && globalVerdict.review_lifecycle_line1 || '').trim();
+    const reviewLifecycleLine2 = String(globalVerdict && globalVerdict.review_lifecycle_line2 || '').trim();
+    const trackPresentationBucket = String(globalVerdict && globalVerdict.track_presentation_bucket || '').trim().toLowerCase();
     if(isExtended){
       return {
         line1:'No pullback structure to define entry yet.',
         line2:'Buyers in control, but price is stretched away from support'
+      };
+    }
+    if(reviewLifecycleBias === 'diminishing' || trackPresentationBucket === 'diminishing'){
+      return {
+        line1:reviewLifecycleLine1 || 'Trend is weakening - no reliable stop level yet.',
+        line2:reviewLifecycleLine2 || 'Diminishing - setup quality is fading.'
       };
     }
     if(structureEligibility === 'damaged' || structureState === 'weakening'){

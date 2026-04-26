@@ -11470,6 +11470,138 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   };
 }
 
+function resolveReviewLifecycleCopyBias(record, options = {}){
+  const item = normalizeTickerRecord(record || {});
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object'
+    ? options.globalVerdict
+    : resolveGlobalVerdict(item);
+  const visualState = options.visualState && typeof options.visualState === 'object'
+    ? options.visualState
+    : {};
+  const derivedStates = options.derivedStates && typeof options.derivedStates === 'object'
+    ? options.derivedStates
+    : analysisDerivedStatesFromRecord(item);
+  const lifecycleSnapshot = syncWatchlistLifecycle(item) || watchlistLifecycleSnapshot(item);
+  const priority = watchlistPriorityForRecord(item);
+  const presentation = resolveTrackPresentationModel(item, globalVerdict, lifecycleSnapshot, priority);
+  const verdict = normalizeGlobalVerdictKey(
+    visualState.finalVerdict
+    || visualState.final_verdict
+    || globalVerdict.final_verdict
+    || globalVerdict.finalVerdict
+    || ''
+  );
+  const structureState = String(
+    derivedStates.structureState
+    || visualState.structure_state
+    || globalVerdict.structure_state
+    || ''
+  ).trim().toLowerCase();
+  const structureEligibility = String(
+    visualState.structure_eligibility
+    || globalVerdict.structure_eligibility
+    || ''
+  ).trim().toLowerCase();
+  const lifecycleState = String(
+    (lifecycleSnapshot && lifecycleSnapshot.state)
+    || globalVerdict.lifecycle
+    || ''
+  ).trim().toLowerCase();
+  const weakeningLifecycle = ['diminishing','weakening','deteriorating','drop'].includes(lifecycleState);
+  const diminishingLike = presentation.presentationBucket === 'diminishing'
+    || structureEligibility === 'damaged'
+    || structureState === 'weakening'
+    || weakeningLifecycle;
+  const overrideAllowed = ['monitor','watch'].includes(verdict) && diminishingLike;
+  if(!overrideAllowed){
+    return {
+      review_lifecycle_bias:'neutral',
+      review_lifecycle_copy_override_applied:false,
+      review_lifecycle_copy_reason:'No lifecycle override applied; review state remains aligned with the base resolver.',
+      decisionSummary:String(visualState.decision_summary || '').trim(),
+      tradeStatusLine1:'',
+      tradeStatusLine2:'',
+      trackPresentationBucket:presentation.presentationBucket,
+      trackPresentationTone:presentation.presentationTone
+    };
+  }
+  return {
+    review_lifecycle_bias:'diminishing',
+    review_lifecycle_copy_override_applied:true,
+    review_lifecycle_copy_reason:'Review copy overridden because Track lifecycle is diminishing.',
+    decisionSummary:'Diminishing - structure is weakening. Setup quality is fading.',
+    tradeStatusLine1:'Trend is weakening - no reliable stop level yet.',
+    tradeStatusLine2:'Diminishing - setup quality is fading.',
+    trackPresentationBucket:presentation.presentationBucket,
+    trackPresentationTone:presentation.presentationTone
+  };
+}
+
+function describePriceVsMovingAverage(price, movingAverage, nearThreshold = 0.02){
+  const numericPrice = numericOrNull(price);
+  const numericMa = numericOrNull(movingAverage);
+  if(!Number.isFinite(numericPrice) || !Number.isFinite(numericMa) || numericMa <= 0) return 'unknown';
+  const delta = (numericPrice - numericMa) / numericMa;
+  if(Math.abs(delta) <= nearThreshold) return 'near';
+  return delta > 0 ? 'above' : 'below';
+}
+
+function guardAnalysisMovingAverageLanguage(chartRead, options = {}){
+  const original = String(chartRead || '').trim();
+  const price = numericOrNull(options.price);
+  const sma20 = numericOrNull(options.sma20);
+  const sma50 = numericOrNull(options.sma50);
+  const structureState = String(options.structureState || '').trim().toLowerCase();
+  const priceVs20 = describePriceVsMovingAverage(price, sma20, 0.015);
+  const priceVs50 = describePriceVsMovingAverage(price, sma50, 0.02);
+  const false50Pattern = /(pull(?:ing)? back towards the 50\s*ma|pullback towards the 50\s*ma|pullback to the 50\s*ma|near the 50\s*ma|testing the 50\s*ma as support|using the 50\s*ma as support|holding the 50\s*ma as support)/i;
+  if(!original){
+    return {
+      text:original,
+      applied:false,
+      reason:'No correction applied; chart read is empty.',
+      priceVs20,
+      priceVs50
+    };
+  }
+  if(!false50Pattern.test(original)){
+    return {
+      text:original,
+      applied:false,
+      reason:'No correction applied; no false 50MA language detected.',
+      priceVs20,
+      priceVs50
+    };
+  }
+  const clearlyBelow50 = Number.isFinite(price) && Number.isFinite(sma50) && price < sma50 * 0.9975;
+  const weakeningBelow50 = priceVs50 === 'below' && ['weakening','broken','invalid','failed'].includes(structureState);
+  if(!(clearlyBelow50 || weakeningBelow50)){
+    return {
+      text:original,
+      applied:false,
+      reason:'No correction applied; price is not clearly below the 50MA.',
+      priceVs20,
+      priceVs50
+    };
+  }
+  const correction = priceVs20 === 'below'
+    ? 'Price is below both the 20MA and 50MA. This is no longer a clean pullback to the 50MA.'
+    : 'Price has lost the 50MA. This is no longer a clean pullback to the 50MA.';
+  const sentences = original
+    .split(/(?<=[.!?])\s+/)
+    .map(sentence => String(sentence || '').trim())
+    .filter(Boolean);
+  const keptSentences = sentences.filter(sentence => !false50Pattern.test(sentence));
+  const correctedText = [correction, ...keptSentences].join(' ').trim();
+  return {
+    text:correctedText || correction,
+    applied:true,
+    reason:'AI 50MA wording corrected because price is below the 50MA.',
+    priceVs20,
+    priceVs50
+  };
+}
+
 function reconcileWatchlistPresentation({
   record,
   visualState,
@@ -15647,6 +15779,12 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   const derivedStates = analysisDerivedStates(previousState);
   const marketStatus = previousState.marketStatus || state.marketStatus || '';
   const tightenedVerdict = tightenPlaybookVerdict(parsed.final_verdict || parsed.verdict, derivedStates, marketStatus);
+  const chartReadGuard = guardAnalysisMovingAverageLanguage(parsed.plain_english_chart_read, {
+    price:previousState.marketData && previousState.marketData.price,
+    sma20:previousState.marketData && previousState.marketData.sma20,
+    sma50:previousState.marketData && previousState.marketData.sma50,
+    structureState:derivedStates.structureState
+  });
   const riskFit = planValid ? evaluateRiskFit({entry:numericEntry, stop:numericStop, ...currentRiskSettings()}) : {
     max_loss:currentMaxLoss(),
     risk_per_share:null,
@@ -15667,7 +15805,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   return {
     setup_type:parsed.setup_type || previousState.setupType || '',
     verdict:parsed.verdict,
-    plain_english_chart_read:parsed.plain_english_chart_read,
+    plain_english_chart_read:chartReadGuard.text,
     chart_match_status:mismatchStatus,
     chart_match_warning:mismatchWarning,
     entry,
@@ -15689,6 +15827,10 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     key_reasons:keyReasons,
     risks:finalRisks,
     final_verdict:tightenedVerdict,
+    ai_ma_language_guard_applied:chartReadGuard.applied,
+    ai_ma_language_guard_reason:chartReadGuard.reason,
+    ai_price_vs_20ma:chartReadGuard.priceVs20,
+    ai_price_vs_50ma:chartReadGuard.priceVs50,
     warning_state:evaluateWarningState({
       ...existingTickerState,
       meta:{
@@ -18115,7 +18257,26 @@ function renderReviewWorkspace(options = {}){
   const paperTradePreviewMarkup = paperTradePreviewModel
     ? `${paperTradePreviewModel.debugForced ? '<div class="tiny warntext">Simulated Entry-ready preview (debug).</div>' : ''}<div class="tiny">Ticker ${escapeHtml(paperTradePreviewModel.ticker)} | Side ${escapeHtml(paperTradePreviewModel.side)} | Qty ${escapeHtml(String(paperTradePreviewModel.quantity))}</div><div class="tiny">Entry ${escapeHtml(fmtPrice(paperTradePreviewModel.entry))} | Stop ${escapeHtml(fmtPrice(paperTradePreviewModel.stop))} | Target ${escapeHtml(fmtPrice(paperTradePreviewModel.target))}</div><div class="tiny">Max loss ${escapeHtml(Number.isFinite(paperTradePreviewModel.maxLoss) ? formatGbp(paperTradePreviewModel.maxLoss) : 'n/a')} | RR ${escapeHtml(Number.isFinite(paperTradePreviewModel.rrRatio) ? `${paperTradePreviewModel.rrRatio.toFixed(2)}R` : 'n/a')}</div><div class="tiny">Capital ${escapeHtml(paperTradePreviewModel.capitalLabel)} | Market ${escapeHtml(paperTradePreviewModel.marketStatus || '')}</div>`
     : `<div class="tiny warntext">${escapeHtml(paperTradePrimaryReason || 'Unable to build paper-trade preview for this setup.')}</div>`;
-  const decisionSummary = visualState.decision_summary;
+  const reviewLifecycleBias = resolveReviewLifecycleCopyBias(record, {
+    globalVerdict,
+    visualState,
+    derivedStates
+  });
+  const reviewTradeStatusVerdict = {
+    ...visualState,
+    structure_state:visualState.structure_state || globalVerdict.structure_state,
+    structure_eligibility:visualState.structure_eligibility || globalVerdict.structure_eligibility,
+    main_blocker:visualState.main_blocker || globalVerdict.main_blocker,
+    is_extended:visualState.is_extended === true || globalVerdict.is_extended === true,
+    review_lifecycle_bias:reviewLifecycleBias.review_lifecycle_bias,
+    review_lifecycle_copy_override_applied:reviewLifecycleBias.review_lifecycle_copy_override_applied,
+    review_lifecycle_copy_reason:reviewLifecycleBias.review_lifecycle_copy_reason,
+    review_lifecycle_line1:reviewLifecycleBias.tradeStatusLine1,
+    review_lifecycle_line2:reviewLifecycleBias.tradeStatusLine2,
+    track_presentation_bucket:reviewLifecycleBias.trackPresentationBucket,
+    track_presentation_tone:reviewLifecycleBias.trackPresentationTone
+  };
+  const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary;
   const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
   const reviewAction = getActions(visualState.finalVerdict || visualState.final_verdict);
   const reviewNextActionLabel = String(reviewAction && reviewAction.label || '').trim() || 'Review setup inputs';
@@ -18126,7 +18287,7 @@ function renderReviewWorkspace(options = {}){
     structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
   });
   const tradeStatusText = planUI.showPlan
-    ? tradeStatusMetricText({globalVerdict:visualState, displayedPlan, resolvedContract})
+    ? tradeStatusMetricText({globalVerdict:reviewTradeStatusVerdict, displayedPlan, resolvedContract})
     : {line1:planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.', line2:''};
   const modifierMarkup = emojiModifierMarkup(resolvedContract);
   const scannerPresentation = resolveEmojiPresentation(record, {
@@ -18221,6 +18382,12 @@ function renderReviewWorkspace(options = {}){
     {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
     {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
     {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
+  ])}${renderDebugSectionMarkup('Review Lifecycle Bias', [
+    {label:'Review Lifecycle Bias', value:reviewLifecycleBias.review_lifecycle_bias || '(none)'},
+    {label:'Copy Override Applied', value:reviewLifecycleBias.review_lifecycle_copy_override_applied ? 'true' : 'false'},
+    {label:'Copy Override Reason', value:reviewLifecycleBias.review_lifecycle_copy_reason || '(none)'},
+    {label:'Track Presentation Bucket', value:reviewLifecycleBias.trackPresentationBucket || '(none)'},
+    {label:'Track Presentation Tone', value:reviewLifecycleBias.trackPresentationTone || '(none)'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
     {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
     {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
@@ -18260,6 +18427,10 @@ function renderReviewWorkspace(options = {}){
     {label:'Resolver Reason', value:globalVerdict.reason || '(none)'},
     {label:'AI Analysis Raw Length', value:String(analysisState.rawAnalysis.length)},
     {label:'Normalized Analysis Exists', value:String(!!analysisState.normalizedAnalysis)},
+    {label:'AI MA Guard Applied', value:analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_language_guard_applied ? 'true' : 'false'},
+    {label:'AI MA Guard Reason', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_language_guard_reason) || '(none)'},
+    {label:'AI Price vs 20MA', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_price_vs_20ma) || '(none)'},
+    {label:'AI Price vs 50MA', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_price_vs_50ma) || '(none)'},
     {label:'Last Error', value:analysisState.error || '(none)'},
     {label:'Last Reviewed At', value:record.review.lastReviewedAt || '(none)'}
   ])}${renderDebugSectionMarkup('Capital Simulation (Debug Only)', [
@@ -18784,7 +18955,26 @@ function syncPlanDisplayMeta(){
     displayedPlan,
     setupScore:setupScoreForRecord(record)
   });
-  const decisionSummary = visualState.decision_summary || '';
+  const reviewLifecycleBias = resolveReviewLifecycleCopyBias(record, {
+    globalVerdict,
+    visualState,
+    derivedStates
+  });
+  const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary || '';
+  const reviewTradeStatusVerdict = {
+    ...visualState,
+    structure_state:visualState.structure_state || globalVerdict.structure_state,
+    structure_eligibility:visualState.structure_eligibility || globalVerdict.structure_eligibility,
+    main_blocker:visualState.main_blocker || globalVerdict.main_blocker,
+    is_extended:visualState.is_extended === true || globalVerdict.is_extended === true,
+    review_lifecycle_bias:reviewLifecycleBias.review_lifecycle_bias,
+    review_lifecycle_copy_override_applied:reviewLifecycleBias.review_lifecycle_copy_override_applied,
+    review_lifecycle_copy_reason:reviewLifecycleBias.review_lifecycle_copy_reason,
+    review_lifecycle_line1:reviewLifecycleBias.tradeStatusLine1,
+    review_lifecycle_line2:reviewLifecycleBias.tradeStatusLine2,
+    track_presentation_bucket:reviewLifecycleBias.trackPresentationBucket,
+    track_presentation_tone:reviewLifecycleBias.trackPresentationTone
+  };
   const planUI = resolvePlanVisibility({
     state:visualState.finalVerdict,
     bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
@@ -18809,7 +18999,7 @@ function syncPlanDisplayMeta(){
   }
   if($('tradeStatusBox')){
     const tradeStatusText = planUI.showPlan
-      ? tradeStatusMetricText({globalVerdict:visualState, displayedPlan, resolvedContract})
+      ? tradeStatusMetricText({globalVerdict:reviewTradeStatusVerdict, displayedPlan, resolvedContract})
       : {line1:planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.', line2:''};
     $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   }
