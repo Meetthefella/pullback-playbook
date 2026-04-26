@@ -1371,7 +1371,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .review-hidden{
   display:none !important;
 }
-.reviewworkspace.ready{
+.reviewworkspace--ready{
   box-shadow:none;
 }
 .reviewworkspace-shell.visual-state-card{
@@ -1445,6 +1445,27 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .reviewworkspace-shell.card--dead .panelbox{
   background:rgba(42,24,28,.80);
   border-color:rgba(220, 38, 38, 0.18);
+}
+.reviewworkspace .panelbox.review-panel-tone-monitor{
+  background:rgba(36,33,20,.78);
+  border-color:rgba(245, 158, 11, 0.16);
+}
+.reviewworkspace .panelbox.review-panel-tone-diminishing{
+  background:rgba(38,29,20,.82);
+  border-color:rgba(249, 115, 22, 0.22);
+}
+.reviewworkspace .panelbox.review-panel-tone-avoid{
+  background:rgba(42,24,28,.82);
+  border-color:rgba(220, 38, 38, 0.20);
+}
+.reviewworkspace .panelbox.review-panel-tone-entry,
+.reviewworkspace .panelbox.review-panel-tone-near_entry{
+  background:rgba(18,37,34,.80);
+  border-color:rgba(16, 185, 129, 0.18);
+}
+.reviewworkspace .panelbox.review-panel-tone-watch{
+  background:rgba(28,28,46,.80);
+  border-color:rgba(124, 58, 237, 0.18);
 }
 .plannerbox{
   transition:background-color .18s ease, border-color .18s ease;
