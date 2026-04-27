@@ -56,6 +56,8 @@ const startupCoordinator = {
   startupWatchlistRefreshState:'idle',
   startupWatchlistRefreshPromise:null,
   startupWatchlistRefreshTimer:null,
+  lastStartupScanSignature:'',
+  startupEmptyScanRendered:false,
   lastTrackUserOpenedAt:0,
   nextAllowedStartupTrackRefreshAt:0
 };
@@ -454,6 +456,55 @@ function startupDebugRecordCountForWorkspace(name){
 function logStartupDebugRender(name, payload = {}){
   if(!PP_PERF_DEBUG) return;
   console.debug(`[PP_PERF] render_${name}`, payload);
+}
+
+function scannerSessionActiveForStartupRender(){
+  const sessionTickers = uniqueTickers(uiState.scannerSessionTickers || []);
+  const hasSessionTickers = sessionTickers.length > 0;
+  const hasSessionId = String(uiState.scannerSessionId || '').trim().length > 0;
+  const hasSessionTimestamp = String(uiState.scannerLastScanAt || '').trim().length > 0;
+  const hasLoadingTicker = normalizeTicker(uiState.loadingTicker || '').length > 0;
+  const statusLock = uiState.scannerSelectionStatusLock && typeof uiState.scannerSelectionStatusLock === 'object'
+    ? uiState.scannerSelectionStatusLock
+    : null;
+  const hasReviewPendingLock = !!(statusLock && String(statusLock.kind || '').trim() === 'review_pending');
+  return hasSessionTickers || hasSessionId || hasSessionTimestamp || hasLoadingTicker || hasReviewPendingLock;
+}
+
+function startupScanRenderSignature(records = []){
+  const rankedTickers = records
+    .map(record => normalizeTicker(record && record.ticker))
+    .filter(Boolean)
+    .join(',');
+  return JSON.stringify({
+    rankedTickers,
+    rankedCount:records.length,
+    shortlistSuppressed:uiState.scannerShortlistSuppressed === true ? 1 : 0,
+    scannerSessionActive:scannerSessionActiveForStartupRender() ? 1 : 0,
+    scannerSessionId:String(uiState.scannerSessionId || ''),
+    scannerLastScanAt:String(uiState.scannerLastScanAt || ''),
+    universeMode:String(effectiveUniverseMode() || '')
+  });
+}
+
+function scanDomAlreadyShowingEmptyState(){
+  const box = $('results');
+  if(!box || box.childElementCount < 1) return false;
+  const text = String(box.textContent || '').toLowerCase();
+  return text.includes('no scan results yet') || text.includes('shortlist cleared');
+}
+
+function renderStartupScanEmptyStateShell(){
+  const box = $('results');
+  if(!box) return;
+  if(uiState.scannerShortlistSuppressed){
+    box.innerHTML = '<div class="summary"><strong>Shortlist Cleared</strong><div class="tiny" style="margin-top:8px">Run a fresh scan.</div></div>';
+  }else{
+    box.innerHTML = '<div class="summary"><strong>No scan results yet</strong><div class="tiny" style="margin-top:8px">Run a fresh scan or import tickers to generate new opportunities for review.</div></div>';
+  }
+  const resultsToggle = $('resultsToggle');
+  if(resultsToggle) syncResultsToggleLabel();
+  updateScannerSelectionStatus();
 }
 
 function measureWorkspaceRender(name, source, callback){
@@ -3875,6 +3926,81 @@ function renderWorkspaceSurface(tab, options = {}){
     ? String(tab).toLowerCase()
     : 'scan';
   if(targetTab === 'scan'){
+    const reason = String(options.reason || 'workspace_surface');
+    const records = rankedTickerRecords();
+    const startupReason = reason === 'startup_local_restore' || reason === 'startup_remote_merge';
+    const scanStartupSignature = startupScanRenderSignature(records);
+    const scannerSessionActive = scannerSessionActiveForStartupRender();
+    const scanDomAlreadyEmpty = scanDomAlreadyShowingEmptyState();
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] scan_render_requested', {
+        source:reason,
+        rankedRecordCount:records.length,
+        activeTab:activeWorkspaceTab(),
+        hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
+        scanDomAlreadyEmpty,
+        scannerSessionActive
+      });
+    }
+    const startupEmptyRenderCandidate = startupReason
+      && records.length === 0
+      && uiState.scannerShortlistSuppressed !== true
+      && scannerSessionActive !== true;
+    if(startupEmptyRenderCandidate){
+      const unchangedSignature = (
+        startupCoordinator.startupEmptyScanRendered === true
+        && String(startupCoordinator.lastStartupScanSignature || '') === scanStartupSignature
+      );
+      if(scanDomAlreadyEmpty && unchangedSignature){
+        if(PP_PERF_DEBUG){
+          console.debug('[PP_PERF] scan_render_skipped_empty_startup', {
+            source:reason,
+            skipReason:'signature_unchanged',
+            rankedRecordCount:records.length,
+            activeTab:activeWorkspaceTab(),
+            hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
+            scanDomAlreadyEmpty,
+            scannerSessionActive
+          });
+        }
+        startupCoordinator.renderedTabs.scan = true;
+        startupCoordinator.startupEmptyScanRendered = true;
+        return;
+      }
+      if(scanDomAlreadyEmpty){
+        startupCoordinator.lastStartupScanSignature = scanStartupSignature;
+        startupCoordinator.startupEmptyScanRendered = true;
+        if(PP_PERF_DEBUG){
+          console.debug('[PP_PERF] scan_render_skipped_empty_startup', {
+            source:reason,
+            skipReason:'dom_already_empty',
+            rankedRecordCount:records.length,
+            activeTab:activeWorkspaceTab(),
+            hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
+            scanDomAlreadyEmpty,
+            scannerSessionActive
+          });
+        }
+        startupCoordinator.renderedTabs.scan = true;
+        return;
+      }
+      renderStartupScanEmptyStateShell();
+      startupCoordinator.lastStartupScanSignature = scanStartupSignature;
+      startupCoordinator.startupEmptyScanRendered = true;
+      if(PP_PERF_DEBUG){
+        console.debug('[PP_PERF] scan_render_skipped_empty_startup', {
+          source:reason,
+          skipReason:'cheap_empty_shell',
+          rankedRecordCount:records.length,
+          activeTab:activeWorkspaceTab(),
+          hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
+          scanDomAlreadyEmpty:scanDomAlreadyShowingEmptyState(),
+          scannerSessionActive
+        });
+      }
+      startupCoordinator.renderedTabs.scan = true;
+      return;
+    }
     measureWorkspaceRender('scan', options.reason || 'workspace_surface', () => {
       perfMark('pp_scanner_render_start');
       renderScannerResults();
@@ -3882,6 +4008,10 @@ function renderWorkspaceSurface(tab, options = {}){
       perfMark('pp_scanner_render_end');
       perfMeasure('pp_scanner_render', 'pp_scanner_render_start', 'pp_scanner_render_end');
     });
+    if(startupReason){
+      startupCoordinator.lastStartupScanSignature = scanStartupSignature;
+      startupCoordinator.startupEmptyScanRendered = records.length === 0 && uiState.scannerShortlistSuppressed !== true;
+    }
     startupCoordinator.renderedTabs.scan = true;
     return;
   }
@@ -5572,6 +5702,16 @@ function addToWatchlist(tickerData){
   }else{
     startupCoordinator.renderedTabs.track = false;
     startupCoordinator.trackHydratedRendered = false;
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] track_render_deferred_hidden_after_review_add', {
+        source:'watchlist_add',
+        ticker:entry.ticker,
+        activeTab:activeWorkspaceTab(),
+        trackRendered:startupCoordinator.renderedTabs.track === true,
+        watchlistDirty:hasWatchlistDirtyRecords(),
+        trackNeedsFullRender:startupCoordinator.trackNeedsFullRender === true
+      });
+    }
   }
   record.watchlist.debug.lastAddResult = wasInWatchlist ? 'already_present' : 'added';
   record.watchlist.debug.lastAddMessage = wasInWatchlist
@@ -7051,6 +7191,20 @@ function buildWatchlistSectionsFragment(records, showExpired){
 
 async function renderWatchlistChunked(options = {}){
   const source = String(options.source || 'watchlist_refresh');
+  if(shouldSkipHiddenWatchlistRender(source)){
+    if(source === 'watchlist_add' || source === 'review_add_watchlist_hidden'){
+      if(PP_PERF_DEBUG){
+        console.debug('[PP_PERF] track_render_deferred_hidden_after_review_add', {
+          source,
+          activeTab:activeWorkspaceTab(),
+          trackRendered:startupCoordinator.renderedTabs.track === true,
+          watchlistDirty:hasWatchlistDirtyRecords(),
+          trackNeedsFullRender:startupCoordinator.trackNeedsFullRender === true
+        });
+      }
+    }
+    return;
+  }
   const batchSize = Math.max(1, Number(options.batchSize) || WATCHLIST_RENDER_BATCH_SIZE);
   const model = options.model || prepareWatchlistRenderModel(source);
   const {box, showExpired, records, renderSignature} = model;
@@ -7124,6 +7278,7 @@ async function renderWatchlistChunked(options = {}){
 }
 
 function renderWatchlist(){
+  if(shouldSkipHiddenWatchlistRender('watchlist_render')) return;
   const model = prepareWatchlistRenderModel('watchlist_render');
   const {box, showExpired, records, renderSignature} = model;
   if(!box) return;
@@ -7153,8 +7308,28 @@ function renderWatchlist(){
 let watchlistRenderScheduled = false;
 let watchlistRenderNeedsFocusQueue = false;
 
+function shouldSkipHiddenWatchlistRender(source = 'watchlist_render'){
+  const activeTab = activeWorkspaceTab();
+  if(activeTab === 'track') return false;
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] watchlist_prepare_skipped_hidden', {
+      source:String(source || 'watchlist_render'),
+      activeTab,
+      trackRendered:startupCoordinator.renderedTabs.track === true,
+      watchlistDirty:hasWatchlistDirtyRecords(),
+      trackNeedsFullRender:startupCoordinator.trackNeedsFullRender === true
+    });
+  }
+  return true;
+}
+
 function requestWatchlistRender(options = {}){
+  const source = String(options.source || 'request_watchlist_render');
   const includeFocusQueue = options.includeFocusQueue === true;
+  if(shouldSkipHiddenWatchlistRender(source)){
+    watchlistRenderNeedsFocusQueue = false;
+    return;
+  }
   watchlistRenderNeedsFocusQueue = watchlistRenderNeedsFocusQueue || includeFocusQueue;
   if(watchlistRenderScheduled) return;
   watchlistRenderScheduled = true;
@@ -7162,6 +7337,7 @@ function requestWatchlistRender(options = {}){
     watchlistRenderScheduled = false;
     const renderFocus = watchlistRenderNeedsFocusQueue;
     watchlistRenderNeedsFocusQueue = false;
+    if(shouldSkipHiddenWatchlistRender(`${source}_flush`)) return;
     renderWatchlist();
     if(renderFocus) renderFocusQueue();
   };
