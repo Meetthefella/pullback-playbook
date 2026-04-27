@@ -119,9 +119,9 @@ function riskSettingsFingerprintFromState(){
 
 function riskCalcSnapshotForRecord(record){
   const item = normalizeTickerRecord(record || {});
-  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
   const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
-  const quoteCurrency = normalizeQuoteCurrency(plan.quoteCurrency || marketData.currency || '');
+  const quoteCurrency = normalizeQuoteCurrency((item.plan && item.plan.quoteCurrency) || marketData.currency || '');
   const fxCached = quoteCurrency && !['GBP','GBX'].includes(quoteCurrency) ? fxRateCache.get(quoteCurrency) : null;
   return {
     accountSize:normalizeRiskCalcNumber(state.accountSize, 4),
@@ -129,12 +129,13 @@ function riskCalcSnapshotForRecord(record){
     selectedRiskPercent:normalizeRiskCalcNumber(normalizeRiskPercentInput(state.riskPercent, 1), 4),
     maxLossOverride:normalizeRiskCalcNumber(state.maxLossOverride, 4),
     wholeSharesOnly:state.wholeSharesOnly !== false ? 1 : 0,
-    derivedEntry:normalizeRiskCalcNumber(plan.entry, 6),
-    derivedStop:normalizeRiskCalcNumber(plan.stop, 6),
-    derivedTarget:normalizeRiskCalcNumber(plan.firstTarget != null ? plan.firstTarget : plan.target, 6),
+    derivedEntry:normalizeRiskCalcNumber(effectivePlan.entry, 6),
+    derivedStop:normalizeRiskCalcNumber(effectivePlan.stop, 6),
+    derivedTarget:normalizeRiskCalcNumber(effectivePlan.firstTarget, 6),
     derivedLatestPrice:normalizeRiskCalcNumber(marketData.price, 6),
     derivedQuoteCurrency:normalizeRiskCalcText(quoteCurrency || 'GBP'),
-    fxRate:normalizeRiskCalcNumber(fxCached && fxCached.rate, 8)
+    fxRate:normalizeRiskCalcNumber(fxCached && fxCached.rate, 8),
+    planSourceUsedForRisk:normalizeRiskCalcText(effectivePlan.source || '')
   };
 }
 
@@ -4349,6 +4350,20 @@ function persistRiskSettingsQuick(){
   });
 }
 
+function invalidateWatchlistRenderCaches(reason = 'risk_settings_change'){
+  uiState.watchlistPreparedModelCache = null;
+  uiState.watchlistRenderSignature = '';
+  const list = $('watchlistList');
+  if(list && list.dataset) list.dataset.watchlistSignature = '';
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] track_rerendered_or_marked_dirty', {
+      reason,
+      action:'invalidate_watchlist_render_cache',
+      activeTab:activeWorkspaceTab()
+    });
+  }
+}
+
 function scheduleRiskContextRefresh(options = {}){
   const source = String(options.source || 'risk_settings_change');
   const force = options.force === true;
@@ -4475,6 +4490,12 @@ async function runRiskContextRefreshChunked(options = {}){
       risk_calc_executed:executedCount,
       risk_calc_skipped_unchanged:skippedCount
     });
+    if(watchlistTickers.length){
+      markWatchlistDirty(watchlistTickers, `${source}_recalc`);
+    }else{
+      markWatchlistDirty(null, `${source}_recalc`);
+    }
+    invalidateWatchlistRenderCaches(source);
     syncCardDraftsFromDom();
     const persistStartedAt = nowPerfMs();
     commitTickerState();
@@ -4507,11 +4528,16 @@ async function runRiskContextRefreshChunked(options = {}){
         batchSize:WATCHLIST_RENDER_BATCH_SIZE_BACKGROUND,
         model:prepareWatchlistRenderModel('risk_settings_visible_track', {
           lightweight:true,
-          allowCache:true
+          allowCache:false
         })
       });
       renderFocusQueue();
       clearAllTrackFreshnessFlagsAfterSuccessfulRender();
+      logRiskPerf('track_rerendered_or_marked_dirty', {
+        ...renderStateBase,
+        action:'rerendered_visible_track',
+        recordCount:watchlistTickerRecords().length
+      });
       logRiskPerf('renderTrackWorkspace_end', {
         ...renderStateBase,
         trigger:'risk_settings_change',
@@ -4541,6 +4567,11 @@ async function runRiskContextRefreshChunked(options = {}){
         recordCount:activeReviewTicker() ? 1 : 0
       });
       renderCards();
+      logRiskPerf('active_review_rerendered', {
+        ...renderStateBase,
+        action:'rendered_active_review',
+        ticker:activeReviewTicker() || '(none)'
+      });
       logRiskPerf('renderReviewWorkspace_end', {
         ...renderStateBase,
         trigger:'risk_settings_change',
@@ -4558,6 +4589,11 @@ async function runRiskContextRefreshChunked(options = {}){
       markWatchlistDirty(null, `${source}_hidden_track`);
       startupCoordinator.renderedTabs.track = false;
       startupCoordinator.trackNeedsHydratedRender = true;
+      logRiskPerf('track_rerendered_or_marked_dirty', {
+        ...renderStateBase,
+        action:'marked_hidden_track_dirty',
+        recordCount:watchlistTickerRecords().length
+      });
     }
     const plannerStartedAt = nowPerfMs();
     renderPlannerPlanSummary();
@@ -4586,6 +4622,13 @@ function handleRiskSettingsChange(source = 'risk_settings_change'){
   const previousSettingsFingerprint = riskSettingsFingerprintFromState();
   syncRiskSettingsFromDom();
   const nextSettingsFingerprint = riskSettingsFingerprintFromState();
+  logRiskPerf('risk_settings_changed', {
+    source,
+    accountSize:state.accountSize,
+    riskPercent:state.riskPercent,
+    maxLossOverride:state.maxLossOverride,
+    userRiskPerTrade:state.userRiskPerTrade
+  });
   const statsStartedAt = nowPerfMs();
   renderStats();
   logRiskPerf('risk_change_stats_immediate', {
@@ -12768,9 +12811,29 @@ function deriveTradeability(planStatus, riskStatus, capitalFit){
 }
 
 function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrency = ''){
-  const entry = numericOrNull(entryValue);
-  const stop = numericOrNull(stopValue);
-  const target = numericOrNull(targetValue);
+  let sourceLabel = '';
+  let entryInput = entryValue;
+  let stopInput = stopValue;
+  let targetInput = targetValue;
+  let resolvedQuoteCurrency = quoteCurrency;
+  if(
+    entryValue
+    && typeof entryValue === 'object'
+    && !Array.isArray(entryValue)
+    && stopValue == null
+    && targetValue == null
+  ){
+    const item = normalizeTickerRecord(entryValue);
+    const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+    entryInput = effectivePlan.entry;
+    stopInput = effectivePlan.stop;
+    targetInput = effectivePlan.firstTarget;
+    resolvedQuoteCurrency = (item.marketData && item.marketData.currency) || '';
+    sourceLabel = String(effectivePlan.source || '');
+  }
+  const entry = numericOrNull(entryInput);
+  const stop = numericOrNull(stopInput);
+  const target = numericOrNull(targetInput);
   const hasEntry = Number.isFinite(entry);
   const hasStop = Number.isFinite(stop);
   const hasTarget = Number.isFinite(target);
@@ -12788,7 +12851,7 @@ function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrenc
     entry,
     position_size:riskFit.position_size,
     account_size_gbp:currentAccountSizeGbp(),
-    quote_currency:quoteCurrency
+    quote_currency:resolvedQuoteCurrency
   });
   const rewardPerShare = hasEntry && hasTarget && target > entry ? target - entry : null;
   const status = !allPresent ? 'missing' : (rewardRisk.valid ? 'valid' : 'invalid');
@@ -12807,7 +12870,8 @@ function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrenc
     riskFit,
     capitalFit,
     tradeability,
-    affordability
+    affordability,
+    planSourceUsedForRisk:sourceLabel
   };
 }
 
@@ -14933,20 +14997,27 @@ async function refreshMarketDataForTickers(tickers, options = {}){
   return {done, failed, rejected};
 }
 
-function recomputeRiskContextForCard(card){
+function recomputeRiskContextForCard(card, options = {}){
   const normalized = normalizeCard(card);
   const sourceData = normalized.marketData || normalized;
   const checks = normalized.checks || buildScannerChecks(sourceData);
   const scanType = resolveScanType(normalized, sourceData, checks);
   const suitability = hasUsableScannerData(sourceData) ? scoreSuitability(normalized, sourceData, checks) : null;
   const tradePlan = suitability ? suitability.tradePlan : deriveTradePlan(sourceData, scanTypeForEvaluation(scanType));
+  const planOverride = options.planOverride && typeof options.planOverride === 'object' ? options.planOverride : null;
+  const resolvedEntry = numericOrNull(planOverride && planOverride.entry);
+  const resolvedStop = numericOrNull(planOverride && planOverride.stop);
+  const resolvedTarget = numericOrNull(planOverride && planOverride.firstTarget);
+  const riskEntry = Number.isFinite(resolvedEntry) ? resolvedEntry : numericOrNull(tradePlan.entry || normalized.entry);
+  const riskStop = Number.isFinite(resolvedStop) ? resolvedStop : numericOrNull(tradePlan.stop || normalized.stop);
+  const riskTarget = Number.isFinite(resolvedTarget) ? resolvedTarget : numericOrNull(tradePlan.target || normalized.target);
   const hardReasons = hasUsableScannerData(sourceData) ? scannerHardFailReasons(sourceData, checks, tradePlan) : [];
   const riskFit = evaluateRiskFit({
-    entry:tradePlan.entry || normalized.entry,
-    stop:tradePlan.stop || normalized.stop,
+    entry:riskEntry,
+    stop:riskStop,
     ...currentRiskSettings()
   });
-  const rewardRisk = evaluateRewardRisk(tradePlan.entry || normalized.entry, tradePlan.stop || normalized.stop, tradePlan.target || normalized.target);
+  const rewardRisk = evaluateRewardRisk(riskEntry, riskStop, riskTarget);
   const chartVerdict = hasUsableScannerData(sourceData)
     ? determineScannerVerdict({
       technicalValid:hardReasons.length === 0,
@@ -14958,6 +15029,9 @@ function recomputeRiskContextForCard(card){
     : (normalized.chartVerdict || normalized.status || 'Watch');
   normalized.chartVerdict = chartVerdict;
   if(suitability) normalized.score = suitability.total;
+  if(Number.isFinite(riskEntry)) normalized.entry = Number(riskEntry.toFixed(2)).toString();
+  if(Number.isFinite(riskStop)) normalized.stop = Number(riskStop.toFixed(2)).toString();
+  if(Number.isFinite(riskTarget)) normalized.target = Number(riskTarget.toFixed(2)).toString();
   normalized.riskStatus = riskFit.risk_status;
   normalized.rewardPerShare = rewardRisk.rewardPerShare;
   normalized.rrRatio = rewardRisk.rrRatio;
@@ -14989,6 +15063,7 @@ function recomputeRiskContextForCard(card){
     normalized.analysis.first_target_too_close = rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false;
     normalized.analysis.reward_risk = Number.isFinite(rewardRisk.rrRatio) ? rewardRisk.rrRatio.toFixed(2) : '';
     normalized.analysis.position_size = Number.isFinite(riskFit.position_size) ? riskFit.position_size : 0;
+    normalized.analysis.plan_source_used_for_risk = String(options.planSource || '');
   }
   return normalized;
 }
@@ -14997,6 +15072,13 @@ function recomputeRiskContextForRecordWithMeta(record, options = {}){
   const source = String(options.source || 'risk_context');
   const skipIfUnchanged = options.skipIfUnchanged === true;
   const item = normalizeTickerRecord(record || {});
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+  const effectiveDisplayedPlan = deriveCurrentPlanState(
+    effectivePlan.entry,
+    effectivePlan.stop,
+    effectivePlan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
   const nextSnapshot = riskCalcSnapshotForRecord(item);
   const nextFingerprint = riskCalcFingerprint(nextSnapshot);
   const previousFingerprint = item.meta && typeof item.meta === 'object'
@@ -15031,12 +15113,35 @@ function recomputeRiskContextForRecordWithMeta(record, options = {}){
       changedInputFields:[]
     };
   }
-  const updatedCard = recomputeRiskContextForCard(tickerRecordToLegacyCard(record));
+  const updatedCard = recomputeRiskContextForCard(tickerRecordToLegacyCard(record), {
+    planOverride:effectivePlan,
+    planSource:effectivePlan.source
+  });
   mergeLegacyCardIntoRecord(item, updatedCard, {
     fromScanner:true,
     fromCards:item.review.cardOpen,
     cardOpen:item.review.cardOpen
   });
+  if([effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget].every(value => Number.isFinite(numericOrNull(value)))){
+    applyPlanCandidateToRecord(item, {
+      entry:effectivePlan.entry,
+      stop:effectivePlan.stop,
+      firstTarget:effectivePlan.firstTarget
+    }, {
+      source:String(effectivePlan.source || source || 'risk_context'),
+      updatedAt:new Date().toISOString()
+    });
+  }
+  item.meta.planSourceUsedForRisk = String(effectivePlan.source || '');
+  item.meta.riskRecalcPlanEntry = numericOrNull(effectivePlan.entry);
+  item.meta.riskRecalcPlanStop = numericOrNull(effectivePlan.stop);
+  item.meta.riskRecalcPlanTarget = numericOrNull(effectivePlan.firstTarget);
+  item.meta.riskRecalcReason = source;
+  item.meta.riskFitStatus = String(
+    (item.plan && item.plan.riskStatus)
+    || (effectiveDisplayedPlan.riskFit && effectiveDisplayedPlan.riskFit.risk_status)
+    || 'plan_missing'
+  );
   item.meta.lastRiskCalcFingerprint = nextFingerprint;
   item.meta.lastRiskCalcInputSnapshot = nextSnapshot;
   item.meta.lastRiskCalcSource = source;
@@ -15045,6 +15150,11 @@ function recomputeRiskContextForRecordWithMeta(record, options = {}){
     console.debug('[PP_PERF] risk_calc_executed', {
       ticker:item.ticker,
       risk_calc_reason:source,
+      plan_source_used_for_risk:effectivePlan.source || '',
+      risk_recalc_plan_entry:numericOrNull(effectivePlan.entry),
+      risk_recalc_plan_stop:numericOrNull(effectivePlan.stop),
+      risk_recalc_plan_target:numericOrNull(effectivePlan.firstTarget),
+      risk_fit_status:String((item.plan && item.plan.riskStatus) || 'plan_missing'),
       risk_calc_changed_input_fields:changedInputFields,
       risk_calc_record_count:1
     });
@@ -15775,7 +15885,7 @@ function effectivePlanForRecord(record, options = {}){
   const manualReview = item.review && item.review.manualReview && typeof item.review.manualReview === 'object'
     ? item.review.manualReview
     : null;
-  const hasCanonicalPlan = [item.plan.entry, item.plan.stop, item.plan.firstTarget].some(Number.isFinite);
+  const hasCanonicalPlan = [item.plan.entry, item.plan.stop, item.plan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
   if(hasCanonicalPlan){
     return {
       entry:Number.isFinite(item.plan.entry) ? String(Number(item.plan.entry.toFixed(2))) : '',
@@ -15784,7 +15894,8 @@ function effectivePlanForRecord(record, options = {}){
       source:String(item.plan.source || '')
     };
   }
-  if(manualReview && (manualReview.entry || manualReview.stop || manualReview.target)){
+  const hasCompleteManualPlan = manualReview && [manualReview.entry, manualReview.stop, manualReview.target].every(value => Number.isFinite(numericOrNull(value)));
+  if(hasCompleteManualPlan){
     return {
       entry:String(manualReview.entry || ''),
       stop:String(manualReview.stop || ''),
