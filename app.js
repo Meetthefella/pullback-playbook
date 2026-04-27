@@ -76,6 +76,14 @@ let riskSettingsRecalcSequence = 0;
 let riskSettingsRecalcPendingSource = '';
 let riskRecalcStatusToken = 0;
 let riskRecalcStatusSafetyTimer = null;
+const RISK_FIT_MEMO_LIMIT = 2500;
+const riskFitMemoCache = new Map();
+const riskFitPerfCounters = {
+  cycle:'',
+  calls:0,
+  cacheHits:0,
+  cacheMisses:0
+};
 const startupHydrationReadyPromise = new Promise(resolve => {
   startupHydrationReadyResolve = resolve;
 });
@@ -97,6 +105,38 @@ function nowPerfMs(){
 function logRiskPerf(eventName, payload = {}){
   if(!PP_PERF_DEBUG) return;
   console.debug(`[PP_PERF] ${eventName}`, payload);
+}
+
+function riskVerboseDebugEnabled(){
+  return typeof window !== 'undefined' && window.PP_PERF_DEBUG_VERBOSE_RISK === true;
+}
+
+function resetRiskFitPerfCounters(cycle = ''){
+  riskFitPerfCounters.cycle = String(cycle || '');
+  riskFitPerfCounters.calls = 0;
+  riskFitPerfCounters.cacheHits = 0;
+  riskFitPerfCounters.cacheMisses = 0;
+}
+
+function logRiskFitPerfSummary(source = '', extra = {}){
+  logRiskPerf('risk_fit_summary', {
+    source:String(source || riskFitPerfCounters.cycle || ''),
+    risk_fit_calls:riskFitPerfCounters.calls,
+    risk_fit_cache_hits:riskFitPerfCounters.cacheHits,
+    risk_fit_cache_misses:riskFitPerfCounters.cacheMisses,
+    ...extra
+  });
+}
+
+function riskFitMemoKey({entry, stop, account_size, risk_percent, max_loss_override, whole_shares_only}){
+  return JSON.stringify({
+    entry:normalizeRiskCalcNumber(entry, 8),
+    stop:normalizeRiskCalcNumber(stop, 8),
+    account_size:normalizeRiskCalcNumber(account_size, 4),
+    risk_percent:normalizeRiskCalcNumber(risk_percent, 6),
+    max_loss_override:normalizeRiskCalcNumber(max_loss_override, 4),
+    whole_shares_only:whole_shares_only !== false ? 1 : 0
+  });
 }
 
 function normalizeRiskCalcNumber(value, precision = 6){
@@ -556,6 +596,7 @@ async function runStartupRiskRefreshChunked(){
   const riskRefreshStartMark = 'pp_startup_risk_refresh_start';
   perfMark(riskRefreshStartMark);
   let canPublishRiskDiagnostic = false;
+  resetRiskFitPerfCounters('startup_risk_refresh');
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] startup_risk_refresh', {
       phase:'start',
@@ -681,12 +722,20 @@ async function runStartupRiskRefreshChunked(){
       canPublish:canPublishRiskDiagnostic,
       message:'Plans updated.'
     });
+    logRiskFitPerfSummary('startup_risk_refresh', {
+      risk_records_recalculated:executedCount,
+      risk_records_skipped:skippedCount,
+      startup_risk_refresh_duration_ms:riskEntry ? Number(riskEntry.duration.toFixed(1)) : null
+    });
   }catch(error){
     console.error('[risk-recalc] startup refresh failed', error);
     failRiskRecalcBatchStatus({
       source,
       canPublish:canPublishRiskDiagnostic,
       message:'Plan update failed.'
+    });
+    logRiskFitPerfSummary('startup_risk_refresh', {
+      failed:true
     });
     throw error;
   }
@@ -1619,7 +1668,7 @@ function evaluateRiskFit(input){
   if(looksLikeTickerRecord){
     const item = normalizeTickerRecord(candidate);
     const currentPlan = deriveCurrentPlanState(item);
-    if(PP_PERF_DEBUG){
+    if(PP_PERF_DEBUG && riskVerboseDebugEnabled()){
       console.debug('[PP_PERF] evaluateRiskFit_record_delegate', {
         ticker:item.ticker,
         evaluateRiskFit_input_mode:'ticker_record',
@@ -1639,17 +1688,40 @@ function evaluateRiskFit(input){
   }
   const resolvedInput = candidate;
   const {entry, stop, account_size, risk_percent, max_loss_override, whole_shares_only} = resolvedInput;
-  if(PP_PERF_DEBUG){
+  riskFitPerfCounters.calls += 1;
+  const memoKey = riskFitMemoKey({entry, stop, account_size, risk_percent, max_loss_override, whole_shares_only});
+  if(riskFitMemoCache.has(memoKey)){
+    riskFitPerfCounters.cacheHits += 1;
+    const cached = riskFitMemoCache.get(memoKey);
+    if(PP_PERF_DEBUG && riskVerboseDebugEnabled()){
+      console.debug('[PP_PERF] evaluateRiskFit_raw', {
+        evaluateRiskFit_input_mode:'raw_input',
+        evaluateRiskFit_cache:'hit',
+        evaluateRiskFit_plan_source:'',
+        evaluateRiskFit_entry:numericOrNull(entry),
+        evaluateRiskFit_stop:numericOrNull(stop)
+      });
+    }
+    return cached && typeof cached === 'object' ? {...cached} : cached;
+  }
+  riskFitPerfCounters.cacheMisses += 1;
+  const computed = evaluateRiskFitImpl({entry, stop, account_size, risk_percent, max_loss_override, whole_shares_only}, {
+    numericOrNull
+  });
+  if(riskFitMemoCache.size >= RISK_FIT_MEMO_LIMIT){
+    riskFitMemoCache.clear();
+  }
+  riskFitMemoCache.set(memoKey, computed && typeof computed === 'object' ? {...computed} : computed);
+  if(PP_PERF_DEBUG && riskVerboseDebugEnabled()){
     console.debug('[PP_PERF] evaluateRiskFit_raw', {
       evaluateRiskFit_input_mode:'raw_input',
+      evaluateRiskFit_cache:'miss',
       evaluateRiskFit_plan_source:'',
       evaluateRiskFit_entry:numericOrNull(entry),
       evaluateRiskFit_stop:numericOrNull(stop)
     });
   }
-  return evaluateRiskFitImpl({entry, stop, account_size, risk_percent, max_loss_override, whole_shares_only}, {
-    numericOrNull
-  });
+  return computed;
 }
 
 function evaluateCapitalFit({entry, position_size, account_size_gbp, quote_currency}){
@@ -4599,6 +4671,7 @@ async function runRiskContextRefreshChunked(options = {}){
   const startedAt = nowPerfMs();
   riskSettingsRecalcRunning = true;
   let canPublishRiskDiagnostic = false;
+  resetRiskFitPerfCounters('risk_settings_refresh');
   try{
     const riskDiagnosticRequested = /risk|account|max_loss|whole_shares|risk_/i.test(source);
     const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
@@ -4802,12 +4875,20 @@ async function runRiskContextRefreshChunked(options = {}){
       canPublish:canPublishRiskDiagnostic,
       message:'Plans updated.'
     });
+    logRiskFitPerfSummary('risk_settings_refresh', {
+      risk_records_recalculated:executedCount,
+      risk_records_skipped:skippedCount,
+      risk_settings_refresh_duration_ms:durationMs
+    });
   } catch(error){
     console.error('[risk-recalc] failed', error);
     failRiskRecalcBatchStatus({
       source,
       canPublish:canPublishRiskDiagnostic,
       message:'Plan update failed.'
+    });
+    logRiskFitPerfSummary('risk_settings_refresh', {
+      failed:true
     });
     throw error;
   } finally {
@@ -15278,6 +15359,21 @@ function recomputeRiskContextForCard(card, options = {}){
   return normalized;
 }
 
+function hasPersistedRiskContextForRecord(record){
+  const item = normalizeTickerRecord(record || {});
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const riskStatus = String(plan.riskStatus || '').trim().toLowerCase();
+  if(!riskStatus) return false;
+  if(['plan_missing','missing'].includes(riskStatus)) return true;
+  const maxLoss = numericOrNull(plan.maxLoss);
+  if(!Number.isFinite(maxLoss)) return false;
+  const positionSize = numericOrNull(plan.positionSize);
+  if(['fits_risk','risk_too_high','too_small_for_risk'].includes(riskStatus)){
+    return Number.isFinite(positionSize) && positionSize >= 0;
+  }
+  return true;
+}
+
 function recomputeRiskContextForRecordWithMeta(record, options = {}){
   const source = String(options.source || 'risk_context');
   const skipIfUnchanged = options.skipIfUnchanged === true;
@@ -15291,13 +15387,19 @@ function recomputeRiskContextForRecordWithMeta(record, options = {}){
   );
   const nextSnapshot = riskCalcSnapshotForRecord(item);
   const nextFingerprint = riskCalcFingerprint(nextSnapshot);
-  const previousFingerprint = item.meta && typeof item.meta === 'object'
+  let previousFingerprint = item.meta && typeof item.meta === 'object'
     ? String(item.meta.lastRiskCalcFingerprint || '')
     : '';
   const previousSnapshot = item.meta && item.meta.lastRiskCalcInputSnapshot && typeof item.meta.lastRiskCalcInputSnapshot === 'object'
     ? item.meta.lastRiskCalcInputSnapshot
     : null;
   const changedInputFields = riskCalcChangedInputFields(previousSnapshot, nextSnapshot);
+  if(skipIfUnchanged && !previousFingerprint && hasPersistedRiskContextForRecord(item)){
+    previousFingerprint = nextFingerprint;
+    item.meta.lastRiskCalcFingerprint = nextFingerprint;
+    item.meta.lastRiskCalcInputSnapshot = nextSnapshot;
+    item.meta.lastRiskCalcSource = String(item.meta.lastRiskCalcSource || 'persisted_bootstrap');
+  }
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] risk_calc_requested', {
       ticker:item.ticker,
@@ -15384,6 +15486,8 @@ function recomputeRiskContextForRecord(record, options = {}){
 
 function refreshRiskContextForActiveSetups(options = {}){
   const source = String(options.source || 'risk_context');
+  const startedAt = nowPerfMs();
+  resetRiskFitPerfCounters(`active_setups_${source}`);
   const riskDiagnosticRequested = /risk|account|max_loss|whole_shares|risk_/i.test(source);
   const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
     ? String(uiState.liveProcessStatus.state || '')
@@ -15450,12 +15554,20 @@ function refreshRiskContextForActiveSetups(options = {}){
       canPublish:canPublishRiskDiagnostic,
       message:'Plans updated.'
     });
+    logRiskFitPerfSummary('active_setups_refresh', {
+      risk_records_recalculated:executedCount,
+      risk_records_skipped:skippedCount,
+      active_setups_refresh_duration_ms:Number((nowPerfMs() - startedAt).toFixed(1))
+    });
   }catch(error){
     console.error('[risk-recalc] active setup refresh failed', error);
     failRiskRecalcBatchStatus({
       source,
       canPublish:canPublishRiskDiagnostic,
       message:'Plan update failed.'
+    });
+    logRiskFitPerfSummary('active_setups_refresh', {
+      failed:true
     });
     throw error;
   }
