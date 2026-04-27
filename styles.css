@@ -2273,8 +2273,10 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 .watchlist-card__status .watchlist-card__priority{
   grid-column:1 / -1;
   text-align:right;
-  font-size:.76rem;
-  opacity:.92;
+  font-size:.71rem;
+  opacity:.62;
+  font-weight:500;
+  letter-spacing:.02em;
 }
 .watchlist-card__company{grid-area:company;width:100%;min-width:0;color:var(--text-secondary);overflow-wrap:anywhere;font-size:.79rem;line-height:1.35}
 .watchlist-card.scan-card .watchlist-card__header{
@@ -2292,6 +2294,9 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 .watchlist-signal-row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;min-width:0}
 .watchlist-signal-row .pill{max-width:100%}
 .watchlist-card__priority{white-space:nowrap}
+.watchlist-card__priority--zero{
+  opacity:.42 !important;
+}
 .watchlist-card__reason{
   display:-webkit-box;
   -webkit-line-clamp:2;
