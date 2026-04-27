@@ -4713,7 +4713,7 @@ async function runRiskContextRefreshChunked(options = {}){
       });
       await renderWatchlistChunked({
         source:'risk_settings_visible_track',
-        batchSize:WATCHLIST_RENDER_BATCH_SIZE_BACKGROUND,
+        batchSize:WATCHLIST_REFRESH_BATCH_SIZE_BACKGROUND,
         model:prepareWatchlistRenderModel('risk_settings_visible_track', {
           lightweight:true,
           allowCache:false
