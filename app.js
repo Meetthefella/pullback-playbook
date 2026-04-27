@@ -11589,38 +11589,62 @@ function guardAnalysisMovingAverageLanguage(chartRead, options = {}){
   const priceVs20 = describePriceVsMovingAverage(price, sma20, 0.015);
   const priceVs50 = describePriceVsMovingAverage(price, sma50, 0.02);
   const false50Pattern = /(pull(?:ing)? back towards (?:its |the )?50\s*ma|pull(?:ing)? back toward (?:its |the )?50\s*ma|pullback towards (?:its |the )?50\s*ma|pullback toward (?:its |the )?50\s*ma|pullback to (?:its |the )?50\s*ma|near (?:its |the )?50\s*ma(?: as support)?|testing (?:its |the )?50\s*ma as support|using (?:its |the )?50\s*ma as support|holding (?:its |the )?50\s*ma as support)/i;
+  const matchedPhrase = original.match(false50Pattern);
   if(!original){
     return {
       text:original,
       applied:false,
       reason:'No correction applied; chart read is empty.',
       priceVs20,
-      priceVs50
+      priceVs50,
+      price,
+      sma50,
+      matchedPhrase:'',
+      outputChanged:false
     };
   }
-  if(!false50Pattern.test(original)){
+  if(!matchedPhrase){
     return {
       text:original,
       applied:false,
       reason:'No correction applied; no false 50MA language detected.',
       priceVs20,
-      priceVs50
+      priceVs50,
+      price,
+      sma50,
+      matchedPhrase:'',
+      outputChanged:false
     };
   }
-  const clearlyBelow50 = Number.isFinite(price) && Number.isFinite(sma50) && price < sma50 * 0.9975;
-  const weakeningBelow50 = priceVs50 === 'below' && ['weakening','broken','invalid','failed'].includes(structureState);
-  if(!(clearlyBelow50 || weakeningBelow50)){
+  if(!Number.isFinite(price) || !Number.isFinite(sma50)){
     return {
       text:original,
       applied:false,
-      reason:'No correction applied; price is not clearly below the 50MA.',
+      reason:'No correction applied; price or SMA50 is unavailable.',
       priceVs20,
-      priceVs50
+      priceVs50,
+      price,
+      sma50,
+      matchedPhrase:matchedPhrase[0] || '',
+      outputChanged:false
+    };
+  }
+  if(!(price < sma50)){
+    return {
+      text:original,
+      applied:false,
+      reason:'No correction applied; price is not below the 50MA.',
+      priceVs20,
+      priceVs50,
+      price,
+      sma50,
+      matchedPhrase:matchedPhrase[0] || '',
+      outputChanged:false
     };
   }
   const correction = priceVs20 === 'below'
     ? 'Price is below both the 20MA and 50MA. This is no longer a clean pullback to the 50MA.'
-    : 'Price has lost the 50MA. Price is below the 50MA and structure is weakening. This is no longer a clean pullback to the 50MA.';
+    : 'Price has lost the 50MA and the setup is deteriorating.';
   const sentences = original
     .split(/(?<=[.!?])\s+/)
     .map(sentence => String(sentence || '').trim())
@@ -11630,9 +11654,13 @@ function guardAnalysisMovingAverageLanguage(chartRead, options = {}){
   return {
     text:correctedText || correction,
     applied:true,
-    reason:'AI 50MA wording corrected because price is below the 50MA.',
+    reason:'AI 50MA wording corrected because a false 50MA support phrase was detected while price is below the 50MA.',
     priceVs20,
-    priceVs50
+    priceVs50,
+    price,
+    sma50,
+    matchedPhrase:matchedPhrase[0] || '',
+    outputChanged:(correctedText || correction) !== original
   };
 }
 
@@ -11654,8 +11682,22 @@ function finalDisplayedAnalysisChartRead(record, analysis){
     applied:correction.applied,
     reason:correction.reason,
     priceVs20:correction.priceVs20,
-    priceVs50:correction.priceVs50
+    priceVs50:correction.priceVs50,
+    price:correction.price,
+    sma50:correction.sma50,
+    matchedPhrase:correction.matchedPhrase,
+    outputChanged:correction.outputChanged
   };
+}
+
+function savedAiNoPlanMarkup(chartReadDisplay){
+  const correctionLine = chartReadDisplay
+    && chartReadDisplay.applied === true
+    && chartReadDisplay.outputChanged === true
+    && chartReadDisplay.matchedPhrase
+    ? `<div class="tiny">${escapeHtml(chartReadDisplay.text || 'Price has lost the 50MA and the setup is deteriorating.')}</div>`
+    : '';
+  return `<div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Trend is weakening - no reliable stop level yet.</div>${correctionLine}`;
 }
 
 function reconcileWatchlistPresentation({
@@ -12305,7 +12347,8 @@ function bindEntryConditionsHoldInteractions(root){
       holdOpened:false,
       suppressClick:false,
       holdAttempted:false,
-      moveCancelled:false
+      moveCancelled:false,
+      moveCancelledLogged:false
     };
     const clearTimer = () => {
       if(state.timer){
@@ -12361,7 +12404,7 @@ function bindEntryConditionsHoldInteractions(root){
       if(state.pointerId == null || event.pointerId !== state.pointerId) return;
       const dx = Math.abs(Number(event.clientX || 0) - state.startX);
       const dy = Math.abs(Number(event.clientY || 0) - state.startY);
-      const cancelThreshold = cardMode ? 34 : 12;
+      const cancelThreshold = cardMode ? 52 : 12;
       if(dx > cancelThreshold || dy > cancelThreshold){
         clearTimer();
         helper.classList.remove('hold-armed');
@@ -12388,7 +12431,9 @@ function bindEntryConditionsHoldInteractions(root){
     };
     trigger.addEventListener('pointerup', closeOnRelease);
     trigger.addEventListener('pointercancel', closeOnRelease);
-    trigger.addEventListener('pointerleave', closeOnRelease);
+    if(!cardMode){
+      trigger.addEventListener('pointerleave', closeOnRelease);
+    }
     if(typeof window !== 'undefined' && !('PointerEvent' in window)){
       trigger.addEventListener('touchstart', event => {
         if(cardMode && shouldIgnoreHoldStartTarget(event.target, helper, cardMode)){
@@ -12413,7 +12458,7 @@ function bindEntryConditionsHoldInteractions(root){
         if(!touch) return;
         const dx = Math.abs(Number(touch.clientX || 0) - state.startX);
         const dy = Math.abs(Number(touch.clientY || 0) - state.startY);
-        const touchCancelThreshold = cardMode ? 32 : 20;
+        const touchCancelThreshold = cardMode ? 48 : 20;
         if(dx > touchCancelThreshold || dy > touchCancelThreshold){
           clearTimer();
           helper.classList.remove('hold-armed');
@@ -15897,6 +15942,12 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     final_verdict:tightenedVerdict,
     ai_ma_language_guard_applied:chartReadGuard.applied,
     ai_ma_language_guard_reason:chartReadGuard.reason,
+    ai_ma_guard_applied:chartReadGuard.applied,
+    ai_ma_guard_reason:chartReadGuard.reason,
+    ai_ma_guard_price:Number.isFinite(chartReadGuard.price) ? chartReadGuard.price : null,
+    ai_ma_guard_sma50:Number.isFinite(chartReadGuard.sma50) ? chartReadGuard.sma50 : null,
+    ai_ma_guard_matched_phrase:chartReadGuard.matchedPhrase || '',
+    ai_ma_guard_output_changed:chartReadGuard.outputChanged === true,
     ai_final_display_text_corrected:chartReadGuard.applied,
     ai_price_vs_20ma:chartReadGuard.priceVs20,
     ai_price_vs_50ma:chartReadGuard.priceVs50,
@@ -16322,7 +16373,7 @@ function renderAnalysisPanel(card){
     const showPlanNumbers = savedAiPlanNumbersAllowed(card);
     const planMarkup = showPlanNumbers
       ? `<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div>`
-      : '<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Trend is weakening - no reliable stop level yet.</div><div class="tiny">Price has lost the 50MA and the setup is deteriorating.</div></div>';
+      : `<div class="analysisplanmini">${savedAiNoPlanMarkup(chartReadDisplay)}</div>`;
     logAnalysisDebug('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
     return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div>${planMarkup}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
@@ -16399,7 +16450,7 @@ function renderAnalysisPanelFromRecord(record){
     const showPlanNumbers = savedAiPlanNumbersAllowed(item);
     const planMarkup = showPlanNumbers
       ? `<div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div>`
-      : '<div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Trend is weakening - no reliable stop level yet.</div><div class="tiny">Price has lost the 50MA and the setup is deteriorating.</div>';
+      : savedAiNoPlanMarkup(chartReadDisplay);
     return `<div class="responsegrid"><div class="mutebox tiny">${escapeHtml(advisory.advisoryNote)}</div>${advisory.reviewMoreConservative ? '<div class="mutebox warntext"><strong>Final review is more conservative than the saved AI read.</strong></div>' : ''}${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Metrics</summary><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div>${planMarkup}</div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
   }
   if(!analysisState.rawAnalysis) return '<div class="tiny">No AI analysis saved yet.</div>';
@@ -18359,7 +18410,9 @@ function renderReviewWorkspace(options = {}){
     || visualState.final_verdict
     || 'monitor'
   ).trim().toLowerCase();
-  const reviewPresentationState = normalizeGlobalVerdictKey(reviewPresentationStateRaw || 'monitor');
+  const reviewPresentationState = ['diminishing','avoid','dead','entry','near_entry','monitor','watch'].includes(reviewPresentationStateRaw)
+    ? reviewPresentationStateRaw
+    : normalizeGlobalVerdictKey(reviewPresentationStateRaw || 'monitor');
   const reviewVisualTone = visualState.terminal_avoid_applied || ['avoid', 'dead'].includes(reviewPresentationState)
     ? 'avoid'
     : (reviewPresentationState === 'diminishing'
@@ -18571,6 +18624,10 @@ function renderReviewWorkspace(options = {}){
     {label:'Normalized Analysis Exists', value:String(!!analysisState.normalizedAnalysis)},
     {label:'AI MA Guard Applied', value:analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_language_guard_applied ? 'true' : 'false'},
     {label:'AI MA Guard Reason', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_language_guard_reason) || '(none)'},
+    {label:'AI MA Guard Price', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_guard_price != null) ? String(analysisState.normalizedAnalysis.ai_ma_guard_price) : '(none)'},
+    {label:'AI MA Guard SMA50', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_guard_sma50 != null) ? String(analysisState.normalizedAnalysis.ai_ma_guard_sma50) : '(none)'},
+    {label:'AI MA Guard Matched Phrase', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_guard_matched_phrase) || '(none)'},
+    {label:'AI MA Guard Output Changed', value:analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_ma_guard_output_changed ? 'true' : 'false'},
     {label:'AI Final Display Text Corrected', value:analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_final_display_text_corrected ? 'true' : 'false'},
     {label:'AI Price vs 20MA', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_price_vs_20ma) || '(none)'},
     {label:'AI Price vs 50MA', value:(analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.ai_price_vs_50ma) || '(none)'},

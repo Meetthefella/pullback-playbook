@@ -2322,13 +2322,13 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 }
 .watchlist-card[data-entry-hold-helper="1"] .entry-conditions-helper{
   position:absolute;
-  top:14px;
+  bottom:14px;
   right:14px;
   z-index:4;
 }
 .watchlist-card[data-entry-hold-helper="1"] .entry-conditions-affordance{
   position:absolute;
-  top:14px;
+  bottom:14px;
   right:14px;
   z-index:4;
   width:38px;
