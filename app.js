@@ -16,6 +16,7 @@ const defaultPushSubscribeEndpoint = '/api/push-subscribe';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
 const savedScannerUniverseKey = 'pp_scanner_universe_saved';
 const savedScannerUniverseMetaKey = 'pp_scanner_universe_saved_meta';
+const trackSectionStateKey = 'pp_track_section_state_v1';
 const DEFAULT_PROVIDER = 'fmp';
 const DEFAULT_API_PLAN = 'scanner';
 const WATCHLIST_REFRESH_BATCH_SIZE = 8;
@@ -3450,23 +3451,7 @@ function sortWatchlistGroupRecords(records, groupKey){
   const getSetupScore = record => Number(setupScoreForRecord(record) || 0);
   const getRecency = record => watchlistRecordRecencyTimestamp(record);
 
-  if(groupKey === 'tradeable_entry'){
-    return list.sort((a, b) => {
-      const verdictA = getVerdict(a);
-      const verdictB = getVerdict(b);
-      const rankDiff = watchlistGroupSortRankForVerdict(verdictA) - watchlistGroupSortRankForVerdict(verdictB);
-      if(rankDiff !== 0) return rankDiff;
-      const priorityDiff = getPriority(b) - getPriority(a);
-      if(priorityDiff !== 0) return priorityDiff;
-      const setupDiff = getSetupScore(b) - getSetupScore(a);
-      if(setupDiff !== 0) return setupDiff;
-      const recencyDiff = getRecency(b) - getRecency(a);
-      if(recencyDiff !== 0) return recencyDiff;
-      return String(a.ticker || '').localeCompare(String(b.ticker || ''));
-    });
-  }
-
-  if(groupKey === 'monitor_watch'){
+  if(groupKey === 'tradeable_entry' || groupKey === 'monitor_watch' || groupKey === 'active'){
     return list.sort((a, b) => {
       const verdictA = getVerdict(a);
       const verdictB = getVerdict(b);
@@ -7073,12 +7058,151 @@ function updateWatchlistCardForTicker(ticker){
 
 function watchlistRenderGroups(showExpired){
   const groups = [
-    {key:'tradeable_entry', title:'Entry / Near Entry', hint:'Setups closest to actionable quality.'},
-    {key:'monitor_watch', title:'Monitor / Watch', hint:'Live candidates worth active focus.'},
-    {key:'diminishing', title:'Diminishing', hint:'Weakening setups kept for review, not active focus.'},
-    {key:'avoid_dead', title:'Avoid / Dead', hint:'Failed or invalid setups.'}
+    {key:'active', title:'Monitor / Active', hint:'Actionable setups with active focus.', collapsible:false},
+    {key:'diminishing', title:'Diminishing', hint:'Weakening setups kept for review, not active focus.', collapsible:true},
+    {key:'avoid_dead', title:'Avoid / Dead', hint:'Failed or invalid setups.', collapsible:true}
   ];
   return groups;
+}
+
+function normalizeTrackSectionState(raw){
+  const stateValue = raw && typeof raw === 'object' ? raw : {};
+  return {
+    diminishing:stateValue.diminishing === true,
+    avoid_dead:stateValue.avoid_dead === true
+  };
+}
+
+function readTrackSectionState(){
+  const cached = uiState.trackSectionState && typeof uiState.trackSectionState === 'object'
+    ? uiState.trackSectionState
+    : null;
+  if(cached) return normalizeTrackSectionState(cached);
+  const persisted = normalizeTrackSectionState(safeStorageGet(trackSectionStateKey, {}));
+  uiState.trackSectionState = persisted;
+  return persisted;
+}
+
+function persistTrackSectionState(nextState){
+  const normalized = normalizeTrackSectionState(nextState);
+  uiState.trackSectionState = normalized;
+  safeStorageSet(trackSectionStateKey, normalized);
+}
+
+function isTrackSectionCollapsible(sectionKey){
+  return sectionKey === 'diminishing' || sectionKey === 'avoid_dead';
+}
+
+function watchlistSectionPriorityValue(record){
+  const rawPriority = record && (record.priorityScore ?? record.priority);
+  if(Number.isFinite(Number(rawPriority))) return Number(rawPriority);
+  return Number(watchlistPriorityForRecord(record).score || 0);
+}
+
+function shouldForceTrackSectionCollapsed(sectionKey, sectionRecords = []){
+  if(!isTrackSectionCollapsible(sectionKey)) return false;
+  if(!Array.isArray(sectionRecords) || !sectionRecords.length) return false;
+  return sectionRecords.every(record => {
+    const bucket = watchlistPresentationBucketForRecord(record);
+    const priorityValue = watchlistSectionPriorityValue(record);
+    const stateMatches = sectionKey === 'diminishing'
+      ? bucket === 'diminishing'
+      : bucket === 'avoid_dead';
+    return stateMatches && priorityValue <= 0;
+  });
+}
+
+function isTrackSectionExpanded(sectionKey, sectionRecords = []){
+  if(!isTrackSectionCollapsible(sectionKey)) return true;
+  if(shouldForceTrackSectionCollapsed(sectionKey, sectionRecords)) return false;
+  const stateMap = readTrackSectionState();
+  return stateMap[sectionKey] === true;
+}
+
+function setTrackSectionExpanded(sectionKey, expanded){
+  if(!isTrackSectionCollapsible(sectionKey)) return;
+  const nextState = {
+    ...readTrackSectionState(),
+    [sectionKey]:expanded === true
+  };
+  persistTrackSectionState(nextState);
+}
+
+function watchlistRenderGroupForBucket(bucket){
+  if(bucket === 'tradeable_entry' || bucket === 'monitor_watch') return 'active';
+  if(bucket === 'diminishing') return 'diminishing';
+  if(bucket === 'avoid_dead') return 'avoid_dead';
+  return 'active';
+}
+
+function applyTrackSectionExpandedState(section, expanded){
+  if(!section) return;
+  section.classList.toggle('is-expanded', expanded === true);
+  section.classList.toggle('is-collapsed', expanded !== true);
+  const toggle = section.querySelector('.watchlistgroup__toggle');
+  const body = section.querySelector('.watchlistgroup__body');
+  if(toggle){
+    toggle.setAttribute('aria-expanded', expanded === true ? 'true' : 'false');
+  }
+  if(body){
+    body.setAttribute('aria-hidden', expanded === true ? 'false' : 'true');
+  }
+}
+
+function buildWatchlistSectionShell(group, count, expanded){
+  const collapsible = isTrackSectionCollapsible(group.key);
+  const section = document.createElement('div');
+  section.className = `watchlistgroup${collapsible ? ' watchlistgroup--collapsible' : ''}`;
+  section.dataset.groupKey = group.key;
+  const headerTag = collapsible ? 'button' : 'div';
+  const header = document.createElement(headerTag);
+  if(collapsible) header.type = 'button';
+  header.className = `summary watchlistgroup__header${collapsible ? ' watchlistgroup__toggle' : ''}`;
+  header.innerHTML = `<div class="watchlistgroup__heading"><strong>${escapeHtml(group.title)} <span class="watchlistgroup__count">(${escapeHtml(String(count))})</span></strong><span class="watchlistgroup__chevron" aria-hidden="true">▾</span></div><span class="tiny">${escapeHtml(group.hint)}</span>`;
+  const body = document.createElement('div');
+  body.className = 'watchlistgroup__body';
+  section.appendChild(header);
+  section.appendChild(body);
+  applyTrackSectionExpandedState(section, !collapsible || expanded === true);
+  return {section, header, body, collapsible};
+}
+
+function renderWatchlistSectionCardsSync(records, container){
+  if(!container) return;
+  records.forEach(record => {
+    const cardElement = renderWatchlistCardElement(record);
+    if(!cardElement) return;
+    container.appendChild(cardElement);
+  });
+}
+
+async function renderWatchlistSectionCardsChunked(records, container, options = {}){
+  if(!container) return;
+  const batchSize = Math.max(1, Number(options.batchSize) || WATCHLIST_RENDER_BATCH_SIZE);
+  const source = String(options.source || 'watchlist_section_chunked');
+  let batchIndex = 0;
+  for(let index = 0; index < records.length; index += batchSize){
+    const batchStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    const slice = records.slice(index, index + batchSize);
+    const batchFragment = document.createDocumentFragment();
+    slice.forEach(record => {
+      const cardElement = renderWatchlistCardElement(record);
+      if(cardElement) batchFragment.appendChild(cardElement);
+    });
+    container.appendChild(batchFragment);
+    const batchEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] watchlist_render_batch', {
+        source,
+        batchIndex,
+        durationMs:Number((batchEndedAt - batchStartedAt).toFixed(1)),
+        recordsInBatch:slice.length,
+        batchSize
+      });
+    }
+    batchIndex += 1;
+    await yieldUiChunk();
+  }
 }
 
 function prepareWatchlistRenderModel(source = 'watchlist_render', options = {}){
@@ -7186,21 +7310,35 @@ function buildWatchlistSectionsFragment(records, showExpired){
   groups.forEach(group => { grouped[group.key] = []; });
   records.forEach(record => {
     const bucket = watchlistPresentationBucketForRecord(record);
-    if(grouped[bucket]) grouped[bucket].push(record);
+    const groupKey = watchlistRenderGroupForBucket(bucket);
+    if(grouped[groupKey]) grouped[groupKey].push(record);
   });
   const fragment = document.createDocumentFragment();
   groups.forEach(group => {
     const groupRecords = grouped[group.key] || [];
     if(!groupRecords.length) return;
     const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key);
-    const section = document.createElement('div');
-    section.className = 'watchlistgroup';
-    section.innerHTML = `<div class="summary" style="margin:12px 0 8px"><strong>${escapeHtml(group.title)}</strong> <span class="tiny">${escapeHtml(group.hint)}</span></div>`;
-    sortedGroupRecords.forEach(record => {
-      const cardElement = renderWatchlistCardElement(record);
-      if(!cardElement) return;
-      section.appendChild(cardElement);
-    });
+    const expanded = isTrackSectionExpanded(group.key, sortedGroupRecords);
+    const shell = buildWatchlistSectionShell(group, sortedGroupRecords.length, expanded);
+    const {section, header, body, collapsible} = shell;
+    if(expanded){
+      renderWatchlistSectionCardsSync(sortedGroupRecords, body);
+      section.dataset.rendered = '1';
+    }else{
+      section.dataset.rendered = '0';
+    }
+    if(collapsible){
+      header.addEventListener('click', () => {
+        const isExpanded = section.classList.contains('is-expanded');
+        const nextExpanded = !isExpanded;
+        setTrackSectionExpanded(group.key, nextExpanded);
+        applyTrackSectionExpandedState(section, nextExpanded);
+        if(nextExpanded && section.dataset.rendered !== '1'){
+          renderWatchlistSectionCardsSync(sortedGroupRecords, body);
+          section.dataset.rendered = '1';
+        }
+      });
+    }
     fragment.appendChild(section);
   });
   return fragment;
@@ -7247,47 +7385,56 @@ async function renderWatchlistChunked(options = {}){
   groups.forEach(group => { grouped[group.key] = []; });
   records.forEach(record => {
     const bucket = watchlistPresentationBucketForRecord(record);
-    if(grouped[bucket]) grouped[bucket].push(record);
+    const groupKey = watchlistRenderGroupForBucket(bucket);
+    if(grouped[groupKey]) grouped[groupKey].push(record);
   });
   const sectionMeta = [];
   groups.forEach(group => {
     const groupRecords = grouped[group.key] || [];
     if(!groupRecords.length) return;
     const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key);
-    const section = document.createElement('div');
-    section.className = 'watchlistgroup';
-    section.innerHTML = `<div class="summary" style="margin:12px 0 8px"><strong>${escapeHtml(group.title)}</strong> <span class="tiny">${escapeHtml(group.hint)}</span></div>`;
-    sectionMeta.push({section, records:sortedGroupRecords});
+    const expanded = isTrackSectionExpanded(group.key, sortedGroupRecords);
+    const shell = buildWatchlistSectionShell(group, sortedGroupRecords.length, expanded);
+    sectionMeta.push({
+      ...shell,
+      groupKey:group.key,
+      records:sortedGroupRecords,
+      expanded,
+      rendered:false
+    });
   });
   box.innerHTML = '';
   const fragment = document.createDocumentFragment();
-  sectionMeta.forEach(meta => fragment.appendChild(meta.section));
+  sectionMeta.forEach(meta => {
+    if(meta.collapsible){
+      meta.header.addEventListener('click', () => {
+        const isExpanded = meta.section.classList.contains('is-expanded');
+        const nextExpanded = !isExpanded;
+        setTrackSectionExpanded(meta.groupKey, nextExpanded);
+        applyTrackSectionExpandedState(meta.section, nextExpanded);
+        if(nextExpanded && !meta.rendered){
+          renderWatchlistSectionCardsChunked(meta.records, meta.body, {
+            batchSize,
+            source:`${source}_${meta.groupKey}_expand`
+          }).then(() => {
+            meta.rendered = true;
+            meta.section.dataset.rendered = '1';
+          }).catch(() => {});
+        }
+      });
+    }
+    fragment.appendChild(meta.section);
+  });
   box.appendChild(fragment);
-  let batchIndex = 0;
   for(let sectionIndex = 0; sectionIndex < sectionMeta.length; sectionIndex += 1){
     const meta = sectionMeta[sectionIndex];
-    for(let index = 0; index < meta.records.length; index += batchSize){
-      const batchStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
-      const slice = meta.records.slice(index, index + batchSize);
-      const batchFragment = document.createDocumentFragment();
-      slice.forEach(record => {
-        const cardElement = renderWatchlistCardElement(record);
-        if(cardElement) batchFragment.appendChild(cardElement);
-      });
-      meta.section.appendChild(batchFragment);
-      const batchEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
-      if(PP_PERF_DEBUG){
-        console.debug('[PP_PERF] watchlist_render_batch', {
-          source,
-          batchIndex,
-          durationMs:Number((batchEndedAt - batchStartedAt).toFixed(1)),
-          recordsInBatch:slice.length,
-          batchSize
-        });
-      }
-      batchIndex += 1;
-      await yieldUiChunk();
-    }
+    if(!meta.expanded) continue;
+    await renderWatchlistSectionCardsChunked(meta.records, meta.body, {
+      batchSize,
+      source:`${source}_${meta.groupKey}`
+    });
+    meta.rendered = true;
+    meta.section.dataset.rendered = '1';
   }
   uiState.watchlistRenderSignature = renderSignature;
   box.dataset.watchlistSignature = renderSignature;
