@@ -1,5 +1,18 @@
 (function(global){
   function createTrackWatchlistFeature(deps){
+    function perfEnabled(){
+      return typeof deps.perfDebugEnabled === 'function' ? deps.perfDebugEnabled() : false;
+    }
+
+    function logPerf(event, payload){
+      if(typeof deps.logPerf === 'function'){
+        deps.logPerf(event, payload || {});
+        return;
+      }
+      if(!perfEnabled()) return;
+      console.debug(`[PP_PERF] ${event}`, payload || {});
+    }
+
     async function refreshTicker(ticker){
       const symbol = deps.normalizeTicker(ticker);
       if(!symbol) return;
@@ -10,6 +23,15 @@
       const beforeRecord = deps.getTickerRecord(symbol);
       const beforePlacement = beforeRecord ? deps.watchlistPlacementSnapshot(beforeRecord) : null;
       let requireFullWatchlistRender = true;
+      let fallbackReason = 'unknown';
+      const activeTab = typeof deps.activeWorkspaceTab === 'function' ? deps.activeWorkspaceTab() : '';
+      const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+      logPerf('watchlist_single_ticker_refresh_requested', {
+        ticker:symbol,
+        activeTab,
+        watchlistDirty:typeof deps.hasWatchlistDirtyRecords === 'function' ? deps.hasWatchlistDirtyRecords() : null,
+        trackNeedsFullRender:typeof deps.trackNeedsFullRender === 'function' ? deps.trackNeedsFullRender() : null
+      });
       deps.setManualWatchlistRefreshInProgress(symbol, true);
       deps.setWatchlistCardRefreshButtonState(symbol, true);
       try{
@@ -44,15 +66,71 @@
           && beforePlacement.lifecycleRank === afterPlacement.lifecycleRank
           && beforePlacement.priority === afterPlacement.priority
         );
+        logPerf('watchlist_single_ticker_patch_start', {
+          ticker:symbol,
+          activeTab:typeof deps.activeWorkspaceTab === 'function' ? deps.activeWorkspaceTab() : '',
+          reason:placementStable ? 'placement_stable' : 'placement_changed',
+          watchlistDirty:typeof deps.hasWatchlistDirtyRecords === 'function' ? deps.hasWatchlistDirtyRecords() : null,
+          trackNeedsFullRender:typeof deps.trackNeedsFullRender === 'function' ? deps.trackNeedsFullRender() : null
+        });
         if(placementStable){
-          requireFullWatchlistRender = !deps.updateWatchlistCardForTicker(symbol);
+          const patched = deps.updateWatchlistCardForTicker(symbol);
+          if(patched){
+            requireFullWatchlistRender = false;
+            fallbackReason = '';
+            const patchEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+            logPerf('watchlist_single_ticker_patch_end', {
+              ticker:symbol,
+              activeTab:typeof deps.activeWorkspaceTab === 'function' ? deps.activeWorkspaceTab() : '',
+              durationMs:Number((patchEndedAt - startedAt).toFixed(1)),
+              reason:'patched'
+            });
+          }else{
+            requireFullWatchlistRender = true;
+            fallbackReason = 'patch_target_missing';
+          }
         }else{
           requireFullWatchlistRender = true;
+          fallbackReason = 'placement_changed';
         }
       }finally{
         deps.setManualWatchlistRefreshInProgress(symbol, false);
         if(requireFullWatchlistRender){
-          deps.requestWatchlistRender({includeFocusQueue:true});
+          logPerf('watchlist_single_ticker_patch_fallback_full', {
+            ticker:symbol,
+            activeTab:typeof deps.activeWorkspaceTab === 'function' ? deps.activeWorkspaceTab() : '',
+            fallbackReason,
+            watchlistDirty:typeof deps.hasWatchlistDirtyRecords === 'function' ? deps.hasWatchlistDirtyRecords() : null,
+            trackNeedsFullRender:typeof deps.trackNeedsFullRender === 'function' ? deps.trackNeedsFullRender() : null
+          });
+          if(typeof deps.activeWorkspaceTab === 'function' && deps.activeWorkspaceTab() === 'track'){
+            if(typeof deps.renderWatchlistChunked === 'function' && typeof deps.prepareWatchlistRenderModel === 'function'){
+              deps.renderWatchlistChunked({
+                source:'watchlist_single_ticker_patch_fallback_full',
+                model:deps.prepareWatchlistRenderModel('watchlist_single_ticker_patch_fallback_full', {
+                  lightweight:true
+                })
+              }).catch(() => {
+                deps.requestWatchlistRender({
+                  includeFocusQueue:true,
+                  source:'watchlist_single_ticker_patch_fallback_full'
+                });
+              }).finally(() => {
+                deps.setWatchlistCardRefreshButtonState(symbol, false);
+              });
+            }else{
+              deps.requestWatchlistRender({
+                includeFocusQueue:true,
+                source:'watchlist_single_ticker_patch_fallback_full'
+              });
+            }
+          }else{
+            deps.requestWatchlistRender({
+              includeFocusQueue:true,
+              source:'watchlist_single_ticker_patch_fallback_full_hidden'
+            });
+            deps.setWatchlistCardRefreshButtonState(symbol, false);
+          }
         }else{
           deps.renderFocusQueue();
           deps.setWatchlistCardRefreshButtonState(symbol, false);

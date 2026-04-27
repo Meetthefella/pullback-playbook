@@ -1429,6 +1429,43 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .review-section--snapshot{
   gap:14px;
 }
+.review-summary-top{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:12px;
+  align-items:start;
+}
+.review-summary-left{
+  min-width:0;
+}
+.review-summary-right{
+  display:flex;
+  justify-content:flex-end;
+  align-items:flex-start;
+}
+.review-summary-badges{
+  gap:8px;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+}
+.review-ticker-row{
+  font-size:1.02rem;
+  letter-spacing:.02em;
+  margin-bottom:3px;
+}
+.review-decision-primary{
+  margin-top:2px;
+  margin-bottom:4px;
+  font-size:.96rem;
+  line-height:1.42;
+  font-weight:700;
+  color:var(--text-primary);
+}
+.review-next-action-inline{
+  margin-top:2px;
+  color:var(--text-secondary);
+  opacity:.95;
+}
 .review-warning-row{
   gap:8px;
   flex-wrap:wrap;
@@ -1436,6 +1473,28 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .reviewchartpanel--compact{
   display:grid;
   gap:12px;
+}
+.reviewsectionsubhead{
+  margin-top:2px;
+  margin-bottom:0;
+  color:var(--text-muted);
+  font-size:.78rem;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+}
+.review-section-divider{
+  height:1px;
+  background:linear-gradient(90deg, rgba(148,163,184,.24), rgba(148,163,184,.08) 55%, transparent);
+  margin:2px 0 0;
+}
+.review-diagnostics-stack{
+  display:grid;
+  gap:10px;
+}
+.review-technical-line{
+  margin-top:0;
+  color:var(--text-secondary);
+  font-size:.82rem;
 }
 .review-hidden{
   display:none !important;
@@ -1501,6 +1560,28 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   -webkit-backdrop-filter:none;
   box-shadow:none;
   border:1px solid rgba(255,255,255,.05);
+}
+.reviewworkspace .compact-details,
+.reviewworkspace .responsepanel,
+.reviewworkspace .promptdetails{
+  border:1px solid rgba(159,176,198,.16);
+  background:rgba(15,23,42,.36);
+  border-radius:10px;
+}
+.reviewworkspace .compact-details > summary,
+.reviewworkspace .responsepanel > summary,
+.reviewworkspace .promptdetails > summary{
+  padding:10px 12px;
+}
+.reviewworkspace .compact-details > :not(summary),
+.reviewworkspace .responsepanel > :not(summary),
+.reviewworkspace .promptdetails > :not(summary){
+  padding-left:12px;
+  padding-right:12px;
+  padding-bottom:10px;
+}
+.reviewworkspace .review-checklist-panel{
+  margin-top:2px;
 }
 .reviewworkspace-shell.card--monitor .panelbox{
   background:rgba(36,33,20,.78);
@@ -1765,6 +1846,15 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   gap:10px;
   align-items:center;
   flex-wrap:wrap;
+}
+@media (max-width: 780px){
+  .review-summary-top{
+    grid-template-columns:1fr;
+    gap:8px;
+  }
+  .review-summary-right{
+    justify-content:flex-start;
+  }
 }
 .focuscard{gap:8px;padding:12px}
 .focusstrip{

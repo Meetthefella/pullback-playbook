@@ -2124,9 +2124,17 @@ const reviewAnalysisFeature = createReviewAnalysisFeature({
 const trackWatchlistFeature = createTrackWatchlistFeature({
   normalizeTicker,
   escapeHtml,
+  perfDebugEnabled:() => PP_PERF_DEBUG,
+  logPerf:(event, payload = {}) => {
+    if(!PP_PERF_DEBUG) return;
+    console.debug(`[PP_PERF] ${event}`, payload);
+  },
+  activeWorkspaceTab,
   isManualWatchlistRefreshInProgress,
   setManualWatchlistRefreshInProgress,
   setWatchlistCardRefreshButtonState,
+  hasWatchlistDirtyRecords,
+  trackNeedsFullRender:() => startupCoordinator.trackNeedsFullRender === true,
   setStatus,
   getTickerRecord,
   watchlistPlacementSnapshot,
@@ -2137,6 +2145,8 @@ const trackWatchlistFeature = createTrackWatchlistFeature({
   renderCards,
   activeReviewTicker,
   renderReviewWorkspace,
+  renderWatchlistChunked,
+  prepareWatchlistRenderModel,
   requestTrackedStatePersist,
   updateWatchlistCardForTicker,
   requestWatchlistRender,
@@ -19300,6 +19310,13 @@ function renderReviewWorkspace(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
   });
+  const technicalContextLine = [
+    `Structure ${String(derivedStates.structureState || 'n/a')}`,
+    `Pullback ${String(derivedStates.pullbackState || derivedStates.pullbackZoneState || 'n/a')}`,
+    `Bounce ${String(derivedStates.bounceState || 'n/a')}`,
+    `Volume ${String(derivedStates.volumeState || 'n/a')}`,
+    `Market ${qualityAdjustments.weakRegimePenalty ? 'weak' : 'supportive'}`
+  ].join(' | ');
   box.className = `list reviewworkspace-shell ${reviewOuterShellClass}`;
   box.style.cssText = reviewShellStyleAttr;
   box.dataset.visualTone = reviewOuterBorderTone || visualState.visual_tone || '';
@@ -19311,22 +19328,25 @@ function renderReviewWorkspace(options = {}){
   });
   box.innerHTML = `<div class="reviewworkspace reviewworkspace--ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(reviewOuterBorderTone || visualState.visual_tone || '')}" data-visual-state="${escapeHtml(reviewPresentationState || visualState.state || '')}">
     <div class="panelbox review-section review-section--snapshot">
-      <div class="reviewsectionhead"><strong>Snapshot</strong></div>
+      <div class="reviewsectionhead"><strong>Decision Summary</strong></div>
       <div class="reviewhero reviewhero-compact">
-        <div class="reviewherohead">
-          <div class="reviewheadline">
-            <div class="inline-status">
-              <strong>${escapeHtml(record.ticker)}</strong>
+        <div class="reviewherohead review-summary-top">
+          <div class="reviewheadline review-summary-left">
+            <div class="review-ticker-row"><strong>${escapeHtml(record.ticker)}</strong></div>
+            <div class="tiny">${escapeHtml(companyLine)}</div>
+            ${marketMetaLine}
+          </div>
+          <div class="review-summary-right">
+            <div class="inline-status review-summary-badges">
               <span class="badge ${reviewBadge.className}">${escapeHtml(reviewBadgeLabel)}</span>
               <span class="score visual-score">${escapeHtml(setupScoreDisplay)}</span>
             </div>
-            <div class="tiny">${escapeHtml(companyLine)}</div>
-            ${marketMetaLine}
-            ${snapshotWarningsMarkup ? `<div class="inline-status review-warning-row">${snapshotWarningsMarkup}</div>` : ''}
-            ${downgradeSummary ? `<div class="tiny review-downgrade-badge"><span class="badge avoid">${escapeHtml(downgradeSummary.label)}</span> ${escapeHtml(downgradeSummary.transition)}</div>` : ''}
-            <div class="review-decision-detail decision-summary">${escapeHtml(snapshotVerdictLine)}</div>
           </div>
         </div>
+        ${snapshotWarningsMarkup ? `<div class="inline-status review-warning-row">${snapshotWarningsMarkup}</div>` : ''}
+        ${downgradeSummary ? `<div class="tiny review-downgrade-badge"><span class="badge avoid">${escapeHtml(downgradeSummary.label)}</span> ${escapeHtml(downgradeSummary.transition)}</div>` : ''}
+        <div class="review-decision-primary decision-summary">${escapeHtml(snapshotVerdictLine)}</div>
+        <div class="tiny review-next-action-inline">Action guidance: ${escapeHtml(reviewNextActionLabel)}</div>
       </div>
       <div class="reviewchartpanel reviewchartpanel--compact">
         ${chartGuidance}
@@ -19368,43 +19388,48 @@ function renderReviewWorkspace(options = {}){
       <div class="tiny" id="calcNote">${escapeHtml(planUI.showPlan ? 'Enter planned entry, stop, and first target to calculate size.' : nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary))}</div>
     </div>
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
-      <div class="reviewsectionhead"><strong>Analysis</strong></div>
+      <div class="reviewsectionhead"><strong>Technical Context</strong></div>
+      <div class="summary review-technical-line">${escapeHtml(technicalContextLine)}</div>
       ${diagnosticsPanelBody}
       <div class="reviewactions reviewactions-top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
       <textarea id="reviewNotes" class="${loading ? 'review-notes--ai' : ''}" placeholder="${escapeHtml(notesPlaceholder)}">${escapeHtml(record.review.notes || '')}</textarea>
-      ${renderReviewRecomputeDiagnostics(record)}
-      <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
-        <summary>AI Summary</summary>
-        ${renderAnalysisPanelFromRecord(record)}
-      </details>
       <div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary))}</div>
-      <details class="compact-details" id="planRealismReasonsPanel" ${planRealismReasons ? '' : 'hidden'}>
-        <summary>Why this call</summary>
-        <div class="tiny" id="planRealismReasons">${escapeHtml(planRealismReasons)}</div>
-      </details>
-      <details class="compact-details">
-        <summary>Plan Diagnostics</summary>
-        <div class="reviewmeta-grid">
-          <div><label>Plan State</label><input id="planStateBox" readonly value="${escapeHtml(planState)}" /></div>
-          <div><label>Plan Math</label><input id="planQualityBox" readonly value="${escapeHtml(planQualityForRr(rrRatio) || 'N/A')}" /></div>
-          <div><label>RR Realism</label><input id="rrRealismBox" readonly value="${escapeHtml(planRealism.rr_realism_label)}" /></div>
-          <div><label>Credible RR</label><input id="credibleRrBox" readonly value="${escapeHtml(credibleRrDisplay)}" /></div>
-          <div><label>Optimistic Target</label><input id="optimisticTargetBox" readonly value="${escapeHtml(planRealism.optimistic_target_flag ? 'Yes' : 'No')}" /></div>
-          <div><label>Target Assessment</label><input id="targetAssessmentBox" readonly value="${escapeHtml(planRealism.credible_target_assessment)}" /></div>
-          <div><label>Plan Source</label><input id="planSourceBox" readonly value="${escapeHtml(String(record.plan.source || effectivePlan.source || ''))}" /></div>
-          <div><label>Trigger State</label><input id="triggerStateBox" readonly value="${escapeHtml(triggerStateLabel(record.plan.triggerState))}" /></div>
-          <div><label>Plan Check</label><input id="planValidationBox" readonly value="${escapeHtml(planValidationStateLabel(planCheckState))}" /></div>
-          <div><label>Execution Mode</label><input id="exitModeBox" readonly value="${escapeHtml(executionModeText)}" /></div>
-          <div><label>Target Review</label><input id="targetReviewStateBox" readonly value="${escapeHtml(targetReviewText)}" /></div>
-          <div><label>Target Alert</label><input id="targetAlertBox" readonly value="${escapeHtml(targetAlertText)}" /></div>
-          <div><label>Capital Comfort</label><input id="capitalComfortBox" readonly value="${escapeHtml(capitalComfort.label)}" /></div>
-        </div>
-      </details>
-      <details class="promptdetails compact-open-on-demand" id="reviewPrompt" ${promptPreviewOpen}>
-        <summary>Prompt Preview</summary>
-        <div class="mutebox scrollbox">${escapeHtml(promptText)}</div>
-      </details>
-      <details class="panelbox reviewchecklist">
+      <div class="review-section-divider"></div>
+      <div class="reviewsectionsubhead"><strong>Diagnostics & Trace</strong></div>
+      <div class="review-diagnostics-stack">
+        ${renderReviewRecomputeDiagnostics(record)}
+        <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
+          <summary>AI Summary</summary>
+          ${renderAnalysisPanelFromRecord(record)}
+        </details>
+        <details class="compact-details" id="planRealismReasonsPanel" ${planRealismReasons ? '' : 'hidden'}>
+          <summary>Why this call</summary>
+          <div class="tiny" id="planRealismReasons">${escapeHtml(planRealismReasons)}</div>
+        </details>
+        <details class="compact-details">
+          <summary>Plan Diagnostics</summary>
+          <div class="reviewmeta-grid">
+            <div><label>Plan State</label><input id="planStateBox" readonly value="${escapeHtml(planState)}" /></div>
+            <div><label>Plan Math</label><input id="planQualityBox" readonly value="${escapeHtml(planQualityForRr(rrRatio) || 'N/A')}" /></div>
+            <div><label>RR Realism</label><input id="rrRealismBox" readonly value="${escapeHtml(planRealism.rr_realism_label)}" /></div>
+            <div><label>Credible RR</label><input id="credibleRrBox" readonly value="${escapeHtml(credibleRrDisplay)}" /></div>
+            <div><label>Optimistic Target</label><input id="optimisticTargetBox" readonly value="${escapeHtml(planRealism.optimistic_target_flag ? 'Yes' : 'No')}" /></div>
+            <div><label>Target Assessment</label><input id="targetAssessmentBox" readonly value="${escapeHtml(planRealism.credible_target_assessment)}" /></div>
+            <div><label>Plan Source</label><input id="planSourceBox" readonly value="${escapeHtml(String(record.plan.source || effectivePlan.source || ''))}" /></div>
+            <div><label>Trigger State</label><input id="triggerStateBox" readonly value="${escapeHtml(triggerStateLabel(record.plan.triggerState))}" /></div>
+            <div><label>Plan Check</label><input id="planValidationBox" readonly value="${escapeHtml(planValidationStateLabel(planCheckState))}" /></div>
+            <div><label>Execution Mode</label><input id="exitModeBox" readonly value="${escapeHtml(executionModeText)}" /></div>
+            <div><label>Target Review</label><input id="targetReviewStateBox" readonly value="${escapeHtml(targetReviewText)}" /></div>
+            <div><label>Target Alert</label><input id="targetAlertBox" readonly value="${escapeHtml(targetAlertText)}" /></div>
+            <div><label>Capital Comfort</label><input id="capitalComfortBox" readonly value="${escapeHtml(capitalComfort.label)}" /></div>
+          </div>
+        </details>
+        <details class="promptdetails compact-open-on-demand" id="reviewPrompt" ${promptPreviewOpen}>
+          <summary>Prompt Preview</summary>
+          <div class="mutebox scrollbox">${escapeHtml(promptText)}</div>
+        </details>
+      </div>
+      <details class="compact-details reviewchecklist review-checklist-panel">
         <summary><strong>Checklist</strong> <span id="progressText">Checks met: 0 / 10</span></summary>
         <div class="prog"><div class="fill" id="progressFill"></div></div>
         <div class="checks">
@@ -19419,7 +19444,7 @@ function renderReviewWorkspace(options = {}){
         <button class="secondary" id="saveReviewBtn">Save Review</button>
         <button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button>
       </div>
-      <div class="tiny review-next-action-primary">Next: ${escapeHtml(reviewNextActionLabel)}</div>
+      <div class="tiny review-next-action-primary">Can I trade this now? ${escapeHtml(reviewNextActionLabel)}</div>
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}
       ${paperTradeHasRuntimeStatus ? `<div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>` : ''}
@@ -20193,7 +20218,7 @@ function renderAppFromState(options = {}){
   renderTickerQuickLists();
   renderFinalUniversePreview();
   renderSavedScannerUniverseSnapshot();
-  renderScannerDebug();
+  renderScannerRulesPanel().catch(() => {});
   renderScannerResults();
   renderFocusQueue();
   renderCards();
@@ -20599,7 +20624,7 @@ click('clearBtn', () => {
   renderTvImportPreview([], 'default');
   renderFinalUniversePreview();
   renderSavedScannerUniverseSnapshot();
-  renderScannerDebug();
+  renderScannerRulesPanel().catch(() => {});
   clearOcrReview('OCR review cleared. Scanner universe is ready for repopulation.');
   renderScannerResults();
   renderCards();
