@@ -1583,7 +1583,52 @@ function convertQuoteValueToGbp(value, quoteCurrency){
   });
 }
 
-function evaluateRiskFit({entry, stop, account_size, risk_percent, max_loss_override, whole_shares_only}){
+function evaluateRiskFit(input){
+  const candidate = input && typeof input === 'object' ? input : {};
+  const looksLikeTickerRecord = !!(
+    candidate
+    && typeof candidate === 'object'
+    && !Array.isArray(candidate)
+    && (
+      Object.prototype.hasOwnProperty.call(candidate, 'ticker')
+      || Object.prototype.hasOwnProperty.call(candidate, 'plan')
+      || Object.prototype.hasOwnProperty.call(candidate, 'review')
+      || Object.prototype.hasOwnProperty.call(candidate, 'watchlist')
+      || Object.prototype.hasOwnProperty.call(candidate, 'scan')
+      || Object.prototype.hasOwnProperty.call(candidate, 'marketData')
+    )
+  );
+  if(looksLikeTickerRecord){
+    const item = normalizeTickerRecord(candidate);
+    const currentPlan = deriveCurrentPlanState(item);
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] evaluateRiskFit_record_delegate', {
+        ticker:item.ticker,
+        evaluateRiskFit_input_mode:'ticker_record',
+        evaluateRiskFit_plan_source:String(currentPlan.planSourceUsedForRisk || ''),
+        evaluateRiskFit_entry:currentPlan.entry,
+        evaluateRiskFit_stop:currentPlan.stop
+      });
+    }
+    return currentPlan.riskFit && typeof currentPlan.riskFit === 'object'
+      ? currentPlan.riskFit
+      : {
+        max_loss:currentMaxLoss(),
+        risk_per_share:null,
+        position_size:0,
+        risk_status:'plan_missing'
+      };
+  }
+  const resolvedInput = candidate;
+  const {entry, stop, account_size, risk_percent, max_loss_override, whole_shares_only} = resolvedInput;
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] evaluateRiskFit_raw', {
+      evaluateRiskFit_input_mode:'raw_input',
+      evaluateRiskFit_plan_source:'',
+      evaluateRiskFit_entry:numericOrNull(entry),
+      evaluateRiskFit_stop:numericOrNull(stop)
+    });
+  }
   return evaluateRiskFitImpl({entry, stop, account_size, risk_percent, max_loss_override, whole_shares_only}, {
     numericOrNull
   });
