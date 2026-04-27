@@ -74,6 +74,8 @@ let riskSettingsRecalcRunning = false;
 let riskSettingsRecalcQueued = false;
 let riskSettingsRecalcSequence = 0;
 let riskSettingsRecalcPendingSource = '';
+let riskRecalcStatusToken = 0;
+let riskRecalcStatusSafetyTimer = null;
 const startupHydrationReadyPromise = new Promise(resolve => {
   startupHydrationReadyResolve = resolve;
 });
@@ -553,6 +555,7 @@ async function runStartupRiskRefreshChunked(){
   const source = 'startup_restore';
   const riskRefreshStartMark = 'pp_startup_risk_refresh_start';
   perfMark(riskRefreshStartMark);
+  let canPublishRiskDiagnostic = false;
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] startup_risk_refresh', {
       phase:'start',
@@ -566,36 +569,34 @@ async function runStartupRiskRefreshChunked(){
   const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
     ? String(uiState.liveProcessStatus.state || '')
     : '';
-  const canPublishRiskDiagnostic = !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
-  const records = allTickerRecords();
-  const watchlistTickers = records
-    .filter(record => {
-      const item = normalizeTickerRecord(record);
-      return !!(item.watchlist && item.watchlist.inWatchlist);
-    })
-    .map(record => normalizeTickerRecord(record).ticker)
-    .filter(Boolean);
-  const watchlistTickerSet = new Set(watchlistTickers);
-  if(canPublishRiskDiagnostic){
-    if(watchlistTickers.length){
-      setLiveProcessStatus('action', `Recalculating watchlist ticker ${watchlistTickers[0]} plan to fit new risk...`);
-    }else{
-      setLiveProcessStatus('action', 'Recalculating plans to fit new risk...');
-    }
-  }
-  state.userRiskPerTrade = currentMaxLoss();
-  state.maxRisk = state.userRiskPerTrade;
-  if(PP_PERF_DEBUG){
-    console.debug('[PP_PERF] risk_calc_requested', {
-      risk_calc_reason:source,
-      risk_calc_record_count:records.length,
-      risk_calc_changed_input_fields:['selectedRiskAmount','selectedRiskPercent','accountSize','maxLossOverride','wholeSharesOnly']
+  canPublishRiskDiagnostic = !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
+  try{
+    const records = allTickerRecords();
+    const watchlistTickers = records
+      .filter(record => {
+        const item = normalizeTickerRecord(record);
+        return !!(item.watchlist && item.watchlist.inWatchlist);
+      })
+      .map(record => normalizeTickerRecord(record).ticker)
+      .filter(Boolean);
+    beginRiskRecalcBatchStatus({
+      source,
+      tickerCount:watchlistTickers.length,
+      canPublish:canPublishRiskDiagnostic
     });
-  }
-  const chunkSize = 5;
-  let skippedCount = 0;
-  let executedCount = 0;
-  for(let index = 0; index < records.length; index += 1){
+    state.userRiskPerTrade = currentMaxLoss();
+    state.maxRisk = state.userRiskPerTrade;
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] risk_calc_requested', {
+        risk_calc_reason:source,
+        risk_calc_record_count:records.length,
+        risk_calc_changed_input_fields:['selectedRiskAmount','selectedRiskPercent','accountSize','maxLossOverride','wholeSharesOnly']
+      });
+    }
+    const chunkSize = 5;
+    let skippedCount = 0;
+    let executedCount = 0;
+    for(let index = 0; index < records.length; index += 1){
     if(PP_PERF_DEBUG && index % chunkSize === 0){
       console.debug('[PP_PERF] startup_risk_refresh', {
         phase:'chunk_start',
@@ -614,12 +615,6 @@ async function runStartupRiskRefreshChunked(){
     });
     if(recomputeMeta.skipped) skippedCount += 1;
     else executedCount += 1;
-    if(canPublishRiskDiagnostic){
-      const ticker = normalizeTickerRecord(record).ticker;
-      if(watchlistTickerSet.has(ticker)){
-        setLiveProcessStatus('action', `Recalculating watchlist ticker ${ticker} plan to fit new risk...`);
-      }
-    }
     if(index > 0 && index % chunkSize === 0){
       if(PP_PERF_DEBUG){
         console.debug('[PP_PERF] startup_risk_refresh', {
@@ -634,55 +629,66 @@ async function runStartupRiskRefreshChunked(){
       }
       await yieldDeferredStartupChunk();
     }
-  }
-  runWatchlistLifecycleEvaluation({
-    source,
-    persist:false,
-    render:false,
-    force:false
-  });
-  commitTickerState();
-  await yieldDeferredStartupChunk();
-  renderStats();
-  if(activeWorkspaceTab() === 'track'){
-    renderWatchlist();
-    renderFocusQueue();
-  }else{
-    markWatchlistDirty(null, 'startup_risk_refresh');
-    startupCoordinator.renderedTabs.track = false;
-    startupCoordinator.trackHydratedRendered = false;
+    }
+    runWatchlistLifecycleEvaluation({
+      source,
+      persist:false,
+      render:false,
+      force:false
+    });
+    commitTickerState();
+    await yieldDeferredStartupChunk();
+    renderStats();
+    if(activeWorkspaceTab() === 'track'){
+      renderWatchlist();
+      renderFocusQueue();
+    }else{
+      markWatchlistDirty(null, 'startup_risk_refresh');
+      startupCoordinator.renderedTabs.track = false;
+      startupCoordinator.trackHydratedRendered = false;
+      if(PP_PERF_DEBUG){
+        console.debug('[PP_PERF] track_render_skipped_hidden', {
+          source:'startup_risk_refresh',
+          activeTab:activeWorkspaceTab(),
+          ...startupDebugRenderState()
+        });
+      }
+    }
+    if(activeWorkspaceTab() === 'scan'){
+      renderScannerResults();
+      renderScannerRulesPanel();
+    }else if(activeWorkspaceTab() === 'review'){
+      renderCards();
+    }else if(activeWorkspaceTab() === 'diary'){
+      renderTradeDiary();
+    }
+    perfMark('pp_startup_risk_refresh_end');
+    const riskEntry = perfMeasure('pp_startup_risk_refresh', riskRefreshStartMark, 'pp_startup_risk_refresh_end');
     if(PP_PERF_DEBUG){
-      console.debug('[PP_PERF] track_render_skipped_hidden', {
-        source:'startup_risk_refresh',
-        activeTab:activeWorkspaceTab(),
+      console.debug('[PP_PERF] startup_risk_refresh', {
+        phase:'complete',
+        source,
+        durationMs:riskEntry ? Number(riskEntry.duration.toFixed(1)) : null,
+        recordCount:records.length,
+        risk_calc_record_count:records.length,
+        risk_calc_executed:executedCount,
+        risk_calc_skipped_unchanged:skippedCount,
         ...startupDebugRenderState()
       });
     }
-  }
-  if(activeWorkspaceTab() === 'scan'){
-    renderScannerResults();
-    renderScannerRulesPanel();
-  }else if(activeWorkspaceTab() === 'review'){
-    renderCards();
-  }else if(activeWorkspaceTab() === 'diary'){
-    renderTradeDiary();
-  }
-  perfMark('pp_startup_risk_refresh_end');
-  const riskEntry = perfMeasure('pp_startup_risk_refresh', riskRefreshStartMark, 'pp_startup_risk_refresh_end');
-  if(PP_PERF_DEBUG){
-    console.debug('[PP_PERF] startup_risk_refresh', {
-      phase:'complete',
+    completeRiskRecalcBatchStatus({
       source,
-      durationMs:riskEntry ? Number(riskEntry.duration.toFixed(1)) : null,
-      recordCount:records.length,
-      risk_calc_record_count:records.length,
-      risk_calc_executed:executedCount,
-      risk_calc_skipped_unchanged:skippedCount,
-      ...startupDebugRenderState()
+      canPublish:canPublishRiskDiagnostic,
+      message:'Plans updated.'
     });
-  }
-  if(canPublishRiskDiagnostic){
-    setLiveProcessStatus('action', 'Risk recalculation complete.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+  }catch(error){
+    console.error('[risk-recalc] startup refresh failed', error);
+    failRiskRecalcBatchStatus({
+      source,
+      canPublish:canPublishRiskDiagnostic,
+      message:'Plan update failed.'
+    });
+    throw error;
   }
 }
 
@@ -1293,6 +1299,17 @@ uiState.watchlistDirtyTickers = uiState.watchlistDirtyTickers && typeof uiState.
 uiState.watchlistPreparedModelCache = uiState.watchlistPreparedModelCache && typeof uiState.watchlistPreparedModelCache === 'object'
   ? uiState.watchlistPreparedModelCache
   : null;
+uiState.riskRecalcStatusRuntime = uiState.riskRecalcStatusRuntime && typeof uiState.riskRecalcStatusRuntime === 'object'
+  ? uiState.riskRecalcStatusRuntime
+  : {
+    inFlight:false,
+    pending:false,
+    lastReason:'',
+    startedAt:'',
+    finishedAt:'',
+    tickerCount:0,
+    activeToken:0
+  };
 uiState.activeWorkspaceTab = ['scan', 'review', 'track', 'diary'].includes(String(uiState.activeWorkspaceTab || '').toLowerCase())
   ? String(uiState.activeWorkspaceTab).toLowerCase()
   : 'scan';
@@ -1410,6 +1427,7 @@ const DIARY_MISTAKE_TAG_OPTIONS = ['early entry', 'chased breakout', 'ignored we
 const DIARY_LESSON_TAG_OPTIONS = ['wait for bounce confirmation', '50MA setups need extra patience', 'weak tape needs stricter filtering', 'best setups come from strong RS names', 'avoid loose structure under 20MA'];
 const LIVE_PROCESS_COMPLETE_TO_IDLE_MS = 2200;
 const LIVE_PROCESS_IDLE_FADE_MS = 1500;
+const RISK_RECALC_STATUS_STALE_TIMEOUT_MS = 10000;
 const ALERT_PRIORITY = {
   closed:1,
   entered:2,
@@ -4409,6 +4427,123 @@ function invalidateWatchlistRenderCaches(reason = 'risk_settings_change'){
   }
 }
 
+function riskRecalcRuntimeState(){
+  uiState.riskRecalcStatusRuntime = uiState.riskRecalcStatusRuntime && typeof uiState.riskRecalcStatusRuntime === 'object'
+    ? uiState.riskRecalcStatusRuntime
+    : {
+      inFlight:false,
+      pending:false,
+      lastReason:'',
+      startedAt:'',
+      finishedAt:'',
+      tickerCount:0,
+      activeToken:0
+    };
+  return uiState.riskRecalcStatusRuntime;
+}
+
+function updateRiskRecalcRuntime(patch = {}){
+  const runtime = riskRecalcRuntimeState();
+  Object.assign(runtime, patch || {});
+  logRiskPerf('risk_recalc_runtime', {
+    risk_recalc_in_flight:runtime.inFlight === true,
+    risk_recalc_pending:runtime.pending === true,
+    risk_recalc_last_reason:String(runtime.lastReason || ''),
+    risk_recalc_started_at:String(runtime.startedAt || ''),
+    risk_recalc_finished_at:String(runtime.finishedAt || ''),
+    risk_recalc_ticker_count:Number(runtime.tickerCount || 0)
+  });
+  return runtime;
+}
+
+function clearRiskRecalcStatusSafetyTimer(){
+  if(!riskRecalcStatusSafetyTimer) return;
+  clearTimeout(riskRecalcStatusSafetyTimer);
+  riskRecalcStatusSafetyTimer = null;
+}
+
+function riskRecalcWorkingMessage(tickerCount, source = ''){
+  const count = Number.isFinite(Number(tickerCount)) ? Number(tickerCount) : 0;
+  if(count === 1) return 'Updating watchlist plan';
+  if(/market_status/i.test(String(source || ''))) return 'Updating watchlist plans';
+  return 'Updating watchlist plans';
+}
+
+function clearStaleRiskRecalcStatus(reason = 'stale_timeout'){
+  const runtime = riskRecalcRuntimeState();
+  const liveStatus = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+    ? uiState.liveProcessStatus
+    : {state:'idle', message:'', job:''};
+  if(riskSettingsRecalcRunning || riskSettingsRecalcQueued || runtime.inFlight) return;
+  if(String(liveStatus.job || '') !== 'risk_recalc') return;
+  console.warn('[live-status] cleared stale risk recalculation status', {
+    reason,
+    message:String(liveStatus.message || '')
+  });
+  setLiveProcessStatus('idle', 'Idle.');
+}
+
+function scheduleRiskRecalcStatusSafetyCheck(token){
+  clearRiskRecalcStatusSafetyTimer();
+  riskRecalcStatusSafetyTimer = setTimeout(() => {
+    const runtime = riskRecalcRuntimeState();
+    if(Number(runtime.activeToken || 0) !== Number(token || 0)) return;
+    clearStaleRiskRecalcStatus('stale_timeout');
+  }, RISK_RECALC_STATUS_STALE_TIMEOUT_MS);
+}
+
+function beginRiskRecalcBatchStatus({source = '', tickerCount = 0, canPublish = true} = {}){
+  const token = ++riskRecalcStatusToken;
+  updateRiskRecalcRuntime({
+    inFlight:true,
+    pending:riskSettingsRecalcQueued === true,
+    lastReason:String(source || ''),
+    startedAt:new Date().toISOString(),
+    finishedAt:'',
+    tickerCount:Number.isFinite(Number(tickerCount)) ? Number(tickerCount) : 0,
+    activeToken:token
+  });
+  if(canPublish){
+    setLiveProcessStatus('action', riskRecalcWorkingMessage(tickerCount, source), {
+      job:'risk_recalc'
+    });
+    scheduleRiskRecalcStatusSafetyCheck(token);
+  }
+  return token;
+}
+
+function completeRiskRecalcBatchStatus({source = '', canPublish = true, message = 'Plans updated.'} = {}){
+  clearRiskRecalcStatusSafetyTimer();
+  updateRiskRecalcRuntime({
+    inFlight:false,
+    pending:riskSettingsRecalcQueued === true,
+    lastReason:String(source || ''),
+    finishedAt:new Date().toISOString()
+  });
+  if(canPublish){
+    setLiveProcessStatus('action', String(message || 'Plans updated.'), {
+      autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS,
+      job:'risk_recalc'
+    });
+  }
+}
+
+function failRiskRecalcBatchStatus({source = '', canPublish = true, message = 'Plan update failed.'} = {}){
+  clearRiskRecalcStatusSafetyTimer();
+  updateRiskRecalcRuntime({
+    inFlight:false,
+    pending:riskSettingsRecalcQueued === true,
+    lastReason:String(source || ''),
+    finishedAt:new Date().toISOString()
+  });
+  if(canPublish){
+    setLiveProcessStatus('error', String(message || 'Plan update failed.'), {
+      autoIdleMs:LIVE_PROCESS_COMPLETE_TO_IDLE_MS,
+      job:'risk_recalc'
+    });
+  }
+}
+
 function scheduleRiskContextRefresh(options = {}){
   const source = String(options.source || 'risk_settings_change');
   const force = options.force === true;
@@ -4428,15 +4563,27 @@ function scheduleRiskContextRefresh(options = {}){
     force,
     queuePending:riskSettingsRecalcRunning === true
   });
+  updateRiskRecalcRuntime({
+    pending:true,
+    lastReason:source
+  });
   riskSettingsRecalcTimer = setTimeout(() => {
     riskSettingsRecalcTimer = null;
     if(riskSettingsRecalcRunning){
       riskSettingsRecalcQueued = true;
+      updateRiskRecalcRuntime({
+        pending:true,
+        lastReason:riskSettingsRecalcPendingSource || source
+      });
       return;
     }
     runRiskContextRefreshChunked({source:riskSettingsRecalcPendingSource || source, force}).catch(() => {}).finally(() => {
       if(riskSettingsRecalcQueued){
         riskSettingsRecalcQueued = false;
+        updateRiskRecalcRuntime({
+          pending:false,
+          lastReason:riskSettingsRecalcPendingSource || source
+        });
         scheduleRiskContextRefresh({
           source:riskSettingsRecalcPendingSource || source,
           force:true,
@@ -4451,12 +4598,13 @@ async function runRiskContextRefreshChunked(options = {}){
   const source = String(options.source || 'risk_settings_change');
   const startedAt = nowPerfMs();
   riskSettingsRecalcRunning = true;
+  let canPublishRiskDiagnostic = false;
   try{
     const riskDiagnosticRequested = /risk|account|max_loss|whole_shares|risk_/i.test(source);
     const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
       ? String(uiState.liveProcessStatus.state || '')
       : '';
-    const canPublishRiskDiagnostic = riskDiagnosticRequested && !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
+    canPublishRiskDiagnostic = riskDiagnosticRequested && !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
     const records = allTickerRecords();
     if(PP_PERF_DEBUG){
       console.debug('[PP_PERF] risk_calc_requested', {
@@ -4472,14 +4620,15 @@ async function runRiskContextRefreshChunked(options = {}){
       })
       .map(record => normalizeTickerRecord(record).ticker)
       .filter(Boolean);
-    const watchlistTickerSet = new Set(watchlistTickers);
-    if(canPublishRiskDiagnostic){
-      if(watchlistTickers.length){
-        setLiveProcessStatus('action', `Recalculating watchlist ticker ${watchlistTickers[0]} plan to fit new risk...`);
-      }else{
-        setLiveProcessStatus('action', 'Recalculating plans to fit new risk...');
-      }
-    }
+    beginRiskRecalcBatchStatus({
+      source,
+      tickerCount:watchlistTickers.length,
+      canPublish:canPublishRiskDiagnostic
+    });
+    updateRiskRecalcRuntime({
+      pending:false,
+      lastReason:source
+    });
     state.userRiskPerTrade = currentMaxLoss();
     state.maxRisk = state.userRiskPerTrade;
     let processed = 0;
@@ -4497,12 +4646,6 @@ async function runRiskContextRefreshChunked(options = {}){
         });
         if(recomputeMeta.skipped) skippedCount += 1;
         else executedCount += 1;
-        if(canPublishRiskDiagnostic){
-          const ticker = normalizeTickerRecord(record).ticker;
-          if(watchlistTickerSet.has(ticker)){
-            setLiveProcessStatus('action', `Recalculating watchlist ticker ${ticker} plan to fit new risk...`);
-          }
-        }
         processed += 1;
         inChunk += 1;
         if((nowPerfMs() - chunkStartedAt) >= RISK_RECALC_CHUNK_BUDGET_MS) break;
@@ -4646,9 +4789,6 @@ async function runRiskContextRefreshChunked(options = {}){
       ...renderStateBase,
       durationMs:Number((nowPerfMs() - plannerStartedAt).toFixed(1))
     });
-    if(canPublishRiskDiagnostic){
-      setLiveProcessStatus('action', 'Risk recalculation complete.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
-    }
     const durationMs = Number((nowPerfMs() - startedAt).toFixed(1));
     logRiskPerf('risk_recalc_complete', {
       source,
@@ -4657,8 +4797,27 @@ async function runRiskContextRefreshChunked(options = {}){
       hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
       riskRefreshComplete:true
     });
+    completeRiskRecalcBatchStatus({
+      source,
+      canPublish:canPublishRiskDiagnostic,
+      message:'Plans updated.'
+    });
+  } catch(error){
+    console.error('[risk-recalc] failed', error);
+    failRiskRecalcBatchStatus({
+      source,
+      canPublish:canPublishRiskDiagnostic,
+      message:'Plan update failed.'
+    });
+    throw error;
   } finally {
     riskSettingsRecalcRunning = false;
+    updateRiskRecalcRuntime({
+      inFlight:false,
+      pending:riskSettingsRecalcQueued === true,
+      lastReason:source,
+      finishedAt:new Date().toISOString()
+    });
   }
 }
 
@@ -7275,6 +7434,7 @@ function queuePendingReviewRequest(ticker, options = {}){
 
 function setLiveProcessStatus(stateKey, message, options = {}){
   const nextState = String(stateKey || 'idle');
+  const nextJob = String(options.job || '');
   const pendingReview = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
     ? uiState.pendingReviewRequest
     : null;
@@ -7285,7 +7445,8 @@ function setLiveProcessStatus(stateKey, message, options = {}){
   uiState.liveProcessStatus = {
     state:nextState,
     message:nextMessage,
-    updatedAt:new Date().toISOString()
+    updatedAt:new Date().toISOString(),
+    job:nextJob
   };
   if(liveProcessIdleTimer){
     clearTimeout(liveProcessIdleTimer);
@@ -7302,7 +7463,11 @@ function setLiveProcessStatus(stateKey, message, options = {}){
   renderLiveProcessStatusBanner();
   if(Number.isFinite(options.autoIdleMs) && options.autoIdleMs > 0){
     liveProcessIdleTimer = setTimeout(() => {
-      if(uiState.liveProcessStatus && uiState.liveProcessStatus.state === nextState){
+      if(
+        uiState.liveProcessStatus
+        && uiState.liveProcessStatus.state === nextState
+        && String(uiState.liveProcessStatus.job || '') === nextJob
+      ){
         setLiveProcessStatus('idle', 'Idle.');
       }
     }, Math.floor(options.autoIdleMs));
@@ -15233,62 +15398,66 @@ function refreshRiskContextForActiveSetups(options = {}){
     })
     .map(record => normalizeTickerRecord(record).ticker)
     .filter(Boolean);
-  const watchlistTickerSet = new Set(watchlistTickers);
-  if(canPublishRiskDiagnostic){
-    if(watchlistTickers.length){
-      setLiveProcessStatus('action', `Recalculating watchlist ticker ${watchlistTickers[0]} plan to fit new risk...`);
-    }else{
-      setLiveProcessStatus('action', 'Recalculating plans to fit new risk...');
-    }
-  }
-  if(PP_PERF_DEBUG){
-    console.debug('[PP_PERF] risk_calc_requested', {
-      risk_calc_reason:source,
-      risk_calc_record_count:records.length,
-      risk_calc_changed_input_fields:riskDiagnosticRequested
-        ? ['selectedRiskAmount','selectedRiskPercent','accountSize','maxLossOverride','wholeSharesOnly']
-        : ['non_risk_context']
-    });
-  }
-  state.userRiskPerTrade = currentMaxLoss();
-  state.maxRisk = state.userRiskPerTrade;
-  let skippedCount = 0;
-  let executedCount = 0;
-  records.forEach(record => {
-    const recomputeMeta = recomputeRiskContextForRecordWithMeta(record, {
-      source,
-      skipIfUnchanged
-    });
-    if(recomputeMeta.skipped) skippedCount += 1;
-    else executedCount += 1;
-    if(!canPublishRiskDiagnostic) return;
-    const ticker = normalizeTickerRecord(record).ticker;
-    if(watchlistTickerSet.has(ticker)){
-      setLiveProcessStatus('action', `Recalculating watchlist ticker ${ticker} plan to fit new risk...`);
-    }
-  });
-  runWatchlistLifecycleEvaluation({
+  beginRiskRecalcBatchStatus({
     source,
-    persist:false,
-    render:false,
-    force:options.force === true
+    tickerCount:watchlistTickers.length,
+    canPublish:canPublishRiskDiagnostic
   });
-  commitTickerState();
-  renderStats();
-  renderScannerResults();
-  renderCards();
-  renderWatchlist();
-  renderFocusQueue();
-  if(PP_PERF_DEBUG){
-    console.debug('[PP_PERF] risk_calc_record_count', {
-      risk_calc_reason:source,
-      risk_calc_record_count:records.length,
-      risk_calc_executed:executedCount,
-      risk_calc_skipped_unchanged:skippedCount
+  try{
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] risk_calc_requested', {
+        risk_calc_reason:source,
+        risk_calc_record_count:records.length,
+        risk_calc_changed_input_fields:riskDiagnosticRequested
+          ? ['selectedRiskAmount','selectedRiskPercent','accountSize','maxLossOverride','wholeSharesOnly']
+          : ['non_risk_context']
+      });
+    }
+    state.userRiskPerTrade = currentMaxLoss();
+    state.maxRisk = state.userRiskPerTrade;
+    let skippedCount = 0;
+    let executedCount = 0;
+    records.forEach(record => {
+      const recomputeMeta = recomputeRiskContextForRecordWithMeta(record, {
+        source,
+        skipIfUnchanged
+      });
+      if(recomputeMeta.skipped) skippedCount += 1;
+      else executedCount += 1;
     });
-  }
-  if(canPublishRiskDiagnostic){
-    setLiveProcessStatus('action', 'Risk recalculation complete.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+    runWatchlistLifecycleEvaluation({
+      source,
+      persist:false,
+      render:false,
+      force:options.force === true
+    });
+    commitTickerState();
+    renderStats();
+    renderScannerResults();
+    renderCards();
+    renderWatchlist();
+    renderFocusQueue();
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] risk_calc_record_count', {
+        risk_calc_reason:source,
+        risk_calc_record_count:records.length,
+        risk_calc_executed:executedCount,
+        risk_calc_skipped_unchanged:skippedCount
+      });
+    }
+    completeRiskRecalcBatchStatus({
+      source,
+      canPublish:canPublishRiskDiagnostic,
+      message:'Plans updated.'
+    });
+  }catch(error){
+    console.error('[risk-recalc] active setup refresh failed', error);
+    failRiskRecalcBatchStatus({
+      source,
+      canPublish:canPublishRiskDiagnostic,
+      message:'Plan update failed.'
+    });
+    throw error;
   }
 }
 
