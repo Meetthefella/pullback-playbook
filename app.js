@@ -620,9 +620,20 @@ async function runStartupRiskRefreshChunked(){
       })
       .map(record => normalizeTickerRecord(record).ticker)
       .filter(Boolean);
+    const scanTickers = rankedTickerRecords()
+      .map(record => normalizeTickerRecord(record).ticker)
+      .filter(Boolean);
+    const reviewTicker = normalizeTicker(activeReviewTicker());
+    const activeTickerSet = new Set([
+      ...watchlistTickers,
+      ...scanTickers,
+      ...(reviewTicker ? [reviewTicker] : [])
+    ]);
+    const activeRecords = records.filter(record => activeTickerSet.has(normalizeTickerRecord(record).ticker));
+    const skippedInactiveCount = Math.max(0, records.length - activeRecords.length);
     beginRiskRecalcBatchStatus({
       source,
-      tickerCount:watchlistTickers.length,
+      tickerCount:activeRecords.length,
       canPublish:canPublishRiskDiagnostic
     });
     state.userRiskPerTrade = currentMaxLoss();
@@ -630,26 +641,29 @@ async function runStartupRiskRefreshChunked(){
     if(PP_PERF_DEBUG){
       console.debug('[PP_PERF] risk_calc_requested', {
         risk_calc_reason:source,
-        risk_calc_record_count:records.length,
-        risk_calc_changed_input_fields:['selectedRiskAmount','selectedRiskPercent','accountSize','maxLossOverride','wholeSharesOnly']
+        risk_calc_record_count:activeRecords.length,
+        risk_calc_changed_input_fields:['selectedRiskAmount','selectedRiskPercent','accountSize','maxLossOverride','wholeSharesOnly'],
+        active_ticker_count:activeTickerSet.size,
+        total_tracked_records:records.length,
+        skipped_records_count:skippedInactiveCount
       });
     }
     const chunkSize = 5;
     let skippedCount = 0;
     let executedCount = 0;
-    for(let index = 0; index < records.length; index += 1){
+    for(let index = 0; index < activeRecords.length; index += 1){
     if(PP_PERF_DEBUG && index % chunkSize === 0){
       console.debug('[PP_PERF] startup_risk_refresh', {
         phase:'chunk_start',
         source,
         chunkIndex:Math.floor(index / chunkSize),
         durationMs:null,
-        recordCount:records.length,
+        recordCount:activeRecords.length,
         processed:index,
         ...startupDebugRenderState()
       });
     }
-    const record = records[index];
+    const record = activeRecords[index];
     const recomputeMeta = recomputeRiskContextForRecordWithMeta(record, {
       source,
       skipIfUnchanged:true
@@ -663,7 +677,7 @@ async function runStartupRiskRefreshChunked(){
           source,
           chunkIndex:Math.floor(index / chunkSize),
           durationMs:null,
-          recordCount:records.length,
+          recordCount:activeRecords.length,
           processed:index,
           ...startupDebugRenderState()
         });
@@ -710,10 +724,13 @@ async function runStartupRiskRefreshChunked(){
         phase:'complete',
         source,
         durationMs:riskEntry ? Number(riskEntry.duration.toFixed(1)) : null,
-        recordCount:records.length,
-        risk_calc_record_count:records.length,
+        recordCount:activeRecords.length,
+        risk_calc_record_count:activeRecords.length,
         risk_calc_executed:executedCount,
         risk_calc_skipped_unchanged:skippedCount,
+        active_ticker_count:activeTickerSet.size,
+        total_tracked_records:records.length,
+        skipped_records_count:skippedInactiveCount,
         ...startupDebugRenderState()
       });
     }
@@ -725,6 +742,9 @@ async function runStartupRiskRefreshChunked(){
     logRiskFitPerfSummary('startup_risk_refresh', {
       risk_records_recalculated:executedCount,
       risk_records_skipped:skippedCount,
+      active_ticker_count:activeTickerSet.size,
+      total_tracked_records:records.length,
+      skipped_records_count:skippedInactiveCount,
       startup_risk_refresh_duration_ms:riskEntry ? Number(riskEntry.duration.toFixed(1)) : null
     });
   }catch(error){
