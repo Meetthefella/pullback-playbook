@@ -2747,6 +2747,38 @@ details>summary::-webkit-details-marker{display:none}
   }
 }
 
+/* Desktop-only action row alignment for Track cards.
+   Keep mobile/PWA behavior unchanged. */
+@media (min-width: 561px){
+  .watchlist-actions{
+    width:auto;
+    display:inline-flex;
+    align-items:center;
+    flex-wrap:nowrap;
+    gap:10px;
+    padding-right:0;
+  }
+  .watchlist-card__details{
+    width:auto;
+    display:inline-block;
+    vertical-align:middle;
+    margin-top:0;
+    margin-left:10px;
+  }
+  .watchlist-card__details[open]{
+    display:block;
+    width:100%;
+    margin-top:10px;
+    margin-left:0;
+  }
+  .watchlist-actions button,
+  .watchlist-card__details>summary{
+    min-height:38px;
+    padding:9px 14px;
+    line-height:1.1;
+  }
+}
+
 .watchlistgroup > .summary{
   display:grid;
   gap:2px;
