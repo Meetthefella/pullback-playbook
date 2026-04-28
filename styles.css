@@ -1423,7 +1423,7 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   z-index:1;
 }
 .reviewworkspace{
-  gap:15px;
+  gap:14px;
   padding:0;
   border:0;
   background:transparent;
@@ -1478,7 +1478,18 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 }
 .reviewchartpanel--compact{
   display:grid;
-  gap:12px;
+  gap:10px;
+}
+.review-chart-controls{
+  margin:0;
+}
+.review-chart-controls > summary{
+  min-height:40px;
+  padding:9px 12px;
+  border-radius:var(--pp-radius-button);
+}
+.review-chart-controls .workflowmenu{
+  margin-top:8px;
 }
 .reviewsectionsubhead{
   margin-top:2px;
@@ -1496,6 +1507,25 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .review-diagnostics-stack{
   display:grid;
   gap:10px;
+}
+.review-advanced-panel{
+  margin-top:8px;
+}
+.review-advanced-panel > summary{
+  min-height:44px;
+}
+.review-ai-preview{
+  margin-top:2px;
+  max-height:200px;
+  overflow:auto;
+  line-height:1.45;
+  color:var(--text-secondary);
+}
+.review-ai-overflow-hint{
+  margin-top:6px;
+  opacity:.66;
+  color:var(--text-muted);
+  font-size:.74rem;
 }
 .review-technical-line{
   margin-top:0;

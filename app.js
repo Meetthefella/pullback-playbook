@@ -13293,10 +13293,6 @@ function normalizeUiCopy(text){
   return String(text || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-function hasContent(text){
-  return typeof text === 'string' && text.trim().length > 0;
-}
-
 function isDuplicatedStatusCopy(message, decisionSummary){
   if(!message || !decisionSummary) return false;
   return normalizeUiCopy(message) === normalizeUiCopy(decisionSummary);
@@ -13318,6 +13314,25 @@ function nonPlanDiagnosticsSummaryMarkup(message, decisionSummary){
     return '<div class="tiny">Bounce is too weak to price cleanly. Waiting for a reclaim and stronger close.</div>';
   }
   return `<div class="summary">${escapeHtml(message)}</div>`;
+}
+
+function ensureReviewAdvancedState(){
+  if(!uiState.reviewAdvancedOpen || typeof uiState.reviewAdvancedOpen !== 'object'){
+    uiState.reviewAdvancedOpen = {};
+  }
+  return uiState.reviewAdvancedOpen;
+}
+
+function isReviewAdvancedOpen(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return false;
+  return ensureReviewAdvancedState()[symbol] === true;
+}
+
+function setReviewAdvancedOpen(ticker, open){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  ensureReviewAdvancedState()[symbol] = open === true;
 }
 
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
@@ -18866,8 +18881,21 @@ function bindReviewWorkspaceActions(record){
   if(!box) return;
   const promptDetails = $('reviewPrompt');
   const responseDetails = $('reviewResponse');
+  const advancedDetails = $('reviewAdvancedDetails');
   if(promptDetails) promptDetails.addEventListener('toggle', () => { uiState.promptOpen[record.ticker] = promptDetails.open; });
   if(responseDetails) responseDetails.addEventListener('toggle', () => { uiState.responseOpen[record.ticker] = responseDetails.open; });
+  if(advancedDetails){
+    advancedDetails.addEventListener('toggle', () => {
+      if(advancedDetails.open && !isReviewAdvancedOpen(record.ticker)){
+        setReviewAdvancedOpen(record.ticker, true);
+        renderReviewWorkspace({source:'advanced_open'});
+        return;
+      }
+      if(!advancedDetails.open){
+        setReviewAdvancedOpen(record.ticker, false);
+      }
+    });
+  }
   const fileInput = $('reviewChartFile');
   if(fileInput) fileInput.addEventListener('change', event => handleChartSelection(record.ticker, event.target.files && event.target.files[0]));
   const chooseBtn = box.querySelector('[data-act="choose-chart"]');
@@ -18921,6 +18949,14 @@ function bindReviewWorkspaceActions(record){
   });
   document.querySelectorAll('#reviewWorkspace .logic').forEach(el => el.addEventListener('change', refreshReview));
   ['entryPrice','stopPrice','targetPrice'].forEach(id => on(id, 'input', calculate));
+}
+
+function updateReviewAiSummaryOverflowHint(){
+  const preview = $('reviewAiSummaryPreview');
+  const hint = $('reviewAiSummaryOverflowHint');
+  if(!preview || !hint) return;
+  const overflowing = preview.scrollHeight > preview.clientHeight + 2;
+  hint.hidden = !overflowing;
 }
 
 function renderReviewWorkspace(options = {}){
@@ -19322,23 +19358,7 @@ function renderReviewWorkspace(options = {}){
       ? 'Re-run analysis'
       : (analysisUiState === 'error' ? 'Analyse Setup' : 'Analyse Setup'));
   const analyseDisabled = analysisUiState === 'idle' || loading || (analysisBusy && !loading);
-  const diagnosticsToneClass = planUI.diagnosticsTone === 'danger'
-    ? 'avoid'
-    : (planUI.diagnosticsTone === 'neutral' ? 'watch' : `analysis-state-${analysisUiState}`);
   const analysisPanelClass = `reviewanalysispanel ${reviewPanelToneClass}`.trim();
-  const analysisPanelBody = analysisUiState === 'idle'
-    ? '<div class="tiny">Add a screenshot to run AI analysis.</div>'
-    : (analysisUiState === 'ready'
-      ? '<div class="tiny">Screenshot attached. AI analysis will start automatically.</div>'
-      : (analysisUiState === 'running'
-        ? `<div class="summary ai-progress-text">🤖 ${escapeHtml(analysisLoadingStage)}</div><div class="tiny ai-progress-subtext">${analysisState.hasSavedAnalysis ? 'Refreshing saved analysis...' : 'Analysing current setup...'}</div>`
-        : (analysisUiState === 'complete'
-          ? '<div class="summary">Analysis complete</div><div class="tiny">Review AI read and trade plan below.</div>'
-          : '<div class="summary">Analysis failed</div><div class="tiny">Try again.</div>')));
-  const diagnosticsPanelBody = null;
-  const diagnosticsPanelMarkup = hasContent(diagnosticsPanelBody)
-    ? diagnosticsPanelBody
-    : '';
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
   const rawRrDisplay = planUI.showRR && displayedPlan.status === 'valid' && Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : 'No actionable plan yet.';
@@ -19358,8 +19378,33 @@ function renderReviewWorkspace(options = {}){
   const chartGuidance = record.review.chartRef && record.review.chartRef.dataUrl
     ? ''
     : '<div class="summary" style="margin-bottom:12px"><strong>📸 Add screenshot for analysis</strong><div class="tiny" style="margin-top:6px">Open the live chart, capture a fresh screenshot, then import it to continue review.</div></div>';
-  const capitalSimulationControls = `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="capital-sim-50">Simulate 50%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-65">Simulate 65%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-85">Simulate 85%</button><button class="ghost compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>`;
-  const reviewDebug = `<details class="compact-details"><summary>Debug State</summary>${renderDebugSectionMarkup('Final Decision', [
+  const hasChartScreenshot = !!(record.review.chartRef && record.review.chartRef.dataUrl);
+  const chartControlsFullMarkup = `<div class="workflowmenu workflowmenu-inline">
+            <button class="secondary compactbutton" type="button" data-act="open-chart">Open Chart</button>
+            <button class="secondary compactbutton" type="button" data-act="choose-chart">Choose Screenshot</button>
+            <button class="secondary compactbutton" type="button" data-act="import-latest">Import Latest</button>
+            <button class="ghost compactbutton" type="button" data-act="clear-chart">Remove Chart</button>
+          </div>`;
+  const chartControlsMarkup = hasChartScreenshot
+    ? `<details class="compact-details review-chart-controls"><summary>Change chart</summary>${chartControlsFullMarkup}</details>`
+    : chartControlsFullMarkup;
+  const aiSummaryPreview = (() => {
+    if(analysisState.error) return `AI analysis failed: ${analysisState.error}`;
+    if(analysisUiState === 'running') return `🤖 ${analysisLoadingStage}`;
+    if(analysisUiState === 'idle' || analysisUiState === 'ready') return 'No AI analysis saved yet.';
+    if(analysisState.normalizedAnalysis){
+      const chartRead = finalDisplayedAnalysisChartRead(record, analysisState.normalizedAnalysis);
+      const text = String(chartRead && chartRead.text || '').trim();
+      return text || 'No AI analysis saved yet.';
+    }
+    const fallback = String(analysisState.rawAnalysis || '').trim();
+    return fallback || 'No AI analysis saved yet.';
+  })();
+  const advancedOpen = isReviewAdvancedOpen(record.ticker);
+  const capitalSimulationControls = advancedOpen
+    ? `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="capital-sim-50">Simulate 50%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-65">Simulate 65%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-85">Simulate 85%</button><button class="ghost compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>`
+    : '';
+  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${renderDebugSectionMarkup('Final Decision', [
     {label:'UI State Source', value:visualState.ui_state_source || '(none)'},
     {label:'Final Verdict Rendered', value:visualState.final_verdict_rendered || visualState.finalVerdict || '(none)'},
     {label:'Rendered Verdict', value:visualState.renderedVerdict || visualState.final_verdict_rendered || '(none)'},
@@ -19466,7 +19511,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Simulated Capital OK', value:capitalSimulationState.simulation ? String(capitalSimulationState.simulation.capitalOk) : '(none)'},
     {label:'Simulated Tradeability', value:capitalSimulationState.simulation ? capitalSimulationState.simulation.tradeability : '(none)'},
     {label:'Simulated Final Verdict Impact', value:capitalSimulationState.simulation ? (simulatedFinalVerdict || displayStage) : '(none)'}
-  ])}${capitalSimulationControls}</details>`;
+  ])}${capitalSimulationControls}</details>` : '';
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
@@ -19533,12 +19578,7 @@ function renderReviewWorkspace(options = {}){
         ${chartGuidance}
         <div class="reviewsectionhead">
           <strong>Chart</strong>
-          <div class="workflowmenu workflowmenu-inline">
-            <button class="secondary compactbutton" type="button" data-act="open-chart">Open Chart</button>
-            <button class="secondary compactbutton" type="button" data-act="choose-chart">Choose Screenshot</button>
-            <button class="secondary compactbutton" type="button" data-act="import-latest">Import Latest</button>
-            <button class="ghost compactbutton" type="button" data-act="clear-chart">Remove Chart</button>
-          </div>
+          ${chartControlsMarkup}
         </div>
         <input id="reviewChartFile" type="file" accept="image/png,image/jpeg,image/*" hidden />
         ${chartPreview}
@@ -19571,49 +19611,62 @@ function renderReviewWorkspace(options = {}){
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
       <div class="reviewsectionhead"><strong>Technical Context</strong></div>
       <div class="summary review-technical-line">${escapeHtml(technicalContextLine)}</div>
-      ${diagnosticsPanelMarkup}
       <div class="review-action-row review-action-row--top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
       ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
-      <div class="review-section-divider"></div>
-      <div class="reviewsectionsubhead"><strong>Diagnostics & Trace</strong></div>
-      <div class="review-diagnostics-stack">
-        ${renderReviewRecomputeDiagnostics(record)}
-        <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
-          <summary>AI Summary</summary>
-          ${renderAnalysisPanelFromRecord(record)}
-        </details>
-        <details class="compact-details">
-          <summary>Plan Diagnostics</summary>
-          <div class="reviewmeta-grid">
-            <div><label>Plan State</label><input id="planStateBox" readonly value="${escapeHtml(planState)}" /></div>
-            <div><label>Plan Math</label><input id="planQualityBox" readonly value="${escapeHtml(planQualityForRr(rrRatio) || 'N/A')}" /></div>
-            <div><label>RR Realism</label><input id="rrRealismBox" readonly value="${escapeHtml(planRealism.rr_realism_label)}" /></div>
-            <div><label>Credible RR</label><input id="credibleRrBox" readonly value="${escapeHtml(credibleRrDisplay)}" /></div>
-            <div><label>Optimistic Target</label><input id="optimisticTargetBox" readonly value="${escapeHtml(planRealism.optimistic_target_flag ? 'Yes' : 'No')}" /></div>
-            <div><label>Target Assessment</label><input id="targetAssessmentBox" readonly value="${escapeHtml(planRealism.credible_target_assessment)}" /></div>
-            <div><label>Plan Source</label><input id="planSourceBox" readonly value="${escapeHtml(String(record.plan.source || effectivePlan.source || ''))}" /></div>
-            <div><label>Trigger State</label><input id="triggerStateBox" readonly value="${escapeHtml(triggerStateLabel(record.plan.triggerState))}" /></div>
-            <div><label>Plan Check</label><input id="planValidationBox" readonly value="${escapeHtml(planValidationStateLabel(planCheckState))}" /></div>
-            <div><label>Execution Mode</label><input id="exitModeBox" readonly value="${escapeHtml(executionModeText)}" /></div>
-            <div><label>Target Review</label><input id="targetReviewStateBox" readonly value="${escapeHtml(targetReviewText)}" /></div>
-            <div><label>Target Alert</label><input id="targetAlertBox" readonly value="${escapeHtml(targetAlertText)}" /></div>
-            <div><label>Capital Comfort</label><input id="capitalComfortBox" readonly value="${escapeHtml(capitalComfort.label)}" /></div>
-          </div>
-        </details>
-        <details class="promptdetails compact-open-on-demand" id="reviewPrompt" ${promptPreviewOpen}>
-          <summary>Prompt Preview</summary>
-          <div class="mutebox scrollbox">${escapeHtml(promptText)}</div>
-        </details>
-      </div>
-      <details class="compact-details reviewchecklist review-checklist-panel">
-        <summary><strong>Checklist</strong> <span id="progressText">Checks met: 0 / 10</span></summary>
-        <div class="prog"><div class="fill" id="progressFill"></div></div>
-        <div class="checks">
-          <div class="checkgroup"><h3>Trend</h3><label class="checkitem"><input type="checkbox" class="logic" id="trendStrong" ${reviewChecks.trendStrong ? 'checked' : ''}> Strong uptrend</label><label class="checkitem"><input type="checkbox" class="logic" id="above50" ${reviewChecks.above50 ? 'checked' : ''}> Above 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="above200" ${reviewChecks.above200 ? 'checked' : ''}> Above 200 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="ma50gt200" ${reviewChecks.ma50gt200 ? 'checked' : ''}> 50 MA above 200 MA</label></div>
-          <div class="checkgroup"><h3>Pullback + Confirmation</h3><label class="checkitem"><input type="checkbox" class="logic" id="near20" ${reviewChecks.near20 ? 'checked' : ''}> Near 20 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="near50" ${reviewChecks.near50 ? 'checked' : ''}> Near 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="stabilising" ${reviewChecks.stabilising ? 'checked' : ''}> Stabilising</label><label class="checkitem"><input type="checkbox" class="logic" id="bounce" ${reviewChecks.bounce ? 'checked' : ''}> Bounce candle</label><label class="checkitem"><input type="checkbox" class="logic" id="volume" ${reviewChecks.volume ? 'checked' : ''}> Volume supportive</label></div>
-          <div class="checkgroup"><h3>Trade Plan</h3><label class="checkitem"><input type="checkbox" class="logic" id="entryDefined" ${reviewChecks.entryDefined ? 'checked' : ''}> Entry defined</label><label class="checkitem"><input type="checkbox" class="logic" id="stopDefined" ${reviewChecks.stopDefined ? 'checked' : ''}> Stop defined</label><label class="checkitem"><input type="checkbox" class="logic" id="targetDefined" ${reviewChecks.targetDefined ? 'checked' : ''}> Target defined</label></div>
-        </div>
-        <div class="summary" id="summaryBox">No setup reviewed yet.</div>
+      <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
+        <summary>AI Summary</summary>
+        <div class="tiny review-ai-preview" id="reviewAiSummaryPreview">${escapeHtml(aiSummaryPreview)}</div>
+        <div class="tiny review-ai-overflow-hint" id="reviewAiSummaryOverflowHint" hidden>Scroll for more</div>
+      </details>
+      <details class="compact-details review-advanced-panel" id="reviewAdvancedDetails" ${advancedOpen ? 'open' : ''}>
+        <summary>Advanced details</summary>
+        ${advancedOpen ? `<div class="review-diagnostics-stack">
+          <div class="reviewsectionsubhead"><strong>Diagnostics & Trace</strong></div>
+          ${renderReviewRecomputeDiagnostics(record)}
+          <details class="compact-details">
+            <summary>Plan Diagnostics</summary>
+            <div class="reviewmeta-grid">
+              <div><label>Plan State</label><input id="planStateBox" readonly value="${escapeHtml(planState)}" /></div>
+              <div><label>Plan Math</label><input id="planQualityBox" readonly value="${escapeHtml(planQualityForRr(rrRatio) || 'N/A')}" /></div>
+              <div><label>RR Realism</label><input id="rrRealismBox" readonly value="${escapeHtml(planRealism.rr_realism_label)}" /></div>
+              <div><label>Credible RR</label><input id="credibleRrBox" readonly value="${escapeHtml(credibleRrDisplay)}" /></div>
+              <div><label>Optimistic Target</label><input id="optimisticTargetBox" readonly value="${escapeHtml(planRealism.optimistic_target_flag ? 'Yes' : 'No')}" /></div>
+              <div><label>Target Assessment</label><input id="targetAssessmentBox" readonly value="${escapeHtml(planRealism.credible_target_assessment)}" /></div>
+              <div><label>Plan Source</label><input id="planSourceBox" readonly value="${escapeHtml(String(record.plan.source || effectivePlan.source || ''))}" /></div>
+              <div><label>Trigger State</label><input id="triggerStateBox" readonly value="${escapeHtml(triggerStateLabel(record.plan.triggerState))}" /></div>
+              <div><label>Plan Check</label><input id="planValidationBox" readonly value="${escapeHtml(planValidationStateLabel(planCheckState))}" /></div>
+              <div><label>Execution Mode</label><input id="exitModeBox" readonly value="${escapeHtml(executionModeText)}" /></div>
+              <div><label>Target Review</label><input id="targetReviewStateBox" readonly value="${escapeHtml(targetReviewText)}" /></div>
+              <div><label>Target Alert</label><input id="targetAlertBox" readonly value="${escapeHtml(targetAlertText)}" /></div>
+              <div><label>Capital Comfort</label><input id="capitalComfortBox" readonly value="${escapeHtml(capitalComfort.label)}" /></div>
+            </div>
+          </details>
+          <details class="promptdetails compact-open-on-demand" id="reviewPrompt" ${promptPreviewOpen}>
+            <summary>Prompt Preview</summary>
+            <div class="mutebox scrollbox">${escapeHtml(promptText)}</div>
+          </details>
+          <details class="compact-details reviewchecklist review-checklist-panel">
+            <summary><strong>Checklist</strong> <span id="progressText">Checks met: 0 / 10</span></summary>
+            <div class="prog"><div class="fill" id="progressFill"></div></div>
+            <div class="checks">
+              <div class="checkgroup"><h3>Trend</h3><label class="checkitem"><input type="checkbox" class="logic" id="trendStrong" ${reviewChecks.trendStrong ? 'checked' : ''}> Strong uptrend</label><label class="checkitem"><input type="checkbox" class="logic" id="above50" ${reviewChecks.above50 ? 'checked' : ''}> Above 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="above200" ${reviewChecks.above200 ? 'checked' : ''}> Above 200 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="ma50gt200" ${reviewChecks.ma50gt200 ? 'checked' : ''}> 50 MA above 200 MA</label></div>
+              <div class="checkgroup"><h3>Pullback + Confirmation</h3><label class="checkitem"><input type="checkbox" class="logic" id="near20" ${reviewChecks.near20 ? 'checked' : ''}> Near 20 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="near50" ${reviewChecks.near50 ? 'checked' : ''}> Near 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="stabilising" ${reviewChecks.stabilising ? 'checked' : ''}> Stabilising</label><label class="checkitem"><input type="checkbox" class="logic" id="bounce" ${reviewChecks.bounce ? 'checked' : ''}> Bounce candle</label><label class="checkitem"><input type="checkbox" class="logic" id="volume" ${reviewChecks.volume ? 'checked' : ''}> Volume supportive</label></div>
+              <div class="checkgroup"><h3>Trade Plan</h3><label class="checkitem"><input type="checkbox" class="logic" id="entryDefined" ${reviewChecks.entryDefined ? 'checked' : ''}> Entry defined</label><label class="checkitem"><input type="checkbox" class="logic" id="stopDefined" ${reviewChecks.stopDefined ? 'checked' : ''}> Stop defined</label><label class="checkitem"><input type="checkbox" class="logic" id="targetDefined" ${reviewChecks.targetDefined ? 'checked' : ''}> Target defined</label></div>
+            </div>
+            <div class="summary" id="summaryBox">No setup reviewed yet.</div>
+          </details>
+          <details class="compact-details">
+            <summary>AI detail trace</summary>
+            ${renderAnalysisPanelFromRecord(record)}
+          </details>
+          <details class="compact-details">
+            <summary>Workspace Status</summary>
+            <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
+            <div class="reviewactions reviewactions-secondary"><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button></div>
+            ${reviewDebug}
+            <div class="statusline tiny" id="reviewWorkspaceStatus">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div>
+          </details>
+        </div>` : ''}
       </details>
       <div class="review-action-row review-action-row--bottom">
         <button class="primary" id="paperTradeBtn" ${paperTradeButtonDisabled ? 'disabled' : ''}>${escapeHtml(paperTradeButtonLabel)}</button>
@@ -19632,22 +19685,15 @@ function renderReviewWorkspace(options = {}){
           <button class="secondary compactbutton" id="paperTradeCancelBtn" type="button">Close Preview</button>
         </div>
       </div>` : ''}
-      <details class="compact-details">
-        <summary>Workspace Status</summary>
-        <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
-        <div class="reviewactions reviewactions-secondary"><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button></div>
-        ${reviewDebug}
-        <div class="statusline tiny" id="reviewWorkspaceStatus">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div>
-      </details>
-      <div class="reviewactions reviewactions-secondary">
-        <button class="danger" id="removeTickerActiveBtn" type="button">Remove Ticker</button>
-      </div>
+      
     </div>
   </div>`;
   bindReviewWorkspaceActions(record);
   refreshReview({skipWatchlistLifecycle:options.skipWatchlistLifecycle === true});
   renderReviewLifecycleSummary(record.ticker);
   calculate({persist:false});
+  updateReviewAiSummaryOverflowHint();
+  window.requestAnimationFrame(() => updateReviewAiSummaryOverflowHint());
   finishReviewRenderLog();
 }
 
