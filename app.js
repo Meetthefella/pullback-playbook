@@ -20052,14 +20052,14 @@ function refreshReview(options = {}){
     });
     requestWatchlistRender({includeFocusQueue:true});
   }
+  if(options.persistDraft !== false){
+    scheduleReviewDraftAutosave({reason:'refresh_review'});
+  }
 }
 
-function saveReview(){
+function persistActiveReviewDraft(options = {}){
   const ticker = activeReviewTicker();
-  if(!ticker){
-    $('selectedTicker').focus();
-    return;
-  }
+  if(!ticker) return false;
   const checks = currentChecks();
   const result = scoreAndStatusFromChecks(checks);
   const record = upsertTickerRecord(ticker);
@@ -20068,9 +20068,9 @@ function saveReview(){
   if(uiState.activeReviewAddsToScannerUniverse !== false && !state.tickers.includes(ticker)) state.tickers.push(ticker);
   const manualReview = {
     checks,
-    entry:$('entryPrice').value || '',
-    stop:$('stopPrice').value || '',
-    target:$('targetPrice').value || '',
+    entry:($('entryPrice') && $('entryPrice').value) || '',
+    stop:($('stopPrice') && $('stopPrice').value) || '',
+    target:($('targetPrice') && $('targetPrice').value) || '',
     score:result.score,
     status:result.status,
     summary:buildSummary(checks, result.status),
@@ -20091,7 +20091,7 @@ function saveReview(){
     lastPlannedAt:manualReview.savedAt
   });
   runWatchlistLifecycleEvaluation({
-    source:'review_save',
+    source:options.source || 'review_autosave',
     tickers:[ticker],
     persist:false,
     render:false,
@@ -20099,11 +20099,37 @@ function saveReview(){
   });
   updateTickerInputFromState();
   commitTickerState();
-  renderWatchlist();
-  renderFocusQueue();
-  renderCards();
-  renderReviewLifecycleSummary(ticker);
-  setStatus('inputStatus', '<span class="ok">Manual review saved as optional notes only. Scanner ranking stays unchanged.</span>');
+  if(options.render === true){
+    renderWatchlist();
+    renderFocusQueue();
+    renderCards();
+    renderReviewLifecycleSummary(ticker);
+  }
+  return true;
+}
+
+function scheduleReviewDraftAutosave(options = {}){
+  const delayMs = Number.isFinite(Number(options.delayMs)) ? Math.max(0, Number(options.delayMs)) : 220;
+  if(scheduleReviewDraftAutosave._timer){
+    clearTimeout(scheduleReviewDraftAutosave._timer);
+    scheduleReviewDraftAutosave._timer = null;
+  }
+  scheduleReviewDraftAutosave._timer = setTimeout(() => {
+    scheduleReviewDraftAutosave._timer = null;
+    persistActiveReviewDraft({source:options.source || 'review_autosave'});
+  }, delayMs);
+}
+
+function saveReview(){
+  const ticker = activeReviewTicker();
+  if(!ticker){
+    if($('selectedTicker')) $('selectedTicker').focus();
+    return;
+  }
+  const saved = persistActiveReviewDraft({source:'review_save', render:true});
+  if(saved){
+    setStatus('inputStatus', '<span class="ok">Manual review saved as optional notes only. Scanner ranking stays unchanged.</span>');
+  }
 }
 
 function resetReview(){
@@ -20400,6 +20426,7 @@ function calculate(options = {}){
       requestWatchlistRender({includeFocusQueue:true});
     }
     renderReviewLifecycleSummary(ticker);
+    scheduleReviewDraftAutosave({reason:'calculate', source:'review_autosave_calculate'});
   }
   syncPlanDisplayMeta();
   const displayStage = activeRecord ? displayStageForRecord(activeRecord) : 'Watch';
