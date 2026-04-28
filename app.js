@@ -16098,7 +16098,29 @@ async function autoAnalyseWatchlist(options = {}){
 
 function currentChecks(){
   const out = {};
-  checklistIds.forEach(id => { out[id] = $(id).checked; });
+  const ticker = activeReviewTicker();
+  const record = ticker ? getTickerRecord(ticker) : null;
+  const savedChecks = (
+    (record && record.review && record.review.manualReview && record.review.manualReview.checks)
+    || (record && record.review && record.review.checks)
+    || (record && record.scan && record.scan.flags && record.scan.flags.checks)
+    || {}
+  );
+  if(!currentChecks._missingLogged) currentChecks._missingLogged = new Set();
+  checklistIds.forEach(id => {
+    const input = $(id);
+    if(input && typeof input.checked === 'boolean'){
+      out[id] = !!input.checked;
+      return;
+    }
+    out[id] = !!savedChecks[id];
+    if(!currentChecks._missingLogged.has(id)){
+      currentChecks._missingLogged.add(id);
+      if(typeof console !== 'undefined' && console.debug){
+        console.debug('[Review] checklist input not mounted; using saved/default value', {id, ticker:ticker || '(none)'});
+      }
+    }
+  });
   return out;
 }
 
@@ -20075,7 +20097,10 @@ function resetReview(){
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
   ['selectedTicker','planStateBox','planQualityBox','planSourceBox','exitModeBox','targetReviewStateBox','targetAlertBox','rrRealismBox','credibleRrBox','optimisticTargetBox','targetAssessmentBox','entryPrice','stopPrice','targetPrice'].forEach(id => { if($(id)) $(id).value = ''; });
-  checklistIds.forEach(id => { $(id).checked = false; });
+  checklistIds.forEach(id => {
+    const input = $(id);
+    if(input) input.checked = false;
+  });
   $('summaryBox').textContent = 'No setup reviewed yet.';
   $('progressText').textContent = 'Checks met: 0 / 10';
   $('progressFill').style.width = '0%';
