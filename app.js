@@ -1532,6 +1532,7 @@ const REVIEW_EXPIRY_TRADING_DAYS = 5;
 const PLAN_EXPIRY_TRADING_DAYS = 3;
 const WATCHLIST_LIFECYCLE_INTERVAL_MS = 5 * 60 * 1000;
 const WATCHLIST_LIFECYCLE_FRESHNESS_MS = 24 * 60 * 60 * 1000;
+const TRACK_FOCUS_LIFECYCLE_REFRESH_MIN_INTERVAL_MS = 15 * 1000;
 const MARKET_STATUS_REFRESH_MS = 60 * 1000;
 const MARKET_TIMEZONE = 'America/New_York';
 const US_MARKET_CALENDAR_CONFIG = {
@@ -4169,6 +4170,18 @@ function handleWorkspaceTabChange(tab){
   if(!startupCoordinator.localStateLoaded) return;
   const nextTab = String(tab || '').toLowerCase();
   if(nextTab === 'track'){
+    const lifecycleRefresh = maybeRunTrackFocusLifecycleRefresh({source:'track_focus'});
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] track_focus_lifecycle_refresh', {
+        ran:lifecycleRefresh.ran === true,
+        changed:lifecycleRefresh.changed === true,
+        reason:String(lifecycleRefresh.reason || ''),
+        inFlight:uiState.watchlistLifecycleRunning === true,
+        lastRunAt:String(uiState.watchlistLifecycleLastRunAt || ''),
+        watchlistDirty:hasWatchlistDirtyRecords(),
+        activeTab:activeWorkspaceTab()
+      });
+    }
     const watchlistDirty = hasWatchlistDirtyRecords();
     const versionStale = Number(startupCoordinator.lastTrackRenderVersion || 0) !== Number(startupCoordinator.currentWatchlistDataVersion || 0);
     const forceFullRender = (
@@ -6336,6 +6349,37 @@ function syncWatchlistLifecycleBeforeRender(source = 'auto_recompute'){
     logUnchanged:false
   });
   return !!(result && result.changed);
+}
+
+function maybeRunTrackFocusLifecycleRefresh(options = {}){
+  const source = String(options.source || 'track_focus');
+  if(activeWorkspaceTab() !== 'track') return {ran:false, changed:false, reason:'track_not_active'};
+  if(uiState.watchlistLifecycleRunning) return {ran:false, changed:false, reason:'in_flight'};
+  const now = Date.now();
+  const lastRunAt = Date.parse(String(uiState.watchlistLifecycleLastRunAt || ''));
+  const recentlyRan = Number.isFinite(lastRunAt)
+    && (now - lastRunAt) < TRACK_FOCUS_LIFECYCLE_REFRESH_MIN_INTERVAL_MS;
+  const watchlistDirty = hasWatchlistDirtyRecords();
+  const staleInputs = !allWatchlistRecords().every(hasFreshLifecycleInputs);
+  const trackNotRendered = startupCoordinator.renderedTabs.track !== true;
+  const shouldRun = options.force === true || watchlistDirty || staleInputs || trackNotRendered;
+  if(!shouldRun) return {ran:false, changed:false, reason:'not_needed'};
+  if(recentlyRan && options.force !== true){
+    return {ran:false, changed:false, reason:'cooldown'};
+  }
+  const result = runWatchlistLifecycleEvaluation({
+    source,
+    persist:true,
+    render:false,
+    force:options.force === true || watchlistDirty || staleInputs,
+    logUnchanged:false
+  });
+  const changed = !!(result && result.changed);
+  if(changed){
+    markWatchlistDirty(null, `${source}_changed`);
+    startupCoordinator.trackNeedsFullRender = true;
+  }
+  return {ran:true, changed, reason:'executed'};
 }
 
 function appendWatchlistDebugEvent(record, event){
@@ -16116,7 +16160,7 @@ function currentChecks(){
     out[id] = !!savedChecks[id];
     if(!currentChecks._missingLogged.has(id)){
       currentChecks._missingLogged.add(id);
-      if(typeof console !== 'undefined' && console.debug){
+      if(window.PP_PERF_DEBUG === true && typeof console !== 'undefined' && console.debug){
         console.debug('[Review] checklist input not mounted; using saved/default value', {id, ticker:ticker || '(none)'});
       }
     }
@@ -20030,28 +20074,16 @@ function refreshReview(options = {}){
     summaryBox.textContent = buildSummary(checks, result.status);
   }else if(!refreshReview._missingTextTargetsLogged.has('summaryBox')){
     refreshReview._missingTextTargetsLogged.add('summaryBox');
-    console.warn('[Review] Skipped text update for missing element:', 'summaryBox');
+    if(window.PP_PERF_DEBUG === true) console.warn('[Review] Skipped text update for missing element:', 'summaryBox');
   }
   if(progressText){
     progressText.textContent = `Checks met: ${result.score} / 10`;
   }else if(!refreshReview._missingTextTargetsLogged.has('progressText')){
     refreshReview._missingTextTargetsLogged.add('progressText');
-    console.warn('[Review] Skipped text update for missing element:', 'progressText');
+    if(window.PP_PERF_DEBUG === true) console.warn('[Review] Skipped text update for missing element:', 'progressText');
   }
   if(progressFill && progressFill.style) progressFill.style.width = `${result.score * 10}%`;
   syncPlanDisplayMeta();
-  const ticker = activeReviewTicker();
-  const record = ticker ? getTickerRecord(ticker) : null;
-  if(record && record.watchlist && record.watchlist.inWatchlist && options.skipWatchlistLifecycle !== true){
-    runWatchlistLifecycleEvaluation({
-      source:'auto_recompute',
-      tickers:[ticker],
-      persist:false,
-      render:false,
-      force:true
-    });
-    requestWatchlistRender({includeFocusQueue:true});
-  }
   if(options.persistDraft !== false){
     scheduleReviewDraftAutosave({reason:'refresh_review'});
   }
@@ -20078,25 +20110,7 @@ function persistActiveReviewDraft(options = {}){
   };
   record.review.manualReview = manualReview;
   record.review.lastReviewedAt = manualReview.savedAt;
-  record.review.savedVerdict = result.status;
   record.review.savedSummary = manualReview.summary;
-  record.review.savedScore = result.score;
-  refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Manual review saved.', 'review');
-  applyPlanCandidateToRecord(record, {
-    entry:manualReview.entry,
-    stop:manualReview.stop,
-    firstTarget:manualReview.target
-  }, {
-    source:'review',
-    lastPlannedAt:manualReview.savedAt
-  });
-  runWatchlistLifecycleEvaluation({
-    source:options.source || 'review_autosave',
-    tickers:[ticker],
-    persist:false,
-    render:false,
-    force:true
-  });
   updateTickerInputFromState();
   commitTickerState();
   if(options.render === true){
