@@ -2186,13 +2186,13 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 .watchlist-card>*{width:100%;min-width:0}
 #watchlistList{
   touch-action:pan-y;
-  padding-bottom:14px;
+  padding-bottom:calc(108px + env(safe-area-inset-bottom));
 }
 #watchlistList::after{
   content:'';
   display:block;
   width:100%;
-  height:14px;
+  height:calc(12px + env(safe-area-inset-bottom));
   user-select:none;
   -webkit-user-select:none;
   -webkit-touch-callout:none;
@@ -2956,14 +2956,14 @@ details>summary::-webkit-details-marker{display:none}
   opacity:.72;
 }
 .watchlistgroup__body{
-  overflow:hidden;
-  max-height:3000px;
-  transition:max-height .24s ease, opacity .2s ease;
+  overflow:visible;
+  display:block;
+  transition:opacity .16s ease;
   opacity:1;
 }
 .watchlistgroup.is-collapsed .watchlistgroup__body{
-  max-height:0;
   opacity:0;
+  display:none;
 }
 .watchlistgroup > .summary strong{
   display:block;

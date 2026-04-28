@@ -7135,6 +7135,17 @@ function watchlistRenderGroupForBucket(bucket){
   return 'active';
 }
 
+function logTrackSectionRender(sectionKey, collapsed, itemCount, renderedCardCount, source = 'watchlist_render'){
+  if(!PP_PERF_DEBUG) return;
+  console.debug('[PP_PERF] track_section_render', {
+    sectionKey:String(sectionKey || ''),
+    collapsed:collapsed === true,
+    itemCount:Number(itemCount || 0),
+    renderedCardCount:Number(renderedCardCount || 0),
+    source:String(source || 'watchlist_render')
+  });
+}
+
 function applyTrackSectionExpandedState(section, expanded){
   if(!section) return;
   section.classList.toggle('is-expanded', expanded === true);
@@ -7146,6 +7157,7 @@ function applyTrackSectionExpandedState(section, expanded){
   }
   if(body){
     body.setAttribute('aria-hidden', expanded === true ? 'false' : 'true');
+    body.style.display = expanded === true ? 'block' : 'none';
   }
 }
 
@@ -7324,8 +7336,10 @@ function buildWatchlistSectionsFragment(records, showExpired){
     if(expanded){
       renderWatchlistSectionCardsSync(sortedGroupRecords, body);
       section.dataset.rendered = '1';
+      logTrackSectionRender(group.key, false, sortedGroupRecords.length, body.children.length, 'watchlist_render_sync');
     }else{
       section.dataset.rendered = '0';
+      logTrackSectionRender(group.key, true, sortedGroupRecords.length, 0, 'watchlist_render_sync');
     }
     if(collapsible){
       header.addEventListener('click', () => {
@@ -7336,6 +7350,9 @@ function buildWatchlistSectionsFragment(records, showExpired){
         if(nextExpanded && section.dataset.rendered !== '1'){
           renderWatchlistSectionCardsSync(sortedGroupRecords, body);
           section.dataset.rendered = '1';
+          logTrackSectionRender(group.key, false, sortedGroupRecords.length, body.children.length, 'watchlist_render_sync_expand');
+        }else{
+          logTrackSectionRender(group.key, !nextExpanded, sortedGroupRecords.length, nextExpanded ? body.children.length : 0, 'watchlist_render_sync_toggle');
         }
       });
     }
@@ -7419,9 +7436,15 @@ async function renderWatchlistChunked(options = {}){
           }).then(() => {
             meta.rendered = true;
             meta.section.dataset.rendered = '1';
+            logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}_expand`);
           }).catch(() => {});
+        }else{
+          logTrackSectionRender(meta.groupKey, !nextExpanded, meta.records.length, nextExpanded ? meta.body.children.length : 0, `${source}_${meta.groupKey}_toggle`);
         }
       });
+    }
+    if(!meta.expanded){
+      logTrackSectionRender(meta.groupKey, true, meta.records.length, 0, `${source}_${meta.groupKey}`);
     }
     fragment.appendChild(meta.section);
   });
@@ -7435,6 +7458,7 @@ async function renderWatchlistChunked(options = {}){
     });
     meta.rendered = true;
     meta.section.dataset.rendered = '1';
+    logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}`);
   }
   uiState.watchlistRenderSignature = renderSignature;
   box.dataset.watchlistSignature = renderSignature;
