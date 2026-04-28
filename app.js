@@ -7037,6 +7037,9 @@ function renderWatchlistCardElement(record){
   const priorityClass = prioritySortValue <= 0
     ? 'watchlist-card__priority watchlist-card__priority--zero'
     : 'watchlist-card__priority';
+  const priorityLabel = prioritySortValue <= 0
+    ? 'Low priority'
+    : `Priority ${String(priority.score)}`;
   const liveRefreshNote = liveRefreshPending
     ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
     : '';
@@ -7051,11 +7054,35 @@ function renderWatchlistCardElement(record){
   const entryConditionsSummary = buildEntryConditionsSummary({
     ticker:entry.ticker,
     finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
+    presentationState:presentationBucket,
     resolvedContract,
     globalVerdict,
     derivedStates,
     displayedPlan
   });
+  const suppressPlanBlockerInHeadline = !!(entryConditionsSummary && entryConditionsSummary.suppressPlanBlockerInHeadline === true);
+  const diagnosticPlanBlocker = planUI.showPlan
+    ? resolvedContract.planStatusLabel
+    : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.');
+  const finalVerdictForHeadline = normalizeVerdict(watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '');
+  const isNearEntryVerdict = finalVerdictForHeadline === 'near_entry';
+  const isDiminishingVerdict = finalVerdictForHeadline === 'diminishing';
+  const isActionableSoonState = finalVerdictForHeadline === 'near_entry' || finalVerdictForHeadline === 'diminishing';
+  const mainCardPlanHeadlineEnabled = isActionableSoonState;
+  const watchlistPlanHeadline = suppressPlanBlockerInHeadline
+    ? (
+      isNearEntryVerdict
+        ? 'Bounce is forming - needs confirmation before entry.'
+        : (isDiminishingVerdict
+          ? 'Structure is weakening - wait for recovery.'
+          : diagnosticPlanBlocker)
+    )
+    : diagnosticPlanBlocker;
+  const compactPrimaryPlanHeadline = mainCardPlanHeadlineEnabled
+    && watchlistPlanHeadline
+    && watchlistPlanHeadline !== decisionSummary
+    ? watchlistPlanHeadline
+    : '';
   const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
   const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
   div.className = `resultcompact result-card result-feed-card scan-card watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
@@ -7063,7 +7090,7 @@ function renderWatchlistCardElement(record){
   div.dataset.visualTone = watchlistVisualState.visual_tone || '';
   div.dataset.visualState = watchlistVisualState.state || '';
   div.dataset.watchlistTicker = entry.ticker;
-  div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span>${watchlistScoreMarkup}<span class="tiny ${escapeHtml(priorityClass)}">Priority ${escapeHtml(String(priority.score))}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(planUI.showPlan ? resolvedContract.planStatusLabel : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.'))}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Log to Diary</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
+  div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span>${watchlistScoreMarkup}<span class="tiny ${escapeHtml(priorityClass)}">${escapeHtml(priorityLabel)}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}${compactPrimaryPlanHeadline ? `<div class="tiny watchlist-plan-meta">${escapeHtml(compactPrimaryPlanHeadline)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(diagnosticPlanBlocker)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Log to Diary</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
   div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
   div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
   div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
@@ -12851,12 +12878,14 @@ function nextUpgradeStateForSummaryLabel(verdict){
 function buildEntryConditionsSummary({
   ticker,
   finalVerdict,
+  presentationState,
   resolvedContract,
   globalVerdict,
   derivedStates,
   displayedPlan
 } = {}){
   const verdict = normalizeVerdict(finalVerdict || (globalVerdict && globalVerdict.final_verdict) || '');
+  const presentation = String(presentationState || '').trim().toLowerCase();
   const structureState = String((derivedStates && derivedStates.structureState) || (globalVerdict && globalVerdict.structure_state) || '').toLowerCase();
   const bounceState = String((derivedStates && derivedStates.bounceState) || (globalVerdict && globalVerdict.bounce_state) || '').toLowerCase();
   const stabilisationState = String((derivedStates && derivedStates.stabilisationState) || '').toLowerCase();
@@ -12896,6 +12925,50 @@ function buildEntryConditionsSummary({
       triggerLine:'Becomes actionable IF: entry trigger stays valid on close.',
       futureStateLine:'Upgrades to: \uD83D\uDE80 Entry.',
       footer:'Becomes actionable IF: entry trigger stays valid on close. Upgrades to: \uD83D\uDE80 Entry.'
+    };
+  }
+  if(presentation === 'diminishing'){
+    const structuralState = String((resolvedContract && resolvedContract.structuralState) || '').toLowerCase();
+    const explicitInvalidationReason = String((globalVerdict && globalVerdict.explicit_invalidation_reason) || '');
+    const normalizedInvalidationReason = explicitInvalidationReason.trim().toLowerCase();
+    const hasExplicitInvalidation = !!(
+      normalizedInvalidationReason
+      && normalizedInvalidationReason !== '(none)'
+      && normalizedInvalidationReason !== 'none'
+      && normalizedInvalidationReason !== 'n/a'
+    );
+    const deadGuardApplied = !!(globalVerdict && (
+      globalVerdict.dead_guard_applied === true
+      || globalVerdict.deadGuardApplied === true
+      || ['dead','avoid'].includes(normalizeVerdict(globalVerdict.final_verdict || globalVerdict.finalVerdict || ''))
+    ));
+    const structureBroken = ['broken','invalid','dead','failed'].includes(structureState)
+      || ['broken','invalid','dead','failed'].includes(structuralState)
+      || hasExplicitInvalidation
+      || deadGuardApplied === true;
+    const triggerLine = 'Becomes actionable IF: Structure stabilises and buyers reclaim control.';
+    const futureStateLine = structureBroken
+      ? 'Drops to: ⛔ Avoid.'
+      : 'Recovers to: 🟡 Monitor.';
+    return {
+      show:true,
+      ready:false,
+      ticker:normalizeTicker(ticker || ''),
+      header:'📉 Diminishing - structure weakening',
+      primary:'Weakening setup - losing quality',
+      definitionLine:'Quality is deteriorating - wait for structure to stabilise.',
+      wording_tone:'weakening_setup',
+      pattern_label:'Weakening setup',
+      pattern_explanation:'Losing quality',
+      secondary:[
+        'Structure must stabilise',
+        'Bounce must improve',
+        'Risk/reward must become realistic'
+      ],
+      triggerLine,
+      futureStateLine,
+      footer:`${triggerLine} ${futureStateLine}`,
+      suppressPlanBlockerInHeadline:true
     };
   }
   if(verdict === 'near_entry'){
