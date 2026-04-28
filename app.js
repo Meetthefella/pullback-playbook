@@ -20025,8 +20025,19 @@ function refreshReview(options = {}){
   const summaryBox = $('summaryBox');
   const progressText = $('progressText');
   const progressFill = $('progressFill');
-  if(summaryBox) summaryBox.textContent = buildSummary(checks, result.status);
-  if(progressText) progressText.textContent = `Checks met: ${result.score} / 10`;
+  if(!refreshReview._missingTextTargetsLogged) refreshReview._missingTextTargetsLogged = new Set();
+  if(summaryBox){
+    summaryBox.textContent = buildSummary(checks, result.status);
+  }else if(!refreshReview._missingTextTargetsLogged.has('summaryBox')){
+    refreshReview._missingTextTargetsLogged.add('summaryBox');
+    console.warn('[Review] Skipped text update for missing element:', 'summaryBox');
+  }
+  if(progressText){
+    progressText.textContent = `Checks met: ${result.score} / 10`;
+  }else if(!refreshReview._missingTextTargetsLogged.has('progressText')){
+    refreshReview._missingTextTargetsLogged.add('progressText');
+    console.warn('[Review] Skipped text update for missing element:', 'progressText');
+  }
   if(progressFill && progressFill.style) progressFill.style.width = `${result.score * 10}%`;
   syncPlanDisplayMeta();
   const ticker = activeReviewTicker();
