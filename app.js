@@ -6360,7 +6360,7 @@ function maybeRunTrackFocusLifecycleRefresh(options = {}){
   const recentlyRan = Number.isFinite(lastRunAt)
     && (now - lastRunAt) < TRACK_FOCUS_LIFECYCLE_REFRESH_MIN_INTERVAL_MS;
   const watchlistDirty = hasWatchlistDirtyRecords();
-  const staleInputs = !allWatchlistRecords().every(hasFreshLifecycleInputs);
+  const staleInputs = !watchlistTickerRecords().every(hasFreshLifecycleInputs);
   const trackNotRendered = startupCoordinator.renderedTabs.track !== true;
   const shouldRun = options.force === true || watchlistDirty || staleInputs || trackNotRendered;
   if(!shouldRun) return {ran:false, changed:false, reason:'not_needed'};
