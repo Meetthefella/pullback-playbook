@@ -20022,9 +20022,12 @@ function loadCard(ticker, options = {}){
 function refreshReview(options = {}){
   const checks = currentChecks();
   const result = scoreAndStatusFromChecks(checks);
-  $('summaryBox').textContent = buildSummary(checks, result.status);
-  $('progressText').textContent = `Checks met: ${result.score} / 10`;
-  $('progressFill').style.width = `${result.score * 10}%`;
+  const summaryBox = $('summaryBox');
+  const progressText = $('progressText');
+  const progressFill = $('progressFill');
+  if(summaryBox) summaryBox.textContent = buildSummary(checks, result.status);
+  if(progressText) progressText.textContent = `Checks met: ${result.score} / 10`;
+  if(progressFill && progressFill.style) progressFill.style.width = `${result.score * 10}%`;
   syncPlanDisplayMeta();
   const ticker = activeReviewTicker();
   const record = ticker ? getTickerRecord(ticker) : null;
@@ -20101,11 +20104,17 @@ function resetReview(){
     const input = $(id);
     if(input) input.checked = false;
   });
-  $('summaryBox').textContent = 'No setup reviewed yet.';
-  $('progressText').textContent = 'Checks met: 0 / 10';
-  $('progressFill').style.width = '0%';
+  const summaryBox = $('summaryBox');
+  const progressText = $('progressText');
+  const progressFill = $('progressFill');
+  if(summaryBox) summaryBox.textContent = 'No setup reviewed yet.';
+  if(progressText) progressText.textContent = 'Checks met: 0 / 10';
+  if(progressFill && progressFill.style) progressFill.style.width = '0%';
   if($('calcNote')) $('calcNote').textContent = 'Enter planned entry, stop, and first target to calculate size.';
-  ['riskPerShare','positionSize','rrValue'].forEach(id => { $(id).textContent = '-'; });
+  ['riskPerShare','positionSize','rrValue'].forEach(id => {
+    const el = $(id);
+    if(el) el.textContent = '-';
+  });
   renderPlannerPlanSummary('', '', '', 'fixed_target');
   renderReviewLifecycleSummary('');
   renderCards();
