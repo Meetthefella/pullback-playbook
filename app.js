@@ -12063,8 +12063,8 @@ function stateLabelForDecisionSummary(finalVerdict){
 
 function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, derivedStates}){
   const verdict = normalizeVerdict(finalVerdict || '');
-  if(verdict === 'entry') return 'Entry: confirmation is in place. Setup is ready to act on.';
-  if(verdict === 'near_entry') return 'Near Entry: stabilising near support. Buyers are starting to respond.';
+  if(verdict === 'entry') return 'Entry conditions met - plan is valid and risk defined.';
+  if(verdict === 'near_entry') return 'Setup is ready - waiting for confirmation trigger.';
   if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
   const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
   const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
@@ -21538,50 +21538,76 @@ function buildPromotionGateTrace(context = {}){
   const hardBlockers = !!context.hardBlockers;
   const tradeStructureClearEnough = context.tradeStructureClearEnough === true;
   const hasPriceablePlanValues = context.hasPriceablePlanValues === true;
+  const pullbackValid = context.pullbackValid === true || ['near_20ma','near_50ma'].includes(pullbackState);
+  const validStructure = ['strong','intact','developing_clean'].includes(structureState);
+  const validBounce = ['improving','confirmed'].includes(bounceState);
+  const hasEntrySafe = Boolean(context.hasEntry);
+  const hasStopSafe = Boolean(context.hasStop);
+  const hasTargetSafe = Boolean(context.hasTarget);
+  const hasPlanValuesSafe = Boolean(context.hasPlanValues);
+  const hasEntry = hasEntrySafe || hasPlanValuesSafe;
+  const hasStop = hasStopSafe || hasPlanValuesSafe;
+  const planExists = Boolean(hasEntrySafe && hasStopSafe);
+  const targetExists = hasTargetSafe || hasPlanValuesSafe;
+  const hasFullTradePlan = Boolean(hasEntrySafe && hasStopSafe && targetExists);
+  const riskValid = context.stopDistanceTooWide !== true && !riskTooWide;
+  const structureHardBlocked = ['weakening','weak','broken'].includes(structureState);
+  const bounceHardBlocked = bounceState === 'attempt';
+  const priceBelow50MA = context.priceBelow50MA === true;
+  const reclaimAttempt = context.reclaimAttempt === true;
+  const below50WithoutReclaim = priceBelow50MA && !reclaimAttempt;
+  const hardGateBlock = structureHardBlocked || bounceHardBlocked || below50WithoutReclaim;
+  const setupReadyForEntry = validStructure && validBounce && planExists && riskValid && pullbackValid && !hardGateBlock;
+  const entryTriggerHit = context.breaksLocalHigh === true
+    || context.reclaimsLevel === true
+    || context.strongBullishContinuation === true;
+  const rrValue = Number(context.rr);
+  const rrReadyForEntry = Number.isFinite(rrValue) ? rrValue >= 2 : false;
 
-  const gate_structure_ok_for_near = ['strong','intact','developing_clean'].includes(structureState);
-  const gate_pullback_zone_ok_for_near = ['near_20ma','near_50ma'].includes(pullbackState);
+  const gate_structure_ok_for_near = validStructure;
+  const gate_pullback_zone_ok_for_near = pullbackValid;
   const gate_stabilisation_ok_for_near = ['clear','present','early'].includes(stabilisationState) && stabilisationState !== 'none';
-  const gate_bounce_ok_for_near = ['early','attempt','confirmed'].includes(bounceState) && bounceState !== 'none';
-  const gate_plan_ok_for_near = ['valid','needs_adjustment'].includes(planStateKey);
-  const gate_risk_width_ok_for_near = !riskTooWide;
-  const gate_hard_blockers_clear_for_near = !hardBlockers;
-  const gate_not_weakening_for_near = structureState !== 'weakening';
-  const gate_trade_structure_clear_enough = tradeStructureClearEnough;
+  const gate_bounce_ok_for_near = validBounce && bounceState !== 'none';
+  const gate_plan_ok_for_near = planExists && ['valid','needs_adjustment'].includes(planStateKey);
+  const gate_risk_width_ok_for_near = riskValid;
+  const gate_hard_blockers_clear_for_near = !hardBlockers && !hardGateBlock;
+  const gate_not_weakening_for_near = !structureHardBlocked;
+  const gate_trade_structure_clear_enough = tradeStructureClearEnough && setupReadyForEntry;
 
   const promotion_watch_to_near_allowed = !!(
-    gate_structure_ok_for_near
-    && gate_pullback_zone_ok_for_near
+    setupReadyForEntry
+    && !entryTriggerHit
+    && bounceState !== 'none'
     && gate_stabilisation_ok_for_near
-    && gate_bounce_ok_for_near
-    && gate_plan_ok_for_near
-    && gate_risk_width_ok_for_near
     && gate_hard_blockers_clear_for_near
-    && gate_not_weakening_for_near
-    && gate_trade_structure_clear_enough
   );
 
-  const gate_structure_ok_for_entry = ['strong','intact'].includes(structureState);
+  const gate_structure_ok_for_entry = validStructure;
   const gate_bounce_confirmed_for_entry = bounceState === 'confirmed';
-  const gate_stabilisation_clear_for_entry = stabilisationState === 'clear';
-  const gate_plan_valid_for_entry = planStateKey === 'valid';
-  const gate_prices_all_defined_for_entry = hasPriceablePlanValues;
-  const gate_blockers_clear_for_entry = !hardBlockers && tradeStructureClearEnough;
+  const gate_stabilisation_clear_for_entry = ['clear','present','early'].includes(stabilisationState) && stabilisationState !== 'none';
+  const gate_plan_valid_for_entry = hasFullTradePlan && planStateKey === 'valid';
+  const gate_prices_all_defined_for_entry = hasPriceablePlanValues && hasFullTradePlan;
+  const gate_blockers_clear_for_entry = !hardBlockers && !hardGateBlock && tradeStructureClearEnough;
+  const gate_rr_ok_for_entry = rrReadyForEntry;
 
   const promotion_near_to_entry_allowed = !!(
-    gate_structure_ok_for_entry
+    setupReadyForEntry
+    && entryTriggerHit
     && gate_bounce_confirmed_for_entry
     && gate_stabilisation_clear_for_entry
     && gate_plan_valid_for_entry
     && gate_prices_all_defined_for_entry
+    && gate_rr_ok_for_entry
     && gate_blockers_clear_for_entry
   );
 
   let promotion_watch_to_near_reason = '';
   if(promotion_watch_to_near_allowed){
-    promotion_watch_to_near_reason = 'Promoted to Near Entry: valid pullback, stabilisation present, and buyers starting to respond.';
+    promotion_watch_to_near_reason = 'Promoted to Near Entry: setup is ready and waiting for confirmation trigger.';
   }else if(!gate_plan_ok_for_near){
     promotion_watch_to_near_reason = 'Stayed Monitor: plan is not valid or adjustable yet.';
+  }else if(hardGateBlock){
+    promotion_watch_to_near_reason = 'Stayed Monitor: structure and bounce conditions are not stable enough yet.';
   }else if(!gate_trade_structure_clear_enough){
     promotion_watch_to_near_reason = (bounceState === 'attempt')
       ? 'Stayed Monitor: bounce attempt present but trade structure not clear enough.'
@@ -21602,11 +21628,13 @@ function buildPromotionGateTrace(context = {}){
 
   let promotion_near_to_entry_reason = '';
   if(promotion_near_to_entry_allowed){
-    promotion_near_to_entry_reason = 'Promoted to Entry: confirmation, clear stabilisation, and full plan pricing available.';
+    promotion_near_to_entry_reason = 'Promoted to Entry: entry conditions met - plan is valid and risk defined.';
   }else if(!gate_bounce_confirmed_for_entry){
     promotion_near_to_entry_reason = 'Stayed Near Entry: bounce not confirmed yet.';
   }else if(!gate_stabilisation_clear_for_entry){
     promotion_near_to_entry_reason = 'Stayed Near Entry: stabilisation is not clear yet.';
+  }else if(!gate_rr_ok_for_entry){
+    promotion_near_to_entry_reason = 'Stayed Near Entry: reward:risk is below 2R.';
   }else if(!gate_plan_valid_for_entry || !gate_prices_all_defined_for_entry){
     promotion_near_to_entry_reason = 'Stayed Near Entry: plan pricing is not fully defined yet.';
   }else if(!gate_structure_ok_for_entry){
@@ -21641,10 +21669,22 @@ function buildPromotionGateTrace(context = {}){
     gate_plan_valid_for_entry,
     gate_prices_all_defined_for_entry,
     gate_blockers_clear_for_entry,
+    gate_rr_ok_for_entry,
     promotion_watch_to_near_allowed,
     promotion_near_to_entry_allowed,
     promotion_watch_to_near_reason,
-    promotion_near_to_entry_reason
+    promotion_near_to_entry_reason,
+    setupReadyForEntry,
+    entryTriggerHit,
+    hardGateBlock,
+    validStructure,
+    validBounce,
+    planExists,
+    targetExists,
+    hasFullTradePlan,
+    hasEntry,
+    hasStop,
+    riskValid
   };
 }
 
@@ -21678,7 +21718,19 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
     riskTooWide:!!context.riskTooWide,
     hardBlockers,
     tradeStructureClearEnough,
-    hasPriceablePlanValues:!!context.hasPriceablePlanValues
+    hasPriceablePlanValues:!!context.hasPriceablePlanValues,
+    hasEntry:!!context.hasEntry,
+    hasStop:!!context.hasStop,
+    hasTarget:!!context.hasTarget,
+    hasPlanValues:!!context.hasPlanValues,
+    stopDistanceTooWide:!!context.stopDistanceTooWide,
+    pullbackValid:!!context.pullbackValid,
+    breaksLocalHigh:!!context.breaksLocalHigh,
+    reclaimsLevel:!!context.reclaimsLevel,
+    strongBullishContinuation:!!context.strongBullishContinuation,
+    priceBelow50MA:!!context.priceBelow50MA,
+    reclaimAttempt:!!context.reclaimAttempt,
+    rr:numericOrNull(context.rr)
   });
   const blockerFlags = {
     structureState,
@@ -21826,10 +21878,13 @@ function resolveFinalStateContract(record, options = {}){
   const planEntry = numericOrNull(effectivePlan && effectivePlan.entry);
   const planStop = numericOrNull(effectivePlan && effectivePlan.stop);
   const planTarget = numericOrNull(effectivePlan && effectivePlan.firstTarget);
+  const hasEntry = Number.isFinite(planEntry);
+  const hasStop = Number.isFinite(planStop);
+  const hasTarget = Number.isFinite(planTarget);
   const hasPriceablePlanValues = !!(
-    Number.isFinite(planEntry)
-    && Number.isFinite(planStop)
-    && Number.isFinite(planTarget)
+    hasEntry
+    && hasStop
+    && hasTarget
     && planEntry > planStop
     && planTarget > planEntry
   );
@@ -21857,7 +21912,10 @@ function resolveFinalStateContract(record, options = {}){
     weakControl,
     hardBlockers,
     tradeStructureClearEnough,
-    hasPriceablePlanValues
+    hasPriceablePlanValues,
+    hasEntry,
+    hasStop,
+    hasTarget
   });
   const finalVerdict = verdictCap.verdict;
   const promotionTrace = verdictCap.blockerFlags && typeof verdictCap.blockerFlags === 'object'
