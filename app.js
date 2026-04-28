@@ -62,6 +62,13 @@ const startupCoordinator = {
   lastTrackUserOpenedAt:0,
   nextAllowedStartupTrackRefreshAt:0
 };
+const trackRefreshRuntime = {
+  inFlight:false,
+  queued:false,
+  lastReason:'',
+  lastStartedAt:'',
+  lastFinishedAt:''
+};
 const deferredStartupQueue = [];
 let deferredStartupQueueRunning = false;
 let deferredStartupTaskSeq = 0;
@@ -16149,6 +16156,9 @@ function recomputeRiskContextForRecord(record, options = {}){
 
 function refreshRiskContextForActiveSetups(options = {}){
   const source = String(options.source || 'risk_context');
+  const trackOnly = options.trackOnly === true;
+  const visibleOnly = options.visibleOnly === true;
+  const suppressTrackRender = options.suppressTrackRender === true;
   const startedAt = nowPerfMs();
   resetRiskFitPerfCounters(`active_setups_${source}`);
   const riskDiagnosticRequested = /risk|account|max_loss|whole_shares|risk_/i.test(source);
@@ -16157,7 +16167,13 @@ function refreshRiskContextForActiveSetups(options = {}){
     : '';
   const canPublishRiskDiagnostic = riskDiagnosticRequested && !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
   const skipIfUnchanged = riskDiagnosticRequested;
-  const records = allTickerRecords();
+  const allRecords = allTickerRecords();
+  const records = trackOnly && visibleOnly
+    ? allRecords.filter(record => {
+      const item = normalizeTickerRecord(record);
+      return !!(item.watchlist && item.watchlist.inWatchlist);
+    })
+    : allRecords;
   const watchlistTickers = records
     .filter(record => {
       const item = normalizeTickerRecord(record);
@@ -16200,10 +16216,23 @@ function refreshRiskContextForActiveSetups(options = {}){
     });
     commitTickerState();
     renderStats();
-    renderScannerResults();
-    renderCards();
-    renderWatchlist();
-    renderFocusQueue();
+    if(trackOnly){
+      if(activeWorkspaceTab() === 'track'){
+        if(!suppressTrackRender){
+          renderWatchlist();
+          renderFocusQueue();
+        }
+      }else{
+        markWatchlistDirty(null, `${source}_hidden_track`);
+        startupCoordinator.renderedTabs.track = false;
+        startupCoordinator.trackNeedsHydratedRender = true;
+      }
+    }else{
+      renderScannerResults();
+      renderCards();
+      renderWatchlist();
+      renderFocusQueue();
+    }
     if(PP_PERF_DEBUG){
       console.debug('[PP_PERF] risk_calc_record_count', {
         risk_calc_reason:source,
@@ -18063,7 +18092,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
       const afterSignature = watchlistRecordRenderSignature(record);
       return beforeSignatures[ticker] !== afterSignature;
     });
-    const trackOnlyRefresh = source === 'startup_refresh_full_user_open';
+    const trackOnlyRefresh = options.trackOnly === true || source === 'startup_refresh_full_user_open' || source === 'track_pull_refresh';
     const renderStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     let patchedCards = 0;
     let patchedFailed = 0;
@@ -18187,6 +18216,129 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     setLiveProcessStatus('idle', 'Idle.');
   }
   return finishWatchlistRefreshLog(summary);
+}
+
+async function refreshTrackOnly(options = {}){
+  const source = String(options.source || 'track_pull_refresh');
+  const requestedWorkspace = activeWorkspaceTab?.() || uiState.activeWorkspaceTab || 'scan';
+  const refreshStartedOnTab = requestedWorkspace;
+  let userNavigatedAwayDuringRefresh = false;
+  const wasTrackActive = requestedWorkspace === 'track';
+  const markUserWorkspaceNavigation = event => {
+    if(!trackRefreshRuntime.inFlight) return;
+    if(!event || !event.target || typeof event.target.closest !== 'function') return;
+    let nextTab = '';
+    const button = event.target.closest('[data-workspace-tab]');
+    if(button){
+      nextTab = String(button.getAttribute('data-workspace-tab') || '').trim().toLowerCase();
+    }else{
+      const anchor = event.target.closest('a[href^="#"]');
+      if(anchor){
+        const href = String(anchor.getAttribute('href') || '').trim();
+        nextTab = String(workspaceAnchorTabMap[href] || '').trim().toLowerCase();
+      }
+    }
+    if(nextTab && nextTab !== 'track'){
+      userNavigatedAwayDuringRefresh = true;
+    }
+  };
+  if(trackRefreshRuntime.inFlight){
+    trackRefreshRuntime.queued = true;
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] track_render_deferred_hidden_after_review_add', {
+        source,
+        reason:'in_flight',
+        activeTab:activeWorkspaceTab(),
+        trackNeedsFullRender:startupCoordinator.trackNeedsFullRender === true,
+        watchlistDirty:hasWatchlistDirtyRecords()
+      });
+    }
+    return {queued:true, source};
+  }
+  trackRefreshRuntime.inFlight = true;
+  trackRefreshRuntime.lastReason = source;
+  trackRefreshRuntime.lastStartedAt = new Date().toISOString();
+  document.addEventListener('click', markUserWorkspaceNavigation, true);
+  const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
+  const previousTrackScrollTop = trackWorkspace ? Number(trackWorkspace.scrollTop || 0) : 0;
+  setLiveProcessStatus('refreshing_watchlist', 'Updating watchlist plans');
+  console.info('[TrackPullRefresh] start', {activeWorkspace:activeWorkspaceTab(), source});
+  try{
+    await pullTrackedRecordsFromBackend({
+      reason:source,
+      force:options.force === true,
+      render:false
+    });
+    await refreshWatchlistRecordsFromSourceOfTruth({
+      source,
+      mode:'full',
+      force:options.force === true,
+      render:false,
+      persist:true
+    });
+    refreshRiskContextForActiveSetups({
+      source,
+      force:options.force === true,
+      trackOnly:true,
+      visibleOnly:true,
+      suppressTrackRender:true
+    });
+    markWatchlistDirty(null, source);
+    if(activeWorkspaceTab() === 'track'){
+      await renderWatchlistChunked({
+        source,
+        batchSize:WATCHLIST_RENDER_BATCH_SIZE,
+        model:prepareWatchlistRenderModel(source, {
+          lightweight:false,
+          allowCache:false
+        })
+      });
+      renderFocusQueue();
+      startupCoordinator.renderedTabs.track = true;
+      startupCoordinator.trackNeedsHydratedRender = false;
+      startupCoordinator.trackDeferredRenderSkipped = false;
+      startupCoordinator.pendingWatchlistPatchFallback = false;
+      startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
+      if(!hasWatchlistDirtyRecords()){
+        startupCoordinator.trackNeedsFullRender = false;
+      }
+      if(trackWorkspace){
+        trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
+      }
+    }else if(wasTrackActive){
+      if(trackWorkspace){
+        trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
+      }
+    }
+    if(
+      refreshStartedOnTab === 'track'
+      && activeWorkspaceTab() !== 'track'
+      && !userNavigatedAwayDuringRefresh
+    ){
+      setActiveWorkspaceTab('track', {
+        source:'track_pull_refresh_internal_restore',
+        focusTop:false
+      });
+    }
+    setLiveProcessStatus('action', 'Watchlist plans updated.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+    console.info('[TrackPullRefresh] complete', {activeWorkspace:activeWorkspaceTab(), source});
+    return {ok:true, source};
+  }catch(error){
+    console.warn('[TrackPullRefresh] failed', error);
+    setLiveProcessStatus('error', 'Watchlist refresh failed.');
+    return {ok:false, source, error:error && error.message ? String(error.message) : 'unknown_error'};
+  }finally{
+    document.removeEventListener('click', markUserWorkspaceNavigation, true);
+    trackRefreshRuntime.inFlight = false;
+    trackRefreshRuntime.lastFinishedAt = new Date().toISOString();
+    if(trackRefreshRuntime.queued){
+      trackRefreshRuntime.queued = false;
+      scheduleDeferredStartupTask(() => refreshTrackOnly({
+        ...options,
+        source
+      }), {idle:false});
+    }
+  }
 }
 
 async function refreshWatchlistTicker(ticker){
@@ -21165,6 +21317,44 @@ function registerPwa(){
   });
 }
 
+function bindTrackPullRefreshGesture(){
+  const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
+  if(!trackWorkspace) return;
+  let trackPullStartY = null;
+  let trackPullTriggered = false;
+  const atTop = () => {
+    const scrollTop = Number(trackWorkspace.scrollTop || 0);
+    const pageTop = Number(window.scrollY || 0);
+    return scrollTop <= 0 && pageTop <= 0;
+  };
+  trackWorkspace.addEventListener('touchstart', event => {
+    if(activeWorkspaceTab() !== 'track') return;
+    if(!atTop()) return;
+    const touch = event.touches && event.touches[0];
+    trackPullStartY = touch ? Number(touch.clientY) : null;
+    trackPullTriggered = false;
+  }, {passive:true});
+  trackWorkspace.addEventListener('touchmove', event => {
+    if(activeWorkspaceTab() !== 'track') return;
+    if(trackPullStartY == null) return;
+    if(!atTop()) return;
+    const touch = event.touches && event.touches[0];
+    if(!touch) return;
+    const deltaY = Number(touch.clientY) - trackPullStartY;
+    if(deltaY > 12){
+      event.preventDefault();
+    }
+    if(deltaY > 72 && !trackPullTriggered){
+      trackPullTriggered = true;
+      refreshTrackOnly({source:'track_pull_refresh', force:true}).catch(() => {});
+    }
+  }, {passive:false});
+  trackWorkspace.addEventListener('touchend', () => {
+    trackPullStartY = null;
+    trackPullTriggered = false;
+  }, {passive:true});
+}
+
 click('addTickerBtn', addTickerFromSearch);
 click('buildBtn', buildCards);
 setScanInProgress(false);
@@ -22995,6 +23185,7 @@ function reviewHeaderVerdictForRecord(record){
 }
 
 installRuntimeDebugHooks();
+bindTrackPullRefreshGesture();
 registerPwa();
 scheduleNamedDeferredStartupTask('startup_application_boot', startApplication, {idle:false});
 

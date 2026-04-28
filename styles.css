@@ -2977,6 +2977,11 @@ details>summary::-webkit-details-marker{display:none}
   color:#ffd89a;
 }
 
+body[data-active-workspace="track"] [data-workspace-card="track"],
+body[data-active-workspace="track"] #watchlistSection{
+  overscroll-behavior-y:contain;
+}
+
 .wrap{
   padding-bottom:calc(96px + env(safe-area-inset-bottom));
 }
