@@ -11969,6 +11969,20 @@ function renderTradeStatusMarkup(status){
 function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
   const weakBounceHeadline = 'Bounce is too weak to price cleanly.';
   const weakBounceSubline = 'Buyers have not taken control yet.';
+  const renderedVerdict = normalizeVerdict(
+    (resolvedContract && (
+      resolvedContract.finalVerdictRendered
+      || resolvedContract.final_verdict_rendered
+      || resolvedContract.finalVerdict
+      || resolvedContract.final_verdict
+    )) || ''
+  );
+  if(renderedVerdict === 'near_entry'){
+    return {
+      line1:'Awaiting confirmation',
+      line2:'Entry trigger not validated'
+    };
+  }
   const blockerCode = String(resolvedContract && resolvedContract.blockerCode || '').trim().toLowerCase();
   const blockerReason = String(resolvedContract && resolvedContract.blockerReason || '').trim().toLowerCase();
   if(['plan_invalid','plan_missing','plan_adjustment'].includes(blockerCode) || blockerReason.includes('invalid plan') || blockerReason.includes('plan not defined') || blockerReason.includes('plan needs adjustment')){
@@ -12884,6 +12898,28 @@ function buildEntryConditionsSummary({
       footer:'Becomes actionable IF: entry trigger stays valid on close. Upgrades to: \uD83D\uDE80 Entry.'
     };
   }
+  if(verdict === 'near_entry'){
+    const triggerLine = 'Becomes actionable IF: Buyers reclaim the 20MA with strength and a higher low holds.';
+    return {
+      show:true,
+      ready:false,
+      ticker:normalizeTicker(ticker || ''),
+      header:'\uD83C\uDFAF Near Entry - Stabilising near support',
+      primary:'Awaiting confirmation',
+      definitionLine:'Almost ready - waiting for confirmation',
+      wording_tone:'healthy_pullback',
+      pattern_label:'Awaiting confirmation',
+      pattern_explanation:'Almost ready - waiting for confirmation',
+      secondary:[
+        'Bounce not yet confirmed',
+        'Entry trigger not validated'
+      ],
+      triggerLine,
+      futureStateLine:'Upgrades to: \uD83D\uDE80 Entry.',
+      footer:`${triggerLine} Upgrades to: \uD83D\uDE80 Entry.`,
+      suppressPlanBlockerInHeadline:true
+    };
+  }
 
   const blockers = [];
   const addBlocker = (id, priority, primary, secondary) => {
@@ -13008,8 +13044,9 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
     return `<div class="entry-conditions-panel entry-conditions-panel--card no-card-click" id="${escapeHtml(panelId)}" hidden>
       <div class="entry-conditions-header"><strong>Status:</strong> ${escapeHtml(details.header || 'Monitor - Not ready')}</div>
       <div class="entry-conditions-pattern"><strong>Core Problem:</strong> ${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
-      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Holding it back:</strong></div>` : ''}
+      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Needs:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
+      ${details.definitionLine ? `<div class="entry-conditions-footer">${escapeHtml(String(details.definitionLine || ''))}</div>` : ''}
       ${triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(triggerLine)}</div>` : ''}
       ${futureStateLine ? `<div class="entry-conditions-footer">${escapeHtml(futureStateLine)}</div>` : (!triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
     </div>`;
@@ -13019,8 +13056,9 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
     <div class="entry-conditions-panel no-card-click" id="${escapeHtml(panelId)}" hidden>
       <div class="entry-conditions-header"><strong>Status:</strong> ${escapeHtml(details.header || 'Monitor - Not ready')}</div>
       <div class="entry-conditions-pattern"><strong>Core Problem:</strong> ${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
-      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Holding it back:</strong></div>` : ''}
+      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Needs:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
+      ${details.definitionLine ? `<div class="entry-conditions-footer">${escapeHtml(String(details.definitionLine || ''))}</div>` : ''}
       ${triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(triggerLine)}</div>` : ''}
       ${futureStateLine ? `<div class="entry-conditions-footer">${escapeHtml(futureStateLine)}</div>` : (!triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
     </div>
