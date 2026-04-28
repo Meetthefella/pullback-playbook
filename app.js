@@ -13293,6 +13293,10 @@ function normalizeUiCopy(text){
   return String(text || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+function hasContent(text){
+  return typeof text === 'string' && text.trim().length > 0;
+}
+
 function isDuplicatedStatusCopy(message, decisionSummary){
   if(!message || !decisionSummary) return false;
   return normalizeUiCopy(message) === normalizeUiCopy(decisionSummary);
@@ -17234,6 +17238,8 @@ function savedAiPlanNumbersAllowed(record){
 function renderAnalysisPanelFromRecord(record){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
+  const analysisRunning = uiState.loadingTicker === item.ticker;
+  const analysisRunningStage = getAnalysisLoadingStage(item.ticker) || 'AI analysis in progress';
   logAnalysisDebug('ANALYSIS_PANEL_RENDER_FIELDS', {
     ticker:item.ticker,
     analysisResult:{
@@ -17248,7 +17254,7 @@ function renderAnalysisPanelFromRecord(record){
     }
   });
   if(analysisState.error){
-    return `<div class="responsegrid"><div class="mutebox badtext">${escapeHtml(analysisState.error)}</div>${analysisState.rawAnalysis ? `<details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details>` : ''}</div>`;
+    return `<div class="responsegrid"><div class="summary tiny ai-summary-message ai-summary-message--failed">${escapeHtml(analysisState.error)}</div>${analysisState.rawAnalysis ? `<details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details>` : ''}</div>`;
   }
   if(analysisState.normalizedAnalysis){
     const analysis = analysisState.normalizedAnalysis;
@@ -17272,7 +17278,10 @@ function renderAnalysisPanelFromRecord(record){
     const planMarkup = showPlanNumbers
       ? `<div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div>`
       : savedAiNoPlanMarkup(chartReadDisplay);
-    return `<div class="responsegrid"><div class="mutebox tiny">${escapeHtml(advisory.advisoryNote)}</div>${advisory.reviewMoreConservative ? '<div class="mutebox warntext"><strong>Final review is more conservative than the saved AI read.</strong></div>' : ''}${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Metrics</summary><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div>${planMarkup}</div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
+    return `<div class="responsegrid">${analysisRunning ? `<div class="summary ai-progress-text">🤖 ${escapeHtml(analysisRunningStage)}</div>` : ''}<div class="summary tiny ai-summary-message">${escapeHtml(advisory.advisoryNote)}</div>${advisory.reviewMoreConservative ? '<div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>Final review is more conservative than the saved AI read.</strong></div>' : ''}${staleAnalysis ? '<div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="summary tiny ai-summary-message ai-summary-message--failed"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Metrics</summary><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div>${planMarkup}</div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
+  }
+  if(analysisRunning){
+    return `<div class="responsegrid"><div class="summary ai-progress-text">🤖 ${escapeHtml(analysisRunningStage)}</div><div class="tiny ai-progress-subtext">${analysisState.hasSavedAnalysis ? 'Refreshing saved analysis...' : 'Analysing current setup...'}</div></div>`;
   }
   if(!analysisState.rawAnalysis) return '<div class="tiny">No AI analysis saved yet.</div>';
   logDebug('DEBUG_RENDER', 'LEGACY_PATH_STILL_IN_USE', 'renderAnalysisPanelFromRecord-fallback', item.ticker);
@@ -18855,19 +18864,6 @@ async function submitPaperTradeFromReview(ticker){
 function bindReviewWorkspaceActions(record){
   const box = $('reviewWorkspace');
   if(!box) return;
-  const notesField = $('reviewNotes');
-  if(notesField){
-    notesField.addEventListener('input', event => {
-      const liveRecord = upsertTickerRecord(record.ticker);
-      liveRecord.review.notes = event.target.value;
-      commitTickerState();
-    });
-    notesField.addEventListener('change', event => {
-      const liveRecord = upsertTickerRecord(record.ticker);
-      liveRecord.review.notes = event.target.value;
-      commitTickerState();
-    });
-  }
   const promptDetails = $('reviewPrompt');
   const responseDetails = $('reviewResponse');
   if(promptDetails) promptDetails.addEventListener('toggle', () => { uiState.promptOpen[record.ticker] = promptDetails.open; });
@@ -19318,7 +19314,6 @@ function renderReviewWorkspace(options = {}){
   }
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
-  const notesPlaceholder = loading ? '🤖 AI analysis in progress...' : 'Add ticker-specific notes here.';
   const analysisUiState = reviewAnalysisUiStateForRecord(record);
   const analysisLoadingStage = getAnalysisLoadingStage(record.ticker) || 'Building analysis...';
   const analyseLabel = loading
@@ -19340,15 +19335,23 @@ function renderReviewWorkspace(options = {}){
         : (analysisUiState === 'complete'
           ? '<div class="summary">Analysis complete</div><div class="tiny">Review AI read and trade plan below.</div>'
           : '<div class="summary">Analysis failed</div><div class="tiny">Try again.</div>')));
-  const diagnosticsPanelBody = planUI.diagnosticsMessage
-    ? nonPlanDiagnosticsSummaryMarkup(planUI.diagnosticsMessage, decisionSummary)
-    : analysisPanelBody;
+  const diagnosticsPanelBody = null;
+  const diagnosticsPanelMarkup = hasContent(diagnosticsPanelBody)
+    ? diagnosticsPanelBody
+    : '';
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
   const rawRrDisplay = planUI.showRR && displayedPlan.status === 'valid' && Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : 'No actionable plan yet.';
   const credibleRrDisplay = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   const planRealismSummary = planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.';
-  const planRealismReasons = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
+  const primaryPlanMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
+  const secondaryPlanMessage = String(nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
+  const dedupedPlanRealismSummary = !planUI.showPlan && primaryPlanMessage && (secondaryPlanMessage === primaryPlanMessage || secondaryPlanMessage === tradeStatusText.line1)
+    ? ''
+    : secondaryPlanMessage;
+  const calcNoteText = planUI.showPlan
+    ? 'Enter planned entry, stop, and first target to calculate size.'
+    : ((primaryPlanMessage && primaryPlanMessage === tradeStatusText.line1) ? '' : primaryPlanMessage);
   const chartPreview = record.review.chartRef && record.review.chartRef.dataUrl
     ? `<div class="thumbwrap"><img class="thumb reviewthumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>`
     : '<div class="tiny">No chart attached yet.</div>';
@@ -19563,15 +19566,14 @@ function renderReviewWorkspace(options = {}){
         <div class="stat review-hidden"><div>Capital Check</div><div class="big" id="capitalCheckBox">${escapeHtml(capitalComfort.note || 'Clear')}</div></div>
       </div>
       <div class="statnote trade-plan-fx-note ${planUI.showCapital ? '' : 'review-hidden'}" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div>
-      <div class="tiny" id="calcNote">${escapeHtml(planUI.showPlan ? 'Enter planned entry, stop, and first target to calculate size.' : nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary))}</div>
+      ${calcNoteText ? `<div class="tiny" id="calcNote">${escapeHtml(calcNoteText)}</div>` : ''}
     </div>
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
       <div class="reviewsectionhead"><strong>Technical Context</strong></div>
       <div class="summary review-technical-line">${escapeHtml(technicalContextLine)}</div>
-      ${diagnosticsPanelBody}
-      <div class="reviewactions reviewactions-top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
-      <textarea id="reviewNotes" class="${loading ? 'review-notes--ai' : ''}" placeholder="${escapeHtml(notesPlaceholder)}">${escapeHtml(record.review.notes || '')}</textarea>
-      <div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary))}</div>
+      ${diagnosticsPanelMarkup}
+      <div class="review-action-row review-action-row--top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
+      ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
       <div class="review-section-divider"></div>
       <div class="reviewsectionsubhead"><strong>Diagnostics & Trace</strong></div>
       <div class="review-diagnostics-stack">
@@ -19579,10 +19581,6 @@ function renderReviewWorkspace(options = {}){
         <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
           <summary>AI Summary</summary>
           ${renderAnalysisPanelFromRecord(record)}
-        </details>
-        <details class="compact-details" id="planRealismReasonsPanel" ${planRealismReasons ? '' : 'hidden'}>
-          <summary>Why this call</summary>
-          <div class="tiny" id="planRealismReasons">${escapeHtml(planRealismReasons)}</div>
         </details>
         <details class="compact-details">
           <summary>Plan Diagnostics</summary>
@@ -19617,11 +19615,11 @@ function renderReviewWorkspace(options = {}){
         </div>
         <div class="summary" id="summaryBox">No setup reviewed yet.</div>
       </details>
-      <div class="reviewactions">
+      <div class="review-action-row review-action-row--bottom">
         <button class="primary" id="paperTradeBtn" ${paperTradeButtonDisabled ? 'disabled' : ''}>${escapeHtml(paperTradeButtonLabel)}</button>
         <button class="secondary" id="saveReviewBtn">Save Review</button>
-        <button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button>
       </div>
+      <div class="review-action-row review-action-row--watchlist"><button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button></div>
       <div class="tiny review-next-action-primary">Can I trade this now? ${escapeHtml(reviewNextActionLabel)}</div>
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}
@@ -19806,12 +19804,6 @@ function refreshReview(options = {}){
   syncPlanDisplayMeta();
   const ticker = activeReviewTicker();
   const record = ticker ? getTickerRecord(ticker) : null;
-  const reviewNotes = $('reviewNotes');
-  if(reviewNotes){
-    const aiBusy = !!(ticker && uiState.loadingTicker === ticker);
-    reviewNotes.classList.toggle('review-notes--ai', aiBusy);
-    reviewNotes.placeholder = aiBusy ? '🤖 AI analysis in progress...' : 'Add ticker-specific notes here.';
-  }
   if(record && record.watchlist && record.watchlist.inWatchlist && options.skipWatchlistLifecycle !== true){
     runWatchlistLifecycleEvaluation({
       source:'auto_recompute',
@@ -19885,7 +19877,7 @@ function resetReview(){
   $('summaryBox').textContent = 'No setup reviewed yet.';
   $('progressText').textContent = 'Checks met: 0 / 10';
   $('progressFill').style.width = '0%';
-  $('calcNote').textContent = 'Enter planned entry, stop, and first target to calculate size.';
+  if($('calcNote')) $('calcNote').textContent = 'Enter planned entry, stop, and first target to calculate size.';
   ['riskPerShare','positionSize','rrValue'].forEach(id => { $(id).textContent = '-'; });
   renderPlannerPlanSummary('', '', '', 'fixed_target');
   renderReviewLifecycleSummary('');
@@ -20048,12 +20040,13 @@ function syncPlanDisplayMeta(){
   if($('positionSizeStat')) $('positionSizeStat').classList.toggle('review-hidden', !planUI.showPositionSize);
   if($('positionCostStat')) $('positionCostStat').classList.toggle('review-hidden', !planUI.showPlan);
   if($('fxBasisBox')) $('fxBasisBox').classList.toggle('review-hidden', !planUI.showCapital);
-  if($('planRealismSummary')) $('planRealismSummary').textContent = planUI.showPlan
-    ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
-    : nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary);
-  const planReasonText = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
-  if($('planRealismReasons')) $('planRealismReasons').textContent = planReasonText;
-  if($('planRealismReasonsPanel')) $('planRealismReasonsPanel').hidden = !planReasonText;
+  if($('planRealismSummary')){
+    const calcMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
+    const realismMessage = String(nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
+    $('planRealismSummary').textContent = planUI.showPlan
+      ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
+      : (calcMessage && realismMessage === calcMessage ? '' : realismMessage);
+  }
 }
 
 function refreshSelectedTickerLifecycle(){
@@ -20268,12 +20261,13 @@ function calculate(options = {}){
   if($('credibleRrBox')) $('credibleRrBox').value = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   if($('optimisticTargetBox')) $('optimisticTargetBox').value = planRealism.optimistic_target_flag ? 'Yes' : 'No';
   if($('targetAssessmentBox')) $('targetAssessmentBox').value = planRealism.credible_target_assessment || 'N/A';
-  if($('planRealismSummary')) $('planRealismSummary').textContent = planUI.showPlan
-    ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
-    : nonPlanRealismSummaryText(planUI.diagnosticsMessage, plannerDecisionSummary);
-  const plannerReasonText = planUI.showPlan && planRealism.reasons && planRealism.reasons.length ? planRealism.reasons.slice(0, 2).join(' | ') : '';
-  if($('planRealismReasons')) $('planRealismReasons').textContent = plannerReasonText;
-  if($('planRealismReasonsPanel')) $('planRealismReasonsPanel').hidden = !plannerReasonText;
+  if($('planRealismSummary')){
+    const calcMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary) || '').trim();
+    const realismMessage = String(nonPlanRealismSummaryText(planUI.diagnosticsMessage, plannerDecisionSummary) || '').trim();
+    $('planRealismSummary').textContent = planUI.showPlan
+      ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
+      : (calcMessage && realismMessage === calcMessage ? '' : realismMessage);
+  }
   if(!planUI.showPlan){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
@@ -20284,7 +20278,11 @@ function calculate(options = {}){
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
       plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
-    $('calcNote').textContent = nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary);
+    if($('calcNote')){
+      const tradeLine = String(tradeStatusText && tradeStatusText.line1 || '').trim();
+      const calcLine = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary) || '').trim();
+      $('calcNote').textContent = (calcLine && calcLine === tradeLine) ? '' : calcLine;
+    }
     return;
   }
   if(displayedPlan.status === 'missing'){
@@ -20297,7 +20295,7 @@ function calculate(options = {}){
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
       plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
-    $('calcNote').textContent = 'Add planned entry, stop, and first target to complete the trade plan.';
+    if($('calcNote')) $('calcNote').textContent = 'Add planned entry, stop, and first target to complete the trade plan.';
     return;
   }
   if(displayedPlan.status === 'invalid'){
@@ -20310,7 +20308,7 @@ function calculate(options = {}){
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
       plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
-    $('calcNote').textContent = 'Planned entry, stop, and first target must form a valid long plan.';
+    if($('calcNote')) $('calcNote').textContent = 'Planned entry, stop, and first target must form a valid long plan.';
     return;
   }
   $('riskPerShare').textContent = Number.isFinite(displayedPlan.riskFit.risk_per_share) ? displayedPlan.riskFit.risk_per_share.toFixed(2) : '-';
@@ -20322,17 +20320,19 @@ function calculate(options = {}){
     const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
     plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
   }
-  $('calcNote').textContent = planRealism.plan_realism_reason || (displayedPlan.riskFit.risk_status === 'too_wide'
-    ? `Stop would be too wide for ${formatPound(state.userRiskPerTrade || currentMaxLoss())} risk.`
-    : (displayedPlan.capitalFit.capital_fit === 'too_expensive'
-      ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but the position cost is above the current account size.`
-      : (displayedPlan.capitalFit.capital_fit === 'too_heavy'
-        ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital concentration is too high for this account size.`
-        : (displayedPlan.capitalFit.capital_fit === 'heavy'
-          ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital usage is heavy for this account size.`
-          : (displayedPlan.capitalFit.capital_fit === 'unknown'
-            ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital affordability is unavailable. ${displayedPlan.capitalFit.capital_note}`
-            : `Current max loss is ${formatGbp(displayedPlan.riskFit.max_loss)}. Capital usage is ${capitalFitLabel(displayedPlan.capitalFit.capital_fit).toLowerCase()}.`)))));
+  if($('calcNote')){
+    $('calcNote').textContent = planRealism.plan_realism_reason || (displayedPlan.riskFit.risk_status === 'too_wide'
+      ? `Stop would be too wide for ${formatPound(state.userRiskPerTrade || currentMaxLoss())} risk.`
+      : (displayedPlan.capitalFit.capital_fit === 'too_expensive'
+        ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but the position cost is above the current account size.`
+        : (displayedPlan.capitalFit.capital_fit === 'too_heavy'
+          ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital concentration is too high for this account size.`
+          : (displayedPlan.capitalFit.capital_fit === 'heavy'
+            ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital usage is heavy for this account size.`
+            : (displayedPlan.capitalFit.capital_fit === 'unknown'
+              ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital affordability is unavailable. ${displayedPlan.capitalFit.capital_note}`
+              : `Current max loss is ${formatGbp(displayedPlan.riskFit.max_loss)}. Capital usage is ${capitalFitLabel(displayedPlan.capitalFit.capital_fit).toLowerCase()}.`)))));
+  }
 }
 
 async function copyText(text){

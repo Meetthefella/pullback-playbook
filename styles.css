@@ -21,6 +21,12 @@
   --radius-primary:14px;
   --radius-secondary:12px;
   --radius-pill:999px;
+  --pp-radius-card:16px;
+  --pp-radius-button:14px;
+  --pp-radius-small:12px;
+  --radius-card:16px;
+  --radius-button:12px;
+  --radius-flush:14px;
   --spacing-1:.2rem;
   --spacing-2:.4rem;
   --spacing-3:.6rem;
@@ -1818,10 +1824,104 @@ button:hover:not([disabled]){transform:translateY(-1px)}
   font-weight:500;
   color:var(--text-primary);
 }
-.reviewactions{display:flex;flex-wrap:wrap;gap:10px}
+.reviewactions{display:flex;flex-wrap:wrap;gap:8px}
 .reviewactions-top{margin-top:-2px}
-.reviewactions-secondary{margin-top:10px}
+.reviewactions-secondary{margin-top:8px}
 .reviewanalysispanel .reviewactions{margin-top:0}
+.review-action-row{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+  margin-top:8px;
+}
+.review-action-row--watchlist{
+  grid-template-columns:1fr;
+  margin-top:6px;
+}
+.review-action-row button{
+  min-height:48px;
+  padding:12px 14px;
+  font-size:.82rem;
+  font-weight:700;
+  border-radius:var(--pp-radius-button);
+  line-height:1.1;
+  text-align:center;
+  white-space:normal;
+}
+.review-action-row--top button,
+.review-action-row--bottom button{
+  white-space:nowrap;
+}
+.review-action-row--watchlist button{
+  white-space:normal;
+}
+.review-action-stack{
+  display:grid;
+  gap:10px;
+  margin-top:8px;
+}
+.review-action-stack .compact-details{
+  margin:0;
+}
+.review-action-stack .compact-details > summary,
+.reviewworkspace .compact-details.reviewchecklist > summary{
+  width:100%;
+  min-height:48px;
+  padding:12px 14px;
+  border-radius:var(--pp-radius-button);
+  font-size:.82rem;
+  font-weight:700;
+  background:rgba(9,14,24,.62);
+  color:var(--text-primary);
+  box-shadow:inset 0 0 0 1px rgba(148,163,184,.44);
+}
+.reviewworkspace .compact-details.reviewchecklist{
+  margin-top:8px;
+}
+.reviewworkspace .panelbox{
+  padding:16px;
+  border-radius:var(--pp-radius-card);
+}
+.reviewworkspace .panelbox .summary,
+.reviewworkspace .panelbox .mutebox{
+  border-radius:var(--pp-radius-button);
+}
+.reviewworkspace .panelbox .compact-details{
+  border:0;
+  background:transparent;
+  box-shadow:none;
+}
+.reviewworkspace .panelbox .compact-details[open]{
+  padding:0;
+}
+.reviewworkspace #addWatchlistActiveBtn[disabled]{
+  opacity:.52;
+  color:var(--text-muted);
+}
+.reviewworkspace #addWatchlistActiveBtn[disabled]:hover{
+  transform:none;
+}
+.review-diagnostics-stack{
+  gap:10px;
+}
+.reviewworkspace .responsegrid .mutebox{
+  font-family:inherit;
+}
+.ai-summary-message{
+  margin:0;
+  padding:10px 12px;
+  border-radius:var(--pp-radius-button);
+  background:rgba(148,163,184,.10);
+  color:var(--text-secondary);
+}
+.ai-summary-message--warning{
+  background:rgba(245,158,11,.12);
+  color:rgba(255,214,146,.92);
+}
+.ai-summary-message--failed{
+  background:rgba(245,158,11,.12);
+  color:rgba(255,214,146,.96);
+}
 .reviewworkspace-shell.review-tone--monitor .warntext,
 .reviewworkspace-shell.review-tone--monitor .badtext{
   color:var(--tone-monitor);
