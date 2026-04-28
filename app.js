@@ -1408,6 +1408,17 @@ uiState.analysisActiveRequest = uiState.analysisActiveRequest && typeof uiState.
 uiState.analysisLoadingStageByTicker = uiState.analysisLoadingStageByTicker && typeof uiState.analysisLoadingStageByTicker === 'object'
   ? uiState.analysisLoadingStageByTicker
   : {};
+uiState.reviewAiRuntime = uiState.reviewAiRuntime && typeof uiState.reviewAiRuntime === 'object'
+  ? uiState.reviewAiRuntime
+  : {
+    ticker:'',
+    status:'idle',
+    requestId:'',
+    startedAt:0,
+    completedAt:0,
+    error:'',
+    prompt:''
+  };
 uiState.paperTradeStateByTicker = uiState.paperTradeStateByTicker && typeof uiState.paperTradeStateByTicker === 'object'
   ? uiState.paperTradeStateByTicker
   : {};
@@ -2120,7 +2131,10 @@ const reviewAnalysisFeature = createReviewAnalysisFeature({
   displayStageForRecord,
   getTickerRecord,
   upsertTickerRecord,
-  analyseSetup
+  analyseSetup,
+  isReviewAiAnalysisStale,
+  clearReviewAiAnalysis,
+  getReviewAiRuntime
 });
 const trackWatchlistFeature = createTrackWatchlistFeature({
   normalizeTicker,
@@ -15056,11 +15070,102 @@ function reviewAnalysisUiStateForRecord(record){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
   const chartAttached = !!(item.review && item.review.chartRef && item.review.chartRef.dataUrl);
+  const runtime = uiState.reviewAiRuntime && typeof uiState.reviewAiRuntime === 'object'
+    ? uiState.reviewAiRuntime
+    : null;
+  if(runtime && runtime.status === 'running' && normalizeTicker(runtime.ticker || '') === item.ticker){
+    if(isReviewAiAnalysisStale(item.ticker)){
+      console.warn('[review-analysis] stale_runtime_auto_cleared', {ticker:item.ticker});
+      clearReviewAiAnalysis(item.ticker);
+    }else{
+      return 'running';
+    }
+  }
   if(!chartAttached) return 'idle';
-  if(uiState.loadingTicker === item.ticker) return 'running';
   if(analysisState.error) return 'error';
   if(analysisState.hasSavedAnalysis) return 'complete';
   return 'ready';
+}
+
+const REVIEW_AI_RUNTIME_STALE_TIMEOUT_MS = 90 * 1000;
+
+function getReviewAiRuntime(){
+  if(!uiState.reviewAiRuntime || typeof uiState.reviewAiRuntime !== 'object'){
+    uiState.reviewAiRuntime = {
+      ticker:'',
+      status:'idle',
+      requestId:'',
+      startedAt:0,
+      completedAt:0,
+      error:'',
+      prompt:''
+    };
+  }
+  return uiState.reviewAiRuntime;
+}
+
+function beginReviewAiAnalysis(ticker, prompt){
+  const runtime = getReviewAiRuntime();
+  const symbol = normalizeTicker(ticker);
+  uiState.analysisRequestSeq = Number(uiState.analysisRequestSeq || 0) + 1;
+  const requestId = `analysis-${uiState.analysisRequestSeq}-${Date.now()}`;
+  runtime.ticker = symbol;
+  runtime.status = 'running';
+  runtime.requestId = requestId;
+  runtime.startedAt = Date.now();
+  runtime.completedAt = 0;
+  runtime.error = '';
+  runtime.prompt = String(prompt || '');
+  uiState.loadingTicker = symbol;
+  return requestId;
+}
+
+function completeReviewAiAnalysis(ticker, requestId){
+  const runtime = getReviewAiRuntime();
+  const symbol = normalizeTicker(ticker);
+  if(runtime.requestId !== requestId || normalizeTicker(runtime.ticker || '') !== symbol) return false;
+  runtime.status = 'success';
+  runtime.completedAt = Date.now();
+  runtime.error = '';
+  uiState.loadingTicker = '';
+  return true;
+}
+
+function failReviewAiAnalysis(ticker, requestId, errorMessage){
+  const runtime = getReviewAiRuntime();
+  const symbol = normalizeTicker(ticker);
+  if(runtime.requestId !== requestId || normalizeTicker(runtime.ticker || '') !== symbol) return false;
+  runtime.status = 'error';
+  runtime.completedAt = Date.now();
+  runtime.error = String(errorMessage || '');
+  uiState.loadingTicker = '';
+  return true;
+}
+
+function clearReviewAiAnalysis(ticker){
+  const runtime = getReviewAiRuntime();
+  const symbol = normalizeTicker(ticker);
+  if(symbol && normalizeTicker(runtime.ticker || '') !== symbol) return false;
+  runtime.status = 'idle';
+  runtime.requestId = '';
+  runtime.startedAt = 0;
+  runtime.completedAt = Date.now();
+  runtime.error = '';
+  runtime.prompt = '';
+  if(!symbol || normalizeTicker(uiState.loadingTicker || '') === symbol){
+    uiState.loadingTicker = '';
+  }
+  return true;
+}
+
+function isReviewAiAnalysisStale(ticker){
+  const runtime = getReviewAiRuntime();
+  const symbol = normalizeTicker(ticker);
+  if(runtime.status !== 'running') return false;
+  if(normalizeTicker(runtime.ticker || '') !== symbol) return false;
+  const startedAt = Number(runtime.startedAt || 0);
+  if(!Number.isFinite(startedAt) || startedAt <= 0) return true;
+  return (Date.now() - startedAt) > REVIEW_AI_RUNTIME_STALE_TIMEOUT_MS;
 }
 
 function setAnalysisLoadingStage(ticker, message){
@@ -16931,14 +17036,27 @@ async function analyseSetup(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   ticker = symbol;
+  console.debug('[review-analysis] analyse_setup_click', {ticker});
+  if(isReviewAiAnalysisStale(ticker)){
+    console.warn('[review-analysis] stale_runtime_cleared_before_start', {ticker});
+    clearReviewAiAnalysis(ticker);
+  }
   const activeRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
     ? uiState.analysisActiveRequest
     : null;
+  const runtime = getReviewAiRuntime();
+  if(runtime.status === 'running' && normalizeTicker(runtime.ticker || '') === ticker && !isReviewAiAnalysisStale(ticker)){
+    console.warn('[review-analysis] duplicate_running_click_ignored', {ticker});
+    return;
+  }
+  // Compatibility-only legacy flag reconciliation.
+  // reviewAiRuntime is the sole control-flow authority for running/stale state.
   const activeLoadingTicker = normalizeTicker(uiState.loadingTicker || '');
   if(activeLoadingTicker){
-    if(activeLoadingTicker === ticker){
-      setScannerCardClickTrace(ticker, 'analyseSetup.skipped', `loadingTicker=${activeLoadingTicker}`);
-      return;
+    if(activeLoadingTicker === ticker && !(runtime.status === 'running' && normalizeTicker(runtime.ticker || '') === ticker)){
+      console.warn('[review-analysis] clearing_legacy_loadingTicker_drift', {ticker, loadingTicker:activeLoadingTicker});
+      uiState.loadingTicker = '';
+      clearAnalysisLoadingStage(activeLoadingTicker);
     }
     if(activeRequest && activeRequest.controller && typeof activeRequest.controller.abort === 'function' && !activeRequest.controller.signal.aborted){
       activeRequest.cancelReason = 'superseded';
@@ -16948,8 +17066,21 @@ async function analyseSetup(ticker){
     }
     clearAnalysisLoadingStage(activeLoadingTicker);
   }
-  uiState.analysisRequestSeq = Number(uiState.analysisRequestSeq || 0) + 1;
-  const analysisRequestId = `analysis-${uiState.analysisRequestSeq}-${Date.now()}`;
+  const record = upsertTickerRecord(ticker);
+  record.review.cardOpen = true;
+  // 1) sync UI -> state first, so prompt reflects latest typed values.
+  syncStateFromDom();
+  let card = tickerRecordToLegacyCard(record);
+  const notesEl = $('reviewNotes') || $(`notes-${ticker}`);
+  if(notesEl){
+    record.review.notes = notesEl.value;
+    card.notes = notesEl.value;
+  }
+  // 2) build prompt only after sync/copy.
+  const prompt = buildTickerPrompt(card);
+  card.lastPrompt = prompt;
+  // 3) begin runtime after prompt is finalized.
+  const analysisRequestId = beginReviewAiAnalysis(ticker, prompt);
   const requestController = new AbortController();
   uiState.analysisActiveRequest = {
     id:analysisRequestId,
@@ -16957,8 +17088,9 @@ async function analyseSetup(ticker){
     controller:requestController,
     cancelReason:''
   };
-  uiState.loadingTicker = ticker;
   setAnalysisLoadingStage(ticker, 'Reading chart...');
+  console.debug('[review-analysis] request_started', {ticker, requestId:analysisRequestId});
+  renderCards();
   const liveAnalyseButton = $('analyseActiveBtn');
   if(liveAnalyseButton){
     liveAnalyseButton.disabled = true;
@@ -16967,19 +17099,30 @@ async function analyseSetup(ticker){
   setScannerCardClickTrace(ticker, 'analyseSetup.loading', `loadingTicker_set request=${analysisRequestId}`);
   try{
     setScannerCardClickTrace(ticker, 'analyseSetup.enter', `request=${analysisRequestId}`);
-    syncStateFromDom();
     const record = upsertTickerRecord(ticker);
     record.review.cardOpen = true;
     let card = tickerRecordToLegacyCard(record);
+    card.lastPrompt = prompt;
     const previousTickerState = normalizeCard(card);
-    const notesEl = $('reviewNotes') || $(`notes-${ticker}`);
-    if(notesEl){
-      record.review.notes = notesEl.value;
-      card.notes = notesEl.value;
-    }
     setAnalysisLoadingStage(ticker, 'Checking structure...');
-    card.lastPrompt = buildTickerPrompt(card);
-    setReviewAnalysisState(record, {prompt:card.lastPrompt});
+    if(!(record.review && record.review.chartRef && record.review.chartRef.dataUrl)){
+      const reason = 'AI analysis failed: add or import a chart screenshot first.';
+      console.warn('[review-analysis] blocked_missing_chart', {ticker});
+      card.lastError = reason;
+      setReviewAnalysisState(record, {
+        raw:'',
+        normalized:null,
+        error:reason,
+        prompt,
+        reviewedAt:new Date().toISOString()
+      });
+      record.review.cardOpen = true;
+      failReviewAiAnalysis(ticker, analysisRequestId, reason);
+      commitTickerState();
+      renderCards();
+      return;
+    }
+    setReviewAnalysisState(record, {prompt});
     card.lastError = '';
     card.lastResponse = '';
     card.lastAnalysis = null;
@@ -16993,9 +17136,10 @@ async function analyseSetup(ticker){
         raw:'',
         normalized:null,
         error:card.lastError,
-        prompt:card.lastPrompt,
+        prompt,
         reviewedAt:new Date().toISOString()
       });
+      failReviewAiAnalysis(ticker, analysisRequestId, card.lastError);
       setScannerCardClickTrace(ticker, 'analyseSetup.no_endpoint', 'no_endpoint');
       return;
     }
@@ -17008,7 +17152,7 @@ async function analyseSetup(ticker){
         isRequestCurrent:() => !!(uiState.analysisActiveRequest && uiState.analysisActiveRequest.id === analysisRequestId),
         buildRequestBody:() => ({
           payload:buildAnalysisPayload(card),
-          prompt:card.lastPrompt,
+          prompt,
           chartRef:card.chartRef ? {name:card.chartRef.name, type:card.chartRef.type, dataUrl:card.chartRef.dataUrl} : null
         }),
         classifyAbortReason:() => {
@@ -17045,12 +17189,14 @@ async function analyseSetup(ticker){
         : {};
       if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
         setScannerCardClickTrace(ticker, 'analyseSetup.stale_apply_ignored', `request=${analysisRequestId}`);
+        console.warn('[review-analysis] stale_response_ignored', {ticker, requestId:analysisRequestId});
         return;
       }
       if(!data || !data.analysis || typeof data.analysis !== 'object'){
         throw new Error('The AI endpoint returned no analysis payload.');
       }
       setScannerCardClickTrace(ticker, 'analyseSetup.success', 'analysis_received');
+      console.debug('[review-analysis] request_completed', {ticker, requestId:analysisRequestId});
       logAnalysisDebug('RAW_ANALYSIS_RESULT', data.analysis || null);
       logAnalysisDebug('PREVIOUS_TICKER_STATE', previousTickerState);
       const analysis = normalizeAnalysisResult(data.analysis, previousTickerState);
@@ -17066,7 +17212,7 @@ async function analyseSetup(ticker){
         card.target = analysis.first_target || '';
       }
       setReviewAnalysisState(record, {
-        prompt:card.lastPrompt,
+        prompt,
         raw:card.lastResponse,
         normalized:analysis,
         error:'',
@@ -17117,6 +17263,7 @@ async function analyseSetup(ticker){
         render:false,
         force:true
       });
+      completeReviewAiAnalysis(ticker, analysisRequestId);
       commitTickerState();
       // renderCards() in outer finally re-renders the review workspace and syncs planner fields.
     }catch(err){
@@ -17132,9 +17279,15 @@ async function analyseSetup(ticker){
       }
       if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
         setScannerCardClickTrace(ticker, 'analyseSetup.stale_error_ignored', `request=${analysisRequestId}`);
+        console.warn('[review-analysis] stale_response_ignored', {ticker, requestId:analysisRequestId, kind:'error'});
         return;
       }
       setScannerCardClickTrace(ticker, 'analyseSetup.error', err && err.message ? err.message : 'unknown_error');
+      console.error('[review-analysis] request_failed', {
+        ticker,
+        requestId:analysisRequestId,
+        error:err && err.message ? err.message : String(err || 'unknown_error')
+      });
       const baseMessage = err && err.name === 'AbortError'
         ? 'The analysis request timed out. Retry the setup.'
         : String(err.message || 'Analysis request failed.');
@@ -17168,6 +17321,7 @@ async function analyseSetup(ticker){
         render:false,
         force:true
       });
+      failReviewAiAnalysis(ticker, analysisRequestId, card.lastError);
       commitTickerState();
     }
   }finally{
@@ -17177,12 +17331,13 @@ async function analyseSetup(ticker){
     const ownsActiveRequest = !!(currentRequest && currentRequest.id === analysisRequestId);
     if(ownsActiveRequest && activeReviewTicker() === ticker) uiState.activeReviewVerdictOverride = '';
     if(ownsActiveRequest){
-      uiState.loadingTicker = '';
       clearAnalysisLoadingStage(ticker);
       uiState.analysisActiveRequest = null;
       setScannerCardClickTrace(ticker, 'analyseSetup.finally', `loadingTicker_cleared request=${analysisRequestId}`);
+      console.debug('[review-analysis] request_finalized', {ticker, requestId:analysisRequestId, cleared:true});
     }else{
       setScannerCardClickTrace(ticker, 'analyseSetup.finally', `stale_request_preserved request=${analysisRequestId}`);
+      console.debug('[review-analysis] request_finalized', {ticker, requestId:analysisRequestId, cleared:false});
     }
     requestWatchlistRender({includeFocusQueue:true});
     renderCards();
@@ -17253,7 +17408,8 @@ function savedAiPlanNumbersAllowed(record){
 function renderAnalysisPanelFromRecord(record){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
-  const analysisRunning = uiState.loadingTicker === item.ticker;
+  const runtime = getReviewAiRuntime();
+  const analysisRunning = runtime.status === 'running' && normalizeTicker(runtime.ticker || '') === item.ticker;
   const analysisRunningStage = getAnalysisLoadingStage(item.ticker) || 'AI analysis in progress';
   logAnalysisDebug('ANALYSIS_PANEL_RENDER_FIELDS', {
     ticker:item.ticker,
