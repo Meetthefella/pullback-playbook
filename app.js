@@ -7528,6 +7528,7 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
   if(!container) return;
   const batchSize = Math.max(1, Number(options.batchSize) || WATCHLIST_RENDER_BATCH_SIZE);
   const source = String(options.source || 'watchlist_section_chunked');
+  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   const projectionStartedAt = nowPerfMs();
   const projectedRecords = [];
   const projectionChunkSize = Math.max(1, Math.min(5, batchSize));
