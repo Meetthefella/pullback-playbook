@@ -11148,6 +11148,54 @@ function verdictRank(verdict){
   return null;
 }
 
+function normalizeReviewPresentationVerdict(value){
+  const raw = String(value || '').trim().toLowerCase();
+  if(!raw) return 'watch';
+  if(['entry'].includes(raw)) return 'entry';
+  if(['near_entry','near entry'].includes(raw)) return 'near_entry';
+  if(['watch'].includes(raw)) return 'watch';
+  if(['monitor'].includes(raw)) return 'monitor';
+  if(['diminishing'].includes(raw)) return 'diminishing';
+  if(['avoid'].includes(raw)) return 'avoid';
+  if(['dead'].includes(raw)) return 'dead';
+  return normalizeGlobalVerdictKey(raw || 'watch');
+}
+
+function reviewVerdictLabel(verdictKey){
+  const key = normalizeReviewPresentationVerdict(verdictKey);
+  if(key === 'near_entry') return 'Near Entry';
+  if(key === 'entry') return 'Entry';
+  if(key === 'monitor') return 'Monitor';
+  if(key === 'diminishing') return 'Diminishing';
+  if(key === 'avoid') return 'Avoid';
+  if(key === 'dead') return 'Dead';
+  return 'Watch';
+}
+
+function reviewVerdictRank(verdict){
+  const key = normalizeReviewPresentationVerdict(verdict);
+  if(key === 'dead') return 0;
+  if(key === 'avoid') return 1;
+  if(key === 'diminishing') return 2;
+  if(key === 'monitor') return 3;
+  if(key === 'watch') return 4;
+  if(key === 'near_entry') return 5;
+  if(key === 'entry') return 6;
+  return null;
+}
+
+function reviewVerdictKeyToAnalysisVerdict(value){
+  const key = normalizeReviewPresentationVerdict(value);
+  if(key === 'near_entry') return 'Near Entry';
+  if(key === 'entry') return 'Entry';
+  if(key === 'watch') return 'Watch';
+  if(key === 'monitor') return 'Monitor';
+  if(key === 'diminishing') return 'Diminishing';
+  if(key === 'avoid') return 'Avoid';
+  if(key === 'dead') return 'Dead';
+  return '';
+}
+
 function verdictFromScore(score){
   const roundedScore = Number.isFinite(Number(score)) ? Math.max(0, Math.min(10, Math.round(Number(score)))) : null;
   if(!Number.isFinite(roundedScore)) return 'Watch';
@@ -11739,11 +11787,11 @@ function legacyReviewHeaderVerdictForRecord(record){
 
 function reviewDowngradeSummaryForRecord(record, options = {}){
   const item = normalizeTickerRecord(record);
-  const scannerStatus = normalizeAnalysisVerdict(options.scannerStatus || '');
-  const reviewStatus = normalizeAnalysisVerdict(options.reviewStatus || '');
+  const scannerStatus = normalizeReviewPresentationVerdict(options.scannerStatus || '');
+  const reviewStatus = normalizeReviewPresentationVerdict(options.reviewStatus || '');
   if(!scannerStatus || !reviewStatus) return null;
-  if(verdictRank(reviewStatus) == null || verdictRank(scannerStatus) == null) return null;
-  if(verdictRank(reviewStatus) >= verdictRank(scannerStatus)) return null;
+  if(reviewVerdictRank(reviewStatus) == null || reviewVerdictRank(scannerStatus) == null) return null;
+  if(reviewVerdictRank(reviewStatus) >= reviewVerdictRank(scannerStatus)) return null;
 
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     item.plan && item.plan.entry,
@@ -11772,7 +11820,7 @@ function reviewDowngradeSummaryForRecord(record, options = {}){
     scanner_status:scannerStatus,
     review_status:reviewStatus,
     label:'Downgraded after review',
-    transition:`Scanner ${scannerStatus} -> Review ${reviewStatus}`,
+    transition:`Scanner ${reviewVerdictLabel(scannerStatus)} -> Review ${reviewVerdictLabel(reviewStatus)}`,
     summary:reasons.slice(0, 2).join(' | ')
   };
 }
@@ -11880,6 +11928,7 @@ function avoidSubtypeForRecord(record, options = {}){
 function decisionReasoningForRecord(record, options = {}){
   const item = normalizeTickerRecord(record);
   const scannerStatus = normalizeAnalysisVerdict(options.scannerStatus || '');
+  const reviewPresentationState = normalizeReviewPresentationVerdict(options.reviewVerdict || '');
   const resolved = resolveFinalStateContract(item, {
     context:'review',
     finalVerdict:options.reviewVerdict || displayStageForRecord(item),
@@ -11891,6 +11940,11 @@ function decisionReasoningForRecord(record, options = {}){
   let headline = resolved.actionLabel;
   if(scannerStatus && verdictRank(resolved.finalVerdict) != null && verdictRank(scannerStatus) != null && verdictRank(resolved.finalVerdict) < verdictRank(scannerStatus)){
     headline = `Downgraded: ${String(resolved.actionLabel || '').toLowerCase()}`;
+  }
+  if(reviewPresentationState === 'monitor'){
+    headline = `Monitor: ${String(headline || '').trim() || 'conditions not yet supportive.'}`;
+  }else if(reviewPresentationState === 'diminishing'){
+    headline = `Diminishing: ${String(headline || '').trim() || 'setup weakening or losing momentum.'}`;
   }
   return {
     headline:String(headline || '').slice(0, 80),
@@ -19878,6 +19932,14 @@ function renderReviewWorkspace(options = {}){
     displayedPlan,
     setupScore
   });
+  const unifiedFinalReviewVerdict = normalizeReviewPresentationVerdict(
+    visualState.final_verdict_rendered
+    || visualState.renderedVerdict
+    || resolvedContract.finalVerdict
+    || visualState.finalVerdict
+    || visualState.final_verdict
+    || displayStage
+  );
   const reviewFinalVerdictForPaperTrade = normalizeAnalysisVerdict(
     visualState.final_verdict_rendered || visualState.finalVerdict || visualState.final_verdict || displayStage
   );
@@ -19938,7 +20000,7 @@ function renderReviewWorkspace(options = {}){
     : (paperTradeUi.state === 'submit_success' ? 'ok' : 'tiny');
   const decisionReasoning = decisionReasoningForRecord(record, {
     scannerStatus,
-    reviewVerdict:displayStage,
+    reviewVerdict:reviewVerdictKeyToAnalysisVerdict(unifiedFinalReviewVerdict),
     derivedStates:analysisDerivedStatesFromRecord(record),
     displayedPlan,
     qualityAdjustments,
@@ -20018,7 +20080,7 @@ function renderReviewWorkspace(options = {}){
   };
   const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary;
   const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
-  const reviewRenderedVerdict = String(visualState.final_verdict_rendered || visualState.renderedVerdict || visualState.finalVerdict || visualState.final_verdict || '').trim().toLowerCase();
+  const reviewRenderedVerdict = String(unifiedFinalReviewVerdict || '').trim().toLowerCase();
   const reviewPresentationStateRaw = String(
     visualState.review_presentation_state
     || visualState.final_verdict_rendered
@@ -20064,11 +20126,13 @@ function renderReviewWorkspace(options = {}){
   const reviewOuterClassList = reviewOuterShellClass.split(/\s+/).filter(Boolean);
   const originalReviewToneClasses = Array.from(new Set(String(`${visualState.className || ''} ${visualState.toneClass || ''}`)
     .match(/(?:card--[a-z-]+|visual-tone-[a-z-]+)/g) || []));
-  const reviewConflictingToneClassesDetected = originalReviewToneClasses.some(token => {
-    if(token.startsWith('card--')) return token !== reviewAccentClass;
-    if(token.startsWith('visual-tone-')) return token !== `visual-tone-${reviewOuterBorderTone}`;
-    return false;
-  });
+  const generatedToneClasses = reviewOuterClassList.filter(token => /^card--|^visual-tone-|^review-tone--/.test(token));
+  const toneFamilies = {
+    card:new Set(generatedToneClasses.filter(token => token.startsWith('card--'))),
+    visual:new Set(generatedToneClasses.filter(token => token.startsWith('visual-tone-'))),
+    review:new Set(generatedToneClasses.filter(token => token.startsWith('review-tone--')))
+  };
+  const reviewConflictingToneClassesDetected = toneFamilies.card.size > 1 || toneFamilies.visual.size > 1 || toneFamilies.review.size > 1;
   const reviewScoreStyleApplied = 'suppressed_root_review_tone';
   const reviewPanelToneClass = `review-panel-tone-${reviewVisualTone}`;
   const reviewAction = reviewRenderedVerdict === 'diminishing'
@@ -20098,20 +20162,20 @@ function renderReviewWorkspace(options = {}){
   }
   const downgradeSummary = reviewDowngradeSummaryForRecord(record, {
     scannerStatus,
-    reviewStatus:displayStage,
+    reviewStatus:unifiedFinalReviewVerdict,
     displayedPlan,
     derivedStates:analysisDerivedStatesFromRecord(record),
     qualityAdjustments,
     warningState
   });
-  if(displayStage === 'Watch' && /ignore/i.test(String(reviewAction.label || ''))){
-    logDebugWarn('DEBUG_RENDER', 'REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, nextAction:reviewAction.label});
+  if(unifiedFinalReviewVerdict === 'watch' && /ignore/i.test(String(reviewAction.label || ''))){
+    logDebugWarn('DEBUG_RENDER', 'REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:unifiedFinalReviewVerdict, nextAction:reviewAction.label});
   }
-  if(displayStage === 'Watch' && avoidSubtype === 'terminal'){
-    logDebugWarn('DEBUG_RENDER', 'REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:displayStage, avoidSubtype});
+  if(unifiedFinalReviewVerdict === 'watch' && avoidSubtype === 'terminal'){
+    logDebugWarn('DEBUG_RENDER', 'REVIEW_STATE_MISMATCH', {ticker:record.ticker, finalVerdict:unifiedFinalReviewVerdict, avoidSubtype});
   }
-  if((displayStage !== 'Avoid' && resolvedContract.primaryState === 'dead') || (displayStage === 'Avoid' && resolvedContract.primaryState !== 'dead' && avoidSubtype === 'terminal')){
-    logDebugWarn('DEBUG_RENDER', 'REVIEW_HEADER_DISAGREEMENT', {ticker:record.ticker, finalVerdict:displayStage, reviewBadgeLabel, headline:decisionReasoning.headline, nextAction:reviewAction.label});
+  if((unifiedFinalReviewVerdict !== 'avoid' && resolvedContract.primaryState === 'dead') || (unifiedFinalReviewVerdict === 'avoid' && resolvedContract.primaryState !== 'dead' && avoidSubtype === 'terminal')){
+    logDebugWarn('DEBUG_RENDER', 'REVIEW_HEADER_DISAGREEMENT', {ticker:record.ticker, finalVerdict:unifiedFinalReviewVerdict, reviewBadgeLabel, headline:decisionReasoning.headline, nextAction:reviewAction.label});
   }
   const loading = uiState.loadingTicker === record.ticker;
   const analysisBusy = !!uiState.loadingTicker;
@@ -23627,17 +23691,3 @@ scheduleNamedDeferredStartupTask('startup_application_boot', startApplication, {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
