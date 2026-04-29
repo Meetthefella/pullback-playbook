@@ -2366,33 +2366,191 @@ function tickerRecordToWatchlistEntry(record){
   });
 }
 
-function allTickerRecords(){
+function allTickerRecords(options = {}){
+  const passCache = options.passCache || null;
   const records = Object.values(normalizeTickerRecordsMap(state.tickerRecords || {}));
   records.forEach(record => {
     reevaluateTickerProgress(record);
-    syncWatchlistLifecycle(record);
+    syncWatchlistLifecycle(record, {passCache});
     maybeExpireTickerRecord(record);
   });
   state.tickerRecords = Object.fromEntries(records.map(record => [record.ticker, record]));
   return records;
 }
 
-function watchlistTickerRecords(){
-  return allTickerRecords()
-    .filter(record => record.watchlist && record.watchlist.inWatchlist)
-    .sort((a, b) => {
-      const lifecycleA = syncWatchlistLifecycle(a) || watchlistLifecycleSnapshot(a);
-      const lifecycleB = syncWatchlistLifecycle(b) || watchlistLifecycleSnapshot(b);
-      return lifecycleA.rank - lifecycleB.rank
-        || watchlistPriorityForRecord(b).score - watchlistPriorityForRecord(a).score
-        || String(b.watchlist.addedAt || '').localeCompare(String(a.watchlist.addedAt || ''))
-        || a.ticker.localeCompare(b.ticker);
-    });
+function createWatchlistProjectionPassCache(){
+  return {
+    finalState:new WeakMap(),
+    staticResolverOptions:new Map(),
+    finalStateCacheHits:0,
+    finalStateCacheMisses:0,
+    sortComparatorFallbackCalls:0
+  };
 }
 
-function watchlistPriorityForRecord(record){
+function isTrackPerfDebugEnabled(){
+  return typeof window !== 'undefined' && window.PP_PERF_DEBUG === true;
+}
+
+function createTrackPerfSummary(source = 'unknown'){
+  return {
+    source:String(source || 'unknown'),
+    startedAt:(typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now(),
+    records:0,
+    resolveFinalStateCalls:0,
+    effectivePlanCalls:0,
+    lifecycleSyncCalls:0,
+    lifecycleSnapshotCalls:0,
+    priorityCalls:0,
+    renderCalls:0,
+    sortComparatorFallbackCalls:0,
+    cacheHits:0,
+    cacheMisses:0
+  };
+}
+
+function activeTrackPerfSummary(){
+  if(!isTrackPerfDebugEnabled()) return null;
+  uiState.trackPerf = uiState.trackPerf && typeof uiState.trackPerf === 'object' ? uiState.trackPerf : {};
+  return uiState.trackPerf.currentPass || null;
+}
+
+function withTrackPerfPass(source, runner){
+  if(!isTrackPerfDebugEnabled()) return runner(null);
+  uiState.trackPerf = uiState.trackPerf && typeof uiState.trackPerf === 'object' ? uiState.trackPerf : {};
+  const previousPass = uiState.trackPerf.currentPass || null;
+  const pass = createTrackPerfSummary(source);
+  uiState.trackPerf.currentPass = pass;
+  try{
+    return runner(pass);
+  }finally{
+    if(uiState.trackPerf.currentPass === pass){
+      const endedAt = (typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now();
+      const durationMs = Math.round(endedAt - pass.startedAt);
+      const summary = {
+        source:pass.source,
+        durationMs,
+        records:Number(pass.records || 0),
+        finalStateCalls:Number(pass.resolveFinalStateCalls || 0),
+        effectivePlanCalls:Number(pass.effectivePlanCalls || 0),
+        lifecycleSyncCalls:Number(pass.lifecycleSyncCalls || 0),
+        lifecycleSnapshotCalls:Number(pass.lifecycleSnapshotCalls || 0),
+        priorityCalls:Number(pass.priorityCalls || 0),
+        cacheHits:Number(pass.cacheHits || 0),
+        cacheMisses:Number(pass.cacheMisses || 0),
+        renderCalls:Number(pass.renderCalls || 0),
+        sortComparatorFallbackCalls:Number(pass.sortComparatorFallbackCalls || 0)
+      };
+      uiState.trackPerf.lastSummary = summary;
+      console.info('[TrackPerfSummary]', summary);
+      if(summary.records > 0 && summary.finalStateCalls > (summary.records * 2)){
+        console.warn('[TrackPerfWarn] finalStateCalls exceeded threshold', {finalStateCalls:summary.finalStateCalls, records:summary.records});
+      }
+      if(summary.records > 0 && summary.lifecycleSyncCalls > Math.ceil(summary.records * 1.5)){
+        console.warn('[TrackPerfWarn] lifecycleSyncCalls exceeded threshold', {lifecycleSyncCalls:summary.lifecycleSyncCalls, records:summary.records});
+      }
+      if(summary.renderCalls > 1){
+        console.warn('[TrackPerfWarn] renderWatchlist called more than once per pass', {renderCalls:summary.renderCalls});
+      }
+      if(summary.sortComparatorFallbackCalls > 0){
+        console.warn('Expensive watchlist sort fallback used - precompute this value before sorting.', {sortComparatorFallbackCalls:summary.sortComparatorFallbackCalls});
+      }
+      if(summary.durationMs > 500){
+        console.warn('[TrackPerfWarn] pass duration exceeded threshold', {durationMs:summary.durationMs});
+      }
+      uiState.trackPerf.currentPass = previousPass;
+    }else{
+      uiState.trackPerf.currentPass = previousPass;
+    }
+  }
+}
+
+if(typeof window !== 'undefined'){
+  window.PPTrackPerf = {
+    enable(){ window.PP_PERF_DEBUG = true; },
+    disable(){ window.PP_PERF_DEBUG = false; },
+    lastSummary(){ return (uiState.trackPerf && uiState.trackPerf.lastSummary) || null; }
+  };
+}
+
+function getOptionsIdentity(options = {}){
+  return options;
+}
+
+function getFinalStateForPass(record, options = {}, passCache){
+  const perfPass = activeTrackPerfSummary();
+  if(!record || typeof record !== 'object' || !passCache || !(passCache.finalState instanceof WeakMap)){
+    return resolveFinalStateContract(record, options);
+  }
+  let recordCache = passCache.finalState.get(record);
+  if(!recordCache){
+    recordCache = new WeakMap();
+    passCache.finalState.set(record, recordCache);
+  }
+  const optionKey = getOptionsIdentity(options);
+  if(optionKey && typeof optionKey === 'object' && recordCache.has(optionKey)){
+    if(perfPass) perfPass.cacheHits += 1;
+    passCache.finalStateCacheHits = Number(passCache.finalStateCacheHits || 0) + 1;
+    return recordCache.get(optionKey);
+  }
+  if(perfPass) perfPass.cacheMisses += 1;
+  passCache.finalStateCacheMisses = Number(passCache.finalStateCacheMisses || 0) + 1;
+  const resolved = resolveFinalStateContract(record, options);
+  if(optionKey && typeof optionKey === 'object'){
+    recordCache.set(optionKey, resolved);
+  }
+  return resolved;
+}
+
+function getStaticPassResolverOptions(optionCacheKey, passCache, factory){
+  const build = typeof factory === 'function' ? factory : (() => ({}));
+  if(!passCache || !(passCache.staticResolverOptions instanceof Map)) return build();
+  if(passCache.staticResolverOptions.has(optionCacheKey)) return passCache.staticResolverOptions.get(optionCacheKey);
+  const nextOptions = build();
+  if(nextOptions && typeof nextOptions === 'object') Object.freeze(nextOptions);
+  passCache.staticResolverOptions.set(optionCacheKey, nextOptions);
+  return nextOptions;
+}
+
+function buildDynamicResolverOptionsSnapshot(payload = {}){
+  return Object.freeze({...payload});
+}
+
+function watchlistTickerRecords(options = {}){
+  const perfPass = activeTrackPerfSummary();
+  const passCache = options.passCache || createWatchlistProjectionPassCache();
+  const records = allTickerRecords({passCache}).filter(record => record.watchlist && record.watchlist.inWatchlist);
+  if(perfPass) perfPass.records = Math.max(Number(perfPass.records || 0), records.length);
+  const metadata = new Map();
+  records.forEach(record => {
+    const lifecycle = syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache});
+    const priority = watchlistPriorityForRecord(record, {passCache, lifecycle});
+    metadata.set(record.ticker, {lifecycle, priority});
+  });
+  const sorted = records.sort((a, b) => {
+    const metaA = metadata.get(a.ticker) || {};
+    const metaB = metadata.get(b.ticker) || {};
+    if(!metaA.lifecycle || !metaB.lifecycle || !metaA.priority || !metaB.priority){
+      passCache.sortComparatorFallbackCalls = Number(passCache.sortComparatorFallbackCalls || 0) + 1;
+      if(perfPass) perfPass.sortComparatorFallbackCalls += 1;
+    }
+    const lifecycleA = metaA.lifecycle || {rank:watchlistLifecycleStateRank('monitor')};
+    const lifecycleB = metaB.lifecycle || {rank:watchlistLifecycleStateRank('monitor')};
+    const priorityA = metaA.priority || {score:0};
+    const priorityB = metaB.priority || {score:0};
+    return lifecycleA.rank - lifecycleB.rank
+      || priorityB.score - priorityA.score
+      || String(b.watchlist.addedAt || '').localeCompare(String(a.watchlist.addedAt || ''))
+      || a.ticker.localeCompare(b.ticker);
+  });
+  return sorted;
+}
+
+function watchlistPriorityForRecord(record, options = {}){
+  const perfPass = activeTrackPerfSummary();
+  if(perfPass) perfPass.priorityCalls += 1;
   const item = normalizeTickerRecord(record);
-  const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(item);
+  const lifecycle = options.lifecycle || syncWatchlistLifecycle(record, options) || watchlistLifecycleSnapshot(item, options);
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const rrResolution = resolveScannerStateWithTrace(item);
   const setupScore = setupScoreForRecord(item);
@@ -3645,8 +3803,11 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
   return nextSnapshot;
 }
 
-function watchlistLifecycleSnapshot(record){
+function watchlistLifecycleSnapshot(record, options = {}){
+  const perfPass = activeTrackPerfSummary();
+  if(perfPass) perfPass.lifecycleSnapshotCalls += 1;
   const item = normalizeTickerRecord(record);
+  const passCache = options.passCache || null;
   const liveRefreshPending = isWatchlistLiveRefreshPending(item.ticker);
   if(liveRefreshPending){
     const storedState = canonicalLifecycleState(item.watchlist && item.watchlist.lifecycleState);
@@ -3708,9 +3869,10 @@ function watchlistLifecycleSnapshot(record){
     avoidSubtype,
     deadCheck
   });
-  const resolved = resolveFinalStateContract(item, {
+  const watchlistFinalVerdict = displayStageForRecord(item);
+  const resolverOptions = buildDynamicResolverOptionsSnapshot({
     context:'watchlist',
-    finalVerdict:displayStageForRecord(item),
+    finalVerdict:watchlistFinalVerdict,
     derivedStates,
     displayedPlan,
     qualityAdjustments,
@@ -3718,6 +3880,7 @@ function watchlistLifecycleSnapshot(record){
     deadCheck,
     emojiPresentation
   });
+  const resolved = getFinalStateForPass(item, resolverOptions, passCache);
   const canonicalVerdict = normalizeGlobalVerdictKey(globalVerdict.final_verdict);
   const actionState = deriveActionStateForRecord(item).stage;
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
@@ -3839,10 +4002,12 @@ function watchlistLifecycleSnapshot(record){
   return snapshot;
 }
 
-function syncWatchlistLifecycle(record){
+function syncWatchlistLifecycle(record, options = {}){
+  const perfPass = activeTrackPerfSummary();
+  if(perfPass) perfPass.lifecycleSyncCalls += 1;
   if(!record || !record.watchlist || !record.watchlist.inWatchlist) return null;
-  if(hasLockedLifecycle(record)) return watchlistLifecycleSnapshot(record);
-  const snapshot = watchlistLifecycleSnapshot(record);
+  if(hasLockedLifecycle(record)) return watchlistLifecycleSnapshot(record, options);
+  const snapshot = watchlistLifecycleSnapshot(record, options);
   record.watchlist.lifecycleState = snapshot.state;
   record.watchlist.lifecycleLabel = snapshot.label;
   record.watchlist.watchlist_priority_bucket = snapshot.bucket;
@@ -3915,11 +4080,12 @@ function shouldEvaluateWatchlistLifecycleRecord(record, options = {}){
 function runWatchlistLifecycleEvaluation(options = {}){
   const source = String(options.source || 'system');
   const logUnchanged = options.logUnchanged !== false;
+  const passCache = createWatchlistProjectionPassCache();
   if(uiState.watchlistLifecycleRunning){
     const requestedTickers = Array.isArray(options.tickers)
       ? new Set(options.tickers.map(normalizeTicker).filter(Boolean))
       : null;
-    allTickerRecords().forEach(record => {
+    allTickerRecords({passCache}).forEach(record => {
       if(!record.watchlist || !record.watchlist.inWatchlist) return;
       if(requestedTickers && !requestedTickers.has(record.ticker)) return;
       record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
@@ -3952,7 +4118,7 @@ function runWatchlistLifecycleEvaluation(options = {}){
       const previousLabel = String(record.watchlist.lifecycleLabel || '');
       if(shouldEvaluateWatchlistLifecycleRecord(record, options)){
         reevaluateTickerProgress(record);
-        const snapshot = syncWatchlistLifecycle(record);
+        const snapshot = syncWatchlistLifecycle(record, {passCache});
         const settledGlobalVerdict = resolveGlobalVerdict(record);
         maybeTriggerEntryAlert(record, settledGlobalVerdict, {source});
         const derivedStates = analysisDerivedStatesFromRecord(record);
@@ -4142,6 +4308,7 @@ function watchlistLifecycleChangeType(previousState, currentState){
 // LEGACY WATCHLIST GUIDANCE BLOCK DISABLED
 // Shadowed by the canonical watchlist guidance block later in app.js.
 function legacyWatchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
+  const passCache = context.passCache || null;
   const derivedStates = context.derivedStates || analysisDerivedStatesFromRecord(record);
   const displayedPlan = context.displayedPlan || deriveCurrentPlanState(
     record.plan && record.plan.entry,
@@ -4151,7 +4318,7 @@ function legacyWatchlistNextStateGuidance(record, lifecycleSnapshot, context = {
   );
   const qualityAdjustments = context.qualityAdjustments || evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
   const rrResolution = context.rrResolution || resolveScannerStateWithTrace(record);
-  const resolved = context.resolvedContract || resolveFinalStateContract(record, {
+  const resolverOptions = buildDynamicResolverOptionsSnapshot({
     context:'watchlist',
     derivedStates,
     displayedPlan,
@@ -4159,6 +4326,7 @@ function legacyWatchlistNextStateGuidance(record, lifecycleSnapshot, context = {
     rrResolution,
     planUiState:context.planUiState
   });
+  const resolved = context.resolvedContract || getFinalStateForPass(record, resolverOptions, passCache);
   if(['dead','expired','inactive'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || ''))){
     return {nextPossibleState:'None', mainBlocker:'Setup is no longer active'};
   }
@@ -4206,6 +4374,7 @@ function watchlistDebugWarnings(record, lifecycleSnapshot, actionPresentation, o
 
 function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options = {}){
   const item = normalizeTickerRecord(record);
+  const passCache = options.passCache || null;
   const globalVerdict = resolveGlobalVerdict(item);
   const setupScoreTrace = setupScoreTraceForRecord(item);
   const debug = item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
@@ -4218,13 +4387,14 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   );
   const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
   const rrResolution = options.rrResolution || resolveScannerStateWithTrace(item);
-  const resolved = options.resolvedContract || resolveFinalStateContract(item, {
+  const resolverOptions = buildDynamicResolverOptionsSnapshot({
     context:'watchlist',
     derivedStates,
     displayedPlan,
     qualityAdjustments,
     rrResolution
   });
+  const resolved = options.resolvedContract || getFinalStateForPass(item, resolverOptions, passCache);
   const globalVisual = options.globalVisual || resolveGlobalVisualState(item, 'watchlist', {
     structuralState:resolved.structuralState,
     actionStateKey:resolved.actionStateKey,
@@ -4434,40 +4604,51 @@ function clearSavedScannerUniverseList(){
 }
 
 function renderWatchlist(){
-  syncWatchlistLifecycleBeforeRender('auto_recompute');
-  purgeExpiredWatchlistEntries();
-  const box = $('watchlistList');
-  if(!box) return;
-  let gatingChanged = false;
-  watchlistTickerRecords().forEach(record => {
-    const gated = applyGlobalVerdictGates(record, {source:'auto_recompute'});
-    if(gated.changed) gatingChanged = true;
-  });
-  if(gatingChanged) commitTickerState();
-  const showExpired = !!state.showExpiredWatchlist;
-  const records = watchlistTickerRecords().filter(record => {
-    const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
-    if(showExpired) return true;
-    return !['dead','expired'].includes(lifecycle.state);
-  });
-  console.debug('RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
-  if(!records.length){
-    box.innerHTML = showExpired
-      ? '<div class="summary">No watchlist entries match this filter right now.</div>'
-      : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
-    renderWorkflowAlerts();
-    return;
-  }
-  box.innerHTML = '';
-  const groups = [
-    {key:'tradeable_entry', title:'Tradeable / Entry', hint:'Near-entry and entry-grade watchlist records.'},
-    {key:'monitor_watch', title:'Monitor / Watch', hint:'Structurally alive setups worth keeping on the watchlist.'},
-    {key:'low_priority_avoid', title:'Low Priority / Avoid', hint:'Downgraded or failed watchlist records.'}
-  ];
-  if(showExpired){
-    groups.push({key:'inactive', title:'Dead / Expired', hint:'Technically failed or aged-out watchlist records.'});
-  }
-  groups.forEach(group => {
+  return withTrackPerfPass('render_watchlist', perfPass => {
+    if(perfPass) perfPass.renderCalls += 1;
+    syncWatchlistLifecycleBeforeRender('auto_recompute');
+    purgeExpiredWatchlistEntries();
+    const box = $('watchlistList');
+    if(!box) return;
+    const passCache = createWatchlistProjectionPassCache();
+    const flushPassStats = () => {
+      if(!perfPass) return;
+      perfPass.cacheHits += Number(passCache.finalStateCacheHits || 0);
+      perfPass.cacheMisses += Number(passCache.finalStateCacheMisses || 0);
+      perfPass.sortComparatorFallbackCalls += Number(passCache.sortComparatorFallbackCalls || 0);
+    };
+    let gatingChanged = false;
+    watchlistTickerRecords({passCache}).forEach(record => {
+      const gated = applyGlobalVerdictGates(record, {source:'auto_recompute'});
+      if(gated.changed) gatingChanged = true;
+    });
+    if(gatingChanged) commitTickerState();
+    const showExpired = !!state.showExpiredWatchlist;
+    const records = watchlistTickerRecords({passCache}).filter(record => {
+      const lifecycle = syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache});
+      if(showExpired) return true;
+      return !['dead','expired'].includes(lifecycle.state);
+    });
+    if(perfPass) perfPass.records = Math.max(Number(perfPass.records || 0), records.length);
+    console.debug('RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
+    if(!records.length){
+      box.innerHTML = showExpired
+        ? '<div class="summary">No watchlist entries match this filter right now.</div>'
+        : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+      flushPassStats();
+      renderWorkflowAlerts();
+      return;
+    }
+    box.innerHTML = '';
+    const groups = [
+      {key:'tradeable_entry', title:'Tradeable / Entry', hint:'Near-entry and entry-grade watchlist records.'},
+      {key:'monitor_watch', title:'Monitor / Watch', hint:'Structurally alive setups worth keeping on the watchlist.'},
+      {key:'low_priority_avoid', title:'Low Priority / Avoid', hint:'Downgraded or failed watchlist records.'}
+    ];
+    if(showExpired){
+      groups.push({key:'inactive', title:'Dead / Expired', hint:'Technically failed or aged-out watchlist records.'});
+    }
+    groups.forEach(group => {
     const groupRecords = records.filter(record => watchlistPresentationBucketForRecord(record) === group.key);
     if(!groupRecords.length) return;
     const section = document.createElement('div');
@@ -4480,10 +4661,10 @@ function renderWatchlist(){
       const liveRefreshPending = isWatchlistLiveRefreshPending(record.ticker);
       const remaining = getTradingDaysRemaining(entry);
       const lifecycleText = lifecycleLabel(record);
-      const lifecycleSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+      const lifecycleSnapshot = syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache});
       const expired = lifecycleSnapshot.state === 'expired' || record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
       const expiryDate = record.lifecycle.expiresAt || 'Not set';
-      const priority = watchlistPriorityForRecord(record);
+      const priority = watchlistPriorityForRecord(record, {passCache, lifecycle:lifecycleSnapshot});
       const avoidSubtype = avoidSubtypeForRecord(record);
       const derivedStates = analysisDerivedStatesFromRecord(record);
       const displayedPlan = applySetupConfirmationPlanGate(record, deriveCurrentPlanState(
@@ -4494,7 +4675,7 @@ function renderWatchlist(){
       ), derivedStates);
       const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
       const rrResolution = resolveScannerStateWithTrace(record);
-      const resolvedContract = resolveFinalStateContract(record, {
+      const resolverOptions = buildDynamicResolverOptionsSnapshot({
         context:'watchlist',
         finalVerdict:view.displayStage,
         derivedStates,
@@ -4502,6 +4683,7 @@ function renderWatchlist(){
         qualityAdjustments,
         rrResolution
       });
+      const resolvedContract = getFinalStateForPass(record, resolverOptions, passCache);
       const watchlistPresentation = resolveEmojiPresentation(record, {
         context:'watchlist',
         finalVerdict:view.displayStage,
@@ -4569,6 +4751,7 @@ function renderWatchlist(){
         record.watchlist.debug.holdTraceHistory = [`hold_helper.rendered | ${seededAt}`, ...history].slice(0, 8);
       }
       const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
+        passCache,
         derivedStates,
         displayedPlan,
         qualityAdjustments,
@@ -4627,10 +4810,12 @@ function renderWatchlist(){
       section.appendChild(div);
       bindEntryConditionsHoldInteractions(div);
     });
-    box.appendChild(section);
+      box.appendChild(section);
+    });
+    flushPassStats();
+    renderWorkflowAlerts();
+    return;
   });
-  renderWorkflowAlerts();
-  return;
   records.forEach(record => {
     const entry = tickerRecordToWatchlistEntry(record);
     if(!entry) return;
@@ -12939,6 +13124,8 @@ function fallbackPlanProposalForCard(cardLike){
 }
 
 function effectivePlanForRecord(record, options = {}){
+  const perfPass = activeTrackPerfSummary();
+  if(perfPass) perfPass.effectivePlanCalls += 1;
   const allowScannerFallback = options.allowScannerFallback === true;
   const item = record && typeof record === 'object' ? record : {};
   const manualReview = item.review && item.review.manualReview && typeof item.review.manualReview === 'object'
@@ -12979,8 +13166,14 @@ function effectivePlanForRecord(record, options = {}){
       riskStatus:(item.plan && item.plan.riskStatus) || (item.scan && item.scan.riskStatus) || 'plan_missing',
       score:Number.isFinite(numericOrNull(item.scan && item.scan.score)) ? Number(item.scan.score) : 0,
       summary:(item.scan && item.scan.summary) || ((item.scan && item.scan.reasons && item.scan.reasons[0]) || ''),
-      checks:cloneData((item.scan && item.scan.flags && item.scan.flags.checks) || {}, {}),
-      marketData:cloneData(item.marketData || {}, {})
+      checks:(() => {
+        const snapshot = {...((item.scan && item.scan.flags && item.scan.flags.checks) || {})};
+        return isTrackPerfDebugEnabled() ? Object.freeze(snapshot) : snapshot;
+      })(),
+      marketData:(() => {
+        const snapshot = {...(item.marketData || {})};
+        return isTrackPerfDebugEnabled() ? Object.freeze(snapshot) : snapshot;
+      })()
     })
     : null;
   if(fallbackPlan){
@@ -16307,6 +16500,8 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
 }
 
 function resolveFinalStateContract(record, options = {}){
+  const perfPass = activeTrackPerfSummary();
+  if(perfPass) perfPass.resolveFinalStateCalls += 1;
   const item = record && typeof record === 'object' ? record : {};
   const requestedFinalVerdict = normalizeAnalysisVerdict(options.finalVerdict || resolverSeedVerdictForRecord(item));
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
