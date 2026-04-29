@@ -1,11 +1,18 @@
 (function(global){
   function createTrackedStateService(deps){
+    const MIN_PERSIST_INTERVAL_MS = 500;
+    const PERSIST_PAYLOAD_CHUNK_SIZE = 20;
+    const TRACK_REFRESH_DEFER_RETRY_MS = 350;
     let backendSyncTimer = null;
     let backendRefreshTimer = null;
+    let persistIdleHandle = null;
+    let persistRetryTimer = null;
     let trackedStatePersistScheduled = false;
     let trackedStatePersistInFlight = false;
     let trackedStatePersistFollowUp = false;
+    let trackedStatePersistDeferredByTrackRefresh = false;
     let trackedStatePersistLastSuccessfulSignature = '';
+    let trackedStatePersistLastStartedAt = 0;
     let trackedStatePullInFlightPromise = null;
     let trackedStateBackendUnavailable = !!(deps.state && deps.state.trackedStateBackendUnavailable === true);
     let trackedStateBackendUnavailableNotified = !!(deps.state && deps.state.trackedStateBackendUnavailableNotified === true);
@@ -48,6 +55,71 @@
       return deps.defaultTrackedStateEndpoint;
     }
 
+    function clearPersistIdleHandle(){
+      if(persistIdleHandle == null) return;
+      if(typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function'){
+        try{
+          window.cancelIdleCallback(persistIdleHandle);
+        }catch(error){}
+      }else{
+        clearTimeout(persistIdleHandle);
+      }
+      persistIdleHandle = null;
+    }
+
+    function clearPersistRetryTimer(){
+      if(persistRetryTimer == null) return;
+      clearTimeout(persistRetryTimer);
+      persistRetryTimer = null;
+    }
+
+    function scheduleLowPriorityPersistFlush(flush, options = {}){
+      const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Math.max(0, Number(options.timeoutMs)) : 1000;
+      if(typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'){
+        persistIdleHandle = window.requestIdleCallback(() => {
+          persistIdleHandle = null;
+          flush();
+        }, {timeout:timeoutMs});
+        return;
+      }
+      persistIdleHandle = setTimeout(() => {
+        persistIdleHandle = null;
+        flush();
+      }, 0);
+    }
+
+    function schedulePersistRetry(options = {}){
+      const reason = String(options.reason || 'track_refresh_deferred');
+      const waitMs = Number.isFinite(Number(options.delayMs))
+        ? Math.max(100, Number(options.delayMs))
+        : TRACK_REFRESH_DEFER_RETRY_MS;
+      clearPersistRetryTimer();
+      persistRetryTimer = setTimeout(() => {
+        persistRetryTimer = null;
+        if(trackedStatePersistInFlight || trackedStatePersistScheduled) return;
+        trackedStatePersistScheduled = true;
+        scheduleLowPriorityPersistFlush(() => {
+          trackedStatePersistScheduled = false;
+          const stillRefreshingTrack = typeof deps.isTrackRefreshInFlight === 'function'
+            ? deps.isTrackRefreshInFlight() === true
+            : false;
+          if(stillRefreshingTrack){
+            trackedStatePersistFollowUp = true;
+            trackedStatePersistDeferredByTrackRefresh = true;
+            schedulePersistRetry({reason:'track_refresh_still_in_flight'});
+            return;
+          }
+          pushTrackedRecordsToBackend({reason});
+        }, {timeoutMs:1000});
+      }, waitMs);
+    }
+
+    function yieldPersistChunk(){
+      return new Promise(resolve => {
+        setTimeout(resolve, 0);
+      });
+    }
+
     function normalizedRiskPercentForPersist(value){
       const numeric = deps.numericOrNull(value);
       if(!Number.isFinite(numeric) || numeric <= 0) return 1;
@@ -64,18 +136,27 @@
       );
     }
 
-    function trackedTickerRecordsPayload(){
+    async function trackedTickerRecordsPayloadChunked(){
       const records = {};
-      Object.values(deps.normalizeTickerRecordsMap(deps.state.tickerRecords || {})).forEach(record => {
+      const normalizedRecords = Object.values(deps.normalizeTickerRecordsMap(deps.state.tickerRecords || {}));
+      for(let index = 0; index < normalizedRecords.length; index += 1){
+        const record = normalizedRecords[index];
         if(shouldSyncTickerRecordToBackend(record)) records[record.ticker] = record;
-      });
+        if(index > 0 && (index % PERSIST_PAYLOAD_CHUNK_SIZE) === 0){
+          await yieldPersistChunk();
+        }
+      }
       const removedRecords = {};
       const currentTickers = new Set(Object.keys(records));
       const localTrackedTickers = deps.uniqueTickers(deps.state.backendLocalTrackedTickers || []);
       const knownVersions = deps.state.backendTrackedVersions && typeof deps.state.backendTrackedVersions === 'object' ? deps.state.backendTrackedVersions : {};
-      localTrackedTickers.forEach(ticker => {
+      for(let index = 0; index < localTrackedTickers.length; index += 1){
+        const ticker = localTrackedTickers[index];
         if(!currentTickers.has(ticker)) removedRecords[ticker] = String(knownVersions[ticker] || '');
-      });
+        if(index > 0 && (index % PERSIST_PAYLOAD_CHUNK_SIZE) === 0){
+          await yieldPersistChunk();
+        }
+      }
       return {
         settings:{
           accountSize:deps.currentAccountSizeGbp(),
@@ -130,7 +211,8 @@
         deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_SKIP_BACKEND_UNAVAILABLE', {reason:String(options.reason || 'backend_unavailable')});
         return false;
       }
-      const payload = trackedTickerRecordsPayload();
+      const persistStartedAt = Date.now();
+      const payload = await trackedTickerRecordsPayloadChunked();
       const payloadSignature = deps.trackedStatePersistSignature(payload);
       if(payloadSignature === trackedStatePersistLastSuccessfulSignature){
         deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_SKIP_UNCHANGED', {reason:'signature_unchanged'});
@@ -141,7 +223,9 @@
         deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_SKIP_IN_FLIGHT', {reason:'in_flight'});
         return false;
       }
+      clearPersistRetryTimer();
       trackedStatePersistInFlight = true;
+      trackedStatePersistLastStartedAt = Date.now();
       const localTrackedTickers = Object.keys(payload.records).map(deps.normalizeTicker);
       try{
         const response = await deps.fetchJsonWithTimeout(trackedStateEndpoint(), {
@@ -160,6 +244,10 @@
           deps.state.backendLocalTrackedTickers = localTrackedTickers;
           deps.persistState();
           trackedStatePersistLastSuccessfulSignature = payloadSignature;
+          deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_TIMING', {
+            durationMs:Date.now() - persistStartedAt,
+            recordCount:localTrackedTickers.length
+          });
           deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_OK', {
             trackedTickers:localTrackedTickers.length
           });
@@ -186,6 +274,16 @@
       }
       const delayMs = Number.isFinite(Number(options.delayMs)) ? Math.max(0, Number(options.delayMs)) : 0;
       const reason = String(options.reason || 'unspecified');
+      const trackRefreshInFlight = typeof deps.isTrackRefreshInFlight === 'function'
+        ? deps.isTrackRefreshInFlight() === true
+        : false;
+      if(trackRefreshInFlight && options.force !== true){
+        trackedStatePersistFollowUp = true;
+        trackedStatePersistDeferredByTrackRefresh = true;
+        deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_DEFER_TRACK_REFRESH', {reason});
+        schedulePersistRetry({reason:'track_refresh_deferred'});
+        return;
+      }
       if(trackedStatePersistInFlight){
         trackedStatePersistFollowUp = true;
         deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_QUEUE_FOLLOW_UP', {reason});
@@ -198,19 +296,48 @@
       trackedStatePersistScheduled = true;
       const flush = () => {
         trackedStatePersistScheduled = false;
+        const now = Date.now();
+        const sinceLastPersistMs = now - trackedStatePersistLastStartedAt;
+        if(trackedStatePersistLastStartedAt > 0 && sinceLastPersistMs < MIN_PERSIST_INTERVAL_MS){
+          trackedStatePersistScheduled = true;
+          const waitMs = Math.max(0, MIN_PERSIST_INTERVAL_MS - sinceLastPersistMs);
+          clearTimeout(backendSyncTimer);
+          backendSyncTimer = setTimeout(() => {
+            scheduleLowPriorityPersistFlush(flush, {timeoutMs:1000});
+          }, waitMs);
+          deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_THROTTLED', {reason, waitMs});
+          return;
+        }
+        const stillRefreshingTrack = typeof deps.isTrackRefreshInFlight === 'function'
+          ? deps.isTrackRefreshInFlight() === true
+          : false;
+        if(stillRefreshingTrack){
+          trackedStatePersistFollowUp = true;
+          trackedStatePersistDeferredByTrackRefresh = true;
+          deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_DEFER_TRACK_REFRESH', {reason:'track_refresh_in_flight_flush'});
+          schedulePersistRetry({reason:'track_refresh_in_flight_flush'});
+          return;
+        }
         if(deps.isPersistBurstActive()){
           trackedStatePersistFollowUp = true;
           deps.logDebug('DEBUG_STORAGE', 'TRACKED_STATE_PERSIST_DEFER_SCAN', {reason});
           return;
         }
+        if(trackedStatePersistDeferredByTrackRefresh){
+          trackedStatePersistDeferredByTrackRefresh = false;
+        }
         pushTrackedRecordsToBackend({reason});
       };
       if(delayMs > 0){
         clearTimeout(backendSyncTimer);
-        backendSyncTimer = setTimeout(flush, delayMs);
+        clearPersistIdleHandle();
+        backendSyncTimer = setTimeout(() => {
+          scheduleLowPriorityPersistFlush(flush, {timeoutMs:1000});
+        }, delayMs);
         return;
       }
-      setTimeout(flush, 0);
+      clearPersistIdleHandle();
+      scheduleLowPriorityPersistFlush(flush, {timeoutMs:1000});
     }
 
     function scheduleTrackedRecordsSync(delayMs = 800){

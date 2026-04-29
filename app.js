@@ -2126,6 +2126,7 @@ const trackedStateService = createTrackedStateService({
   renderWatchlist,
   renderFocusQueue,
   renderReviewWorkspace,
+  isTrackRefreshInFlight:() => trackRefreshRuntime.inFlight === true,
   isPersistBurstActive:isScannerWorkflowPersistBurstActive,
   onTrackedStateBackendUnavailable:() => {
     setStatus('scannerSelectionStatus', '<span class="warntext">Tracked-state backend unavailable in this preview session. Watchlist persistence may be limited on draft builds.</span>');
@@ -4847,6 +4848,10 @@ function scheduleRiskContextRefresh(options = {}){
 
 async function runRiskContextRefreshChunked(options = {}){
   const source = String(options.source || 'risk_settings_change');
+  const trackOnly = options.trackOnly === true;
+  const startedTrackOnly = trackOnly;
+  const visibleOnly = options.visibleOnly === true;
+  const suppressTrackRender = options.suppressTrackRender === true;
   const startedAt = nowPerfMs();
   riskSettingsRecalcRunning = true;
   let canPublishRiskDiagnostic = false;
@@ -4857,7 +4862,13 @@ async function runRiskContextRefreshChunked(options = {}){
       ? String(uiState.liveProcessStatus.state || '')
       : '';
     canPublishRiskDiagnostic = riskDiagnosticRequested && !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
-    const records = allTickerRecords();
+    const allRecords = allTickerRecords();
+    const records = trackOnly && visibleOnly
+      ? allRecords.filter(record => {
+        const item = normalizeTickerRecord(record);
+        return !!(item.watchlist && item.watchlist.inWatchlist);
+      })
+      : allRecords;
     if(PP_PERF_DEBUG){
       console.debug('[PP_PERF] risk_calc_requested', {
         risk_calc_reason:source,
@@ -4910,6 +4921,16 @@ async function runRiskContextRefreshChunked(options = {}){
         processed,
         recordCount:records.length
       });
+      if(PP_PERF_DEBUG){
+        console.info('[TrackPullRefresh]', {
+          event:'riskRecalcChunk',
+          source,
+          chunkIndex,
+          durationMs:chunkDurationMs,
+          processed,
+          total:records.length
+        });
+      }
       chunkIndex += 1;
       if(processed < records.length) await yieldDeferredStartupChunk(50);
     }
@@ -4956,28 +4977,87 @@ async function runRiskContextRefreshChunked(options = {}){
       ...renderStateBase,
       durationMs:Number((nowPerfMs() - statsStartedAt).toFixed(1))
     });
-    if(activeTab === 'track'){
+    if(startedTrackOnly){
+      const trackTabAtFinalize = activeWorkspaceTab();
+      if(trackTabAtFinalize === 'track'){
+        const trackStartedAt = nowPerfMs();
+        logRiskPerf('renderTrackWorkspace_start', {
+          ...renderStateBase,
+          trigger:'risk_settings_change_track_only',
+          recordCount:watchlistTickerRecords().length
+        });
+        if(suppressTrackRender){
+          markWatchlistDirty(null, `${source}_suppress_track_render`);
+        }else{
+          await renderWatchlistChunked({
+            source:'risk_settings_visible_track',
+            batchSize:WATCHLIST_REFRESH_BATCH_SIZE_BACKGROUND,
+            model:prepareWatchlistRenderModel('risk_settings_visible_track', {
+              lightweight:true,
+              allowCache:false
+            })
+          });
+          if(activeWorkspaceTab() === 'track'){
+            renderFocusQueue();
+            clearAllTrackFreshnessFlagsAfterSuccessfulRender();
+            logRiskPerf('track_rerendered_or_marked_dirty', {
+              ...renderStateBase,
+              action:'rerendered_visible_track',
+              recordCount:watchlistTickerRecords().length
+            });
+          }else{
+            markWatchlistDirty(null, `${source}_hidden_track`);
+            startupCoordinator.renderedTabs.track = false;
+            startupCoordinator.trackNeedsHydratedRender = true;
+            logRiskPerf('track_rerendered_or_marked_dirty', {
+              ...renderStateBase,
+              action:'marked_hidden_track_dirty_after_render_boundary',
+              recordCount:watchlistTickerRecords().length
+            });
+          }
+        }
+        logRiskPerf('renderTrackWorkspace_end', {
+          ...renderStateBase,
+          trigger:'risk_settings_change_track_only',
+          durationMs:Number((nowPerfMs() - trackStartedAt).toFixed(1)),
+          recordCount:watchlistTickerRecords().length
+        });
+      }else{
+        markWatchlistDirty(null, `${source}_hidden_track`);
+        startupCoordinator.renderedTabs.track = false;
+        startupCoordinator.trackNeedsHydratedRender = true;
+        logRiskPerf('track_rerendered_or_marked_dirty', {
+          ...renderStateBase,
+          action:'marked_hidden_track_dirty',
+          recordCount:watchlistTickerRecords().length
+        });
+      }
+    }else if(activeTab === 'track'){
       const trackStartedAt = nowPerfMs();
       logRiskPerf('renderTrackWorkspace_start', {
         ...renderStateBase,
         trigger:'risk_settings_change',
         recordCount:watchlistTickerRecords().length
       });
-      await renderWatchlistChunked({
-        source:'risk_settings_visible_track',
-        batchSize:WATCHLIST_REFRESH_BATCH_SIZE_BACKGROUND,
-        model:prepareWatchlistRenderModel('risk_settings_visible_track', {
-          lightweight:true,
-          allowCache:false
-        })
-      });
-      renderFocusQueue();
-      clearAllTrackFreshnessFlagsAfterSuccessfulRender();
-      logRiskPerf('track_rerendered_or_marked_dirty', {
-        ...renderStateBase,
-        action:'rerendered_visible_track',
-        recordCount:watchlistTickerRecords().length
-      });
+      if(suppressTrackRender){
+        markWatchlistDirty(null, `${source}_suppress_track_render`);
+      }else{
+        await renderWatchlistChunked({
+          source:'risk_settings_visible_track',
+          batchSize:WATCHLIST_REFRESH_BATCH_SIZE_BACKGROUND,
+          model:prepareWatchlistRenderModel('risk_settings_visible_track', {
+            lightweight:true,
+            allowCache:false
+          })
+        });
+        renderFocusQueue();
+        clearAllTrackFreshnessFlagsAfterSuccessfulRender();
+        logRiskPerf('track_rerendered_or_marked_dirty', {
+          ...renderStateBase,
+          action:'rerendered_visible_track',
+          recordCount:watchlistTickerRecords().length
+        });
+      }
       logRiskPerf('renderTrackWorkspace_end', {
         ...renderStateBase,
         trigger:'risk_settings_change',
@@ -18223,30 +18303,21 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
 }
 
 async function refreshTrackOnly(options = {}){
-  const source = String(options.source || 'track_pull_refresh');
+  const source = String(options.source || 'unknown');
+  const isPullGestureRefresh = source === 'track_pull_refresh';
   const requestedWorkspace = activeWorkspaceTab?.() || uiState.activeWorkspaceTab || 'scan';
-  const refreshStartedOnTab = requestedWorkspace;
-  let userNavigatedAwayDuringRefresh = false;
   const wasTrackActive = requestedWorkspace === 'track';
-  const markUserWorkspaceNavigation = event => {
-    if(!trackRefreshRuntime.inFlight) return;
-    if(!event || !event.target || typeof event.target.closest !== 'function') return;
-    let nextTab = '';
-    const button = event.target.closest('[data-workspace-tab]');
-    if(button){
-      nextTab = String(button.getAttribute('data-workspace-tab') || '').trim().toLowerCase();
-    }else{
-      const anchor = event.target.closest('a[href^="#"]');
-      if(anchor){
-        const href = String(anchor.getAttribute('href') || '').trim();
-        nextTab = String(workspaceAnchorTabMap[href] || '').trim().toLowerCase();
-      }
-    }
-    if(nextTab && nextTab !== 'track'){
-      userNavigatedAwayDuringRefresh = true;
-    }
-  };
+  if(isPullGestureRefresh && startupCoordinator.trackedStateHydrationResolved !== true){
+    return {ok:false, source, skipped:true, reason:'hydration_incomplete'};
+  }
+  if(isPullGestureRefresh && requestedWorkspace !== 'track'){
+    return {ok:false, source, skipped:true, reason:'track_not_active'};
+  }
   if(trackRefreshRuntime.inFlight){
+    if(isPullGestureRefresh){
+      console.info('[TrackPullRefresh]', {event:'pullRefreshSkippedBecauseInFlight', source, activeWorkspace:activeWorkspaceTab()});
+      return {queued:false, skipped:true, reason:'in_flight', source};
+    }
     trackRefreshRuntime.queued = true;
     if(PP_PERF_DEBUG){
       console.debug('[PP_PERF] track_render_deferred_hidden_after_review_add', {
@@ -18262,11 +18333,14 @@ async function refreshTrackOnly(options = {}){
   trackRefreshRuntime.inFlight = true;
   trackRefreshRuntime.lastReason = source;
   trackRefreshRuntime.lastStartedAt = new Date().toISOString();
-  document.addEventListener('click', markUserWorkspaceNavigation, true);
   const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
   const previousTrackScrollTop = trackWorkspace ? Number(trackWorkspace.scrollTop || 0) : 0;
+  let refreshOk = false;
   setLiveProcessStatus('refreshing_watchlist', 'Updating watchlist plans');
-  console.info('[TrackPullRefresh] start', {activeWorkspace:activeWorkspaceTab(), source});
+  console.info('[TrackPullRefresh]', {event:'trackRefreshStarted', activeWorkspace:activeWorkspaceTab(), source});
+  if(isPullGestureRefresh){
+    console.info('[TrackPullRefresh]', {event:'pullRefreshStarted', activeWorkspace:activeWorkspaceTab(), source});
+  }
   try{
     await pullTrackedRecordsFromBackend({
       reason:source,
@@ -18280,23 +18354,27 @@ async function refreshTrackOnly(options = {}){
       render:false,
       persist:true
     });
-    refreshRiskContextForActiveSetups({
-      source,
+    console.info('[TrackPullRefresh]', {event:'riskRecalcStart', source});
+    await runRiskContextRefreshChunked({
+      source:`${source}_risk_recalc`,
       force:options.force === true,
       trackOnly:true,
       visibleOnly:true,
       suppressTrackRender:true
     });
+    console.info('[TrackPullRefresh]', {event:'riskRecalcEnd', source});
     markWatchlistDirty(null, source);
     if(activeWorkspaceTab() === 'track'){
+      console.info('[TrackPullRefresh]', {event:'trackRenderStart', source});
       await renderWatchlistChunked({
         source,
         batchSize:WATCHLIST_RENDER_BATCH_SIZE,
         model:prepareWatchlistRenderModel(source, {
-          lightweight:false,
+          lightweight:true,
           allowCache:false
         })
       });
+      console.info('[TrackPullRefresh]', {event:'trackRenderEnd', source});
       renderFocusQueue();
       startupCoordinator.renderedTabs.track = true;
       startupCoordinator.trackNeedsHydratedRender = false;
@@ -18306,35 +18384,35 @@ async function refreshTrackOnly(options = {}){
       if(!hasWatchlistDirtyRecords()){
         startupCoordinator.trackNeedsFullRender = false;
       }
-      if(trackWorkspace){
-        trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
-      }
+      requestAnimationFrame(() => {
+        if(activeWorkspaceTab() !== 'track') return;
+        if(trackWorkspace){
+          trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
+        }
+      });
     }else if(wasTrackActive){
-      if(trackWorkspace){
-        trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
-      }
-    }
-    if(
-      refreshStartedOnTab === 'track'
-      && activeWorkspaceTab() !== 'track'
-      && !userNavigatedAwayDuringRefresh
-    ){
-      setActiveWorkspaceTab('track', {
-        source:'track_pull_refresh_internal_restore',
-        focusTop:false
+      requestAnimationFrame(() => {
+        if(activeWorkspaceTab() !== 'track') return;
+        if(trackWorkspace){
+          trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
+        }
       });
     }
     setLiveProcessStatus('action', 'Watchlist plans updated.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
-    console.info('[TrackPullRefresh] complete', {activeWorkspace:activeWorkspaceTab(), source});
+    refreshOk = true;
     return {ok:true, source};
   }catch(error){
     console.warn('[TrackPullRefresh] failed', error);
     setLiveProcessStatus('error', 'Watchlist refresh failed.');
     return {ok:false, source, error:error && error.message ? String(error.message) : 'unknown_error'};
   }finally{
-    document.removeEventListener('click', markUserWorkspaceNavigation, true);
+    console.info('[TrackPullRefresh]', {event:'trackRefreshCompleted', activeWorkspace:activeWorkspaceTab(), source, ok:refreshOk});
+    if(isPullGestureRefresh){
+      console.info('[TrackPullRefresh]', {event:'pullRefreshCompleted', activeWorkspace:activeWorkspaceTab(), source, ok:refreshOk});
+    }
     trackRefreshRuntime.inFlight = false;
     trackRefreshRuntime.lastFinishedAt = new Date().toISOString();
+    requestTrackedStatePersist({reason:'track_refresh_complete'});
     if(trackRefreshRuntime.queued){
       trackRefreshRuntime.queued = false;
       scheduleDeferredStartupTask(() => refreshTrackOnly({
@@ -21338,38 +21416,99 @@ function bindTrackPullRefreshGesture(){
   const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
   if(!trackWorkspace) return;
   let trackPullStartY = null;
-  let trackPullTriggered = false;
+  let trackPullLastY = null;
+  let trackPullThresholdMet = false;
+  let trackPullGestureLogged = false;
+  let trackPullPreventLogged = false;
+  let trackPullCapturedScroll = false;
+  let trackPullIgnoredReason = '';
   const atTop = () => {
     const scrollTop = Number(trackWorkspace.scrollTop || 0);
     const pageTop = Number(window.scrollY || 0);
     return scrollTop <= 0 && pageTop <= 0;
   };
+  const resetGesture = () => {
+    trackPullStartY = null;
+    trackPullLastY = null;
+    trackPullThresholdMet = false;
+    trackPullGestureLogged = false;
+    trackPullPreventLogged = false;
+    trackPullCapturedScroll = false;
+    trackPullIgnoredReason = '';
+  };
   trackWorkspace.addEventListener('touchstart', event => {
-    if(activeWorkspaceTab() !== 'track') return;
-    if(!atTop()) return;
+    if(activeWorkspaceTab() !== 'track'){
+      trackPullIgnoredReason = 'not_track_tab';
+      return;
+    }
+    if(startupCoordinator.trackedStateHydrationResolved !== true){
+      trackPullIgnoredReason = 'hydration_incomplete';
+      return;
+    }
+    if(!atTop()){
+      trackPullIgnoredReason = 'not_at_top';
+      return;
+    }
+    if(trackRefreshRuntime.inFlight){
+      trackPullIgnoredReason = 'refresh_in_flight';
+      return;
+    }
     const touch = event.touches && event.touches[0];
     trackPullStartY = touch ? Number(touch.clientY) : null;
-    trackPullTriggered = false;
+    trackPullLastY = trackPullStartY;
+    trackPullThresholdMet = false;
+    trackPullCapturedScroll = false;
+    trackPullIgnoredReason = '';
+    if(!trackPullGestureLogged){
+      trackPullGestureLogged = true;
+      console.info('[TrackPullRefresh]', {event:'pullRefreshGestureStart', activeWorkspace:activeWorkspaceTab()});
+    }
   }, {passive:true});
   trackWorkspace.addEventListener('touchmove', event => {
     if(activeWorkspaceTab() !== 'track') return;
     if(trackPullStartY == null) return;
-    if(!atTop()) return;
+    if(!atTop()){
+      trackPullCapturedScroll = true;
+      return;
+    }
     const touch = event.touches && event.touches[0];
     if(!touch) return;
-    const deltaY = Number(touch.clientY) - trackPullStartY;
-    if(deltaY > 12){
+    trackPullLastY = Number(touch.clientY);
+    const deltaY = trackPullLastY - trackPullStartY;
+    const shouldCapturePullGesture = deltaY > 12 && !trackPullCapturedScroll;
+    if(shouldCapturePullGesture && event.cancelable){
       event.preventDefault();
+      if(!trackPullPreventLogged){
+        trackPullPreventLogged = true;
+        console.info('[TrackPullRefresh]', {event:'eventCancelableWhenPrevented', cancelable:true});
+      }
     }
-    if(deltaY > 72 && !trackPullTriggered){
-      trackPullTriggered = true;
-      refreshTrackOnly({source:'track_pull_refresh', force:true}).catch(() => {});
+    if(deltaY > 72 && !trackPullThresholdMet){
+      trackPullThresholdMet = true;
+      console.info('[TrackPullRefresh]', {event:'pullRefreshThresholdMet', deltaY:Number(deltaY.toFixed(1))});
     }
   }, {passive:false});
   trackWorkspace.addEventListener('touchend', () => {
-    trackPullStartY = null;
-    trackPullTriggered = false;
+    const hadGesture = trackPullStartY != null;
+    if(!hadGesture){
+      if(trackPullIgnoredReason){
+        console.info('[TrackPullRefresh]', {event:'pullRefreshIgnoredReason', reason:trackPullIgnoredReason, activeWorkspace:activeWorkspaceTab()});
+      }
+      resetGesture();
+      return;
+    }
+    if(trackPullThresholdMet){
+      if(trackRefreshRuntime.inFlight){
+        console.info('[TrackPullRefresh]', {event:'pullRefreshSkippedBecauseInFlight', activeWorkspace:activeWorkspaceTab()});
+      }else{
+        refreshTrackOnly({source:'track_pull_refresh', force:true}).catch(() => {});
+      }
+    }else{
+      console.info('[TrackPullRefresh]', {event:'pullRefreshIgnoredReason', reason:'threshold_not_met', activeWorkspace:activeWorkspaceTab()});
+    }
+    resetGesture();
   }, {passive:true});
+  trackWorkspace.addEventListener('touchcancel', resetGesture, {passive:true});
 }
 
 click('addTickerBtn', addTickerFromSearch);
