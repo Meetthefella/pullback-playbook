@@ -18589,6 +18589,7 @@ async function refreshTrackOnly(options = {}){
   const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
   const previousTrackScrollTop = trackWorkspace ? Number(trackWorkspace.scrollTop || 0) : 0;
   let refreshOk = false;
+  let riskRecalcFailed = false;
   setLiveProcessStatus('refreshing_watchlist', 'Updating watchlist plans');
   console.info('[TrackPullRefresh]', {event:'trackRefreshStarted', activeWorkspace:activeWorkspaceTab(), source});
   if(isPullGestureRefresh){
@@ -18608,14 +18609,26 @@ async function refreshTrackOnly(options = {}){
       persist:true
     });
     console.info('[TrackPullRefresh]', {event:'riskRecalcStart', source});
-    await runRiskContextRefreshChunked({
-      source:`${source}_risk_recalc`,
-      force:options.force === true,
-      trackOnly:true,
-      visibleOnly:true,
-      suppressTrackRender:true
-    });
-    console.info('[TrackPullRefresh]', {event:'riskRecalcEnd', source});
+    try{
+      await runRiskContextRefreshChunked({
+        source:`${source}_risk_recalc`,
+        force:options.force === true,
+        trackOnly:true,
+        visibleOnly:true,
+        suppressTrackRender:true
+      });
+      console.info('[TrackPullRefresh]', {event:'riskRecalcEnd', source});
+    }catch(riskError){
+      riskRecalcFailed = true;
+      console.warn('[TrackPullRefresh] risk recalc failed; continuing with watchlist render fallback', riskError);
+      runWatchlistLifecycleEvaluation({
+        source:`${source}_risk_recalc_fallback`,
+        persist:false,
+        render:false,
+        force:options.force === true
+      });
+      markWatchlistDirty(null, `${source}_risk_recalc_fallback`);
+    }
     markWatchlistDirty(null, source);
     if(activeWorkspaceTab() === 'track'){
       console.info('[TrackPullRefresh]', {event:'trackRenderStart', source});
@@ -18623,7 +18636,7 @@ async function refreshTrackOnly(options = {}){
         source,
         batchSize:WATCHLIST_RENDER_BATCH_SIZE,
         model:prepareWatchlistRenderModel(source, {
-          lightweight:true,
+          lightweight:false,
           allowCache:false
         })
       });
@@ -18651,9 +18664,13 @@ async function refreshTrackOnly(options = {}){
         }
       });
     }
-    setLiveProcessStatus('action', 'Watchlist plans updated.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+    setLiveProcessStatus(
+      'action',
+      riskRecalcFailed ? 'Watchlist updated (risk recalc deferred).' : 'Watchlist plans updated.',
+      {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
+    );
     refreshOk = true;
-    return {ok:true, source};
+    return {ok:true, source, riskRecalcFailed};
   }catch(error){
     console.warn('[TrackPullRefresh] failed', error);
     setLiveProcessStatus('error', 'Watchlist refresh failed.');
