@@ -3395,17 +3395,113 @@ function allTickerRecords(){
   return records;
 }
 
-function watchlistTickerRecords(){
-  return allTickerRecords()
-    .filter(record => record.watchlist && record.watchlist.inWatchlist)
-    .sort((a, b) => {
-      const lifecycleA = syncWatchlistLifecycle(a) || watchlistLifecycleSnapshot(a);
-      const lifecycleB = syncWatchlistLifecycle(b) || watchlistLifecycleSnapshot(b);
-      return lifecycleA.rank - lifecycleB.rank
-        || watchlistPriorityForRecord(b).score - watchlistPriorityForRecord(a).score
-        || String(b.watchlist.addedAt || '').localeCompare(String(a.watchlist.addedAt || ''))
-        || a.ticker.localeCompare(b.ticker);
+function createWatchlistProjectionPassCache(){
+  return {
+    lifecycle:new Map(),
+    priority:new Map(),
+    priorityScore:new Map(),
+    finalState:new Map(),
+    finalStateCacheHits:0,
+    finalStateCacheMisses:0
+  };
+}
+
+function buildFinalStatePassCacheKey(record, options = {}){
+  const item = normalizeTickerRecord(record || {});
+  const ticker = normalizeTicker(item && item.ticker || '');
+  const recordUpdatedAt = String(
+    item && (
+      item.updatedAt
+      || (item.meta && item.meta.updatedAt)
+      || (item.scan && item.scan.updatedAt)
+      || ''
+    )
+  );
+  const planUpdatedAt = String(item && item.plan && item.plan.updatedAt || '');
+  const contextToken = String(options && options.context || '');
+  const finalVerdictToken = String(options && options.finalVerdict || '');
+  return `${ticker}|${recordUpdatedAt}|${planUpdatedAt}|${contextToken}|${finalVerdictToken}`;
+}
+
+function getFinalStateForPass(record, options = {}, passCache = null){
+  if(!passCache || !(passCache.finalState instanceof Map)){
+    return resolveFinalStateContract(record, options);
+  }
+  const key = buildFinalStatePassCacheKey(record, options);
+  if(passCache.finalState.has(key)){
+    passCache.finalStateCacheHits = Number(passCache.finalStateCacheHits || 0) + 1;
+    return passCache.finalState.get(key);
+  }
+  const resolved = resolveFinalStateContract(record, options);
+  passCache.finalState.set(key, resolved);
+  passCache.finalStateCacheMisses = Number(passCache.finalStateCacheMisses || 0) + 1;
+  return resolved;
+}
+
+function warmWatchlistProjectionPassCache(records = [], passCache = null){
+  if(!passCache || !Array.isArray(records) || !records.length) return;
+  records.forEach(record => {
+    const symbol = normalizeTicker(record && record.ticker || '');
+    if(!symbol) return;
+    let lifecycle = passCache.lifecycle instanceof Map ? passCache.lifecycle.get(symbol) : null;
+    if(!lifecycle){
+      lifecycle = syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache});
+      if(passCache.lifecycle instanceof Map) passCache.lifecycle.set(symbol, lifecycle);
+    }
+    if(!(passCache.priorityScore instanceof Map) || passCache.priorityScore.has(symbol)) return;
+    watchlistPriorityForRecord(record, {lifecycleSnapshot:lifecycle, passCache});
+  });
+}
+
+function watchlistTickerRecords(options = {}){
+  const startedAt = nowPerfMs();
+  const passCache = options.passCache && typeof options.passCache === 'object'
+    ? options.passCache
+    : createWatchlistProjectionPassCache();
+  const lifecycleCache = passCache.lifecycle;
+  const priorityCache = passCache.priorityScore;
+  let lifecycleSnapshotCount = 0;
+  let finalStateResolveCount = 0;
+  const records = allTickerRecords().filter(record => record.watchlist && record.watchlist.inWatchlist);
+  records.forEach(record => {
+    const symbol = normalizeTicker(record && record.ticker || '');
+    const lifecycle = syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache});
+    const priority = watchlistPriorityForRecord(record, {lifecycleSnapshot:lifecycle, passCache});
+    lifecycleSnapshotCount += 1;
+    finalStateResolveCount += 1;
+    const priorityScore = Number(priority && priority.score || 0);
+    lifecycleCache.set(symbol, lifecycle);
+    passCache.priority.set(symbol, priority);
+    priorityCache.set(symbol, priorityScore);
+  });
+  const sorted = records.sort((a, b) => {
+    const symbolA = normalizeTicker(a && a.ticker || '');
+    const symbolB = normalizeTicker(b && b.ticker || '');
+    const lifecycleA = lifecycleCache.get(symbolA) || {rank:99};
+    const lifecycleB = lifecycleCache.get(symbolB) || {rank:99};
+    const priorityA = Number(priorityCache.get(symbolA) || 0);
+    const priorityB = Number(priorityCache.get(symbolB) || 0);
+    return lifecycleA.rank - lifecycleB.rank
+      || priorityB - priorityA
+      || String(b.watchlist.addedAt || '').localeCompare(String(a.watchlist.addedAt || ''))
+      || a.ticker.localeCompare(b.ticker);
+  });
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] watchlist_projection_pass', {
+      lifecycleSyncStart:startedAt,
+      lifecycleSyncEnd:nowPerfMs(),
+      lifecycleSnapshotCount,
+      finalStateResolveCount,
+      effectivePlanResolveCount:finalStateResolveCount,
+      normalizedRecordCount:records.length,
+      cacheHitCount:lifecycleCache.size + priorityCache.size,
+      cacheMissCount:0,
+      finalStateCacheHits:Number(passCache.finalStateCacheHits || 0),
+      finalStateCacheMisses:Number(passCache.finalStateCacheMisses || 0),
+      watchlistProjectionDurationMs:Number((nowPerfMs() - startedAt).toFixed(1))
     });
+  }
+  return sorted;
 }
 
 function watchlistRecordRecencyTimestamp(record){
@@ -3456,35 +3552,45 @@ function watchlistGroupSortRankForVerdict(globalVerdict){
   return 3;
 }
 
-function sortWatchlistGroupRecords(records, groupKey){
+function sortWatchlistGroupRecords(records, groupKey, passCache = null){
   const list = Array.isArray(records) ? records.slice() : [];
-  const cachedVerdicts = new Map();
-  const getVerdict = record => {
+  const metaBySymbol = new Map();
+  list.forEach(record => {
     const symbol = normalizeTicker(record && record.ticker || '');
-    if(cachedVerdicts.has(symbol)) return cachedVerdicts.get(symbol);
-    const verdict = resolveGlobalVerdict(record);
-    cachedVerdicts.set(symbol, verdict);
-    return verdict;
-  };
-  const getPriority = record => {
     const rawPriority = record && (record.priorityScore ?? record.priority);
-    if(Number.isFinite(Number(rawPriority))) return Number(rawPriority);
-    return Number(watchlistPriorityForRecord(record).score || 0);
+    const precomputedPriority = passCache && passCache.priorityScore instanceof Map
+      ? passCache.priorityScore.get(symbol)
+      : null;
+    const priority = precomputedPriority !== null
+      ? precomputedPriority
+      : (Number.isFinite(Number(rawPriority)) ? Number(rawPriority) : 0);
+    metaBySymbol.set(symbol, {
+      verdict:resolveGlobalVerdict(record),
+      priority,
+      setupScore:Number(setupScoreForRecord(record) || 0),
+      recency:watchlistRecordRecencyTimestamp(record)
+    });
+  });
+  const getMeta = record => metaBySymbol.get(normalizeTicker(record && record.ticker || '')) || {
+    verdict:{},
+    priority:0,
+    setupScore:0,
+    recency:0
   };
-  const getSetupScore = record => Number(setupScoreForRecord(record) || 0);
-  const getRecency = record => watchlistRecordRecencyTimestamp(record);
 
   if(groupKey === 'tradeable_entry' || groupKey === 'monitor_watch' || groupKey === 'active'){
     return list.sort((a, b) => {
-      const verdictA = getVerdict(a);
-      const verdictB = getVerdict(b);
+      const metaA = getMeta(a);
+      const metaB = getMeta(b);
+      const verdictA = metaA.verdict;
+      const verdictB = metaB.verdict;
       const rankDiff = watchlistGroupSortRankForVerdict(verdictA) - watchlistGroupSortRankForVerdict(verdictB);
       if(rankDiff !== 0) return rankDiff;
-      const priorityDiff = getPriority(b) - getPriority(a);
+      const priorityDiff = metaB.priority - metaA.priority;
       if(priorityDiff !== 0) return priorityDiff;
-      const setupDiff = getSetupScore(b) - getSetupScore(a);
+      const setupDiff = metaB.setupScore - metaA.setupScore;
       if(setupDiff !== 0) return setupDiff;
-      const recencyDiff = getRecency(b) - getRecency(a);
+      const recencyDiff = metaB.recency - metaA.recency;
       if(recencyDiff !== 0) return recencyDiff;
       return String(a.ticker || '').localeCompare(String(b.ticker || ''));
     });
@@ -3492,11 +3598,13 @@ function sortWatchlistGroupRecords(records, groupKey){
 
   if(groupKey === 'diminishing'){
     return list.sort((a, b) => {
-      const priorityDiff = getPriority(b) - getPriority(a);
+      const metaA = getMeta(a);
+      const metaB = getMeta(b);
+      const priorityDiff = metaB.priority - metaA.priority;
       if(priorityDiff !== 0) return priorityDiff;
-      const setupDiff = getSetupScore(b) - getSetupScore(a);
+      const setupDiff = metaB.setupScore - metaA.setupScore;
       if(setupDiff !== 0) return setupDiff;
-      const recencyDiff = getRecency(b) - getRecency(a);
+      const recencyDiff = metaB.recency - metaA.recency;
       if(recencyDiff !== 0) return recencyDiff;
       return String(a.ticker || '').localeCompare(String(b.ticker || ''));
     });
@@ -3504,11 +3612,13 @@ function sortWatchlistGroupRecords(records, groupKey){
 
   if(groupKey === 'avoid_dead'){
     return list.sort((a, b) => {
-      const priorityDiff = getPriority(b) - getPriority(a);
+      const metaA = getMeta(a);
+      const metaB = getMeta(b);
+      const priorityDiff = metaB.priority - metaA.priority;
       if(priorityDiff !== 0) return priorityDiff;
-      const setupDiff = getSetupScore(b) - getSetupScore(a);
+      const setupDiff = metaB.setupScore - metaA.setupScore;
       if(setupDiff !== 0) return setupDiff;
-      const recencyDiff = getRecency(b) - getRecency(a);
+      const recencyDiff = metaB.recency - metaA.recency;
       if(recencyDiff !== 0) return recencyDiff;
       return String(a.ticker || '').localeCompare(String(b.ticker || ''));
     });
@@ -3517,9 +3627,20 @@ function sortWatchlistGroupRecords(records, groupKey){
   return list;
 }
 
-function watchlistPriorityForRecord(record){
+function watchlistPriorityForRecord(record, options = {}){
   const item = normalizeTickerRecord(record);
-  const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(item);
+  const symbol = normalizeTicker(item && item.ticker || '');
+  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
+  if(passCache && passCache.priority instanceof Map && passCache.priority.has(symbol)){
+    return passCache.priority.get(symbol);
+  }
+  const lifecycle = (
+    (options.lifecycleSnapshot && typeof options.lifecycleSnapshot === 'object')
+      ? options.lifecycleSnapshot
+      : (passCache && passCache.lifecycle instanceof Map && passCache.lifecycle.has(symbol)
+        ? passCache.lifecycle.get(symbol)
+        : watchlistLifecycleSnapshot(item))
+  );
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const rrResolution = resolveScannerStateWithTrace(item);
   const setupScore = setupScoreForRecord(item);
@@ -3563,7 +3684,13 @@ function watchlistPriorityForRecord(record){
   if(record && typeof record === 'object'){
     record.priorityScore = score;
   }
-  return {score, bucket};
+  const result = {score, bucket};
+  if(passCache && passCache.priority instanceof Map){
+    passCache.priority.set(symbol, result);
+    if(passCache.priorityScore instanceof Map) passCache.priorityScore.set(symbol, score);
+    if(passCache.lifecycle instanceof Map && !passCache.lifecycle.has(symbol)) passCache.lifecycle.set(symbol, lifecycle);
+  }
+  return result;
 }
 
 function setWatchlistLiveRefreshPending(tickers, pending = true){
@@ -6029,8 +6156,9 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
   return nextSnapshot;
 }
 
-function watchlistLifecycleSnapshot(record){
+function watchlistLifecycleSnapshot(record, options = {}){
   const item = normalizeTickerRecord(record);
+  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   const liveRefreshPending = isWatchlistLiveRefreshPending(item.ticker);
   if(liveRefreshPending){
     const storedState = canonicalLifecycleState(item.watchlist && item.watchlist.lifecycleState);
@@ -6092,7 +6220,7 @@ function watchlistLifecycleSnapshot(record){
     avoidSubtype,
     deadCheck
   });
-  const resolved = resolveFinalStateContract(item, {
+  const resolved = getFinalStateForPass(item, {
     context:'watchlist',
     finalVerdict:displayStageForRecord(item),
     derivedStates,
@@ -6101,7 +6229,7 @@ function watchlistLifecycleSnapshot(record){
     avoidSubtype,
     deadCheck,
     emojiPresentation
-  });
+  }, passCache);
   const canonicalVerdict = normalizeGlobalVerdictKey(globalVerdict.final_verdict);
   const actionState = deriveActionStateForRecord(item).stage;
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
@@ -6223,10 +6351,10 @@ function watchlistLifecycleSnapshot(record){
   return snapshot;
 }
 
-function syncWatchlistLifecycle(record){
+function syncWatchlistLifecycle(record, options = {}){
   if(!record || !record.watchlist || !record.watchlist.inWatchlist) return null;
-  if(hasLockedLifecycle(record)) return watchlistLifecycleSnapshot(record);
-  const snapshot = watchlistLifecycleSnapshot(record);
+  if(hasLockedLifecycle(record)) return watchlistLifecycleSnapshot(record, options);
+  const snapshot = watchlistLifecycleSnapshot(record, options);
   record.watchlist.lifecycleState = snapshot.state;
   record.watchlist.lifecycleLabel = snapshot.label;
   record.watchlist.watchlist_priority_bucket = snapshot.bucket;
@@ -6969,7 +7097,7 @@ function buildWatchlistRenderSignature(records, options = {}){
 
 function shouldDisplayWatchlistRecordForCurrentFilter(record){
   const showExpired = !!state.showExpiredWatchlist;
-  const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+  const lifecycle = syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache});
   if(showExpired) return true;
   return !['dead','expired'].includes(lifecycle.state);
 }
@@ -7005,18 +7133,29 @@ function setWatchlistCardRefreshButtonState(ticker, busy = false){
   return true;
 }
 
-function renderWatchlistCardElement(record){
+function renderWatchlistCardElement(record, options = {}){
   const entry = tickerRecordToWatchlistEntry(record);
   if(!entry) return null;
-  const view = buildFinalSetupView(record);
+  const view = options.precomputedView && typeof options.precomputedView === 'object'
+    ? options.precomputedView
+    : buildFinalSetupView(record);
   const liveRefreshPending = isWatchlistLiveRefreshPending(record.ticker);
   const manualRefreshBusy = isManualWatchlistRefreshInProgress(record.ticker);
   const remaining = getTradingDaysRemaining(entry);
   const lifecycleText = lifecycleLabel(record);
-  const lifecycleSnapshot = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
+  const symbol = normalizeTicker(record && record.ticker || '');
+  const lifecycleSnapshot = (
+    passCache && passCache.lifecycle instanceof Map && passCache.lifecycle.has(symbol)
+      ? passCache.lifecycle.get(symbol)
+      : (syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache}))
+  );
   const expired = lifecycleSnapshot.state === 'expired' || record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
   const expiryDate = record.lifecycle.expiresAt || 'Not set';
-  const priority = watchlistPriorityForRecord(record);
+  const priority = watchlistPriorityForRecord(record, {
+    lifecycleSnapshot,
+    passCache
+  });
   const avoidSubtype = avoidSubtypeForRecord(record);
   const derivedStates = analysisDerivedStatesFromRecord(record);
   const displayedPlan = applySetupConfirmationPlanGate(record, deriveCurrentPlanState(
@@ -7027,14 +7166,14 @@ function renderWatchlistCardElement(record){
   ), derivedStates);
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
   const rrResolution = resolveScannerStateWithTrace(record);
-  const resolvedContract = resolveFinalStateContract(record, {
+  const resolvedContract = getFinalStateForPass(record, {
     context:'watchlist',
     finalVerdict:view.displayStage,
     derivedStates,
     displayedPlan,
     qualityAdjustments,
     rrResolution
-  });
+  }, passCache);
   const watchlistPresentation = resolveEmojiPresentation(record, {
     context:'watchlist',
     finalVerdict:view.displayStage,
@@ -7278,18 +7417,29 @@ function isTrackSectionCollapsible(sectionKey){
   return sectionKey === 'diminishing' || sectionKey === 'avoid_dead';
 }
 
-function watchlistSectionPriorityValue(record){
+function watchlistSectionPriorityValue(record, passCache = null){
+  const symbol = normalizeTicker(record && record.ticker || '');
+  if(passCache && passCache.priorityScore instanceof Map && Number.isFinite(Number(passCache.priorityScore.get(symbol)))){
+    return Number(passCache.priorityScore.get(symbol));
+  }
   const rawPriority = record && (record.priorityScore ?? record.priority);
   if(Number.isFinite(Number(rawPriority))) return Number(rawPriority);
-  return Number(watchlistPriorityForRecord(record).score || 0);
+  if(passCache){
+    const lifecycle = passCache.lifecycle instanceof Map && passCache.lifecycle.has(symbol)
+      ? passCache.lifecycle.get(symbol)
+      : (syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache}));
+    const resolved = watchlistPriorityForRecord(record, {lifecycleSnapshot:lifecycle, passCache});
+    return Number(resolved && resolved.score || 0);
+  }
+  return 0;
 }
 
-function shouldForceTrackSectionCollapsed(sectionKey, sectionRecords = []){
+function shouldForceTrackSectionCollapsed(sectionKey, sectionRecords = [], passCache = null){
   if(!isTrackSectionCollapsible(sectionKey)) return false;
   if(!Array.isArray(sectionRecords) || !sectionRecords.length) return false;
   return sectionRecords.every(record => {
     const bucket = watchlistPresentationBucketForRecord(record);
-    const priorityValue = watchlistSectionPriorityValue(record);
+    const priorityValue = watchlistSectionPriorityValue(record, passCache);
     const stateMatches = sectionKey === 'diminishing'
       ? bucket === 'diminishing'
       : bucket === 'avoid_dead';
@@ -7364,10 +7514,11 @@ function buildWatchlistSectionShell(group, count, expanded){
   return {section, header, body, collapsible};
 }
 
-function renderWatchlistSectionCardsSync(records, container){
+function renderWatchlistSectionCardsSync(records, container, options = {}){
   if(!container) return;
+  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   records.forEach(record => {
-    const cardElement = renderWatchlistCardElement(record);
+    const cardElement = renderWatchlistCardElement(record, {passCache});
     if(!cardElement) return;
     container.appendChild(cardElement);
   });
@@ -7377,13 +7528,38 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
   if(!container) return;
   const batchSize = Math.max(1, Number(options.batchSize) || WATCHLIST_RENDER_BATCH_SIZE);
   const source = String(options.source || 'watchlist_section_chunked');
+  const projectionStartedAt = nowPerfMs();
+  const projectedRecords = [];
+  const projectionChunkSize = Math.max(1, Math.min(5, batchSize));
+  let projectionChunkCount = 0;
+  for(let index = 0; index < records.length; index += projectionChunkSize){
+    const end = Math.min(index + projectionChunkSize, records.length);
+    for(let cursor = index; cursor < end; cursor += 1){
+      const record = records[cursor];
+      projectedRecords.push({
+        record,
+        precomputedView:projectTickerForCard(record)
+      });
+    }
+    projectionChunkCount += 1;
+    await yieldUiChunk();
+  }
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] watchlist_projection_summary', {
+      source,
+      chunkCount:projectionChunkCount,
+      recordCount:projectedRecords.length,
+      durationMs:Number((nowPerfMs() - projectionStartedAt).toFixed(1))
+    });
+  }
+  const renderStartedAt = nowPerfMs();
   let batchIndex = 0;
-  for(let index = 0; index < records.length; index += batchSize){
+  for(let index = 0; index < projectedRecords.length; index += batchSize){
     const batchStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
-    const slice = records.slice(index, index + batchSize);
+    const slice = projectedRecords.slice(index, index + batchSize);
     const batchFragment = document.createDocumentFragment();
-    slice.forEach(record => {
-      const cardElement = renderWatchlistCardElement(record);
+    slice.forEach(item => {
+      const cardElement = renderWatchlistCardElement(item.record, {precomputedView:item.precomputedView, passCache});
       if(cardElement) batchFragment.appendChild(cardElement);
     });
     container.appendChild(batchFragment);
@@ -7400,10 +7576,21 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
     batchIndex += 1;
     await yieldUiChunk();
   }
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] watchlist_render_summary', {
+      source,
+      chunkCount:batchIndex,
+      recordCount:projectedRecords.length,
+      durationMs:Number((nowPerfMs() - renderStartedAt).toFixed(1))
+    });
+  }
 }
 
 function prepareWatchlistRenderModel(source = 'watchlist_render', options = {}){
   const mode = options.lightweight === true ? 'lightweight' : 'full';
+  const passCache = options.passCache && typeof options.passCache === 'object'
+    ? options.passCache
+    : createWatchlistProjectionPassCache();
   const prepStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
   const prepSteps = {};
   const markStep = (name, startAt) => {
@@ -7437,12 +7624,13 @@ function prepareWatchlistRenderModel(source = 'watchlist_render', options = {}){
         showExpired
       });
     }
-    return {
-      box,
-      showExpired,
-      records:cache.records,
-      renderSignature:cache.renderSignature
-    };
+      return {
+        box,
+        showExpired,
+        records:cache.records,
+        renderSignature:cache.renderSignature,
+        passCache
+      };
   }
   let records = [];
   if(mode === 'full'){
@@ -7458,8 +7646,8 @@ function prepareWatchlistRenderModel(source = 'watchlist_render', options = {}){
     });
     if(gatingChanged) commitTickerState();
     stepStart = markStep('applyGates', stepStart);
-    records = watchlistTickerRecords().filter(record => {
-      const lifecycle = syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record);
+    records = watchlistTickerRecords({passCache}).filter(record => {
+      const lifecycle = syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache});
       if(showExpired) return true;
       return !['dead','expired'].includes(lifecycle.state);
     });
@@ -7498,10 +7686,12 @@ function prepareWatchlistRenderModel(source = 'watchlist_render', options = {}){
       steps:prepSteps
     });
   }
-  return {box, showExpired, records, renderSignature};
+  warmWatchlistProjectionPassCache(records, passCache);
+  return {box, showExpired, records, renderSignature, passCache};
 }
 
-function buildWatchlistSectionsFragment(records, showExpired){
+function buildWatchlistSectionsFragment(records, showExpired, options = {}){
+  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   const groups = watchlistRenderGroups(showExpired);
   const grouped = {};
   groups.forEach(group => { grouped[group.key] = []; });
@@ -7514,12 +7704,12 @@ function buildWatchlistSectionsFragment(records, showExpired){
   groups.forEach(group => {
     const groupRecords = grouped[group.key] || [];
     if(!groupRecords.length) return;
-    const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key);
+    const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key, passCache);
     const expanded = isTrackSectionExpanded(group.key, sortedGroupRecords);
     const shell = buildWatchlistSectionShell(group, sortedGroupRecords.length, expanded);
     const {section, header, body, collapsible} = shell;
     if(expanded){
-      renderWatchlistSectionCardsSync(sortedGroupRecords, body);
+      renderWatchlistSectionCardsSync(sortedGroupRecords, body, {passCache});
       section.dataset.rendered = '1';
       logTrackSectionRender(group.key, false, sortedGroupRecords.length, body.children.length, 'watchlist_render_sync');
     }else{
@@ -7533,7 +7723,7 @@ function buildWatchlistSectionsFragment(records, showExpired){
         setTrackSectionExpanded(group.key, nextExpanded);
         applyTrackSectionExpandedState(section, nextExpanded);
         if(nextExpanded && section.dataset.rendered !== '1'){
-          renderWatchlistSectionCardsSync(sortedGroupRecords, body);
+          renderWatchlistSectionCardsSync(sortedGroupRecords, body, {passCache});
           section.dataset.rendered = '1';
           logTrackSectionRender(group.key, false, sortedGroupRecords.length, body.children.length, 'watchlist_render_sync_expand');
         }else{
@@ -7563,8 +7753,12 @@ async function renderWatchlistChunked(options = {}){
     return;
   }
   const batchSize = Math.max(1, Number(options.batchSize) || WATCHLIST_RENDER_BATCH_SIZE);
-  const model = options.model || prepareWatchlistRenderModel(source);
+  const passCache = options.passCache && typeof options.passCache === 'object'
+    ? options.passCache
+    : createWatchlistProjectionPassCache();
+  const model = options.model || prepareWatchlistRenderModel(source, {passCache});
   const {box, showExpired, records, renderSignature} = model;
+  const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
   if(!box) return;
   logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
   if(!records.length){
@@ -7594,7 +7788,7 @@ async function renderWatchlistChunked(options = {}){
   groups.forEach(group => {
     const groupRecords = grouped[group.key] || [];
     if(!groupRecords.length) return;
-    const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key);
+    const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key, modelPassCache);
     const expanded = isTrackSectionExpanded(group.key, sortedGroupRecords);
     const shell = buildWatchlistSectionShell(group, sortedGroupRecords.length, expanded);
     sectionMeta.push({
@@ -7617,7 +7811,8 @@ async function renderWatchlistChunked(options = {}){
         if(nextExpanded && !meta.rendered){
           renderWatchlistSectionCardsChunked(meta.records, meta.body, {
             batchSize,
-            source:`${source}_${meta.groupKey}_expand`
+            source:`${source}_${meta.groupKey}_expand`,
+            passCache:modelPassCache
           }).then(() => {
             meta.rendered = true;
             meta.section.dataset.rendered = '1';
@@ -7639,7 +7834,8 @@ async function renderWatchlistChunked(options = {}){
     if(!meta.expanded) continue;
     await renderWatchlistSectionCardsChunked(meta.records, meta.body, {
       batchSize,
-      source:`${source}_${meta.groupKey}`
+      source:`${source}_${meta.groupKey}`,
+      passCache:modelPassCache
     });
     meta.rendered = true;
     meta.section.dataset.rendered = '1';
@@ -7652,8 +7848,10 @@ async function renderWatchlistChunked(options = {}){
 
 function renderWatchlist(){
   if(shouldSkipHiddenWatchlistRender('watchlist_render')) return;
-  const model = prepareWatchlistRenderModel('watchlist_render');
+  const passCache = createWatchlistProjectionPassCache();
+  const model = prepareWatchlistRenderModel('watchlist_render', {passCache});
   const {box, showExpired, records, renderSignature} = model;
+  const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
   if(!box) return;
   logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
   if(!records.length){
@@ -7672,7 +7870,7 @@ function renderWatchlist(){
     return;
   }
   box.innerHTML = '';
-  box.appendChild(buildWatchlistSectionsFragment(records, showExpired));
+  box.appendChild(buildWatchlistSectionsFragment(records, showExpired, {passCache:modelPassCache}));
   uiState.watchlistRenderSignature = renderSignature;
   box.dataset.watchlistSignature = renderSignature;
   clearWatchlistDirtyForRecords(records);
@@ -23442,3 +23640,4 @@ scheduleNamedDeferredStartupTask('startup_application_boot', startApplication, {
 
 
 
+  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
