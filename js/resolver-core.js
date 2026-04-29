@@ -60,8 +60,101 @@
     })[safeVerdict] || {label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true};
   }
 
+  function numericValueOrNull(value){
+    if(value === null || value === undefined) return null;
+    if(typeof value === 'string' && value.trim() === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function resolveBouncePriceability(ctx = {}){
+    const reclaimSupportingEvidence = [];
+    const reclaimDirectEvidence = [];
+    const stabilisationState = String(ctx.stabilisation_state || '').trim().toLowerCase();
+    if(ctx.reclaim_attempt === true) reclaimSupportingEvidence.push('reclaim_attempt');
+    if(stabilisationState === 'clear') reclaimSupportingEvidence.push('stabilisation_clear');
+    if(String(ctx.bounce_quality || '').trim().toLowerCase() === 'strong' || String(ctx.bounce_quality || '').trim().toLowerCase() === 'clear'){
+      reclaimSupportingEvidence.push('bounce_quality_clear');
+    }
+    if(String(ctx.volume_state || '').trim().toLowerCase() === 'supportive' || String(ctx.volume_state || '').trim().toLowerCase() === 'strong'){
+      reclaimSupportingEvidence.push('volume_confirmation');
+    }
+    if(ctx.reclaims_level === true) reclaimDirectEvidence.push('reclaims_level');
+    if(ctx.reclaim_hold === true) reclaimDirectEvidence.push('reclaim_hold');
+    if(ctx.held_reclaim === true) reclaimDirectEvidence.push('held_reclaim');
+    if(ctx.entry_trigger_hit === true) reclaimDirectEvidence.push('entry_trigger_hit');
+    const currentPriceVal = numericValueOrNull(ctx.current_price);
+    const entryVal = numericValueOrNull(ctx.entry);
+    const credibleRR = numericValueOrNull(ctx.credible_rr);
+    const rrFallback = numericValueOrNull(ctx.rr);
+    const resolvedRR = credibleRR !== null ? credibleRR : rrFallback;
+    if(entryVal !== null && currentPriceVal !== null && currentPriceVal >= entryVal){
+      reclaimDirectEvidence.push('price_holding_entry');
+    }
+    if(ctx.higher_low_respected === true || ctx.swing_low_respected === true){
+      reclaimDirectEvidence.push('higher_low_respected');
+    }
+    const reclaimSignalCount = reclaimSupportingEvidence.length + reclaimDirectEvidence.length;
+    const reclaimDirectSignalCount = reclaimDirectEvidence.length;
+    const independentReclaimConfirmed = reclaimSignalCount >= 2 && reclaimDirectSignalCount >= 1;
+    const reclaimConfirmedReason = independentReclaimConfirmed
+      ? `Confirmed from ${reclaimSignalCount} signals (${reclaimDirectSignalCount} direct).`
+      : `Need >=2 signals with >=1 direct; got ${reclaimSignalCount} total and ${reclaimDirectSignalCount} direct.`;
+    const reclaimConfirmationEvidence = reclaimDirectEvidence.concat(reclaimSupportingEvidence);
+    const helper = global.BouncePriceability && typeof global.BouncePriceability.isConfirmedBouncePriceable === 'function'
+      ? global.BouncePriceability.isConfirmedBouncePriceable
+      : null;
+    if(helper){
+      const result = helper({
+        originalBounceState:ctx.bounce_state,
+        structureState:ctx.structure_state,
+        pullbackZone:ctx.pullback_zone,
+        stabilisationState:ctx.stabilisation_state,
+        trendState:ctx.trend_state,
+        currentPrice:ctx.current_price,
+        entry:ctx.entry,
+        stop:ctx.stop,
+        target:ctx.target,
+        rr:resolvedRR,
+        reclaimConfirmed:independentReclaimConfirmed,
+        riskTooWide:ctx.stop_distance_too_wide === true
+      });
+      return {
+        ...result,
+        resolvedRR,
+        rrKnown:resolvedRR !== null,
+        reclaimConfirmed:independentReclaimConfirmed,
+        reclaimConfirmationEvidence,
+        reclaimSignalCount,
+        reclaimDirectSignalCount,
+        reclaimConfirmedReason
+      };
+    }
+    const bounce = String(ctx.bounce_state || '').trim().toLowerCase() || 'none';
+    return {
+      originalBounceState:bounce,
+      adjustedBounceState:bounce,
+      bouncePriceabilityGuardApplied:false,
+      bouncePriceabilityGuardReason:'',
+      hasClearInvalidationLevel:ctx.has_stop === true,
+      hasPriceablePlan:ctx.plan_status === 'valid',
+      hasCredibleEntryTrigger:false,
+      unpriceableBlockReason:'',
+      resolvedRR,
+      rrKnown:resolvedRR !== null,
+      reclaimConfirmed:independentReclaimConfirmed,
+      reclaimConfirmationEvidence,
+      reclaimSignalCount,
+      reclaimDirectSignalCount,
+      reclaimConfirmedReason
+    };
+  }
+
   function canPromoteToEntry(ctx = {}){
-    const bounceState = String(ctx.bounce_state || '').trim().toLowerCase();
+    const bouncePriceability = resolveBouncePriceability(ctx);
+    const credibleRrValue = numericValueOrNull(ctx.credible_rr);
+    const rrValue = numericValueOrNull(ctx.rr);
+    const bounceState = String(bouncePriceability.adjustedBounceState || ctx.bounce_state || '').trim().toLowerCase();
     const structureState = String(ctx.structure_state || '').trim().toLowerCase();
     const planStatus = String(ctx.plan_status || '').trim().toLowerCase();
     const tradeability = String(ctx.tradeability || '').trim().toLowerCase();
@@ -69,7 +162,7 @@
     const volumeState = String(ctx.volume_state || '').trim().toLowerCase();
     const checks = {
       structure_ok:['strong', 'intact', 'developing_clean'].includes(structureState),
-      bounce_ok:bounceState === 'confirmed',
+      bounce_ok:bounceState === 'confirmed' && !bouncePriceability.unpriceableBlockReason && bouncePriceability.reclaimConfirmed === true,
       pullback_ok:['near_20ma', 'near_50ma'].includes(String(ctx.pullback_zone || '').trim().toLowerCase()),
       market_ok:['normal', 'supportive'].includes(marketRegime),
       volume_ok:['normal', 'supportive', 'strong'].includes(volumeState),
@@ -79,20 +172,31 @@
       plan_ok:planStatus === 'valid' && ctx.plan_blocked !== true,
       risk_width_ok:ctx.stop_distance_too_wide !== true,
       pullback_valid:ctx.pullback_valid !== false,
-      rr_ok:Number.isFinite(Number(ctx.credible_rr)) ? Number(ctx.credible_rr) >= 2 : (Number.isFinite(Number(ctx.rr)) && Number(ctx.rr) >= 2),
+      rr_ok:credibleRrValue !== null ? credibleRrValue >= 2 : (rrValue !== null && rrValue >= 2),
       entry_trigger_hit:ctx.entry_trigger_hit === true,
       tradeability_ok:['tradable', 'entry', 'ready', 'action_now'].includes(tradeability),
-      unpriceable_block:!['tradable', 'entry', 'ready', 'action_now'].includes(tradeability),
+      unpriceable_block:!['tradable', 'entry', 'ready', 'action_now'].includes(tradeability) || !!bouncePriceability.unpriceableBlockReason,
       below_50_without_reclaim:ctx.price_below_50ma === true && ctx.reclaim_attempt !== true,
       capital_ok:(() => {
         const capitalFit = String(ctx.capital_fit || '').trim().toLowerCase();
         if(!capitalFit || capitalFit === 'unknown') return true;
         return ['ideal', 'acceptable', 'fits_capital'].includes(capitalFit);
-      })()
+      })(),
+      has_clear_invalidation_level:bouncePriceability.hasClearInvalidationLevel === true,
+      has_priceable_plan:bouncePriceability.hasPriceablePlan === true,
+      unpriceable_block_reason:String(bouncePriceability.unpriceableBlockReason || '').trim(),
+      reclaim_confirmed_independent:bouncePriceability.reclaimConfirmed === true,
+      reclaim_confirmation_evidence:Array.isArray(bouncePriceability.reclaimConfirmationEvidence) ? bouncePriceability.reclaimConfirmationEvidence.slice() : [],
+      reclaim_signal_count:Number.isFinite(Number(bouncePriceability.reclaimSignalCount)) ? Number(bouncePriceability.reclaimSignalCount) : 0,
+      reclaim_direct_signal_count:Number.isFinite(Number(bouncePriceability.reclaimDirectSignalCount)) ? Number(bouncePriceability.reclaimDirectSignalCount) : 0,
+      reclaim_confirmed_reason:String(bouncePriceability.reclaimConfirmedReason || '').trim(),
+      resolved_rr:bouncePriceability.resolvedRR,
+      rr_known:bouncePriceability.rrKnown === true
     };
     const reasons = [];
     if(!checks.structure_ok) reasons.push('Structure is not strong/intact/developing clean.');
     if(!checks.bounce_ok) reasons.push('Bounce must be confirmed.');
+    if(bouncePriceability.unpriceableBlockReason) reasons.push(bouncePriceability.unpriceableBlockReason);
     if(!checks.pullback_ok) reasons.push('Pullback must be near the 20MA or 50MA.');
     if(!checks.pullback_valid) reasons.push('Pullback context is invalid.');
     if(!checks.market_ok) reasons.push('Market regime must be supportive.');
@@ -116,8 +220,11 @@
   }
 
   function canPromoteToNearEntry(ctx = {}){
+    const bouncePriceability = resolveBouncePriceability(ctx);
+    const credibleRrValue = numericValueOrNull(ctx.credible_rr);
+    const rrValue = numericValueOrNull(ctx.rr);
     const structureState = String(ctx.structure_state || '').trim().toLowerCase();
-    const bounceState = String(ctx.bounce_state || '').trim().toLowerCase();
+    const bounceState = String(bouncePriceability.adjustedBounceState || ctx.bounce_state || '').trim().toLowerCase();
     const pullbackZone = String(ctx.pullback_zone || '').trim().toLowerCase();
     const tradeability = String(ctx.tradeability || '').trim().toLowerCase();
     const planStatus = String(ctx.plan_status || '').trim().toLowerCase();
@@ -126,33 +233,43 @@
     const checks = {
       structure_ok:['strong', 'intact', 'developing_clean'].includes(structureState),
       structure_hard_blocked:['weakening', 'weak', 'broken', 'developing_loose'].includes(structureState),
-      bounce_ok:['improving', 'confirmed'].includes(bounceState),
-      bounce_hard_blocked:['attempt', 'none'].includes(bounceState),
+      bounce_ok:bounceState === 'confirmed' && !bouncePriceability.unpriceableBlockReason && bouncePriceability.reclaimConfirmed === true,
+      bounce_hard_blocked:bounceState !== 'confirmed' || !!bouncePriceability.unpriceableBlockReason || bouncePriceability.reclaimConfirmed !== true,
       pullback_ok:['near_20ma', 'near_50ma'].includes(pullbackZone),
       pullback_valid:ctx.pullback_valid !== false,
       plan_visible:ctx.plan_visible === true,
       has_entry:ctx.has_entry === true,
       has_stop:ctx.has_stop === true,
       plan_ok:planStatus === 'valid',
-      weak_bounce_plan_text:planText.includes('bounce is too weak to price cleanly'),
+      weak_bounce_plan_text:planText.includes('bounce is not clear enough to price yet'),
       risk_width_ok:ctx.stop_distance_too_wide !== true,
-      rr_priceable:Number.isFinite(Number(ctx.credible_rr)) || Number.isFinite(Number(ctx.rr)),
+      rr_priceable:credibleRrValue !== null || rrValue !== null,
       tradeability_ok:validTradeability,
       below_50_without_reclaim:ctx.price_below_50ma === true && ctx.reclaim_attempt !== true,
-      volume_blocked:ctx.volume_required === true && String(ctx.volume_state || '').trim().toLowerCase() === 'weak'
+      volume_blocked:ctx.volume_required === true && String(ctx.volume_state || '').trim().toLowerCase() === 'weak',
+      has_clear_invalidation_level:bouncePriceability.hasClearInvalidationLevel === true,
+      has_priceable_plan:bouncePriceability.hasPriceablePlan === true,
+      unpriceable_block_reason:String(bouncePriceability.unpriceableBlockReason || '').trim(),
+      reclaim_confirmed_independent:bouncePriceability.reclaimConfirmed === true,
+      reclaim_confirmation_evidence:Array.isArray(bouncePriceability.reclaimConfirmationEvidence) ? bouncePriceability.reclaimConfirmationEvidence.slice() : [],
+      reclaim_signal_count:Number.isFinite(Number(bouncePriceability.reclaimSignalCount)) ? Number(bouncePriceability.reclaimSignalCount) : 0,
+      reclaim_direct_signal_count:Number.isFinite(Number(bouncePriceability.reclaimDirectSignalCount)) ? Number(bouncePriceability.reclaimDirectSignalCount) : 0,
+      reclaim_confirmed_reason:String(bouncePriceability.reclaimConfirmedReason || '').trim(),
+      resolved_rr:bouncePriceability.resolvedRR,
+      rr_known:bouncePriceability.rrKnown === true
     };
     const reasons = [];
     if(!checks.structure_ok) reasons.push('Structure is not strong/intact/developing clean.');
     if(checks.structure_hard_blocked) reasons.push('Structure is weakening or broken.');
-    if(!checks.bounce_ok) reasons.push('Bounce not yet confirmed.');
-    if(checks.bounce_hard_blocked) reasons.push('Bounce is too weak to price cleanly.');
+    if(!checks.bounce_ok) reasons.push('Developing - waiting for confirmation.');
+    if(checks.bounce_hard_blocked && bouncePriceability.unpriceableBlockReason) reasons.push(bouncePriceability.unpriceableBlockReason);
     if(!checks.pullback_ok) reasons.push('Pullback must be near the 20MA or 50MA.');
     if(!checks.pullback_valid) reasons.push('Pullback context is invalid.');
     if(!checks.plan_visible) reasons.push('No actionable plan yet.');
     if(!checks.has_entry) reasons.push('Entry is missing from the plan.');
     if(!checks.has_stop) reasons.push('Stop is missing from the plan.');
     if(!checks.plan_ok) reasons.push('Plan must be valid to qualify for Near Entry.');
-    if(checks.weak_bounce_plan_text) reasons.push('Bounce is too weak to price cleanly.');
+    if(checks.weak_bounce_plan_text) reasons.push('Bounce is not clear enough to price yet.');
     if(!checks.risk_width_ok) reasons.push('Stop distance is too wide to price risk cleanly.');
     if(!checks.rr_priceable) reasons.push('Risk/reward cannot be calculated from the current plan.');
     if(!checks.tradeability_ok) reasons.push('Tradeability is not priceable yet.');
@@ -284,7 +401,8 @@
     const bounceUseful = bounceEarly || bounceState === 'confirmed';
     const isExtended = ctx.isExtended === true;
     const planInvalidLabel = String(ctx.planStatusKey || '').toLowerCase() === 'invalid';
-    const viableRrExists = rrOk || Number.isFinite(Number(ctx.credibleRr)) && Number(ctx.credibleRr) >= 1.5;
+    const credibleRrValue = numericValueOrNull(ctx.credibleRr);
+    const viableRrExists = rrOk || (credibleRrValue !== null && credibleRrValue >= 1.5);
 
     if(structureEligibility === 'broken'){
       return {
@@ -376,12 +494,22 @@
       : preLifecycleResolved;
     const baseVerdict = deps.baseVerdictFromResolvedContract(preLifecycleResolved);
     const derivedStates = deps.analysisDerivedStatesFromRecord(item);
-    const displayedPlan = deps.deriveCurrentPlanState(
-      item.plan && item.plan.entry,
-      item.plan && item.plan.stop,
-      item.plan && item.plan.firstTarget,
+    const effectivePlan = typeof deps.effectivePlanForRecord === 'function'
+      ? deps.effectivePlanForRecord(item, {allowScannerFallback:true})
+      : {
+        entry:item.plan && item.plan.entry,
+        stop:item.plan && item.plan.stop,
+        firstTarget:item.plan && item.plan.firstTarget
+      };
+    const rawDisplayedPlan = deps.deriveCurrentPlanState(
+      effectivePlan && effectivePlan.entry,
+      effectivePlan && effectivePlan.stop,
+      effectivePlan && effectivePlan.firstTarget,
       item.marketData && item.marketData.currency
     );
+    const displayedPlan = typeof deps.applySetupConfirmationPlanGate === 'function'
+      ? deps.applySetupConfirmationPlanGate(item, rawDisplayedPlan, derivedStates)
+      : rawDisplayedPlan;
     const setupScore = deps.setupScoreForRecord(item);
     const structureState = String(derivedStates.structureState || '').toLowerCase();
     const trendState = String(derivedStates.trendState || '').toLowerCase();
@@ -395,21 +523,15 @@
     const volumeState = String(derivedStates.volumeState || '').toLowerCase();
     const volumeRequired = item && item.setup && item.setup.volumeRequired === true;
     const pullbackZone = String(derivedStates.pullbackZone || '').toLowerCase();
-    const currentPrice = Number.isFinite(Number(item && item.marketData && item.marketData.price))
-      ? Number(item.marketData.price)
-      : null;
-    const ma20 = Number.isFinite(Number(item && item.marketData && item.marketData.ma20))
-      ? Number(item.marketData.ma20)
-      : null;
+    const currentPrice = numericValueOrNull(item && item.marketData && item.marketData.price);
+    const ma20 = numericValueOrNull(item && item.marketData && item.marketData.ma20);
     const priceDistanceFrom20MA = Number.isFinite(currentPrice) && Number.isFinite(ma20) && ma20 !== 0
       ? Math.abs((currentPrice - ma20) / ma20)
       : null;
-    const rrValue = Number.isFinite(Number(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio))
-      ? Number(displayedPlan.rewardRisk.rrRatio)
-      : null;
-    const planEntry = Number.isFinite(Number(displayedPlan && displayedPlan.entry)) ? Number(displayedPlan.entry) : null;
-    const planStop = Number.isFinite(Number(displayedPlan && displayedPlan.stop)) ? Number(displayedPlan.stop) : null;
-    const planTarget = Number.isFinite(Number(displayedPlan && displayedPlan.target)) ? Number(displayedPlan.target) : null;
+    const rrValue = numericValueOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
+    const planEntry = numericValueOrNull(displayedPlan && displayedPlan.entry);
+    const planStop = numericValueOrNull(displayedPlan && displayedPlan.stop);
+    const planTarget = numericValueOrNull(displayedPlan && displayedPlan.target);
     const hasEntry = Number.isFinite(planEntry);
     const hasStop = Number.isFinite(planStop);
     const hasTarget = Number.isFinite(planTarget);
@@ -417,14 +539,13 @@
     const stopDistanceTooWide = String(displayedPlan && displayedPlan.riskFit && displayedPlan.riskFit.risk_status || '').toLowerCase() === 'too_wide';
     const planStatusText = String(resolved && resolved.blockerReason || '');
     const pullbackValid = ['near_20ma','near_50ma'].includes(pullbackZone);
-    const priceBelow50MA = Number.isFinite(currentPrice) && Number.isFinite(Number(item && item.marketData && item.marketData.sma50))
-      ? currentPrice < Number(item.marketData.sma50)
+    const sma50 = numericValueOrNull(item && item.marketData && item.marketData.sma50);
+    const priceBelow50MA = Number.isFinite(currentPrice) && Number.isFinite(sma50)
+      ? currentPrice < sma50
       : false;
     const entryTriggerHit = ['entry', 'ready_to_act'].includes(String(resolved.actionStateKey || '').toLowerCase())
       || String(resolved.structuralState || '').toLowerCase() === 'entry';
-    const stopPrice = Number.isFinite(Number(item && item.plan && item.plan.stop))
-      ? Number(item.plan.stop)
-      : null;
+    const stopPrice = numericValueOrNull(item && item.plan && item.plan.stop);
     const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
     const planRealism = typeof deps.evaluatePlanRealism === 'function'
       ? deps.evaluatePlanRealism(item, {
@@ -432,9 +553,8 @@
         derivedStates
       })
       : null;
-    const credibleRr = Number.isFinite(Number(planRealism && planRealism.credible_rr))
-      ? Number(planRealism.credible_rr)
-      : rrValue;
+    const credibleRrParsed = numericValueOrNull(planRealism && planRealism.credible_rr);
+    const credibleRr = credibleRrParsed !== null ? credibleRrParsed : rrValue;
     const capitalFit = String(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || '').toLowerCase();
     const explicitInvalidationFlag = !!(item && item.plan && item.plan.invalidatedState);
     const explicitInvalidationReason = explicitInvalidationFlag && (structureState === 'broken' || trendState === 'broken' || brokenBelowStop)
@@ -501,7 +621,7 @@
             : (weakVolume ? 'Weak volume caution.' : `${structureReasonLabel(structureState)}. Setup is still early.`)));
     }else if(resolved.actionStateKey === 'recalculate_plan' || resolved.actionStateKey === 'wait_for_confirmation' || resolved.structuralState === 'developing'){
       finalVerdict = 'monitor';
-      reason = resolved.blockerReason || 'Bounce is too weak to price cleanly.';
+      reason = resolved.blockerReason || 'Bounce is not clear enough to price yet.';
     }else if(String(resolved.finalVerdict || '').toLowerCase() === 'avoid'){
       finalVerdict = 'monitor';
       reason = resolved.reasonSummary || resolved.blockerReason || `${structureReasonLabel(structureState)}. Alive setup downgraded to monitoring.`;
@@ -513,6 +633,7 @@
       reason
     }, {
       structure_state:structureState,
+      stabilisation_state:String(derivedStates.stabilisationState || '').toLowerCase(),
       bounce_state:bounceState,
       pullback_zone:pullbackZone,
       market_regime:marketWeak ? 'weak' : 'normal',
@@ -532,6 +653,12 @@
       plan_status_text:planStatusText,
       rr:rrValue,
       credible_rr:credibleRr,
+      entry:planEntry,
+      stop:planStop,
+      target:planTarget,
+      current_price:currentPrice,
+      trend_state:trendState,
+      reclaims_level:item && item.reclaimsLevel === true,
       setup_score:setupScore,
       tradeability:tradeabilityState,
       capital_fit:capitalFit
@@ -672,6 +799,50 @@
       pullback_zone:pullbackZone || '',
       volume_state:volumeState || '',
       market_regime:marketWeak ? 'weak' : 'normal',
+      planPriceabilitySource:'resolver-core:effectivePlan+marketData',
+      resolvedPlanEntry:planEntry,
+      resolvedPlanStop:planStop,
+      resolvedPlanTarget:planTarget,
+      resolvedPlanCurrentPrice:currentPrice,
+      resolverCoreEntry:planEntry,
+      resolverCoreStop:planStop,
+      resolverCoreTarget:planTarget,
+      resolverCoreCurrentPrice:currentPrice,
+      hasClearInvalidationLevel:!!(
+        guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.has_clear_invalidation_level
+      ),
+      hasPriceablePlan:!!(
+        guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.has_priceable_plan
+      ),
+      unpriceableBlockReason:(
+        (guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.unpriceable_block_reason)
+        || (guardedVerdict.entry_gate_checks && guardedVerdict.entry_gate_checks.unpriceable_block_reason)
+        || ''
+      ),
+      reclaimSignalCount:Number.isFinite(Number(
+        guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.reclaim_signal_count
+      )) ? Number(guardedVerdict.near_entry_gate_checks.reclaim_signal_count) : 0,
+      reclaimDirectSignalCount:Number.isFinite(Number(
+        guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.reclaim_direct_signal_count
+      )) ? Number(guardedVerdict.near_entry_gate_checks.reclaim_direct_signal_count) : 0,
+      reclaimConfirmedReason:String(
+        (guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.reclaim_confirmed_reason)
+        || (guardedVerdict.entry_gate_checks && guardedVerdict.entry_gate_checks.reclaim_confirmed_reason)
+        || ''
+      ).trim(),
+      resolvedRR:(
+        guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.rr_known
+      )
+        ? guardedVerdict.near_entry_gate_checks.resolved_rr
+        : (
+          guardedVerdict.entry_gate_checks && guardedVerdict.entry_gate_checks.rr_known
+            ? guardedVerdict.entry_gate_checks.resolved_rr
+            : null
+        ),
+      rrKnown:!!(
+        (guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.rr_known)
+        || (guardedVerdict.entry_gate_checks && guardedVerdict.entry_gate_checks.rr_known)
+      ),
       tracked:isTracked,
       source:'resolver',
       debugToneSource:({
@@ -690,17 +861,40 @@
     const cases = [
       {
         id:'A',
-        ctx:{structure_state:'intact', bounce_state:'attempt', plan_visible:false, has_entry:false, has_stop:false, plan_status:'needs_adjustment', plan_status_text:'Bounce is too weak to price cleanly.', pullback_zone:'near_20ma', tradeability:'watch'},
+        ctx:{structure_state:'intact', bounce_state:'attempt', plan_visible:false, has_entry:false, has_stop:false, plan_status:'needs_adjustment', plan_status_text:'Bounce is not clear enough to price yet.', pullback_zone:'near_20ma', tradeability:'watch'},
         expect:{near:false, entry:false}
       },
       {
         id:'B',
         ctx:{structure_state:'intact', bounce_state:'improving', plan_visible:true, has_entry:true, has_stop:true, has_target:false, stop_distance_too_wide:false, plan_status:'valid', pullback_zone:'near_20ma', tradeability:'tradable', entry_trigger_hit:false, rr:1.8},
-        expect:{near:true, entry:false}
+        expect:{near:false, entry:false}
       },
       {
         id:'C',
-        ctx:{structure_state:'intact', bounce_state:'confirmed', plan_visible:true, has_entry:true, has_stop:true, has_target:true, stop_distance_too_wide:false, plan_status:'valid', pullback_zone:'near_20ma', tradeability:'entry', entry_trigger_hit:true, rr:2.1, market_regime:'supportive', volume_state:'normal'},
+        ctx:{
+          structure_state:'intact',
+          trend_state:'intact',
+          stabilisation_state:'clear',
+          bounce_state:'confirmed',
+          plan_visible:true,
+          has_entry:true,
+          has_stop:true,
+          has_target:true,
+          plan_status:'valid',
+          pullback_zone:'near_20ma',
+          stop_distance_too_wide:false,
+          entry:100,
+          stop:97,
+          target:106,
+          current_price:101,
+          rr:2.1,
+          market_regime:'supportive',
+          volume_state:'normal',
+          tradeability:'entry',
+          entry_trigger_hit:true,
+          reclaim_attempt:true,
+          reclaims_level:true
+        },
         expect:{near:true, entry:true}
       },
       {

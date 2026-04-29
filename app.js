@@ -6668,7 +6668,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   ])}${renderDebugSectionMarkup('Execution State', [
     {label:'Lifecycle State', value:lifecycleSnapshot.state || globalVerdict.lifecycle || 'n/a'},
     {label:'Action State', value:resolved.actionStateLabel || resolved.actionLabel || 'n/a'},
-    {label:'Plan Status', value:debugPlanUI.showPlan ? (resolved.planStatusLabel || 'n/a') : (debugPlanUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.')},
+    {label:'Plan Status', value:debugPlanUI.showPlan ? (resolved.planStatusLabel || 'n/a') : (debugPlanUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.')},
     {label:'Plan Visible', value:debugPlanUI.showPlan ? 'true' : 'false'},
     {label:'RR Confidence', value:resolved.rrConfidenceLabel || 'n/a'},
     {label:'Capital Fit', value:capitalComfort.label || 'n/a'},
@@ -6677,6 +6677,19 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   ])}${renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Original Bounce State', value:globalVerdict.originalBounceState || '(none)'},
+    {label:'Adjusted Bounce State', value:globalVerdict.adjustedBounceState || '(none)'},
+    {label:'Bounce Priceability Guard Applied', value:globalVerdict.bouncePriceabilityGuardApplied ? 'true' : 'false'},
+    {label:'Bounce Priceability Guard Reason', value:globalVerdict.bouncePriceabilityGuardReason || '(none)'},
+    {label:'Has Clear Invalidation Level', value:globalVerdict.hasClearInvalidationLevel === true ? 'true' : (globalVerdict.hasClearInvalidationLevel === false ? 'false' : '(none)')},
+    {label:'Has Priceable Plan', value:globalVerdict.hasPriceablePlan === true ? 'true' : (globalVerdict.hasPriceablePlan === false ? 'false' : '(none)')},
+    {label:'Unpriceable Block Reason', value:globalVerdict.unpriceableBlockReason || '(none)'},
+    {label:'Priceability Context Source', value:globalVerdict.planPriceabilitySource || '(none)'},
+    {label:'Resolved Plan Entry', value:Number.isFinite(globalVerdict.resolvedPlanEntry) ? String(globalVerdict.resolvedPlanEntry) : '(none)'},
+    {label:'Resolved Plan Stop', value:Number.isFinite(globalVerdict.resolvedPlanStop) ? String(globalVerdict.resolvedPlanStop) : '(none)'},
+    {label:'Resolved Plan Target', value:Number.isFinite(globalVerdict.resolvedPlanTarget) ? String(globalVerdict.resolvedPlanTarget) : '(none)'},
+    {label:'Resolved Plan Current Price', value:Number.isFinite(globalVerdict.resolvedPlanCurrentPrice) ? String(globalVerdict.resolvedPlanCurrentPrice) : '(none)'},
+    {label:'Duplicate validateCurrentPlan Removed', value:globalVerdict.duplicateValidateCurrentPlanRemoved ? 'true' : 'false'},
     {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
     {label:'Allow Plan', value:globalVerdict.allow_plan ? 'true' : 'false'},
     {label:'Allow Watchlist', value:globalVerdict.allow_watchlist ? 'true' : 'false'},
@@ -7070,7 +7083,7 @@ function renderWatchlistCardElement(record){
   const suppressPlanBlockerInHeadline = !!(entryConditionsSummary && entryConditionsSummary.suppressPlanBlockerInHeadline === true);
   const diagnosticPlanBlocker = planUI.showPlan
     ? resolvedContract.planStatusLabel
-    : (planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.');
+    : (planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.');
   const finalVerdictForHeadline = normalizeVerdict(watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '');
   const isNearEntryVerdict = finalVerdictForHeadline === 'near_entry';
   const isDiminishingVerdict = finalVerdictForHeadline === 'diminishing';
@@ -11329,6 +11342,22 @@ function reviewReasonSummary(reasoning, actionText){
   return String(reasoning && reasoning.detail || '').trim();
 }
 
+function evaluateBouncePriceabilityGuard(context = {}){
+  if(window.BouncePriceability && typeof window.BouncePriceability.isConfirmedBouncePriceable === 'function'){
+    return window.BouncePriceability.isConfirmedBouncePriceable(context);
+  }
+  return {
+    originalBounceState:String(context.originalBounceState || context.bounceState || 'none').trim().toLowerCase() || 'none',
+    adjustedBounceState:String(context.originalBounceState || context.bounceState || 'none').trim().toLowerCase() || 'none',
+    bouncePriceabilityGuardApplied:false,
+    bouncePriceabilityGuardReason:'',
+    hasClearInvalidationLevel:false,
+    hasPriceablePlan:false,
+    hasCredibleEntryTrigger:false,
+    unpriceableBlockReason:''
+  };
+}
+
 function evaluateEntryTrigger(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
@@ -11362,13 +11391,28 @@ function evaluateEntryTrigger(record, options = {}){
   const breakAboveTrigger = hasReviewedPlan && Number.isFinite(currentPrice) && Number.isFinite(entry) && currentPrice >= entry;
   const strongReversal = pullbackValid && structureIntact && confirmedBounce && clearStabilisation;
   const reclaimFollowThrough = pullbackValid && structureIntact && confirmedBounce && clearStabilisation && breakAboveTrigger;
+  const bounceGuard = evaluateBouncePriceabilityGuard({
+    originalBounceState:bounceState,
+    structureState,
+    pullbackZone,
+    stabilisationState,
+    trendState,
+    currentPrice,
+    entry,
+    stop,
+    target,
+    rr:numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio),
+    reclaimConfirmed:pullbackValid && clearStabilisation && (breakAboveTrigger || strongReversal),
+    riskTooWide:false
+  });
+  const bounceConfirmedAndPriceable = bounceState === 'confirmed' && !bounceGuard.unpriceableBlockReason;
   const triggerReady = trendValid && pullbackValid && structureIntact && !hardFail && hasReviewedPlan
-    && confirmedBounce
+    && bounceConfirmedAndPriceable
     && clearStabilisation
     && !hostileMarket
     && (breakAboveTrigger || strongReversal || reclaimFollowThrough);
   const nearReady = !hardFail && pullbackValid && trendState !== 'broken' && structureIntact
-    && (confirmedBounce || (bounceState === 'attempt' && clearStabilisation));
+    && bounceConfirmedAndPriceable;
   const extendedFromEntry = hasReviewedPlan && Number.isFinite(currentPrice) && Number.isFinite(entry) && currentPrice > (entry * 1.03);
   const clearlyMissed = hasReviewedPlan && Number.isFinite(currentPrice) && Number.isFinite(entry) && currentPrice > (entry * 1.06);
   return {
@@ -11384,75 +11428,13 @@ function evaluateEntryTrigger(record, options = {}){
     hasReviewedPlan,
     hostileMarket,
     extendedFromEntry,
-    clearlyMissed
+    clearlyMissed,
+    bouncePriceabilityGuardApplied:bounceGuard.bouncePriceabilityGuardApplied,
+    bouncePriceabilityGuardReason:bounceGuard.bouncePriceabilityGuardReason
   };
 }
 
-function validateCurrentPlan(record, options = {}){
-  const rawRecord = record && typeof record === 'object' ? record : {};
-  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
-    rawRecord.plan && rawRecord.plan.entry,
-    rawRecord.plan && rawRecord.plan.stop,
-    rawRecord.plan && rawRecord.plan.firstTarget,
-    rawRecord.marketData && rawRecord.marketData.currency
-  );
-  const trigger = options.triggerState || evaluateEntryTrigger(rawRecord, {displayedPlan, derivedStates:options.derivedStates});
-  const entry = displayedPlan.entry;
-  const stop = displayedPlan.stop;
-  const target = displayedPlan.target;
-  const currentPrice = numericOrNull(rawRecord.marketData && rawRecord.marketData.price);
-  const structurePremature = !trigger.trendValid || !trigger.structureIntact;
-  const confirmationPremature = !trigger.confirmedBounce || !trigger.clearStabilisation;
-  if(displayedPlan.status !== 'valid'){
-    return {
-      state:displayedPlan.status === 'missing' ? 'not_reviewed' : 'needs_replan',
-      valid:false,
-      needsReplan:displayedPlan.status !== 'missing',
-      missed:false,
-      invalidated:false,
-      capitalConstraint:'',
-      reasonCode:displayedPlan.status === 'missing' ? 'plan_missing' : 'plan_incomplete'
-    };
-  }
-  if(trigger.hardFail){
-    return {state:'invalidated', valid:false, needsReplan:false, missed:false, invalidated:true, capitalConstraint:'', reasonCode:'technical_invalidation'};
-  }
-  if(trigger.clearlyMissed || (Number.isFinite(currentPrice) && Number.isFinite(target) && currentPrice >= (target * 0.98))){
-    return {state:'missed', valid:false, needsReplan:false, missed:true, invalidated:false, capitalConstraint:'', reasonCode:'missed_setup'};
-  }
-  if(structurePremature || confirmationPremature){
-    return {
-      state:'pending_validation',
-      valid:false,
-      needsReplan:true,
-      missed:false,
-      invalidated:false,
-      capitalConstraint:'',
-      reasonCode:structurePremature ? 'weak_structure' : 'bounce_not_confirmed'
-    };
-  }
-  const prospectiveRisk = (Number.isFinite(currentPrice) && Number.isFinite(stop) && Number.isFinite(target) && currentPrice > entry)
-    ? evaluateRewardRisk(currentPrice, stop, target)
-    : displayedPlan.rewardRisk;
-  const prospectiveRiskFit = (Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice > entry)
-    ? evaluateRiskFit({entry:currentPrice, stop, ...currentRiskSettings()})
-    : displayedPlan.riskFit;
-  const sizeShift = Number.isFinite(displayedPlan.riskFit.position_size) && displayedPlan.riskFit.position_size > 0 && Number.isFinite(prospectiveRiskFit.position_size)
-    ? Math.abs(prospectiveRiskFit.position_size - displayedPlan.riskFit.position_size) / displayedPlan.riskFit.position_size
-    : 0;
-  const staleMove = trigger.extendedFromEntry
-    || (prospectiveRisk.valid && prospectiveRisk.rrRatio < 1.5)
-    || sizeShift > 0.35;
-  return {
-    state:staleMove ? 'needs_replan' : 'valid',
-    valid:!staleMove,
-    needsReplan:staleMove,
-    missed:false,
-    invalidated:false,
-    capitalConstraint:capitalConstraintCodeForPlan(displayedPlan),
-    reasonCode:staleMove ? 'plan_premature_or_stale' : 'valid'
-  };
-}
+// validateCurrentPlan is defined once later in this file as the canonical runtime path.
 
 function displayStageForRecord(record, options = {}){
   return displayStageForRecordImpl(record, options, {
@@ -12001,7 +11983,7 @@ function renderTradeStatusMarkup(status){
 }
 
 function blockedTradeStatusFromPrimaryBlocker(resolvedContract){
-  const weakBounceHeadline = 'Bounce is too weak to price cleanly.';
+  const weakBounceHeadline = 'Bounce is not clear enough to price yet.';
   const weakBounceSubline = 'Buyers have not taken control yet.';
   const renderedVerdict = normalizeVerdict(
     (resolvedContract && (
@@ -13029,7 +13011,7 @@ function buildEntryConditionsSummary({
     addBlocker('capital', 7, 'This setup does not currently fit the saved risk limit', 'Risk cannot be sized safely with current account settings');
   }
   if(!blockers.length){
-    addBlocker('confirmation', 8, 'Bounce is too weak to price cleanly.', 'No trustworthy entry yet.');
+    addBlocker('confirmation', 8, 'Bounce is not clear enough to price yet.', 'No trustworthy entry yet.');
   }
 
   blockers.sort((a, b) => a.priority - b.priority);
@@ -13428,7 +13410,7 @@ function resolvePlanVisibility(setup){
       showPositionSize:false,
       showCapital:false,
       showRR:false,
-      diagnosticsMessage:'Bounce is too weak to price cleanly.',
+      diagnosticsMessage:'Bounce is not clear enough to price yet.',
       diagnosticsTone:'neutral'
     };
   }
@@ -13460,7 +13442,7 @@ function resolvePlanVisibility(setup){
     showPositionSize:false,
     showCapital:false,
     showRR:false,
-    diagnosticsMessage:'Bounce is too weak to price cleanly.',
+    diagnosticsMessage:'Bounce is not clear enough to price yet.',
     diagnosticsTone:'neutral'
   };
 }
@@ -13480,14 +13462,14 @@ function nonPlanCalcNoteText(message, decisionSummary){
 }
 
 function nonPlanRealismSummaryText(message, decisionSummary){
-  if(isDuplicatedStatusCopy(message, decisionSummary)) return 'Bounce is too weak to price cleanly.';
-  return message || 'Bounce is too weak to price cleanly.';
+  if(isDuplicatedStatusCopy(message, decisionSummary)) return 'Bounce is not clear enough to price yet.';
+  return message || 'Bounce is not clear enough to price yet.';
 }
 
 function nonPlanDiagnosticsSummaryMarkup(message, decisionSummary){
   if(!message) return '';
   if(isDuplicatedStatusCopy(message, decisionSummary)){
-    return '<div class="tiny">Bounce is too weak to price cleanly. Waiting for a reclaim and stronger close.</div>';
+    return '<div class="tiny">Bounce is not clear enough to price yet. Waiting for a reclaim and stronger close.</div>';
   }
   return `<div class="summary">${escapeHtml(message)}</div>`;
 }
@@ -16607,6 +16589,22 @@ function deriveSetupStates(card, data, checks, tradePlan){
     bounceState = 'attempt';
   }
 
+  const bouncePriceability = evaluateBouncePriceabilityGuard({
+    originalBounceState:bounceState,
+    structureState,
+    pullbackZone,
+    stabilisationState,
+    trendState,
+    currentPrice:price,
+    entry:numericOrNull(plan && plan.entry),
+    stop:numericOrNull(plan && plan.stop),
+    target:numericOrNull(plan && plan.target),
+    rr:numericOrNull(plan && plan.rr),
+    reclaimConfirmed,
+    riskTooWide:false
+  });
+  bounceState = bouncePriceability.adjustedBounceState;
+
   let volumeState = 'normal';
   if(safeChecks.volume && bounceState !== 'none'){
     volumeState = 'supportive';
@@ -16621,6 +16619,12 @@ function deriveSetupStates(card, data, checks, tradePlan){
     structure_state:structureState,
     stabilisation_state:stabilisationState,
     bounce_state:bounceState,
+    bounce_state_original:bouncePriceability.originalBounceState,
+    bounce_priceability_guard_applied:bouncePriceability.bouncePriceabilityGuardApplied ? 'yes' : 'no',
+    bounce_priceability_guard_reason:bouncePriceability.bouncePriceabilityGuardReason || '',
+    has_clear_invalidation_level:bouncePriceability.hasClearInvalidationLevel ? 'yes' : 'no',
+    has_priceable_plan:bouncePriceability.hasPriceablePlan ? 'yes' : 'no',
+    unpriceable_block_reason:bouncePriceability.unpriceableBlockReason || '',
     volume_state:volumeState,
     scan_type:scanType,
     evaluation_scan_type:evaluationScanType,
@@ -19803,7 +19807,7 @@ function renderReviewWorkspace(options = {}){
   });
   const tradeStatusText = planUI.showPlan
     ? tradeStatusMetricText({globalVerdict:reviewTradeStatusVerdict, displayedPlan, resolvedContract})
-    : {line1:planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.', line2:''};
+    : {line1:planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.', line2:''};
   const modifierMarkup = emojiModifierMarkup(resolvedContract);
   const scannerPresentation = resolveEmojiPresentation(record, {
     context:'scanner',
@@ -19961,6 +19965,19 @@ function renderReviewWorkspace(options = {}){
   ])}${renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Original Bounce State', value:globalVerdict.originalBounceState || '(none)'},
+    {label:'Adjusted Bounce State', value:globalVerdict.adjustedBounceState || '(none)'},
+    {label:'Bounce Priceability Guard Applied', value:globalVerdict.bouncePriceabilityGuardApplied ? 'true' : 'false'},
+    {label:'Bounce Priceability Guard Reason', value:globalVerdict.bouncePriceabilityGuardReason || '(none)'},
+    {label:'Has Clear Invalidation Level', value:globalVerdict.hasClearInvalidationLevel === true ? 'true' : (globalVerdict.hasClearInvalidationLevel === false ? 'false' : '(none)')},
+    {label:'Has Priceable Plan', value:globalVerdict.hasPriceablePlan === true ? 'true' : (globalVerdict.hasPriceablePlan === false ? 'false' : '(none)')},
+    {label:'Unpriceable Block Reason', value:globalVerdict.unpriceableBlockReason || '(none)'},
+    {label:'Priceability Context Source', value:globalVerdict.planPriceabilitySource || '(none)'},
+    {label:'Resolved Plan Entry', value:Number.isFinite(globalVerdict.resolvedPlanEntry) ? String(globalVerdict.resolvedPlanEntry) : '(none)'},
+    {label:'Resolved Plan Stop', value:Number.isFinite(globalVerdict.resolvedPlanStop) ? String(globalVerdict.resolvedPlanStop) : '(none)'},
+    {label:'Resolved Plan Target', value:Number.isFinite(globalVerdict.resolvedPlanTarget) ? String(globalVerdict.resolvedPlanTarget) : '(none)'},
+    {label:'Resolved Plan Current Price', value:Number.isFinite(globalVerdict.resolvedPlanCurrentPrice) ? String(globalVerdict.resolvedPlanCurrentPrice) : '(none)'},
+    {label:'Duplicate validateCurrentPlan Removed', value:globalVerdict.duplicateValidateCurrentPlanRemoved ? 'true' : 'false'},
     {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
     {label:'Base Status Label', value:scannerStatus || '(none)'},
     {label:'Base Review Label', value:displayStage || '(none)'},
@@ -20582,7 +20599,7 @@ function syncPlanDisplayMeta(){
   if($('tradeStatusBox')){
     const tradeStatusText = planUI.showPlan
       ? tradeStatusMetricText({globalVerdict:reviewTradeStatusVerdict, displayedPlan, resolvedContract})
-      : {line1:planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.', line2:''};
+      : {line1:planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.', line2:''};
     $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   }
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
@@ -20785,7 +20802,7 @@ function calculate(options = {}){
   });
   const tradeStatusText = planUI.showPlan
     ? tradeStatusMetricText({globalVerdict:plannerVisualState, displayedPlan, resolvedContract})
-    : {line1:planUI.diagnosticsMessage || 'Bounce is too weak to price cleanly.', line2:''};
+    : {line1:planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.', line2:''};
   if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
   if($('capitalFitMetric')){
@@ -21730,7 +21747,9 @@ function buildPromotionGateTrace(context = {}){
   const hasPriceablePlanValues = context.hasPriceablePlanValues === true;
   const pullbackValid = context.pullbackValid === true || ['near_20ma','near_50ma'].includes(pullbackState);
   const validStructure = ['strong','intact','developing_clean'].includes(structureState);
-  const validBounce = ['improving','confirmed'].includes(bounceState);
+  const bounceConfirmed = bounceState === 'confirmed';
+  const bouncePriceable = context.hasPriceablePlanValues === true && context.hasClearInvalidationLevel !== false && !context.unpriceableBlockReason;
+  const validBounce = bounceConfirmed && bouncePriceable;
   const hasEntrySafe = Boolean(context.hasEntry);
   const hasStopSafe = Boolean(context.hasStop);
   const hasTargetSafe = Boolean(context.hasTarget);
@@ -21742,7 +21761,7 @@ function buildPromotionGateTrace(context = {}){
   const hasFullTradePlan = Boolean(hasEntrySafe && hasStopSafe && targetExists);
   const riskValid = context.stopDistanceTooWide !== true && !riskTooWide;
   const structureHardBlocked = ['weakening','weak','broken'].includes(structureState);
-  const bounceHardBlocked = bounceState === 'attempt';
+  const bounceHardBlocked = !bounceConfirmed || !bouncePriceable;
   const priceBelow50MA = context.priceBelow50MA === true;
   const reclaimAttempt = context.reclaimAttempt === true;
   const below50WithoutReclaim = priceBelow50MA && !reclaimAttempt;
@@ -21757,7 +21776,7 @@ function buildPromotionGateTrace(context = {}){
   const gate_structure_ok_for_near = validStructure;
   const gate_pullback_zone_ok_for_near = pullbackValid;
   const gate_stabilisation_ok_for_near = ['clear','present','early'].includes(stabilisationState) && stabilisationState !== 'none';
-  const gate_bounce_ok_for_near = validBounce && bounceState !== 'none';
+  const gate_bounce_ok_for_near = validBounce;
   const gate_plan_ok_for_near = planExists && ['valid','needs_adjustment'].includes(planStateKey);
   const gate_risk_width_ok_for_near = riskValid;
   const gate_hard_blockers_clear_for_near = !hardBlockers && !hardGateBlock;
@@ -21767,7 +21786,7 @@ function buildPromotionGateTrace(context = {}){
   const promotion_watch_to_near_allowed = !!(
     setupReadyForEntry
     && !entryTriggerHit
-    && bounceState !== 'none'
+    && gate_bounce_ok_for_near
     && gate_stabilisation_ok_for_near
     && gate_hard_blockers_clear_for_near
   );
@@ -21799,17 +21818,17 @@ function buildPromotionGateTrace(context = {}){
   }else if(hardGateBlock){
     promotion_watch_to_near_reason = 'Stayed Monitor: structure and bounce conditions are not stable enough yet.';
   }else if(!gate_trade_structure_clear_enough){
-    promotion_watch_to_near_reason = (bounceState === 'attempt')
-      ? 'Stayed Monitor: bounce attempt present but trade structure not clear enough.'
-      : 'Stayed Monitor: trade structure is not clear enough yet.';
+    promotion_watch_to_near_reason = 'Stayed Monitor: trade structure is not clear enough yet.';
   }else if(!gate_bounce_ok_for_near){
-    promotion_watch_to_near_reason = 'Stayed Monitor: still forming - buyers have not taken control yet.';
+    promotion_watch_to_near_reason = context.unpriceableBlockReason
+      ? `Stayed Monitor: ${context.unpriceableBlockReason}`
+      : 'Stayed Monitor: developing - waiting for confirmation.';
   }else if(!gate_stabilisation_ok_for_near){
     promotion_watch_to_near_reason = 'Stayed Monitor: stabilisation is not established yet.';
   }else if(!gate_not_weakening_for_near){
     promotion_watch_to_near_reason = 'Stayed Monitor: trend is weakening - no reliable stop level yet.';
   }else if(!gate_risk_width_ok_for_near){
-    promotion_watch_to_near_reason = 'Stayed Monitor: bounce is too weak to price cleanly.';
+    promotion_watch_to_near_reason = 'Stayed Monitor: trend is weakening - no reliable stop level yet.';
   }else if(!gate_hard_blockers_clear_for_near){
     promotion_watch_to_near_reason = 'Stayed Monitor: hard blockers are still active.';
   }else{
@@ -21874,7 +21893,8 @@ function buildPromotionGateTrace(context = {}){
     hasFullTradePlan,
     hasEntry,
     hasStop,
-    riskValid
+    riskValid,
+    bouncePriceable
   };
 }
 
@@ -21886,9 +21906,24 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
   const displayedPlanStatus = String(context.displayedPlanStatus || '').toLowerCase();
   const pullbackState = String(context.pullbackState || '').toLowerCase();
   const stabilisationState = String(context.stabilisationState || '').toLowerCase();
-  const buyersNotInControl = ['none','unconfirmed'].includes(bounceState);
-  const bounceImproving = ['attempt','early','unconfirmed'].includes(bounceState);
-  const bounceAbsent = bounceState === 'none';
+  const bounceGuard = evaluateBouncePriceabilityGuard({
+    originalBounceState:bounceState,
+    structureState,
+    pullbackZone:pullbackState,
+    stabilisationState,
+    trendState:context.trendState,
+    currentPrice:context.currentPrice,
+    entry:context.planEntry,
+    stop:context.planStop,
+    target:context.planTarget,
+    rr:context.rr,
+    reclaimConfirmed:context.reclaimAttempt === true || context.reclaimsLevel === true,
+    riskTooWide:!!context.riskTooWide
+  });
+  const effectiveBounceState = bounceGuard.adjustedBounceState;
+  const buyersNotInControl = ['none','unconfirmed'].includes(effectiveBounceState);
+  const bounceImproving = ['attempt','early','unconfirmed','improving'].includes(effectiveBounceState);
+  const bounceAbsent = effectiveBounceState === 'none';
   const weakeningStructure = structureState === 'weakening';
   const nearEntryStructure = ['strong','intact','developing_clean'].includes(structureState);
   const pullbackValid = ['near_20ma','near_50ma'].includes(pullbackState);
@@ -21903,12 +21938,14 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
     structureState,
     pullbackState,
     stabilisationState,
-    bounceState,
+    bounceState:effectiveBounceState,
     planStateKey,
     riskTooWide:!!context.riskTooWide,
     hardBlockers,
     tradeStructureClearEnough,
     hasPriceablePlanValues:!!context.hasPriceablePlanValues,
+    hasClearInvalidationLevel:bounceGuard.hasClearInvalidationLevel,
+    unpriceableBlockReason:bounceGuard.unpriceableBlockReason,
     hasEntry:!!context.hasEntry,
     hasStop:!!context.hasStop,
     hasTarget:!!context.hasTarget,
@@ -21924,7 +21961,7 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
   });
   const blockerFlags = {
     structureState,
-    bounceState,
+    bounceState:effectiveBounceState,
     planStateKey,
     displayedPlanStatus,
     pullbackState,
@@ -21943,6 +21980,13 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
     riskTooWide:!!context.riskTooWide,
     hasPlanValues:!!context.hasPlanValues,
     hasPriceablePlanValues:!!context.hasPriceablePlanValues,
+    originalBounceState:bounceGuard.originalBounceState,
+    adjustedBounceState:bounceGuard.adjustedBounceState,
+    bouncePriceabilityGuardApplied:bounceGuard.bouncePriceabilityGuardApplied,
+    bouncePriceabilityGuardReason:bounceGuard.bouncePriceabilityGuardReason,
+    hasClearInvalidationLevel:bounceGuard.hasClearInvalidationLevel,
+    hasPriceablePlan:bounceGuard.hasPriceablePlan,
+    unpriceableBlockReason:bounceGuard.unpriceableBlockReason,
     ...gateTrace
   };
   if(verdict === 'Avoid'){
@@ -22026,7 +22070,7 @@ function resolveFinalStateContract(record, options = {}){
   const deadCheck = options.deadCheck || isTerminalDeadSetup(item, {derivedStates, displayedPlan});
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
-  const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+  const bounceStateRaw = String(derivedStates.bounceState || '').toLowerCase();
   const pullbackState = String(derivedStates.pullbackZone || derivedStates.pullbackState || '').toLowerCase();
   const stabilisationState = String(derivedStates.stabilisationState || '').toLowerCase();
   const volumeState = String(derivedStates.volumeState || '').toLowerCase();
@@ -22050,7 +22094,25 @@ function resolveFinalStateContract(record, options = {}){
   const capitalHeavy = executionCapitalHeavy(displayedPlan);
   const weakVolume = volumeState === 'weak';
   const weakControl = !!(qualityAdjustments.lowControlSetup || qualityAdjustments.tooWideForQualityPullback);
-  const bounceUnconfirmed = ['none','unconfirmed'].includes(bounceState);
+  const planEntry = numericOrNull(effectivePlan && effectivePlan.entry);
+  const planStop = numericOrNull(effectivePlan && effectivePlan.stop);
+  const planTarget = numericOrNull(effectivePlan && effectivePlan.firstTarget);
+  const bounceGuard = evaluateBouncePriceabilityGuard({
+    originalBounceState:bounceStateRaw,
+    structureState,
+    pullbackZone:pullbackState,
+    stabilisationState,
+    trendState,
+    currentPrice,
+    entry:planEntry,
+    stop:planStop,
+    target:planTarget,
+    rr:numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio),
+    reclaimConfirmed:currentPrice != null && planEntry != null && currentPrice >= (planEntry * 0.985),
+    riskTooWide
+  });
+  const bounceState = bounceGuard.adjustedBounceState;
+  const bounceUnconfirmed = ['none','unconfirmed','attempt','early','improving'].includes(bounceState);
   const nearReadyStructure = ['strong','intact','developing_clean'].includes(structureState);
   const hardStructureBroken = !!(
     deadCheck.dead
@@ -22065,9 +22127,6 @@ function resolveFinalStateContract(record, options = {}){
     && effectivePlan.stop != null
     && effectivePlan.firstTarget != null
   );
-  const planEntry = numericOrNull(effectivePlan && effectivePlan.entry);
-  const planStop = numericOrNull(effectivePlan && effectivePlan.stop);
-  const planTarget = numericOrNull(effectivePlan && effectivePlan.firstTarget);
   const hasEntry = Number.isFinite(planEntry);
   const hasStop = Number.isFinite(planStop);
   const hasTarget = Number.isFinite(planTarget);
@@ -22092,6 +22151,7 @@ function resolveFinalStateContract(record, options = {}){
   else if(planUiState.state === 'unrealistic_rr') planStateKey = 'unrealistic_rr';
   const verdictCap = capVerdictByBlockingFactors(requestedFinalVerdict, {
     structureState,
+    trendState,
     bounceState,
     pullbackState,
     stabilisationState,
@@ -22105,7 +22165,13 @@ function resolveFinalStateContract(record, options = {}){
     hasPriceablePlanValues,
     hasEntry,
     hasStop,
-    hasTarget
+    hasTarget,
+    currentPrice,
+    planEntry,
+    planStop,
+    planTarget,
+    rr:numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio),
+    reclaimAttempt:currentPrice != null && planEntry != null && currentPrice >= (planEntry * 0.985)
   });
   const finalVerdict = verdictCap.verdict;
   const promotionTrace = verdictCap.blockerFlags && typeof verdictCap.blockerFlags === 'object'
@@ -22175,18 +22241,19 @@ function resolveFinalStateContract(record, options = {}){
       lost50MaSupport ? 'lost_50ma_support' : 'weakening_structure'
     );
     addReason(blockerReason);
-  }else if(planStateKey !== 'valid'){
+  }else if(planStateKey !== 'valid' || !!bounceGuard.unpriceableBlockReason){
     actionStateKey = 'recalculate_plan';
     actionLabel = 'Hold for entry conditions';
     actionTone = 'warning';
-    setPrimaryBlocker(planStateKey, (planStateKey === 'needs_adjustment' && (capitalBlocked || capitalHeavy))
+    const planOrBounceCode = bounceGuard.unpriceableBlockReason ? 'bounce_not_priceable' : planStateKey;
+    setPrimaryBlocker(planOrBounceCode, bounceGuard.unpriceableBlockReason || ((planStateKey === 'needs_adjustment' && (capitalBlocked || capitalHeavy))
       ? (capitalConstraintReasonForPlan(displayedPlan) || 'Capital usage is heavy for this account size.')
       : (({
         missing:'Plan not defined',
         invalid:'Invalid plan',
-        needs_adjustment:'Bounce is too weak to price cleanly.',
+        needs_adjustment:'Bounce is not clear enough to price yet.',
         unrealistic_rr:'R:R is not realistic'
-      })[planStateKey] || 'Plan needs adjustment'), 'plan_state');
+      })[planStateKey] || 'Plan needs adjustment')), 'plan_state');
     addReason(blockerReason);
   }else if(
     finalVerdict === 'Entry'
@@ -22209,7 +22276,7 @@ function resolveFinalStateContract(record, options = {}){
         lost50MaSupport ? 'lost_50ma_support' : 'weakening_structure'
       );
     }else if(bounceUnconfirmed){
-      setPrimaryBlocker('bounce_not_confirmed', 'Still forming - buyers have not taken control yet.', 'bounce_confirmation');
+      setPrimaryBlocker('bounce_not_confirmed', bounceGuard.unpriceableBlockReason || 'Developing - waiting for confirmation.', 'bounce_confirmation');
     }else if(weakVolume){
       setPrimaryBlocker('weak_volume', 'Needs stronger volume', 'volume');
     }else if(marketWeak){
@@ -22275,6 +22342,19 @@ function resolveFinalStateContract(record, options = {}){
     capCode:verdictCap.capCode || '',
     capSeverity:verdictCap.capSeverity || '',
     capBlockers:verdictCap.blockerFlags || {},
+    originalBounceState:bounceGuard.originalBounceState,
+    adjustedBounceState:bounceGuard.adjustedBounceState,
+    bouncePriceabilityGuardApplied:bounceGuard.bouncePriceabilityGuardApplied,
+    bouncePriceabilityGuardReason:bounceGuard.bouncePriceabilityGuardReason,
+    hasClearInvalidationLevel:bounceGuard.hasClearInvalidationLevel,
+    hasPriceablePlan:bounceGuard.hasPriceablePlan,
+    unpriceableBlockReason:bounceGuard.unpriceableBlockReason,
+    planPriceabilitySource:'resolveFinalStateContract:effectivePlan+marketData',
+    resolvedPlanEntry:planEntry,
+    resolvedPlanStop:planStop,
+    resolvedPlanTarget:planTarget,
+    resolvedPlanCurrentPrice:currentPrice,
+    duplicateValidateCurrentPlanRemoved:true,
     promotion_watch_to_near_allowed:!!promotionTrace.promotion_watch_to_near_allowed,
     promotion_near_to_entry_allowed:!!promotionTrace.promotion_near_to_entry_allowed,
     promotion_watch_to_near_reason:String(promotionTrace.promotion_watch_to_near_reason || ''),
@@ -22772,6 +22852,8 @@ function resolveGlobalVerdict(record){
     resolvePreLifecycleStateContract,
     baseVerdictFromResolvedContract,
     analysisDerivedStatesFromRecord,
+    effectivePlanForRecord,
+    applySetupConfirmationPlanGate,
     deriveCurrentPlanState,
     evaluatePlanRealism,
     setupScoreForRecord,
@@ -23122,7 +23204,21 @@ function validateCurrentPlan(record, options = {}){
   if(trigger.clearlyMissed || (Number.isFinite(currentPrice) && Number.isFinite(target) && currentPrice >= (target * 0.98))){
     return {state:'missed', valid:false, needsReplan:false, missed:true, invalidated:false, capitalConstraint:'', reasonCode:'missed_setup'};
   }
-  if(structurePremature || confirmationPremature){
+  const bounceGuard = evaluateBouncePriceabilityGuard({
+    originalBounceState:String(derivedStates.bounceState || '').toLowerCase(),
+    structureState,
+    pullbackZone:String(derivedStates.pullbackZone || '').toLowerCase(),
+    stabilisationState:String(derivedStates.stabilisationState || '').toLowerCase(),
+    trendState,
+    currentPrice,
+    entry,
+    stop,
+    target,
+    rr:numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio),
+    reclaimConfirmed:trigger.entryTriggerReady || trigger.nearReady,
+    riskTooWide:false
+  });
+  if(structurePremature || confirmationPremature || !!bounceGuard.unpriceableBlockReason){
     return {
       state:'pending_validation',
       valid:false,
@@ -23130,7 +23226,9 @@ function validateCurrentPlan(record, options = {}){
       missed:false,
       invalidated:false,
       capitalConstraint:'',
-      reasonCode:structurePremature ? 'weak_structure' : 'bounce_not_confirmed'
+      reasonCode:structurePremature
+        ? 'weak_structure'
+        : (bounceGuard.unpriceableBlockReason ? 'bounce_not_priceable' : 'bounce_not_confirmed')
     };
   }
   const prospectiveRisk = (Number.isFinite(currentPrice) && Number.isFinite(stop) && Number.isFinite(target) && currentPrice > entry)
