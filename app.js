@@ -21704,8 +21704,7 @@ function bindTrackPullRefreshGesture(){
   let trackPullIgnoredReason = '';
   const atTop = () => {
     const scrollTop = Number(trackWorkspace.scrollTop || 0);
-    const pageTop = Number(window.scrollY || 0);
-    return scrollTop <= 0 && pageTop <= 0;
+    return scrollTop <= 0;
   };
   const resetGesture = () => {
     trackPullStartY = null;
@@ -21747,15 +21746,15 @@ function bindTrackPullRefreshGesture(){
   trackWorkspace.addEventListener('touchmove', event => {
     if(activeWorkspaceTab() !== 'track') return;
     if(trackPullStartY == null) return;
-    if(!atTop()){
-      trackPullCapturedScroll = true;
-      return;
-    }
     const touch = event.touches && event.touches[0];
     if(!touch) return;
     trackPullLastY = Number(touch.clientY);
     const deltaY = trackPullLastY - trackPullStartY;
-    const shouldCapturePullGesture = deltaY > 12 && !trackPullCapturedScroll;
+    if(deltaY <= 0){
+      trackPullCapturedScroll = true;
+      return;
+    }
+    const shouldCapturePullGesture = deltaY > 8 && !trackPullCapturedScroll;
     if(shouldCapturePullGesture && event.cancelable){
       event.preventDefault();
       if(!trackPullPreventLogged){
