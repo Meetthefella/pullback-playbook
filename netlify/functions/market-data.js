@@ -50,6 +50,17 @@ function requestedTickerCount(params){
   return [...new Set(raw.split(/[\s,]+/).map(item => String(item || '').trim().toUpperCase()).filter(Boolean))].length;
 }
 
+function requestedSymbols(params){
+  const raw = [
+    params.symbol,
+    params.ticker,
+    params.symbols,
+    params.tickers
+  ].map(value => String(value || '').trim()).filter(Boolean).join(',');
+  if(!raw) return [];
+  return [...new Set(raw.split(/[\s,]+/).map(item => String(item || '').trim().toUpperCase()).filter(Boolean))];
+}
+
 function providerApiKey(providerId){
   if(providerId === 'fmp') return process.env.FMP_API_KEY;
   if(providerId === 'marketdata') return process.env.MARKETDATA_API_KEY || process.env.MARKETDATA_TOKEN;
@@ -86,7 +97,8 @@ exports.handler = async function handler(event){
   const adapter = getProviderAdapter(providerConfig.id);
   const apiKey = providerApiKey(providerConfig.id);
   const mode = String(params.mode || '').trim().toLowerCase();
-  const symbol = String(params.symbol || params.ticker || '').trim().toUpperCase();
+  const symbols = requestedSymbols(params);
+  const symbol = symbols[0] || '';
   const query = String(params.query || params.q || '').trim();
 
   if(mode === 'fx'){
@@ -146,6 +158,57 @@ exports.handler = async function handler(event){
     }
 
     if(!symbol) return jsonResponse(400, {error:'Missing symbol.'});
+    if(symbols.length > 1 || String(params.symbols || params.tickers || '').trim()){
+      const results = await Promise.all(symbols.map(async batchSymbol => {
+        if(!/^[A-Z][A-Z0-9.-]{0,9}$/.test(batchSymbol)){
+          return {
+            symbol:batchSymbol,
+            ok:false,
+            error:'Invalid ticker symbol format.',
+            data:baseResponsePayload(batchSymbol, providerConfig.id)
+          };
+        }
+        try{
+          const snapshot = await adapter.getSnapshot(batchSymbol, {
+            apiKey,
+            providerConfig,
+            log:(level, details) => logEndpointEvent(level, {...details, provider:providerConfig.id})
+          });
+          return {
+            symbol:batchSymbol,
+            ok:true,
+            error:null,
+            data:{
+              ...snapshot,
+              dataProvider:providerConfig.id
+            }
+          };
+        }catch(error){
+          const failure = adapter.classifyError
+            ? adapter.classifyError(error, providerConfig.label)
+            : {
+                clientMessage:String(error && error.message || 'Market-data request failed.'),
+                logMessage:String(error && error.message || 'Market-data request failed.')
+              };
+          console.error(`[market-data] ${failure.logMessage}`);
+          return {
+            symbol:batchSymbol,
+            ok:false,
+            error:failure.clientMessage,
+            data:baseResponsePayload(batchSymbol, providerConfig.id)
+          };
+        }
+      }));
+      return jsonResponse(200, {
+        ok:true,
+        error:null,
+        provider:providerConfig.id,
+        providerLabel:providerConfig.label,
+        batch:true,
+        results
+      });
+    }
+
     if(!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)){
       return jsonResponse(400, {
         ok:false,

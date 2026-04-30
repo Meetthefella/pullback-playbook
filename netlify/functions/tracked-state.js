@@ -2,10 +2,94 @@ const { loadTrackedState, saveTrackedState } = require('./lib/tracked-store');
 const { corsHeadersForEvent, guardTrustedOrigin } = require('./lib/request-guard');
 
 function jsonResponse(event, statusCode, body){
+  if(String(process.env.DEBUG_TRACKED_STATE_SIZE || '').trim().toLowerCase() === 'true'){
+    try{
+      const approxBytes = Buffer.byteLength(JSON.stringify(body || {}), 'utf8');
+      console.log('TRACKED_STATE_RESPONSE_SIZE', {statusCode, approxBytes});
+    }catch(error){}
+  }
   return {
     statusCode,
     headers:corsHeadersForEvent(event, 'GET, POST, OPTIONS'),
     body:JSON.stringify(body)
+  };
+}
+
+function compactChartRef(chartRef){
+  if(!chartRef || typeof chartRef !== 'object') return null;
+  return {
+    name:String(chartRef.name || ''),
+    type:String(chartRef.type || '')
+  };
+}
+
+function compactReview(review){
+  const safe = review && typeof review === 'object' ? review : {};
+  const analysisState = safe.analysisState && typeof safe.analysisState === 'object' ? safe.analysisState : {};
+  return {
+    ...safe,
+    chartRef:compactChartRef(safe.chartRef),
+    analysisState:{
+      ...analysisState,
+      raw:'',
+      prompt:''
+    },
+    aiAnalysisRaw:'',
+    lastPrompt:''
+  };
+}
+
+function compactTickerRecordForResponse(record){
+  const safe = record && typeof record === 'object' ? record : {};
+  const marketData = safe.marketData && typeof safe.marketData === 'object' ? safe.marketData : {};
+  const watchlist = safe.watchlist && typeof safe.watchlist === 'object' ? safe.watchlist : {};
+  return {
+    ...safe,
+    review:compactReview(safe.review),
+    marketData:{
+      ...marketData,
+      history:[]
+    },
+    watchlist:{
+      ...watchlist,
+      debug:{}
+    }
+  };
+}
+
+function compactTrackedStateForResponse(state){
+  const safe = state && typeof state === 'object' ? state : {};
+  const records = safe.records && typeof safe.records === 'object' ? safe.records : {};
+  const compactRecords = {};
+  Object.entries(records).forEach(([ticker, record]) => {
+    if(!ticker || !record || typeof record !== 'object') return;
+    compactRecords[ticker] = compactTickerRecordForResponse(record);
+  });
+  return {
+    updatedAt:String(safe.updatedAt || ''),
+    settings:safe.settings && typeof safe.settings === 'object' ? safe.settings : {},
+    records:compactRecords
+  };
+}
+
+function trackedStateAckForResponse(state){
+  const safe = state && typeof state === 'object' ? state : {};
+  const records = safe.records && typeof safe.records === 'object' ? safe.records : {};
+  const versionRecords = {};
+  Object.entries(records).forEach(([ticker, record]) => {
+    if(!ticker || !record || typeof record !== 'object') return;
+    const meta = record.meta && typeof record.meta === 'object' ? record.meta : {};
+    versionRecords[ticker] = {
+      ticker:String(record.ticker || ticker),
+      meta:{
+        updatedAt:String(meta.updatedAt || record.updatedAt || '')
+      }
+    };
+  });
+  return {
+    updatedAt:String(safe.updatedAt || ''),
+    settings:safe.settings && typeof safe.settings === 'object' ? safe.settings : {},
+    records:versionRecords
   };
 }
 
@@ -64,11 +148,12 @@ function applyExplicitRemovals(records = {}, removedRecords = {}){
 }
 
 exports.handler = async function handler(event){
-  if(!guardTrustedOrigin(event)) return jsonResponse(event, 403, {error:'Forbidden'});
+ 
   if(event.httpMethod === 'OPTIONS') return jsonResponse(event, 200, {ok:true});
+ if(!guardTrustedOrigin(event)) return jsonResponse(event, 403, {error:'Forbidden'});
   if(event.httpMethod === 'GET'){
     const state = await loadTrackedState();
-    return jsonResponse(event, 200, {ok:true, trackedState:state});
+    return jsonResponse(event, 200, {ok:true, trackedState:compactTrackedStateForResponse(state)});
   }
   if(event.httpMethod !== 'POST'){
     return jsonResponse(event, 405, {error:'Method not allowed'});
@@ -91,5 +176,5 @@ exports.handler = async function handler(event){
     )
   };
   const saved = await saveTrackedState(nextState);
-  return jsonResponse(event, 200, {ok:true, trackedState:saved});
+  return jsonResponse(event, 200, {ok:true, trackedState:trackedStateAckForResponse(saved)});
 };

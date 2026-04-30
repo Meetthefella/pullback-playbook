@@ -3,17 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pullback Playbook v4.4.1</title>
-  <meta name="theme-color" content="#0f172a" />
+  <title>Pullback Playbook v4.4.9</title>
+  <meta name="theme-color" content="#0b1220" />
+  <meta name="color-scheme" content="dark" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="build-version" content="v4.4.1" />
+  <meta name="build-version" content="v4.4.9" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="./icon-192.png" />
   <link id="appManifest" rel="manifest" href="./manifest.webmanifest" />
   <link rel="stylesheet" href="./styles.css" />
   <script>
     (function(){
       var meta = document.querySelector('meta[name="build-version"]');
-      var buildVersion = (meta && meta.getAttribute('content')) || 'v4.4.1';
+      var buildVersion = (meta && meta.getAttribute('content')) || 'v4.4.9';
       window.__BUILD_VERSION__ = buildVersion;
       if(meta) meta.setAttribute('content', buildVersion);
       var manifest = document.getElementById('appManifest');
@@ -23,210 +27,247 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="card resetcard">
-    <div class="actions" style="margin-top:0">
-      <button class="danger" id="resetAllBtn">Reset All</button>
-    </div>
-  </div>
   <div class="card contextstrip">
     <div class="contextmain">
       <div class="contexttitle">
-        <h1>Pullback Playbook v4.4.1</h1>
+        <div class="contexttitle-row">
+          <h1>Pullback Playbook v4.4.9</h1>
+          <button class="context-settings-toggle" type="button" id="contextSettingsToggle" aria-label="Open context settings" aria-expanded="false" aria-controls="headerControlSurface">
+            <span class="context-settings-dot"></span><span class="context-settings-dot"></span><span class="context-settings-dot"></span>
+          </button>
+        </div>
         <p>Scan, shortlist, review, decide, then track.</p>
       </div>
-      <div class="contextmeta">
-        <div class="contextpill">
-          <label id="marketStatusSection">Market Status</label>
-          <select id="marketStatus">
-            <option>S&amp;P above 50 MA</option>
-            <option>S&amp;P near 50 MA</option>
-            <option>S&amp;P below 50 MA</option>
-          </select>
-        </div>
-        <div class="pillrow">
-          <span class="pill">Account <strong id="accountStat">GBP 4,000</strong></span>
-          <span class="pill">Max Risk <strong id="riskStat">GBP 40</strong></span>
-          <span class="pill">Risk % <strong id="riskPctStat">1.0%</strong></span>
-          <span class="pill" id="appVersion">v4.4.1</span>
+      <div class="header-ledger-view" id="headerLedgerView">
+        <div class="ledger-strip" id="headerLedgerStrip" aria-live="polite">
+          <div class="ledger-strip__market">
+            <span class="ledger-strip__label">Market</span>
+            <div class="ledger-strip__primary-row">
+              <strong class="ledger-strip__market-value" id="marketStatusLedger">S&amp;P above 50 MA</strong>
+              <span class="ledger-session-pill" id="marketSessionLedgerState">Market Closed</span>
+            </div>
+          </div>
+          <div class="ledger-strip__meta">
+            <button class="ledger-meta-item ledger-meta-button" type="button" id="marketTimingLedger" aria-label="Open US market calendar">Opens 14:30 UK</button>
+            <button class="ledger-meta-item ledger-meta-button" type="button" id="accountRiskLedger" aria-label="Edit account and risk">GBP 4,000 | &pound;40</button>
+            <button class="ledger-meta-item ledger-meta-button" type="button" id="scannerModeLedger" aria-label="Edit scanner mode">Curated Core</button>
+            <button class="ledger-meta-item ledger-meta-button" type="button" id="setupTypeLedger" aria-label="Edit setup type">Setup not set</button>
+          </div>
         </div>
       </div>
+      <div class="header-control-surface context-edit-panel" id="headerControlSurface" hidden>
+        <div class="context-edit-head">
+          <div class="context-edit-head__row">
+            <strong>Context Settings</strong>
+            <button class="context-settings-close" type="button" id="contextSettingsCloseBtn" aria-label="Close context settings">&times;</button>
+          </div>
+          <span class="tiny">Adjust market, account/risk, scanner mode, and setup defaults.</span>
+        </div>
+      <div class="context-panel-section" id="contextSectionMarket">
+        <div class="context-panel-section__title">Market</div>
+        <div class="tiny" id="contextMarketLiveStatus">Market state loading...</div>
+      <div class="control-focus-rail" id="controlFocusRail" aria-label="Control focus rail">
+        <button class="focus-rail-item" id="marketStatusPill" type="button" data-control-strip="market">
+          <span class="focus-rail-label" id="marketStatusSection">Market</span>
+          <strong class="focus-rail-value" id="marketStatusStrip">S&amp;P above 50 MA</strong>
+        </button>
+        <button class="focus-rail-item" id="accountRiskPill" type="button" data-control-strip="account">
+          <span class="focus-rail-label">Account</span>
+          <strong class="focus-rail-value" id="accountRiskStrip">GBP 4,000 | £--</strong>
+        </button>
+        <button class="focus-rail-item" id="scannerModePill" type="button" data-control-strip="mode">
+          <span class="focus-rail-label">Mode</span>
+          <strong class="focus-rail-value" id="scannerModeStrip">Curated Core</strong>
+        </button>
+        <button class="focus-rail-item" id="setupTypePill" type="button" data-control-strip="setup">
+          <span class="focus-rail-label">Setup</span>
+          <strong class="focus-rail-value" id="setupTypeStrip">Setup not set</strong>
+        </button>
+      </div>
+      <div class="control-focus-tray" id="controlStripSelector">
+        <div class="control-focus-tray__label" id="controlStripSelectorLabel">Market</div>
+        <div class="control-focus-tray__body" id="controlStripSelectorOptions"></div>
+      </div>
+      </div>
+      <div class="context-panel-section" id="contextSectionAccount">
+        <div class="context-panel-section__title">Account &amp; Risk</div>
+      <div class="compact-settings compact-settings--panel" id="headerRiskSettings">
+        <strong class="compact-settings-title">Risk Settings</strong>
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>Account Size (GBP)</label>
+            <input id="accountSize" type="number" value="4000" min="1" />
+          </div>
+          <div>
+            <label>Risk %</label>
+            <input id="riskPercent" type="number" value="0.01" min="0.001" step="0.001" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div>
+            <label>Max Loss Override (GBP)</label>
+            <input id="maxLossOverride" type="number" min="1" step="1" placeholder="Optional" />
+          </div>
+          <div class="panelbox">
+            <label class="checkitem" style="padding:0"><input id="wholeSharesOnly" type="checkbox" checked> Whole shares only</label>
+            <div class="tiny" style="margin-top:8px">Top context stays slim. Edit risk controls here when you need them.</div>
+          </div>
+        </div>
+      </div>
+      </div>
+      </div>
+      <select id="marketStatus" hidden>
+        <option>S&amp;P above 50 MA</option>
+        <option>S&amp;P near 50 MA</option>
+        <option>S&amp;P below 50 MA</option>
+      </select>
+      <select id="marketStatusMode" hidden>
+        <option value="auto">Auto</option>
+        <option value="manual">Manual</option>
+      </select>
+      <select id="universeMode" hidden>
+        <option value="tradingview_only">TradingView</option>
+        <option value="core8">Curated Core</option>
+        <option value="combined">Combined</option>
+      </select>
+      <select id="scannerSetupType" hidden>
+        <option value="">Setup not set</option>
+        <option value="20MA">20MA</option>
+        <option value="50MA">50MA</option>
+      </select>
     </div>
-    <details class="compact-settings" style="margin-top:12px">
-      <summary><strong>1) Header / Market Context</strong> · Edit settings</summary>
-      <div class="row" style="margin-top:12px">
-        <div>
-          <label>Account Size (GBP)</label>
-          <input id="accountSize" type="number" value="4000" min="1" />
-        </div>
-        <div>
-          <label>Risk %</label>
-          <input id="riskPercent" type="number" value="0.01" min="0.001" step="0.001" />
-        </div>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <div>
-          <label>Max Loss Override (GBP)</label>
-          <input id="maxLossOverride" type="number" min="1" step="1" placeholder="Optional" />
-        </div>
-        <div class="panelbox">
-          <label class="checkitem" style="padding:0"><input id="wholeSharesOnly" type="checkbox" checked> Whole shares only</label>
-          <div class="tiny" style="margin-top:8px">Top context stays slim. Edit risk controls here when you need them.</div>
-        </div>
-      </div>
-    </details>
-    <div class="navtabs">
-      <a class="tablink" href="#dailyInput">Scan</a>
-      <a class="tablink" href="#resultsSection">Shortlist</a>
-      <a class="tablink" href="#reviewSection">Review</a>
-      <a class="tablink" href="#watchlistSection">Watchlist</a>
-      <a class="tablink" href="#diarySection">Diary</a>
-      <a class="tablink" href="#alertsSection">Alerts</a>
-      <a class="tablink" href="#advancedSection">Advanced</a>
+    <div class="context-settings-backdrop" id="contextSettingsBackdrop" hidden></div>
+    <div id="liveProcessStatusBanner" class="live-process-banner" data-live-process="startup" aria-live="polite">
+      <span class="live-process-banner__label">Status</span>
+      <span id="liveProcessStatusText">Loading context...</span>
     </div>
   </div>
 
-  <div class="card" style="margin-top:14px">
-    <h2 id="dailyInput">2) Scan List</h2>
-    <p class="tiny">Paste/import tickers, optionally add one manually, then run the scan.</p>
-    <div style="margin-top:10px">
+  <main id="workspaceArea" class="workspace-area">
+  <div class="card app-workspace-card" data-workspace-card="scan" style="margin-top:14px">
+    <h2 id="dailyInput">Scan</h2>
+    <div class="scan-primary-stack" style="margin-top:10px">
       <strong>Import From Screenshot</strong>
-      <div class="tiny" style="margin-top:6px">Upload a TradingView screenshot to extract tickers. OCR does not run the scan automatically.</div>
+      <div class="tiny" style="margin-top:6px">Upload a TradingView screenshot to extract tickers for review before scanning.</div>
       <div class="actions">
         <button class="secondary" id="importScreenshotBtn">Import From Screenshot</button>
       </div>
       <input id="ocrImportFile" type="file" accept="image/*" style="display:none" />
       <div class="statusline tiny" id="ocrImportStatus">OCR import is optional and runs fully in your browser.</div>
-      <div style="margin-top:10px">
+      <div id="ocrReviewBlock" style="margin-top:10px" hidden>
         <label>OCR Review / Edit</label>
         <textarea id="ocrReviewInput" placeholder="Detected tickers will appear here for review before import."></textarea>
-        <div class="actions">
-          <button class="secondary" id="applyOcrBtn">Confirm OCR Tickers</button>
-          <button class="ghost" id="clearOcrBtn">Clear OCR Review</button>
+      </div>
+      <div class="actions">
+        <button class="secondary" id="applyOcrBtn">Confirm OCR Tickers</button>
+        <button class="ghost" id="clearOcrBtn">Clear OCR Review</button>
+      </div>
+      <div style="margin-top:14px">
+        <label>Quick Manual Ticker Search</label>
+        <div class="searchaddrow" style="margin-top:10px">
+          <div class="searchaddinput">
+            <label>Ticker Search / Add</label>
+            <input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" />
+            <div id="tickerSuggestions" class="suggestions" hidden></div>
+          </div>
+          <div class="searchaddaction"><button class="primary compactbutton" id="addTickerBtn">Add Ticker</button></div>
         </div>
+        <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
       </div>
-    </div>
-    <div class="panelbox" style="margin-top:12px">
-      <strong>Scanner Universe Controls</strong>
-      <div class="row" style="margin-top:10px">
-        <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
-        <div><label>Universe Mode</label><select id="universeMode"><option value="tradingview_only">TradingView Only</option><option value="core8">Curated Core 8</option><option value="combined">Combined</option></select></div>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <div><label>Setup Type</label><select id="scannerSetupType"><option value="">Unknown</option><option value="20MA">20MA</option><option value="50MA">50MA</option></select></div>
-        <div class="tiny" style="align-self:end">Max loss uses the override if set, otherwise account size x risk %.</div>
-      </div>
-      <div id="finalUniversePreview" class="mutebox" style="margin-top:10px">Final scan universe will appear here.</div>
-      <div class="quicklisthead" style="margin-top:12px">
-        <strong>Scanner Universe</strong>
-        <span class="tiny">This is the live universe used for the scan.</span>
-      </div>
-      <div class="summary saved-universe-summary" id="savedUniverseSummary" style="margin-top:10px">No saved scanner universe snapshot on this device.</div>
-      <div class="quicklist" id="scannerUniverseQuickList"></div>
-    </div>
-    <div style="margin-top:14px">
-      <label>Quick Manual Ticker Search</label>
-      <div class="searchaddrow" style="margin-top:10px">
-        <div class="searchaddinput">
-          <label>Ticker Search / Add</label>
-          <input id="tickerSearch" autocomplete="off" placeholder="AAPL or BRK.B" />
-          <div id="tickerSuggestions" class="suggestions" hidden></div>
-        </div>
-        <div class="searchaddaction"><button class="primary compactbutton" id="addTickerBtn">Add Ticker</button></div>
-      </div>
-      <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
-    </div>
-    <details id="advancedScannerTools" style="margin-top:14px">
-      <summary><strong>Advanced Scanner Controls</strong></summary>
-      <div style="margin-top:10px">
-        <label>Universe Text List</label>
-        <textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea>
-        <div class="tiny" style="margin-top:8px">Use this only for bulk editing. The scan uses your imported/manual tickers when present, otherwise the curated fallback list.</div>
-      </div>
-      <div style="margin-top:10px">
-        <label>Paste or Import Tickers</label>
+      <div style="margin-top:14px">
+        <label>Paste Ticker List</label>
         <textarea id="tvImportInput" placeholder="CAT,DE,UNP,GEV&#10;or&#10;CAT DE UNP GEV&#10;or one ticker per line"></textarea>
         <div class="actions">
           <button class="secondary" id="importTvBtn">Import Tickers</button>
+          <button class="primary" id="buildBtn">Run Scan</button>
+          <button class="ghost" id="clearBtn">Clear</button>
         </div>
         <div id="tvImportPreview" class="mutebox" style="margin-top:10px">No imported ticker list yet.</div>
+        <div class="statusline tiny" id="inputStatus">Scans use your imported/manual tickers when present, otherwise the curated default list.</div>
       </div>
-      <details style="margin-top:12px">
-        <summary><strong>Active Scanner Rules</strong></summary>
-        <div id="scannerRulesList" class="mutebox" style="margin-top:10px">Loading active scanner rules...</div>
-        <div id="scannerDebugList" class="mutebox" style="margin-top:10px">No scan debug data yet.</div>
-      </details>
-    </details>
-    <div class="actions">
-      <button class="secondary" id="saveBtn">Save List</button>
-      <button class="secondary" id="loadBtn">Load Saved</button>
-      <button class="ghost" id="clearBtn">Clear</button>
-      <button class="primary" id="buildBtn">Run Scan</button>
     </div>
-    <div class="statusline tiny" id="inputStatus">Scans use your imported/manual tickers when present, otherwise the curated default list.</div>
+    <details id="scannerSettings" class="scanner-settings" style="margin-top:14px">
+      <summary><strong>Advanced Scanner Settings</strong></summary>
+      <div class="panelbox scanner-settings-panel" style="margin-top:12px">
+        <strong>Scanner Universe Controls</strong>
+        <div class="row" style="margin-top:10px">
+          <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
+          <div class="tiny" style="align-self:end">Max loss uses the override if set, otherwise account size x risk %.</div>
+        </div>
+        <div id="finalUniversePreview" class="mutebox" style="margin-top:10px">Final scan universe will appear here.</div>
+        <div class="quicklisthead" style="margin-top:12px">
+          <strong>Scanner Universe</strong>
+          <span class="tiny">This is the live universe used for the scan.</span>
+        </div>
+        <div class="summary saved-universe-summary" id="savedUniverseSummary" style="margin-top:10px">No saved scanner universe snapshot on this device.</div>
+        <div class="quicklist" id="scannerUniverseQuickList"></div>
+      </div>
+      <details id="advancedScannerTools" style="margin-top:12px">
+        <summary><strong>Advanced Scanner Controls</strong></summary>
+        <div style="margin-top:10px">
+          <label>Universe Text List</label>
+          <textarea id="tickerInput" placeholder="PWR&#10;LIN&#10;UNP&#10;DE&#10;HSY"></textarea>
+          <div class="tiny" style="margin-top:8px">Use this for bulk editing only when you need more control.</div>
+        </div>
+        <details style="margin-top:12px">
+          <summary><strong>Active Scanner Rules</strong></summary>
+          <div id="scannerRulesList" class="mutebox" style="margin-top:10px">Loading active scanner rules...</div>
+          <div id="scannerDebugList" class="mutebox" style="margin-top:10px">No scan debug data yet.</div>
+        </details>
+      </details>
+      <div class="actions scanner-settings-actions">
+        <button class="secondary" id="saveBtn">Save List</button>
+        <button class="secondary" id="loadBtn">Load Saved</button>
+      </div>
+    </details>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="scan" style="margin-top:14px">
     <details id="resultsToggle" open>
-      <summary><strong id="resultsSection">3) All Scan Results</strong> <span class="tiny" id="resultsToggleText">- Show Ranked Results</span></summary>
-      <p class="tiny" style="margin-top:10px">Primary scan output for review. Use this list to open a ticker into the review workspace.</p>
+      <summary><strong id="resultsSection">Ranked Results</strong> <span class="tiny" id="resultsToggleText">- Show Ranked Results</span></summary>
+      <p class="tiny" style="margin-top:10px">Triage candidates here, then open one into Review.</p>
       <div class="statusline tiny" id="scannerSelectionStatus">Open any ranked setup to jump straight into review.</div>
       <div id="results" class="list"></div>
     </details>
   </div>
 
-  <div class="card" style="margin-top:14px">
-    <h2 id="reviewSection">4) Selected Ticker Review Workspace</h2>
-    <p class="tiny">One active ticker at a time. Review the chart, notes, checklist, and trade plan in one place.</p>
+  <div class="card app-workspace-card" data-workspace-card="review" style="margin-top:14px">
+    <h2 id="reviewSection">Review</h2>
+    <p class="tiny">One active ticker at a time: chart, verdict, plan, and next action.</p>
     <div id="reviewWorkspace" class="list" style="margin-top:14px"></div>
   </div>
 
-  <div class="card" style="margin-top:14px">
-    <h2 id="watchlistSection">5) Watchlist</h2>
-    <p class="tiny">Decision output area for reviewed setups. Entries expire after 5 trading days unless refreshed.</p>
+  <div class="card app-workspace-card" data-workspace-card="track" style="margin-top:14px">
+    <h2 id="watchlistSection">Track</h2>
+    <p class="tiny">Monitor active setups, refresh lifecycle state, and reopen names in Review.</p>
     <div class="actions" style="margin-top:10px">
       <label class="checkitem" style="padding:0"><input id="showExpiredWatchlist" type="checkbox"> Show expired</label>
     </div>
     <div id="watchlistList" class="list"></div>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <h2 id="diarySection" style="margin-bottom:0">6) Trade Diary</h2>
+      <h2 id="diarySection" style="margin-bottom:0">Diary</h2>
       <div class="actions" style="margin-top:0">
-        <button class="secondary" id="jumpToDiaryBtn">Diary Section</button>
         <button class="secondary" id="exportDiaryBtn">Export Diary JSON</button>
       </div>
     </div>
-    <p class="tiny">Diary records stay compact by default. Expand a record only when you want to edit the full trade outcome.</p>
-    <p class="tiny">Browser storage cannot expose a direct file path here, so use <strong>Export Diary JSON</strong> to save a local copy.</p>
+    <p class="tiny">Journal outcomes and lessons here. Entries stay compact by default; expand only when editing details.</p>
     <div id="tradeDiary" class="list"></div>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
     <details>
-      <summary><strong id="alertsSection">7) Alerts / Attention</strong></summary>
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
-        <p class="tiny" style="margin:0">Alerts stay lower in the workflow so they support decisions instead of competing with scan and review.</p>
-        <div class="actions" style="margin-top:0">
-          <span class="pill" id="newAlertsCount">0 new</span>
-          <button class="secondary" id="markAlertsSeenBtn" type="button">Mark Seen</button>
-        </div>
-      </div>
-      <div id="alertsList" class="list"></div>
-    </details>
-  </div>
-
-  <div class="card" style="margin-top:14px">
-    <details>
-      <summary><strong id="analyticsSection">8) Pattern Review</strong></summary>
+      <summary><strong id="analyticsSection">Pattern Review</strong></summary>
       <p class="tiny" style="margin-top:10px">Pattern review stays available, but secondary to the active trading workflow.</p>
       <div id="patternAnalytics" class="list"></div>
     </details>
   </div>
 
-  <div class="card" style="margin-top:14px">
-    <details>
-      <summary><strong id="advancedSection">9) Advanced / API Utilities</strong></summary>
+  <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
+    <details id="advancedUtilitiesDetails">
+      <summary><strong id="advancedSection">Advanced / API Utilities</strong></summary>
       <div class="grid" style="margin-top:12px">
         <div class="panelbox">
           <strong id="apiSettings">API Settings Utility</strong>
@@ -259,14 +300,74 @@
           <div class="actions">
             <button class="secondary" id="refreshViewBtn" type="button">Refresh View</button>
             <button class="secondary" id="clearSessionBtn" type="button">Clear Session State</button>
+            <button class="danger" id="resetAllBtn" type="button">Reset All</button>
             <button class="danger" id="hardResetAppBtn" type="button">Hard Reset App Data</button>
           </div>
           <div id="resetStatus" class="subtle">Refresh rerenders only. Session clear drops shortlist/review working state. Hard reset also clears scanner caches and reloads.</div>
         </div>
+        <div class="panelbox" id="marketCalendarPanel">
+          <strong>U.S. Market Calendar</strong>
+          <div id="marketCalendarSummary" class="tiny" style="margin-top:10px">Current U.S. trading month.</div>
+          <div class="market-calendar-grid" id="marketCalendarGrid" style="margin-top:10px"></div>
+          <div class="market-calendar-legend" style="margin-top:10px">
+            <span class="market-calendar-legend__item"><span class="market-calendar-legend__swatch market-calendar-legend__swatch--today"></span>Today</span>
+            <span class="market-calendar-legend__item"><span class="market-calendar-legend__swatch market-calendar-legend__swatch--holiday"></span>Holiday</span>
+            <span class="market-calendar-legend__item"><span class="market-calendar-legend__swatch market-calendar-legend__swatch--early"></span>Early close</span>
+          </div>
+        </div>
+        <div class="panelbox">
+          <strong>Runtime Debug</strong>
+          <div id="runtimeDebugStatus" class="tiny" style="margin-top:10px">No runtime errors captured yet.</div>
+          <div id="runtimeDebugOutput" class="mutebox scrollbox" style="margin-top:10px; white-space:pre-wrap; max-height:240px">No runtime debug output yet.</div>
+          <div class="actions">
+            <button class="secondary" id="clearRuntimeDebugBtn" type="button">Clear Debug Log</button>
+          </div>
+        </div>
       </div>
     </details>
   </div>
+  </main>
+
+  <nav id="bottomRibbonNav" class="bottom-ribbon-nav" aria-label="Primary navigation" role="tablist">
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="true" data-workspace-tab="scan">Scan</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="review">Review</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="track">Track</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="diary">Diary</button>
+  </nav>
 </div>
-<script src="./app.js?v=4.4.1"></script>
+<script defer src="./js/utils.js?v=4.4.9"></script>
+<script defer src="./js/date-utils.js?v=4.4.9"></script>
+<script defer src="./js/ticker-utils.js?v=4.4.9"></script>
+<script defer src="./js/storage.js?v=4.4.9"></script>
+<script defer src="./js/state.js?v=4.4.9"></script>
+<script defer src="./js/records.js?v=4.4.9"></script>
+<script defer src="./js/plan-math.js?v=4.4.9"></script>
+<script defer src="./js/tradeability.js?v=4.4.9"></script>
+<script defer src="./js/bounce-priceability.js?v=4.4.9"></script>
+<script defer src="./js/watchlist-utils.js?v=4.4.9"></script>
+<script defer src="./js/watchlist-guidance.js?v=4.4.9"></script>
+<script defer src="./js/resolver-support.js?v=4.4.9"></script>
+<script defer src="./js/resolver-core.js?v=4.4.9"></script>
+<script defer src="./js/resolver-presentation.js?v=4.4.9"></script>
+<script defer src="./js/scanner-view.js?v=4.4.9"></script>
+<script defer src="./js/scanner-debug.js?v=4.4.9"></script>
+<script defer src="./js/scanner-card-shell.js?v=4.4.9"></script>
+<script defer src="./js/scanner-interaction-state.js?v=4.4.9"></script>
+<script defer src="./js/scanner-results-support.js?v=4.4.9"></script>
+<script defer src="./js/review-presentation.js?v=4.4.9"></script>
+<script defer src="./js/domain/persist-signature.js?v=4.4.9"></script>
+<script defer src="./js/domain/diary-schema.js?v=4.4.9"></script>
+<script defer src="./js/domain/paper-trade-eligibility.js?v=4.4.9"></script>
+<script defer src="./js/shell/app-shell.js?v=4.4.9"></script>
+<script defer src="./js/services/analysis-service.js?v=4.4.9"></script>
+<script defer src="./js/services/tracked-state-service.js?v=4.4.9"></script>
+<script defer src="./js/services/diary-service.js?v=4.4.9"></script>
+<script defer src="./js/services/trading212-service.js?v=4.4.9"></script>
+<script defer src="./js/features/review/review-analysis-feature.js?v=4.4.9"></script>
+<script defer src="./js/features/track/track-watchlist-feature.js?v=4.4.9"></script>
+<script defer src="./js/features/diary/diary-feature.js?v=4.4.9"></script>
+<script defer src="./app.js?v=4.4.9"></script>
 </body>
 </html>
+
+

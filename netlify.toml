@@ -46,3 +46,8 @@
   from = "/api/push-subscribe"
   to = "/.netlify/functions/push-subscribe"
   status = 200
+
+[[redirects]]
+  from = "/api/paper-trade"
+  to = "/.netlify/functions/paper-trade"
+  status = 200
