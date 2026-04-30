@@ -17712,12 +17712,19 @@ function tradingViewSymbolForTicker(ticker){
 }
 
 function openTickerChart(ticker){
+  const symbol = normalizeTicker(ticker);
+  const record = symbol ? getTickerRecord(symbol) : null;
+  const beforeSnapshot = record ? reviewOpenMutationSnapshot(record, 'chart_open') : null;
   const tvSymbol = tradingViewSymbolForTicker(ticker);
   if(!tvSymbol) return;
   const url = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`;
   try{
     window.open(url, '_blank', 'noopener');
   }catch(error){}
+  if(record){
+    const afterSnapshot = reviewOpenMutationSnapshot(getTickerRecord(symbol) || record, 'chart_open');
+    logReviewOpenMutationTrace(symbol, 'openTickerChart.windowOpen', beforeSnapshot, afterSnapshot);
+  }
 }
 
 async function analyseSetup(ticker){
@@ -18170,6 +18177,63 @@ function statusRank(status){
   return 3;
 }
 
+function reviewOpenMutationSnapshot(record, context = 'review_open'){
+  const item = normalizeTickerRecord(record);
+  const canonical = resolveCanonicalTickerVerdict(item, {context, silentTrace:true});
+  const globalVerdict = resolveGlobalVerdict(item);
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  return {
+    context:String(context || 'review_open'),
+    ticker:item.ticker,
+    canonicalVerdictKey:String(canonical.canonicalVerdictKey || ''),
+    reviewSavedVerdict:String(item.review && item.review.savedVerdict || ''),
+    reviewSavedSummary:String(item.review && item.review.savedSummary || ''),
+    reviewSavedScore:Number.isFinite(numericOrNull(item.review && item.review.savedScore)) ? Number(item.review.savedScore) : null,
+    manualReviewStatus:String(item.review && item.review.manualReview && item.review.manualReview.status || ''),
+    finalVerdict:String(globalVerdict.final_verdict || ''),
+    globalVerdict:String(globalVerdict.final_verdict || ''),
+    displayStage:String(displayStageForRecord(item) || ''),
+    lifecycleState:String(item.watchlist && item.watchlist.lifecycleState || ''),
+    planEntry:item.plan && item.plan.entry != null ? String(item.plan.entry) : '',
+    planStop:item.plan && item.plan.stop != null ? String(item.plan.stop) : '',
+    planTarget:item.plan && item.plan.firstTarget != null ? String(item.plan.firstTarget) : '',
+    structureState:String(derivedStates.structureState || ''),
+    bounceState:String(derivedStates.bounceState || '')
+  };
+}
+
+function logReviewOpenMutationTrace(ticker, writerPath, beforeSnapshot, afterSnapshot){
+  if(window.PP_PERF_DEBUG !== true) return;
+  const watchedKeys = [
+    'canonicalVerdictKey',
+    'reviewSavedVerdict',
+    'reviewSavedSummary',
+    'reviewSavedScore',
+    'manualReviewStatus',
+    'finalVerdict',
+    'globalVerdict',
+    'displayStage',
+    'lifecycleState',
+    'planEntry',
+    'planStop',
+    'planTarget',
+    'structureState',
+    'bounceState'
+  ];
+  const changed = watchedKeys.filter(key => String(beforeSnapshot && beforeSnapshot[key]) !== String(afterSnapshot && afterSnapshot[key]));
+  console.info('[VerdictDriftTrace]', {
+    ticker:normalizeTicker(ticker),
+    surface:String((afterSnapshot && afterSnapshot.context) || (beforeSnapshot && beforeSnapshot.context) || 'review_open'),
+    context:String((afterSnapshot && afterSnapshot.context) || (beforeSnapshot && beforeSnapshot.context) || 'review_open'),
+    writerPath:String(writerPath || ''),
+    canonicalBefore:String(beforeSnapshot && beforeSnapshot.canonicalVerdictKey || ''),
+    canonicalAfter:String(afterSnapshot && afterSnapshot.canonicalVerdictKey || ''),
+    changedFields:changed,
+    before:beforeSnapshot || {},
+    after:afterSnapshot || {}
+  });
+}
+
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
@@ -18199,11 +18263,13 @@ function loadTickerIntoReview(ticker, options = {}){
       return;
     }
     const record = upsertTickerRecord(symbol);
+    const openBeforeSnapshot = reviewOpenMutationSnapshot(record, 'review_open');
+    const readOnlyReviewOpen = options.recompute !== true;
     const inWatchlist = !!(record && record.watchlist && record.watchlist.inWatchlist);
     const sourceContext = String(options.sourceContext || '');
     const skipAutoScroll = options.skipAutoScroll === true;
     uiState.activeReviewAddsToScannerUniverse = options.includeInScannerUniverse !== false;
-    uiState.activeReviewVerdictOverride = options.useSourceVerdict !== false
+    uiState.activeReviewVerdictOverride = !readOnlyReviewOpen && options.useSourceVerdict !== false
       ? reviewVerdictOverrideFromLabel(options.sourceVerdict || '')
       : '';
     setActiveReviewTicker(symbol);
@@ -18238,6 +18304,8 @@ function loadTickerIntoReview(ticker, options = {}){
         }
         try{
           loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll, preScrolled:true});
+          const openAfterSnapshot = reviewOpenMutationSnapshot(getTickerRecord(symbol) || record, 'review_open');
+          logReviewOpenMutationTrace(symbol, 'loadTickerIntoReview.completeLoad.loadCard', openBeforeSnapshot, openAfterSnapshot);
           if(skipAutoScroll !== true){
             scheduleReviewScrollAfterLoad(symbol, 'loadTickerIntoReview.post', {
               onSettled:() => {
@@ -19988,7 +20056,10 @@ function renderReviewWorkspace(options = {}){
     return;
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
-  const canonicalPlanSynced = ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
+  const readOnlyReviewOpen = options.skipWatchlistLifecycle === true && options.recompute !== true;
+  const canonicalPlanSynced = readOnlyReviewOpen
+    ? false
+    : ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
   if(options.recompute === true){
     maybeExpireTickerRecord(liveRecord);
     reevaluateTickerProgress(liveRecord);
@@ -20025,9 +20096,17 @@ function renderReviewWorkspace(options = {}){
     derivedStates
   });
   const adjustmentSummary = qualityAdjustments.adjustmentReasons.join(' | ');
-  const initialVerdictOverride = activeReviewTicker() === record.ticker ? String(uiState.activeReviewVerdictOverride || '').trim() : '';
+  const initialVerdictOverride = readOnlyReviewOpen
+    ? ''
+    : (activeReviewTicker() === record.ticker ? String(uiState.activeReviewVerdictOverride || '').trim() : '');
+  const reviewOpenCanonicalContract = readOnlyReviewOpen
+    ? resolveCanonicalTickerVerdict(record, {context:'review_open', silentTrace:true})
+    : null;
+  const reviewOpenCanonicalVerdict = reviewOpenCanonicalContract && reviewOpenCanonicalContract.presentationLabel
+    ? String(reviewOpenCanonicalContract.presentationLabel)
+    : '';
   const reviewHeaderVerdict = reviewHeaderVerdictForRecord(record);
-  const displayStage = initialVerdictOverride || reviewHeaderVerdict;
+  const displayStage = initialVerdictOverride || reviewOpenCanonicalVerdict || reviewHeaderVerdict;
   const scannerView = buildFinalSetupView(record);
   const scannerStatus = normalizeAnalysisVerdict(scannerView && scannerView.scannerResolution && scannerView.scannerResolution.status || scannerView && scannerView.displayStage || '');
   const effectivePlanSnapshot = {
@@ -20694,7 +20773,11 @@ function renderReviewWorkspace(options = {}){
     </div>
   </div>`;
   bindReviewWorkspaceActions(record);
-  refreshReview({skipWatchlistLifecycle:options.skipWatchlistLifecycle === true});
+  refreshReview({
+    skipWatchlistLifecycle:options.skipWatchlistLifecycle === true,
+    readOnlyReviewOpen:readOnlyReviewOpen,
+    persistDraft:readOnlyReviewOpen ? false : options.persistDraft
+  });
   renderReviewLifecycleSummary(record.ticker);
   calculate({persist:false});
   updateReviewAiSummaryOverflowHint();
@@ -20823,7 +20906,11 @@ function loadCard(ticker, options = {}){
     if(input) input.checked = !!reviewChecks[id];
   });
   setScannerCardClickTrace(ticker, 'loadCard.after_syncChecks', 'checks_synced');
-  refreshReview({skipWatchlistLifecycle:displayOnlyReviewOpen});
+  refreshReview({
+    skipWatchlistLifecycle:displayOnlyReviewOpen,
+    readOnlyReviewOpen:displayOnlyReviewOpen,
+    persistDraft:displayOnlyReviewOpen ? false : options.persistDraft
+  });
   setScannerCardClickTrace(ticker, 'loadCard.after_refreshReview', 'review_refreshed');
   syncPlannerFromTicker(record.ticker);
   const hydratedPlan = getCanonicalTradeSnapshot(record.ticker);
@@ -20866,7 +20953,7 @@ function refreshReview(options = {}){
     if(window.PP_PERF_DEBUG === true) console.warn('[Review] Skipped text update for missing element:', 'progressText');
   }
   if(progressFill && progressFill.style) progressFill.style.width = `${result.score * 10}%`;
-  syncPlanDisplayMeta();
+  syncPlanDisplayMeta({readOnlyReviewOpen:options.readOnlyReviewOpen === true});
   if(options.persistDraft !== false){
     scheduleReviewDraftAutosave({reason:'refresh_review'});
   }
@@ -20965,7 +21052,7 @@ function resetReview(){
   renderCards();
 }
 
-function syncPlanDisplayMeta(){
+function syncPlanDisplayMeta(options = {}){
   const ticker = activeReviewTicker();
   const planStateBox = $('planStateBox');
   const planQualityBox = $('planQualityBox');
@@ -20987,7 +21074,10 @@ function syncPlanDisplayMeta(){
     return;
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
-  const canonicalPlanSynced = ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
+  const readOnlyReviewOpen = options.readOnlyReviewOpen === true;
+  const canonicalPlanSynced = readOnlyReviewOpen
+    ? false
+    : ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
   if(canonicalPlanSynced) commitTickerState();
   const record = normalizeTickerRecord(liveRecord);
   const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
