@@ -3180,7 +3180,7 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   record.review.lastError = String(card.lastError || record.review.lastError || '');
   record.review.manualReview = card.manualReview && typeof card.manualReview === 'object' ? cloneData(card.manualReview, null) : record.review.manualReview;
   if(card.manualReview && typeof card.manualReview === 'object'){
-    const savedVerdict = String(card.manualReview.status || record.review.savedVerdict || '').trim();
+    const savedVerdict = String(record.review.savedVerdict || '').trim();
     record.review.savedVerdict = savedVerdict ? normalizeImportedStatus(savedVerdict) : '';
     record.review.savedSummary = String(card.manualReview.summary || record.review.savedSummary || '');
     record.review.savedScore = numericOrNull(card.manualReview.score ?? record.review.savedScore);
@@ -6230,7 +6230,8 @@ function watchlistLifecycleSnapshot(record, options = {}){
     deadCheck,
     emojiPresentation
   }, passCache);
-  const canonicalVerdict = normalizeGlobalVerdictKey(globalVerdict.final_verdict);
+  const canonicalContract = resolveCanonicalTickerVerdict(item, {context:'track', derivedStates});
+  const canonicalVerdict = normalizeGlobalVerdictKey(canonicalContract.canonicalVerdictKey);
   const actionState = deriveActionStateForRecord(item).stage;
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
   const expiryTradingDays = item.watchlist.expiryAfterTradingDays || WATCHLIST_EXPIRY_TRADING_DAYS;
@@ -8496,6 +8497,8 @@ function getCanonicalTradeSnapshot(cardOrTicker){
   const record = getTickerRecord(ticker);
   const card = typeof cardOrTicker === 'string' ? null : cardOrTicker;
   if(record){
+    const canonicalContract = resolveCanonicalTickerVerdict(record, {context:'diary_snapshot'});
+    const canonicalVerdictLabel = canonicalContract.presentationLabel || 'Watch';
     const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
     const entry = String(effectivePlan.entry || '');
     const stop = String(effectivePlan.stop || '');
@@ -8504,8 +8507,8 @@ function getCanonicalTradeSnapshot(cardOrTicker){
     const rewardRisk = evaluateRewardRisk(entry, stop, firstTarget);
     return {
       ticker:record.ticker,
-      chartVerdict:preferredVerdictForRecord(record),
-      verdict:preferredVerdictForRecord(record),
+      chartVerdict:canonicalVerdictLabel,
+      verdict:canonicalVerdictLabel,
       qualityScore:Number.isFinite(preferredScoreForRecord(record)) ? preferredScoreForRecord(record) : '',
       exitMode:normalizeExitMode(record.plan.exitMode),
       entry,
@@ -11014,8 +11017,7 @@ function convictionTierLabel(tier){
 function savedReviewVerdictForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const review = item.review && typeof item.review === 'object' ? item.review : {};
-  const manualReview = review.manualReview && typeof review.manualReview === 'object' ? review.manualReview : null;
-  const rawVerdict = String(review.savedVerdict || (manualReview && manualReview.status) || '').trim();
+  const rawVerdict = String(review.savedVerdict || '').trim();
   return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
 }
 
@@ -11044,12 +11046,155 @@ function runtimeFallbackVerdictForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
   const review = item.review && typeof item.review === 'object' ? item.review : {};
-  const manualReview = review.manualReview && typeof review.manualReview === 'object' ? review.manualReview : null;
-  const reviewVerdict = String(review.savedVerdict || (manualReview && manualReview.status) || '').trim();
+  const reviewVerdict = String(review.savedVerdict || '').trim();
   const rawVerdict = reviewVerdict
     ? ''
     : String(scan.resolvedVerdict || scan.verdict || '').trim();
   return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
+}
+
+function verdictPresentationLabelForKey(key){
+  const normalized = normalizeGlobalVerdictKey(key);
+  if(normalized === 'entry') return 'Entry';
+  if(normalized === 'near_entry') return 'Near Entry';
+  if(normalized === 'diminishing') return 'Diminishing';
+  if(normalized === 'monitor') return 'Monitor';
+  if(normalized === 'developing') return 'Developing';
+  if(normalized === 'watch') return 'Watch';
+  if(normalized === 'avoid') return 'Avoid';
+  if(normalized === 'dead') return 'Dead';
+  return 'Watch';
+}
+
+function runVerdictDriftParityChecks(record){
+  if(window.PP_PERF_DEBUG !== true) return;
+  const item = normalizeTickerRecord(record);
+  if(!item.ticker) return;
+  const trackContract = resolveCanonicalTickerVerdict(item, {context:'track', silentTrace:true});
+  const diaryContract = resolveCanonicalTickerVerdict(item, {context:'diary_snapshot', silentTrace:true});
+  if(trackContract.canonicalVerdictKey !== diaryContract.canonicalVerdictKey){
+    console.warn('[VerdictDriftTrace] canonical parity mismatch', {
+      ticker:item.ticker,
+      trackVerdict:trackContract.canonicalVerdictKey,
+      diaryVerdict:diaryContract.canonicalVerdictKey,
+      trackSource:trackContract.sourceTrace,
+      diarySource:diaryContract.sourceTrace
+    });
+  }
+  const diminishingLabel = verdictPresentationLabelForKey('diminishing');
+  if(diminishingLabel !== 'Diminishing'){
+    console.warn('[VerdictDriftTrace] diminishing label mapping mismatch', {
+      ticker:item.ticker,
+      mappedLabel:diminishingLabel
+    });
+  }
+}
+
+function logVerdictDriftTrace(record, context, contract = null){
+  if(window.PP_PERF_DEBUG !== true) return;
+  const item = normalizeTickerRecord(record);
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const rawDisplayedPlan = deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+  const canonicalDisplayedPlan = deriveCurrentPlanState(
+    effectivePlan.entry,
+    effectivePlan.stop,
+    effectivePlan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const globalVerdict = resolveGlobalVerdict(item);
+  const resolved = contract && typeof contract === 'object' ? contract : {};
+  console.info('[VerdictDriftTrace]', {
+    ticker:item.ticker,
+    surface:String(context || ''),
+    input:{
+      final_verdict:globalVerdict.final_verdict || '',
+      global_verdict:globalVerdict.final_verdict || '',
+      reviewVerdict:String(item.review && item.review.savedVerdict || ''),
+      lifecycle:String(item.watchlist && item.watchlist.lifecycleState || ''),
+      display_stage:displayStageForRecord(item),
+      analysisVerdict:analysisVerdictForRecord(item),
+      savedReviewVerdict:savedReviewVerdictForRecord(item),
+      diaryVerdict:item.diary && Array.isArray(item.diary.records) && item.diary.records[0] ? String(item.diary.records[0].verdict || '') : ''
+    },
+    derived:{
+      structureState:String(derivedStates.structureState || ''),
+      bounceState:String(derivedStates.bounceState || ''),
+      volumeState:String(derivedStates.volumeState || ''),
+      planValidity:String(getPlanUiState(item, {displayedPlan:canonicalDisplayedPlan}).state || ''),
+      tradeability:String(resolved.tradeabilityVerdict || resolved.finalVerdict || ''),
+      capitalFit:String(canonicalDisplayedPlan.capitalFit && canonicalDisplayedPlan.capitalFit.capital_fit || canonicalDisplayedPlan.capitalFit || ''),
+      canonicalPlanSource:String(effectivePlan.source || ''),
+      canonicalPlan:{
+        entry:effectivePlan.entry || '',
+        stop:effectivePlan.stop || '',
+        target:effectivePlan.firstTarget || ''
+      },
+      rawPlan:{
+        entry:item.plan && item.plan.entry != null ? String(item.plan.entry) : '',
+        stop:item.plan && item.plan.stop != null ? String(item.plan.stop) : '',
+        target:item.plan && item.plan.firstTarget != null ? String(item.plan.firstTarget) : ''
+      },
+      rawPlanUiState:String(getPlanUiState(item, {displayedPlan:rawDisplayedPlan}).state || '')
+    },
+    output:{
+      canonicalVerdictKey:String(resolved.canonicalVerdictKey || ''),
+      presentationLabel:String(resolved.presentationLabel || ''),
+      lifecycleState:String(resolved.lifecycleState || ''),
+      bucket:String(resolved.bucket || ''),
+      reason:String(resolved.reason || ''),
+      blockers:Array.isArray(resolved.blockers) ? resolved.blockers : []
+    }
+  });
+}
+
+function resolveCanonicalTickerVerdict(record, options = {}){
+  const item = normalizeTickerRecord(record);
+  const context = String(options.context || 'track');
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    effectivePlan.entry,
+    effectivePlan.stop,
+    effectivePlan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const resolved = resolveFinalStateContract(item, {
+    context,
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments
+  });
+  const canonicalVerdictKey = normalizeGlobalVerdictKey(
+    resolved.finalVerdict
+    || resolved.final_verdict_rendered
+    || resolved.final_verdict
+    || 'watch'
+  );
+  const output = {
+    canonicalVerdictKey,
+    presentationLabel:verdictPresentationLabelForKey(canonicalVerdictKey),
+    lifecycleState:String(resolved.structuralState || ''),
+    bucket:String(resolved.bucket || ''),
+    tone:String(resolved.actionTone || ''),
+    reason:String((resolved.reasonParts && resolved.reasonParts[0]) || resolved.actionLabel || ''),
+    blockers:Array.isArray(resolved.reasonParts) ? resolved.reasonParts.slice(0, 3) : [],
+    sourceTrace:{
+      context,
+      resolver:'resolveFinalStateContract',
+      planSource:String(effectivePlan.source || '')
+    }
+  };
+  if(options.silentTrace !== true){
+    logVerdictDriftTrace(item, context, output);
+  }
+  return output;
 }
 
 function currentRuntimeSummaryForRecord(record){
@@ -20749,6 +20894,12 @@ function persistActiveReviewDraft(options = {}){
   record.review.manualReview = manualReview;
   record.review.lastReviewedAt = manualReview.savedAt;
   record.review.savedSummary = manualReview.summary;
+  if(String(result.status || '').trim()){
+    record.review.savedVerdict = normalizeImportedStatus(result.status, {preserveEmpty:true});
+  }
+  if(Number.isFinite(numericOrNull(result.score))){
+    record.review.savedScore = Number(result.score);
+  }
   updateTickerInputFromState();
   commitTickerState();
   if(options.render === true){
@@ -20780,6 +20931,11 @@ function saveReview(){
   }
   const saved = persistActiveReviewDraft({source:'review_save', render:true});
   if(saved){
+    const record = getTickerRecord(ticker);
+    if(record){
+      resolveCanonicalTickerVerdict(record, {context:'review_save'});
+      runVerdictDriftParityChecks(record);
+    }
     setStatus('inputStatus', '<span class="ok">Manual review saved as optional notes only. Scanner ranking stays unchanged.</span>');
   }
 }
