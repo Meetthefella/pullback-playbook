@@ -67,14 +67,6 @@ self.addEventListener('fetch', event => {
   }
 
   if(isStaticAssetRequest(event.request)){
-    if(event.request.destination === 'script'){
-      event.respondWith(
-        fetch(event.request)
-          .then(response => putInCache(event.request, response))
-          .catch(() => caches.match(event.request))
-      );
-      return;
-    }
     event.respondWith(
       caches.match(event.request).then(cached => {
         const shouldPreferCache = cached && (event.request.destination === 'script' || isVersionedAssetRequest(event.request));
