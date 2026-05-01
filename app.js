@@ -7250,9 +7250,10 @@ function renderWatchlistCardElement(record, options = {}){
   ), derivedStates);
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
   const rrResolution = resolveScannerStateWithTrace(record);
+  const canonicalWatchlistVerdict = verdictPresentationLabelForKey(lifecycleSnapshot.state || 'watch');
   const resolvedContract = getFinalStateForPass(record, {
     context:'watchlist',
-    finalVerdict:view.displayStage,
+    finalVerdict:canonicalWatchlistVerdict,
     derivedStates,
     displayedPlan,
     qualityAdjustments,
@@ -7260,7 +7261,7 @@ function renderWatchlistCardElement(record, options = {}){
   }, passCache);
   const watchlistPresentation = resolveEmojiPresentation(record, {
     context:'watchlist',
-    finalVerdict:view.displayStage,
+    finalVerdict:canonicalWatchlistVerdict,
     setupUiState:view.setupUiState,
     displayedPlan:view.displayedPlan,
     derivedStates:view.setupStates,
@@ -7283,7 +7284,7 @@ function renderWatchlistCardElement(record, options = {}){
     logDebugWarn('DEBUG_RENDER', 'EMOJI_SURFACE_DISAGREEMENT', {ticker:record.ticker, watchlist:watchlistPresentation.primaryText, review:reviewPresentation.primaryText});
   }
   const reasoning = decisionReasoningForRecord(record, {
-    reviewVerdict:view.displayStage,
+    reviewVerdict:canonicalWatchlistVerdict,
     avoidSubtype
   });
   const shortAction = watchlistActionSummary({
@@ -18954,6 +18955,7 @@ async function refreshTrackOnly(options = {}){
     });
     await refreshWatchlistRecordsFromSourceOfTruth({
       source,
+      trackOnly:true,
       mode:'full',
       force:options.force === true,
       render:false,
@@ -20240,7 +20242,7 @@ function renderReviewWorkspace(options = {}){
     ? ''
     : (activeReviewTicker() === record.ticker ? String(uiState.activeReviewVerdictOverride || '').trim() : '');
   const reviewOpenCanonicalContract = readOnlyReviewOpen
-    ? resolveCanonicalTickerVerdict(record, {context:'review_open', silentTrace:true})
+    ? resolveCanonicalTickerVerdict(record, {context:'track', silentTrace:true})
     : null;
   const reviewOpenCanonicalVerdict = reviewOpenCanonicalContract && reviewOpenCanonicalContract.presentationLabel
     ? String(reviewOpenCanonicalContract.presentationLabel)
@@ -22097,6 +22099,9 @@ function registerPwa(){
 function bindTrackPullRefreshGesture(){
   const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
   if(!trackWorkspace) return;
+  // Prevent native browser pull-to-refresh from reloading the app on long pull.
+  trackWorkspace.style.overscrollBehaviorY = 'contain';
+  trackWorkspace.style.touchAction = 'pan-y';
   let trackPullStartY = null;
   let trackPullLastY = null;
   let trackPullThresholdMet = false;
@@ -22156,7 +22161,7 @@ function bindTrackPullRefreshGesture(){
       trackPullCapturedScroll = true;
       return;
     }
-    const shouldCapturePullGesture = deltaY > 8 && !trackPullCapturedScroll;
+    const shouldCapturePullGesture = deltaY > 0 && atTop() && !trackPullCapturedScroll;
     if(shouldCapturePullGesture && event.cancelable){
       event.preventDefault();
       if(!trackPullPreventLogged){
