@@ -33,7 +33,85 @@ function readPersistentPerfDebugFlag(){
   }catch(error){}
   return false;
 }
-const PP_PERF_DEBUG = readPersistentPerfDebugFlag();
+function normalizePerfDebugFlag(value){
+  if(value === 'verbose') return 'verbose';
+  return value === true;
+}
+let PP_PERF_DEBUG = normalizePerfDebugFlag(readPersistentPerfDebugFlag());
+let lastTrackPerfSummary = null;
+let reviewRenderSeq = 0;
+
+function isPerfDebugEnabled(){
+  return PP_PERF_DEBUG === true || PP_PERF_DEBUG === 'verbose';
+}
+
+function isPerfDebugVerbose(){
+  return PP_PERF_DEBUG === 'verbose';
+}
+
+function updatePerfDebugFlag(value, options = {}){
+  const normalized = normalizePerfDebugFlag(value);
+  PP_PERF_DEBUG = normalized;
+  if(typeof window !== 'undefined'){
+    try{
+      if(normalized){
+        if(window.sessionStorage) window.sessionStorage.setItem('PP_PERF_DEBUG', '1');
+        if(window.localStorage) window.localStorage.setItem('PP_PERF_DEBUG', '1');
+      }else if(options.persist !== false){
+        if(window.sessionStorage) window.sessionStorage.removeItem('PP_PERF_DEBUG');
+        if(window.localStorage) window.localStorage.removeItem('PP_PERF_DEBUG');
+      }
+    }catch(error){}
+  }
+  return normalized;
+}
+
+function nextReviewRenderSeq(){
+  reviewRenderSeq += 1;
+  return reviewRenderSeq;
+}
+
+function isCurrentReviewRender(seq){
+  return Number(seq) === Number(reviewRenderSeq);
+}
+
+function reviewRenderSeqForOptions(options = {}){
+  const seq = Number(options.reviewRenderSeq);
+  return Number.isFinite(seq) ? seq : Number(reviewRenderSeq);
+}
+
+if(typeof window !== 'undefined'){
+  let seeded = window.PP_PERF_DEBUG;
+  Object.defineProperty(window, 'PP_PERF_DEBUG', {
+    configurable:true,
+    enumerable:true,
+    get(){
+      return PP_PERF_DEBUG;
+    },
+    set(value){
+      updatePerfDebugFlag(value);
+    }
+  });
+  if(seeded !== undefined){
+    window.PP_PERF_DEBUG = seeded;
+  }else{
+    window.PP_PERF_DEBUG = PP_PERF_DEBUG;
+  }
+  window.PPTrackPerf = {
+    enable(){
+      window.PP_PERF_DEBUG = true;
+    },
+    verbose(){
+      window.PP_PERF_DEBUG = 'verbose';
+    },
+    disable(){
+      window.PP_PERF_DEBUG = false;
+    },
+    lastSummary(){
+      return lastTrackPerfSummary || null;
+    }
+  };
+}
 const startupCoordinator = {
   shellRendered:false,
   localStateLoaded:false,
@@ -3487,7 +3565,7 @@ function watchlistTickerRecords(options = {}){
       || a.ticker.localeCompare(b.ticker);
   });
   if(PP_PERF_DEBUG){
-    console.debug('[PP_PERF] watchlist_projection_pass', {
+    const summaryPayload = {
       lifecycleSyncStart:startedAt,
       lifecycleSyncEnd:nowPerfMs(),
       lifecycleSnapshotCount,
@@ -3499,7 +3577,12 @@ function watchlistTickerRecords(options = {}){
       finalStateCacheHits:Number(passCache.finalStateCacheHits || 0),
       finalStateCacheMisses:Number(passCache.finalStateCacheMisses || 0),
       watchlistProjectionDurationMs:Number((nowPerfMs() - startedAt).toFixed(1))
-    });
+    };
+    lastTrackPerfSummary = {
+      source:'watchlist_projection_pass',
+      ...summaryPayload
+    };
+    console.debug('[PP_PERF] watchlist_projection_pass', summaryPayload);
   }
   return sorted;
 }
@@ -11067,7 +11150,7 @@ function verdictPresentationLabelForKey(key){
 }
 
 function runVerdictDriftParityChecks(record){
-  if(window.PP_PERF_DEBUG !== true) return;
+  if(!isPerfDebugEnabled()) return;
   const item = normalizeTickerRecord(record);
   if(!item.ticker) return;
   const trackContract = resolveCanonicalTickerVerdict(item, {context:'track', silentTrace:true});
@@ -11091,7 +11174,41 @@ function runVerdictDriftParityChecks(record){
 }
 
 function logVerdictDriftTrace(record, context, contract = null){
-  if(window.PP_PERF_DEBUG !== true) return;
+  if(!isPerfDebugEnabled()) return;
+  if(!logVerdictDriftTrace._summary){
+    logVerdictDriftTrace._summary = {
+      count:0,
+      surfaces:{},
+      mismatches:0,
+      startedAt:Date.now(),
+      timer:null
+    };
+  }
+  const summary = logVerdictDriftTrace._summary;
+  const surfaceKey = String(context || 'unknown');
+  summary.count += 1;
+  summary.surfaces[surfaceKey] = Number(summary.surfaces[surfaceKey] || 0) + 1;
+  if(!isPerfDebugVerbose()){
+    if(!summary.timer){
+      summary.timer = setTimeout(() => {
+        const state = logVerdictDriftTrace._summary;
+        if(!state || state.count <= 0) return;
+        const durationMs = Math.max(0, Date.now() - Number(state.startedAt || Date.now()));
+        console.info('[VerdictDriftSummary]', {
+          count:state.count,
+          surfaces:state.surfaces,
+          mismatches:state.mismatches,
+          durationMs
+        });
+        state.count = 0;
+        state.surfaces = {};
+        state.mismatches = 0;
+        state.startedAt = Date.now();
+        state.timer = null;
+      }, 1200);
+    }
+    return;
+  }
   const item = normalizeTickerRecord(record);
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const rawDisplayedPlan = deriveCurrentPlanState(
@@ -11109,6 +11226,13 @@ function logVerdictDriftTrace(record, context, contract = null){
   );
   const globalVerdict = resolveGlobalVerdict(item);
   const resolved = contract && typeof contract === 'object' ? contract : {};
+  if(
+    resolved
+    && resolved.canonicalVerdictKey
+    && normalizeGlobalVerdictKey(resolved.canonicalVerdictKey) !== normalizeGlobalVerdictKey(globalVerdict.final_verdict || '')
+  ){
+    summary.mismatches += 1;
+  }
   console.info('[VerdictDriftTrace]', {
     ticker:item.ticker,
     surface:String(context || ''),
@@ -16760,7 +16884,7 @@ function currentChecks(){
     out[id] = !!savedChecks[id];
     if(!currentChecks._missingLogged.has(id)){
       currentChecks._missingLogged.add(id);
-      if(window.PP_PERF_DEBUG === true && typeof console !== 'undefined' && console.debug){
+      if(isPerfDebugEnabled() && typeof console !== 'undefined' && console.debug){
         console.debug('[Review] checklist input not mounted; using saved/default value', {id, ticker:ticker || '(none)'});
       }
     }
@@ -18203,7 +18327,7 @@ function reviewOpenMutationSnapshot(record, context = 'review_open'){
 }
 
 function logReviewOpenMutationTrace(ticker, writerPath, beforeSnapshot, afterSnapshot){
-  if(window.PP_PERF_DEBUG !== true) return;
+  if(!isPerfDebugVerbose()) return;
   const watchedKeys = [
     'canonicalVerdictKey',
     'reviewSavedVerdict',
@@ -18239,6 +18363,7 @@ function loadTickerIntoReview(ticker, options = {}){
   if(!symbol) return;
   setActiveWorkspaceTab('review', {focusTop:false});
   const reviewRequestToken = String(options.reviewRequestToken || nextReviewRequestToken());
+  const reviewSeq = nextReviewRenderSeq();
   uiState.reviewLoadToken = Number(uiState.reviewLoadToken || 0) + 1;
   const reviewLoadToken = Number(uiState.reviewLoadToken || 0);
   setScannerCardClickTrace(symbol, 'loadTickerIntoReview.enter', `includeInScannerUniverse=${options.includeInScannerUniverse === true} recompute=${options.recompute === true}`);
@@ -18295,6 +18420,7 @@ function loadTickerIntoReview(ticker, options = {}){
         `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_refresh=${shouldRefreshScannerSurfaces ? 'yes' : 'no'}`
       );
       const completeLoad = () => {
+        if(!isCurrentReviewRender(reviewSeq)) return;
         if(reviewLoadToken !== Number(uiState.reviewLoadToken || 0)){
           if(sourceContext === 'watchlist'){
             settleScannerSelectionStatusReviewPending(symbol, {superseded:true, reviewRequestToken});
@@ -18303,7 +18429,13 @@ function loadTickerIntoReview(ticker, options = {}){
           return;
         }
         try{
-          loadCard(symbol, {touchLifecycle:options.recompute === true, recompute:options.recompute === true, skipAutoScroll, preScrolled:true});
+          loadCard(symbol, {
+            touchLifecycle:options.recompute === true,
+            recompute:options.recompute === true,
+            skipAutoScroll,
+            preScrolled:true,
+            reviewRenderSeq:reviewSeq
+          });
           const openAfterSnapshot = reviewOpenMutationSnapshot(getTickerRecord(symbol) || record, 'review_open');
           logReviewOpenMutationTrace(symbol, 'loadTickerIntoReview.completeLoad.loadCard', openBeforeSnapshot, openAfterSnapshot);
           if(skipAutoScroll !== true){
@@ -18351,9 +18483,15 @@ function loadTickerIntoReview(ticker, options = {}){
     }
   };
   if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-    window.requestAnimationFrame(() => runReviewLoad());
+    window.requestAnimationFrame(() => {
+      if(!isCurrentReviewRender(reviewSeq)) return;
+      runReviewLoad();
+    });
   }else{
-    setTimeout(() => runReviewLoad(), 0);
+    setTimeout(() => {
+      if(!isCurrentReviewRender(reviewSeq)) return;
+      runReviewLoad();
+    }, 0);
   }
 }
 
@@ -20010,6 +20148,8 @@ function updateReviewAiSummaryOverflowHint(){
 }
 
 function renderReviewWorkspace(options = {}){
+  const reviewSeq = reviewRenderSeqForOptions(options);
+  if(!isCurrentReviewRender(reviewSeq)) return;
   const box = $('reviewWorkspace');
   if(!box) return;
   perfMark('pp_review_workspace_render_start');
@@ -20776,7 +20916,8 @@ function renderReviewWorkspace(options = {}){
   refreshReview({
     skipWatchlistLifecycle:options.skipWatchlistLifecycle === true,
     readOnlyReviewOpen:readOnlyReviewOpen,
-    persistDraft:readOnlyReviewOpen ? false : options.persistDraft
+    persistDraft:readOnlyReviewOpen ? false : options.persistDraft,
+    reviewRenderSeq:reviewSeq
   });
   renderReviewLifecycleSummary(record.ticker);
   calculate({persist:false});
@@ -20881,6 +21022,8 @@ function scrollReviewSectionIntoView(ticker, context = 'review_open', options = 
 function loadCard(ticker, options = {}){
   const record = getTickerRecord(ticker);
   if(!record) return;
+  const reviewSeq = reviewRenderSeqForOptions(options);
+  if(!isCurrentReviewRender(reviewSeq)) return;
   const displayOnlyReviewOpen = options.recompute !== true && options.touchLifecycle !== true;
   const preserveScrollOnSkip = options.skipAutoScroll === true && typeof window !== 'undefined';
   const preservedScrollY = preserveScrollOnSkip ? Number(window.scrollY || window.pageYOffset || 0) : 0;
@@ -20896,7 +21039,8 @@ function loadCard(ticker, options = {}){
   }
   renderReviewWorkspace({
     recompute:options.recompute === true,
-    skipWatchlistLifecycle:displayOnlyReviewOpen
+    skipWatchlistLifecycle:displayOnlyReviewOpen,
+    reviewRenderSeq:reviewSeq
   });
   setScannerCardClickTrace(ticker, 'loadCard.after_renderReviewWorkspace', 'workspace_rendered');
   const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : null;
@@ -20909,7 +21053,8 @@ function loadCard(ticker, options = {}){
   refreshReview({
     skipWatchlistLifecycle:displayOnlyReviewOpen,
     readOnlyReviewOpen:displayOnlyReviewOpen,
-    persistDraft:displayOnlyReviewOpen ? false : options.persistDraft
+    persistDraft:displayOnlyReviewOpen ? false : options.persistDraft,
+    reviewRenderSeq:reviewSeq
   });
   setScannerCardClickTrace(ticker, 'loadCard.after_refreshReview', 'review_refreshed');
   syncPlannerFromTicker(record.ticker);
@@ -20934,26 +21079,35 @@ function loadCard(ticker, options = {}){
 }
 
 function refreshReview(options = {}){
+  const reviewSeq = reviewRenderSeqForOptions(options);
+  if(!isCurrentReviewRender(reviewSeq)) return;
   const checks = currentChecks();
   const result = scoreAndStatusFromChecks(checks);
-  const summaryBox = $('summaryBox');
-  const progressText = $('progressText');
-  const progressFill = $('progressFill');
-  if(!refreshReview._missingTextTargetsLogged) refreshReview._missingTextTargetsLogged = new Set();
-  if(summaryBox){
-    summaryBox.textContent = buildSummary(checks, result.status);
-  }else if(!refreshReview._missingTextTargetsLogged.has('summaryBox')){
-    refreshReview._missingTextTargetsLogged.add('summaryBox');
-    if(window.PP_PERF_DEBUG === true) console.warn('[Review] Skipped text update for missing element:', 'summaryBox');
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(() => {
+      if(!isCurrentReviewRender(reviewSeq)) return;
+      const summaryBox = $('summaryBox');
+      const progressText = $('progressText');
+      const progressFill = $('progressFill');
+      if(!refreshReview._missingTextTargetsLogged) refreshReview._missingTextTargetsLogged = new Set();
+      if(summaryBox){
+        summaryBox.textContent = buildSummary(checks, result.status);
+      }else if(!refreshReview._missingTextTargetsLogged.has('summaryBox')){
+        refreshReview._missingTextTargetsLogged.add('summaryBox');
+        if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'summaryBox', selector:'#summaryBox'});
+      }
+      if(progressText){
+        progressText.textContent = `Checks met: ${result.score} / 10`;
+      }else if(!refreshReview._missingTextTargetsLogged.has('progressText')){
+        refreshReview._missingTextTargetsLogged.add('progressText');
+        if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'progressText', selector:'#progressText'});
+      }
+      if(progressFill && progressFill.style) progressFill.style.width = `${result.score * 10}%`;
+      syncPlanDisplayMeta({readOnlyReviewOpen:options.readOnlyReviewOpen === true, reviewRenderSeq:reviewSeq});
+    });
+  }else{
+    syncPlanDisplayMeta({readOnlyReviewOpen:options.readOnlyReviewOpen === true, reviewRenderSeq:reviewSeq});
   }
-  if(progressText){
-    progressText.textContent = `Checks met: ${result.score} / 10`;
-  }else if(!refreshReview._missingTextTargetsLogged.has('progressText')){
-    refreshReview._missingTextTargetsLogged.add('progressText');
-    if(window.PP_PERF_DEBUG === true) console.warn('[Review] Skipped text update for missing element:', 'progressText');
-  }
-  if(progressFill && progressFill.style) progressFill.style.width = `${result.score * 10}%`;
-  syncPlanDisplayMeta({readOnlyReviewOpen:options.readOnlyReviewOpen === true});
   if(options.persistDraft !== false){
     scheduleReviewDraftAutosave({reason:'refresh_review'});
   }
@@ -21053,6 +21207,8 @@ function resetReview(){
 }
 
 function syncPlanDisplayMeta(options = {}){
+  const reviewSeq = reviewRenderSeqForOptions(options);
+  if(!isCurrentReviewRender(reviewSeq)) return;
   const ticker = activeReviewTicker();
   const planStateBox = $('planStateBox');
   const planQualityBox = $('planQualityBox');
