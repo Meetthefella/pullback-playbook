@@ -20999,6 +20999,13 @@ function renderReviewWorkspace(options = {}){
   const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary;
   const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
   const reviewRenderedVerdict = String(unifiedFinalReviewVerdict || '').trim().toLowerCase();
+  const sharedCanonicalVerdictKey = String(
+    bundleValid
+      && refreshBundle
+      && refreshBundle.canonicalContract
+      && refreshBundle.canonicalContract.canonicalVerdictKey
+      || ''
+  ).trim().toLowerCase();
   const reviewPresentationStateRaw = String(
     visualState.review_presentation_state
     || visualState.final_verdict_rendered
@@ -21011,27 +21018,48 @@ function renderReviewWorkspace(options = {}){
   const reviewPresentationState = ['diminishing','avoid','dead','entry','near_entry','monitor','watch'].includes(reviewPresentationStateRaw)
     ? reviewPresentationStateRaw
     : normalizeGlobalVerdictKey(reviewPresentationStateRaw || 'monitor');
-  const reviewVisualTone = visualState.terminal_avoid_applied || ['avoid', 'dead'].includes(reviewPresentationState)
+  const hardTerminalAvoid = !!(
+    sharedCanonicalVerdictKey === 'avoid'
+    || visualState.terminal_avoid_applied === true
+    || reviewLifecycleBias.terminal_avoid_applied === true
+    || String(safeResolvedContract.primaryState || '').trim().toLowerCase() === 'dead'
+  );
+  const shouldPreserveSharedDiminishing = !!(
+    bundleValid
+    && sharedCanonicalVerdictKey === 'watch'
+    && (
+      String(visualState.presentationBucket || '').trim().toLowerCase() === 'diminishing'
+      || String(reviewLifecycleBias.trackPresentationBucket || '').trim().toLowerCase() === 'diminishing'
+    )
+    && !hardTerminalAvoid
+  );
+  const effectiveReviewPresentationState = shouldPreserveSharedDiminishing
+    ? 'diminishing'
+    : reviewPresentationState;
+  const effectiveReviewBadge = shouldPreserveSharedDiminishing
+    ? getBadge('watch')
+    : reviewBadge;
+  const reviewVisualTone = hardTerminalAvoid || ['avoid', 'dead'].includes(effectiveReviewPresentationState)
     ? 'avoid'
-    : (reviewPresentationState === 'diminishing'
+    : (effectiveReviewPresentationState === 'diminishing'
       ? 'diminishing'
-      : (reviewPresentationState === 'entry'
+      : (effectiveReviewPresentationState === 'entry'
         ? 'entry'
-        : (reviewPresentationState === 'near_entry'
+        : (effectiveReviewPresentationState === 'near_entry'
           ? 'near_entry'
-          : (['monitor', 'watch'].includes(reviewPresentationState) ? 'monitor' : 'neutral'))));
+          : (['monitor', 'watch'].includes(effectiveReviewPresentationState) ? 'monitor' : 'neutral'))));
   const reviewOuterBorderTone = reviewVisualTone;
   const reviewAccentClass = reviewVisualTone === 'diminishing'
     ? 'card--diminishing'
     : (reviewVisualTone === 'avoid'
-      ? (reviewPresentationState === 'dead' ? 'card--dead' : 'card--avoid')
+      ? (effectiveReviewPresentationState === 'dead' ? 'card--dead' : 'card--avoid')
       : (reviewVisualTone === 'monitor'
         ? 'card--monitor'
         : (reviewVisualTone === 'near_entry'
           ? 'card--near-entry'
           : (reviewVisualTone === 'entry' ? 'card--entry' : 'card--watch'))));
   const reviewRootToneClass = `review-tone--${reviewVisualTone}`;
-  const reviewOuterShellClass = `visual-state-card visual-state-${reviewPresentationState} visual-tone-${reviewOuterBorderTone} ${reviewAccentClass} ${reviewRootToneClass}`;
+  const reviewOuterShellClass = `visual-state-card visual-state-${effectiveReviewPresentationState} visual-tone-${reviewOuterBorderTone} ${reviewAccentClass} ${reviewRootToneClass}`;
   const reviewShellStyleAttr = reviewVisualTone === 'diminishing'
     ? '--visual-state-background:#F97316;--visual-state-border:rgba(249, 115, 22, 0.46);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#F97316;'
     : (reviewVisualTone === 'avoid'
@@ -21040,7 +21068,7 @@ function renderReviewWorkspace(options = {}){
   const reviewVisualStateSource = reviewVisualTone === 'avoid' && visualState.terminal_avoid_applied
     ? 'terminal_avoid'
     : (visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || 'resolver');
-  const reviewBadgeTone = String((visualState.badge && visualState.badge.className) || reviewBadge.className || '').trim() || '(none)';
+  const reviewBadgeTone = String((visualState.badge && visualState.badge.className) || effectiveReviewBadge.className || '').trim() || '(none)';
   const reviewOuterClassList = reviewOuterShellClass.split(/\s+/).filter(Boolean);
   const originalReviewToneClasses = Array.from(new Set(String(`${visualState.className || ''} ${visualState.toneClass || ''}`)
     .match(/(?:card--[a-z-]+|visual-tone-[a-z-]+)/g) || []));
@@ -21053,11 +21081,11 @@ function renderReviewWorkspace(options = {}){
   const reviewConflictingToneClassesDetected = toneFamilies.card.size > 1 || toneFamilies.visual.size > 1 || toneFamilies.review.size > 1;
   const reviewScoreStyleApplied = 'suppressed_root_review_tone';
   const reviewPanelToneClass = `review-panel-tone-${reviewVisualTone}`;
-  const reviewAction = reviewRenderedVerdict === 'diminishing'
-    ? {label:'DIMINISHING', detail:'Weakening setup', planAllowed:false, watchlistAllowed:true}
+  const reviewAction = effectiveReviewPresentationState === 'diminishing'
+    ? {label:'DIMINISHING', detail:'Wait for recovery', planAllowed:false, watchlistAllowed:true}
     : getActions(visualState.finalVerdict || visualState.final_verdict);
   const reviewNextActionLabel = String(reviewAction && reviewAction.label || '').trim() || 'Review setup inputs';
-  const reviewBadgeLabel = reviewBadge.text;
+  const reviewBadgeLabel = effectiveReviewBadge.text;
   const planUI = resolvePlanVisibility({
     state:visualState.final_verdict_rendered || visualState.finalVerdict,
     bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
@@ -21185,7 +21213,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Review Lifecycle Bias', value:reviewLifecycleBias.review_lifecycle_bias || '(none)'},
     {label:'Review Outer Class', value:reviewOuterShellClass || '(none)'},
     {label:'Review Outer Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
-    {label:'Review Outer Tone Source', value:reviewPresentationState || '(none)'},
+    {label:'Review Outer Tone Source', value:effectiveReviewPresentationState || '(none)'},
     {label:'Review Visual Tone', value:reviewVisualTone || '(none)'},
     {label:'Review Shell Tone', value:reviewOuterBorderTone || '(none)'},
     {label:'Review Accent Tone', value:reviewAccentClass || '(none)'},
@@ -21309,13 +21337,13 @@ function renderReviewWorkspace(options = {}){
   box.className = `list reviewworkspace-shell ${reviewOuterShellClass}`;
   box.style.cssText = reviewShellStyleAttr;
   box.dataset.visualTone = reviewOuterBorderTone || visualState.visual_tone || '';
-  box.dataset.visualState = reviewPresentationState || visualState.state || '';
-  box.dataset.reviewPresentationState = reviewPresentationState || '';
+  box.dataset.visualState = effectiveReviewPresentationState || visualState.state || '';
+  box.dataset.reviewPresentationState = effectiveReviewPresentationState || '';
   box.dataset.reviewVisualSource = reviewVisualStateSource;
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate({persist:false});
   });
-  box.innerHTML = `<div class="reviewworkspace reviewworkspace--ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(reviewOuterBorderTone || visualState.visual_tone || '')}" data-visual-state="${escapeHtml(reviewPresentationState || visualState.state || '')}">
+  box.innerHTML = `<div class="reviewworkspace reviewworkspace--ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(reviewOuterBorderTone || visualState.visual_tone || '')}" data-visual-state="${escapeHtml(effectiveReviewPresentationState || visualState.state || '')}">
     <div class="panelbox review-section review-section--snapshot">
       <div class="reviewsectionhead"><strong>Decision Summary</strong></div>
       <div class="reviewhero reviewhero-compact">
@@ -21327,7 +21355,7 @@ function renderReviewWorkspace(options = {}){
           </div>
           <div class="review-summary-right">
             <div class="inline-status review-summary-badges">
-              <span class="badge ${reviewBadge.className}">${escapeHtml(reviewBadgeLabel)}</span>
+              <span class="badge ${effectiveReviewBadge.className}">${escapeHtml(reviewBadgeLabel)}</span>
               <span class="score visual-score">${escapeHtml(setupScoreDisplay)}</span>
             </div>
           </div>
@@ -21347,7 +21375,7 @@ function renderReviewWorkspace(options = {}){
         ${chartPreview}
       </div>
     </div>
-    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(reviewPresentationState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">
+    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(effectiveReviewPresentationState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">
       <div class="reviewsectionhead"><strong id="plannerSection">Trade Plan</strong></div>
       <div class="summary review-hidden" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div>
       <input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden />
