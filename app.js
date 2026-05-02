@@ -6890,7 +6890,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'UI State Source', value:globalVisual.ui_state_source || 'n/a'},
     {label:'Watchlist Presentation Source', value:globalVisual.watchlist_presentation_source || 'n/a'},
     {label:'Final Verdict Rendered', value:globalVisual.final_verdict_rendered || globalVisual.finalVerdict || 'n/a'},
-    {label:'Bucket Rendered', value:globalVisual.bucket_rendered || globalVisual.bucket || 'n/a'},
+    {label:'Bucket Rendered', value:visualBucketLabel(globalVisual.bucket_rendered || globalVisual.bucket || 'monitor')},
     {label:'Dead Guard Applied', value:globalVisual.dead_guard_applied ? 'true' : 'false'},
     {label:'Dead Trigger Source', value:globalVisual.dead_trigger_source || '(none)'},
     {label:'Explicit Invalidation Reason', value:globalVisual.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)'},
@@ -6903,17 +6903,23 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Final Verdict', value:globalVerdict.final_verdict || 'n/a'},
     {label:'Canonical Final Verdict', value:globalVisual.canonicalFinalVerdict || '(none)'},
     {label:'Tone', value:globalVerdict.tone || 'n/a'},
-    {label:'Bucket', value:lifecycleSnapshot.bucket || globalVerdict.bucket || 'n/a'},
+    {label:'Bucket', value:visualBucketLabel(
+      lifecycleSnapshot.bucket || globalVerdict.bucket || 'monitor',
+      globalVerdict.final_verdict || globalVerdict.finalVerdict || ''
+    )},
     {label:'Viability', value:globalVerdict.viability || '(none)'},
-    {label:'Presentation Bucket', value:globalVisual.presentationBucket || '(none)'},
-    {label:'Track Presentation Bucket', value:globalVisual.trackPresentationBucket || globalVisual.presentationBucket || '(none)'},
-    {label:'Scan Presentation Bucket', value:globalVisual.scanPresentationBucket || '(none)'},
+    {label:'Visual Bucket', value:visualBucketLabel(globalVisual.presentationBucket || 'monitor')},
+    {label:'Track Visual Bucket', value:visualBucketLabel(globalVisual.trackPresentationBucket || globalVisual.presentationBucket || 'monitor')},
+    {label:'Scan Visual Bucket', value:visualBucketLabel(globalVisual.scanPresentationBucket || 'monitor')},
     {label:'Scan/Track Mismatch Detected', value:globalVisual.scanTrackMismatchDetected ? 'true' : 'false'},
     {label:'Presentation Tone', value:globalVisual.presentationTone || '(none)'},
     {label:'Presentation Badge', value:globalVisual.presentationBadge || '(none)'},
     {label:'Badge Label', value:globalVisual.badgeLabel || globalVisual.presentationBadge || '(none)'},
     {label:'Card Class', value:globalVisual.cardClass || globalVisual.className || globalVisual.toneClass || '(none)'},
     {label:'Badge Class', value:globalVisual.badgeClass || (globalVisual.badge && globalVisual.badge.className) || '(none)'},
+    {label:'Legacy Bucket Input', value:globalVisual.legacyBucketInput || '(none)'},
+    {label:'Legacy Bucket Remapped', value:globalVisual.legacyBucketRemapped ? 'true' : 'false'},
+    {label:'Remap Reason', value:globalVisual.bucketRemapReason || '(none)'},
     {label:'Presentation Reason', value:globalVisual.presentationReason || '(none)'},
     {label:'Terminal Avoid Reason', value:globalVisual.terminalAvoidReason || '(none)'},
     {label:'Diminishing Reason', value:globalVisual.diminishingReason || '(none)'},
@@ -7471,9 +7477,9 @@ function updateWatchlistCardForTicker(ticker){
 
 function watchlistRenderGroups(showExpired){
   const groups = [
-    {key:'active', title:'Monitor / Active', hint:'Actionable setups with active focus.', collapsible:false},
+    {key:'active', title:'Monitor', hint:'Setups waiting for confirmation.', collapsible:false},
     {key:'diminishing', title:'Diminishing', hint:'Weakening setups kept for review, not active focus.', collapsible:true},
-    {key:'avoid_dead', title:'Avoid / Dead', hint:'Failed or invalid setups.', collapsible:true}
+    {key:'avoid_dead', title:'Avoid', hint:'Failed or invalid setups.', collapsible:true}
   ];
   return groups;
 }
@@ -7531,7 +7537,7 @@ function shouldForceTrackSectionCollapsed(sectionKey, sectionRecords = [], passC
     const priorityValue = watchlistSectionPriorityValue(record, passCache);
     const stateMatches = sectionKey === 'diminishing'
       ? bucket === 'diminishing'
-      : bucket === 'avoid_dead';
+      : bucket === 'avoid';
     return stateMatches && priorityValue <= 0;
   });
 }
@@ -7553,9 +7559,10 @@ function setTrackSectionExpanded(sectionKey, expanded){
 }
 
 function watchlistRenderGroupForBucket(bucket){
-  if(bucket === 'tradeable_entry' || bucket === 'monitor_watch') return 'active';
-  if(bucket === 'diminishing') return 'diminishing';
-  if(bucket === 'avoid_dead') return 'avoid_dead';
+  const normalizedBucket = String(bucket || '').trim().toLowerCase();
+  if(['entry','near_entry','tradeable_entry','monitor','monitor_watch'].includes(normalizedBucket)) return 'active';
+  if(normalizedBucket === 'diminishing') return 'diminishing';
+  if(['avoid','avoid_dead','low_priority_avoid','lower_priority','dead','inactive'].includes(normalizedBucket)) return 'avoid_dead';
   return 'active';
 }
 
@@ -11167,6 +11174,101 @@ function verdictPresentationLabelForKey(key){
   return 'Watch';
 }
 
+function resolveVisualBucketFromInputs(bucket, canonicalVerdict = ''){
+  const raw = String(bucket || '').trim().toLowerCase();
+  const canonical = normalizeGlobalVerdictKey(canonicalVerdict || '');
+  const noCanonical = !canonical;
+  const result = {
+    key:'monitor',
+    legacyInput:raw,
+    remapped:false,
+    reason:'default_monitor'
+  };
+  if(['entry','near_entry','monitor','diminishing','avoid'].includes(raw)){
+    result.key = raw;
+    result.reason = 'already_canonical_visual_bucket';
+    return result;
+  }
+  if(raw === 'tradeable_entry'){
+    if(canonical === 'entry'){
+      result.key = 'entry';
+      result.remapped = true;
+      result.reason = 'legacy_tradeable_entry_from_canonical_entry';
+      return result;
+    }
+    if(canonical === 'near_entry'){
+      result.key = 'near_entry';
+      result.remapped = true;
+      result.reason = 'legacy_tradeable_entry_from_canonical_near_entry';
+      return result;
+    }
+    if(canonical === 'watch'){
+      result.key = 'monitor';
+      result.remapped = true;
+      result.reason = 'legacy_tradeable_entry_from_canonical_watch';
+      return result;
+    }
+    if(canonical === 'avoid'){
+      result.key = 'avoid';
+      result.remapped = true;
+      result.reason = 'legacy_tradeable_entry_from_canonical_avoid';
+      return result;
+    }
+    result.key = noCanonical ? 'monitor' : result.key;
+    result.remapped = true;
+    result.reason = noCanonical ? 'legacy_tradeable_entry_without_canonical' : 'legacy_tradeable_entry_unknown';
+    return result;
+  }
+  if(['monitor_watch','active','scanner_watch','review_monitor','developing'].includes(raw)){
+    result.key = 'monitor';
+    result.remapped = true;
+    result.reason = 'legacy_monitor_family';
+    return result;
+  }
+  if(['avoid_dead','low_priority_avoid','lower_priority','dead','inactive'].includes(raw)){
+    result.key = 'avoid';
+    result.remapped = true;
+    result.reason = 'legacy_avoid_family';
+    return result;
+  }
+  if(canonical === 'entry'){
+    result.key = 'entry';
+    result.remapped = true;
+    result.reason = 'fallback_from_canonical_entry';
+    return result;
+  }
+  if(canonical === 'near_entry'){
+    result.key = 'near_entry';
+    result.remapped = true;
+    result.reason = 'fallback_from_canonical_near_entry';
+    return result;
+  }
+  if(canonical === 'avoid'){
+    result.key = 'avoid';
+    result.remapped = true;
+    result.reason = 'fallback_from_canonical_avoid';
+    return result;
+  }
+  result.key = 'monitor';
+  result.remapped = true;
+  result.reason = canonical === 'watch' ? 'fallback_from_canonical_watch' : 'fallback_monitor';
+  return result;
+}
+
+function normalizeVisualBucketKey(bucket, canonicalVerdict = ''){
+  return resolveVisualBucketFromInputs(bucket, canonicalVerdict).key;
+}
+
+function visualBucketLabel(bucket, canonicalVerdict = ''){
+  const key = normalizeVisualBucketKey(bucket, canonicalVerdict);
+  if(key === 'entry') return 'Entry';
+  if(key === 'near_entry') return 'Near Entry';
+  if(key === 'monitor') return 'Monitor';
+  if(key === 'diminishing') return 'Diminishing';
+  if(key === 'avoid') return 'Avoid';
+  return 'Monitor';
+}
+
 function runVerdictDriftParityChecks(record){
   if(!isPerfDebugEnabled()) return;
   const item = normalizeTickerRecord(record);
@@ -11288,7 +11390,11 @@ function logVerdictDriftTrace(record, context, contract = null){
       canonicalVerdictKey:String(resolved.canonicalVerdictKey || ''),
       presentationLabel:String(resolved.presentationLabel || ''),
       lifecycleState:String(resolved.lifecycleState || ''),
-      bucket:String(resolved.bucket || ''),
+      bucket:String(normalizeVisualBucketKey(resolved.bucket || '', resolved.canonicalVerdictKey || '')),
+      bucketLabel:String(resolved.bucketLabel || visualBucketLabel(resolved.bucket || 'monitor', resolved.canonicalVerdictKey || '')),
+      legacyBucketInput:String(resolved.legacyBucketInput || ''),
+      legacyBucketRemapped:resolved.legacyBucketRemapped === true,
+      remapReason:String(resolved.bucketRemapReason || ''),
       reason:String(resolved.reason || ''),
       blockers:Array.isArray(resolved.blockers) ? resolved.blockers : []
     }
@@ -11319,11 +11425,16 @@ function resolveCanonicalTickerVerdict(record, options = {}){
     || resolved.final_verdict
     || 'watch'
   );
+  const visualBucketResolution = resolveVisualBucketFromInputs(resolved.bucket || '', canonicalVerdictKey);
   const output = {
     canonicalVerdictKey,
     presentationLabel:verdictPresentationLabelForKey(canonicalVerdictKey),
     lifecycleState:String(resolved.structuralState || ''),
-    bucket:String(resolved.bucket || ''),
+    bucket:visualBucketResolution.key,
+    bucketLabel:visualBucketLabel(visualBucketResolution.key, canonicalVerdictKey),
+    legacyBucketInput:visualBucketResolution.legacyInput || '',
+    legacyBucketRemapped:visualBucketResolution.remapped === true,
+    bucketRemapReason:visualBucketResolution.reason || '',
     tone:String(resolved.actionTone || ''),
     reason:String((resolved.reasonParts && resolved.reasonParts[0]) || resolved.actionLabel || ''),
     blockers:Array.isArray(resolved.reasonParts) ? resolved.reasonParts.slice(0, 3) : [],
@@ -12706,7 +12817,7 @@ function watchlistStrictAvoidTruth(record, globalVerdict, lifecycleSnapshot){
 
 function watchlistPresentationBucketForRecord(record){
   const item = normalizeTickerRecord(record || {});
-  if(isWatchlistLiveRefreshPending(item.ticker)) return 'monitor_watch';
+  if(isWatchlistLiveRefreshPending(item.ticker)) return 'monitor';
   const strictVerdict = resolveGlobalVerdict(item);
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
   const priority = watchlistPriorityForRecord(item);
@@ -12717,42 +12828,47 @@ function watchlistPresentationBucketForRecord(record){
     || (strictVerdict && strictVerdict.finalVerdict)
     || ''
   );
-  if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
-  if(finalVerdict === 'entry' || finalVerdict === 'near_entry') return 'tradeable_entry';
+  if(presentation.presentationBucket === 'avoid') return 'avoid';
+  if(finalVerdict === 'entry') return 'entry';
+  if(finalVerdict === 'near_entry') return 'near_entry';
   if(presentation.presentationBucket === 'diminishing') return 'diminishing';
-  return 'monitor_watch';
+  return 'monitor';
 }
 
 function resolvePresentationTone(record = {}){
-  const presentationBucket = String(record.presentationBucket || 'active').trim().toLowerCase();
+  const presentationBucket = String(record.presentationBucket || 'monitor').trim().toLowerCase();
   const finalVerdict = String(record.finalVerdict || '').trim().toLowerCase();
   const structureState = String(record.structureState || '').trim().toLowerCase();
   const isTerminal = ['avoid','dead','reject'].includes(finalVerdict);
   const map = {
     entry:{presentationTone:'entry', badgeLabel:'Entry', cardClass:'card--entry', badgeClass:'badge--entry'},
     near_entry:{presentationTone:'near_entry', badgeLabel:'Near Entry', cardClass:'card--near-entry', badgeClass:'badge--near-entry'},
-    watch:{presentationTone:'watch', badgeLabel:'Watch', cardClass:'card--watch', badgeClass:'badge--watch'},
     monitor:{presentationTone:'monitor', badgeLabel:'Watch', cardClass:'card--monitor', badgeClass:'badge--monitor'},
     diminishing:{presentationTone:'diminishing', badgeLabel:'Watch', cardClass:'card--diminishing', badgeClass:'badge--diminishing'},
-    avoid:{presentationTone:'avoid', badgeLabel:'Avoid', cardClass:'card--avoid', badgeClass:'badge--avoid'},
-    dead:{presentationTone:'dead', badgeLabel:'Avoid', cardClass:'card--dead', badgeClass:'badge--avoid'}
+    avoid:{presentationTone:'avoid', badgeLabel:'Avoid', cardClass:'card--avoid', badgeClass:'badge--avoid'}
   };
   if(presentationBucket === 'avoid' || isTerminal || ['broken','invalid','failed'].includes(structureState)){
-    return {presentationBucket:'avoid', ...(finalVerdict === 'dead' ? map.dead : map.avoid)};
+    return {presentationBucket:'avoid', ...map.avoid};
   }
   if(presentationBucket === 'diminishing'){
     return {presentationBucket:'diminishing', ...map.diminishing};
   }
+  if(presentationBucket === 'monitor'){
+    return {presentationBucket:'monitor', ...map.monitor};
+  }
+  if(presentationBucket === 'entry'){
+    return {presentationBucket:'entry', ...map.entry};
+  }
+  if(presentationBucket === 'near_entry'){
+    return {presentationBucket:'near_entry', ...map.near_entry};
+  }
   if(finalVerdict === 'entry'){
-    return {presentationBucket:'active', ...map.entry};
+    return {presentationBucket:'entry', ...map.entry};
   }
   if(finalVerdict === 'near_entry'){
-    return {presentationBucket:'active', ...map.near_entry};
+    return {presentationBucket:'near_entry', ...map.near_entry};
   }
-  if(finalVerdict === 'watch'){
-    return {presentationBucket:'active', ...map.watch};
-  }
-  return {presentationBucket:'active', ...map.monitor};
+  return {presentationBucket:'monitor', ...map.monitor};
 }
 
 function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot, priority){
@@ -12885,6 +13001,7 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     badgeClass:presentationBadgeClass,
     cardClass:presentationCardClass
   };
+  const legacyBucketResolution = resolveVisualBucketFromInputs(sourceBucket || '', effectiveDisplayVerdict || 'watch');
   return {
     canonicalFinalVerdict:effectiveDisplayVerdict || 'watch',
     finalVerdict:effectiveDisplayVerdict || 'watch',
@@ -12912,6 +13029,9 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     structuralAliveAtRefresh,
     avoidAllowedByStructureGuard,
     explicitInvalidationReason:explicitInvalidationReason || '(none)',
+    legacyBucketInput:legacyBucketResolution.legacyInput || '',
+    legacyBucketRemapped:legacyBucketResolution.remapped === true,
+    bucketRemapReason:legacyBucketResolution.reason || '',
     visualTone
   };
 }
@@ -13191,8 +13311,8 @@ function reconcileWatchlistPresentation({
       finalVerdict:'avoid',
       final_verdict:'avoid',
       final_verdict_rendered:'avoid',
-      bucket:'low_priority_avoid',
-      bucket_rendered:'low_priority_avoid',
+      bucket:'avoid',
+      bucket_rendered:'avoid',
       badge:{text:strictTone.badgeLabel, className:strictTone.badgeClass},
       className:strictTone.cardClass,
       toneClass:strictTone.cardClass,
@@ -13236,14 +13356,18 @@ function reconcileWatchlistPresentation({
     final_verdict:presentation.finalVerdict || base.final_verdict || 'watch',
     final_verdict_rendered:presentation.finalVerdict || base.final_verdict_rendered || 'watch',
     bucket_rendered:(function(){
+      if(presentation.presentationBucket === 'entry') return 'entry';
+      if(presentation.presentationBucket === 'near_entry') return 'near_entry';
       if(presentation.presentationBucket === 'diminishing') return 'diminishing';
-      if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
-      return base.bucket_rendered || base.bucket || 'monitor_watch';
+      if(presentation.presentationBucket === 'avoid') return 'avoid';
+      return 'monitor';
     })(),
     bucket:(function(){
+      if(presentation.presentationBucket === 'entry') return 'entry';
+      if(presentation.presentationBucket === 'near_entry') return 'near_entry';
       if(presentation.presentationBucket === 'diminishing') return 'diminishing';
-      if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
-      return base.bucket || 'monitor_watch';
+      if(presentation.presentationBucket === 'avoid') return 'avoid';
+      return 'monitor';
     })(),
     badge:{
       text:presentation.presentationBadge,
@@ -21001,7 +21125,7 @@ function renderReviewWorkspace(options = {}){
     {label:'UI State Source', value:visualState.ui_state_source || '(none)'},
     {label:'Final Verdict Rendered', value:visualState.final_verdict_rendered || visualState.finalVerdict || '(none)'},
     {label:'Rendered Verdict', value:visualState.renderedVerdict || visualState.final_verdict_rendered || '(none)'},
-    {label:'Bucket Rendered', value:visualState.bucket_rendered || visualState.bucket || '(none)'},
+    {label:'Bucket Rendered', value:visualBucketLabel(visualState.bucket_rendered || visualState.bucket || 'monitor')},
     {label:'Dead Guard Applied', value:visualState.dead_guard_applied ? 'true' : 'false'},
     {label:'Dead Trigger Source', value:visualState.dead_trigger_source || '(none)'},
     {label:'Explicit Invalidation Reason', value:visualState.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)'},
@@ -21013,7 +21137,10 @@ function renderReviewWorkspace(options = {}){
     {label:'Conflicting Legacy State Detected', value:visualState.conflicting_legacy_state_detected ? 'true' : 'false'},
     {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
     {label:'Tone', value:globalVerdict.tone || '(none)'},
-    {label:'Bucket', value:globalVerdict.bucket || '(none)'},
+    {label:'Bucket', value:visualBucketLabel(
+      globalVerdict.bucket || 'monitor',
+      globalVerdict.final_verdict || globalVerdict.finalVerdict || ''
+    )},
     {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
     {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
     {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
@@ -21043,7 +21170,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Terminal Avoid Applied', value:visualState.terminal_avoid_applied ? 'true' : 'false'},
     {label:'Terminal Avoid Reason', value:visualState.terminal_avoid_reason || reviewLifecycleBias.terminal_avoid_reason || '(none)'},
     {label:'Diminishing Preserved In Review', value:visualState.diminishing_preserved_in_review ? 'true' : 'false'},
-    {label:'Track Presentation Bucket', value:reviewLifecycleBias.trackPresentationBucket || '(none)'},
+    {label:'Track Visual Bucket', value:visualBucketLabel(reviewLifecycleBias.trackPresentationBucket || 'monitor')},
     {label:'Track Presentation Tone', value:reviewLifecycleBias.trackPresentationTone || '(none)'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
     {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
