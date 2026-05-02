@@ -215,3 +215,7 @@ The following hook points are ready for the next step:
       - window.DEBUG_ANALYSIS = true
       - window.DEBUG_LIFECYCLE = true
       - window.DEBUG_AUDIT = true
+
+  [![Netlify Status](https://api.netlify.com/api/v1/badges/fa873e6d-d24a-43ea-b968-aabc20f04592/deploy-status)](https://app.netlify.com/projects/velvety-clafoutis-8a92bf/deploys)
+
+  
