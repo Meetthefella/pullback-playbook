@@ -7394,14 +7394,14 @@ function renderWatchlistCardElement(record, options = {}){
     : (planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.');
   const finalVerdictForHeadline = normalizeVerdict(watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '');
   const isNearEntryVerdict = finalVerdictForHeadline === 'near_entry';
-  const isDiminishingVerdict = finalVerdictForHeadline === 'diminishing';
-  const isActionableSoonState = finalVerdictForHeadline === 'near_entry' || finalVerdictForHeadline === 'diminishing';
+  const isDiminishingVisualBucket = presentationBucket === 'diminishing';
+  const isActionableSoonState = isNearEntryVerdict || isDiminishingVisualBucket;
   const mainCardPlanHeadlineEnabled = isActionableSoonState;
   const watchlistPlanHeadline = suppressPlanBlockerInHeadline
     ? (
       isNearEntryVerdict
         ? 'Bounce is forming - needs confirmation before entry.'
-        : (isDiminishingVerdict
+        : (isDiminishingVisualBucket
           ? 'Structure is weakening - wait for recovery.'
           : diagnosticPlanBlocker)
     )
@@ -12827,21 +12827,21 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
   const avoidTrackEligible = avoidByVerdict || avoidByBroken || avoidByExplicitInvalidation;
-  let presentationBucket = 'active';
+  let presentationBucket = 'monitor';
   if(avoidTrackEligible){
     presentationBucket = 'avoid';
   }else if(finalIsEntryNear){
-    presentationBucket = 'active';
+    presentationBucket = normalizedFinalVerdict === 'entry' ? 'entry' : 'near_entry';
   }else if(activeTrackEligible){
-    presentationBucket = 'active';
+    presentationBucket = 'monitor';
   }else if(diminishingTrackEligible || finalIsMonitorWatch){
     presentationBucket = 'diminishing';
   }else{
-    presentationBucket = 'active';
+    presentationBucket = 'monitor';
   }
 
   let presentationTone = 'monitor';
-  let presentationBadge = 'Monitor';
+  let presentationBadge = globalVerdictLabel(effectiveDisplayVerdict || 'watch');
   let presentationBadgeClass = 'badge--monitor';
   let presentationCardClass = 'card--monitor';
   let presentationReason = String(verdictSource && verdictSource.reason || '').trim() || 'Monitor - still forming.';
@@ -12856,14 +12856,28 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   presentationBadgeClass = resolvedTone.badgeClass;
   presentationCardClass = resolvedTone.cardClass;
   if(presentationBucket === 'avoid'){
+    presentationTone = 'avoid';
+    presentationBadge = 'Avoid';
+    presentationBadgeClass = 'badge--avoid';
+    presentationCardClass = 'card--avoid';
     presentationReason = 'Avoid - setup no longer viable.';
   }else if(presentationBucket === 'diminishing'){
     presentationTone = 'diminishing';
-    presentationBadge = 'Diminishing';
+    presentationBadge = 'Watch';
     presentationBadgeClass = 'badge--diminishing';
     presentationCardClass = 'card--diminishing';
     presentationReason = 'Diminishing - structure weakening.';
     diminishingReason = presentationReason;
+  }else if(presentationBucket === 'entry'){
+    presentationTone = 'entry';
+    presentationBadge = 'Entry';
+    presentationBadgeClass = 'badge--entry';
+    presentationCardClass = 'card--entry';
+  }else if(presentationBucket === 'near_entry'){
+    presentationTone = 'near_entry';
+    presentationBadge = 'Near Entry';
+    presentationBadgeClass = 'badge--near-entry';
+    presentationCardClass = 'card--near-entry';
   }
 
   const visualTone = {
@@ -19335,7 +19349,8 @@ async function refreshTrackOnly(options = {}){
     const refreshedCount = Number(refreshSummary && refreshSummary.refreshed || 0);
     const failedCount = Number(refreshSummary && refreshSummary.failed || 0);
     const allFailed = attempted > 0 && refreshedCount === 0 && failedCount > 0;
-    if(allFailed){
+    const hasRenderableWatchlistState = watchlistTickerRecords().length > 0;
+    if(allFailed && !hasRenderableWatchlistState){
       setLiveProcessStatus('error', 'Watchlist refresh failed.');
       if(PP_PERF_DEBUG){
         console.warn('[TrackRefreshFailureTrace]', {
@@ -19344,8 +19359,27 @@ async function refreshTrackOnly(options = {}){
           attempted,
           refreshedCount,
           failedCount,
+          hasRenderableWatchlistState,
           backendPullFailed,
           riskRecalcFailed
+        });
+      }
+    }else if(allFailed){
+      setLiveProcessStatus(
+        'action',
+        'Watchlist kept saved state (live refresh unavailable).',
+        {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
+      );
+      if(PP_PERF_DEBUG){
+        console.info('[TrackRefreshPartial]', {
+          source,
+          attempted,
+          refreshedCount,
+          failedCount,
+          hasRenderableWatchlistState,
+          backendPullFailed,
+          riskRecalcFailed,
+          fallback:'saved_state'
         });
       }
     }else if(failedCount > 0 || backendPullFailed){
@@ -19386,7 +19420,15 @@ async function refreshTrackOnly(options = {}){
         riskRecalcFailed
       });
     }
-    setLiveProcessStatus('error', 'Watchlist refresh failed.');
+    if(watchlistTickerRecords().length > 0){
+      setLiveProcessStatus(
+        'action',
+        'Watchlist kept saved state (refresh interrupted).',
+        {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
+      );
+    }else{
+      setLiveProcessStatus('error', 'Watchlist refresh failed.');
+    }
     return {ok:false, source, error:error && error.message ? String(error.message) : 'unknown_error'};
   }finally{
     console.info('[TrackPullRefresh]', {event:'trackRefreshCompleted', activeWorkspace:activeWorkspaceTab(), source, ok:refreshOk});
