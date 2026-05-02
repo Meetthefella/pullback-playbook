@@ -18922,6 +18922,19 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       verdict:refreshedVerdict
     };
   }catch(error){
+    if(PP_PERF_DEBUG){
+      console.warn('[TrackRefreshFailureTrace]', {
+        scope:'refreshWatchlistRecordFromSourceOfTruth',
+        ticker:symbol,
+        source,
+        errorName:error && error.name ? String(error.name) : '',
+        errorMessage:error && error.message ? String(error.message) : 'refresh_failed',
+        errorStack:error && error.stack ? String(error.stack) : '',
+        refreshSkippedReason:null,
+        hasResolvedStateBundleCache:!!(record && record.resolvedStateBundleCache),
+        sharedBundleValid:null
+      });
+    }
     if(!suppressLiveStatus){
       setLiveProcessStatus('error', 'Refresh failed.');
     }
@@ -19228,18 +19241,33 @@ async function refreshTrackOnly(options = {}){
   const previousTrackScrollTop = trackWorkspace ? Number(trackWorkspace.scrollTop || 0) : 0;
   let refreshOk = false;
   let riskRecalcFailed = false;
+  let backendPullFailed = false;
+  let refreshSummary = null;
   setLiveProcessStatus('refreshing_watchlist', 'Updating watchlist plans');
   console.info('[TrackPullRefresh]', {event:'trackRefreshStarted', activeWorkspace:activeWorkspaceTab(), source});
   if(isPullGestureRefresh){
     console.info('[TrackPullRefresh]', {event:'pullRefreshStarted', activeWorkspace:activeWorkspaceTab(), source});
   }
   try{
-    await pullTrackedRecordsFromBackend({
-      reason:source,
-      force:options.force === true,
-      render:false
-    });
-    await refreshWatchlistRecordsFromSourceOfTruth({
+    try{
+      await pullTrackedRecordsFromBackend({
+        reason:source,
+        force:options.force === true,
+        render:false
+      });
+    }catch(pullError){
+      backendPullFailed = true;
+      if(PP_PERF_DEBUG){
+        console.warn('[TrackRefreshFailureTrace]', {
+          scope:'refreshTrackOnly.pullTrackedRecordsFromBackend',
+          source,
+          errorName:pullError && pullError.name ? String(pullError.name) : '',
+          errorMessage:pullError && pullError.message ? String(pullError.message) : 'pull_failed',
+          errorStack:pullError && pullError.stack ? String(pullError.stack) : ''
+        });
+      }
+    }
+    refreshSummary = await refreshWatchlistRecordsFromSourceOfTruth({
       source,
       trackOnly:true,
       mode:'full',
@@ -19303,15 +19331,61 @@ async function refreshTrackOnly(options = {}){
         }
       });
     }
-    setLiveProcessStatus(
-      'action',
-      riskRecalcFailed ? 'Watchlist updated (risk recalc deferred).' : 'Watchlist plans updated.',
-      {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
-    );
+    const attempted = Number(refreshSummary && refreshSummary.attempted || 0);
+    const refreshedCount = Number(refreshSummary && refreshSummary.refreshed || 0);
+    const failedCount = Number(refreshSummary && refreshSummary.failed || 0);
+    const allFailed = attempted > 0 && refreshedCount === 0 && failedCount > 0;
+    if(allFailed){
+      setLiveProcessStatus('error', 'Watchlist refresh failed.');
+      if(PP_PERF_DEBUG){
+        console.warn('[TrackRefreshFailureTrace]', {
+          scope:'refreshTrackOnly.summary_all_failed',
+          source,
+          attempted,
+          refreshedCount,
+          failedCount,
+          backendPullFailed,
+          riskRecalcFailed
+        });
+      }
+    }else if(failedCount > 0 || backendPullFailed){
+      setLiveProcessStatus(
+        'action',
+        `Watchlist updated (${refreshedCount}/${attempted || refreshedCount} tickers; some refreshes were skipped or failed).`,
+        {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
+      );
+      if(PP_PERF_DEBUG){
+        console.info('[TrackRefreshPartial]', {
+          source,
+          attempted,
+          refreshedCount,
+          failedCount,
+          backendPullFailed,
+          riskRecalcFailed
+        });
+      }
+    }else{
+      setLiveProcessStatus(
+        'action',
+        riskRecalcFailed ? 'Watchlist updated (risk recalc deferred).' : 'Watchlist plans updated.',
+        {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
+      );
+    }
     refreshOk = true;
-    return {ok:true, source, riskRecalcFailed};
+    return {ok:true, source, riskRecalcFailed, backendPullFailed, summary:refreshSummary};
   }catch(error){
     console.warn('[TrackPullRefresh] failed', error);
+    if(PP_PERF_DEBUG){
+      console.warn('[TrackRefreshFailureTrace]', {
+        scope:'refreshTrackOnly.catch',
+        source,
+        errorName:error && error.name ? String(error.name) : '',
+        errorMessage:error && error.message ? String(error.message) : 'unknown_error',
+        errorStack:error && error.stack ? String(error.stack) : '',
+        backendPullFailed,
+        riskRecalcFailed
+      });
+    }
     setLiveProcessStatus('error', 'Watchlist refresh failed.');
     return {ok:false, source, error:error && error.message ? String(error.message) : 'unknown_error'};
   }finally{
