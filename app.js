@@ -19381,6 +19381,15 @@ async function refreshTrackOnly(options = {}){
   let riskRecalcFailed = false;
   let backendPullFailed = false;
   let refreshSummary = null;
+  let interruptionStage = '';
+  const interruptionCauseCodeForStage = (stage) => {
+    const safe = String(stage || '').trim().toLowerCase();
+    if(!safe) return 'unknown';
+    if(safe === 'pull_backend') return 'backend_pull';
+    if(safe === 'refresh_watchlist') return 'watchlist_batch';
+    if(safe === 'render_track') return 'render';
+    return safe;
+  };
   setLiveProcessStatus('refreshing_watchlist', 'Updating watchlist plans');
   console.info('[TrackPullRefresh]', {event:'trackRefreshStarted', activeWorkspace:activeWorkspaceTab(), source});
   if(isPullGestureRefresh){
@@ -19388,11 +19397,13 @@ async function refreshTrackOnly(options = {}){
   }
   try{
     try{
+      interruptionStage = 'pull_backend';
       await pullTrackedRecordsFromBackend({
         reason:source,
         force:options.force === true,
         render:false
       });
+      interruptionStage = '';
     }catch(pullError){
       backendPullFailed = true;
       if(PP_PERF_DEBUG){
@@ -19405,6 +19416,7 @@ async function refreshTrackOnly(options = {}){
         });
       }
     }
+    interruptionStage = 'refresh_watchlist';
     refreshSummary = await refreshWatchlistRecordsFromSourceOfTruth({
       source,
       trackOnly:true,
@@ -19413,6 +19425,7 @@ async function refreshTrackOnly(options = {}){
       render:false,
       persist:true
     });
+    interruptionStage = '';
     console.info('[TrackPullRefresh]', {event:'riskRecalcStart', source});
     try{
       await runRiskContextRefreshChunked({
@@ -19437,6 +19450,7 @@ async function refreshTrackOnly(options = {}){
     markWatchlistDirty(null, source);
     if(activeWorkspaceTab() === 'track'){
       console.info('[TrackPullRefresh]', {event:'trackRenderStart', source});
+      interruptionStage = 'render_track';
       await renderWatchlistChunked({
         source,
         batchSize:WATCHLIST_RENDER_BATCH_SIZE,
@@ -19445,6 +19459,7 @@ async function refreshTrackOnly(options = {}){
           allowCache:false
         })
       });
+      interruptionStage = '';
       console.info('[TrackPullRefresh]', {event:'trackRenderEnd', source});
       renderFocusQueue();
       startupCoordinator.renderedTabs.track = true;
@@ -19533,6 +19548,10 @@ async function refreshTrackOnly(options = {}){
     return {ok:true, source, riskRecalcFailed, backendPullFailed, summary:refreshSummary};
   }catch(error){
     console.warn('[TrackPullRefresh] failed', error);
+    const attempted = Number(refreshSummary && refreshSummary.attempted || 0);
+    const refreshedCount = Number(refreshSummary && refreshSummary.refreshed || 0);
+    const failedCount = Number(refreshSummary && refreshSummary.failed || 0);
+    const interruptionCause = interruptionCauseCodeForStage(interruptionStage);
     if(PP_PERF_DEBUG){
       console.warn('[TrackRefreshFailureTrace]', {
         scope:'refreshTrackOnly.catch',
@@ -19540,14 +19559,25 @@ async function refreshTrackOnly(options = {}){
         errorName:error && error.name ? String(error.name) : '',
         errorMessage:error && error.message ? String(error.message) : 'unknown_error',
         errorStack:error && error.stack ? String(error.stack) : '',
+        interruptionStage,
+        interruptionCause,
+        attempted,
+        refreshedCount,
+        failedCount,
         backendPullFailed,
         riskRecalcFailed
       });
     }
-    if(watchlistTickerRecords().length > 0){
+    if(refreshedCount > 0){
       setLiveProcessStatus(
         'action',
-        'Watchlist kept saved state (refresh interrupted).',
+        `Watchlist updated (${refreshedCount}/${attempted || refreshedCount} tickers; interrupted: ${interruptionCause}).`,
+        {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
+      );
+    }else if(watchlistTickerRecords().length > 0){
+      setLiveProcessStatus(
+        'action',
+        `Watchlist kept saved state (interrupted: ${interruptionCause}).`,
         {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
       );
     }else{
