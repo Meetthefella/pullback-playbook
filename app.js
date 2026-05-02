@@ -6,7 +6,7 @@ const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.4.9';
+const APP_VERSION = 'v4.4.10';
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';
@@ -8594,7 +8594,7 @@ function getCanonicalTradeSnapshot(cardOrTicker){
     });
     validateSharedRefreshBundle(refreshed, 'getCanonicalTradeSnapshot');
     const bundleValid = hasCompleteSharedRefreshBundle(refreshed);
-    const liveRecord = refreshed.record;
+    const liveRecord = (bundleValid && refreshed && refreshed.record) ? refreshed.record : record;
     const canonicalContract = bundleValid ? refreshed.canonicalContract : {
       canonicalVerdictKey:'watch',
       presentationLabel:'Watch'

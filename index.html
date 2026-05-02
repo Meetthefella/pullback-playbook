@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="build-version" content="v4.4.9" />
+  <meta name="build-version" content="v4.4.10" />
   <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
   <link rel="apple-touch-icon" sizes="192x192" href="./icon-192.png" />
   <link id="appManifest" rel="manifest" href="./manifest.webmanifest" />
@@ -17,7 +17,7 @@
   <script>
     (function(){
       var meta = document.querySelector('meta[name="build-version"]');
-      var buildVersion = (meta && meta.getAttribute('content')) || 'v4.4.9';
+      var buildVersion = (meta && meta.getAttribute('content')) || 'v4.4.10';
       window.__BUILD_VERSION__ = buildVersion;
       if(meta) meta.setAttribute('content', buildVersion);
       var manifest = document.getElementById('appManifest');
