@@ -6670,6 +6670,18 @@ function maybeRunTrackFocusLifecycleRefresh(options = {}){
     markWatchlistDirty(null, `${source}_changed`);
     startupCoordinator.trackNeedsFullRender = true;
   }
+  const watchlistRecords = watchlistTickerRecords();
+  watchlistRecords.forEach(record => {
+    const symbol = normalizeTicker(record && record.ticker);
+    if(!symbol) return;
+    refreshTrackedTickerState(symbol, {
+      source:'track',
+      reason:'track_focus',
+      force:options.force === true || staleInputs,
+      persist:false,
+      emitTrace:false
+    });
+  });
   return {ran:true, changed, reason:'executed'};
 }
 
@@ -8573,20 +8585,33 @@ function getCanonicalTradeSnapshot(cardOrTicker){
   const record = getTickerRecord(ticker);
   const card = typeof cardOrTicker === 'string' ? null : cardOrTicker;
   if(record){
-    const canonicalContract = resolveCanonicalTickerVerdict(record, {context:'diary_snapshot'});
+    const refreshed = refreshTrackedTickerState(ticker, {
+      source:'diary',
+      reason:'diary_snapshot',
+      force:true,
+      persist:false,
+      emitTrace:true
+    });
+    validateSharedRefreshBundle(refreshed, 'getCanonicalTradeSnapshot');
+    const bundleValid = hasCompleteSharedRefreshBundle(refreshed);
+    const liveRecord = refreshed.record;
+    const canonicalContract = bundleValid ? refreshed.canonicalContract : {
+      canonicalVerdictKey:'watch',
+      presentationLabel:'Watch'
+    };
     const canonicalVerdictLabel = canonicalContract.presentationLabel || 'Watch';
-    const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
+    const effectivePlan = bundleValid ? refreshed.effectivePlan : {entry:'', stop:'', firstTarget:''};
     const entry = String(effectivePlan.entry || '');
     const stop = String(effectivePlan.stop || '');
     const firstTarget = String(effectivePlan.firstTarget || '');
     const riskFit = evaluateRiskFit({entry, stop, ...currentRiskSettings()});
     const rewardRisk = evaluateRewardRisk(entry, stop, firstTarget);
     return {
-      ticker:record.ticker,
+      ticker:liveRecord.ticker,
       chartVerdict:canonicalVerdictLabel,
       verdict:canonicalVerdictLabel,
-      qualityScore:Number.isFinite(preferredScoreForRecord(record)) ? preferredScoreForRecord(record) : '',
-      exitMode:normalizeExitMode(record.plan.exitMode),
+      qualityScore:Number.isFinite(preferredScoreForRecord(liveRecord)) ? preferredScoreForRecord(liveRecord) : '',
+      exitMode:normalizeExitMode(liveRecord.plan.exitMode),
       entry,
       stop,
       firstTarget,
@@ -8599,9 +8624,9 @@ function getCanonicalTradeSnapshot(cardOrTicker){
       positionSize:String(riskFit.position_size || ''),
       riskStatus:riskFit.risk_status,
       accountSize:String(state.accountSize || ''),
-      marketStatus:record.meta.marketStatus || state.marketStatus || '',
-      scanType:record.scan.scanType || '',
-      notes:record.review.notes || preferredSummaryForRecord(record) || '',
+      marketStatus:liveRecord.meta.marketStatus || state.marketStatus || '',
+      scanType:liveRecord.scan.scanType || '',
+      notes:liveRecord.review.notes || preferredSummaryForRecord(liveRecord) || '',
       plannedEntry:entry,
       plannedStop:stop,
       plannedFirstTarget:firstTarget,
@@ -8611,8 +8636,8 @@ function getCanonicalTradeSnapshot(cardOrTicker){
       plannedPositionSize:String(riskFit.position_size || ''),
       plannedMaxLoss:Number.isFinite(riskFit.max_loss) ? String(Number(riskFit.max_loss.toFixed(2))) : '',
       plannedAt:todayIsoDate(),
-      setupTags:[record.scan.scanType || '', record.scan.pullbackType || ''].filter(Boolean),
-      beforeImage:record.review.chartRef && record.review.chartRef.dataUrl ? String(record.review.chartRef.dataUrl) : ''
+      setupTags:[liveRecord.scan.scanType || '', liveRecord.scan.pullbackType || ''].filter(Boolean),
+      beforeImage:liveRecord.review.chartRef && liveRecord.review.chartRef.dataUrl ? String(liveRecord.review.chartRef.dataUrl) : ''
     };
   }
   if(!card) return null;
@@ -18389,6 +18414,13 @@ function loadTickerIntoReview(ticker, options = {}){
       : '';
     setActiveReviewTicker(symbol);
     record.review.cardOpen = true;
+    refreshTrackedTickerState(symbol, {
+      source:'review',
+      reason:'review_open',
+      force:true,
+      persist:true,
+      emitTrace:true
+    });
     if(options.includeInScannerUniverse === true && !state.tickers.includes(symbol)) state.tickers.push(symbol);
     const selectedBefore = !!uiState.selectedScanner[symbol];
     delete uiState.selectedScanner[symbol];
@@ -18578,6 +18610,273 @@ function reviewWatchlistTicker(ticker){
   loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false, sourceVerdict, sourceContext:'watchlist', reviewRequestToken});
 }
 
+const trackedTickerRefreshRuntime = {
+  inFlight:new Set(),
+  lastRunAt:new Map()
+};
+const TRACKED_TICKER_REFRESH_COOLDOWN_MS = 450;
+
+function buildResolvedStateBundleFromRecord(record, options = {}){
+  const liveRecord = record && typeof record === 'object' ? record : upsertTickerRecord(normalizeTicker(record && record.ticker));
+  const item = normalizeTickerRecord(liveRecord);
+  const source = String(options.source || 'track');
+  const sourceSurface = String(options.sourceSurface || source || 'track');
+  const reason = String(options.reason || source);
+  const context = 'shared_refresh';
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+  const displayedPlan = deriveCurrentPlanState(
+    effectivePlan.entry,
+    effectivePlan.stop,
+    effectivePlan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const qualityAdjustments = evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const warningState = evaluateWarningState(item);
+  const resolvedContract = resolveFinalStateContract(item, {
+    context,
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    warningState
+  });
+  const setupScore = setupScoreForRecord(item);
+  const visualState = resolveVisualState(item, 'watchlist', {
+    resolvedContract,
+    derivedStates,
+    displayedPlan,
+    setupScore
+  });
+  const canonicalVerdictKey = normalizeGlobalVerdictKey(
+    resolvedContract && (
+      resolvedContract.finalVerdict
+      || resolvedContract.final_verdict_rendered
+      || resolvedContract.final_verdict
+    ) || 'watch'
+  );
+  const canonicalContract = {
+    canonicalVerdictKey,
+    presentationLabel:verdictPresentationLabelForKey(canonicalVerdictKey),
+    lifecycleState:String(resolvedContract && resolvedContract.structuralState || ''),
+    bucket:String(resolvedContract && resolvedContract.bucket || ''),
+    tone:String(resolvedContract && resolvedContract.actionTone || ''),
+    reason:String(
+      (resolvedContract && resolvedContract.reasonParts && resolvedContract.reasonParts[0])
+      || (resolvedContract && resolvedContract.actionLabel)
+      || ''
+    ),
+    blockers:Array.isArray(resolvedContract && resolvedContract.reasonParts)
+      ? resolvedContract.reasonParts.slice(0, 3)
+      : [],
+    sourceTrace:{
+      context,
+      sourceSurface,
+      resolver:'resolveFinalStateContract',
+      planSource:String(effectivePlan && effectivePlan.source || '')
+    }
+  };
+  const lifecycleSnapshot = syncWatchlistLifecycle(liveRecord) || watchlistLifecycleSnapshot(liveRecord);
+  const globalVerdict = resolveGlobalVerdict(liveRecord);
+  return {
+    record:liveRecord,
+    normalizedRecordSnapshot:item,
+    canonicalContract,
+    resolvedContract,
+    visualState,
+    globalVerdict,
+    lifecycleSnapshot,
+    derivedStates,
+    effectivePlan,
+    displayedPlan,
+    qualityAdjustments,
+    warningState,
+    source,
+    sourceSurface,
+    reason
+  };
+}
+
+function toResolvedStateBundleCache(bundle){
+  const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
+  return {
+    canonicalContract:safeBundle.canonicalContract || null,
+    resolvedContract:safeBundle.resolvedContract || null,
+    visualState:safeBundle.visualState || null,
+    globalVerdict:safeBundle.globalVerdict || null,
+    lifecycleSnapshot:safeBundle.lifecycleSnapshot || null,
+    effectivePlan:safeBundle.effectivePlan || null,
+    displayedPlan:safeBundle.displayedPlan || null,
+    qualityAdjustments:safeBundle.qualityAdjustments || null,
+    warningState:safeBundle.warningState || null,
+    derivedStates:safeBundle.derivedStates || null,
+    source:String(safeBundle.source || ''),
+    sourceSurface:String(safeBundle.sourceSurface || ''),
+    reason:String(safeBundle.reason || ''),
+    cachedAt:new Date().toISOString()
+  };
+}
+
+function withLiveRecordFromCache(liveRecord, cache){
+  const safeCache = cache && typeof cache === 'object' ? cache : {};
+  return {
+    record:liveRecord,
+    canonicalContract:safeCache.canonicalContract || null,
+    resolvedContract:safeCache.resolvedContract || null,
+    visualState:safeCache.visualState || null,
+    globalVerdict:safeCache.globalVerdict || null,
+    lifecycleSnapshot:safeCache.lifecycleSnapshot || null,
+    effectivePlan:safeCache.effectivePlan || null,
+    displayedPlan:safeCache.displayedPlan || null,
+    qualityAdjustments:safeCache.qualityAdjustments || null,
+    warningState:safeCache.warningState || null,
+    derivedStates:safeCache.derivedStates || null,
+    source:String(safeCache.source || ''),
+    sourceSurface:String(safeCache.sourceSurface || ''),
+    reason:String(safeCache.reason || ''),
+    cachedAt:String(safeCache.cachedAt || '')
+  };
+}
+
+function validateSharedRefreshBundle(bundle, context = 'unknown'){
+  if(typeof window === 'undefined' || window.PP_PERF_DEBUG !== true) return;
+  const item = bundle && typeof bundle === 'object' ? bundle : null;
+  const missing = [];
+  if(!item || !item.record) missing.push('record');
+  if(!item || !item.canonicalContract) missing.push('canonicalContract');
+  if(!item || !item.resolvedContract) missing.push('resolvedContract');
+  if(!item || !item.visualState) missing.push('visualState');
+  if(!item || !item.globalVerdict) missing.push('globalVerdict');
+  if(!item || !item.lifecycleSnapshot) missing.push('lifecycleSnapshot');
+  if(!item || !item.effectivePlan) missing.push('effectivePlan');
+  if(!item || !item.displayedPlan) missing.push('displayedPlan');
+  if(!missing.length) return;
+  console.warn('[SharedRefreshContractMissing]', {
+    context:String(context || 'unknown'),
+    missing,
+    source:item && item.source ? String(item.source) : '',
+    refreshSkippedReason:item && item.refreshSkippedReason ? String(item.refreshSkippedReason) : '',
+    reusedCachedContract:!!(item && item.reusedCachedContract)
+  });
+}
+
+function hasCompleteSharedRefreshBundle(bundle){
+  return !!(
+    bundle
+    && typeof bundle === 'object'
+    && bundle.record
+    && bundle.canonicalContract
+    && bundle.resolvedContract
+    && bundle.visualState
+    && bundle.globalVerdict
+    && bundle.lifecycleSnapshot
+    && bundle.effectivePlan
+    && bundle.displayedPlan
+  );
+}
+
+function refreshTrackedTickerState(ticker, options = {}){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol){
+    return {
+      ok:false,
+      skipped:true,
+      reason:'invalid_ticker',
+      record:null,
+      canonicalContract:null,
+      resolvedContract:null,
+      visualState:null,
+      source:String(options.source || 'track'),
+      reusedCachedContract:false,
+      refreshSkippedReason:null
+    };
+  }
+  const now = Date.now();
+  const source = String(options.source || 'track');
+  const sourceSurface = String(options.sourceSurface || source || 'track');
+  const reason = String(options.reason || source);
+  const force = options.force === true;
+  const persist = options.persist !== false;
+  const lastRunAt = Number(trackedTickerRefreshRuntime.lastRunAt.get(symbol) || 0);
+  const inFlight = trackedTickerRefreshRuntime.inFlight.has(symbol);
+  const liveRecord = getTickerRecord(symbol) || upsertTickerRecord(symbol);
+  if(liveRecord && liveRecord.resolvedStateBundle) delete liveRecord.resolvedStateBundle;
+  const cachedBundle = liveRecord && liveRecord.resolvedStateBundleCache && typeof liveRecord.resolvedStateBundleCache === 'object'
+    ? liveRecord.resolvedStateBundleCache
+    : null;
+  if(inFlight){
+    const bundle = cachedBundle
+      ? withLiveRecordFromCache(liveRecord, cachedBundle)
+      : buildResolvedStateBundleFromRecord(liveRecord, {source, sourceSurface, reason});
+    if(!cachedBundle){
+      liveRecord.resolvedStateBundleCache = toResolvedStateBundleCache(bundle);
+    }
+    return {
+      ok:true,
+      skipped:true,
+      reason:'in_flight',
+      ...bundle,
+      source,
+      reusedCachedContract:!!cachedBundle,
+      refreshSkippedReason:'in_flight'
+    };
+  }
+  if(!force && lastRunAt > 0 && (now - lastRunAt) < TRACKED_TICKER_REFRESH_COOLDOWN_MS){
+    const bundle = cachedBundle
+      ? withLiveRecordFromCache(liveRecord, cachedBundle)
+      : buildResolvedStateBundleFromRecord(liveRecord, {source, sourceSurface, reason});
+    if(!cachedBundle){
+      liveRecord.resolvedStateBundleCache = toResolvedStateBundleCache(bundle);
+    }
+    return {
+      ok:true,
+      skipped:true,
+      reason:'cooldown',
+      ...bundle,
+      source,
+      reusedCachedContract:!!cachedBundle,
+      refreshSkippedReason:'cooldown'
+    };
+  }
+
+  trackedTickerRefreshRuntime.inFlight.add(symbol);
+  try{
+    const record = upsertTickerRecord(symbol);
+    const bundle = buildResolvedStateBundleFromRecord(record, {source, sourceSurface, reason});
+    const canonicalContract = bundle.canonicalContract;
+
+    record.meta = record.meta && typeof record.meta === 'object' ? record.meta : {};
+    record.meta.lastRefreshSource = source;
+    record.meta.lastRefreshSurface = sourceSurface;
+    record.meta.lastRefreshReason = reason;
+    record.meta.lastRefreshTimestamp = new Date().toISOString();
+    record.meta.recordVersion = Number(record.meta.recordVersion || 0) + 1;
+    record.meta.lastResolvedCanonicalVerdict = String(canonicalContract && canonicalContract.canonicalVerdictKey || '');
+    if(record.resolvedStateBundle) delete record.resolvedStateBundle;
+    record.resolvedStateBundleCache = toResolvedStateBundleCache(bundle);
+
+    if(persist){
+      commitTickerState();
+      if(activeWorkspaceTab() === 'track'){
+        markWatchlistDirty([symbol], `${source}_refresh`);
+      }else{
+        startupCoordinator.trackNeedsFullRender = true;
+      }
+    }
+    trackedTickerRefreshRuntime.lastRunAt.set(symbol, now);
+    return {
+      ok:true,
+      skipped:false,
+      reason:'',
+      ...bundle,
+      source,
+      reusedCachedContract:false,
+      refreshSkippedReason:null
+    };
+  }finally{
+    trackedTickerRefreshRuntime.inFlight.delete(symbol);
+  }
+}
+
 async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return {symbol:'', ok:false, skipped:true, reason:'invalid_ticker', record:null, snapshot:null, verdict:null};
@@ -18595,18 +18894,15 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       || (options.force !== false && source !== 'startup_restore');
     const {card} = await refreshCardMarketData(symbol, {force:forceRefresh});
     mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
-    const normalizedRecord = normalizeTickerRecord(record);
-    state.tickerRecords[symbol] = normalizedRecord;
-    normalizedRecord.watchlist.updatedAt = String(card.scannerUpdatedAt || card.updatedAt || new Date().toISOString());
-    runWatchlistLifecycleEvaluation({
-      source,
-      tickers:[symbol],
-      persist:false,
-      render:false,
-      force:true
+    const refreshed = refreshTrackedTickerState(symbol, {
+      source:'track',
+      reason:source,
+      force:true,
+      persist:false
     });
-    const refreshedVerdict = resolveGlobalVerdict(normalizedRecord);
-    const refreshedSnapshot = syncWatchlistLifecycle(normalizedRecord) || watchlistLifecycleSnapshot(normalizedRecord);
+    const normalizedRecord = refreshed.record;
+    const refreshedVerdict = refreshed.globalVerdict;
+    const refreshedSnapshot = refreshed.lifecycleSnapshot;
     const afterSignature = watchlistRecordRenderSignature(normalizedRecord);
     if(beforeSignature !== afterSignature){
       markWatchlistDirty([symbol], `${source}_result`);
@@ -18629,12 +18925,13 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
     if(!suppressLiveStatus){
       setLiveProcessStatus('error', 'Refresh failed.');
     }
-    runWatchlistLifecycleEvaluation({
-      source,
-      tickers:[symbol],
-      persist:false,
-      render:false
+    const refreshed = refreshTrackedTickerState(symbol, {
+      source:'track',
+      reason:`${source}_error`,
+      force:true,
+      persist:false
     });
+    const fallbackRecord = refreshed.record;
     const afterSignature = watchlistRecordRenderSignature(record);
     if(beforeSignature !== afterSignature){
       markWatchlistDirty([symbol], `${source}_error`);
@@ -18644,9 +18941,9 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       ok:false,
       skipped:false,
       reason:error && error.message ? String(error.message) : 'refresh_failed',
-      record,
-      snapshot:syncWatchlistLifecycle(record) || watchlistLifecycleSnapshot(record),
-      verdict:resolveGlobalVerdict(record)
+      record:fallbackRecord,
+      snapshot:refreshed.lifecycleSnapshot,
+      verdict:refreshed.globalVerdict
     };
   }finally{
     if(options.markPending) clearWatchlistLiveRefreshPending(symbol);
@@ -19675,47 +19972,26 @@ function setPaperTradeUiState(ticker, next = {}){
 function currentPaperTradeContextForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return null;
-  const liveRecord = getTickerRecord(symbol) || upsertTickerRecord(symbol);
+  const refreshed = refreshTrackedTickerState(symbol, {
+    source:'review',
+    sourceSurface:'review',
+    reason:'paper_trade_context',
+    force:true,
+    persist:false,
+    emitTrace:true
+  });
+  const liveRecord = refreshed.record;
   if(!liveRecord) return null;
   const record = normalizeTickerRecord(liveRecord);
-  const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
+  const effectivePlan = refreshed.effectivePlan;
   const displayedPlan = applySetupConfirmationPlanGate(
     record,
     deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency)
   );
+  const resolvedContract = refreshed.resolvedContract;
+  const visualState = refreshed.visualState;
+  const derivedStates = refreshed.derivedStates;
   const finalVerdict = reviewHeaderVerdictForRecord(record);
-  const derivedStates = analysisDerivedStatesFromRecord(record);
-  const analysisState = getReviewAnalysisState(record);
-  const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
-    ? analysisState.normalizedAnalysis.warning_state
-    : evaluateWarningState(record, analysisState.normalizedAnalysis);
-  const qualityAdjustments = evaluateSetupQualityAdjustments(record, {derivedStates, displayedPlan});
-  const planUiState = getPlanUiState(record, {displayedPlan});
-  const setupUiState = getSetupUiState(record, {displayStage:finalVerdict, planUiState});
-  const avoidSubtype = avoidSubtypeForRecord(record, {
-    derivedStates,
-    displayedPlan,
-    qualityAdjustments,
-    warningState,
-    finalVerdict
-  });
-  const resolvedContract = resolveFinalStateContract(record, {
-    context:'review',
-    finalVerdict,
-    derivedStates,
-    displayedPlan,
-    qualityAdjustments,
-    warningState,
-    planUiState,
-    setupUiState,
-    avoidSubtype
-  });
-  const visualState = resolveVisualState(record, 'review', {
-    resolvedContract,
-    derivedStates,
-    displayedPlan,
-    setupScore:setupScoreForRecord(record)
-  });
   const reviewFinalVerdict = normalizeAnalysisVerdict(
     visualState.finalVerdict || visualState.final_verdict || finalVerdict
   );
@@ -20188,15 +20464,25 @@ function renderReviewWorkspace(options = {}){
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
   const readOnlyReviewOpen = options.skipWatchlistLifecycle === true && options.recompute !== true;
+  const refreshBundle = refreshTrackedTickerState(ticker, {
+    source:'review',
+    reason:readOnlyReviewOpen ? 'review_open' : 'review_edit',
+    force:true,
+    persist:false,
+    emitTrace:true
+  });
+  validateSharedRefreshBundle(refreshBundle, 'renderReviewWorkspace');
+  const bundleValid = hasCompleteSharedRefreshBundle(refreshBundle);
+  const refreshedRecord = refreshBundle && refreshBundle.record ? refreshBundle.record : liveRecord;
   const canonicalPlanSynced = readOnlyReviewOpen
     ? false
-    : ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
+    : ensureCanonicalPlanForRecord(refreshedRecord, {allowScannerFallback:true, source:'review'});
   if(options.recompute === true){
-    maybeExpireTickerRecord(liveRecord);
-    reevaluateTickerProgress(liveRecord);
+    maybeExpireTickerRecord(refreshedRecord);
+    reevaluateTickerProgress(refreshedRecord);
   }
   if(canonicalPlanSynced) commitTickerState();
-  const record = normalizeTickerRecord(liveRecord);
+  const record = normalizeTickerRecord(refreshedRecord);
   const analysisState = getReviewAnalysisState(record);
   const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
     ? analysisState.normalizedAnalysis.warning_state
@@ -20220,7 +20506,7 @@ function renderReviewWorkspace(options = {}){
   const rewardPerShare = displayedPlan.rewardPerShare;
   const setupScore = setupScoreForRecord(record);
   const setupScoreDisplay = setupScoreDisplayForRecord(record);
-  const derivedStates = analysisDerivedStatesFromRecord(record);
+  const derivedStates = refreshBundle.derivedStates || analysisDerivedStatesFromRecord(record);
   const convictionTier = convictionTierLabel(record.setup.convictionTier || '');
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {
     displayedPlan,
@@ -20231,7 +20517,7 @@ function renderReviewWorkspace(options = {}){
     ? ''
     : (activeReviewTicker() === record.ticker ? String(uiState.activeReviewVerdictOverride || '').trim() : '');
   const reviewOpenCanonicalContract = readOnlyReviewOpen
-    ? resolveCanonicalTickerVerdict(record, {context:'track', silentTrace:true})
+    ? (bundleValid ? refreshBundle.canonicalContract : {canonicalVerdictKey:'watch', presentationLabel:'Watch'})
     : null;
   const reviewOpenCanonicalVerdict = reviewOpenCanonicalContract && reviewOpenCanonicalContract.presentationLabel
     ? String(reviewOpenCanonicalContract.presentationLabel)
@@ -20279,36 +20565,25 @@ function renderReviewWorkspace(options = {}){
     setupUiState,
     avoidSubtype
   });
-  const resolvedContract = resolveFinalStateContract(record, {
-    context:'review',
-    finalVerdict:displayStage,
-    derivedStates:analysisDerivedStatesFromRecord(record),
-    displayedPlan,
-    qualityAdjustments,
-    warningState,
-    planUiState,
-    setupUiState,
-    avoidSubtype,
-    emojiPresentation
-  });
+  const resolvedContract = bundleValid
+    ? refreshBundle.resolvedContract
+    : {finalVerdict:'watch', final_verdict:'watch', final_verdict_rendered:'watch', primaryState:'developing', blockerReason:'Developing - waiting for confirmation.'};
+  const safeResolvedContract = resolvedContract && typeof resolvedContract === 'object' ? resolvedContract : {};
   const simulatedExecutionVerdict = capitalSimulationState.simulation
     ? capitalSimulationVerdictImpact(displayStage, capitalSimulationState.simulation.capitalFit)
     : '';
   const simulatedFinalVerdict = capitalSimulationState.simulation
     ? (simulatedExecutionVerdict || displayStage)
     : '';
-  const globalVerdict = resolveGlobalVerdict(record);
+  const globalVerdict = bundleValid ? refreshBundle.globalVerdict : {final_verdict:'watch'};
   const watchlistEligibility = watchlistEligibilityForRecord(record);
-  const visualState = resolveVisualState(record, 'review', {
-    resolvedContract,
-    derivedStates:analysisDerivedStatesFromRecord(record),
-    displayedPlan,
-    setupScore
-  });
+  const visualState = bundleValid
+    ? refreshBundle.visualState
+    : {finalVerdict:'watch', final_verdict:'watch', renderedVerdict:'watch', final_verdict_rendered:'watch', decision_summary:'Developing - waiting for confirmation.'};
   const unifiedFinalReviewVerdict = normalizeReviewPresentationVerdict(
     visualState.final_verdict_rendered
     || visualState.renderedVerdict
-    || resolvedContract.finalVerdict
+    || safeResolvedContract.finalVerdict
     || visualState.finalVerdict
     || visualState.final_verdict
     || displayStage
@@ -20328,8 +20603,8 @@ function renderReviewWorkspace(options = {}){
     riskStatus:displayedPlan.riskFit && displayedPlan.riskFit.risk_status,
     tradeability:displayedPlan.tradeability,
     capitalFit:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit,
-    primaryState:resolvedContract.primaryState,
-    hardBlocker:resolvedContract.blockerReason
+    primaryState:safeResolvedContract.primaryState,
+    hardBlocker:safeResolvedContract.blockerReason
   });
   const mergedPaperTradeEligibilityState = applyPaperTradeEligibilityDebugOverride(paperTradeEligibilityState, {
     ticker:record.ticker,
@@ -21133,7 +21408,20 @@ function persistActiveReviewDraft(options = {}){
     record.review.savedScore = Number(result.score);
   }
   updateTickerInputFromState();
+  refreshTrackedTickerState(ticker, {
+    source:'review',
+    reason:String(options.source || 'review_draft'),
+    force:true,
+    persist:false,
+    emitTrace:true
+  });
   commitTickerState();
+  if(activeWorkspaceTab() === 'track'){
+    updateWatchlistCardForTicker(ticker);
+  }else{
+    markWatchlistDirty([ticker], 'review_update');
+    startupCoordinator.trackNeedsFullRender = true;
+  }
   if(options.render === true){
     renderWatchlist();
     renderFocusQueue();
@@ -21165,7 +21453,13 @@ function saveReview(){
   if(saved){
     const record = getTickerRecord(ticker);
     if(record){
-      resolveCanonicalTickerVerdict(record, {context:'review_save'});
+      refreshTrackedTickerState(ticker, {
+        source:'review',
+        reason:'review_save',
+        force:true,
+        persist:true,
+        emitTrace:true
+      });
       runVerdictDriftParityChecks(record);
     }
     setStatus('inputStatus', '<span class="ok">Manual review saved as optional notes only. Scanner ranking stays unchanged.</span>');
