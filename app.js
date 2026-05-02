@@ -5961,7 +5961,7 @@ function watchlistEligibilityForRecord(record){
     || String(item.review && item.review.aiAnalysisRaw || '').trim()
   );
   const allowWatchlist = !!(globalVerdict.allow_watchlist || ['near_entry','entry'].includes(finalVerdict));
-  const eligibleVerdict = ['watch','monitor','near_entry','entry'].includes(finalVerdict);
+  const eligibleVerdict = ['watch','near_entry','entry'].includes(finalVerdict);
   return {
     recordExists:!!item.ticker,
     reviewExists,
@@ -6078,18 +6078,16 @@ function watchlistLifecycleStateRank(state){
   if(state === 'entry') return 0;
   if(state === 'near_entry') return 1;
   if(state === 'watch') return 2;
-  if(state === 'monitor') return 3;
-  if(state === 'avoid') return 4;
-  if(state === 'dead') return 5;
-  return 6;
+  if(state === 'avoid') return 3;
+  return 4;
 }
 
 function canonicalLifecycleState(state){
   const value = String(state || '').trim().toLowerCase();
-  if(value === 'developing') return 'monitor';
+  if(value === 'developing' || value === 'monitor' || value === 'monitor_watch' || value === 'active') return 'watch';
   if(value === 'early') return 'watch';
-  if(value === 'filtered' || value === 'inactive' || value === 'avoided') return 'avoid';
-  if(['entry','near_entry','watch','monitor','avoid','dead'].includes(value)) return value;
+  if(value === 'filtered' || value === 'inactive' || value === 'avoided' || value === 'dead' || value === 'diminishing') return 'avoid';
+  if(['entry','near_entry','watch','avoid'].includes(value)) return value;
   return '';
 }
 
@@ -6107,7 +6105,7 @@ function resolveLifecycleTransition(currentState, inputs = {}){
   if(structureState === 'broken') nextState = 'avoid';
 
   if(
-    ['watch','monitor'].includes(lifecycleState)
+    lifecycleState === 'watch'
     && finalVerdict === 'near_entry'
     && structureState === 'intact'
     && bounceState === 'confirmed'
@@ -6118,26 +6116,20 @@ function resolveLifecycleTransition(currentState, inputs = {}){
     nextState = 'near_entry';
   }
 
-  if(
-    lifecycleState === 'monitor'
-    && structureState === 'broken'
-  ){
+  if(lifecycleState === 'watch' && structureState === 'broken'){
     nextState = 'avoid';
   }
 
-  if(
-    lifecycleState === 'monitor'
-    && planStatus === 'invalid'
-  ){
-    nextState = 'monitor';
+  if(lifecycleState === 'watch' && planStatus === 'invalid'){
+    nextState = 'watch';
   }
 
   if(
-    ['watch','developing'].includes(rawState)
-    && finalVerdict === 'monitor'
+    ['watch','developing','monitor'].includes(rawState)
+    && finalVerdict === 'watch'
     && structureState === 'intact'
   ){
-    nextState = 'monitor';
+    nextState = 'watch';
   }
 
   const nextRank = watchlistLifecycleStateRank(nextState);
@@ -6188,7 +6180,7 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
   const planExpiryAt = context.planExpiryAt || '';
   const expiryAt = context.expiryAt || '';
   const reason = context.reason || snapshot.reason || globalVerdict.reason || '';
-  const badge = getBadge(state || 'monitor');
+  const badge = getBadge(state || 'watch');
   const nextSnapshot = {
     ...snapshot,
     state:state || snapshot.state,
@@ -6245,7 +6237,7 @@ function watchlistLifecycleSnapshot(record, options = {}){
   const liveRefreshPending = isWatchlistLiveRefreshPending(item.ticker);
   if(liveRefreshPending){
     const storedState = canonicalLifecycleState(item.watchlist && item.watchlist.lifecycleState);
-    const state = storedState || 'monitor';
+    const state = storedState || 'watch';
     const expiryTradingDays = item.watchlist.expiryAfterTradingDays || WATCHLIST_EXPIRY_TRADING_DAYS;
     const addedAt = item.watchlist.addedAt || todayIsoDate();
     const expiryAt = item.watchlist.expiryAt || tradingDaysFrom(addedAt, expiryTradingDays);
@@ -6348,7 +6340,7 @@ function watchlistLifecycleSnapshot(record, options = {}){
     nextExpiryAt = '';
     reason = globalVerdict.reason || structureGate.refresh_demote_reason || resolved.blockerReason || 'Setup is no longer structurally alive.';
   }else if(remainingTradingDays <= 0 && !hasMeaningfulImprovement){
-    state = 'monitor';
+    state = 'watch';
     bucket = 'monitor_watch';
     stage = 'watchlist';
     status = 'active';
@@ -6370,14 +6362,14 @@ function watchlistLifecycleSnapshot(record, options = {}){
     nextExpiryAt = activeExpiryAt;
     reason = 'Near entry - monitor for trigger.';
   }else if(canonicalVerdict === 'watch' || canonicalVerdict === 'monitor'){
-    state = 'monitor';
+    state = 'watch';
     bucket = 'monitor_watch';
     stage = 'watchlist';
     status = 'active';
     nextExpiryAt = activeExpiryAt;
     reason = globalVerdict.reason || 'Monitor setup - keep tracking.';
   }else{
-    state = 'monitor';
+    state = 'watch';
     bucket = 'monitor_watch';
     stage = 'watchlist';
     status = 'active';
@@ -11436,10 +11428,9 @@ function reviewVerdictLabel(verdictKey){
   const key = normalizeReviewPresentationVerdict(verdictKey);
   if(key === 'near_entry') return 'Near Entry';
   if(key === 'entry') return 'Entry';
-  if(key === 'monitor') return 'Monitor';
-  if(key === 'diminishing') return 'Diminishing';
+  if(key === 'monitor' || key === 'diminishing') return 'Watch';
   if(key === 'avoid') return 'Avoid';
-  if(key === 'dead') return 'Dead';
+  if(key === 'dead') return 'Avoid';
   return 'Watch';
 }
 
@@ -11459,11 +11450,9 @@ function reviewVerdictKeyToAnalysisVerdict(value){
   const key = normalizeReviewPresentationVerdict(value);
   if(key === 'near_entry') return 'Near Entry';
   if(key === 'entry') return 'Entry';
-  if(key === 'watch') return 'Watch';
-  if(key === 'monitor') return 'Monitor';
-  if(key === 'diminishing') return 'Diminishing';
+  if(key === 'watch' || key === 'monitor' || key === 'diminishing') return 'Watch';
   if(key === 'avoid') return 'Avoid';
-  if(key === 'dead') return 'Dead';
+  if(key === 'dead') return 'Avoid';
   return '';
 }
 
@@ -12718,8 +12707,8 @@ function resolvePresentationTone(record = {}){
     entry:{presentationTone:'entry', badgeLabel:'Entry', cardClass:'card--entry', badgeClass:'badge--entry'},
     near_entry:{presentationTone:'near_entry', badgeLabel:'Near Entry', cardClass:'card--near-entry', badgeClass:'badge--near-entry'},
     watch:{presentationTone:'watch', badgeLabel:'Watch', cardClass:'card--watch', badgeClass:'badge--watch'},
-    monitor:{presentationTone:'monitor', badgeLabel:'Monitor', cardClass:'card--monitor', badgeClass:'badge--monitor'},
-    diminishing:{presentationTone:'diminishing', badgeLabel:'Diminishing', cardClass:'card--diminishing', badgeClass:'badge--diminishing'},
+    monitor:{presentationTone:'monitor', badgeLabel:'Watch', cardClass:'card--monitor', badgeClass:'badge--monitor'},
+    diminishing:{presentationTone:'diminishing', badgeLabel:'Watch', cardClass:'card--diminishing', badgeClass:'badge--diminishing'},
     avoid:{presentationTone:'avoid', badgeLabel:'Avoid', cardClass:'card--avoid', badgeClass:'badge--avoid'},
     dead:{presentationTone:'dead', badgeLabel:'Avoid', cardClass:'card--dead', badgeClass:'badge--avoid'}
   };
@@ -12792,11 +12781,11 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     : (avoidByExplicitInvalidation
       ? 'Explicit invalidation.'
       : (avoidByVerdict ? 'Terminal avoid/dead verdict.' : ''));
-  const finalVerdictKey = rawFinalVerdict || normalizedFinalVerdict || 'monitor';
+  const finalVerdictKey = rawFinalVerdict || normalizedFinalVerdict || 'watch';
   const effectiveFinalVerdictKey = staleAvoidSuppressed && ['monitor','watch'].includes(baseVerdict)
     ? baseVerdict
     : finalVerdictKey;
-  const effectiveDisplayVerdict = normalizeGlobalVerdictKey(effectiveFinalVerdictKey || currentResolverVerdict || 'monitor');
+  const effectiveDisplayVerdict = normalizeGlobalVerdictKey(effectiveFinalVerdictKey || currentResolverVerdict || 'watch');
   const finalIsMonitorWatch = ['watch','monitor'].includes(effectiveFinalVerdictKey);
   const finalIsEntryNear = normalizedFinalVerdict === 'entry' || normalizedFinalVerdict === 'near_entry';
   const activeTrackEligible = finalIsMonitorWatch
@@ -12858,8 +12847,8 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     cardClass:presentationCardClass
   };
   return {
-    canonicalFinalVerdict:effectiveDisplayVerdict || 'monitor',
-    finalVerdict:effectiveDisplayVerdict || 'monitor',
+    canonicalFinalVerdict:effectiveDisplayVerdict || 'watch',
+    finalVerdict:effectiveDisplayVerdict || 'watch',
     bucket:String(sourceBucket || ''),
     viability:effectiveViability,
     presentationBucket,
@@ -13203,10 +13192,10 @@ function reconcileWatchlistPresentation({
   }
   return {
     ...base,
-    state:presentation.presentationBucket === 'avoid' ? 'avoid' : (presentation.finalVerdict || base.state || 'monitor'),
-    finalVerdict:presentation.finalVerdict || base.finalVerdict || 'monitor',
-    final_verdict:presentation.finalVerdict || base.final_verdict || 'monitor',
-    final_verdict_rendered:presentation.finalVerdict || base.final_verdict_rendered || 'monitor',
+    state:presentation.presentationBucket === 'avoid' ? 'avoid' : (presentation.finalVerdict || base.state || 'watch'),
+    finalVerdict:presentation.finalVerdict || base.finalVerdict || 'watch',
+    final_verdict:presentation.finalVerdict || base.final_verdict || 'watch',
+    final_verdict_rendered:presentation.finalVerdict || base.final_verdict_rendered || 'watch',
     bucket_rendered:(function(){
       if(presentation.presentationBucket === 'diminishing') return 'diminishing';
       if(presentation.presentationBucket === 'avoid') return 'avoid_dead';
@@ -13227,7 +13216,7 @@ function reconcileWatchlistPresentation({
     decision_summary:presentation.presentationReason || base.decision_summary,
     reason:presentation.presentationReason || base.reason,
     watchlist_presentation_source:base.watchlist_presentation_source || 'presentation_model',
-    canonicalFinalVerdict:presentation.canonicalFinalVerdict || presentation.finalVerdict || base.finalVerdict || 'monitor',
+    canonicalFinalVerdict:presentation.canonicalFinalVerdict || presentation.finalVerdict || base.finalVerdict || 'watch',
     presentationBucket:presentation.presentationBucket,
     trackPresentationBucket:presentation.presentationBucket,
     scanPresentationBucket,
@@ -21531,7 +21520,7 @@ function calculate(options = {}){
     derivedStates:plannerDerivedStates,
     displayedPlan,
     setupScore:setupScoreForRecord(activeRecord)
-  }) : {finalVerdict:'monitor'};
+  }) : {finalVerdict:'watch'};
   const plannerDecisionSummary = plannerVisualState && plannerVisualState.decision_summary ? plannerVisualState.decision_summary : '';
   const planUI = resolvePlanVisibility({
     state:plannerVisualState.final_verdict_rendered || plannerVisualState.finalVerdict,
@@ -22500,7 +22489,7 @@ function primaryVerdictBadge(verdict){
   if(safeVerdict === 'Entry') return {label:'\uD83D\uDE80 Entry', className:'ready'};
   if(safeVerdict === 'Near Entry') return {label:'\uD83C\uDFAF Near Entry', className:'near'};
   if(safeVerdict === 'Avoid') return {label:'\u26D4 Avoid', className:'avoid'};
-  return {label:'\uD83E\uDDD0 Monitor', className:'watch'};
+  return {label:'Watch', className:'watch'};
 }
 
 function normalizeGlobalVerdictKey(verdict){

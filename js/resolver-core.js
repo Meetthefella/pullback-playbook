@@ -1,41 +1,46 @@
 (function(global){
   // Canonical global-verdict helpers extracted from app.js.
+  function coerceCanonicalVerdict(verdict, fallback = 'watch'){
+    const safe = String(verdict || '').trim().toLowerCase();
+    if(safe === 'entry') return 'entry';
+    if(safe === 'near_entry' || safe === 'near entry' || safe === 'nearentry') return 'near_entry';
+    if(safe === 'avoid') return 'avoid';
+    if(['watch','monitor','monitor_watch','developing','active','scanner_watch','review_monitor'].includes(safe)) return 'watch';
+    if(['dead','diminishing'].includes(safe)) return 'avoid';
+    return fallback;
+  }
+
   function normalizeGlobalVerdictKey(verdict){
-    const safeVerdict = String(verdict || '').trim().toLowerCase();
-    if(['entry','near_entry','watch','monitor','avoid','dead'].includes(safeVerdict)) return safeVerdict;
-    return 'watch';
+    return coerceCanonicalVerdict(verdict, 'watch');
   }
 
   function normalizeVerdict(verdict){
-    const normalized = normalizeGlobalVerdictKey(verdict);
-    if(normalized === 'watch') return 'monitor';
-    if(normalized === 'dead') return 'avoid';
-    return normalized;
+    return normalizeGlobalVerdictKey(verdict);
   }
 
   function globalVerdictLabel(finalVerdict){
     return ({
       entry:'Entry',
       near_entry:'Near Entry',
-      monitor:'Monitor',
+      watch:'Watch',
       avoid:'Avoid',
-    })[normalizeVerdict(finalVerdict)] || 'Monitor';
+    })[normalizeVerdict(finalVerdict)] || 'Watch';
   }
 
   function getTone(finalVerdict){
     return ({
       entry:'green',
       near_entry:'teal',
-      monitor:'amber',
+      watch:'monitor',
       avoid:'red',
-    })[normalizeVerdict(finalVerdict)] || 'amber';
+    })[normalizeVerdict(finalVerdict)] || 'monitor';
   }
 
   function getBucket(finalVerdict){
     return ({
       entry:'tradeable_entry',
       near_entry:'tradeable_entry',
-      monitor:'monitor_watch',
+      watch:'monitor_watch',
       avoid:'lower_priority',
     })[normalizeVerdict(finalVerdict)] || 'monitor_watch';
   }
@@ -43,11 +48,11 @@
   function getBadge(finalVerdict){
     const safeVerdict = normalizeVerdict(finalVerdict);
     return ({
-      entry:{text:'\uD83D\uDE80 Entry', className:'badge--entry ready'},
-      near_entry:{text:'\uD83C\uDFAF Near Entry', className:'badge--near-entry near'},
-      monitor:{text:'\uD83D\uDFE1 Monitor', className:'badge--monitor watch'},
-      avoid:{text:'\u26D4 Avoid', className:'badge--avoid avoid'},
-    })[safeVerdict] || {text:'\uD83D\uDFE1 Monitor', className:'badge--monitor watch'};
+      entry:{text:'Entry', className:'badge--entry ready'},
+      near_entry:{text:'Near Entry', className:'badge--near-entry near'},
+      watch:{text:'Watch', className:'badge--monitor watch'},
+      avoid:{text:'Avoid', className:'badge--avoid avoid'},
+    })[safeVerdict] || {text:'Watch', className:'badge--monitor watch'};
   }
 
   function getActions(finalVerdict){
@@ -55,9 +60,9 @@
     return ({
       entry:{label:'ENTRY', detail:'Ready to act', planAllowed:true, watchlistAllowed:false},
       near_entry:{label:'NEAR ENTRY', detail:'Close to trigger', planAllowed:true, watchlistAllowed:true},
-      monitor:{label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true},
+      watch:{label:'WATCH', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true},
       avoid:{label:'AVOID', detail:'Low priority', planAllowed:false, watchlistAllowed:false},
-    })[safeVerdict] || {label:'MONITOR', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true};
+    })[safeVerdict] || {label:'WATCH', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true};
   }
 
   function numericValueOrNull(value){
@@ -723,12 +728,13 @@
       avoid:'drop',
       dead:'drop'
     };
-    const tone = getTone(finalVerdict);
-    const badge = getBadge(finalVerdict);
-    const action = getActions(finalVerdict);
-    const bucket = (finalVerdict === 'monitor' && viability.viability === 'low_priority')
+    const canonicalFinalVerdict = normalizeVerdict(finalVerdict);
+    const tone = getTone(canonicalFinalVerdict);
+    const badge = getBadge(canonicalFinalVerdict);
+    const action = getActions(canonicalFinalVerdict);
+    const bucket = (canonicalFinalVerdict === 'watch' && viability.viability === 'low_priority')
       ? 'lower_priority'
-      : getBucket(finalVerdict);
+      : getBucket(canonicalFinalVerdict);
     const guardedForPresentation = normalizeVerdict(guardedVerdict.final_verdict);
     const promotionWasAttempted = requestedBeforeGuards === 'near_entry' || requestedBeforeGuards === 'entry';
     const guardBlockers = []
@@ -741,7 +747,7 @@
     return {
       base_verdict:normalizeVerdict(baseVerdict),
       tracked_verdict:trackedVerdict,
-      final_verdict:finalVerdict,
+      final_verdict:canonicalFinalVerdict,
       tone,
       toneClass:`tone-${tone}`,
       borderClass:`tone-${tone}`,
@@ -751,7 +757,7 @@
       bucket,
       badge,
       action,
-      lifecycle:lifecycleMap[finalVerdict] || 'watchlist',
+      lifecycle:lifecycleMap[canonicalFinalVerdict] || 'watchlist',
       allow_plan:action.planAllowed,
       allow_watchlist:action.watchlistAllowed,
       reason,
@@ -781,8 +787,8 @@
         : '',
       promotionBlockedReason:(guardedVerdict.near_entry_gate_reasons && guardedVerdict.near_entry_gate_reasons[0]) || '',
       finalVerdictBeforePresentation:normalizeVerdict(guardedVerdict.final_verdict),
-      finalVerdictAfterPresentation:finalVerdict,
-      presentationDowngradeApplied:normalizeVerdict(guardedVerdict.final_verdict) !== finalVerdict,
+      finalVerdictAfterPresentation:canonicalFinalVerdict,
+      presentationDowngradeApplied:normalizeVerdict(guardedVerdict.final_verdict) !== canonicalFinalVerdict,
       presentationUpgradeBlocked,
       setup_score:Number.isFinite(setupScore) ? setupScore : null,
       priority_score_adjustment:isExtended ? -0.35 : 0,
@@ -852,7 +858,7 @@
         monitor:'monitor_state',
         near_entry:'near_entry_state',
         entry:'ready_state'
-      })[finalVerdict] || 'watch_state',
+      })[canonicalFinalVerdict] || 'watch_state',
       resolved
     };
   }
