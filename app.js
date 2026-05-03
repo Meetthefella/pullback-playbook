@@ -21303,6 +21303,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Review Bucket Source', value:reviewBucketSource},
     {label:'Review Bucket Before Fallback', value:reviewBucketBeforeFallback},
     {label:'Review Bucket After Fallback', value:reviewBucketAfterFallback},
+    {label:'Final Review Visual Bucket', value:finalReviewVisualBucket || '(none)'},
     {label:'Used Cached Bundle', value:usedCachedBundle ? 'true' : 'false'},
     {label:'Missing Bundle Fields', value:missingBundleFields.join(', ') || '(none)'},
     {label:'Review Shell Tone', value:reviewOuterBorderTone || '(none)'},
@@ -21321,6 +21322,14 @@ function renderReviewWorkspace(options = {}){
     {label:'Track Visual Bucket', value:visualBucketLabel(reviewLifecycleBias.trackPresentationBucket || 'monitor')},
     {label:'Track Presentation Tone', value:reviewLifecycleBias.trackPresentationTone || '(none)'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
+    {label:'Previous Verdict', value:visualState.previousVerdict || '(none)'},
+    {label:'Fresh Canonical Verdict', value:visualState.freshCanonicalVerdict || '(none)'},
+    {label:'Fresh Visual Bucket', value:visualState.freshVisualBucket || '(none)'},
+    {label:'Stale Visual Field Ignored', value:visualState.staleVisualFieldIgnored ? 'true' : 'false'},
+    {label:'Stale Avoid Suppressed', value:visualState.staleAvoidSuppressed ? 'true' : 'false'},
+    {label:'Scan Visual Source', value:visualState.scanVisualSource || '(none)'},
+    {label:'Review Visual Source', value:visualState.reviewVisualSource || '(none)'},
+    {label:'Structure Source', value:visualState.structureSource || '(none)'},
     {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
     {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
     {label:'Structure', value:globalVerdict.structure_state || '(none)'},

@@ -54,6 +54,29 @@
     return 'card--watch';
   }
 
+  function visualBucketForCanonical(canonicalVerdict, options = {}, deps = {}){
+    const verdict = coerceCanonicalVerdict(canonicalVerdict, deps);
+    if(verdict === 'entry') return 'entry';
+    if(verdict === 'near_entry') return 'near_entry';
+    if(verdict === 'avoid') return 'avoid';
+    const structureEligibility = String(options.structureEligibility || '').trim().toLowerCase();
+    const structureState = String(options.structureState || '').trim().toLowerCase();
+    const viability = String(options.viability || '').trim().toLowerCase();
+    if(structureEligibility === 'damaged' || structureState === 'weakening' || viability === 'low_priority'){
+      return 'diminishing';
+    }
+    return 'monitor';
+  }
+
+  function cardClassForBucket(bucket){
+    const safe = String(bucket || '').trim().toLowerCase();
+    if(safe === 'entry') return 'card--entry';
+    if(safe === 'near_entry') return 'card--near-entry';
+    if(safe === 'diminishing') return 'card--diminishing';
+    if(safe === 'avoid') return 'card--avoid';
+    return 'card--monitor';
+  }
+
   function decisionSummaryForVerdict(finalVerdict, options = {}, deps = {}){
     const verdict = coerceCanonicalVerdict(finalVerdict, deps);
     if(verdict === 'entry') return 'Entry - your plan fits.';
@@ -100,33 +123,33 @@
     );
     const resolvedContract = options.resolvedContract || deps.resolveFinalStateContract(safeRecord, {context, derivedStates, displayedPlan});
     const rawVerdict = finalVerdictFromResolvedContract(resolvedContract, derivedStates, deps);
-    const canonicalVerdict = coerceCanonicalVerdict(
-      legacyVerdict && legacyVerdict.final_verdict ? String(legacyVerdict.final_verdict) : rawVerdict,
-      deps
-    );
+    const canonicalVerdict = coerceCanonicalVerdict(rawVerdict, deps);
     const finalVerdict = options.pendingResolution === true ? 'watch' : canonicalVerdict;
     const renderedVerdict = finalVerdict;
     const state = visualStateKey(renderedVerdict, deps);
     const structureEligibility = String(legacyVerdict && legacyVerdict.structure_eligibility || '').trim().toLowerCase();
     const viability = String(legacyVerdict && legacyVerdict.viability || '').trim().toLowerCase();
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
+    const previousVerdict = coerceCanonicalVerdict(
+      safeRecord && safeRecord.meta && safeRecord.meta.previousFinalVerdict,
+      deps
+    );
     const weakeningButAlive = finalVerdict === 'watch'
       && (
         structureEligibility === 'damaged'
         || structureState === 'weakening'
         || viability === 'low_priority'
       );
-    let visual_tone = finalVerdict === 'avoid' ? 'avoid' : visualToneForState(state);
-    if(weakeningButAlive && finalVerdict === 'watch'){
-      visual_tone = 'diminishing';
-    }
-    if(visual_tone === 'diminishing' && finalVerdict !== 'watch'){
-      visual_tone = finalVerdict === 'avoid' ? 'avoid' : 'monitor';
-    }
+    const visualBucket = visualBucketForCanonical(finalVerdict, {
+      structureEligibility,
+      structureState,
+      viability
+    }, deps);
+    let visual_tone = visualBucket;
+    if(visual_tone === 'diminishing' && finalVerdict !== 'watch') visual_tone = finalVerdict === 'avoid' ? 'avoid' : 'monitor';
     const score = clampScore(options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord));
-    const styleAttr = visualStyleForState(state, score);
+    const styleAttr = visualStyleForState(visual_tone === 'diminishing' ? 'watch' : visual_tone, score);
     const badge = deps.getBadge(renderedVerdict);
-    const bucket = legacyVerdict && legacyVerdict.bucket ? legacyVerdict.bucket : deps.getBucket(renderedVerdict);
     const summaryOptions = {
       structuralState:resolvedContract && resolvedContract.structuralState,
       structureState:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase(),
@@ -135,7 +158,11 @@
     const resolvedSummary = weakeningButAlive
       ? 'Watch - setup weakening but still alive.'
       : decisionSummaryForVerdict(renderedVerdict, summaryOptions, deps);
-    const cardClass = cardClassForState(state);
+    const cardClass = cardClassForBucket(visualBucket);
+    const staleVisualFieldIgnored = true;
+    const staleAvoidSuppressed = previousVerdict === 'avoid' && finalVerdict !== 'avoid';
+    const scanVisualSource = 'fresh_resolved_bundle';
+    const reviewVisualSource = 'fresh_resolved_bundle';
     return {
       state,
       decision_summary:resolvedSummary,
@@ -154,12 +181,15 @@
       finalVerdict,
       final_verdict:finalVerdict,
       renderedVerdict,
-      review_presentation_state:weakeningButAlive ? 'diminishing' : renderedVerdict,
+      review_presentation_state:visualBucket === 'diminishing' ? 'diminishing' : renderedVerdict,
       review_presentation_source:'resolver',
       terminal_avoid_applied:false,
       terminal_avoid_reason:null,
       diminishing_preserved_in_review:weakeningButAlive,
-      bucket,
+      canonicalVerdict:finalVerdict,
+      visualBucket,
+      presentationBucket:visualBucket,
+      bucket:visualBucket,
       allowPlan:['entry','near_entry'].includes(finalVerdict),
       allow_plan:['entry','near_entry'].includes(finalVerdict),
       allowWatchlist:['watch','near_entry','entry'].includes(finalVerdict),
@@ -178,8 +208,16 @@
       lifecycle_drop_reason:legacyVerdict && legacyVerdict.lifecycle_drop_reason ? String(legacyVerdict.lifecycle_drop_reason) : '(none)',
       avoid_allowed_by_structure_consistency_guard:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase() === 'broken',
       conflicting_legacy_state_detected:false,
-      trackPresentationBucket:'',
-      trackPresentationTone:'',
+      trackPresentationBucket:visualBucket,
+      trackPresentationTone:visual_tone,
+      previousVerdict,
+      freshCanonicalVerdict:finalVerdict,
+      freshVisualBucket:visualBucket,
+      staleVisualFieldIgnored,
+      staleAvoidSuppressed,
+      scanVisualSource,
+      reviewVisualSource,
+      structureSource:'analysisDerivedStatesFromRecord',
       resolvedContract,
       legacyVerdict,
       context
