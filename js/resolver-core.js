@@ -408,82 +408,148 @@
     const planInvalidLabel = String(ctx.planStatusKey || '').toLowerCase() === 'invalid';
     const credibleRrValue = numericValueOrNull(ctx.credibleRr);
     const viableRrExists = rrOk || (credibleRrValue !== null && credibleRrValue >= 1.5);
+    const hardTrendBroken = ctx.hardTrendBroken === true;
+    const terminalAvoidFlag = ctx.terminalAvoidFlag === true;
+    const explicitInvalidationReason = String(ctx.explicitInvalidationReason || '').trim().toLowerCase();
+    const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
+    const bounceKnown = !!(bounceState && !['n/a','na','unknown','none_available'].includes(bounceState));
+    const structureKnown = !!(structureEligibility && !['n/a','na','unknown'].includes(structureEligibility));
+    const setupScoreKnown = numericValueOrNull(ctx.setupScore) !== null;
+    const pullbackKnown = !!(pullbackZone && !['n/a','na','unknown'].includes(pullbackZone));
+    const planInputsKnown = !!(
+      String(ctx.planStatusKey || '').trim()
+      || ctx.planOk === true
+      || ctx.hasEntry === true
+      || ctx.hasStop === true
+      || ctx.hasTarget === true
+    );
+    const inputCompleteness = {
+      bounceState:bounceKnown,
+      structure:structureKnown,
+      setupScore:setupScoreKnown,
+      pullbackContext:pullbackKnown,
+      planInputs:planInputsKnown
+    };
+    const incompleteInputCount = Object.values(inputCompleteness).filter(flag => flag !== true).length;
+    const incompleteInputs = incompleteInputCount > 0;
+    const hardInvalidation = structureEligibility === 'broken' || hardTrendBroken || terminalAvoidFlag || hasExplicitInvalidation;
+    const defaultLowPriorityBucket = structureEligibility === 'damaged' || bounceEarly ? 'diminishing' : 'monitor';
+    const enrich = (result) => {
+      const base = result && typeof result === 'object' ? result : {};
+      const rejectBlockedByIncompleteInputs = base.viability === 'reject' && incompleteInputs && !hardInvalidation;
+      if(rejectBlockedByIncompleteInputs){
+        return {
+          viability:'low_priority',
+          viabilityReason:'Inputs incomplete - refresh before final avoid.',
+          mainBlocker:'Inputs incomplete - refresh before final avoid.',
+          rejectReason:'',
+          visualBucket:defaultLowPriorityBucket,
+          inputCompleteness,
+          rejectBlockedByIncompleteInputs:true
+        };
+      }
+      return {
+        ...base,
+        visualBucket:base.viability === 'reject' ? 'avoid' : (base.visualBucket || defaultLowPriorityBucket),
+        inputCompleteness,
+        rejectBlockedByIncompleteInputs:false
+      };
+    };
+    const asReject = (viabilityReason, mainBlocker, rejectReason) => ({
+      viability:'reject',
+      viabilityReason,
+      mainBlocker,
+      rejectReason:String(rejectReason || viabilityReason || mainBlocker || 'Rejected by viability gate.')
+    });
+    const asLowPriority = (viabilityReason, mainBlocker) => ({
+      viability:'low_priority',
+      viabilityReason,
+      mainBlocker,
+      rejectReason:''
+    });
+    const asWatchlist = (viabilityReason, mainBlocker) => ({
+      viability:'watchlist',
+      viabilityReason,
+      mainBlocker,
+      rejectReason:''
+    });
 
     if(structureEligibility === 'broken'){
-      return {
-        viability:'reject',
-        viabilityReason:'Setup no longer viable - structure is broken.',
-        mainBlocker:'Structure is broken.'
-      };
+      return enrich(asReject(
+        'Setup no longer viable - structure is broken.',
+        'Structure is broken.',
+        'structure_broken'
+      ));
     }
-    if(structureEligibility === 'damaged' && noBounce && !planOk){
-      return {
-        viability:'reject',
-        viabilityReason:'Setup no longer viable - structure is weakening.',
-        mainBlocker:'Trend is weakening - no reliable stop level yet.'
-      };
+    if(isExtended && structureEligibility === 'alive'){
+      return enrich(asLowPriority(
+        'Extended setup - wait for pullback structure.',
+        'No pullback structure to define entry yet.'
+      ));
+    }
+    if(structureEligibility === 'damaged' && noBounce && !planOk && setupScore < 5){
+      return enrich(asReject(
+        'Setup no longer viable - structure is weakening.',
+        'Trend is weakening - no reliable stop level yet.',
+        'damaged_no_bounce_no_plan_low_score'
+      ));
     }
     if(structureEligibility === 'damaged' && !tradeabilityOk && !rrOk){
-      return {
-        viability:'reject',
-        viabilityReason:'No bounce and no valid plan.',
-        mainBlocker:'Trend is weakening - no reliable stop level yet.'
-      };
+      if(bounceUseful || setupScore >= 5){
+        return enrich(asLowPriority(
+          'Weakening setup - wait for recovery.',
+          'Trend is weakening - no reliable stop level yet.'
+        ));
+      }
+      return enrich(asReject(
+        'No bounce and no valid plan.',
+        'Trend is weakening - no reliable stop level yet.',
+        'damaged_not_tradeable_no_rr_no_recovery'
+      ));
     }
-    if(setupScore < 6 && noBounce){
-      return {
-        viability:'reject',
-        viabilityReason:'Setup has slipped below watchlist quality.',
-        mainBlocker:'No bounce confirmation yet.'
-      };
+    if(setupScore < 5 && noBounce){
+      return enrich(asReject(
+        'Setup has slipped below watchlist quality.',
+        'No bounce confirmation yet.',
+        'low_score_no_bounce'
+      ));
     }
     if(planInvalidLabel && !viableRrExists && !bounceUseful){
-      return {
-        viability:'reject',
-        viabilityReason:'No bounce and no valid plan.',
-        mainBlocker:'Invalid plan with no credible RR.'
-      };
+      return enrich(asReject(
+        'No bounce and no valid plan.',
+        'Invalid plan with no credible RR.',
+        'invalid_plan_no_rr_no_bounce'
+      ));
     }
 
     if(structureEligibility === 'damaged' && bounceEarly){
-      return {
-        viability:'low_priority',
-        viabilityReason:'Weakening setup - monitor only if it improves.',
-        mainBlocker:'Trend is weakening - no reliable stop level yet.'
-      };
+      return enrich(asLowPriority(
+        'Weakening setup - monitor only if it improves.',
+        'Trend is weakening - no reliable stop level yet.'
+      ));
     }
     if(setupScore >= 5 && setupScore < 7 && (pullbackOk || bounceEarly || structureEligibility !== 'broken')){
-      return {
-        viability:'low_priority',
-        viabilityReason:'Low-priority watch - needs structure repair.',
-        mainBlocker:structureEligibility === 'damaged'
+      return enrich(asLowPriority(
+        'Low-priority watch - needs structure repair.',
+        structureEligibility === 'damaged'
           ? 'Trend is weakening - no reliable stop level yet.'
           : (noBounce ? 'No bounce confirmation yet.' : 'Conditions are not strong enough for active focus.')
-      };
-    }
-    if(isExtended && structureEligibility === 'alive'){
-      return {
-        viability:'low_priority',
-        viabilityReason:'Extended setup - wait for pullback structure.',
-        mainBlocker:'No pullback structure to define entry yet.'
-      };
+      ));
     }
 
     if(structureEligibility === 'alive' && (pullbackOk || bounceEarly || setupScore >= 7)){
-      return {
-        viability:'watchlist',
-        viabilityReason:'Structurally alive - waiting for confirmation.',
-        mainBlocker:noBounce ? 'No bounce confirmation yet.' : 'Needs confirmation before promotion.'
-      };
+      return enrich(asWatchlist(
+        'Structurally alive - waiting for confirmation.',
+        noBounce ? 'No bounce confirmation yet.' : 'Needs confirmation before promotion.'
+      ));
     }
 
-    return {
-      viability:'low_priority',
-      viabilityReason:'Conditions are not strong enough for active focus.',
-      mainBlocker:structureEligibility === 'damaged'
+    return enrich(asLowPriority(
+      'Conditions are not strong enough for active focus.',
+      structureEligibility === 'damaged'
         ? 'Trend is weakening - no reliable stop level yet.'
         : (noBounce ? 'No bounce confirmation yet.' : 'No pullback structure to define entry yet.')
-    };
+    ));
   }
 
   function resolveGlobalVerdict(record, deps = {}){
@@ -681,7 +747,13 @@
       volumeOk:volumeState !== 'weak',
       planStatusKey,
       credibleRr,
-      isExtended
+      isExtended,
+      hasEntry,
+      hasStop,
+      hasTarget,
+      hardTrendBroken:trendState === 'broken' || (priceBelow50MA && weakStructure),
+      terminalAvoidFlag:item && item.terminal_avoid_applied === true,
+      explicitInvalidationReason
     });
     if(trackedVerdict !== 'entry' && trackedVerdict !== 'near_entry'){
       if(viability.viability === 'reject'){
@@ -797,6 +869,10 @@
       structure_reason:structureLayer.structureReason,
       viability:viability.viability,
       viability_reason:viability.viabilityReason,
+      reject_reason:viability.rejectReason || '',
+      input_completeness:viability.inputCompleteness || null,
+      reject_blocked_by_incomplete_inputs:viability.rejectBlockedByIncompleteInputs === true,
+      viability_visual_bucket:viability.visualBucket || '',
       main_blocker:trackedReason || viability.mainBlocker || '',
       rejected_by_viability_gate:viability.viability === 'reject',
       low_priority_by_viability_gate:viability.viability === 'low_priority',

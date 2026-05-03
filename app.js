@@ -21081,18 +21081,36 @@ function renderReviewWorkspace(options = {}){
   const effectiveReviewBadge = shouldPreserveSharedDiminishing
     ? getBadge('watch')
     : reviewBadge;
-  const effectiveReviewVisualBucket = hardTerminalAvoid
-    ? 'avoid'
-    : (effectiveReviewPresentationState === 'diminishing'
-      ? 'diminishing'
-      : (effectiveReviewPresentationState === 'entry'
-        ? 'entry'
-        : (effectiveReviewPresentationState === 'near_entry'
-          ? 'near_entry'
-          : (effectiveReviewPresentationState === 'dead'
-            ? 'avoid'
-            : (['monitor', 'watch'].includes(effectiveReviewPresentationState) ? 'monitor' : 'monitor')))));
-  const reviewVisualTone = effectiveReviewVisualBucket;
+  const visualBucketSource = String(
+    visualState.presentationBucket
+    || reviewLifecycleBias.trackPresentationBucket
+    || ''
+  ).trim().toLowerCase();
+  let finalReviewVisualBucket = 'monitor';
+  if (
+    sharedCanonicalVerdictKey === 'avoid'
+    || hardTerminalAvoid
+    || effectiveReviewPresentationState === 'avoid'
+    || effectiveReviewPresentationState === 'dead'
+  ){
+    finalReviewVisualBucket = 'avoid';
+  } else if (
+    effectiveReviewPresentationState === 'diminishing'
+    || visualBucketSource === 'diminishing'
+  ){
+    finalReviewVisualBucket = 'diminishing';
+  } else if (
+    sharedCanonicalVerdictKey === 'entry'
+    || effectiveReviewPresentationState === 'entry'
+  ){
+    finalReviewVisualBucket = 'entry';
+  } else if (
+    sharedCanonicalVerdictKey === 'near_entry'
+    || effectiveReviewPresentationState === 'near_entry'
+  ){
+    finalReviewVisualBucket = 'near_entry';
+  }
+  const reviewVisualTone = finalReviewVisualBucket;
   const reviewOuterBorderTone = reviewVisualTone;
   const reviewAccentClass = reviewVisualTone === 'diminishing'
     ? 'card--diminishing'
