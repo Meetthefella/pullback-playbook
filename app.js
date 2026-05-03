@@ -21081,7 +21081,7 @@ function renderReviewWorkspace(options = {}){
   const effectiveReviewBadge = shouldPreserveSharedDiminishing
     ? getBadge('watch')
     : reviewBadge;
-  const reviewVisualTone = hardTerminalAvoid || ['avoid', 'dead'].includes(effectiveReviewPresentationState)
+  const effectiveReviewVisualBucket = hardTerminalAvoid
     ? 'avoid'
     : (effectiveReviewPresentationState === 'diminishing'
       ? 'diminishing'
@@ -21089,12 +21089,15 @@ function renderReviewWorkspace(options = {}){
         ? 'entry'
         : (effectiveReviewPresentationState === 'near_entry'
           ? 'near_entry'
-          : (['monitor', 'watch'].includes(effectiveReviewPresentationState) ? 'monitor' : 'neutral'))));
+          : (effectiveReviewPresentationState === 'dead'
+            ? 'avoid'
+            : (['monitor', 'watch'].includes(effectiveReviewPresentationState) ? 'monitor' : 'monitor')))));
+  const reviewVisualTone = effectiveReviewVisualBucket;
   const reviewOuterBorderTone = reviewVisualTone;
   const reviewAccentClass = reviewVisualTone === 'diminishing'
     ? 'card--diminishing'
     : (reviewVisualTone === 'avoid'
-      ? (effectiveReviewPresentationState === 'dead' ? 'card--dead' : 'card--avoid')
+      ? 'card--avoid'
       : (reviewVisualTone === 'monitor'
         ? 'card--monitor'
         : (reviewVisualTone === 'near_entry'
@@ -21102,11 +21105,14 @@ function renderReviewWorkspace(options = {}){
           : (reviewVisualTone === 'entry' ? 'card--entry' : 'card--watch'))));
   const reviewRootToneClass = `review-tone--${reviewVisualTone}`;
   const reviewOuterShellClass = `visual-state-card visual-state-${effectiveReviewPresentationState} visual-tone-${reviewOuterBorderTone} ${reviewAccentClass} ${reviewRootToneClass}`;
-  const reviewShellStyleAttr = reviewVisualTone === 'diminishing'
-    ? '--visual-state-background:#F97316;--visual-state-border:rgba(249, 115, 22, 0.46);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#F97316;'
-    : (reviewVisualTone === 'avoid'
-      ? '--visual-state-background:#DC2626;--visual-state-border:rgba(220, 38, 38, 0.48);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#DC2626;'
-      : visualState.styleAttr || '');
+  const reviewToneStyleAttrs = {
+    entry:'--visual-state-background:#16A34A;--visual-state-border:rgba(22, 163, 74, 0.44);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#16A34A;',
+    near_entry:'--visual-state-background:#0284C7;--visual-state-border:rgba(2, 132, 199, 0.44);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#0284C7;',
+    monitor:'--visual-state-background:#F59E0B;--visual-state-border:rgba(245, 158, 11, 0.44);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#F59E0B;',
+    diminishing:'--visual-state-background:#F97316;--visual-state-border:rgba(249, 115, 22, 0.46);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#F97316;',
+    avoid:'--visual-state-background:#DC2626;--visual-state-border:rgba(220, 38, 38, 0.48);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#DC2626;'
+  };
+  const reviewShellStyleAttr = reviewToneStyleAttrs[reviewVisualTone] || reviewToneStyleAttrs.monitor;
   const reviewVisualStateSource = reviewVisualTone === 'avoid' && visualState.terminal_avoid_applied
     ? 'terminal_avoid'
     : (visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || 'resolver');
