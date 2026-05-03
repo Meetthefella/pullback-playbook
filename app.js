@@ -6530,6 +6530,7 @@ function runWatchlistLifecycleEvaluation(options = {}){
     ? new Set(options.tickers.map(normalizeTicker).filter(Boolean))
     : null;
   let changed = false;
+  const changedTickers = new Set();
   try{
     allTickerRecords().forEach(record => {
       if(!record.watchlist || !record.watchlist.inWatchlist) return;
@@ -6608,8 +6609,23 @@ function runWatchlistLifecycleEvaluation(options = {}){
       }
       maybeExpireTickerRecord(record);
       const after = watchlistLifecycleStateSignature(record);
-      if(before !== after) changed = true;
+      if(before !== after){
+        changed = true;
+        const symbol = normalizeTicker(record && record.ticker);
+        if(symbol) changedTickers.add(symbol);
+      }
     });
+    if(changedTickers.size){
+      changedTickers.forEach(symbol => {
+        refreshTrackedTickerState(symbol, {
+          source:'track',
+          reason:'lifecycle_changed',
+          force:true,
+          persist:false,
+          emitTrace:false
+        });
+      });
+    }
     if(changed && options.persist !== false) commitTickerState();
     if(options.render !== false && (changed || options.forceRender === true)){
       renderWatchlist();
