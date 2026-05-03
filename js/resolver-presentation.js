@@ -131,13 +131,27 @@
       || finalVerdictFromResolvedContract(resolvedContract, derivedStates, deps)
       || 'watch'
     ).trim();
-    const canonicalVerdict = coerceCanonicalVerdict(rawVerdict, deps);
-    const finalVerdict = options.pendingResolution === true ? 'watch' : canonicalVerdict;
-    const renderedVerdict = finalVerdict;
-    const state = visualStateKey(renderedVerdict, deps);
+    let canonicalVerdict = coerceCanonicalVerdict(rawVerdict, deps);
+    const explicitInvalidationReason = String(legacyVerdict && legacyVerdict.explicit_invalidation_reason || '').trim().toLowerCase();
+    const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
+    const terminalAvoidApplied = legacyVerdict && legacyVerdict.terminal_avoid_applied === true;
     const structureEligibility = String(legacyVerdict && legacyVerdict.structure_eligibility || '').trim().toLowerCase();
     const viability = String(legacyVerdict && legacyVerdict.viability || '').trim().toLowerCase();
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
+    const hardStructureFailure = structureEligibility === 'broken' || structureState === 'broken';
+    const weakeningLowPriorityRecovery = (
+      viability === 'low_priority'
+      && structureState === 'weakening'
+      && !terminalAvoidApplied
+      && !hasExplicitInvalidation
+      && !hardStructureFailure
+    );
+    if(canonicalVerdict === 'avoid' && weakeningLowPriorityRecovery){
+      canonicalVerdict = 'watch';
+    }
+    const finalVerdict = options.pendingResolution === true ? 'watch' : canonicalVerdict;
+    const renderedVerdict = finalVerdict;
+    const state = visualStateKey(renderedVerdict, deps);
     const previousVerdict = coerceCanonicalVerdict(
       safeRecord && safeRecord.meta && safeRecord.meta.previousFinalVerdict,
       deps

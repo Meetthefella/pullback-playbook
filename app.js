@@ -21235,14 +21235,27 @@ function renderReviewWorkspace(options = {}){
     visualState.terminal_avoid_applied === true
     || reviewLifecycleBias.terminal_avoid_applied === true
   );
+  const reviewStructureState = String(
+    derivedStates.structureState
+    || visualState.structure_state
+    || globalVerdict.structure_state
+    || ''
+  ).trim().toLowerCase();
+  const reviewViability = String(
+    globalVerdict.viability
+    || visualState.viability
+    || ''
+  ).trim().toLowerCase();
+  const hardStructureFailure = ['broken','failed'].includes(reviewStructureState)
+    || String(visualState.structure_eligibility || globalVerdict.structure_eligibility || '').trim().toLowerCase() === 'broken';
+  const viabilityReject = reviewViability === 'reject';
   // Canonical verdict is the authority. If canonical is watch, stale terminal flags
   // must not force avoid styling during review-open presentation.
   const hardTerminalAvoid = !!(
-    sharedCanonicalVerdictKey === 'avoid'
-    || (
-      sharedCanonicalVerdictKey !== 'watch'
-      && (terminalAvoidFlagged || hasExplicitInvalidation)
-    )
+    terminalAvoidFlagged
+    || hasExplicitInvalidation
+    || hardStructureFailure
+    || viabilityReject
   );
   const shouldPreserveSharedDiminishing = !!(
     bundleValid
