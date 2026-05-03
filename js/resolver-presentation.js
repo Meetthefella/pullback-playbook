@@ -122,7 +122,15 @@
       safeRecord.marketData && safeRecord.marketData.currency
     );
     const resolvedContract = options.resolvedContract || deps.resolveFinalStateContract(safeRecord, {context, derivedStates, displayedPlan});
-    const rawVerdict = finalVerdictFromResolvedContract(resolvedContract, derivedStates, deps);
+    const rawVerdict = String(
+      (resolvedContract && (
+        resolvedContract.finalVerdict
+        || resolvedContract.final_verdict_rendered
+        || resolvedContract.final_verdict
+      ))
+      || finalVerdictFromResolvedContract(resolvedContract, derivedStates, deps)
+      || 'watch'
+    ).trim();
     const canonicalVerdict = coerceCanonicalVerdict(rawVerdict, deps);
     const finalVerdict = options.pendingResolution === true ? 'watch' : canonicalVerdict;
     const renderedVerdict = finalVerdict;
