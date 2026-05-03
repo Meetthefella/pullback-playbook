@@ -17122,6 +17122,7 @@ function currentChecks(){
     || {}
   );
   if(!currentChecks._missingLogged) currentChecks._missingLogged = new Set();
+  let usedChecklistFallback = false;
   checklistIds.forEach(id => {
     const input = $(id);
     if(input && typeof input.checked === 'boolean'){
@@ -17129,6 +17130,7 @@ function currentChecks(){
       return;
     }
     out[id] = !!savedChecks[id];
+    usedChecklistFallback = true;
     if(!currentChecks._missingLogged.has(id)){
       currentChecks._missingLogged.add(id);
       if(isPerfDebugEnabled() && typeof console !== 'undefined' && console.debug){
@@ -17136,6 +17138,7 @@ function currentChecks(){
       }
     }
   });
+  currentChecks._lastUsedFallback = usedChecklistFallback;
   return out;
 }
 
@@ -20856,6 +20859,8 @@ function updateReviewAiSummaryOverflowHint(){
 }
 
 function renderReviewWorkspace(options = {}){
+  uiState.reviewRenderPass = Number(uiState.reviewRenderPass || 0) + 1;
+  const reviewRenderPass = Number(uiState.reviewRenderPass || 0);
   const reviewSeq = reviewRenderSeqForOptions(options);
   if(!isCurrentReviewRender(reviewSeq)) return;
   const box = $('reviewWorkspace');
@@ -20917,6 +20922,7 @@ function renderReviewWorkspace(options = {}){
   const usedCachedBundle = !!(refreshBundle && refreshBundle.reusedCachedContract === true);
   const requiredBundleFields = ['record','canonicalContract','resolvedContract','visualState','globalVerdict','effectivePlan','lifecycleSnapshot'];
   const missingBundleFields = requiredBundleFields.filter(field => !(refreshBundle && refreshBundle[field] != null));
+  const bundleComplete = bundleValid && missingBundleFields.length === 0;
   const refreshedRecord = refreshBundle && refreshBundle.record ? refreshBundle.record : liveRecord;
   const canonicalPlanSynced = readOnlyReviewOpen
     ? false
@@ -21239,10 +21245,13 @@ function renderReviewWorkspace(options = {}){
   const reviewBucketSource = visualBucketSource || '(none)';
   const reviewBucketBeforeFallback = effectiveReviewPresentationState || '(none)';
   const hasHardReviewAvoidSignal = !!(
-    sharedCanonicalVerdictKey === 'avoid'
-    || hardTerminalAvoid
-    || effectiveReviewPresentationState === 'avoid'
-    || effectiveReviewPresentationState === 'dead'
+    bundleComplete
+    && (
+      sharedCanonicalVerdictKey === 'avoid'
+      || hardTerminalAvoid
+      || effectiveReviewPresentationState === 'avoid'
+      || effectiveReviewPresentationState === 'dead'
+    )
   );
   let finalReviewVisualBucket = 'monitor';
   if (hasHardReviewAvoidSignal){
@@ -21308,6 +21317,22 @@ function renderReviewWorkspace(options = {}){
   const reviewConflictingToneClassesDetected = toneFamilies.card.size > 1 || toneFamilies.visual.size > 1 || toneFamilies.review.size > 1;
   const reviewScoreStyleApplied = 'suppressed_root_review_tone';
   const reviewPanelToneClass = `review-panel-tone-${reviewVisualTone}`;
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_STATE_SOURCE]', {
+      ticker:record.ticker,
+      renderPass:reviewRenderPass,
+      bundleComplete,
+      usedChecklistFallback:currentChecks._lastUsedFallback === true,
+      canonicalVerdict:sharedCanonicalVerdictKey || visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict || '',
+      visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket || '',
+      presentationBucket:visualState.presentationBucket || '',
+      effectiveReviewPresentationState,
+      finalReviewVisualBucket,
+      shellClass:reviewOuterShellClass,
+      accentClass:reviewAccentClass,
+      staleAvoidSuppressed:visualState.staleAvoidSuppressed === true
+    });
+  }
   debugTickerStateSources(record.ticker, 'review', {
     canonicalVerdict:sharedCanonicalVerdictKey || visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict,
     finalVerdict:visualState.finalVerdict || visualState.final_verdict,
