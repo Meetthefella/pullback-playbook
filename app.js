@@ -21047,11 +21047,17 @@ function renderReviewWorkspace(options = {}){
   const reviewPresentationState = ['diminishing','avoid','dead','entry','near_entry','monitor','watch'].includes(reviewPresentationStateRaw)
     ? reviewPresentationStateRaw
     : normalizeGlobalVerdictKey(reviewPresentationStateRaw || 'monitor');
+  const explicitInvalidationReason = String(
+    visualState.explicit_invalidation_reason
+    || globalVerdict.explicit_invalidation_reason
+    || ''
+  ).trim().toLowerCase();
+  const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
   const hardTerminalAvoid = !!(
     sharedCanonicalVerdictKey === 'avoid'
     || visualState.terminal_avoid_applied === true
     || reviewLifecycleBias.terminal_avoid_applied === true
-    || String(safeResolvedContract.primaryState || '').trim().toLowerCase() === 'dead'
+    || hasExplicitInvalidation
   );
   const shouldPreserveSharedDiminishing = !!(
     bundleValid
