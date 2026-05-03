@@ -7435,6 +7435,38 @@ function renderWatchlistCardElement(record, options = {}){
     : '';
   const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
   const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
+  debugTickerStateSources(entry.ticker, 'track', {
+    canonicalVerdict:watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
+    finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
+    renderedVerdict:watchlistVisualState.final_verdict_rendered || watchlistVisualState.renderedVerdict || watchlistVisualState.finalVerdict,
+    visualBucket:watchlistVisualState.visualBucket || watchlistVisualState.presentationBucket || watchlistVisualState.trackPresentationBucket,
+    presentationBucket:presentationBucket || watchlistVisualState.presentationBucket,
+    tone:watchlistVisualState.visual_tone || watchlistVisualState.trackPresentationTone || '',
+    className:watchlistVisualState.className || watchlistVisualState.toneClass || '',
+    cardClass:String(watchlistVisualState.className || '').match(/card--[a-z-]+/)?.[0] || '',
+    shellClass:'',
+    accentClass:'',
+    styleAttr:watchlistVisualState.styleAttr || '',
+    structure:derivedStates.structureState || '',
+    pullback:derivedStates.pullbackZone || derivedStates.pullbackState || '',
+    bounce:derivedStates.bounceState || '',
+    viability:globalVerdict && globalVerdict.viability || '',
+    viabilityReason:globalVerdict && globalVerdict.viability_reason || '',
+    terminalAvoidApplied:watchlistVisualState.terminal_avoid_applied === true,
+    hardTerminalAvoid:false,
+    explicitInvalidationReason:watchlistVisualState.explicit_invalidation_reason || '',
+    sourceFields:{
+      badge:'watchlistVisualState.badge',
+      headlineCopy:'watchlistVisualState.decision_summary',
+      actionGuidance:'resolvedContract.actionLabel',
+      shellColour:'watchlistVisualState.className/styleAttr',
+      leftAccentColour:'watchlistVisualState.className/styleAttr',
+      sectionBucket:'watchlistVisualState.presentationBucket/visualBucket'
+    },
+    fromStoredFields:false,
+    fromResolvedStateBundleCache:watchlistVisualState.watchlist_presentation_source === 'pending_passthrough',
+    fromFreshResolverOutput:watchlistVisualState.watchlist_presentation_source !== 'pending_passthrough'
+  });
   div.className = `resultcompact result-card result-feed-card scan-card watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
   div.style.cssText = watchlistVisualState.styleAttr || '';
   div.dataset.visualTone = watchlistVisualState.visual_tone || '';
@@ -9434,10 +9466,11 @@ function cardVisualStyleAttr(setupScore, structureState){
 
 function renderCompactResultCardFromView(view){
   const item = view && view.item ? view.item : {};
+  const setupStates = view && view.setupStates ? view.setupStates : analysisDerivedStatesFromRecord(item);
   const statusChip = primaryShortlistStatusChip(view);
   const visualState = resolveVisualState(item, 'scanner', {
     displayedPlan:view && view.displayedPlan,
-    derivedStates:view && view.setupStates,
+    derivedStates:setupStates,
     pendingResolution:!!(view && view.resolutionPending),
     setupScore:view && view.setupScore
   });
@@ -9449,6 +9482,38 @@ function renderCompactResultCardFromView(view){
   const companyLine = [item && item.meta && item.meta.companyName || '', item && item.meta && item.meta.exchange || ''].filter(Boolean).join(' | ');
   const technicalSummary = scanCardTechnicalSummaryForView(view);
   const decisionSummary = visualState.decision_summary || compactReasonLineForView(view, 3) || scanCardPrimaryActionLabel(view);
+  debugTickerStateSources(item && item.ticker, 'scan', {
+    canonicalVerdict:visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict,
+    finalVerdict:visualState.finalVerdict || visualState.final_verdict,
+    renderedVerdict:visualState.final_verdict_rendered || visualState.renderedVerdict || visualState.finalVerdict,
+    visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket,
+    presentationBucket:visualState.presentationBucket || visualState.visualBucket,
+    tone:visualState.visual_tone,
+    className:visualState.className || visualState.toneClass || '',
+    cardClass:String(visualState.className || '').match(/card--[a-z-]+/)?.[0] || '',
+    shellClass:'',
+    accentClass:'',
+    styleAttr:visualState.styleAttr || '',
+    structure:setupStates.structureState || '',
+    pullback:setupStates.pullbackZone || setupStates.pullbackState || '',
+    bounce:setupStates.bounceState || '',
+    viability:visualState.legacyVerdict && visualState.legacyVerdict.viability || '',
+    viabilityReason:visualState.legacyVerdict && visualState.legacyVerdict.viability_reason || '',
+    terminalAvoidApplied:visualState.terminal_avoid_applied === true,
+    hardTerminalAvoid:false,
+    explicitInvalidationReason:visualState.explicit_invalidation_reason || '',
+    sourceFields:{
+      badge:'visualState.badge',
+      headlineCopy:'visualState.decision_summary',
+      actionGuidance:'resolvedContract/action fallback',
+      shellColour:'visualState.className/styleAttr',
+      leftAccentColour:'visualState.className/styleAttr',
+      sectionBucket:'visualState.presentationBucket/visualBucket'
+    },
+    fromStoredFields:false,
+    fromResolvedStateBundleCache:false,
+    fromFreshResolverOutput:true
+  });
   return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualState.className || visualState.toneClass || '')}" style="${escapeHtml(visualState.styleAttr || '')}" data-visual-tone="${escapeHtml(visualState.visual_tone || '')}" data-visual-state="${escapeHtml(visualState.state || '')}" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="scan-card__header"><div class="scan-card__header-row"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div></div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(resolvedBadge.className || statusChip.className || 'watch')}">${escapeHtml(resolvedBadge.text || resolvedBadge.label || statusChip.label || 'Watch')}</span><span class="score visual-score scan-card__score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="scan-card__company tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="scan-card__body"><div class="scan-card__technical tiny">${escapeHtml(technicalSummary)}</div><div class="scan-card__decision resultreason decision-summary">${escapeHtml(decisionSummary)}</div></div><div class="scan-card__footer"><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button></div>${secondaryUiMarkup}</div>`;
 }
 
@@ -18926,6 +18991,83 @@ function validateSharedRefreshBundle(bundle, context = 'unknown'){
   });
 }
 
+function debugTickerStateSources(ticker, surface, bundle = {}){
+  if(!isPerfDebugEnabled()) return;
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  window.__tickerStateSourceDebug = window.__tickerStateSourceDebug && typeof window.__tickerStateSourceDebug === 'object'
+    ? window.__tickerStateSourceDebug
+    : {byTicker:new Map()};
+  const store = window.__tickerStateSourceDebug.byTicker instanceof Map
+    ? window.__tickerStateSourceDebug.byTicker
+    : (window.__tickerStateSourceDebug.byTicker = new Map());
+  const state = bundle && typeof bundle === 'object' ? bundle : {};
+  const canonicalVerdict = String(state.canonicalVerdict || state.finalVerdict || '').trim().toLowerCase();
+  const visualBucket = String(state.visualBucket || state.presentationBucket || '').trim().toLowerCase();
+  const shellClass = String(state.shellClass || '').trim();
+  const accentClass = String(state.accentClass || '').trim();
+  const className = String(state.className || '').trim();
+  const hasAvoidShell = /card--avoid|review-tone--avoid|review-panel-tone-avoid|visual-tone-avoid|visual-state-avoid/.test(`${shellClass} ${accentClass} ${className}`);
+  const saysDiminishing = visualBucket === 'diminishing' || String(state.presentationBucket || '').trim().toLowerCase() === 'diminishing';
+  const fromStored = state.fromStoredFields === true;
+  const fromCache = state.fromResolvedStateBundleCache === true;
+  const fromFresh = state.fromFreshResolverOutput === true;
+  const payload = {
+    ticker:symbol,
+    surface:String(surface || ''),
+    canonicalVerdict:state.canonicalVerdict || '',
+    finalVerdict:state.finalVerdict || '',
+    renderedVerdict:state.renderedVerdict || '',
+    visualBucket:state.visualBucket || '',
+    presentationBucket:state.presentationBucket || '',
+    tone:state.tone || '',
+    className:state.className || '',
+    cardClass:state.cardClass || '',
+    shellClass:state.shellClass || '',
+    accentClass:state.accentClass || '',
+    styleAttr:state.styleAttr || '',
+    structure:state.structure || '',
+    pullback:state.pullback || '',
+    bounce:state.bounce || '',
+    viability:state.viability || '',
+    viabilityReason:state.viabilityReason || '',
+    terminalAvoidApplied:state.terminalAvoidApplied === true,
+    hardTerminalAvoid:state.hardTerminalAvoid === true,
+    explicitInvalidationReason:state.explicitInvalidationReason || '',
+    sourceFields:state.sourceFields || {},
+    fromStoredFields:fromStored,
+    fromResolvedStateBundleCache:fromCache,
+    fromFreshResolverOutput:fromFresh
+  };
+  console.info('[TickerStateSource]', payload);
+  if(saysDiminishing && hasAvoidShell){
+    console.warn('[TickerStateSource][Warning]', {ticker:symbol, surface, code:'diminishing_copy_but_avoid_shell'});
+  }
+  if(canonicalVerdict === 'watch' && hasAvoidShell){
+    console.warn('[TickerStateSource][Warning]', {ticker:symbol, surface, code:'watch_canonical_but_avoid_shell'});
+  }
+  if(fromStored && fromFresh){
+    console.warn('[TickerStateSource][Warning]', {ticker:symbol, surface, code:'stored_visual_used_while_fresh_exists'});
+  }
+  const prev = store.get(symbol) || {};
+  const next = {...prev, [surface]:payload};
+  store.set(symbol, next);
+  if(next.scan && next.track){
+    const scanVerdict = String(next.scan.canonicalVerdict || '').trim().toLowerCase();
+    const trackVerdict = String(next.track.canonicalVerdict || '').trim().toLowerCase();
+    if(scanVerdict && trackVerdict && scanVerdict !== trackVerdict){
+      console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'scan_track_verdict_mismatch', scanVerdict, trackVerdict});
+    }
+  }
+  if(next.review && next.track){
+    const reviewBucket = String(next.review.visualBucket || '').trim().toLowerCase();
+    const trackBucket = String(next.track.visualBucket || '').trim().toLowerCase();
+    if(reviewBucket && trackBucket && reviewBucket !== trackBucket){
+      console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'review_track_bucket_mismatch', reviewBucket, trackBucket});
+    }
+  }
+}
+
 function hasCompleteSharedRefreshBundle(bundle){
   return !!(
     bundle
@@ -21166,6 +21308,38 @@ function renderReviewWorkspace(options = {}){
   const reviewConflictingToneClassesDetected = toneFamilies.card.size > 1 || toneFamilies.visual.size > 1 || toneFamilies.review.size > 1;
   const reviewScoreStyleApplied = 'suppressed_root_review_tone';
   const reviewPanelToneClass = `review-panel-tone-${reviewVisualTone}`;
+  debugTickerStateSources(record.ticker, 'review', {
+    canonicalVerdict:sharedCanonicalVerdictKey || visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict,
+    finalVerdict:visualState.finalVerdict || visualState.final_verdict,
+    renderedVerdict:visualState.final_verdict_rendered || visualState.renderedVerdict || visualState.finalVerdict,
+    visualBucket:finalReviewVisualBucket || visualState.visualBucket || visualState.presentationBucket,
+    presentationBucket:effectiveReviewPresentationState || visualState.presentationBucket || '',
+    tone:reviewVisualTone || '',
+    className:reviewOuterShellClass || '',
+    cardClass:reviewAccentClass || '',
+    shellClass:reviewOuterShellClass || '',
+    accentClass:reviewAccentClass || '',
+    styleAttr:reviewShellStyleAttr || '',
+    structure:derivedStates.structureState || '',
+    pullback:derivedStates.pullbackZone || derivedStates.pullbackState || '',
+    bounce:derivedStates.bounceState || '',
+    viability:globalVerdict.viability || '',
+    viabilityReason:globalVerdict.viability_reason || '',
+    terminalAvoidApplied:terminalAvoidFlagged === true || visualState.terminal_avoid_applied === true,
+    hardTerminalAvoid:hardTerminalAvoid === true,
+    explicitInvalidationReason:explicitInvalidationReason || '',
+    sourceFields:{
+      badge:'effectiveReviewBadge',
+      headlineCopy:'decisionSummary/reviewLifecycleBias',
+      actionGuidance:'reviewAction',
+      shellColour:'finalReviewVisualBucket -> reviewOuterShellClass/reviewShellStyleAttr',
+      leftAccentColour:'reviewAccentClass',
+      sectionBucket:'finalReviewVisualBucket/effectiveReviewPresentationState'
+    },
+    fromStoredFields:false,
+    fromResolvedStateBundleCache:usedCachedBundle === true,
+    fromFreshResolverOutput:usedCachedBundle !== true
+  });
   const reviewAction = effectiveReviewPresentationState === 'diminishing'
     ? {label:'DIMINISHING', detail:'Wait for recovery', planAllowed:false, watchlistAllowed:true}
     : getActions(visualState.finalVerdict || visualState.final_verdict);
