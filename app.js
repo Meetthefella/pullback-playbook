@@ -21122,6 +21122,13 @@ function renderReviewWorkspace(options = {}){
     finalReviewVisualBucket = 'near_entry';
   }
   const reviewVisualTone = finalReviewVisualBucket;
+  const finalReviewVisualState = finalReviewVisualBucket === 'near_entry'
+    ? 'near_entry'
+    : (finalReviewVisualBucket === 'entry'
+      ? 'entry'
+      : (finalReviewVisualBucket === 'avoid'
+        ? 'avoid'
+        : (finalReviewVisualBucket === 'diminishing' ? 'diminishing' : 'monitor')));
   const reviewBucketAfterFallback = finalReviewVisualBucket;
   const reviewOuterBorderTone = reviewVisualTone;
   const reviewAccentClass = reviewVisualTone === 'diminishing'
@@ -21134,7 +21141,7 @@ function renderReviewWorkspace(options = {}){
           ? 'card--near-entry'
           : (reviewVisualTone === 'entry' ? 'card--entry' : 'card--watch'))));
   const reviewRootToneClass = `review-tone--${reviewVisualTone}`;
-  const reviewOuterShellClass = `visual-state-card visual-state-${effectiveReviewPresentationState} visual-tone-${reviewOuterBorderTone} ${reviewAccentClass} ${reviewRootToneClass}`;
+  const reviewOuterShellClass = `visual-state-card visual-state-${finalReviewVisualState} visual-tone-${reviewOuterBorderTone} ${reviewAccentClass} ${reviewRootToneClass}`;
   const reviewToneStyleAttrs = {
     entry:'--visual-state-background:#16A34A;--visual-state-border:rgba(22, 163, 74, 0.44);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#16A34A;',
     near_entry:'--visual-state-background:#0284C7;--visual-state-border:rgba(2, 132, 199, 0.44);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#0284C7;',
@@ -21417,16 +21424,42 @@ function renderReviewWorkspace(options = {}){
     `Volume ${String(derivedStates.volumeState || 'n/a')}`,
     `Market ${qualityAdjustments.weakRegimePenalty ? 'weak' : 'supportive'}`
   ].join(' | ');
-  box.className = `list reviewworkspace-shell ${reviewOuterShellClass}`;
+  box.className = 'list reviewworkspace-shell';
+  box.classList.remove(
+    'card--entry',
+    'card--near-entry',
+    'card--monitor',
+    'card--diminishing',
+    'card--avoid',
+    'card--watch',
+    'review-tone--entry',
+    'review-tone--near_entry',
+    'review-tone--monitor',
+    'review-tone--diminishing',
+    'review-tone--avoid',
+    'visual-state-entry',
+    'visual-state-near_entry',
+    'visual-state-monitor',
+    'visual-state-diminishing',
+    'visual-state-avoid',
+    'visual-tone-entry',
+    'visual-tone-near_entry',
+    'visual-tone-monitor',
+    'visual-tone-diminishing',
+    'visual-tone-avoid'
+  );
+  reviewOuterClassList.forEach(token => {
+    if(token) box.classList.add(token);
+  });
   box.style.cssText = reviewShellStyleAttr;
   box.dataset.visualTone = reviewOuterBorderTone || visualState.visual_tone || '';
-  box.dataset.visualState = effectiveReviewPresentationState || visualState.state || '';
+  box.dataset.visualState = finalReviewVisualState || visualState.state || '';
   box.dataset.reviewPresentationState = effectiveReviewPresentationState || '';
   box.dataset.reviewVisualSource = reviewVisualStateSource;
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate({persist:false});
   });
-  box.innerHTML = `<div class="reviewworkspace reviewworkspace--ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(reviewOuterBorderTone || visualState.visual_tone || '')}" data-visual-state="${escapeHtml(effectiveReviewPresentationState || visualState.state || '')}">
+  box.innerHTML = `<div class="reviewworkspace reviewworkspace--ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(reviewOuterBorderTone || visualState.visual_tone || '')}" data-visual-state="${escapeHtml(finalReviewVisualState || visualState.state || '')}">
     <div class="panelbox review-section review-section--snapshot">
       <div class="reviewsectionhead"><strong>Decision Summary</strong></div>
       <div class="reviewhero reviewhero-compact">
@@ -21458,7 +21491,7 @@ function renderReviewWorkspace(options = {}){
         ${chartPreview}
       </div>
     </div>
-    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(effectiveReviewPresentationState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">
+    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(finalReviewVisualState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">
       <div class="reviewsectionhead"><strong id="plannerSection">Trade Plan</strong></div>
       <div class="summary review-hidden" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div>
       <input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden />
