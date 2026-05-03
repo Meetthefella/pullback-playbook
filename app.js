@@ -7205,7 +7205,8 @@ function buildWatchlistRenderSignature(records, options = {}){
   return parts.join('|');
 }
 
-function shouldDisplayWatchlistRecordForCurrentFilter(record){
+function shouldDisplayWatchlistRecordForCurrentFilter(record, options = {}){
+  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   const showExpired = !!state.showExpiredWatchlist;
   const lifecycle = syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache});
   if(showExpired) return true;
@@ -7216,7 +7217,7 @@ function watchlistPlacementSnapshot(record){
   const item = normalizeTickerRecord(record || {});
   const lifecycle = syncWatchlistLifecycle(item) || watchlistLifecycleSnapshot(item);
   return {
-    visible:shouldDisplayWatchlistRecordForCurrentFilter(item),
+    visible:shouldDisplayWatchlistRecordForCurrentFilter(item, {passCache:null}),
     bucket:watchlistPresentationBucketForRecord(item),
     lifecycleRank:Number.isFinite(lifecycle && lifecycle.rank) ? lifecycle.rank : 99,
     priority:watchlistPriorityForRecord(item).score
@@ -18889,6 +18890,15 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
       || resolvedContract.final_verdict
     ) || 'watch'
   );
+  const visualBucketForCheck = String(visualState.visualBucket || visualState.presentationBucket || '').trim().toLowerCase();
+  if((canonicalVerdictKey === 'avoid' && visualBucketForCheck === 'diminishing') || (canonicalVerdictKey === 'watch' && visualBucketForCheck === 'avoid')){
+    console.warn('[STATE_CONTRADICTION]', {
+      ticker:item.ticker,
+      source:'buildResolvedStateBundleFromRecord',
+      canonicalVerdict:canonicalVerdictKey,
+      visualBucket:visualBucketForCheck
+    });
+  }
   const canonicalContract = {
     canonicalVerdictKey,
     presentationLabel:verdictPresentationLabelForKey(canonicalVerdictKey),
@@ -19040,9 +19050,16 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     sourceFields:state.sourceFields || {},
     fromStoredFields:fromStored,
     fromResolvedStateBundleCache:fromCache,
-    fromFreshResolverOutput:fromFresh
+    fromFreshResolverOutput:fromFresh,
+    finalReviewVisualBucket:state.finalReviewVisualBucket || ''
   };
   console.info('[TickerStateSource]', payload);
+  if(canonicalVerdict === 'avoid' && visualBucket === 'diminishing'){
+    console.warn('[STATE_CONTRADICTION]', {ticker:symbol, surface, code:'canonical_avoid_visual_diminishing', canonicalVerdict, visualBucket});
+  }
+  if(canonicalVerdict === 'watch' && visualBucket === 'avoid'){
+    console.warn('[STATE_CONTRADICTION]', {ticker:symbol, surface, code:'canonical_watch_visual_avoid', canonicalVerdict, visualBucket});
+  }
   if(saysDiminishing && hasAvoidShell){
     console.warn('[TickerStateSource][Warning]', {ticker:symbol, surface, code:'diminishing_copy_but_avoid_shell'});
   }
@@ -19068,6 +19085,16 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     if(reviewBucket && trackBucket && reviewBucket !== trackBucket){
       console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'review_track_bucket_mismatch', reviewBucket, trackBucket});
     }
+  }
+  const finalReviewVisualBucket = String(payload.finalReviewVisualBucket || '').trim().toLowerCase();
+  if(
+    finalReviewVisualBucket
+    && visualBucket
+    && finalReviewVisualBucket !== visualBucket
+    && state.terminalAvoidApplied !== true
+    && state.hardTerminalAvoid !== true
+  ){
+    console.warn('[STATE_CONTRADICTION]', {ticker:symbol, surface, code:'review_bucket_differs_without_terminal_avoid', finalReviewVisualBucket, visualBucket});
   }
 }
 
@@ -21363,7 +21390,8 @@ function renderReviewWorkspace(options = {}){
     },
     fromStoredFields:false,
     fromResolvedStateBundleCache:usedCachedBundle === true,
-    fromFreshResolverOutput:usedCachedBundle !== true
+    fromFreshResolverOutput:usedCachedBundle !== true,
+    finalReviewVisualBucket
   });
   const reviewAction = effectiveReviewPresentationState === 'diminishing'
     ? {label:'DIMINISHING', detail:'Wait for recovery', planAllowed:false, watchlistAllowed:true}
