@@ -12916,9 +12916,19 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const broken = structureEligibility === 'broken' || ['broken','invalid','failed'].includes(structureState);
   const avoidByBroken = broken;
   const avoidByExplicitInvalidation = !!explicitInvalidation;
+  const rejectedByViabilityGate = !!(
+    verdictSource
+    && (
+      verdictSource.rejected_by_viability_gate === true
+      || String(verdictSource.viability || '').trim().toLowerCase() === 'reject'
+    )
+  );
+  const canonicalAvoidVerdict = currentResolverVerdict === 'avoid';
+  const displayAvoid = canonicalAvoidVerdict || rejectedByViabilityGate || avoidByBroken || avoidByExplicitInvalidation;
   const weakening = structureEligibility === 'damaged' || structureState === 'weakening';
   const monitorResolverVerdict = ['monitor','watch'].includes(currentResolverVerdict) || ['monitor','watch'].includes(baseVerdict);
   const staleAvoidSuppressed = monitorResolverVerdict
+    && !displayAvoid
     && structuralAliveAtRefresh
     && !avoidAllowedByStructureGuard
     && !explicitInvalidation
@@ -12937,7 +12947,9 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     ? 'Structure broken.'
     : (avoidByExplicitInvalidation
       ? 'Explicit invalidation.'
-      : (avoidByVerdict ? 'Terminal avoid/dead verdict.' : ''));
+      : (rejectedByViabilityGate
+        ? 'Rejected by viability gate.'
+        : (avoidByVerdict ? 'Terminal avoid/dead verdict.' : '')));
   const finalVerdictKey = rawFinalVerdict || normalizedFinalVerdict || 'watch';
   const effectiveFinalVerdictKey = staleAvoidSuppressed && ['monitor','watch'].includes(baseVerdict)
     ? baseVerdict
@@ -12958,7 +12970,7 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     && !avoidByVerdict
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
-  const avoidTrackEligible = avoidByVerdict || avoidByBroken || avoidByExplicitInvalidation;
+  const avoidTrackEligible = displayAvoid;
   let presentationBucket = 'monitor';
   if(avoidTrackEligible){
     presentationBucket = 'avoid';
@@ -13040,6 +13052,7 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     previousLifecycleState:previousLifecycleState || '(none)',
     staleAvoidSuppressed,
     staleRejectSuppressed,
+    rejectedByViabilityGate,
     terminalAvoidReason:terminalAvoidReason || '(none)',
     diminishingReason:diminishingReason || '(none)',
     structuralAliveAtRefresh,
