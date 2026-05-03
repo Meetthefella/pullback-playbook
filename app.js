@@ -21053,11 +21053,18 @@ function renderReviewWorkspace(options = {}){
     || ''
   ).trim().toLowerCase();
   const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
+  const terminalAvoidFlagged = !!(
+    visualState.terminal_avoid_applied === true
+    || reviewLifecycleBias.terminal_avoid_applied === true
+  );
+  // Canonical verdict is the authority. If canonical is watch, stale terminal flags
+  // must not force avoid styling during review-open presentation.
   const hardTerminalAvoid = !!(
     sharedCanonicalVerdictKey === 'avoid'
-    || visualState.terminal_avoid_applied === true
-    || reviewLifecycleBias.terminal_avoid_applied === true
-    || hasExplicitInvalidation
+    || (
+      sharedCanonicalVerdictKey !== 'watch'
+      && (terminalAvoidFlagged || hasExplicitInvalidation)
+    )
   );
   const shouldPreserveSharedDiminishing = !!(
     bundleValid
