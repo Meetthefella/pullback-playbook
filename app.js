@@ -20772,6 +20772,9 @@ function renderReviewWorkspace(options = {}){
   });
   validateSharedRefreshBundle(refreshBundle, 'renderReviewWorkspace');
   const bundleValid = hasCompleteSharedRefreshBundle(refreshBundle);
+  const usedCachedBundle = !!(refreshBundle && refreshBundle.reusedCachedContract === true);
+  const requiredBundleFields = ['record','canonicalContract','resolvedContract','visualState','globalVerdict','effectivePlan','lifecycleSnapshot'];
+  const missingBundleFields = requiredBundleFields.filter(field => !(refreshBundle && refreshBundle[field] != null));
   const refreshedRecord = refreshBundle && refreshBundle.record ? refreshBundle.record : liveRecord;
   const canonicalPlanSynced = readOnlyReviewOpen
     ? false
@@ -21084,19 +21087,27 @@ function renderReviewWorkspace(options = {}){
   const visualBucketSource = String(
     visualState.presentationBucket
     || reviewLifecycleBias.trackPresentationBucket
+    || visualState.trackPresentationBucket
+    || visualState.track_presentation_bucket
+    || globalVerdict.trackPresentationBucket
+    || globalVerdict.track_presentation_bucket
+    || globalVerdict.viability_visual_bucket
     || ''
   ).trim().toLowerCase();
-  let finalReviewVisualBucket = 'monitor';
-  if (
+  const reviewBucketSource = visualBucketSource || '(none)';
+  const reviewBucketBeforeFallback = effectiveReviewPresentationState || '(none)';
+  const hasHardReviewAvoidSignal = !!(
     sharedCanonicalVerdictKey === 'avoid'
     || hardTerminalAvoid
     || effectiveReviewPresentationState === 'avoid'
     || effectiveReviewPresentationState === 'dead'
-  ){
+  );
+  let finalReviewVisualBucket = 'monitor';
+  if (hasHardReviewAvoidSignal){
     finalReviewVisualBucket = 'avoid';
   } else if (
     effectiveReviewPresentationState === 'diminishing'
-    || visualBucketSource === 'diminishing'
+    || (sharedCanonicalVerdictKey === 'watch' && visualBucketSource === 'diminishing')
   ){
     finalReviewVisualBucket = 'diminishing';
   } else if (
@@ -21111,6 +21122,7 @@ function renderReviewWorkspace(options = {}){
     finalReviewVisualBucket = 'near_entry';
   }
   const reviewVisualTone = finalReviewVisualBucket;
+  const reviewBucketAfterFallback = finalReviewVisualBucket;
   const reviewOuterBorderTone = reviewVisualTone;
   const reviewAccentClass = reviewVisualTone === 'diminishing'
     ? 'card--diminishing'
@@ -21281,6 +21293,11 @@ function renderReviewWorkspace(options = {}){
     {label:'Review Outer Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
     {label:'Review Outer Tone Source', value:effectiveReviewPresentationState || '(none)'},
     {label:'Review Visual Tone', value:reviewVisualTone || '(none)'},
+    {label:'Review Bucket Source', value:reviewBucketSource},
+    {label:'Review Bucket Before Fallback', value:reviewBucketBeforeFallback},
+    {label:'Review Bucket After Fallback', value:reviewBucketAfterFallback},
+    {label:'Used Cached Bundle', value:usedCachedBundle ? 'true' : 'false'},
+    {label:'Missing Bundle Fields', value:missingBundleFields.join(', ') || '(none)'},
     {label:'Review Shell Tone', value:reviewOuterBorderTone || '(none)'},
     {label:'Review Accent Tone', value:reviewAccentClass || '(none)'},
     {label:'Review Badge Tone', value:reviewBadgeTone},
