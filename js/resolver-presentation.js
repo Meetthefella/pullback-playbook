@@ -200,7 +200,7 @@
         : (weakeningButAlive ? 'weakening_but_alive' : 'waiting_for_confirmation'),
       ui_state_source:'resolveFinalStateContract',
       final_verdict_rendered:renderedVerdict,
-      bucket_rendered:bucket,
+      bucket_rendered:visualBucket,
       dead_guard_applied:false,
       dead_trigger_source:null,
       explicit_invalidation_reason:legacyVerdict && legacyVerdict.explicit_invalidation_reason ? String(legacyVerdict.explicit_invalidation_reason) : '(none)',
