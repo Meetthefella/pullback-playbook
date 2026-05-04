@@ -19087,6 +19087,9 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     finalReviewVisualBucket:state.finalReviewVisualBucket || ''
   };
   console.info('[TickerStateSource]', payload);
+  if(typeof window !== 'undefined' && window.PP_FORCE_STATE_DEBUG === true){
+    console.warn('[TickerStateSource::mirror]', payload);
+  }
   if(!isAllowedCanonicalVisualPair(canonicalVerdict, visualBucket)){
     console.warn('[STATE_CONTRADICTION]', {ticker:symbol, surface, code:'canonical_visual_pair_invalid', canonicalVerdict, visualBucket});
   }
@@ -21413,6 +21416,22 @@ function renderReviewWorkspace(options = {}){
       accentClass:reviewAccentClass,
       staleAvoidSuppressed:visualState.staleAvoidSuppressed === true
     });
+    if(typeof window !== 'undefined' && window.PP_FORCE_STATE_DEBUG === true){
+      console.warn('[REVIEW_STATE_SOURCE::mirror]', {
+        ticker:record.ticker,
+        renderPass:reviewRenderPass,
+        bundleComplete,
+        usedChecklistFallback:currentChecks._lastUsedFallback === true,
+        canonicalVerdict:sharedCanonicalVerdictKey || visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict || '',
+        visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket || '',
+        presentationBucket:visualState.presentationBucket || '',
+        effectiveReviewPresentationState,
+        finalReviewVisualBucket,
+        shellClass:reviewOuterShellClass,
+        accentClass:reviewAccentClass,
+        staleAvoidSuppressed:visualState.staleAvoidSuppressed === true
+      });
+    }
   }
   debugTickerStateSources(record.ticker, 'review', {
     source:reviewRenderSource || 'review_render',
