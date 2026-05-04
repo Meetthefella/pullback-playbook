@@ -23130,6 +23130,8 @@ function bindTrackPullRefreshGesture(){
   let trackPullPreventLogged = false;
   let trackPullCapturedScroll = false;
   let trackPullIgnoredReason = '';
+  let trackPullLastTriggeredAt = 0;
+  const TRACK_PULL_MIN_INTERVAL_MS = 8000;
   const atTop = () => {
     const scrollTop = Number(trackWorkspace.scrollTop || 0);
     return scrollTop <= 0;
@@ -23144,8 +23146,17 @@ function bindTrackPullRefreshGesture(){
     trackPullIgnoredReason = '';
   };
   trackWorkspace.addEventListener('touchstart', event => {
+    const touchCount = Number(event.touches && event.touches.length || 0);
+    if(touchCount !== 1){
+      trackPullIgnoredReason = 'multi_touch';
+      return;
+    }
     if(activeWorkspaceTab() !== 'track'){
       trackPullIgnoredReason = 'not_track_tab';
+      return;
+    }
+    if((Date.now() - trackPullLastTriggeredAt) < TRACK_PULL_MIN_INTERVAL_MS){
+      trackPullIgnoredReason = 'cooldown';
       return;
     }
     if(startupCoordinator.trackedStateHydrationResolved !== true){
@@ -23208,6 +23219,7 @@ function bindTrackPullRefreshGesture(){
       if(trackRefreshRuntime.inFlight){
         console.info('[TrackPullRefresh]', {event:'pullRefreshSkippedBecauseInFlight', activeWorkspace:activeWorkspaceTab()});
       }else{
+        trackPullLastTriggeredAt = Date.now();
         refreshTrackOnly({source:'track_pull_refresh', force:true}).catch(() => {});
       }
     }else{
