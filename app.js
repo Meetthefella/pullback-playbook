@@ -6306,7 +6306,14 @@ function watchlistLifecycleSnapshot(record, options = {}){
     emojiPresentation
   }, passCache);
   const canonicalContract = resolveCanonicalTickerVerdict(item, {context:'track', derivedStates});
-  const canonicalVerdict = normalizeGlobalVerdictKey(canonicalContract.canonicalVerdictKey);
+  const resolvedFinalVerdictKey = normalizeGlobalVerdictKey(
+    resolved && (
+      resolved.finalVerdict
+      || resolved.final_verdict
+      || resolved.final_verdict_rendered
+    )
+  );
+  const canonicalVerdict = resolvedFinalVerdictKey || normalizeGlobalVerdictKey(canonicalContract.canonicalVerdictKey);
   const actionState = deriveActionStateForRecord(item).stage;
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
   const expiryTradingDays = item.watchlist.expiryAfterTradingDays || WATCHLIST_EXPIRY_TRADING_DAYS;
