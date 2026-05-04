@@ -21357,8 +21357,7 @@ function renderReviewWorkspace(options = {}){
   const hasHardReviewAvoidSignal = !!(
     bundleComplete
     && (
-      sharedCanonicalVerdictKey === 'avoid'
-      || hardTerminalAvoid
+      hardTerminalAvoid
       || effectiveReviewPresentationState === 'avoid'
       || effectiveReviewPresentationState === 'dead'
     )
