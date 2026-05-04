@@ -23163,6 +23163,8 @@ function bindTrackPullRefreshGesture(){
   let trackPullIgnoredReason = '';
   let trackPullLastTriggeredAt = 0;
   const TRACK_PULL_MIN_INTERVAL_MS = 8000;
+  const TRACK_PULL_CAPTURE_MIN_DELTA_Y = 24;
+  const TRACK_PULL_REFRESH_THRESHOLD_Y = 110;
   const atTop = () => {
     const scrollTop = Number(trackWorkspace.scrollTop || 0);
     return scrollTop <= 0;
@@ -23228,7 +23230,7 @@ function bindTrackPullRefreshGesture(){
       trackPullCapturedScroll = true;
       return;
     }
-    const shouldCapturePullGesture = deltaY > 0 && atTop() && !trackPullCapturedScroll;
+    const shouldCapturePullGesture = deltaY >= TRACK_PULL_CAPTURE_MIN_DELTA_Y && atTop() && !trackPullCapturedScroll;
     if(shouldCapturePullGesture && event.cancelable){
       event.preventDefault();
       if(!trackPullPreventLogged){
@@ -23236,7 +23238,7 @@ function bindTrackPullRefreshGesture(){
         console.info('[TrackPullRefresh]', {event:'eventCancelableWhenPrevented', cancelable:true});
       }
     }
-    if(deltaY > 72 && !trackPullThresholdMet){
+    if(deltaY >= TRACK_PULL_REFRESH_THRESHOLD_Y && !trackPullThresholdMet){
       trackPullThresholdMet = true;
       console.info('[TrackPullRefresh]', {event:'pullRefreshThresholdMet', deltaY:Number(deltaY.toFixed(1))});
     }
