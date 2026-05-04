@@ -19180,11 +19180,12 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     const reviewBucket = String(next.review.visualBucket || '').trim().toLowerCase();
     const trackBucket = String(next.track.visualBucket || '').trim().toLowerCase();
     const sharedCanonical = reviewCanonical || trackCanonical;
+    const eitherCanonicalAvoid = reviewCanonical === 'avoid' || trackCanonical === 'avoid';
     const mismatchAllowedByNuance = (
       reviewBucket
       && trackBucket
       && reviewBucket !== trackBucket
-      && sharedCanonical === 'avoid'
+      && (sharedCanonical === 'avoid' || eitherCanonicalAvoid)
       && ['avoid', 'diminishing', 'dead'].includes(normalizeVisualBucketForPairing(reviewBucket))
       && ['avoid', 'diminishing', 'dead'].includes(normalizeVisualBucketForPairing(trackBucket))
     );
