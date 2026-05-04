@@ -19367,13 +19367,47 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       verdict:refreshedVerdict
     };
   }catch(error){
+    const errorName = error && error.name ? String(error.name) : '';
+    const errorMessage = error && error.message ? String(error.message) : 'refresh_failed';
+    const abortLikeError = (
+      errorName === 'AbortError'
+      || /signal is aborted without reason/i.test(errorMessage)
+      || /aborted/i.test(errorMessage)
+    );
+    if(abortLikeError){
+      if(PP_PERF_DEBUG){
+        console.debug('[TrackRefreshSkippedTrace]', {
+          scope:'refreshWatchlistRecordFromSourceOfTruth',
+          ticker:symbol,
+          source,
+          reason:'aborted',
+          errorName,
+          errorMessage
+        });
+      }
+      const refreshed = refreshTrackedTickerState(symbol, {
+        source:'track',
+        reason:`${source}_aborted`,
+        force:false,
+        persist:false
+      });
+      return {
+        symbol,
+        ok:true,
+        skipped:true,
+        reason:'aborted',
+        record:refreshed.record,
+        snapshot:refreshed.lifecycleSnapshot,
+        verdict:refreshed.globalVerdict
+      };
+    }
     if(PP_PERF_DEBUG){
       console.warn('[TrackRefreshFailureTrace]', {
         scope:'refreshWatchlistRecordFromSourceOfTruth',
         ticker:symbol,
         source,
-        errorName:error && error.name ? String(error.name) : '',
-        errorMessage:error && error.message ? String(error.message) : 'refresh_failed',
+        errorName,
+        errorMessage,
         errorStack:error && error.stack ? String(error.stack) : '',
         refreshSkippedReason:null,
         hasResolvedStateBundleCache:!!(record && record.resolvedStateBundleCache),
