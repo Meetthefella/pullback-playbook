@@ -139,9 +139,10 @@
     const viability = String(legacyVerdict && legacyVerdict.viability || '').trim().toLowerCase();
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
     const hardStructureFailure = structureEligibility === 'broken' || structureState === 'broken';
+    const weakOrWeakeningStructure = structureState === 'weakening' || structureState === 'weak';
     const weakeningLowPriorityRecovery = (
       viability === 'low_priority'
-      && structureState === 'weakening'
+      && weakOrWeakeningStructure
       && !terminalAvoidApplied
       && !hasExplicitInvalidation
       && !hardStructureFailure

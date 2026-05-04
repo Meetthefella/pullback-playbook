@@ -11298,6 +11298,16 @@ function resolveVisualBucketFromInputs(bucket, canonicalVerdict = ''){
     reason:'default_monitor'
   };
   if(['entry','near_entry','monitor','diminishing','avoid'].includes(raw)){
+    if(raw === 'near_entry' && canonical && !['near_entry','entry'].includes(canonical)){
+      result.key = canonical === 'watch' ? 'monitor' : (canonical === 'avoid' ? 'avoid' : 'monitor');
+      result.remapped = true;
+      result.reason = canonical === 'watch'
+        ? 'near_entry_visual_blocked_by_canonical_watch'
+        : (canonical === 'avoid'
+          ? 'near_entry_visual_blocked_by_canonical_avoid'
+          : 'near_entry_visual_blocked_by_canonical_mismatch');
+      return result;
+    }
     result.key = raw;
     result.reason = 'already_canonical_visual_bucket';
     return result;
