@@ -19610,6 +19610,9 @@ async function refreshTrackOnly(options = {}){
   if(isPullGestureRefresh && requestedWorkspace !== 'track'){
     return {ok:false, source, skipped:true, reason:'track_not_active'};
   }
+  if(isPullGestureRefresh && watchlistTickerRecords().length <= 0){
+    return {ok:false, source, skipped:true, reason:'empty_watchlist'};
+  }
   if(trackRefreshRuntime.inFlight){
     if(isPullGestureRefresh){
       console.info('[TrackPullRefresh]', {event:'pullRefreshSkippedBecauseInFlight', source, activeWorkspace:activeWorkspaceTab()});
@@ -23161,6 +23164,10 @@ function bindTrackPullRefreshGesture(){
     }
     if(startupCoordinator.trackedStateHydrationResolved !== true){
       trackPullIgnoredReason = 'hydration_incomplete';
+      return;
+    }
+    if(watchlistTickerRecords().length <= 0){
+      trackPullIgnoredReason = 'empty_watchlist';
       return;
     }
     if(!atTop()){
