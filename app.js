@@ -9498,12 +9498,25 @@ function renderCompactResultCardFromView(view){
   const item = view && view.item ? view.item : {};
   const setupStates = view && view.setupStates ? view.setupStates : analysisDerivedStatesFromRecord(item);
   const statusChip = primaryShortlistStatusChip(view);
-  const visualState = resolveVisualState(item, 'scanner', {
-    displayedPlan:view && view.displayedPlan,
-    derivedStates:setupStates,
-    pendingResolution:!!(view && view.resolutionPending),
-    setupScore:view && view.setupScore
-  });
+  const isTrackedTicker = !!(item && item.watchlist && item.watchlist.inWatchlist);
+  const cachedSharedBundle = isTrackedTicker && item && item.resolvedStateBundleCache && typeof item.resolvedStateBundleCache === 'object'
+    ? withLiveRecordFromCache(item, item.resolvedStateBundleCache)
+    : null;
+  const sharedBundle = isTrackedTicker
+    ? (cachedSharedBundle || buildResolvedStateBundleFromRecord(item, {
+      source:'scan_render_shared_bundle',
+      sourceSurface:'scan',
+      reason:'scan_track_alignment'
+    }))
+    : null;
+  const visualState = sharedBundle && sharedBundle.visualState
+    ? sharedBundle.visualState
+    : resolveVisualState(item, 'scanner', {
+      displayedPlan:view && view.displayedPlan,
+      derivedStates:setupStates,
+      pendingResolution:!!(view && view.resolutionPending),
+      setupScore:view && view.setupScore
+    });
   const sourceVerdict = globalVerdictLabel(visualState.finalVerdict || visualState.final_verdict);
   const scoreLabel = view && view.setupScoreDisplay ? view.setupScoreDisplay : 'Setup --/10';
   const resolvedBadge = visualState.badge || statusChip;
@@ -9543,8 +9556,8 @@ function renderCompactResultCardFromView(view){
       sectionBucket:'visualState.presentationBucket/visualBucket'
     },
     fromStoredFields:false,
-    fromResolvedStateBundleCache:false,
-    fromFreshResolverOutput:true
+    fromResolvedStateBundleCache:!!(sharedBundle && cachedSharedBundle),
+    fromFreshResolverOutput:!(sharedBundle && cachedSharedBundle)
   });
   return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualState.className || visualState.toneClass || '')}" style="${escapeHtml(visualState.styleAttr || '')}" data-visual-tone="${escapeHtml(visualState.visual_tone || '')}" data-visual-state="${escapeHtml(visualState.state || '')}" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="scan-card__header"><div class="scan-card__header-row"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div></div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(resolvedBadge.className || statusChip.className || 'watch')}">${escapeHtml(resolvedBadge.text || resolvedBadge.label || statusChip.label || 'Watch')}</span><span class="score visual-score scan-card__score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="scan-card__company tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="scan-card__body"><div class="scan-card__technical tiny">${escapeHtml(technicalSummary)}</div><div class="scan-card__decision resultreason decision-summary">${escapeHtml(decisionSummary)}</div></div><div class="scan-card__footer"><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button></div>${secondaryUiMarkup}</div>`;
 }
