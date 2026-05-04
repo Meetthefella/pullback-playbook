@@ -21301,6 +21301,9 @@ function renderReviewWorkspace(options = {}){
     || ''
   ).trim().toLowerCase();
   const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
+  const resolvedReviewFinalVerdictKey = normalizeGlobalVerdictKey(
+    visualState.finalVerdict || visualState.final_verdict || visualState.final_verdict_rendered || ''
+  );
   const terminalAvoidFlagged = !!(
     visualState.terminal_avoid_applied === true
     || reviewLifecycleBias.terminal_avoid_applied === true
@@ -21322,10 +21325,10 @@ function renderReviewWorkspace(options = {}){
   // Canonical verdict is the authority. If canonical is watch, stale terminal flags
   // must not force avoid styling during review-open presentation.
   const hardTerminalAvoid = !!(
-    terminalAvoidFlagged
+    (terminalAvoidFlagged && resolvedReviewFinalVerdictKey === 'avoid')
     || hasExplicitInvalidation
     || hardStructureFailure
-    || viabilityReject
+    || (viabilityReject && resolvedReviewFinalVerdictKey === 'avoid')
   );
   const shouldPreserveSharedDiminishing = !!(
     bundleValid
@@ -21381,9 +21384,6 @@ function renderReviewWorkspace(options = {}){
   ){
     finalReviewVisualBucket = 'near_entry';
   }
-  const resolvedReviewFinalVerdictKey = normalizeGlobalVerdictKey(
-    visualState.finalVerdict || visualState.final_verdict || visualState.final_verdict_rendered || ''
-  );
   if(!hardTerminalAvoid){
     const reviewDiminishingSignal = (
       effectiveReviewPresentationState === 'diminishing'
