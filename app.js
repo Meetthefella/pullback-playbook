@@ -21381,6 +21381,22 @@ function renderReviewWorkspace(options = {}){
   ){
     finalReviewVisualBucket = 'near_entry';
   }
+  const resolvedReviewFinalVerdictKey = normalizeGlobalVerdictKey(
+    visualState.finalVerdict || visualState.final_verdict || visualState.final_verdict_rendered || ''
+  );
+  if(!hardTerminalAvoid){
+    const reviewDiminishingSignal = (
+      effectiveReviewPresentationState === 'diminishing'
+      || reviewPresentationState === 'diminishing'
+      || visualBucketSource === 'diminishing'
+      || String(visualState.presentationBucket || '').trim().toLowerCase() === 'diminishing'
+    );
+    if(reviewDiminishingSignal){
+      finalReviewVisualBucket = 'diminishing';
+    }else if(resolvedReviewFinalVerdictKey === 'watch' && finalReviewVisualBucket === 'avoid'){
+      finalReviewVisualBucket = 'monitor';
+    }
+  }
   const reviewVisualTone = finalReviewVisualBucket;
   const finalReviewVisualState = finalReviewVisualBucket === 'near_entry'
     ? 'near_entry'
