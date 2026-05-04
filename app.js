@@ -7277,7 +7277,14 @@ function renderWatchlistCardElement(record, options = {}){
   ), derivedStates);
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
   const rrResolution = resolveScannerStateWithTrace(record);
-  const canonicalWatchlistVerdict = verdictPresentationLabelForKey(lifecycleSnapshot.state || 'watch');
+  const globalVerdict = liveRefreshPending ? null : resolveGlobalVerdict(record);
+  const canonicalWatchlistVerdict = verdictPresentationLabelForKey(
+    normalizeGlobalVerdictKey(
+      (globalVerdict && (globalVerdict.final_verdict || globalVerdict.finalVerdict))
+      || lifecycleSnapshot.state
+      || 'watch'
+    )
+  );
   const resolvedContract = getFinalStateForPass(record, {
     context:'watchlist',
     finalVerdict:canonicalWatchlistVerdict,
@@ -7326,7 +7333,6 @@ function renderWatchlistCardElement(record, options = {}){
     pendingResolution:liveRefreshPending,
     setupScore:view && view.setupScore
   });
-  const globalVerdict = liveRefreshPending ? null : resolveGlobalVerdict(record);
   const watchlistVisualState = liveRefreshPending
     ? {
       ...visualState,
@@ -7437,6 +7443,8 @@ function renderWatchlistCardElement(record, options = {}){
   const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
   const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
   debugTickerStateSources(entry.ticker, 'track', {
+    source:watchlistVisualState.watchlist_presentation_source || 'track_render',
+    sectionKey:watchlistState || presentationBucket || '',
     canonicalVerdict:watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
     finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
     renderedVerdict:watchlistVisualState.final_verdict_rendered || watchlistVisualState.renderedVerdict || watchlistVisualState.finalVerdict,
@@ -7531,6 +7539,27 @@ function watchlistRenderGroups(showExpired){
     {key:'avoid_dead', title:'Avoid', hint:'Failed or invalid setups.', collapsible:true}
   ];
   return groups;
+}
+
+function normalizeVisualBucketForPairing(bucket){
+  const safe = String(bucket || '').trim().toLowerCase();
+  if(!safe) return 'monitor';
+  if(['entry','near_entry','monitor','diminishing','avoid','dead'].includes(safe)) return safe;
+  if(['watch','monitor_watch'].includes(safe)) return 'monitor';
+  if(['avoid_dead','low_priority_avoid'].includes(safe)) return 'avoid';
+  if(safe.includes('diminish')) return 'diminishing';
+  if(safe.includes('avoid') || safe.includes('dead')) return 'avoid';
+  return 'monitor';
+}
+
+function isAllowedCanonicalVisualPair(canonicalVerdict, visualBucket){
+  const canonical = normalizeGlobalVerdictKey(canonicalVerdict || '');
+  const bucket = normalizeVisualBucketForPairing(visualBucket);
+  if(canonical === 'entry') return bucket === 'entry';
+  if(canonical === 'near_entry') return bucket === 'near_entry';
+  if(canonical === 'watch') return ['monitor', 'diminishing'].includes(bucket);
+  if(canonical === 'avoid') return ['avoid', 'diminishing', 'dead'].includes(bucket);
+  return true;
 }
 
 function normalizeTrackSectionState(raw){
@@ -9484,6 +9513,8 @@ function renderCompactResultCardFromView(view){
   const technicalSummary = scanCardTechnicalSummaryForView(view);
   const decisionSummary = visualState.decision_summary || compactReasonLineForView(view, 3) || scanCardPrimaryActionLabel(view);
   debugTickerStateSources(item && item.ticker, 'scan', {
+    source:'scan_render',
+    sectionKey:'scan',
     canonicalVerdict:visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict,
     finalVerdict:visualState.finalVerdict || visualState.final_verdict,
     renderedVerdict:visualState.final_verdict_rendered || visualState.renderedVerdict || visualState.finalVerdict,
@@ -18891,7 +18922,7 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
     ) || 'watch'
   );
   const visualBucketForCheck = String(visualState.visualBucket || visualState.presentationBucket || '').trim().toLowerCase();
-  if((canonicalVerdictKey === 'avoid' && visualBucketForCheck === 'diminishing') || (canonicalVerdictKey === 'watch' && visualBucketForCheck === 'avoid')){
+  if(!isAllowedCanonicalVisualPair(canonicalVerdictKey, visualBucketForCheck)){
     console.warn('[STATE_CONTRADICTION]', {
       ticker:item.ticker,
       source:'buildResolvedStateBundleFromRecord',
@@ -19028,6 +19059,8 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
   const payload = {
     ticker:symbol,
     surface:String(surface || ''),
+    source:String(state.source || ''),
+    sectionKey:String(state.sectionKey || ''),
     canonicalVerdict:state.canonicalVerdict || '',
     finalVerdict:state.finalVerdict || '',
     renderedVerdict:state.renderedVerdict || '',
@@ -19054,11 +19087,8 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     finalReviewVisualBucket:state.finalReviewVisualBucket || ''
   };
   console.info('[TickerStateSource]', payload);
-  if(canonicalVerdict === 'avoid' && visualBucket === 'diminishing'){
-    console.warn('[STATE_CONTRADICTION]', {ticker:symbol, surface, code:'canonical_avoid_visual_diminishing', canonicalVerdict, visualBucket});
-  }
-  if(canonicalVerdict === 'watch' && visualBucket === 'avoid'){
-    console.warn('[STATE_CONTRADICTION]', {ticker:symbol, surface, code:'canonical_watch_visual_avoid', canonicalVerdict, visualBucket});
+  if(!isAllowedCanonicalVisualPair(canonicalVerdict, visualBucket)){
+    console.warn('[STATE_CONTRADICTION]', {ticker:symbol, surface, code:'canonical_visual_pair_invalid', canonicalVerdict, visualBucket});
   }
   if(saysDiminishing && hasAvoidShell){
     console.warn('[TickerStateSource][Warning]', {ticker:symbol, surface, code:'diminishing_copy_but_avoid_shell'});
@@ -19080,9 +19110,20 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     }
   }
   if(next.review && next.track){
+    const reviewCanonical = String(next.review.canonicalVerdict || '').trim().toLowerCase();
+    const trackCanonical = String(next.track.canonicalVerdict || '').trim().toLowerCase();
     const reviewBucket = String(next.review.visualBucket || '').trim().toLowerCase();
     const trackBucket = String(next.track.visualBucket || '').trim().toLowerCase();
-    if(reviewBucket && trackBucket && reviewBucket !== trackBucket){
+    const sharedCanonical = reviewCanonical || trackCanonical;
+    const mismatchAllowedByNuance = (
+      reviewBucket
+      && trackBucket
+      && reviewBucket !== trackBucket
+      && sharedCanonical === 'avoid'
+      && ['avoid', 'diminishing', 'dead'].includes(normalizeVisualBucketForPairing(reviewBucket))
+      && ['avoid', 'diminishing', 'dead'].includes(normalizeVisualBucketForPairing(trackBucket))
+    );
+    if(reviewBucket && trackBucket && reviewBucket !== trackBucket && !mismatchAllowedByNuance){
       console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'review_track_bucket_mismatch', reviewBucket, trackBucket});
     }
   }
@@ -21374,6 +21415,8 @@ function renderReviewWorkspace(options = {}){
     });
   }
   debugTickerStateSources(record.ticker, 'review', {
+    source:reviewRenderSource || 'review_render',
+    sectionKey:String(reviewLifecycleBias.review_lifecycle_bias || finalReviewVisualBucket || ''),
     canonicalVerdict:sharedCanonicalVerdictKey || visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict,
     finalVerdict:visualState.finalVerdict || visualState.final_verdict,
     renderedVerdict:visualState.final_verdict_rendered || visualState.renderedVerdict || visualState.finalVerdict,
