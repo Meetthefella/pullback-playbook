@@ -17194,7 +17194,39 @@ function currentChecks(){
     }
   });
   currentChecks._lastUsedFallback = usedChecklistFallback;
+  const renderPass = Number(uiState && uiState.reviewRenderPass || 0);
+  const renderSeq = Number(reviewRenderSeq || 0);
+  if(!uiState.reviewChecklistFallbackByTicker || typeof uiState.reviewChecklistFallbackByTicker !== 'object'){
+    uiState.reviewChecklistFallbackByTicker = {};
+  }
+  if(ticker){
+    uiState.reviewChecklistFallbackByTicker[ticker] = {
+      ticker,
+      usedFallback:usedChecklistFallback === true,
+      renderPass,
+      renderSeq,
+      updatedAt:new Date().toISOString()
+    };
+  }
   return out;
+}
+
+function getReviewChecklistFallbackMeta(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return null;
+  const map = uiState && uiState.reviewChecklistFallbackByTicker && typeof uiState.reviewChecklistFallbackByTicker === 'object'
+    ? uiState.reviewChecklistFallbackByTicker
+    : null;
+  if(!map) return null;
+  const meta = map[symbol];
+  if(!meta || typeof meta !== 'object') return null;
+  return {
+    ticker:symbol,
+    usedFallback:meta.usedFallback === true,
+    renderPass:Number(meta.renderPass || 0),
+    renderSeq:Number(meta.renderSeq || 0),
+    updatedAt:String(meta.updatedAt || '')
+  };
 }
 
 function checklistText(checks){
@@ -22150,8 +22182,35 @@ function refreshReview(options = {}){
 
 function persistActiveReviewDraft(options = {}){
   const ticker = activeReviewTicker();
-  if(!ticker) return false;
+  if(!ticker){
+    return {saved:false, skipped:true, reason:'no_active_ticker'};
+  }
+  const source = String(options.source || 'review_draft');
+  const isManualSave = options.manual === true || source === 'review_save';
   const checks = currentChecks();
+  const fallbackMeta = getReviewChecklistFallbackMeta(ticker);
+  const activeRenderPass = Number(uiState && uiState.reviewRenderPass || 0);
+  const fallbackAppliesToActiveTicker = !!(
+    fallbackMeta
+    && fallbackMeta.ticker === ticker
+    && fallbackMeta.usedFallback === true
+    && fallbackMeta.renderPass === activeRenderPass
+  );
+  if(fallbackAppliesToActiveTicker){
+    if(isPerfDebugEnabled() && typeof console !== 'undefined' && console.warn){
+      console.warn('[ReviewDraftPersistSkipped]', {
+        ticker,
+        source,
+        reason:'checklist_fallback_active',
+        manual:isManualSave,
+        fallbackMeta
+      });
+    }
+    if(isManualSave){
+      return {saved:false, blocked:true, reason:'checklist_fallback', ticker, source, fallbackMeta};
+    }
+    return {saved:false, skipped:true, reason:'checklist_fallback', ticker, source, fallbackMeta};
+  }
   const result = scoreAndStatusFromChecks(checks);
   const record = upsertTickerRecord(ticker);
   setActiveReviewTicker(ticker);
@@ -22197,7 +22256,7 @@ function persistActiveReviewDraft(options = {}){
     renderCards();
     renderReviewLifecycleSummary(ticker);
   }
-  return true;
+  return {saved:true, skipped:false, blocked:false, ticker, source};
 }
 
 function scheduleReviewDraftAutosave(options = {}){
@@ -22208,7 +22267,7 @@ function scheduleReviewDraftAutosave(options = {}){
   }
   scheduleReviewDraftAutosave._timer = setTimeout(() => {
     scheduleReviewDraftAutosave._timer = null;
-    persistActiveReviewDraft({source:options.source || 'review_autosave'});
+    persistActiveReviewDraft({source:options.source || 'review_autosave', manual:false});
   }, delayMs);
 }
 
@@ -22218,8 +22277,8 @@ function saveReview(){
     if($('selectedTicker')) $('selectedTicker').focus();
     return;
   }
-  const saved = persistActiveReviewDraft({source:'review_save', render:true});
-  if(saved){
+  const saveResult = persistActiveReviewDraft({source:'review_save', render:true, manual:true});
+  if(saveResult && saveResult.saved === true){
     const record = getTickerRecord(ticker);
     if(record){
       refreshTrackedTickerState(ticker, {
@@ -22232,7 +22291,13 @@ function saveReview(){
       runVerdictDriftParityChecks(record);
     }
     setStatus('inputStatus', '<span class="ok">Manual review saved as optional notes only. Scanner ranking stays unchanged.</span>');
+    return;
   }
+  if(saveResult && (saveResult.skipped === true || saveResult.blocked === true) && saveResult.reason === 'checklist_fallback'){
+    setStatus('inputStatus', '<span class="warntext">Review not saved yet - checklist still loading. Try again in a moment.</span>');
+    return;
+  }
+  setStatus('inputStatus', '<span class="badtext">Review could not be saved right now. Please try again.</span>');
 }
 
 function resetReview(){
