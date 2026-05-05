@@ -19708,13 +19708,13 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     });
   }
   if(options.persist !== false) commitTickerState();
+  const changedTickers = tickers.filter(ticker => {
+    const record = getTickerRecord(ticker);
+    if(!record) return false;
+    const afterSignature = watchlistRecordRenderSignature(record);
+    return beforeSignatures[ticker] !== afterSignature;
+  });
   if(options.render !== false){
-    const changedTickers = tickers.filter(ticker => {
-      const record = getTickerRecord(ticker);
-      if(!record) return false;
-      const afterSignature = watchlistRecordRenderSignature(record);
-      return beforeSignatures[ticker] !== afterSignature;
-    });
     const trackOnlyRefresh = options.trackOnly === true || source === 'startup_refresh_full_user_open' || source === 'track_pull_refresh';
     const renderStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     let patchedCards = 0;
@@ -19831,6 +19831,8 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     attempted:tickers.length,
     refreshed:results.filter(result => result.ok).length,
     failed:results.filter(result => !result.ok).length,
+    changedTickersCount:changedTickers.length,
+    changedTickers:[...changedTickers],
     results
   };
   if(summary.failed && summary.refreshed === 0){
@@ -19926,56 +19928,68 @@ async function refreshTrackOnly(options = {}){
       persist:true
     });
     interruptionStage = '';
-    console.info('[TrackPullRefresh]', {event:'riskRecalcStart', source});
-    try{
-      await runRiskContextRefreshChunked({
-        source:`${source}_risk_recalc`,
-        force:options.force === true,
-        trackOnly:true,
-        visibleOnly:true,
-        suppressTrackRender:true
-      });
-      console.info('[TrackPullRefresh]', {event:'riskRecalcEnd', source});
-    }catch(riskError){
-      riskRecalcFailed = true;
-      console.warn('[TrackPullRefresh] risk recalc failed; continuing with watchlist render fallback', riskError);
-      runWatchlistLifecycleEvaluation({
-        source:`${source}_risk_recalc_fallback`,
-        persist:false,
-        render:false,
-        force:options.force === true
-      });
-      markWatchlistDirty(null, `${source}_risk_recalc_fallback`);
-    }
-    markWatchlistDirty(null, source);
-    if(activeWorkspaceTab() === 'track'){
-      console.info('[TrackPullRefresh]', {event:'trackRenderStart', source});
-      interruptionStage = 'render_track';
-      await renderWatchlistChunked({
-        source,
-        batchSize:WATCHLIST_RENDER_BATCH_SIZE,
-        model:prepareWatchlistRenderModel(source, {
-          lightweight:false,
-          allowCache:false
-        })
-      });
-      interruptionStage = '';
-      console.info('[TrackPullRefresh]', {event:'trackRenderEnd', source});
-      renderFocusQueue();
-      startupCoordinator.renderedTabs.track = true;
-      startupCoordinator.trackNeedsHydratedRender = false;
-      startupCoordinator.trackDeferredRenderSkipped = false;
-      startupCoordinator.pendingWatchlistPatchFallback = false;
-      startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
-      if(!hasWatchlistDirtyRecords()){
-        startupCoordinator.trackNeedsFullRender = false;
+    const changedTickersCount = Number(refreshSummary && refreshSummary.changedTickersCount || 0);
+    const noChangedInputs = changedTickersCount === 0;
+    if(noChangedInputs){
+      console.info('[TrackPullRefresh]', {event:'riskRecalcSkipped', source, reason:'no_changed_inputs'});
+    }else{
+      console.info('[TrackPullRefresh]', {event:'riskRecalcStart', source, reason:'changed_inputs', changedTickersCount});
+      try{
+        await runRiskContextRefreshChunked({
+          source:`${source}_risk_recalc`,
+          force:options.force === true,
+          trackOnly:true,
+          visibleOnly:true,
+          suppressTrackRender:true
+        });
+        console.info('[TrackPullRefresh]', {event:'riskRecalcEnd', source});
+      }catch(riskError){
+        riskRecalcFailed = true;
+        console.warn('[TrackPullRefresh] risk recalc failed; continuing with watchlist render fallback', riskError);
+        runWatchlistLifecycleEvaluation({
+          source:`${source}_risk_recalc_fallback`,
+          persist:false,
+          render:false,
+          force:options.force === true
+        });
+        markWatchlistDirty(null, `${source}_risk_recalc_fallback`);
       }
-      requestAnimationFrame(() => {
-        if(activeWorkspaceTab() !== 'track') return;
-        if(trackWorkspace){
-          trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
+    }
+    if(!noChangedInputs){
+      markWatchlistDirty(null, source);
+    }
+    if(activeWorkspaceTab() === 'track'){
+      if(noChangedInputs){
+        console.info('[TrackPullRefresh]', {event:'trackRenderSkipped', source, reason:'no_changed_inputs'});
+      }else{
+        console.info('[TrackPullRefresh]', {event:'trackRenderStart', source, reason:'changed_inputs'});
+        interruptionStage = 'render_track';
+        await renderWatchlistChunked({
+          source,
+          batchSize:WATCHLIST_RENDER_BATCH_SIZE,
+          model:prepareWatchlistRenderModel(source, {
+            lightweight:false,
+            allowCache:false
+          })
+        });
+        interruptionStage = '';
+        console.info('[TrackPullRefresh]', {event:'trackRenderEnd', source});
+        renderFocusQueue();
+        startupCoordinator.renderedTabs.track = true;
+        startupCoordinator.trackNeedsHydratedRender = false;
+        startupCoordinator.trackDeferredRenderSkipped = false;
+        startupCoordinator.pendingWatchlistPatchFallback = false;
+        startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
+        if(!hasWatchlistDirtyRecords()){
+          startupCoordinator.trackNeedsFullRender = false;
         }
-      });
+        requestAnimationFrame(() => {
+          if(activeWorkspaceTab() !== 'track') return;
+          if(trackWorkspace){
+            trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
+          }
+        });
+      }
     }else if(wasTrackActive){
       requestAnimationFrame(() => {
         if(activeWorkspaceTab() !== 'track') return;
@@ -20045,7 +20059,7 @@ async function refreshTrackOnly(options = {}){
       );
     }
     refreshOk = true;
-    return {ok:true, source, riskRecalcFailed, backendPullFailed, summary:refreshSummary};
+    return {ok:true, source, riskRecalcFailed, backendPullFailed, summary:refreshSummary, skippedNoChangedInputs:noChangedInputs === true};
   }catch(error){
     console.warn('[TrackPullRefresh] failed', error);
     const attempted = Number(refreshSummary && refreshSummary.attempted || 0);
@@ -21236,13 +21250,39 @@ function renderReviewWorkspace(options = {}){
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
   const readOnlyReviewOpen = options.skipWatchlistLifecycle === true && options.recompute !== true;
-  const refreshBundle = refreshTrackedTickerState(ticker, {
-    source:'review',
-    reason:readOnlyReviewOpen ? 'review_open' : 'review_edit',
-    force:true,
-    persist:false,
-    emitTrace:true
-  });
+  const reviewSnapshotAuthority = String(uiState.activeReviewProjectionSource || '').trim().toLowerCase() === 'clicked_card_snapshot';
+  const cachedReviewBundle = liveRecord && liveRecord.resolvedStateBundleCache && typeof liveRecord.resolvedStateBundleCache === 'object'
+    ? withLiveRecordFromCache(liveRecord, liveRecord.resolvedStateBundleCache)
+    : null;
+  const refreshBundle = reviewSnapshotAuthority
+    ? (
+      cachedReviewBundle
+        ? {
+          ok:true,
+          skipped:true,
+          reason:'review_snapshot_authoritative_cached_bundle',
+          ...cachedReviewBundle,
+          source:'review',
+          reusedCachedContract:true,
+          refreshSkippedReason:'snapshot_authoritative_cached_bundle'
+        }
+        : {
+          ok:true,
+          skipped:true,
+          reason:'review_snapshot_authoritative_rebuild_no_cache',
+          ...buildResolvedStateBundleFromRecord(liveRecord, {source:'review', sourceSurface:'review', reason:'review_snapshot_authoritative'}),
+          source:'review',
+          reusedCachedContract:true,
+          refreshSkippedReason:'snapshot_authoritative_rebuild_no_cache'
+        }
+    )
+    : refreshTrackedTickerState(ticker, {
+      source:'review',
+      reason:readOnlyReviewOpen ? 'review_open' : 'review_edit',
+      force:true,
+      persist:false,
+      emitTrace:true
+    });
   validateSharedRefreshBundle(refreshBundle, 'renderReviewWorkspace');
   const bundleValid = hasCompleteSharedRefreshBundle(refreshBundle);
   const usedCachedBundle = !!(refreshBundle && refreshBundle.reusedCachedContract === true);
