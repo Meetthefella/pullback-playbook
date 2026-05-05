@@ -21202,15 +21202,21 @@ function renderReviewWorkspace(options = {}){
     ? refreshBundle.visualState
     : {finalVerdict:'watch', final_verdict:'watch', renderedVerdict:'watch', final_verdict_rendered:'watch', decision_summary:'Developing - waiting for confirmation.'};
   const unifiedFinalReviewVerdict = normalizeReviewPresentationVerdict(
-    visualState.final_verdict_rendered
-    || visualState.renderedVerdict
-    || safeResolvedContract.finalVerdict
+    safeResolvedContract.finalVerdict
+    || safeResolvedContract.tradeabilityVerdict
     || visualState.finalVerdict
     || visualState.final_verdict
+    || visualState.final_verdict_rendered
+    || visualState.renderedVerdict
     || displayStage
   );
   const reviewFinalVerdictForPaperTrade = normalizeAnalysisVerdict(
-    visualState.final_verdict_rendered || visualState.finalVerdict || visualState.final_verdict || displayStage
+    safeResolvedContract.finalVerdict
+    || safeResolvedContract.tradeabilityVerdict
+    || visualState.finalVerdict
+    || visualState.final_verdict
+    || visualState.final_verdict_rendered
+    || displayStage
   );
   const paperTradeEligibilityState = paperTradeEligibility.evaluatePaperTradeEligibility({
     finalVerdict:reviewFinalVerdictForPaperTrade,
@@ -21348,7 +21354,17 @@ function renderReviewWorkspace(options = {}){
     track_presentation_tone:reviewLifecycleBias.trackPresentationTone
   };
   const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary;
-  const reviewBadge = visualState.badge || getBadge(visualState.finalVerdict || visualState.final_verdict);
+  const resolvedFinalVerdictKey = normalizeGlobalVerdictKey(
+    safeResolvedContract.finalVerdict
+    || safeResolvedContract.tradeabilityVerdict
+    || visualState.finalVerdict
+    || visualState.final_verdict
+    || visualState.final_verdict_rendered
+    || unifiedFinalReviewVerdict
+    || 'watch'
+  );
+  const resolvedFinalVerdictLabel = globalVerdictLabel(resolvedFinalVerdictKey || 'watch');
+  const reviewBadge = getBadge(resolvedFinalVerdictLabel || 'Watch');
   const reviewRenderedVerdict = String(unifiedFinalReviewVerdict || '').trim().toLowerCase();
   const sharedCanonicalVerdictKey = String(
     bundleValid
@@ -21357,27 +21373,13 @@ function renderReviewWorkspace(options = {}){
       && refreshBundle.canonicalContract.canonicalVerdictKey
       || ''
   ).trim().toLowerCase();
-  const reviewPresentationStateRaw = String(
-    visualState.review_presentation_state
-    || visualState.final_verdict_rendered
-    || visualState.renderedVerdict
-    || visualState.state
-    || visualState.finalVerdict
-    || visualState.final_verdict
-    || 'monitor'
-  ).trim().toLowerCase();
-  const reviewPresentationState = ['diminishing','avoid','dead','entry','near_entry','monitor','watch'].includes(reviewPresentationStateRaw)
-    ? reviewPresentationStateRaw
-    : normalizeGlobalVerdictKey(reviewPresentationStateRaw || 'monitor');
   const explicitInvalidationReason = String(
     visualState.explicit_invalidation_reason
     || globalVerdict.explicit_invalidation_reason
     || ''
   ).trim().toLowerCase();
   const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
-  const resolvedReviewFinalVerdictKey = normalizeGlobalVerdictKey(
-    visualState.finalVerdict || visualState.final_verdict || visualState.final_verdict_rendered || ''
-  );
+  const resolvedReviewFinalVerdictKey = resolvedFinalVerdictKey;
   const terminalAvoidFlagged = !!(
     visualState.terminal_avoid_applied === true
     || reviewLifecycleBias.terminal_avoid_applied === true
@@ -21404,85 +21406,34 @@ function renderReviewWorkspace(options = {}){
     || hardStructureFailure
     || (viabilityReject && resolvedReviewFinalVerdictKey === 'avoid')
   );
-  const shouldPreserveSharedDiminishing = !!(
-    bundleValid
-    && sharedCanonicalVerdictKey === 'watch'
-    && (
-      String(visualState.presentationBucket || '').trim().toLowerCase() === 'diminishing'
-      || String(reviewLifecycleBias.trackPresentationBucket || '').trim().toLowerCase() === 'diminishing'
-    )
-    && !hardTerminalAvoid
-  );
-  const effectiveReviewPresentationState = shouldPreserveSharedDiminishing
-    ? 'diminishing'
-    : reviewPresentationState;
-  const effectiveReviewBadge = shouldPreserveSharedDiminishing
-    ? getBadge('watch')
-    : reviewBadge;
+  const effectiveReviewPresentationState = resolvedReviewFinalVerdictKey || 'watch';
+  const effectiveReviewBadge = reviewBadge;
   const visualBucketSource = String(
-    visualState.presentationBucket
-    || reviewLifecycleBias.trackPresentationBucket
-    || visualState.trackPresentationBucket
-    || visualState.track_presentation_bucket
-    || globalVerdict.trackPresentationBucket
-    || globalVerdict.track_presentation_bucket
-    || globalVerdict.viability_visual_bucket
+    safeResolvedContract.visualBucket
+    || safeResolvedContract.presentationBucket
+    || safeResolvedContract.bucket
     || ''
   ).trim().toLowerCase();
-  const reviewBucketSource = visualBucketSource || '(none)';
+  const reviewBucketSource = 'resolved_contract';
   const reviewBucketBeforeFallback = effectiveReviewPresentationState || '(none)';
-  const canonicalAvoidActive = (
-    sharedCanonicalVerdictKey === 'avoid'
-    || resolvedReviewFinalVerdictKey === 'avoid'
-  );
-  const hasHardReviewAvoidSignal = !!(
-    bundleComplete
-    && (
-      hardTerminalAvoid
-      || effectiveReviewPresentationState === 'avoid'
-      || effectiveReviewPresentationState === 'dead'
-    )
-  );
+  const canonicalAvoidActive = resolvedReviewFinalVerdictKey === 'avoid';
   let finalReviewVisualBucket = 'monitor';
-  if (hasHardReviewAvoidSignal){
-    finalReviewVisualBucket = 'avoid';
-  } else if (
-    effectiveReviewPresentationState === 'diminishing'
-    || (sharedCanonicalVerdictKey === 'watch' && visualBucketSource === 'diminishing')
-  ){
-    finalReviewVisualBucket = 'diminishing';
-  } else if (
-    sharedCanonicalVerdictKey === 'entry'
-    || effectiveReviewPresentationState === 'entry'
-  ){
+  if(resolvedReviewFinalVerdictKey === 'entry'){
     finalReviewVisualBucket = 'entry';
-  } else if (
-    sharedCanonicalVerdictKey === 'near_entry'
-    || effectiveReviewPresentationState === 'near_entry'
-  ){
+  } else if (resolvedReviewFinalVerdictKey === 'near_entry'){
     finalReviewVisualBucket = 'near_entry';
-  }
-  if(!hardTerminalAvoid){
-    const reviewDiminishingSignal = (
-      effectiveReviewPresentationState === 'diminishing'
-      || reviewPresentationState === 'diminishing'
-      || visualBucketSource === 'diminishing'
-      || String(visualState.presentationBucket || '').trim().toLowerCase() === 'diminishing'
-    );
-    if(reviewDiminishingSignal){
+  } else if (resolvedReviewFinalVerdictKey === 'avoid'){
+    if(['diminishing'].includes(visualBucketSource)){
       finalReviewVisualBucket = 'diminishing';
-    }else if(resolvedReviewFinalVerdictKey === 'watch' && finalReviewVisualBucket === 'avoid'){
-      finalReviewVisualBucket = 'monitor';
+    }else{
+      finalReviewVisualBucket = 'avoid';
     }
-  }
-  if(finalReviewVisualBucket === 'avoid' && !hardTerminalAvoid && !canonicalAvoidActive){
-    finalReviewVisualBucket = (
-      effectiveReviewPresentationState === 'diminishing'
-      || reviewPresentationState === 'diminishing'
-      || visualBucketSource === 'diminishing'
-    )
-      ? 'diminishing'
+  } else if (resolvedReviewFinalVerdictKey === 'watch'){
+    finalReviewVisualBucket = ['watch', 'monitor'].includes(visualBucketSource)
+      ? 'monitor'
       : 'monitor';
+  } else if (hardTerminalAvoid){
+    finalReviewVisualBucket = 'avoid';
   }
   const reviewVisualTone = finalReviewVisualBucket;
   const finalReviewVisualState = finalReviewVisualBucket === 'near_entry'
@@ -21535,11 +21486,19 @@ function renderReviewWorkspace(options = {}){
       renderPass:reviewRenderPass,
       bundleComplete,
       usedChecklistFallback:currentChecks._lastUsedFallback === true,
-      canonicalVerdict:sharedCanonicalVerdictKey || visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict || '',
-      visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket || '',
-      presentationBucket:visualState.presentationBucket || '',
-      effectiveReviewPresentationState,
-      finalReviewVisualBucket,
+      canonicalVerdict:sharedCanonicalVerdictKey || resolvedReviewFinalVerdictKey || visualState.canonicalVerdict || '',
+      finalVerdict:resolvedReviewFinalVerdictKey,
+      renderedVerdict:resolvedReviewFinalVerdictKey,
+      visualBucket:finalReviewVisualBucket,
+      presentationBucket:finalReviewVisualBucket,
+      tone:reviewVisualTone,
+      effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
+      finalReviewVisualBucket:finalReviewVisualBucket,
+      nonAuthoritativeVisualState:{
+        visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket || '',
+        presentationBucket:visualState.presentationBucket || '',
+        reviewPresentationSource:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || ''
+      },
       shellClass:reviewOuterShellClass,
       accentClass:reviewAccentClass,
       staleAvoidSuppressed:visualState.staleAvoidSuppressed === true
@@ -21550,11 +21509,19 @@ function renderReviewWorkspace(options = {}){
         renderPass:reviewRenderPass,
         bundleComplete,
         usedChecklistFallback:currentChecks._lastUsedFallback === true,
-        canonicalVerdict:sharedCanonicalVerdictKey || visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict || '',
-        visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket || '',
-        presentationBucket:visualState.presentationBucket || '',
-        effectiveReviewPresentationState,
-        finalReviewVisualBucket,
+        canonicalVerdict:sharedCanonicalVerdictKey || resolvedReviewFinalVerdictKey || visualState.canonicalVerdict || '',
+        finalVerdict:resolvedReviewFinalVerdictKey,
+        renderedVerdict:resolvedReviewFinalVerdictKey,
+        visualBucket:finalReviewVisualBucket,
+        presentationBucket:finalReviewVisualBucket,
+        tone:reviewVisualTone,
+        effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
+        finalReviewVisualBucket:finalReviewVisualBucket,
+        nonAuthoritativeVisualState:{
+          visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket || '',
+          presentationBucket:visualState.presentationBucket || '',
+          reviewPresentationSource:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || ''
+        },
         shellClass:reviewOuterShellClass,
         accentClass:reviewAccentClass,
         staleAvoidSuppressed:visualState.staleAvoidSuppressed === true
@@ -21564,11 +21531,11 @@ function renderReviewWorkspace(options = {}){
   debugTickerStateSources(record.ticker, 'review', {
     source:reviewRenderSource || 'review_render',
     sectionKey:String(reviewLifecycleBias.review_lifecycle_bias || finalReviewVisualBucket || ''),
-    canonicalVerdict:sharedCanonicalVerdictKey || visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict,
-    finalVerdict:visualState.finalVerdict || visualState.final_verdict,
-    renderedVerdict:visualState.final_verdict_rendered || visualState.renderedVerdict || visualState.finalVerdict,
-    visualBucket:finalReviewVisualBucket || visualState.visualBucket || visualState.presentationBucket,
-    presentationBucket:effectiveReviewPresentationState || visualState.presentationBucket || '',
+    canonicalVerdict:sharedCanonicalVerdictKey || resolvedReviewFinalVerdictKey || visualState.canonicalVerdict,
+    finalVerdict:resolvedFinalVerdictLabel,
+    renderedVerdict:resolvedFinalVerdictLabel,
+    visualBucket:finalReviewVisualBucket,
+    presentationBucket:finalReviewVisualBucket,
     tone:reviewVisualTone || '',
     className:reviewOuterShellClass || '',
     cardClass:reviewAccentClass || '',
@@ -21601,13 +21568,11 @@ function renderReviewWorkspace(options = {}){
     fromFreshResolverOutput:usedCachedBundle !== true,
     finalReviewVisualBucket
   });
-  const reviewAction = effectiveReviewPresentationState === 'diminishing'
-    ? {label:'DIMINISHING', detail:'Wait for recovery', planAllowed:false, watchlistAllowed:true}
-    : getActions(visualState.finalVerdict || visualState.final_verdict);
+  const reviewAction = getActions(resolvedFinalVerdictLabel);
   const reviewNextActionLabel = String(reviewAction && reviewAction.label || '').trim() || 'Review setup inputs';
   const reviewBadgeLabel = effectiveReviewBadge.text;
   const planUI = resolvePlanVisibility({
-    state:visualState.final_verdict_rendered || visualState.finalVerdict,
+    state:resolvedFinalVerdictLabel,
     bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
     structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
   });
