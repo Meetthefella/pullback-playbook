@@ -7262,6 +7262,13 @@ function renderWatchlistCardElement(record, options = {}){
   const remaining = getTradingDaysRemaining(entry);
   const lifecycleText = lifecycleLabel(record);
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
+  const parentSectionKey = String(options.parentSectionKey || '').trim().toLowerCase();
+  const usedProjectionBundle = options.usedProjectionBundle === true;
+  const recomputedDuringRender = options.recomputedDuringRender === true;
+  const renderSource = String(options.renderSource || options.source || 'watchlist_render');
+  const sourceOfTruthVisualBucket = parentSectionKey
+    ? trackSectionKeyToVisualBucket(parentSectionKey)
+    : watchlistPresentationBucketForRecord(record);
   const symbol = normalizeTicker(record && record.ticker || '');
   const lifecycleSnapshot = (
     passCache && passCache.lifecycle instanceof Map && passCache.lifecycle.has(symbol)
@@ -7449,15 +7456,38 @@ function renderWatchlistCardElement(record, options = {}){
     : '';
   const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
   const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
+  const resolvedSectionKey = watchlistState || presentationBucket || '';
+  const renderedBucket = String(watchlistVisualState.visualBucket || watchlistVisualState.presentationBucket || watchlistVisualState.trackPresentationBucket || '').trim().toLowerCase();
+  const clickedCardProjectionSnapshot = {
+    ticker:entry.ticker,
+    finalVerdict:String(watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '').trim().toLowerCase(),
+    canonicalVerdict:String(watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '').trim().toLowerCase(),
+    visualBucket:String(renderedBucket || sourceOfTruthVisualBucket || '').trim().toLowerCase(),
+    tone:String(watchlistVisualState.visual_tone || watchlistVisualState.trackPresentationTone || '').trim().toLowerCase(),
+    sectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
+    sourceOfTruthVisualBucket:String(sourceOfTruthVisualBucket || '').trim().toLowerCase(),
+    usedProjectionBundle,
+    recomputedDuringRender,
+    capturedAt:new Date().toISOString()
+  };
+  record.watchlist = record.watchlist && typeof record.watchlist === 'object' ? record.watchlist : {};
+  record.watchlist.lastTrackProjectionSnapshot = {...clickedCardProjectionSnapshot};
   debugTickerStateSources(entry.ticker, 'track', {
     source:watchlistVisualState.watchlist_presentation_source || 'track_render',
-    sectionKey:watchlistState || presentationBucket || '',
+    sectionKey:resolvedSectionKey,
+    parentSectionKey,
+    resolvedSectionKey,
     canonicalVerdict:watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
     finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
     renderedVerdict:watchlistVisualState.final_verdict_rendered || watchlistVisualState.renderedVerdict || watchlistVisualState.finalVerdict,
-    visualBucket:watchlistVisualState.visualBucket || watchlistVisualState.presentationBucket || watchlistVisualState.trackPresentationBucket,
+    visualBucket:renderedBucket || sourceOfTruthVisualBucket,
+    renderedBucket:renderedBucket || sourceOfTruthVisualBucket,
     presentationBucket:presentationBucket || watchlistVisualState.presentationBucket,
     tone:watchlistVisualState.visual_tone || watchlistVisualState.trackPresentationTone || '',
+    renderSource,
+    sourceOfTruthVisualBucket,
+    usedProjectionBundle,
+    recomputedDuringRender,
     className:watchlistVisualState.className || watchlistVisualState.toneClass || '',
     cardClass:String(watchlistVisualState.className || '').match(/card--[a-z-]+/)?.[0] || '',
     shellClass:'',
@@ -7490,7 +7520,10 @@ function renderWatchlistCardElement(record, options = {}){
   div.dataset.watchlistTicker = entry.ticker;
   div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.className) || 'near')}">${escapeHtml((watchlistVisualState.badge && watchlistVisualState.badge.text) || '🟡 Monitor')}</span>${watchlistScoreMarkup}<span class="tiny ${escapeHtml(priorityClass)}">${escapeHtml(priorityLabel)}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row">${watchlistSignalRowMarkup}</div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}${compactPrimaryPlanHeadline ? `<div class="tiny watchlist-plan-meta">${escapeHtml(compactPrimaryPlanHeadline)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(diagnosticPlanBlocker)}</div>${reasoning.detail ? `<div class="tiny watchlist-card__detail">${escapeHtml(reasoning.detail)}</div>` : ''}<div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Log to Diary</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
   div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
-  div.querySelector('[data-act="review"]').onclick = () => { reviewWatchlistTicker(entry.ticker); };
+  const cardProjectionSnapshot = {...clickedCardProjectionSnapshot};
+  div.querySelector('[data-act="review"]').onclick = () => {
+    reviewWatchlistTicker(entry.ticker, {sourceProjectionSnapshot:cardProjectionSnapshot});
+  };
   div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
   const refreshButton = div.querySelector('[data-act="refresh-life"]');
   if(refreshButton){
@@ -7557,6 +7590,31 @@ function normalizeVisualBucketForPairing(bucket){
   if(safe.includes('diminish')) return 'diminishing';
   if(safe.includes('avoid') || safe.includes('dead')) return 'avoid';
   return 'monitor';
+}
+
+function trackSectionKeyToVisualBucket(sectionKey){
+  const key = String(sectionKey || '').trim().toLowerCase();
+  if(key === 'diminishing') return 'diminishing';
+  if(key === 'avoid_dead') return 'avoid';
+  return 'monitor';
+}
+
+function bumpVerdictDriftMismatch(){
+  const summary = getOrCreateVerdictDriftSummary();
+  summary.mismatches = Number(summary.mismatches || 0) + 1;
+}
+
+function getOrCreateVerdictDriftSummary(){
+  if(!logVerdictDriftTrace._summary){
+    logVerdictDriftTrace._summary = {
+      count:0,
+      surfaces:{},
+      mismatches:0,
+      startedAt:Date.now(),
+      timer:null
+    };
+  }
+  return logVerdictDriftTrace._summary;
 }
 
 function isAllowedCanonicalVisualPair(canonicalVerdict, visualBucket){
@@ -7698,8 +7756,15 @@ function buildWatchlistSectionShell(group, count, expanded){
 function renderWatchlistSectionCardsSync(records, container, options = {}){
   if(!container) return;
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
+  const parentSectionKey = String(options.parentSectionKey || '').trim().toLowerCase();
   records.forEach(record => {
-    const cardElement = renderWatchlistCardElement(record, {passCache});
+    const cardElement = renderWatchlistCardElement(record, {
+      passCache,
+      parentSectionKey,
+      usedProjectionBundle:false,
+      recomputedDuringRender:true,
+      renderSource:String(options.source || 'watchlist_render_sync')
+    });
     if(!cardElement) return;
     container.appendChild(cardElement);
   });
@@ -7710,6 +7775,7 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
   const batchSize = Math.max(1, Number(options.batchSize) || WATCHLIST_RENDER_BATCH_SIZE);
   const source = String(options.source || 'watchlist_section_chunked');
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
+  const parentSectionKey = String(options.parentSectionKey || '').trim().toLowerCase();
   const projectionStartedAt = nowPerfMs();
   const projectedRecords = [];
   const projectionChunkSize = Math.max(1, Math.min(5, batchSize));
@@ -7741,7 +7807,14 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
     const slice = projectedRecords.slice(index, index + batchSize);
     const batchFragment = document.createDocumentFragment();
     slice.forEach(item => {
-      const cardElement = renderWatchlistCardElement(item.record, {precomputedView:item.precomputedView, passCache});
+      const cardElement = renderWatchlistCardElement(item.record, {
+        precomputedView:item.precomputedView,
+        passCache,
+        parentSectionKey,
+        usedProjectionBundle:true,
+        recomputedDuringRender:false,
+        renderSource:source
+      });
       if(cardElement) batchFragment.appendChild(cardElement);
     });
     container.appendChild(batchFragment);
@@ -7891,7 +7964,11 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
     const shell = buildWatchlistSectionShell(group, sortedGroupRecords.length, expanded);
     const {section, header, body, collapsible} = shell;
     if(expanded){
-      renderWatchlistSectionCardsSync(sortedGroupRecords, body, {passCache});
+      renderWatchlistSectionCardsSync(sortedGroupRecords, body, {
+        passCache,
+        parentSectionKey:group.key,
+        source:'watchlist_render_sync'
+      });
       section.dataset.rendered = '1';
       logTrackSectionRender(group.key, false, sortedGroupRecords.length, body.children.length, 'watchlist_render_sync');
     }else{
@@ -7905,7 +7982,11 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
         setTrackSectionExpanded(group.key, nextExpanded);
         applyTrackSectionExpandedState(section, nextExpanded);
         if(nextExpanded && section.dataset.rendered !== '1'){
-          renderWatchlistSectionCardsSync(sortedGroupRecords, body, {passCache});
+          renderWatchlistSectionCardsSync(sortedGroupRecords, body, {
+            passCache,
+            parentSectionKey:group.key,
+            source:'watchlist_render_sync_expand'
+          });
           section.dataset.rendered = '1';
           logTrackSectionRender(group.key, false, sortedGroupRecords.length, body.children.length, 'watchlist_render_sync_expand');
         }else{
@@ -7994,7 +8075,8 @@ async function renderWatchlistChunked(options = {}){
           renderWatchlistSectionCardsChunked(meta.records, meta.body, {
             batchSize,
             source:`${source}_${meta.groupKey}_expand`,
-            passCache:modelPassCache
+            passCache:modelPassCache,
+            parentSectionKey:meta.groupKey
           }).then(() => {
             meta.rendered = true;
             meta.section.dataset.rendered = '1';
@@ -8017,7 +8099,8 @@ async function renderWatchlistChunked(options = {}){
     await renderWatchlistSectionCardsChunked(meta.records, meta.body, {
       batchSize,
       source:`${source}_${meta.groupKey}`,
-      passCache:modelPassCache
+      passCache:modelPassCache,
+      parentSectionKey:meta.groupKey
     });
     meta.rendered = true;
     meta.section.dataset.rendered = '1';
@@ -11438,16 +11521,7 @@ function runVerdictDriftParityChecks(record){
 
 function logVerdictDriftTrace(record, context, contract = null){
   if(!isPerfDebugEnabled()) return;
-  if(!logVerdictDriftTrace._summary){
-    logVerdictDriftTrace._summary = {
-      count:0,
-      surfaces:{},
-      mismatches:0,
-      startedAt:Date.now(),
-      timer:null
-    };
-  }
-  const summary = logVerdictDriftTrace._summary;
+  const summary = getOrCreateVerdictDriftSummary();
   const surfaceKey = String(context || 'unknown');
   summary.count += 1;
   summary.surfaces[surfaceKey] = Number(summary.surfaces[surfaceKey] || 0) + 1;
@@ -18702,6 +18776,40 @@ function logReviewOpenMutationTrace(ticker, writerPath, beforeSnapshot, afterSna
   });
 }
 
+function setActiveReviewSourceProjectionSnapshot(ticker, snapshot, sourceContext){
+  const symbol = normalizeTicker(ticker);
+  uiState.activeReviewSourceProjectionSnapshot = null;
+  uiState.activeReviewProjectionSource = 'non_watchlist_direct_resolve';
+  if(!symbol) return;
+  const context = String(sourceContext || '').trim().toLowerCase();
+  const provided = snapshot && typeof snapshot === 'object' ? snapshot : null;
+  if(provided){
+    const snapshotTicker = normalizeTicker(provided.ticker || '');
+    if(snapshotTicker && snapshotTicker === symbol){
+      uiState.activeReviewSourceProjectionSnapshot = {
+        ...provided,
+        ticker:symbol
+      };
+      uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
+      return;
+    }
+    console.warn('[TickerStateSource][Warning]', {
+      ticker:symbol,
+      code:'stale_review_projection_snapshot_discarded',
+      snapshotTicker:snapshotTicker || '(none)',
+      sourceContext:context || '(none)'
+    });
+  }
+  if(context === 'watchlist'){
+    uiState.activeReviewProjectionSource = 'snapshot_missing_fallback';
+    console.warn('[TickerStateSource][Warning]', {
+      ticker:symbol,
+      code:'missing_review_projection_snapshot',
+      sourceContext:'watchlist'
+    });
+  }
+}
+
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
@@ -18741,6 +18849,7 @@ function loadTickerIntoReview(ticker, options = {}){
     uiState.activeReviewVerdictOverride = !readOnlyReviewOpen && options.useSourceVerdict !== false
       ? reviewVerdictOverrideFromLabel(options.sourceVerdict || '')
       : '';
+    setActiveReviewSourceProjectionSnapshot(symbol, options.sourceProjectionSnapshot, sourceContext);
     setActiveReviewTicker(symbol);
     record.review.cardOpen = true;
     refreshTrackedTickerState(symbol, {
@@ -18929,14 +19038,27 @@ function openRankedResultInReview(ticker, options = {}){
   });
 }
 
-function reviewWatchlistTicker(ticker){
+function reviewWatchlistTicker(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   const record = getTickerRecord(symbol) || upsertTickerRecord(symbol);
   const sourceVerdict = reviewVerdictOverrideFromView(projectTickerForCard(record));
+  const providedSnapshot = options.sourceProjectionSnapshot && typeof options.sourceProjectionSnapshot === 'object'
+    ? options.sourceProjectionSnapshot
+    : null;
+  const sourceProjectionSnapshot = providedSnapshot
+    ? {...providedSnapshot}
+    : null;
   const reviewRequestToken = nextReviewRequestToken();
   setScannerSelectionStatusReviewPending(symbol, {reviewRequestToken, sourceContext:'watchlist'});
-  loadTickerIntoReview(symbol, {includeInScannerUniverse:false, recompute:false, sourceVerdict, sourceContext:'watchlist', reviewRequestToken});
+  loadTickerIntoReview(symbol, {
+    includeInScannerUniverse:false,
+    recompute:false,
+    sourceVerdict,
+    sourceContext:'watchlist',
+    reviewRequestToken,
+    sourceProjectionSnapshot
+  });
 }
 
 const trackedTickerRefreshRuntime = {
@@ -19122,13 +19244,21 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     ticker:symbol,
     surface:String(surface || ''),
     source:String(state.source || ''),
+    renderSource:String(state.renderSource || state.source || ''),
     sectionKey:String(state.sectionKey || ''),
+    parentSectionKey:String(state.parentSectionKey || ''),
+    resolvedSectionKey:String(state.resolvedSectionKey || state.sectionKey || ''),
     canonicalVerdict:state.canonicalVerdict || '',
     finalVerdict:state.finalVerdict || '',
     renderedVerdict:state.renderedVerdict || '',
     visualBucket:state.visualBucket || '',
+    renderedBucket:state.renderedBucket || state.visualBucket || '',
     presentationBucket:state.presentationBucket || '',
     tone:state.tone || '',
+    sourceOfTruthVisualBucket:state.sourceOfTruthVisualBucket || '',
+    usedProjectionBundle:state.usedProjectionBundle === true,
+    recomputedDuringRender:state.recomputedDuringRender === true,
+    reviewProjectionSource:String(state.reviewProjectionSource || ''),
     className:state.className || '',
     cardClass:state.cardClass || '',
     shellClass:state.shellClass || '',
@@ -19146,19 +19276,25 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     fromStoredFields:fromStored,
     fromResolvedStateBundleCache:fromCache,
     fromFreshResolverOutput:fromFresh,
-    finalReviewVisualBucket:state.finalReviewVisualBucket || ''
+    finalReviewVisualBucket:state.finalReviewVisualBucket || '',
+    usedCachedBundle:state.usedCachedBundle === true,
+    reviewBundleMode:state.reviewBundleMode || '',
+    projectionBundleMode:state.projectionBundleMode || ''
   };
   console.info('[TickerStateSource]', payload);
   if(typeof window !== 'undefined' && window.PP_FORCE_STATE_DEBUG === true){
     console.warn('[TickerStateSource::mirror]', payload);
   }
   if(!isAllowedCanonicalVisualPair(canonicalVerdict, visualBucket)){
+    bumpVerdictDriftMismatch();
     console.warn('[STATE_CONTRADICTION]', {ticker:symbol, surface, code:'canonical_visual_pair_invalid', canonicalVerdict, visualBucket});
   }
   if(saysDiminishing && hasAvoidShell){
+    bumpVerdictDriftMismatch();
     console.warn('[TickerStateSource][Warning]', {ticker:symbol, surface, code:'diminishing_copy_but_avoid_shell'});
   }
   if(canonicalVerdict === 'watch' && hasAvoidShell){
+    bumpVerdictDriftMismatch();
     console.warn('[TickerStateSource][Warning]', {ticker:symbol, surface, code:'watch_canonical_but_avoid_shell'});
   }
   if(fromStored && fromFresh){
@@ -19171,7 +19307,24 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     const scanVerdict = String(next.scan.canonicalVerdict || '').trim().toLowerCase();
     const trackVerdict = String(next.track.canonicalVerdict || '').trim().toLowerCase();
     if(scanVerdict && trackVerdict && scanVerdict !== trackVerdict){
+      bumpVerdictDriftMismatch();
       console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'scan_track_verdict_mismatch', scanVerdict, trackVerdict});
+    }
+  }
+  if(next.track){
+    const parentSectionKey = String(next.track.parentSectionKey || '').trim().toLowerCase();
+    const renderedBucket = normalizeVisualBucketForPairing(next.track.renderedBucket || next.track.visualBucket || '');
+    if(parentSectionKey === 'diminishing' && !['diminishing'].includes(renderedBucket)){
+      bumpVerdictDriftMismatch();
+      console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'section_bucket_mismatch', parentSectionKey, renderedBucket});
+    }
+    if(parentSectionKey === 'avoid_dead' && !['avoid','dead'].includes(renderedBucket)){
+      bumpVerdictDriftMismatch();
+      console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'section_bucket_mismatch', parentSectionKey, renderedBucket});
+    }
+    if(parentSectionKey === 'active' && ['avoid','dead'].includes(renderedBucket)){
+      bumpVerdictDriftMismatch();
+      console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'section_bucket_mismatch', parentSectionKey, renderedBucket});
     }
   }
   if(next.review && next.track){
@@ -19190,6 +19343,7 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
       && ['avoid', 'diminishing', 'dead'].includes(normalizeVisualBucketForPairing(trackBucket))
     );
     if(reviewBucket && trackBucket && reviewBucket !== trackBucket && !mismatchAllowedByNuance){
+      bumpVerdictDriftMismatch();
       console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'review_track_bucket_mismatch', reviewBucket, trackBucket});
     }
   }
@@ -19201,6 +19355,7 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     && state.terminalAvoidApplied !== true
     && state.hardTerminalAvoid !== true
   ){
+    bumpVerdictDriftMismatch();
     console.warn('[STATE_CONTRADICTION]', {ticker:symbol, surface, code:'review_bucket_differs_without_terminal_avoid', finalReviewVisualBucket, visualBucket});
   }
 }
@@ -21408,7 +21563,23 @@ function renderReviewWorkspace(options = {}){
   );
   const effectiveReviewPresentationState = resolvedReviewFinalVerdictKey || 'watch';
   const effectiveReviewBadge = reviewBadge;
+  const sourceProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(record.ticker || '')
+    ? uiState.activeReviewSourceProjectionSnapshot
+    : null;
+  const reviewProjectionSource = String(
+    uiState.activeReviewProjectionSource
+    || (sourceProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
+  ).trim().toLowerCase();
   const visualBucketSource = String(
+    sourceProjectionSnapshot && (sourceProjectionSnapshot.sourceOfTruthVisualBucket || sourceProjectionSnapshot.visualBucket)
+    || safeResolvedContract.visualBucket
+    || safeResolvedContract.presentationBucket
+    || safeResolvedContract.bucket
+    || ''
+  ).trim().toLowerCase();
+  const sourceOfTruthVisualBucket = String(
     safeResolvedContract.visualBucket
     || safeResolvedContract.presentationBucket
     || safeResolvedContract.bucket
@@ -21429,8 +21600,8 @@ function renderReviewWorkspace(options = {}){
       finalReviewVisualBucket = 'avoid';
     }
   } else if (resolvedReviewFinalVerdictKey === 'watch'){
-    finalReviewVisualBucket = ['watch', 'monitor'].includes(visualBucketSource)
-      ? 'monitor'
+    finalReviewVisualBucket = visualBucketSource === 'diminishing'
+      ? 'diminishing'
       : 'monitor';
   } else if (hardTerminalAvoid){
     finalReviewVisualBucket = 'avoid';
@@ -21492,6 +21663,11 @@ function renderReviewWorkspace(options = {}){
       visualBucket:finalReviewVisualBucket,
       presentationBucket:finalReviewVisualBucket,
       tone:reviewVisualTone,
+      sourceOfTruthVisualBucket:sourceOfTruthVisualBucket || visualBucketSource || '',
+      usedCachedBundle:usedCachedBundle === true,
+      reviewBundleMode:usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle',
+      usedTrackProjectionSnapshot:sourceProjectionSnapshot != null,
+      reviewProjectionSource,
       effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
       finalReviewVisualBucket:finalReviewVisualBucket,
       nonAuthoritativeVisualState:{
@@ -21515,6 +21691,11 @@ function renderReviewWorkspace(options = {}){
         visualBucket:finalReviewVisualBucket,
         presentationBucket:finalReviewVisualBucket,
         tone:reviewVisualTone,
+        sourceOfTruthVisualBucket:sourceOfTruthVisualBucket || visualBucketSource || '',
+        usedCachedBundle:usedCachedBundle === true,
+        reviewBundleMode:usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle',
+        usedTrackProjectionSnapshot:sourceProjectionSnapshot != null,
+        reviewProjectionSource,
         effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
         finalReviewVisualBucket:finalReviewVisualBucket,
         nonAuthoritativeVisualState:{
@@ -21537,6 +21718,10 @@ function renderReviewWorkspace(options = {}){
     visualBucket:finalReviewVisualBucket,
     presentationBucket:finalReviewVisualBucket,
     tone:reviewVisualTone || '',
+    sourceOfTruthVisualBucket:sourceOfTruthVisualBucket || visualBucketSource || '',
+    usedProjectionBundle:sourceProjectionSnapshot != null,
+    recomputedDuringRender:usedCachedBundle !== true,
+    reviewProjectionSource,
     className:reviewOuterShellClass || '',
     cardClass:reviewAccentClass || '',
     shellClass:reviewOuterShellClass || '',
