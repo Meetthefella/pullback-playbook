@@ -768,6 +768,63 @@ async function runStartupRiskRefreshChunked(){
     ]);
     const activeRecords = records.filter(record => activeTickerSet.has(normalizeTickerRecord(record).ticker));
     const skippedInactiveCount = Math.max(0, records.length - activeRecords.length);
+    let preflightChangedCount = 0;
+    for(let index = 0; index < activeRecords.length; index += 1){
+      const probeMeta = recomputeRiskContextForRecordWithMeta(activeRecords[index], {
+        source,
+        skipIfUnchanged:true,
+        probeOnly:true,
+        suppressRequestedLog:true
+      });
+      if(probeMeta && probeMeta.changedInputFields && probeMeta.changedInputFields.length > 0) preflightChangedCount += 1;
+    }
+    logRiskPerf('risk_calc_probe_summary', {
+      risk_calc_reason:source,
+      risk_calc_probe_record_count:activeRecords.length,
+      risk_calc_changed_ticker_count:preflightChangedCount,
+      risk_calc_unchanged_ticker_count:Math.max(0, activeRecords.length - preflightChangedCount)
+    });
+    if(preflightChangedCount === 0){
+      logRiskPerf('risk_calc_skipped_unchanged', {
+        risk_calc_reason:source,
+        risk_calc_changed_input_fields:[],
+        risk_calc_record_count:0,
+        risk_calc_changed_ticker_count:0
+      });
+      runWatchlistLifecycleEvaluation({
+        source,
+        persist:false,
+        render:false,
+        force:false
+      });
+      commitTickerState();
+      await yieldDeferredStartupChunk();
+      renderStats();
+      if(activeWorkspaceTab() === 'track'){
+        renderWatchlist();
+        renderFocusQueue();
+      }else{
+        markWatchlistDirty(null, 'startup_risk_refresh');
+        startupCoordinator.renderedTabs.track = false;
+        startupCoordinator.trackHydratedRendered = false;
+      }
+      if(activeWorkspaceTab() === 'scan'){
+        renderScannerResults();
+        renderScannerRulesPanel();
+      }else if(activeWorkspaceTab() === 'review'){
+        renderCards();
+      }else if(activeWorkspaceTab() === 'diary'){
+        renderTradeDiary();
+      }
+      logRiskFitPerfSummary('startup_risk_refresh', {
+        risk_records_recalculated:0,
+        risk_records_skipped:activeRecords.length,
+        active_ticker_count:activeTickerSet.size,
+        total_tracked_records:records.length,
+        skipped_records_count:skippedInactiveCount
+      });
+      return;
+    }
     beginRiskRecalcBatchStatus({
       source,
       tickerCount:activeRecords.length,
@@ -803,7 +860,8 @@ async function runStartupRiskRefreshChunked(){
     const record = activeRecords[index];
     const recomputeMeta = recomputeRiskContextForRecordWithMeta(record, {
       source,
-      skipIfUnchanged:true
+      skipIfUnchanged:true,
+      suppressRequestedLog:true
     });
     if(recomputeMeta.skipped) skippedCount += 1;
     else executedCount += 1;
@@ -5093,6 +5151,46 @@ async function runRiskContextRefreshChunked(options = {}){
       })
       .map(record => normalizeTickerRecord(record).ticker)
       .filter(Boolean);
+    let changedRecordsCount = 0;
+    for(let index = 0; index < records.length; index += 1){
+      const probeMeta = recomputeRiskContextForRecordWithMeta(records[index], {
+        source,
+        skipIfUnchanged:true,
+        probeOnly:true,
+        suppressRequestedLog:true
+      });
+      if(probeMeta && probeMeta.changedInputFields && probeMeta.changedInputFields.length > 0) changedRecordsCount += 1;
+    }
+    logRiskPerf('risk_calc_probe_summary', {
+      risk_calc_reason:source,
+      risk_calc_probe_record_count:records.length,
+      risk_calc_changed_ticker_count:changedRecordsCount,
+      risk_calc_unchanged_ticker_count:Math.max(0, records.length - changedRecordsCount)
+    });
+    if(changedRecordsCount === 0){
+      logRiskPerf('risk_calc_skipped_unchanged', {
+        risk_calc_reason:source,
+        risk_calc_changed_input_fields:[],
+        risk_calc_record_count:0,
+        risk_calc_changed_ticker_count:0
+      });
+      runWatchlistLifecycleEvaluation({
+        source,
+        persist:false,
+        render:false,
+        force:options.force === true
+      });
+      syncCardDraftsFromDom();
+      commitTickerState();
+      renderStats();
+      renderPlannerPlanSummary();
+      logRiskFitPerfSummary('risk_settings_refresh', {
+        risk_records_recalculated:0,
+        risk_records_skipped:records.length,
+        risk_settings_refresh_duration_ms:Number((nowPerfMs() - startedAt).toFixed(1))
+      });
+      return;
+    }
     beginRiskRecalcBatchStatus({
       source,
       tickerCount:watchlistTickers.length,
@@ -5115,7 +5213,8 @@ async function runRiskContextRefreshChunked(options = {}){
         const record = records[processed];
         const recomputeMeta = recomputeRiskContextForRecordWithMeta(record, {
           source,
-          skipIfUnchanged:true
+          skipIfUnchanged:true,
+          suppressRequestedLog:true
         });
         if(recomputeMeta.skipped) skippedCount += 1;
         else executedCount += 1;
@@ -17014,6 +17113,8 @@ function hasPersistedRiskContextForRecord(record){
 function recomputeRiskContextForRecordWithMeta(record, options = {}){
   const source = String(options.source || 'risk_context');
   const skipIfUnchanged = options.skipIfUnchanged === true;
+  const probeOnly = options.probeOnly === true;
+  const suppressRequestedLog = options.suppressRequestedLog === true;
   const item = normalizeTickerRecord(record || {});
   const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
   const effectiveDisplayedPlan = deriveCurrentPlanState(
@@ -17037,7 +17138,7 @@ function recomputeRiskContextForRecordWithMeta(record, options = {}){
     item.meta.lastRiskCalcInputSnapshot = nextSnapshot;
     item.meta.lastRiskCalcSource = String(item.meta.lastRiskCalcSource || 'persisted_bootstrap');
   }
-  if(PP_PERF_DEBUG){
+  if(PP_PERF_DEBUG && !suppressRequestedLog){
     console.debug('[PP_PERF] risk_calc_requested', {
       ticker:item.ticker,
       risk_calc_reason:source,
@@ -17060,6 +17161,16 @@ function recomputeRiskContextForRecordWithMeta(record, options = {}){
       executed:false,
       fingerprint:nextFingerprint,
       changedInputFields:[]
+    };
+  }
+  if(probeOnly){
+    return {
+      record:item,
+      skipped:false,
+      executed:false,
+      probeOnly:true,
+      fingerprint:nextFingerprint,
+      changedInputFields
     };
   }
   const updatedCard = recomputeRiskContextForCard(tickerRecordToLegacyCard(record), {
