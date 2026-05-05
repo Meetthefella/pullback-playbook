@@ -21431,6 +21431,10 @@ function renderReviewWorkspace(options = {}){
   ).trim().toLowerCase();
   const reviewBucketSource = visualBucketSource || '(none)';
   const reviewBucketBeforeFallback = effectiveReviewPresentationState || '(none)';
+  const canonicalAvoidActive = (
+    sharedCanonicalVerdictKey === 'avoid'
+    || resolvedReviewFinalVerdictKey === 'avoid'
+  );
   const hasHardReviewAvoidSignal = !!(
     bundleComplete
     && (
@@ -21470,6 +21474,15 @@ function renderReviewWorkspace(options = {}){
     }else if(resolvedReviewFinalVerdictKey === 'watch' && finalReviewVisualBucket === 'avoid'){
       finalReviewVisualBucket = 'monitor';
     }
+  }
+  if(finalReviewVisualBucket === 'avoid' && !hardTerminalAvoid && !canonicalAvoidActive){
+    finalReviewVisualBucket = (
+      effectiveReviewPresentationState === 'diminishing'
+      || reviewPresentationState === 'diminishing'
+      || visualBucketSource === 'diminishing'
+    )
+      ? 'diminishing'
+      : 'monitor';
   }
   const reviewVisualTone = finalReviewVisualBucket;
   const finalReviewVisualState = finalReviewVisualBucket === 'near_entry'
@@ -21567,7 +21580,12 @@ function renderReviewWorkspace(options = {}){
     bounce:derivedStates.bounceState || '',
     viability:globalVerdict.viability || '',
     viabilityReason:globalVerdict.viability_reason || '',
-    terminalAvoidApplied:terminalAvoidFlagged === true || visualState.terminal_avoid_applied === true,
+    terminalAvoidApplied:canonicalAvoidActive && (
+      terminalAvoidFlagged === true
+      || visualState.terminal_avoid_applied === true
+      || hardTerminalAvoid === true
+      || finalReviewVisualBucket === 'avoid'
+    ),
     hardTerminalAvoid:hardTerminalAvoid === true,
     explicitInvalidationReason:explicitInvalidationReason || '',
     sourceFields:{
