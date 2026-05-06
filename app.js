@@ -7791,9 +7791,14 @@ function renderWatchlistCardElement(record, options = {}){
     ticker:entry.ticker,
     finalVerdict:String(watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '').trim().toLowerCase(),
     canonicalVerdict:String(watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '').trim().toLowerCase(),
+    renderedVerdict:String(watchlistVisualState.final_verdict_rendered || watchlistVisualState.renderedVerdict || watchlistVisualState.finalVerdict || '').trim().toLowerCase(),
     visualBucket:String(sourceOfTruthVisualBucket || renderedBucket || '').trim().toLowerCase(),
+    renderedBucket:String(renderedBucket || sourceOfTruthVisualBucket || '').trim().toLowerCase(),
     tone:String(watchlistVisualState.visual_tone || watchlistVisualState.trackPresentationTone || '').trim().toLowerCase(),
     sectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
+    resolvedSectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
+    decisionSummary:String(watchlistVisualState.decision_summary || '').trim(),
+    actionGuidance:String(resolvedContract && (resolvedContract.actionLabel || resolvedContract.actionShortLabel) || '').trim(),
     sourceOfTruthVisualBucket:String(sourceOfTruthVisualBucket || '').trim().toLowerCase(),
     usedProjectionBundle,
     recomputedDuringRender,
@@ -19304,6 +19309,9 @@ function maybeInvalidateActiveReviewProjectionFromTrack(ticker, nextProjectionSn
   uiState.activeReviewSourceProjectionSnapshot = nextSnapshot;
   uiState.activeReviewProjectionSource = 'track_projection_updated';
   uiState.activeReviewVerdictOverride = '';
+  const liveRecord = getTickerRecord(symbol);
+  if(liveRecord && liveRecord.resolvedStateBundleCache) delete liveRecord.resolvedStateBundleCache;
+  if(liveRecord && liveRecord.resolvedStateBundle) delete liveRecord.resolvedStateBundle;
   if(bucketChanged){
     console.info('[ReviewProjectionInvalidated]', {
       ticker:symbol,
@@ -19714,6 +19722,131 @@ function withLiveRecordFromCache(liveRecord, cache){
     reason:String(safeCache.reason || ''),
     cachedAt:String(safeCache.cachedAt || '')
   };
+}
+
+function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
+  const baseBundle = bundle && typeof bundle === 'object' ? bundle : {};
+  const snapshot = projectionSnapshot && typeof projectionSnapshot === 'object' ? projectionSnapshot : null;
+  if(!snapshot) return {bundle:baseBundle, applied:false};
+  let canonicalKey = normalizeGlobalVerdictKey(snapshot.canonicalVerdict || snapshot.finalVerdict || '');
+  let finalKey = normalizeGlobalVerdictKey(snapshot.finalVerdict || snapshot.canonicalVerdict || canonicalKey || '');
+  let renderedKey = normalizeGlobalVerdictKey(snapshot.renderedVerdict || snapshot.finalVerdict || finalKey || '');
+  let visualBucket = normalizeVisualBucketForPairing(snapshot.sourceOfTruthVisualBucket || snapshot.visualBucket || snapshot.renderedBucket || '');
+  let renderedBucket = normalizeVisualBucketForPairing(snapshot.renderedBucket || snapshot.visualBucket || visualBucket || '');
+  let tone = String(snapshot.tone || visualBucket || '').trim().toLowerCase();
+  const sectionKey = String(snapshot.sectionKey || snapshot.resolvedSectionKey || '').trim().toLowerCase();
+  const decisionSummary = String(snapshot.decisionSummary || snapshot.headlineCopy || '').trim();
+  const actionGuidance = String(snapshot.actionGuidance || snapshot.actionLabel || snapshot.actionShortLabel || '').trim();
+  const originalFinalVerdict = finalKey || canonicalKey || '';
+  const originalVisualBucket = visualBucket || '';
+  const avoidLikeBucket = ['avoid','avoid_dead','terminal','diminishing'].includes(visualBucket);
+  const watchLikeBucket = ['watch','monitor'].includes(visualBucket);
+  const entryLikeBucket = ['entry','near_entry'].includes(visualBucket);
+  const toneForBucket = bucket => {
+    const normalized = String(bucket || '').trim().toLowerCase();
+    if(normalized === 'avoid_dead' || normalized === 'terminal') return 'avoid';
+    return normalized || 'avoid';
+  };
+  let coerced = false;
+  if(visualBucket && finalKey && !isAllowedCanonicalVisualPair(finalKey, visualBucket)){
+    if(avoidLikeBucket && finalKey !== 'avoid'){
+      finalKey = 'avoid';
+      canonicalKey = 'avoid';
+      renderedKey = 'avoid';
+      renderedBucket = visualBucket;
+      tone = toneForBucket(visualBucket);
+      coerced = true;
+    }else if(finalKey === 'avoid' && watchLikeBucket){
+      visualBucket = 'avoid';
+      renderedBucket = 'avoid';
+      tone = toneForBucket(visualBucket);
+      coerced = true;
+    }else if(finalKey === 'watch' && entryLikeBucket){
+      visualBucket = 'monitor';
+      renderedBucket = 'monitor';
+      tone = toneForBucket(visualBucket);
+      coerced = true;
+    }else{
+      finalKey = 'avoid';
+      canonicalKey = 'avoid';
+      renderedKey = 'avoid';
+      visualBucket = 'avoid';
+      renderedBucket = 'avoid';
+      tone = toneForBucket(visualBucket);
+      coerced = true;
+    }
+  }
+  if(coerced){
+    console.warn('[ReviewProjectionInvariantCoerced]', {
+      ticker:normalizeTicker(snapshot.ticker || ''),
+      source:'track_projection_updated',
+      originalFinalVerdict:originalFinalVerdict || '(none)',
+      originalVisualBucket:originalVisualBucket || '(none)',
+      coercedFinalVerdict:finalKey || canonicalKey || '(none)',
+      coercedVisualBucket:visualBucket || '(none)',
+      reason:'invalid_final_visual_pair'
+    });
+  }
+  const nextBundle = {...baseBundle};
+  const nextCanonical = {...(nextBundle.canonicalContract || {})};
+  const nextResolved = {...(nextBundle.resolvedContract || {})};
+  const nextVisual = {...(nextBundle.visualState || {})};
+  const nextGlobal = {...(nextBundle.globalVerdict || {})};
+  if(canonicalKey){
+    nextCanonical.canonicalVerdictKey = canonicalKey;
+    nextCanonical.presentationLabel = verdictPresentationLabelForKey(canonicalKey);
+    nextGlobal.final_verdict = canonicalKey;
+    nextGlobal.finalVerdict = canonicalKey;
+  }
+  if(finalKey){
+    nextResolved.finalVerdict = finalKey;
+    nextResolved.final_verdict = finalKey;
+    nextResolved.final_verdict_rendered = renderedKey || finalKey;
+    nextResolved.tradeabilityVerdict = finalKey;
+    nextVisual.canonicalVerdict = canonicalKey || finalKey;
+    nextVisual.finalVerdict = finalKey;
+    nextVisual.final_verdict = finalKey;
+    nextVisual.renderedVerdict = renderedKey || finalKey;
+    nextVisual.final_verdict_rendered = renderedKey || finalKey;
+    nextVisual.reviewVerdict = finalKey;
+  }
+  if(visualBucket){
+    nextResolved.visualBucket = visualBucket;
+    nextResolved.presentationBucket = visualBucket;
+    nextResolved.bucket = visualBucket;
+    nextVisual.visualBucket = visualBucket;
+    nextVisual.presentationBucket = visualBucket;
+    nextVisual.trackPresentationBucket = visualBucket;
+  }
+  if(renderedBucket){
+    nextVisual.renderedBucket = renderedBucket;
+  }
+  if(tone){
+    nextVisual.visual_tone = tone;
+    nextVisual.trackPresentationTone = tone;
+  }
+  if(sectionKey){
+    nextVisual.sectionKey = sectionKey;
+    nextVisual.resolvedSectionKey = sectionKey;
+  }
+  if(decisionSummary){
+    nextVisual.decision_summary = decisionSummary;
+  }
+  if(actionGuidance){
+    nextResolved.actionLabel = actionGuidance;
+    nextResolved.actionShortLabel = actionGuidance;
+  }
+  nextVisual.review_presentation_source = 'track_projection_bundle';
+  nextBundle.canonicalContract = nextCanonical;
+  nextBundle.resolvedContract = nextResolved;
+  nextBundle.visualState = nextVisual;
+  nextBundle.globalVerdict = nextGlobal;
+  nextBundle.source = 'review';
+  nextBundle.sourceSurface = 'review';
+  nextBundle.reason = 'track_projection_bundle';
+  nextBundle.reusedCachedContract = false;
+  nextBundle.refreshSkippedReason = 'track_projection_bundle';
+  return {bundle:nextBundle, applied:true};
 }
 
 function validateSharedRefreshBundle(bundle, context = 'unknown'){
@@ -21833,11 +21966,31 @@ function renderReviewWorkspace(options = {}){
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
   const readOnlyReviewOpen = options.skipWatchlistLifecycle === true && options.recompute !== true;
-  const reviewSnapshotAuthority = String(uiState.activeReviewProjectionSource || '').trim().toLowerCase() === 'clicked_card_snapshot';
+  const sourceProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(ticker || '')
+    ? uiState.activeReviewSourceProjectionSnapshot
+    : null;
+  const reviewProjectionSource = String(
+    uiState.activeReviewProjectionSource
+    || (sourceProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
+  ).trim().toLowerCase();
+  const hasProjectionSnapshot = !!sourceProjectionSnapshot;
+  const reviewSnapshotAuthority = reviewProjectionSource === 'clicked_card_snapshot'
+    || (reviewProjectionSource === 'track_projection_updated' && hasProjectionSnapshot);
+  const forceTrackProjectionBundle = reviewProjectionSource === 'track_projection_updated';
+  if(forceTrackProjectionBundle && !hasProjectionSnapshot){
+    console.warn('[ReviewProjectionSnapshotMissing]', {
+      ticker:normalizeTicker(ticker || ''),
+      source:'track_projection_updated',
+      reason:'missing_projection_snapshot'
+    });
+  }
   const cachedReviewBundle = liveRecord && liveRecord.resolvedStateBundleCache && typeof liveRecord.resolvedStateBundleCache === 'object'
+    && !forceTrackProjectionBundle
     ? withLiveRecordFromCache(liveRecord, liveRecord.resolvedStateBundleCache)
     : null;
-  const refreshBundle = reviewSnapshotAuthority
+  let refreshBundle = reviewSnapshotAuthority
     ? (
       cachedReviewBundle
         ? {
@@ -21866,6 +22019,14 @@ function renderReviewWorkspace(options = {}){
       persist:false,
       emitTrace:true
     });
+  const projectionBundleAdopted = !!(forceTrackProjectionBundle && hasProjectionSnapshot);
+  if(projectionBundleAdopted){
+    const live = getTickerRecord(ticker);
+    if(live && live.resolvedStateBundleCache) delete live.resolvedStateBundleCache;
+    if(live && live.resolvedStateBundle) delete live.resolvedStateBundle;
+    const applied = applyProjectionSnapshotToReviewBundle(refreshBundle, sourceProjectionSnapshot);
+    refreshBundle = applied.bundle;
+  }
   validateSharedRefreshBundle(refreshBundle, 'renderReviewWorkspace');
   const bundleValid = hasCompleteSharedRefreshBundle(refreshBundle);
   const usedCachedBundle = !!(refreshBundle && refreshBundle.reusedCachedContract === true);
@@ -22186,16 +22347,7 @@ function renderReviewWorkspace(options = {}){
   );
   const effectiveReviewPresentationState = resolvedReviewFinalVerdictKey || 'watch';
   const effectiveReviewBadge = reviewBadge;
-  const sourceProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
-    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
-    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(record.ticker || '')
-    ? uiState.activeReviewSourceProjectionSnapshot
-    : null;
-  const reviewProjectionSource = String(
-    uiState.activeReviewProjectionSource
-    || (sourceProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
-  ).trim().toLowerCase();
-  const projectionSnapshotAuthority = reviewProjectionSource === 'clicked_card_snapshot';
+  const projectionSnapshotAuthority = reviewProjectionSource === 'clicked_card_snapshot' || reviewProjectionSource === 'track_projection_updated';
   const isReviewOpenRender = ['review_open','watchlist','watchlist_card_open','track_projection_updated'].includes(String(reviewRenderSource || '').trim().toLowerCase());
   const effectiveReviewProjectionSourceBase = projectionSnapshotAuthority && !isReviewOpenRender
     ? (sourceProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve')
@@ -22327,7 +22479,7 @@ function renderReviewWorkspace(options = {}){
       tone:reviewVisualTone,
       sourceOfTruthVisualBucket:sourceOfTruthVisualBucket || visualBucketSource || '',
       usedCachedBundle:usedCachedBundle === true,
-      reviewBundleMode:usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle',
+      reviewBundleMode:projectionBundleAdopted ? 'track_projection_bundle' : (usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle'),
       usedTrackProjectionSnapshot:sourceProjectionSnapshot != null,
       reviewProjectionSource:effectiveReviewProjectionSource,
       effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
@@ -22355,7 +22507,7 @@ function renderReviewWorkspace(options = {}){
         tone:reviewVisualTone,
         sourceOfTruthVisualBucket:sourceOfTruthVisualBucket || visualBucketSource || '',
         usedCachedBundle:usedCachedBundle === true,
-        reviewBundleMode:usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle',
+        reviewBundleMode:projectionBundleAdopted ? 'track_projection_bundle' : (usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle'),
         usedTrackProjectionSnapshot:sourceProjectionSnapshot != null,
         reviewProjectionSource:effectiveReviewProjectionSource,
         effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
