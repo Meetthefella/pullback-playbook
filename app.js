@@ -10,9 +10,9 @@ const APP_VERSION = 'v4.4.10';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
     version:'4.4.10',
-    commit:'0e2ab3e',
+    commit:'817dad5',
     branch:'main',
-    builtAt:'2026-05-06T10:37Z'
+    builtAt:'2026-05-06T10:39Z'
   };
 }
 const defaultAiEndpoint = '/api/analyse-setup';
