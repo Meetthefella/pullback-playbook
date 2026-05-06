@@ -7,6 +7,14 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
 const APP_VERSION = 'v4.4.10';
+if(typeof window !== 'undefined'){
+  window.PP_BUILD = {
+    version:'4.4.10',
+    commit:'53c40cb',
+    branch:'main',
+    builtAt:'2026-05-06T00:00Z'
+  };
+}
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';
@@ -7589,6 +7597,7 @@ function renderWatchlistCardElement(record, options = {}){
     recomputedDuringRender,
     capturedAt:new Date().toISOString()
   };
+  maybeInvalidateActiveReviewProjectionFromTrack(entry.ticker, clickedCardProjectionSnapshot, 'track_projection_changed');
   record.watchlist = record.watchlist && typeof record.watchlist === 'object' ? record.watchlist : {};
   record.watchlist.lastTrackProjectionSnapshot = {...clickedCardProjectionSnapshot};
   debugTickerStateSources(entry.ticker, 'track', {
@@ -7810,6 +7819,20 @@ function isTrackSectionExpanded(sectionKey, sectionRecords = []){
   if(stateMap[sectionKey] === true) return true;
   if(shouldForceTrackSectionCollapsed(sectionKey, sectionRecords)) return false;
   return stateMap[sectionKey] === true;
+}
+
+function startTrackRenderCycle(source = 'watchlist_render'){
+  if(activeWorkspaceTab() !== 'track') return () => {};
+  uiState.trackRenderInFlight = true;
+  uiState.trackRenderLastStartedAt = Date.now();
+  uiState.trackRenderLastSource = String(source || 'watchlist_render');
+  let finished = false;
+  return () => {
+    if(finished) return;
+    finished = true;
+    uiState.trackRenderInFlight = false;
+    uiState.trackRenderLastEndedAt = Date.now();
+  };
 }
 
 function captureTrackUiState(){
@@ -8206,136 +8229,166 @@ async function renderWatchlistChunked(options = {}){
     }
     return;
   }
-  const batchSize = Math.max(1, Number(options.batchSize) || WATCHLIST_RENDER_BATCH_SIZE);
-  const passCache = options.passCache && typeof options.passCache === 'object'
-    ? options.passCache
-    : createWatchlistProjectionPassCache();
-  const model = options.model || prepareWatchlistRenderModel(source, {passCache});
-  const {box, showExpired, records, renderSignature} = model;
-  const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
-  const preserveUiState = options.preserveUiState !== false && activeWorkspaceTab() === 'track';
-  const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
-  if(!box) return;
-  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
-  if(!records.length){
+  const finishTrackRender = startTrackRenderCycle(source);
+  let renderError = null;
+  try{
+    const batchSize = Math.max(1, Number(options.batchSize) || WATCHLIST_RENDER_BATCH_SIZE);
+    const passCache = options.passCache && typeof options.passCache === 'object'
+      ? options.passCache
+      : createWatchlistProjectionPassCache();
+    const model = options.model || prepareWatchlistRenderModel(source, {passCache});
+    const {box, showExpired, records, renderSignature} = model;
+    const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
+    const preserveUiState = options.preserveUiState !== false && activeWorkspaceTab() === 'track';
+    const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
+    if(!box) return;
+    logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
+    if(!records.length){
+      uiState.watchlistRenderSignature = renderSignature;
+      box.dataset.watchlistSignature = renderSignature;
+      box.innerHTML = showExpired
+        ? '<div class="summary">No watchlist entries match this filter right now.</div>'
+        : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+      return;
+    }
+    if(
+      uiState.watchlistRenderSignature === renderSignature
+      && box.dataset.watchlistSignature === renderSignature
+      && box.childElementCount > 0
+    ){
+      return;
+    }
+    const groups = watchlistRenderGroups(showExpired);
+    const grouped = {};
+    groups.forEach(group => { grouped[group.key] = []; });
+    records.forEach(record => {
+      const bucket = watchlistPresentationBucketForRecord(record);
+      const groupKey = watchlistRenderGroupForBucket(bucket);
+      if(grouped[groupKey]) grouped[groupKey].push(record);
+    });
+    const sectionMeta = [];
+    groups.forEach(group => {
+      const groupRecords = grouped[group.key] || [];
+      if(!groupRecords.length) return;
+      const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key, modelPassCache);
+      const expanded = isTrackSectionExpanded(group.key, sortedGroupRecords);
+      const shell = buildWatchlistSectionShell(group, sortedGroupRecords.length, expanded);
+      sectionMeta.push({
+        ...shell,
+        groupKey:group.key,
+        records:sortedGroupRecords,
+        expanded,
+        rendered:false
+      });
+    });
+    box.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    sectionMeta.forEach(meta => {
+      if(meta.collapsible){
+        meta.header.addEventListener('click', () => {
+          const isExpanded = meta.section.classList.contains('is-expanded');
+          const nextExpanded = !isExpanded;
+          setTrackSectionExpanded(meta.groupKey, nextExpanded);
+          applyTrackSectionExpandedState(meta.section, nextExpanded);
+          if(nextExpanded && !meta.rendered){
+            renderWatchlistSectionCardsChunked(meta.records, meta.body, {
+              batchSize,
+              source:`${source}_${meta.groupKey}_expand`,
+              passCache:modelPassCache,
+              parentSectionKey:meta.groupKey
+            }).then(() => {
+              meta.rendered = true;
+              meta.section.dataset.rendered = '1';
+              logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}_expand`);
+            }).catch(() => {});
+          }else{
+            logTrackSectionRender(meta.groupKey, !nextExpanded, meta.records.length, nextExpanded ? meta.body.children.length : 0, `${source}_${meta.groupKey}_toggle`);
+          }
+        });
+      }
+      if(!meta.expanded){
+        logTrackSectionRender(meta.groupKey, true, meta.records.length, 0, `${source}_${meta.groupKey}`);
+      }
+      fragment.appendChild(meta.section);
+    });
+    box.appendChild(fragment);
+    for(let sectionIndex = 0; sectionIndex < sectionMeta.length; sectionIndex += 1){
+      const meta = sectionMeta[sectionIndex];
+      if(!meta.expanded) continue;
+      await renderWatchlistSectionCardsChunked(meta.records, meta.body, {
+        batchSize,
+        source:`${source}_${meta.groupKey}`,
+        passCache:modelPassCache,
+        parentSectionKey:meta.groupKey
+      });
+      meta.rendered = true;
+      meta.section.dataset.rendered = '1';
+      logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}`);
+    }
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
-    box.innerHTML = showExpired
-      ? '<div class="summary">No watchlist entries match this filter right now.</div>'
-      : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
-    return;
-  }
-  if(
-    uiState.watchlistRenderSignature === renderSignature
-    && box.dataset.watchlistSignature === renderSignature
-    && box.childElementCount > 0
-  ){
-    return;
-  }
-  const groups = watchlistRenderGroups(showExpired);
-  const grouped = {};
-  groups.forEach(group => { grouped[group.key] = []; });
-  records.forEach(record => {
-    const bucket = watchlistPresentationBucketForRecord(record);
-    const groupKey = watchlistRenderGroupForBucket(bucket);
-    if(grouped[groupKey]) grouped[groupKey].push(record);
-  });
-  const sectionMeta = [];
-  groups.forEach(group => {
-    const groupRecords = grouped[group.key] || [];
-    if(!groupRecords.length) return;
-    const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key, modelPassCache);
-    const expanded = isTrackSectionExpanded(group.key, sortedGroupRecords);
-    const shell = buildWatchlistSectionShell(group, sortedGroupRecords.length, expanded);
-    sectionMeta.push({
-      ...shell,
-      groupKey:group.key,
-      records:sortedGroupRecords,
-      expanded,
-      rendered:false
-    });
-  });
-  box.innerHTML = '';
-  const fragment = document.createDocumentFragment();
-  sectionMeta.forEach(meta => {
-    if(meta.collapsible){
-      meta.header.addEventListener('click', () => {
-        const isExpanded = meta.section.classList.contains('is-expanded');
-        const nextExpanded = !isExpanded;
-        setTrackSectionExpanded(meta.groupKey, nextExpanded);
-        applyTrackSectionExpandedState(meta.section, nextExpanded);
-        if(nextExpanded && !meta.rendered){
-          renderWatchlistSectionCardsChunked(meta.records, meta.body, {
-            batchSize,
-            source:`${source}_${meta.groupKey}_expand`,
-            passCache:modelPassCache,
-            parentSectionKey:meta.groupKey
-          }).then(() => {
-            meta.rendered = true;
-            meta.section.dataset.rendered = '1';
-            logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}_expand`);
-          }).catch(() => {});
-        }else{
-          logTrackSectionRender(meta.groupKey, !nextExpanded, meta.records.length, nextExpanded ? meta.body.children.length : 0, `${source}_${meta.groupKey}_toggle`);
-        }
+    clearWatchlistDirtyForRecords(records);
+    if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
+  }catch(error){
+    renderError = error;
+    throw error;
+  }finally{
+    finishTrackRender();
+    if(renderError && PP_PERF_DEBUG){
+      console.debug('[PP_PERF] track_render_cycle_finished_after_error', {
+        source,
+        error:renderError && renderError.message ? String(renderError.message) : 'unknown_error'
       });
     }
-    if(!meta.expanded){
-      logTrackSectionRender(meta.groupKey, true, meta.records.length, 0, `${source}_${meta.groupKey}`);
-    }
-    fragment.appendChild(meta.section);
-  });
-  box.appendChild(fragment);
-  for(let sectionIndex = 0; sectionIndex < sectionMeta.length; sectionIndex += 1){
-    const meta = sectionMeta[sectionIndex];
-    if(!meta.expanded) continue;
-    await renderWatchlistSectionCardsChunked(meta.records, meta.body, {
-      batchSize,
-      source:`${source}_${meta.groupKey}`,
-      passCache:modelPassCache,
-      parentSectionKey:meta.groupKey
-    });
-    meta.rendered = true;
-    meta.section.dataset.rendered = '1';
-    logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}`);
   }
-  uiState.watchlistRenderSignature = renderSignature;
-  box.dataset.watchlistSignature = renderSignature;
-  clearWatchlistDirtyForRecords(records);
-  if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
 }
 
 function renderWatchlist(){
   if(shouldSkipHiddenWatchlistRender('watchlist_render')) return;
-  const preserveUiState = activeWorkspaceTab() === 'track';
-  const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
-  const passCache = createWatchlistProjectionPassCache();
-  const model = prepareWatchlistRenderModel('watchlist_render', {passCache});
-  const {box, showExpired, records, renderSignature} = model;
-  const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
-  if(!box) return;
-  logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
-  if(!records.length){
+  const finishTrackRender = startTrackRenderCycle('watchlist_render');
+  let renderError = null;
+  try{
+    const preserveUiState = activeWorkspaceTab() === 'track';
+    const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
+    const passCache = createWatchlistProjectionPassCache();
+    const model = prepareWatchlistRenderModel('watchlist_render', {passCache});
+    const {box, showExpired, records, renderSignature} = model;
+    const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
+    if(!box) return;
+    logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
+    if(!records.length){
+      uiState.watchlistRenderSignature = renderSignature;
+      box.dataset.watchlistSignature = renderSignature;
+      box.innerHTML = showExpired
+        ? '<div class="summary">No watchlist entries match this filter right now.</div>'
+        : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+      return;
+    }
+    if(
+      uiState.watchlistRenderSignature === renderSignature
+      && box.dataset.watchlistSignature === renderSignature
+      && box.childElementCount > 0
+    ){
+      return;
+    }
+    box.innerHTML = '';
+    box.appendChild(buildWatchlistSectionsFragment(records, showExpired, {passCache:modelPassCache}));
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
-    box.innerHTML = showExpired
-      ? '<div class="summary">No watchlist entries match this filter right now.</div>'
-      : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
-    return;
+    clearWatchlistDirtyForRecords(records);
+    if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
+  }catch(error){
+    renderError = error;
+    throw error;
+  }finally{
+    finishTrackRender();
+    if(renderError && PP_PERF_DEBUG){
+      console.debug('[PP_PERF] track_render_cycle_finished_after_error', {
+        source:'watchlist_render',
+        error:renderError && renderError.message ? String(renderError.message) : 'unknown_error'
+      });
+    }
   }
-  if(
-    uiState.watchlistRenderSignature === renderSignature
-    && box.dataset.watchlistSignature === renderSignature
-    && box.childElementCount > 0
-  ){
-    return;
-  }
-  box.innerHTML = '';
-  box.appendChild(buildWatchlistSectionsFragment(records, showExpired, {passCache:modelPassCache}));
-  uiState.watchlistRenderSignature = renderSignature;
-  box.dataset.watchlistSignature = renderSignature;
-  clearWatchlistDirtyForRecords(records);
-  if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
 }
 
 let watchlistRenderScheduled = false;
@@ -19019,6 +19072,61 @@ function setActiveReviewSourceProjectionSnapshot(ticker, snapshot, sourceContext
   }
 }
 
+function maybeInvalidateActiveReviewProjectionFromTrack(ticker, nextProjectionSnapshot, reason = 'track_projection_changed'){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return {invalidated:false, rerendered:false, reason:'invalid_ticker'};
+  if(activeReviewTicker() !== symbol) return {invalidated:false, rerendered:false, reason:'inactive_review_ticker'};
+  const nextSnapshot = nextProjectionSnapshot && typeof nextProjectionSnapshot === 'object'
+    ? {...nextProjectionSnapshot, ticker:symbol}
+    : null;
+  if(!nextSnapshot) return {invalidated:false, rerendered:false, reason:'missing_projection_snapshot'};
+  const previousSnapshot = (
+    uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === symbol
+  )
+    ? uiState.activeReviewSourceProjectionSnapshot
+    : null;
+  const oldBucket = normalizeVisualBucketForPairing(
+    previousSnapshot && (previousSnapshot.sourceOfTruthVisualBucket || previousSnapshot.visualBucket) || ''
+  );
+  const newBucket = normalizeVisualBucketForPairing(
+    nextSnapshot.sourceOfTruthVisualBucket || nextSnapshot.visualBucket || ''
+  );
+  const authority = String(uiState.activeReviewProjectionSource || '').trim().toLowerCase();
+  const bucketChanged = !!(oldBucket && newBucket && oldBucket !== newBucket);
+  const mustInvalidate = bucketChanged || authority === 'clicked_card_snapshot';
+  if(!mustInvalidate){
+    return {invalidated:false, rerendered:false, reason:'no_bucket_change'};
+  }
+  uiState.activeReviewSourceProjectionSnapshot = nextSnapshot;
+  uiState.activeReviewProjectionSource = 'track_projection_updated';
+  uiState.activeReviewVerdictOverride = '';
+  if(bucketChanged){
+    console.info('[ReviewProjectionInvalidated]', {
+      ticker:symbol,
+      oldBucket,
+      newBucket,
+      reason:String(reason || 'track_projection_changed')
+    });
+  }
+  const rerender = () => {
+    if(activeReviewTicker() !== symbol) return;
+    renderReviewWorkspace({
+      source:'track_projection_updated',
+      skipWatchlistLifecycle:true,
+      recompute:false,
+      persistDraft:false
+    });
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(() => rerender());
+  }else{
+    setTimeout(rerender, 0);
+  }
+  return {invalidated:true, rerendered:true, reason:'track_projection_updated'};
+}
+
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
@@ -19539,8 +19647,12 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
   if(next.review && next.track){
     const reviewCanonical = String(next.review.canonicalVerdict || '').trim().toLowerCase();
     const trackCanonical = String(next.track.canonicalVerdict || '').trim().toLowerCase();
-    const reviewBucket = String(next.review.visualBucket || '').trim().toLowerCase();
-    const trackBucket = String(next.track.visualBucket || '').trim().toLowerCase();
+    const reviewBucket = normalizeVisualBucketForPairing(
+      next.review.renderedBucket || next.review.visualBucket || next.review.sourceOfTruthVisualBucket || ''
+    );
+    const trackBucket = normalizeVisualBucketForPairing(
+      next.track.sourceOfTruthVisualBucket || next.track.renderedBucket || next.track.visualBucket || ''
+    );
     const sharedCanonical = reviewCanonical || trackCanonical;
     const eitherCanonicalAvoid = reviewCanonical === 'avoid' || trackCanonical === 'avoid';
     const mismatchAllowedByNuance = (
@@ -20103,7 +20215,7 @@ async function refreshTrackOnly(options = {}){
   setLiveProcessStatus('refreshing_watchlist', 'Updating watchlist plans');
   console.info('[TrackPullRefresh]', {event:'trackRefreshStarted', activeWorkspace:activeWorkspaceTab(), source});
   if(isPullGestureRefresh){
-    console.info('[TrackPullRefresh]', {event:'pullRefreshStarted', activeWorkspace:activeWorkspaceTab(), source});
+    console.info('[TrackPullRefresh]', {event:'pullRefreshStarted', activeWorkspace:activeWorkspaceTab(), source, mode:'incremental'});
   }
   try{
     try{
@@ -20130,7 +20242,7 @@ async function refreshTrackOnly(options = {}){
     refreshSummary = await refreshWatchlistRecordsFromSourceOfTruth({
       source,
       trackOnly:true,
-      mode:'full',
+      mode:'incremental',
       force:options.force === true,
       render:false,
       persist:true
@@ -23668,7 +23780,11 @@ function bindTrackPullRefreshGesture(){
   trackWorkspace.style.overscrollBehaviorY = 'contain';
   trackWorkspace.style.touchAction = 'pan-y';
   let trackPullStartY = null;
+  let trackPullStartX = null;
   let trackPullLastY = null;
+  let trackPullLastX = null;
+  let trackPullStartScrollTop = null;
+  let trackPullStartContainerTop = null;
   let trackPullThresholdMet = false;
   let trackPullGestureLogged = false;
   let trackPullPreventLogged = false;
@@ -23678,14 +23794,25 @@ function bindTrackPullRefreshGesture(){
   let trackScrollIdleTimer = null;
   const TRACK_PULL_MIN_INTERVAL_MS = 8000;
   const TRACK_PULL_CAPTURE_MIN_DELTA_Y = 24;
-  const TRACK_PULL_REFRESH_THRESHOLD_Y = 110;
+  const TRACK_PULL_REFRESH_THRESHOLD_Y = 150;
+  const TRACK_PULL_TOP_MAX_SCROLL_PX = 2;
+  const TRACK_PULL_START_ZONE_MAX_OFFSET_PX = 80;
+  const TRACK_PULL_VERTICAL_RATIO = 1.5;
+  const TRACK_PULL_POST_RENDER_COOLDOWN_MS = 800;
   const atTop = () => {
     const scrollTop = Number(trackWorkspace.scrollTop || 0);
-    return scrollTop <= 0;
+    return scrollTop <= TRACK_PULL_TOP_MAX_SCROLL_PX;
+  };
+  const logIgnoredNoop = (reason, extra = {}) => {
+    console.info('[TrackPullRefresh]', {event:'ignoredNoopConfirmed', reason:String(reason || ''), activeWorkspace:activeWorkspaceTab(), ...extra});
   };
   const resetGesture = () => {
     trackPullStartY = null;
+    trackPullStartX = null;
     trackPullLastY = null;
+    trackPullLastX = null;
+    trackPullStartScrollTop = null;
+    trackPullStartContainerTop = null;
     trackPullThresholdMet = false;
     trackPullGestureLogged = false;
     trackPullPreventLogged = false;
@@ -23717,6 +23844,16 @@ function bindTrackPullRefreshGesture(){
     }
     if((Date.now() - trackPullLastTriggeredAt) < TRACK_PULL_MIN_INTERVAL_MS){
       trackPullIgnoredReason = 'cooldown';
+      logIgnoredNoop('cooldown');
+      return;
+    }
+    if(uiState.trackRenderInFlight === true || uiState.watchlistLifecycleRunning === true || riskRecalcRuntimeState().inFlight === true){
+      trackPullIgnoredReason = 'render_in_flight';
+      logIgnoredNoop('render_in_flight', {
+        trackRenderInFlight:uiState.trackRenderInFlight === true,
+        watchlistLifecycleRunning:uiState.watchlistLifecycleRunning === true,
+        riskRecalcInFlight:riskRecalcRuntimeState().inFlight === true
+      });
       return;
     }
     if(startupCoordinator.trackedStateHydrationResolved !== true){
@@ -23727,24 +23864,56 @@ function bindTrackPullRefreshGesture(){
       trackPullIgnoredReason = 'empty_watchlist';
       return;
     }
-    if(!atTop()){
-      trackPullIgnoredReason = 'not_at_top';
-      return;
-    }
     if(trackRefreshRuntime.inFlight){
       trackPullIgnoredReason = 'refresh_in_flight';
+      logIgnoredNoop('refresh_in_flight');
+      return;
+    }
+    const sinceRenderEndedMs = Math.max(0, Date.now() - Number(uiState.trackRenderLastEndedAt || 0));
+    if(Number(uiState.trackRenderLastEndedAt || 0) > 0 && sinceRenderEndedMs < TRACK_PULL_POST_RENDER_COOLDOWN_MS){
+      trackPullIgnoredReason = 'cooldown';
+      logIgnoredNoop('cooldown', {sinceRenderEndedMs});
       return;
     }
     const touch = event.touches && event.touches[0];
-    trackPullStartY = touch ? Number(touch.clientY) : null;
+    const touchY = touch ? Number(touch.clientY) : null;
+    const touchX = touch ? Number(touch.clientX) : null;
+    const scrollTop = Number(trackWorkspace.scrollTop || 0);
+    const containerTop = trackWorkspace.getBoundingClientRect ? Number(trackWorkspace.getBoundingClientRect().top || 0) : 0;
+    const startOffsetY = Number.isFinite(touchY) ? Number(touchY - containerTop) : Number.NaN;
+    if(scrollTop > TRACK_PULL_TOP_MAX_SCROLL_PX){
+      trackPullIgnoredReason = 'not_at_top';
+      logIgnoredNoop('not_at_top', {scrollTop:Number(scrollTop.toFixed(1))});
+      return;
+    }
+    if(Number.isFinite(startOffsetY) && startOffsetY > TRACK_PULL_START_ZONE_MAX_OFFSET_PX){
+      trackPullIgnoredReason = 'not_at_top';
+      logIgnoredNoop('not_at_top', {
+        scrollTop:Number(scrollTop.toFixed(1)),
+        touchStartY:Number(touchY || 0),
+        containerTop:Number(containerTop.toFixed(1))
+      });
+      return;
+    }
+    trackPullStartY = touchY;
+    trackPullStartX = touchX;
     trackPullLastY = trackPullStartY;
+    trackPullLastX = trackPullStartX;
+    trackPullStartScrollTop = scrollTop;
+    trackPullStartContainerTop = containerTop;
     trackPullThresholdMet = false;
     trackPullCapturedScroll = false;
     trackPullIgnoredReason = '';
     uiState.trackPullGestureActive = true;
     if(!trackPullGestureLogged){
       trackPullGestureLogged = true;
-      console.info('[TrackPullRefresh]', {event:'pullRefreshGestureStart', activeWorkspace:activeWorkspaceTab()});
+      console.info('[TrackPullRefresh]', {
+        event:'pullRefreshGestureStart',
+        activeWorkspace:activeWorkspaceTab(),
+        scrollTop:Number(scrollTop.toFixed(1)),
+        touchStartY:Number(touchY || 0),
+        containerTop:Number(containerTop.toFixed(1))
+      });
     }
   }, {passive:true});
   trackWorkspace.addEventListener('touchmove', event => {
@@ -23753,9 +23922,16 @@ function bindTrackPullRefreshGesture(){
     const touch = event.touches && event.touches[0];
     if(!touch) return;
     trackPullLastY = Number(touch.clientY);
+    trackPullLastX = Number(touch.clientX);
     const deltaY = trackPullLastY - trackPullStartY;
+    const deltaX = trackPullLastX - Number(trackPullStartX || 0);
+    const verticalEnough = deltaY > (Math.abs(deltaX) * TRACK_PULL_VERTICAL_RATIO);
     if(deltaY <= 0){
       trackPullCapturedScroll = true;
+      return;
+    }
+    if(!verticalEnough){
+      trackPullIgnoredReason = 'horizontal_scroll';
       return;
     }
     const shouldCapturePullGesture = deltaY >= TRACK_PULL_CAPTURE_MIN_DELTA_Y && atTop() && !trackPullCapturedScroll;
@@ -23768,7 +23944,12 @@ function bindTrackPullRefreshGesture(){
     }
     if(deltaY >= TRACK_PULL_REFRESH_THRESHOLD_Y && !trackPullThresholdMet){
       trackPullThresholdMet = true;
-      console.info('[TrackPullRefresh]', {event:'pullRefreshThresholdMet', deltaY:Number(deltaY.toFixed(1))});
+      console.info('[TrackPullRefresh]', {
+        event:'pullRefreshThresholdMet',
+        deltaY:Number(deltaY.toFixed(1)),
+        deltaX:Number(deltaX.toFixed(1)),
+        threshold:TRACK_PULL_REFRESH_THRESHOLD_Y
+      });
     }
   }, {passive:false});
   trackWorkspace.addEventListener('touchend', () => {
@@ -23781,15 +23962,23 @@ function bindTrackPullRefreshGesture(){
       return;
     }
     if(trackPullThresholdMet){
-      if(trackRefreshRuntime.inFlight){
+      if(trackRefreshRuntime.inFlight || uiState.trackRenderInFlight === true){
         console.info('[TrackPullRefresh]', {event:'pullRefreshSkippedBecauseInFlight', activeWorkspace:activeWorkspaceTab()});
       }else{
         trackPullLastTriggeredAt = Date.now();
         refreshTrackOnly({source:'track_pull_refresh', force:true}).catch(() => {});
       }
     }else{
-      console.info('[TrackPullRefresh]', {event:'pullRefreshIgnoredReason', reason:'threshold_not_met', activeWorkspace:activeWorkspaceTab()});
-      console.info('[TrackPullRefresh]', {event:'ignoredNoopConfirmed', reason:'threshold_not_met', activeWorkspace:activeWorkspaceTab()});
+      if(trackPullIgnoredReason === 'horizontal_scroll'){
+        console.info('[TrackPullRefresh]', {event:'pullRefreshIgnoredReason', reason:'horizontal_scroll', activeWorkspace:activeWorkspaceTab()});
+        logIgnoredNoop('horizontal_scroll');
+      }else{
+        const deltaY = Number((Number(trackPullLastY || trackPullStartY || 0) - Number(trackPullStartY || 0)).toFixed(1));
+        const deltaX = Number((Number(trackPullLastX || trackPullStartX || 0) - Number(trackPullStartX || 0)).toFixed(1));
+        console.info('[TrackPullRefresh]', {event:'thresholdCheck', deltaY, deltaX, threshold:TRACK_PULL_REFRESH_THRESHOLD_Y});
+        console.info('[TrackPullRefresh]', {event:'pullRefreshIgnoredReason', reason:'threshold_not_met', activeWorkspace:activeWorkspaceTab()});
+        console.info('[TrackPullRefresh]', {event:'ignoredNoopConfirmed', reason:'threshold_not_met', activeWorkspace:activeWorkspaceTab()});
+      }
     }
     resetGesture();
   }, {passive:true});
@@ -25710,6 +25899,7 @@ installRuntimeDebugHooks();
 bindTrackPullRefreshGesture();
 registerPwa();
 scheduleNamedDeferredStartupTask('startup_application_boot', startApplication, {idle:false});
+
 
 
 
