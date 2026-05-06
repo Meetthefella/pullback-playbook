@@ -10,9 +10,9 @@ const APP_VERSION = 'v4.4.10';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
     version:'4.4.10',
-    commit:'e61556b',
+    commit:'0e2ab3e',
     branch:'main',
-    builtAt:'2026-05-06T00:00Z'
+    builtAt:'2026-05-06T10:37Z'
   };
 }
 const defaultAiEndpoint = '/api/analyse-setup';
@@ -391,6 +391,12 @@ function clearAllTrackFreshnessFlagsAfterSuccessfulRender(){
   startupCoordinator.trackNeedsHydratedRender = false;
   startupCoordinator.pendingWatchlistPatchFallback = false;
   startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
+}
+
+function clearTrackPatchNoChangeFlags(){
+  ensureWatchlistDirtyState();
+  uiState.watchlistDirtyTickers = {};
+  startupCoordinator.pendingWatchlistPatchFallback = false;
 }
 
 function scheduleAfterFirstTrackPaint(callback){
@@ -7322,6 +7328,202 @@ function watchlistRecordRenderSignature(record, pendingMap = {}, manualRefreshMa
     pendingMap[ticker] ? 1 : 0,
     manualRefreshMap[ticker] ? 1 : 0
   ].join('~');
+}
+
+function trackCardRenderSignatureSnapshot(record){
+  const item = normalizeTickerRecord(record || {});
+  const lifecycle = watchlistLifecycleSnapshot(item);
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const displayedPlan = applySetupConfirmationPlanGate(item, deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  ), derivedStates);
+  const qualityAdjustments = evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const rrResolution = resolveScannerStateWithTrace(item);
+  const globalVerdict = resolveGlobalVerdict(item);
+  const canonicalWatchlistVerdict = verdictPresentationLabelForKey(
+    normalizeGlobalVerdictKey(
+      (globalVerdict && (globalVerdict.final_verdict || globalVerdict.finalVerdict))
+      || lifecycle.state
+      || 'watch'
+    )
+  );
+  const resolvedContract = resolveFinalStateContract(item, {
+    context:'watchlist',
+    finalVerdict:canonicalWatchlistVerdict,
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    rrResolution
+  });
+  const visualState = resolveVisualState(item, 'watchlist', {
+    resolvedContract,
+    derivedStates,
+    displayedPlan,
+    pendingResolution:false,
+    setupScore:numericOrNull(item.scan && item.scan.score)
+  });
+  const watchlistVisualState = reconcileWatchlistPresentation({
+    record:item,
+    visualState,
+    globalVerdict,
+    lifecycleSnapshot:lifecycle,
+    resolvedContract,
+    derivedStates,
+    displayedPlan
+  });
+  const sectionMembership = watchlistRenderGroupForBucket(watchlistPresentationBucketForRecord(item));
+  const decisionSummary = String(watchlistVisualState.decision_summary || '');
+  const actionGuidance = String(resolvedContract && (resolvedContract.actionLabel || resolvedContract.actionShortLabel) || '');
+  return {
+    ticker:normalizeTicker(item.ticker || ''),
+    inWatchlist:!!(item.watchlist && item.watchlist.inWatchlist),
+    sectionMembership,
+    lifecycleStage:String(lifecycle && lifecycle.stage || ''),
+    lifecycleStatus:String(lifecycle && lifecycle.status || ''),
+    lifecycleExpiresAt:String(lifecycle && lifecycle.expiresAt || ''),
+    lifecycleRank:Number.isFinite(Number(lifecycle && lifecycle.rank)) ? Number(lifecycle.rank) : 99,
+    canonicalVerdict:String(watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || ''),
+    finalVerdict:String(watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || ''),
+    visualBucket:String(watchlistVisualState.visualBucket || watchlistVisualState.presentationBucket || ''),
+    renderedBucket:String(watchlistVisualState.visualBucket || watchlistVisualState.presentationBucket || ''),
+    tone:String(watchlistVisualState.visual_tone || watchlistVisualState.trackPresentationTone || ''),
+    className:String(watchlistVisualState.className || watchlistVisualState.toneClass || ''),
+    styleAttr:String(watchlistVisualState.styleAttr || ''),
+    viability:String(globalVerdict && globalVerdict.viability || ''),
+    viabilityReason:String(globalVerdict && globalVerdict.viability_reason || ''),
+    score:String((item.scan && item.scan.score) ?? ''),
+    decisionSummary,
+    actionGuidance,
+    structure:String(derivedStates.structureState || ''),
+    pullback:String(derivedStates.pullbackState || derivedStates.pullbackZone || ''),
+    bounce:String(derivedStates.bounceState || ''),
+    warningState:String((qualityAdjustments && qualityAdjustments.warningState) || ''),
+    planValidationState:String(displayedPlan && displayedPlan.planValidationState || item.plan && item.plan.planValidationState || ''),
+    planSource:String(item.plan && item.plan.source || ''),
+    entry:String(displayedPlan && displayedPlan.entry || ''),
+    stop:String(displayedPlan && displayedPlan.stop || ''),
+    target:String(displayedPlan && displayedPlan.firstTarget || ''),
+    rr:String(displayedPlan && displayedPlan.rr || ''),
+    riskStatus:String(item.plan && item.plan.riskStatus || ''),
+    capitalFit:String(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || ''),
+    blocker:String(resolvedContract && (resolvedContract.planStatusLabel || resolvedContract.blockerReason || '') || '')
+  };
+}
+
+function trackCardPrefilterSnapshot(record){
+  const item = normalizeTickerRecord(record || {});
+  const ticker = normalizeTicker(item.ticker || '');
+  const watch = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : {};
+  const life = item.lifecycle && typeof item.lifecycle === 'object' ? item.lifecycle : {};
+  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const analysisState = review.analysisState && typeof review.analysisState === 'object' ? review.analysisState : {};
+  const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
+  return {
+    ticker,
+    inWatchlist:watch.inWatchlist ? 1 : 0,
+    watchUpdatedAt:String(watch.updatedAt || ''),
+    watchDateAdded:String(watch.dateAdded || watch.addedAt || ''),
+    watchVerdictWhenAdded:String(watch.verdictWhenAdded || ''),
+    watchScoreWhenAdded:String(watch.scoreWhenAdded ?? ''),
+    lifecycleStage:String(life.stage || ''),
+    lifecycleStatus:String(life.status || ''),
+    lifecycleExpiresAt:String(life.expiresAt || ''),
+    lifecycleChangedAt:String(life.changedAt || ''),
+    planSource:String(plan.source || ''),
+    planValidationState:String(plan.planValidationState || ''),
+    planFlags:`${plan.hasValidPlan ? 1 : 0}|${plan.invalidatedState ? 1 : 0}|${plan.missedState ? 1 : 0}|${plan.triggerState || ''}`,
+    scanVerdicts:`${scan.resolvedVerdict || ''}|${scan.verdict || ''}|${scan.score ?? ''}`,
+    reviewState:`${review.savedVerdict || ''}|${review.savedScore ?? ''}|${review.lastReviewedAt || ''}|${analysisState.reviewedAt || ''}`,
+    marketUpdatedAt:String(marketData.updatedAt || '')
+  };
+}
+
+function trackCardPrefilterHash(record){
+  const snapshot = trackCardPrefilterSnapshot(record);
+  return [
+    snapshot.ticker,
+    String(snapshot.inWatchlist),
+    snapshot.watchUpdatedAt,
+    snapshot.watchDateAdded,
+    snapshot.watchVerdictWhenAdded,
+    snapshot.watchScoreWhenAdded,
+    snapshot.lifecycleStage,
+    snapshot.lifecycleStatus,
+    snapshot.lifecycleExpiresAt,
+    snapshot.lifecycleChangedAt,
+    snapshot.planSource,
+    snapshot.planValidationState,
+    snapshot.planFlags,
+    snapshot.scanVerdicts,
+    snapshot.reviewState,
+    snapshot.marketUpdatedAt
+  ].join('~');
+}
+
+function snapshotTickerRecordForDiff(record){
+  const item = normalizeTickerRecord(record || {});
+  try{
+    return JSON.parse(JSON.stringify(item));
+  }catch(_error){
+    return {
+      ticker:normalizeTicker(item.ticker || ''),
+      watchlist:item.watchlist && typeof item.watchlist === 'object' ? {...item.watchlist} : {},
+      lifecycle:item.lifecycle && typeof item.lifecycle === 'object' ? {...item.lifecycle} : {},
+      scan:item.scan && typeof item.scan === 'object' ? {...item.scan} : {},
+      plan:item.plan && typeof item.plan === 'object' ? {...item.plan} : {},
+      review:item.review && typeof item.review === 'object' ? {...item.review} : {},
+      marketData:item.marketData && typeof item.marketData === 'object' ? {...item.marketData} : {}
+    };
+  }
+}
+
+function trackCardRenderSignatureHash(record){
+  const snapshot = trackCardRenderSignatureSnapshot(record);
+  return [
+    snapshot.ticker,
+    snapshot.inWatchlist ? '1' : '0',
+    snapshot.sectionMembership,
+    snapshot.lifecycleStage,
+    snapshot.lifecycleStatus,
+    snapshot.lifecycleExpiresAt,
+    String(snapshot.lifecycleRank),
+    snapshot.canonicalVerdict,
+    snapshot.finalVerdict,
+    snapshot.visualBucket,
+    snapshot.renderedBucket,
+    snapshot.tone,
+    snapshot.className,
+    snapshot.styleAttr,
+    snapshot.viability,
+    snapshot.viabilityReason,
+    snapshot.score,
+    snapshot.decisionSummary,
+    snapshot.actionGuidance,
+    snapshot.structure,
+    snapshot.pullback,
+    snapshot.bounce,
+    snapshot.warningState,
+    snapshot.planValidationState,
+    snapshot.planSource,
+    snapshot.entry,
+    snapshot.stop,
+    snapshot.target,
+    snapshot.rr,
+    snapshot.riskStatus,
+    snapshot.capitalFit,
+    snapshot.blocker
+  ].join('~');
+}
+
+function changedFieldsForTrackCardSignature(beforeSnapshot, afterSnapshot){
+  const before = beforeSnapshot && typeof beforeSnapshot === 'object' ? beforeSnapshot : {};
+  const after = afterSnapshot && typeof afterSnapshot === 'object' ? afterSnapshot : {};
+  return Object.keys(after).filter(key => String(before[key]) !== String(after[key]));
 }
 
 function buildWatchlistRenderSignature(records, options = {}){
@@ -19941,7 +20143,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
       source,
       mode,
       durationMs:null,
-      recordCount:watchlistTickerRecords().length,
+      recordCount:lightweightWatchlistRecordCount(),
       ...startupDebugRenderState()
     });
   }
@@ -19954,7 +20156,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
         source,
         mode,
         durationMs:watchlistRefreshEntry ? Number(watchlistRefreshEntry.duration.toFixed(1)) : null,
-        recordCount:watchlistTickerRecords().length,
+        recordCount:lightweightWatchlistRecordCount(),
         attempted:summary && summary.attempted,
         refreshed:summary && summary.refreshed,
         failed:summary && summary.failed,
@@ -19965,16 +20167,19 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     return summary;
   };
   const tickers = uniqueTickers(
-    (options.tickers || watchlistTickerRecords().map(record => normalizeTickerRecord(record).ticker))
+    (options.tickers || watchlistTickerRecordsFast().map(record => normalizeTickerRecord(record).ticker))
       .filter(Boolean)
   );
   const beforePlacement = {};
-  const beforeSignatures = {};
+  const beforePrefilterHashes = {};
+  const beforeRecordSnapshots = {};
+  const beforeFullRenderHashes = {};
   tickers.forEach(ticker => {
     const record = getTickerRecord(ticker);
     if(!record) return;
-    beforeSignatures[ticker] = watchlistRecordRenderSignature(record);
     beforePlacement[ticker] = watchlistPlacementSnapshot(record);
+    beforePrefilterHashes[ticker] = trackCardPrefilterHash(record);
+    beforeRecordSnapshots[ticker] = snapshotTickerRecordForDiff(record);
   });
   if(!tickers.length) return finishWatchlistRefreshLog({source, attempted:0, refreshed:0, failed:0, results:[]});
   setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
@@ -20029,25 +20234,76 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     });
   }
   if(options.persist !== false) commitTickerState();
-  const changedTickers = tickers.filter(ticker => {
+  const candidateTickers = tickers.filter(ticker => {
     const record = getTickerRecord(ticker);
     if(!record) return false;
-    const afterSignature = watchlistRecordRenderSignature(record);
-    return beforeSignatures[ticker] !== afterSignature;
+    const afterPrefilterHash = trackCardPrefilterHash(record);
+    const dirtyReason = String((uiState.watchlistDirtyTickers && uiState.watchlistDirtyTickers[ticker]) || '');
+    const wildcardDirty = String((uiState.watchlistDirtyTickers && uiState.watchlistDirtyTickers['*']) || '');
+    return beforePrefilterHashes[ticker] !== afterPrefilterHash || !!dirtyReason || !!wildcardDirty;
   });
+  const changedTickerDiagnostics = [];
+  const changedTickers = [];
+  candidateTickers.forEach(ticker => {
+    const record = getTickerRecord(ticker);
+    if(!record) return;
+    let beforeHash = beforeFullRenderHashes[ticker];
+    if(!beforeHash){
+      const beforeRecord = beforeRecordSnapshots[ticker];
+      beforeHash = beforeRecord ? trackCardRenderSignatureHash(beforeRecord) : '';
+      beforeFullRenderHashes[ticker] = beforeHash;
+    }
+    const afterHash = trackCardRenderSignatureHash(record);
+    if(beforeHash === afterHash) return;
+    changedTickers.push(ticker);
+    const beforeTrackRender = beforeRecordSnapshots[ticker] ? trackCardRenderSignatureSnapshot(beforeRecordSnapshots[ticker]) : null;
+    const afterTrackRender = record ? trackCardRenderSignatureSnapshot(record) : null;
+    const changedFields = changedFieldsForTrackCardSignature(beforeTrackRender, afterTrackRender);
+    const placementBefore = beforePlacement[ticker] || null;
+    const placementAfter = record ? watchlistPlacementSnapshot(record) : null;
+    changedTickerDiagnostics.push({
+      ticker,
+      renderSignatureHashBefore:String(beforeHash || ''),
+      renderSignatureHashAfter:String(afterHash || ''),
+      changedSignatureFields:changedFields,
+      placementBefore,
+      placementAfter,
+      dirtyReason:String((uiState.watchlistDirtyTickers && uiState.watchlistDirtyTickers[ticker]) || '')
+    });
+  });
+  const changedTickerDiagnosticsBySymbol = new Map(changedTickerDiagnostics.map(entry => [entry.ticker, entry]));
+  if(PP_PERF_DEBUG){
+    console.debug('[PP_PERF] watchlist_refresh_changed_ticker_diagnostics', {
+      source,
+      mode,
+      changedTickersCount:changedTickers.length,
+      changedTickersSample:changedTickerDiagnostics.slice(0, 30)
+    });
+  }
   if(options.render !== false){
     const trackOnlyRefresh = options.trackOnly === true || source === 'startup_refresh_full_user_open' || source === 'track_pull_refresh';
     const renderStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     let patchedCards = 0;
     let patchedFailed = 0;
     const fallbackTickers = [];
+    const patchFallbackReasons = {};
+    const notePatchFallbackReason = reason => {
+      const key = String(reason || 'unknown');
+      patchFallbackReasons[key] = Number(patchFallbackReasons[key] || 0) + 1;
+    };
+    const resolvePatchFallbackReason = () => {
+      const ranked = Object.entries(patchFallbackReasons).sort((a, b) => Number(b[1]) - Number(a[1]));
+      return ranked.length ? ranked[0][0] : 'unknown';
+    };
     if(renderStrategy === 'patch'){
       if(activeWorkspaceTab() === 'track'){
         changedTickers.forEach(ticker => {
           const record = getTickerRecord(ticker);
+          const tickerDiag = changedTickerDiagnosticsBySymbol.get(ticker) || null;
           if(!record){
             patchedFailed += 1;
             fallbackTickers.push(ticker);
+            notePatchFallbackReason('unknown');
             return;
           }
           const afterPlacement = watchlistPlacementSnapshot(record);
@@ -20061,28 +20317,42 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
           if(!placementStable){
             patchedFailed += 1;
             fallbackTickers.push(ticker);
+            const lifecycleChanged = !!(tickerDiag && Array.isArray(tickerDiag.changedSignatureFields) && tickerDiag.changedSignatureFields.some(field => field.startsWith('lifecycle')));
+            notePatchFallbackReason(lifecycleChanged ? 'lifecycle_dirty' : 'section_membership_changed');
+            return;
+          }
+          const existingCard = findWatchlistCardNodeByTicker(ticker);
+          if(!existingCard){
+            patchedFailed += 1;
+            fallbackTickers.push(ticker);
+            notePatchFallbackReason('dom_anchor_missing');
             return;
           }
           if(updateWatchlistCardForTicker(ticker)) patchedCards += 1;
           else{
             patchedFailed += 1;
             fallbackTickers.push(ticker);
+            notePatchFallbackReason('projection_identity_changed');
           }
         });
       }else{
         patchedFailed = changedTickers.length;
         fallbackTickers.push(...changedTickers);
+        notePatchFallbackReason('unknown');
       }
       if(patchedFailed > 0){
+        const patchFallbackReason = resolvePatchFallbackReason();
         startupCoordinator.pendingWatchlistPatchFallback = true;
-        markWatchlistDirty(fallbackTickers.length ? fallbackTickers : changedTickers, 'watchlist_refresh_patch_fallback');
+        markWatchlistDirty(fallbackTickers.length ? fallbackTickers : changedTickers, `watchlist_refresh_patch_fallback_${patchFallbackReason}`);
         if(activeWorkspaceTab() === 'track'){
           if(PP_PERF_DEBUG){
             console.debug('[PP_PERF] watchlist_patch_fallback_full_render', {
               source,
               mode,
               failedTickers:fallbackTickers.length,
-              changedTickers:changedTickers.length
+              changedTickers:changedTickers.length,
+              patchFallbackReason,
+              patchFallbackReasons
             });
           }
           await renderWatchlistChunked({
@@ -20105,6 +20375,8 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
             startupCoordinator.trackNeedsFullRender = false;
           }
         }
+      }else{
+        clearTrackPatchNoChangeFlags();
       }
     }else{
       await renderWatchlistChunked({
@@ -20138,6 +20410,7 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
         renderStrategy,
         trackOnlyRefresh,
         changedTickers:changedTickers.length,
+        trackCardSignatureChanges:changedTickers.length,
         patchedCards,
         patchedFailed,
         durationMs:Number((renderEndedAt - renderStartedAt).toFixed(1)),
@@ -20175,7 +20448,7 @@ async function refreshTrackOnly(options = {}){
   if(isPullGestureRefresh && requestedWorkspace !== 'track'){
     return {ok:false, source, skipped:true, reason:'track_not_active'};
   }
-  if(isPullGestureRefresh && watchlistTickerRecords().length <= 0){
+  if(isPullGestureRefresh && lightweightWatchlistRecordCount() <= 0){
     return {ok:false, source, skipped:true, reason:'empty_watchlist'};
   }
   if(trackRefreshRuntime.inFlight){
@@ -20312,7 +20585,7 @@ async function refreshTrackOnly(options = {}){
     const refreshedCount = Number(refreshSummary && refreshSummary.refreshed || 0);
     const failedCount = Number(refreshSummary && refreshSummary.failed || 0);
     const allFailed = attempted > 0 && refreshedCount === 0 && failedCount > 0;
-    const hasRenderableWatchlistState = watchlistTickerRecords().length > 0;
+    const hasRenderableWatchlistState = lightweightWatchlistRecordCount() > 0;
     if(allFailed && !hasRenderableWatchlistState){
       setLiveProcessStatus('error', 'Watchlist refresh failed.');
       if(PP_PERF_DEBUG){
@@ -20398,7 +20671,7 @@ async function refreshTrackOnly(options = {}){
         `Watchlist updated (${refreshedCount}/${attempted || refreshedCount} tickers; interrupted: ${interruptionCause}).`,
         {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
       );
-    }else if(watchlistTickerRecords().length > 0){
+    }else if(lightweightWatchlistRecordCount() > 0){
       setLiveProcessStatus(
         'action',
         `Watchlist kept saved state (interrupted: ${interruptionCause}).`,
@@ -21922,6 +22195,14 @@ function renderReviewWorkspace(options = {}){
     uiState.activeReviewProjectionSource
     || (sourceProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
   ).trim().toLowerCase();
+  const projectionSnapshotAuthority = reviewProjectionSource === 'clicked_card_snapshot';
+  const isReviewOpenRender = ['review_open','watchlist','watchlist_card_open','track_projection_updated'].includes(String(reviewRenderSource || '').trim().toLowerCase());
+  const effectiveReviewProjectionSourceBase = projectionSnapshotAuthority && !isReviewOpenRender
+    ? (sourceProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve')
+    : reviewProjectionSource;
+  if(projectionSnapshotAuthority && !isReviewOpenRender){
+    uiState.activeReviewProjectionSource = sourceProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve';
+  }
   const visualBucketSource = String(
     sourceProjectionSnapshot && (sourceProjectionSnapshot.sourceOfTruthVisualBucket || sourceProjectionSnapshot.visualBucket)
     || safeResolvedContract.visualBucket
@@ -21959,7 +22240,7 @@ function renderReviewWorkspace(options = {}){
   } else if (hardTerminalAvoid){
     finalReviewVisualBucket = 'avoid';
   }
-  let effectiveReviewProjectionSource = reviewProjectionSource;
+  let effectiveReviewProjectionSource = effectiveReviewProjectionSourceBase;
   if(['avoid','dead'].includes(trackProjectionBucket) && !['avoid','dead','diminishing'].includes(finalReviewVisualBucket)){
     const invalidationKey = `${normalizeTicker(record.ticker)}|${String(finalReviewVisualBucket)}|avoid|track_projection_changed`;
     if(String(uiState.lastReviewProjectionInvalidationKey || '') !== invalidationKey){
