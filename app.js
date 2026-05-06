@@ -10,7 +10,7 @@ const APP_VERSION = 'v4.4.10';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
     version:'4.4.10',
-    commit:'53c40cb',
+    commit:'e61556b',
     branch:'main',
     builtAt:'2026-05-06T00:00Z'
   };
@@ -21935,6 +21935,9 @@ function renderReviewWorkspace(options = {}){
     || safeResolvedContract.bucket
     || ''
   ).trim().toLowerCase();
+  const trackProjectionBucket = normalizeVisualBucketForPairing(
+    sourceProjectionSnapshot && (sourceProjectionSnapshot.sourceOfTruthVisualBucket || sourceProjectionSnapshot.visualBucket) || sourceOfTruthVisualBucket
+  );
   const reviewBucketSource = 'resolved_contract';
   const reviewBucketBeforeFallback = effectiveReviewPresentationState || '(none)';
   const canonicalAvoidActive = resolvedReviewFinalVerdictKey === 'avoid';
@@ -21955,6 +21958,34 @@ function renderReviewWorkspace(options = {}){
       : 'monitor';
   } else if (hardTerminalAvoid){
     finalReviewVisualBucket = 'avoid';
+  }
+  let effectiveReviewProjectionSource = reviewProjectionSource;
+  if(['avoid','dead'].includes(trackProjectionBucket) && !['avoid','dead','diminishing'].includes(finalReviewVisualBucket)){
+    const invalidationKey = `${normalizeTicker(record.ticker)}|${String(finalReviewVisualBucket)}|avoid|track_projection_changed`;
+    if(String(uiState.lastReviewProjectionInvalidationKey || '') !== invalidationKey){
+      console.info('[ReviewProjectionInvalidated]', {
+        ticker:record.ticker,
+        oldBucket:finalReviewVisualBucket,
+        newBucket:'avoid',
+        reason:'track_projection_changed'
+      });
+      uiState.lastReviewProjectionInvalidationKey = invalidationKey;
+    }
+    finalReviewVisualBucket = 'avoid';
+    effectiveReviewProjectionSource = 'track_projection_updated';
+    uiState.activeReviewProjectionSource = 'track_projection_updated';
+    if(sourceProjectionSnapshot && typeof sourceProjectionSnapshot === 'object'){
+      uiState.activeReviewSourceProjectionSnapshot = {
+        ...sourceProjectionSnapshot,
+        ticker:normalizeTicker(record.ticker),
+        sourceOfTruthVisualBucket:'avoid',
+        visualBucket:'avoid',
+        sectionKey:'avoid_dead',
+        resolvedSectionKey:'avoid_dead'
+      };
+    }
+  }else{
+    uiState.lastReviewProjectionInvalidationKey = '';
   }
   const reviewVisualTone = finalReviewVisualBucket;
   const finalReviewVisualState = finalReviewVisualBucket === 'near_entry'
@@ -22017,7 +22048,7 @@ function renderReviewWorkspace(options = {}){
       usedCachedBundle:usedCachedBundle === true,
       reviewBundleMode:usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle',
       usedTrackProjectionSnapshot:sourceProjectionSnapshot != null,
-      reviewProjectionSource,
+      reviewProjectionSource:effectiveReviewProjectionSource,
       effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
       finalReviewVisualBucket:finalReviewVisualBucket,
       nonAuthoritativeVisualState:{
@@ -22045,7 +22076,7 @@ function renderReviewWorkspace(options = {}){
         usedCachedBundle:usedCachedBundle === true,
         reviewBundleMode:usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle',
         usedTrackProjectionSnapshot:sourceProjectionSnapshot != null,
-        reviewProjectionSource,
+        reviewProjectionSource:effectiveReviewProjectionSource,
         effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
         finalReviewVisualBucket:finalReviewVisualBucket,
         nonAuthoritativeVisualState:{
@@ -22071,7 +22102,7 @@ function renderReviewWorkspace(options = {}){
     sourceOfTruthVisualBucket:sourceOfTruthVisualBucket || visualBucketSource || '',
     usedProjectionBundle:sourceProjectionSnapshot != null,
     recomputedDuringRender:usedCachedBundle !== true,
-    reviewProjectionSource,
+    reviewProjectionSource:effectiveReviewProjectionSource,
     className:reviewOuterShellClass || '',
     cardClass:reviewAccentClass || '',
     shellClass:reviewOuterShellClass || '',
