@@ -3590,6 +3590,9 @@ function warmWatchlistProjectionPassCache(records = [], passCache = null){
 }
 
 function watchlistTickerRecords(options = {}){
+  if(uiState.trackPullGestureActive === true || uiState.trackScrollActive === true){
+    return watchlistTickerRecordsFast();
+  }
   const startedAt = nowPerfMs();
   const passCache = options.passCache && typeof options.passCache === 'object'
     ? options.passCache
@@ -4400,6 +4403,7 @@ function renderActiveWorkspaceSurface(options = {}){
 
 async function renderTrackWorkspaceForcedFull(options = {}){
   const safeReason = String(options.reason || 'track_open_forced_full_render_dirty');
+  const fullRenderReason = String(options.fullRenderReason || 'explicit_user_open');
   if(activeWorkspaceTab() !== 'track'){
     return {
       ok:false,
@@ -4408,6 +4412,12 @@ async function renderTrackWorkspaceForcedFull(options = {}){
     };
   }
   try{
+    if(PP_PERF_DEBUG){
+      console.debug('[PP_PERF] track_forced_full_render_reason', {
+        source:safeReason,
+        fullRenderReason
+      });
+    }
     await measureTrackRenderAsync('user_opened', safeReason, async () => {
       perfMark('pp_watchlist_render_start');
       await renderWatchlistChunked({
@@ -4460,6 +4470,12 @@ function handleWorkspaceTabChange(tab){
     }
     const watchlistDirty = hasWatchlistDirtyRecords();
     const versionStale = Number(startupCoordinator.lastTrackRenderVersion || 0) !== Number(startupCoordinator.currentWatchlistDataVersion || 0);
+    let fullRenderReason = '';
+    if(startupCoordinator.trackNeedsHydratedRender === true) fullRenderReason = 'hydration_required';
+    else if(startupCoordinator.pendingWatchlistPatchFallback === true) fullRenderReason = 'patch_failed';
+    else if(versionStale) fullRenderReason = 'section_membership_changed';
+    else if(startupCoordinator.trackNeedsFullRender === true) fullRenderReason = 'schema_changed';
+    else if(watchlistDirty) fullRenderReason = 'section_membership_changed';
     const forceFullRender = (
       watchlistDirty
       || startupCoordinator.trackNeedsHydratedRender === true
@@ -4475,6 +4491,7 @@ function handleWorkspaceTabChange(tab){
         trackNeedsFullRender:startupCoordinator.trackNeedsFullRender === true,
         pendingWatchlistPatchFallback:startupCoordinator.pendingWatchlistPatchFallback === true,
         versionStale,
+        fullRenderReason:fullRenderReason || 'explicit_user_open',
         lastTrackRenderVersion:Number(startupCoordinator.lastTrackRenderVersion || 0),
         currentWatchlistDataVersion:Number(startupCoordinator.currentWatchlistDataVersion || 0),
         activeTab:activeWorkspaceTab(),
@@ -4485,6 +4502,7 @@ function handleWorkspaceTabChange(tab){
       scheduleDeferredStartupTask(() => {
         renderTrackWorkspaceForcedFull({
           reason:'track_open_forced_full_render_dirty',
+          fullRenderReason:fullRenderReason || 'explicit_user_open',
           hydrated:startupCoordinator.trackedStateHydrationResolved === true,
           userOpened:true
         }).then(result => {
@@ -7555,13 +7573,15 @@ function renderWatchlistCardElement(record, options = {}){
     : '';
   const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
   const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
-  const resolvedSectionKey = watchlistState || presentationBucket || '';
-  const renderedBucket = String(watchlistVisualState.visualBucket || watchlistVisualState.presentationBucket || watchlistVisualState.trackPresentationBucket || '').trim().toLowerCase();
+  const resolvedSectionKey = parentSectionKey || watchlistState || presentationBucket || '';
+  const renderedBucket = parentSectionKey
+    ? sourceOfTruthVisualBucket
+    : String(watchlistVisualState.visualBucket || watchlistVisualState.presentationBucket || watchlistVisualState.trackPresentationBucket || '').trim().toLowerCase();
   const clickedCardProjectionSnapshot = {
     ticker:entry.ticker,
     finalVerdict:String(watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '').trim().toLowerCase(),
     canonicalVerdict:String(watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '').trim().toLowerCase(),
-    visualBucket:String(renderedBucket || sourceOfTruthVisualBucket || '').trim().toLowerCase(),
+    visualBucket:String(sourceOfTruthVisualBucket || renderedBucket || '').trim().toLowerCase(),
     tone:String(watchlistVisualState.visual_tone || watchlistVisualState.trackPresentationTone || '').trim().toLowerCase(),
     sectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
     sourceOfTruthVisualBucket:String(sourceOfTruthVisualBucket || '').trim().toLowerCase(),
@@ -7579,8 +7599,8 @@ function renderWatchlistCardElement(record, options = {}){
     canonicalVerdict:watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
     finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
     renderedVerdict:watchlistVisualState.final_verdict_rendered || watchlistVisualState.renderedVerdict || watchlistVisualState.finalVerdict,
-    visualBucket:renderedBucket || sourceOfTruthVisualBucket,
-    renderedBucket:renderedBucket || sourceOfTruthVisualBucket,
+    visualBucket:sourceOfTruthVisualBucket || renderedBucket,
+    renderedBucket:sourceOfTruthVisualBucket || renderedBucket,
     presentationBucket:presentationBucket || watchlistVisualState.presentationBucket,
     tone:watchlistVisualState.visual_tone || watchlistVisualState.trackPresentationTone || '',
     renderSource,
@@ -7786,9 +7806,81 @@ function shouldForceTrackSectionCollapsed(sectionKey, sectionRecords = [], passC
 
 function isTrackSectionExpanded(sectionKey, sectionRecords = []){
   if(!isTrackSectionCollapsible(sectionKey)) return true;
-  if(shouldForceTrackSectionCollapsed(sectionKey, sectionRecords)) return false;
   const stateMap = readTrackSectionState();
+  if(stateMap[sectionKey] === true) return true;
+  if(shouldForceTrackSectionCollapsed(sectionKey, sectionRecords)) return false;
   return stateMap[sectionKey] === true;
+}
+
+function captureTrackUiState(){
+  const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
+  const watchlistList = $('watchlistList');
+  const state = {
+    scrollTop:trackWorkspace ? Number(trackWorkspace.scrollTop || 0) : 0,
+    anchorTicker:'',
+    anchorOffsetTop:0,
+    expandedState:readTrackSectionState()
+  };
+  if(trackWorkspace){
+    const workspaceTop = trackWorkspace.getBoundingClientRect ? trackWorkspace.getBoundingClientRect().top : 0;
+    const cards = Array.from(trackWorkspace.querySelectorAll('[data-watchlist-ticker]'));
+    for(let index = 0; index < cards.length; index += 1){
+      const node = cards[index];
+      if(!node || typeof node.getBoundingClientRect !== 'function') continue;
+      const rect = node.getBoundingClientRect();
+      if(rect.bottom <= workspaceTop) continue;
+      const ticker = String(node.getAttribute('data-watchlist-ticker') || '').trim().toUpperCase();
+      if(!ticker) continue;
+      state.anchorTicker = ticker;
+      state.anchorOffsetTop = Number(rect.top - workspaceTop);
+      break;
+    }
+  }
+  if(watchlistList){
+    const expanded = {};
+    const sections = watchlistList.querySelectorAll('.watchlistgroup[data-group-key]');
+    sections.forEach(section => {
+      const key = String(section.getAttribute('data-group-key') || '').trim().toLowerCase();
+      if(!key || !isTrackSectionCollapsible(key)) return;
+      expanded[key] = section.classList.contains('is-expanded');
+    });
+    state.expandedState = normalizeTrackSectionState({...state.expandedState, ...expanded});
+  }
+  return state;
+}
+
+function restoreTrackUiState(snapshot = null){
+  const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
+  if(!trackWorkspace || !snapshot || typeof snapshot !== 'object') return;
+  persistTrackSectionState(normalizeTrackSectionState(snapshot.expandedState || {}));
+  const runRestore = () => {
+    const watchlistList = $('watchlistList');
+    if(watchlistList){
+      const sections = watchlistList.querySelectorAll('.watchlistgroup[data-group-key]');
+      sections.forEach(section => {
+        const key = String(section.getAttribute('data-group-key') || '').trim().toLowerCase();
+        if(!key || !isTrackSectionCollapsible(key)) return;
+        const nextExpanded = readTrackSectionState()[key] === true;
+        applyTrackSectionExpandedState(section, nextExpanded);
+      });
+    }
+    if(snapshot.anchorTicker){
+      const anchorNode = trackWorkspace.querySelector(`[data-watchlist-ticker="${snapshot.anchorTicker}"]`);
+      if(anchorNode && typeof anchorNode.getBoundingClientRect === 'function'){
+        const workspaceTop = trackWorkspace.getBoundingClientRect ? trackWorkspace.getBoundingClientRect().top : 0;
+        const rect = anchorNode.getBoundingClientRect();
+        const delta = Number((rect.top - workspaceTop) - Number(snapshot.anchorOffsetTop || 0));
+        trackWorkspace.scrollTop = Number(trackWorkspace.scrollTop || 0) + delta;
+        return;
+      }
+    }
+    trackWorkspace.scrollTop = Number(snapshot.scrollTop || 0);
+  };
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(() => window.requestAnimationFrame(runRestore));
+    return;
+  }
+  setTimeout(runRestore, 0);
 }
 
 function setTrackSectionExpanded(sectionKey, expanded){
@@ -8121,6 +8213,8 @@ async function renderWatchlistChunked(options = {}){
   const model = options.model || prepareWatchlistRenderModel(source, {passCache});
   const {box, showExpired, records, renderSignature} = model;
   const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
+  const preserveUiState = options.preserveUiState !== false && activeWorkspaceTab() === 'track';
+  const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
   if(!box) return;
   logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
   if(!records.length){
@@ -8208,10 +8302,13 @@ async function renderWatchlistChunked(options = {}){
   uiState.watchlistRenderSignature = renderSignature;
   box.dataset.watchlistSignature = renderSignature;
   clearWatchlistDirtyForRecords(records);
+  if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
 }
 
 function renderWatchlist(){
   if(shouldSkipHiddenWatchlistRender('watchlist_render')) return;
+  const preserveUiState = activeWorkspaceTab() === 'track';
+  const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
   const passCache = createWatchlistProjectionPassCache();
   const model = prepareWatchlistRenderModel('watchlist_render', {passCache});
   const {box, showExpired, records, renderSignature} = model;
@@ -8238,6 +8335,7 @@ function renderWatchlist(){
   uiState.watchlistRenderSignature = renderSignature;
   box.dataset.watchlistSignature = renderSignature;
   clearWatchlistDirtyForRecords(records);
+  if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
 }
 
 let watchlistRenderScheduled = false;
@@ -19988,8 +20086,7 @@ async function refreshTrackOnly(options = {}){
   trackRefreshRuntime.inFlight = true;
   trackRefreshRuntime.lastReason = source;
   trackRefreshRuntime.lastStartedAt = new Date().toISOString();
-  const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
-  const previousTrackScrollTop = trackWorkspace ? Number(trackWorkspace.scrollTop || 0) : 0;
+  const trackUiSnapshot = activeWorkspaceTab() === 'track' ? captureTrackUiState() : null;
   let refreshOk = false;
   let riskRecalcFailed = false;
   let backendPullFailed = false;
@@ -20094,20 +20191,10 @@ async function refreshTrackOnly(options = {}){
         if(!hasWatchlistDirtyRecords()){
           startupCoordinator.trackNeedsFullRender = false;
         }
-        requestAnimationFrame(() => {
-          if(activeWorkspaceTab() !== 'track') return;
-          if(trackWorkspace){
-            trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
-          }
-        });
+        restoreTrackUiState(trackUiSnapshot);
       }
     }else if(wasTrackActive){
-      requestAnimationFrame(() => {
-        if(activeWorkspaceTab() !== 'track') return;
-        if(trackWorkspace){
-          trackWorkspace.scrollTop = previousTrackScrollTop <= 0 ? 0 : previousTrackScrollTop;
-        }
-      });
+      restoreTrackUiState(trackUiSnapshot);
     }
     const attempted = Number(refreshSummary && refreshSummary.attempted || 0);
     const refreshedCount = Number(refreshSummary && refreshSummary.refreshed || 0);
@@ -23588,6 +23675,7 @@ function bindTrackPullRefreshGesture(){
   let trackPullCapturedScroll = false;
   let trackPullIgnoredReason = '';
   let trackPullLastTriggeredAt = 0;
+  let trackScrollIdleTimer = null;
   const TRACK_PULL_MIN_INTERVAL_MS = 8000;
   const TRACK_PULL_CAPTURE_MIN_DELTA_Y = 24;
   const TRACK_PULL_REFRESH_THRESHOLD_Y = 110;
@@ -23603,7 +23691,20 @@ function bindTrackPullRefreshGesture(){
     trackPullPreventLogged = false;
     trackPullCapturedScroll = false;
     trackPullIgnoredReason = '';
+    uiState.trackPullGestureActive = false;
   };
+  const markTrackScrollActive = () => {
+    uiState.trackScrollActive = true;
+    if(trackScrollIdleTimer) clearTimeout(trackScrollIdleTimer);
+    trackScrollIdleTimer = setTimeout(() => {
+      uiState.trackScrollActive = false;
+      trackScrollIdleTimer = null;
+    }, 180);
+  };
+  trackWorkspace.addEventListener('scroll', () => {
+    if(activeWorkspaceTab() !== 'track') return;
+    markTrackScrollActive();
+  }, {passive:true});
   trackWorkspace.addEventListener('touchstart', event => {
     const touchCount = Number(event.touches && event.touches.length || 0);
     if(touchCount !== 1){
@@ -23622,7 +23723,7 @@ function bindTrackPullRefreshGesture(){
       trackPullIgnoredReason = 'hydration_incomplete';
       return;
     }
-    if(watchlistTickerRecords().length <= 0){
+    if(lightweightWatchlistRecordCount() <= 0){
       trackPullIgnoredReason = 'empty_watchlist';
       return;
     }
@@ -23640,6 +23741,7 @@ function bindTrackPullRefreshGesture(){
     trackPullThresholdMet = false;
     trackPullCapturedScroll = false;
     trackPullIgnoredReason = '';
+    uiState.trackPullGestureActive = true;
     if(!trackPullGestureLogged){
       trackPullGestureLogged = true;
       console.info('[TrackPullRefresh]', {event:'pullRefreshGestureStart', activeWorkspace:activeWorkspaceTab()});
@@ -23687,6 +23789,7 @@ function bindTrackPullRefreshGesture(){
       }
     }else{
       console.info('[TrackPullRefresh]', {event:'pullRefreshIgnoredReason', reason:'threshold_not_met', activeWorkspace:activeWorkspaceTab()});
+      console.info('[TrackPullRefresh]', {event:'ignoredNoopConfirmed', reason:'threshold_not_met', activeWorkspace:activeWorkspaceTab()});
     }
     resetGesture();
   }, {passive:true});
