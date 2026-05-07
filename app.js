@@ -7962,7 +7962,7 @@ function isAllowedCanonicalVisualPair(canonicalVerdict, visualBucket){
   const canonical = normalizeGlobalVerdictKey(canonicalVerdict || '');
   const bucket = normalizeVisualBucketForPairing(visualBucket);
   if(canonical === 'entry') return bucket === 'entry';
-  if(canonical === 'near_entry') return bucket === 'near_entry';
+  if(canonical === 'near_entry') return ['near_entry', 'monitor'].includes(bucket);
   if(canonical === 'watch') return ['monitor', 'diminishing'].includes(bucket);
   if(canonical === 'avoid') return ['avoid', 'diminishing', 'dead'].includes(bucket);
   return true;
@@ -19730,6 +19730,73 @@ function withLiveRecordFromCache(liveRecord, cache){
   };
 }
 
+function hasProjectionTerminalAvoidReason(snapshot, bundle){
+  const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
+  const visualState = safeBundle.visualState && typeof safeBundle.visualState === 'object' ? safeBundle.visualState : {};
+  const globalVerdict = safeBundle.globalVerdict && typeof safeBundle.globalVerdict === 'object' ? safeBundle.globalVerdict : {};
+  const resolvedContract = safeBundle.resolvedContract && typeof safeBundle.resolvedContract === 'object' ? safeBundle.resolvedContract : {};
+  const lifecycleState = String(
+    source.lifecycleState
+    || source.lifecycle
+    || visualState.lifecycleState
+    || visualState.lifecycle
+    || globalVerdict.lifecycle
+    || ''
+  ).trim().toLowerCase();
+  const structureState = String(
+    source.structureState
+    || source.structuralState
+    || visualState.structureState
+    || visualState.structuralState
+    || globalVerdict.structure_state
+    || resolvedContract.structuralState
+    || ''
+  ).trim().toLowerCase();
+  const avoidSource = String(
+    source.avoidTriggerSource
+    || source.avoid_trigger_source
+    || source.deadTriggerSource
+    || source.dead_trigger_source
+    || source.terminalAvoidSource
+    || source.terminal_avoid_source
+    || visualState.avoid_trigger_source
+    || visualState.dead_trigger_source
+    || globalVerdict.avoid_trigger_source
+    || globalVerdict.dead_trigger_source
+    || ''
+  ).trim().toLowerCase();
+  const viability = String(
+    source.viability
+    || globalVerdict.viability
+    || ''
+  ).trim().toLowerCase();
+  const explicitInvalidationReason = String(
+    source.explicitInvalidationReason
+    || source.explicit_invalidation_reason
+    || visualState.explicit_invalidation_reason
+    || globalVerdict.explicit_invalidation_reason
+    || ''
+  ).trim().toLowerCase();
+  const hasExplicitInvalidation = !!(
+    explicitInvalidationReason
+    && !['(none)', 'none', 'n/a'].includes(explicitInvalidationReason)
+  );
+  return !!(
+    source.terminalAvoidApplied === true
+    || source.terminal_avoid_applied === true
+    || source.hardTerminalAvoid === true
+    || visualState.terminal_avoid_applied === true
+    || globalVerdict.rejected_by_viability_gate === true
+    || globalVerdict.avoid_allowed_by_structure_consistency_guard === true && normalizeGlobalVerdictKey(globalVerdict.final_verdict || '') === 'avoid'
+    || lifecycleState === 'dead'
+    || ['broken', 'dead', 'invalid', 'failed'].includes(structureState)
+    || ['terminal', 'terminal_avoid', 'structure_broken', 'explicit_invalidation', 'dead', 'avoid'].includes(avoidSource)
+    || viability === 'reject'
+    || hasExplicitInvalidation
+  );
+}
+
 function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
   const baseBundle = bundle && typeof bundle === 'object' ? bundle : {};
   const snapshot = projectionSnapshot && typeof projectionSnapshot === 'object' ? projectionSnapshot : null;
@@ -19754,15 +19821,16 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
     return normalized || 'avoid';
   };
   let coerced = false;
+  const terminalAvoidReason = hasProjectionTerminalAvoidReason(snapshot, baseBundle);
   if(visualBucket && finalKey && !isAllowedCanonicalVisualPair(finalKey, visualBucket)){
-    if(avoidLikeBucket && finalKey !== 'avoid'){
+    if(terminalAvoidReason && avoidLikeBucket && finalKey !== 'avoid'){
       finalKey = 'avoid';
       canonicalKey = 'avoid';
       renderedKey = 'avoid';
       renderedBucket = visualBucket;
       tone = toneForBucket(visualBucket);
       coerced = true;
-    }else if(finalKey === 'avoid' && watchLikeBucket){
+    }else if(terminalAvoidReason && finalKey === 'avoid' && watchLikeBucket){
       visualBucket = 'avoid';
       renderedBucket = 'avoid';
       tone = toneForBucket(visualBucket);
@@ -19772,12 +19840,22 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
       renderedBucket = 'monitor';
       tone = toneForBucket(visualBucket);
       coerced = true;
-    }else{
+    }else if(terminalAvoidReason){
       finalKey = 'avoid';
       canonicalKey = 'avoid';
       renderedKey = 'avoid';
       visualBucket = 'avoid';
       renderedBucket = 'avoid';
+      tone = toneForBucket(visualBucket);
+      coerced = true;
+    }else{
+      finalKey = normalizeGlobalVerdictKey(finalKey || canonicalKey || 'watch') === 'avoid' ? 'watch' : (finalKey || canonicalKey || 'watch');
+      canonicalKey = normalizeGlobalVerdictKey(canonicalKey || finalKey) === 'avoid' ? 'watch' : (canonicalKey || finalKey);
+      renderedKey = normalizeGlobalVerdictKey(renderedKey || finalKey) === 'avoid' ? 'watch' : (renderedKey || finalKey);
+      visualBucket = finalKey === 'entry'
+        ? 'entry'
+        : (finalKey === 'near_entry' ? 'monitor' : 'monitor');
+      renderedBucket = visualBucket;
       tone = toneForBucket(visualBucket);
       coerced = true;
     }
@@ -19793,6 +19871,14 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
       reason:'invalid_final_visual_pair'
     });
   }
+  const staleAvoidActionGuidance = !terminalAvoidReason
+    && normalizeGlobalVerdictKey(finalKey || canonicalKey || '') !== 'avoid'
+    && /avoid|too weak|broken/i.test(actionGuidance);
+  const safeActionGuidance = staleAvoidActionGuidance
+    ? (normalizeGlobalVerdictKey(finalKey || canonicalKey || '') === 'near_entry'
+      ? 'Near Entry - waiting for confirmation'
+      : 'Monitor - waiting for confirmation')
+    : actionGuidance;
   const nextBundle = {...baseBundle};
   const nextCanonical = {...(nextBundle.canonicalContract || {})};
   const nextResolved = {...(nextBundle.resolvedContract || {})};
@@ -19838,9 +19924,9 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
   if(decisionSummary){
     nextVisual.decision_summary = decisionSummary;
   }
-  if(actionGuidance){
-    nextResolved.actionLabel = actionGuidance;
-    nextResolved.actionShortLabel = actionGuidance;
+  if(safeActionGuidance){
+    nextResolved.actionLabel = safeActionGuidance;
+    nextResolved.actionShortLabel = safeActionGuidance;
   }
   nextVisual.review_presentation_source = 'track_projection_bundle';
   nextBundle.canonicalContract = nextCanonical;
