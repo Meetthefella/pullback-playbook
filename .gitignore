@@ -38,3 +38,4 @@ node_modules/
 # Temporary analysis exports
 analysis-*.json
 
+.codex-local/
