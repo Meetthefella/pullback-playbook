@@ -1,0 +1,11 @@
+[projects.'c:\users\a_daveg']
+trust_level = "trusted"
+
+[projects.'c:\users\a_daveg\documents\pullback-playbook']
+trust_level = "trusted"
+
+[tui.model_availability_nux]
+"gpt-5.5" = 3
+
+[windows]
+sandbox = "elevated"

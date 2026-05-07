@@ -16,7 +16,13 @@ function runBrowserModule(relativePath){
 }
 
 runBrowserModule('js/bounce-priceability.js');
+runBrowserModule('js/plan-math.js');
+runBrowserModule('js/tradeability.js');
 runBrowserModule('js/resolver-core.js');
+runBrowserModule('js/resolver-presentation.js');
+runBrowserModule('js/domain/simplified-plan-state.js');
+runBrowserModule('js/presentation/simplified-presentation-model.js');
+runBrowserModule('js/domain/simplified-trade-state.js');
 
 const resolverCore = sandbox.window.ResolverCore;
 if(!resolverCore || typeof resolverCore.runTradeReadinessGateAssertions !== 'function'){
@@ -323,5 +329,137 @@ function runReviewProjectionAssertions(){
 
 runReviewProjectionAssertions();
 
+function runSimplifiedPipelineAssertions(){
+  const pipeline = sandbox.window.SimplifiedTradeState;
+  if(!pipeline || typeof pipeline.resolveRecordState !== 'function'){
+    throw new Error('SimplifiedTradeState pipeline is unavailable.');
+  }
+  const requiredKeys = [
+    'ticker',
+    'canonicalVerdict',
+    'visualBucket',
+    'tone',
+    'badgeLabel',
+    'actionLabel',
+    'planVisible',
+    'planStatus',
+    'mainBlocker',
+    'entryGatePass',
+    'nearEntryGatePass',
+    'blockers',
+    'debug'
+  ];
+  function depsFor(derivedStates, finalContract){
+    return {
+      riskSettings:{account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+      analysisDerivedStatesFromRecord:() => derivedStates,
+      resolvePreLifecycleStateContract:() => finalContract,
+      resolveFinalStateContract:() => finalContract,
+      setupScoreForRecord:() => 8,
+      isHostileMarketStatus:() => false,
+      scannerScoreGradientClass:() => ''
+    };
+  }
+
+  const entryBlocked = pipeline.resolveRecordState({
+    ticker:'STRICT',
+    in_watchlist:true,
+    plan:{entry:100, stop:97, firstTarget:105},
+    marketData:{price:101, ma20:100, ma50:95, ma200:80, currency:'GBP'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'intact',
+      trendState:'intact',
+      stabilisationState:'clear',
+      bounceState:'confirmed',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Entry',
+      structuralState:'entry',
+      actionStateKey:'ready_to_act',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Entry',
+      blockerReason:'',
+      reasonSummary:'Ready to act.',
+      terminal:false,
+      baseVerdict:'entry'
+    })
+  });
+  requiredKeys.forEach(key => {
+    if(!(key in entryBlocked)) throw new Error(`Simplified pipeline result missing key: ${key}`);
+  });
+  if(entryBlocked.canonicalVerdict === 'entry' || entryBlocked.entryGatePass !== false){
+    throw new Error('Simplified pipeline must keep Entry strict when existing entry gates fail.');
+  }
+
+  const nearEntry = pipeline.resolveRecordState({
+    ticker:'PROV',
+    in_watchlist:true,
+    reclaimAttempt:true,
+    plan:{entry:100, stop:97, firstTarget:106},
+    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'developing_clean',
+      trendState:'intact',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Near Entry',
+      structuralState:'near_entry',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Near Entry',
+      blockerReason:'Waiting for confirmation.',
+      reasonSummary:'Close to trigger.',
+      terminal:false,
+      baseVerdict:'near_entry'
+    })
+  });
+  if(nearEntry.nearEntryGatePass !== true || !nearEntry.debug || !nearEntry.debug.nearEntryGateChecks){
+    throw new Error('Simplified pipeline must preserve resolver-derived Near Entry gate flags.');
+  }
+
+  const missingPlan = pipeline.resolveRecordState({
+    ticker:'NOPLAN',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:50, currency:'GBP'}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'intact',
+      trendState:'intact',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Plan not ready.',
+      reasonSummary:'Pre-watchlist setup.',
+      terminal:false,
+      baseVerdict:'watch'
+    })
+  });
+  if(missingPlan.planVisible !== false || missingPlan.planStatus !== 'missing' || missingPlan.canonicalVerdict !== 'watch' || missingPlan.visualBucket !== 'monitor'){
+    throw new Error('Missing plan must produce planVisible:false and safe Watch/Monitor output.');
+  }
+}
+
+runSimplifiedPipelineAssertions();
+
 console.log(`Resolver gate assertions passed (${results.length} cases).`);
 console.log('Review projection invariant assertions passed.');
+console.log('Simplified state pipeline assertions passed.');
