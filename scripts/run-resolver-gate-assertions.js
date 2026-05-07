@@ -177,6 +177,62 @@ function runReviewProjectionAssertions(){
   if(terminalGlobal.final_verdict !== 'avoid' || terminalVisual.visualBucket !== 'avoid'){
     throw new Error('Terminal avoid projection must remain avoid.');
   }
+
+  const suppressedTrackPromotion = projectionSandbox.applyProjectionSnapshotToReviewBundle({
+    canonicalContract:{canonicalVerdictKey:'watch'},
+    resolvedContract:{finalVerdict:'watch', visualBucket:'monitor', presentationBucket:'monitor'},
+    visualState:{canonicalVerdict:'watch', finalVerdict:'watch', visualBucket:'monitor', presentationBucket:'monitor'},
+    globalVerdict:{final_verdict:'watch'}
+  }, {
+    ticker:'DINO',
+    canonicalVerdict:'watch',
+    finalVerdict:'near_entry',
+    renderedVerdict:'near_entry',
+    visualBucket:'near_entry',
+    sourceOfTruthVisualBucket:'near_entry',
+    renderedBucket:'near_entry',
+    terminalAvoidApplied:false,
+    avoidTriggerSource:'',
+    structureState:'intact',
+    lifecycleState:'active',
+    viability:'watchlist'
+  });
+  const suppressedVisual = suppressedTrackPromotion.bundle.visualState || {};
+  const suppressedGlobal = suppressedTrackPromotion.bundle.globalVerdict || {};
+  if(suppressedGlobal.final_verdict !== 'watch' || suppressedVisual.finalVerdict !== 'watch' || suppressedVisual.renderedVerdict !== 'watch'){
+    throw new Error('Track projection must not promote fresh watch resolver state to near_entry.');
+  }
+  if(suppressedVisual.visualBucket !== 'monitor'){
+    throw new Error('Suppressed track projection promotion must keep monitor visual bucket.');
+  }
+  if(suppressedVisual.reviewProjectionPromotionSuppressed !== true || !suppressedVisual.reviewProjectionPromotionSuppressedReason){
+    throw new Error('Suppressed track projection promotion must expose debug suppression fields.');
+  }
+
+  const authoritativeNearEntry = projectionSandbox.applyProjectionSnapshotToReviewBundle({
+    canonicalContract:{canonicalVerdictKey:'near_entry'},
+    resolvedContract:{finalVerdict:'near_entry', visualBucket:'near_entry', presentationBucket:'near_entry'},
+    visualState:{canonicalVerdict:'near_entry', finalVerdict:'near_entry', visualBucket:'near_entry', presentationBucket:'near_entry'},
+    globalVerdict:{final_verdict:'near_entry'}
+  }, {
+    ticker:'DINO',
+    canonicalVerdict:'near_entry',
+    finalVerdict:'near_entry',
+    renderedVerdict:'near_entry',
+    visualBucket:'near_entry',
+    sourceOfTruthVisualBucket:'near_entry',
+    renderedBucket:'near_entry',
+    terminalAvoidApplied:false,
+    avoidTriggerSource:'',
+    structureState:'intact',
+    lifecycleState:'active',
+    viability:'watchlist'
+  });
+  const authoritativeVisual = authoritativeNearEntry.bundle.visualState || {};
+  const authoritativeGlobal = authoritativeNearEntry.bundle.globalVerdict || {};
+  if(authoritativeGlobal.final_verdict !== 'near_entry' || authoritativeVisual.visualBucket !== 'near_entry'){
+    throw new Error('Authoritative fresh near_entry resolver state must remain near_entry.');
+  }
 }
 
 runReviewProjectionAssertions();

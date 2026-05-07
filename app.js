@@ -19801,6 +19801,30 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
   const baseBundle = bundle && typeof bundle === 'object' ? bundle : {};
   const snapshot = projectionSnapshot && typeof projectionSnapshot === 'object' ? projectionSnapshot : null;
   if(!snapshot) return {bundle:baseBundle, applied:false};
+  const rawBaseCanonical = String(
+    baseBundle.canonicalContract && baseBundle.canonicalContract.canonicalVerdictKey
+    || baseBundle.resolvedContract && (baseBundle.resolvedContract.finalVerdict || baseBundle.resolvedContract.final_verdict)
+    || baseBundle.visualState && (baseBundle.visualState.canonicalVerdict || baseBundle.visualState.finalVerdict)
+    || baseBundle.globalVerdict && (baseBundle.globalVerdict.final_verdict || baseBundle.globalVerdict.finalVerdict)
+    || ''
+  ).trim();
+  const rawBaseVisualBucket = String(
+    baseBundle.visualState && (
+      baseBundle.visualState.sourceOfTruthVisualBucket
+      || baseBundle.visualState.visualBucket
+      || baseBundle.visualState.presentationBucket
+      || baseBundle.visualState.renderedBucket
+    )
+    || baseBundle.resolvedContract && (
+      baseBundle.resolvedContract.sourceOfTruthVisualBucket
+      || baseBundle.resolvedContract.visualBucket
+      || baseBundle.resolvedContract.presentationBucket
+      || baseBundle.resolvedContract.bucket
+    )
+    || ''
+  ).trim();
+  const baseCanonical = rawBaseCanonical ? normalizeGlobalVerdictKey(rawBaseCanonical) : '';
+  const baseVisualBucket = rawBaseVisualBucket ? normalizeVisualBucketForPairing(rawBaseVisualBucket) : '';
   let canonicalKey = normalizeGlobalVerdictKey(snapshot.canonicalVerdict || snapshot.finalVerdict || '');
   let finalKey = normalizeGlobalVerdictKey(snapshot.finalVerdict || snapshot.canonicalVerdict || canonicalKey || '');
   let renderedKey = normalizeGlobalVerdictKey(snapshot.renderedVerdict || snapshot.finalVerdict || finalKey || '');
@@ -19822,6 +19846,27 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
   };
   let coerced = false;
   const terminalAvoidReason = hasProjectionTerminalAvoidReason(snapshot, baseBundle);
+  const hasAuthoritativeBaseProjection = !!(baseCanonical || baseVisualBucket);
+  const trackPromotionAttempted = hasAuthoritativeBaseProjection
+    && !terminalAvoidReason
+    && ['watch', 'monitor'].includes(baseCanonical || 'watch')
+    && ['monitor', 'watch'].includes(baseVisualBucket || 'monitor')
+    && (finalKey === 'near_entry' || renderedKey === 'near_entry' || visualBucket === 'near_entry' || renderedBucket === 'near_entry');
+  const freshNearEntryAuthoritative = !terminalAvoidReason
+    && (baseCanonical === 'near_entry' || baseVisualBucket === 'near_entry');
+  const promotionSuppressed = trackPromotionAttempted && !freshNearEntryAuthoritative;
+  const promotionSuppressedReason = promotionSuppressed
+    ? 'Track projection cannot promote Review above fresh resolver watch/monitor state.'
+    : '';
+  if(promotionSuppressed){
+    canonicalKey = baseCanonical || 'watch';
+    finalKey = baseCanonical || 'watch';
+    renderedKey = baseCanonical || 'watch';
+    visualBucket = baseVisualBucket || 'monitor';
+    renderedBucket = baseVisualBucket || 'monitor';
+    tone = toneForBucket(visualBucket);
+    coerced = true;
+  }
   if(visualBucket && finalKey && !isAllowedCanonicalVisualPair(finalKey, visualBucket)){
     if(terminalAvoidReason && avoidLikeBucket && finalKey !== 'avoid'){
       finalKey = 'avoid';
@@ -19929,6 +19974,12 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
     nextResolved.actionShortLabel = safeActionGuidance;
   }
   nextVisual.review_presentation_source = 'track_projection_bundle';
+  nextVisual.reviewProjectionPromotedByTrackBundle = !!(trackPromotionAttempted && !promotionSuppressed);
+  nextVisual.reviewProjectionPromotionSuppressed = promotionSuppressed;
+  nextVisual.reviewProjectionPromotionSuppressedReason = promotionSuppressedReason;
+  nextResolved.reviewProjectionPromotedByTrackBundle = !!(trackPromotionAttempted && !promotionSuppressed);
+  nextResolved.reviewProjectionPromotionSuppressed = promotionSuppressed;
+  nextResolved.reviewProjectionPromotionSuppressedReason = promotionSuppressedReason;
   nextBundle.canonicalContract = nextCanonical;
   nextBundle.resolvedContract = nextResolved;
   nextBundle.visualState = nextVisual;
@@ -22581,6 +22632,9 @@ function renderReviewWorkspace(options = {}){
         presentationBucket:visualState.presentationBucket || '',
         reviewPresentationSource:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || ''
       },
+      reviewProjectionPromotedByTrackBundle:visualState.reviewProjectionPromotedByTrackBundle === true,
+      reviewProjectionPromotionSuppressed:visualState.reviewProjectionPromotionSuppressed === true,
+      reviewProjectionPromotionSuppressedReason:visualState.reviewProjectionPromotionSuppressedReason || '',
       shellClass:reviewOuterShellClass,
       accentClass:reviewAccentClass,
       staleAvoidSuppressed:visualState.staleAvoidSuppressed === true
@@ -22609,6 +22663,9 @@ function renderReviewWorkspace(options = {}){
           presentationBucket:visualState.presentationBucket || '',
           reviewPresentationSource:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || ''
         },
+        reviewProjectionPromotedByTrackBundle:visualState.reviewProjectionPromotedByTrackBundle === true,
+        reviewProjectionPromotionSuppressed:visualState.reviewProjectionPromotionSuppressed === true,
+        reviewProjectionPromotionSuppressedReason:visualState.reviewProjectionPromotionSuppressedReason || '',
         shellClass:reviewOuterShellClass,
         accentClass:reviewAccentClass,
         staleAvoidSuppressed:visualState.staleAvoidSuppressed === true
@@ -22628,6 +22685,9 @@ function renderReviewWorkspace(options = {}){
     usedProjectionBundle:sourceProjectionSnapshot != null,
     recomputedDuringRender:usedCachedBundle !== true,
     reviewProjectionSource:effectiveReviewProjectionSource,
+    reviewProjectionPromotedByTrackBundle:visualState.reviewProjectionPromotedByTrackBundle === true,
+    reviewProjectionPromotionSuppressed:visualState.reviewProjectionPromotionSuppressed === true,
+    reviewProjectionPromotionSuppressedReason:visualState.reviewProjectionPromotionSuppressedReason || '',
     className:reviewOuterShellClass || '',
     cardClass:reviewAccentClass || '',
     shellClass:reviewOuterShellClass || '',
@@ -22801,6 +22861,9 @@ function renderReviewWorkspace(options = {}){
     {label:'Review Accent Tone', value:reviewAccentClass || '(none)'},
     {label:'Review Badge Tone', value:reviewBadgeTone},
     {label:'Review Visual State Source', value:reviewVisualStateSource || '(none)'},
+    {label:'reviewProjectionPromotedByTrackBundle', value:visualState.reviewProjectionPromotedByTrackBundle ? 'true' : 'false'},
+    {label:'reviewProjectionPromotionSuppressed', value:visualState.reviewProjectionPromotionSuppressed ? 'true' : 'false'},
+    {label:'reviewProjectionPromotionSuppressedReason', value:visualState.reviewProjectionPromotionSuppressedReason || '(none)'},
     {label:'Review Root Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
     {label:'Review Score Style Applied', value:reviewScoreStyleApplied || '(none)'},
     {label:'Review State Style Applied', value:reviewPanelToneClass || '(none)'},
