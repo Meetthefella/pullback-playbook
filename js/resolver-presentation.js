@@ -34,8 +34,8 @@
   }
 
   function visualPaletteForState(state){
-    if(state === 'entry') return {top:'#008C89', border:'rgba(0, 140, 137, 0.42)'};
-    if(state === 'near_entry') return {top:'#35A0A0', border:'rgba(53, 160, 160, 0.42)'};
+    if(state === 'entry') return {top:'#16A34A', border:'rgba(22, 163, 74, 0.44)'};
+    if(state === 'near_entry') return {top:'#0284C7', border:'rgba(2, 132, 199, 0.44)'};
     if(state === 'avoid') return {top:'#D50032', border:'rgba(213, 0, 50, 0.48)'};
     return {top:'#FFA000', border:'rgba(255, 160, 0, 0.42)'};
   }
