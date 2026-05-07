@@ -308,6 +308,15 @@
     const gateSection = renderAdvancedDebugMarkup([
       {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
       {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
+      {label:'originalBounceState', value:globalVerdict.originalBounceState || '(none)'},
+      {label:'adjustedBounceState', value:globalVerdict.adjustedBounceState || '(none)'},
+      {label:'nearEntryProvisionalBounceApplied', value:globalVerdict.nearEntryProvisionalBounceApplied ? 'true' : 'false'},
+      {label:'nearEntryPullbackZoneAccepted', value:globalVerdict.nearEntryPullbackZoneAccepted ? 'true' : 'false'},
+      {label:'nearEntryTerminalBlockApplied', value:globalVerdict.nearEntryTerminalBlockApplied ? 'true' : 'false'},
+      {label:'nearEntryProvisionalBounceReason', value:globalVerdict.nearEntryProvisionalBounceReason || '(none)'},
+      {label:'hasClearInvalidationLevel', value:globalVerdict.hasClearInvalidationLevel === true ? 'true' : (globalVerdict.hasClearInvalidationLevel === false ? 'false' : '(none)')},
+      {label:'hasProvisionalPriceablePlan', value:globalVerdict.hasProvisionalPriceablePlan === true ? 'true' : (globalVerdict.hasProvisionalPriceablePlan === false ? 'false' : '(none)')},
+      {label:'provisionalPlanBlockReason', value:globalVerdict.provisionalPlanBlockReason || '(none)'},
       {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'}
     ], 'Promotion Gates', deps);
     return `${finalSection}${baseSection}${executionSection}${gateSection}${advancedSection}`;
@@ -407,6 +416,15 @@
       swipeFeedbackRow,
       {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
       {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
+      {label:'originalBounceState', value:globalVerdict.originalBounceState || '(none)'},
+      {label:'adjustedBounceState', value:globalVerdict.adjustedBounceState || '(none)'},
+      {label:'nearEntryProvisionalBounceApplied', value:globalVerdict.nearEntryProvisionalBounceApplied ? 'true' : 'false'},
+      {label:'nearEntryPullbackZoneAccepted', value:globalVerdict.nearEntryPullbackZoneAccepted ? 'true' : 'false'},
+      {label:'nearEntryTerminalBlockApplied', value:globalVerdict.nearEntryTerminalBlockApplied ? 'true' : 'false'},
+      {label:'nearEntryProvisionalBounceReason', value:globalVerdict.nearEntryProvisionalBounceReason || '(none)'},
+      {label:'hasClearInvalidationLevel', value:globalVerdict.hasClearInvalidationLevel === true ? 'true' : (globalVerdict.hasClearInvalidationLevel === false ? 'false' : '(none)')},
+      {label:'hasProvisionalPriceablePlan', value:globalVerdict.hasProvisionalPriceablePlan === true ? 'true' : (globalVerdict.hasProvisionalPriceablePlan === false ? 'false' : '(none)')},
+      {label:'provisionalPlanBlockReason', value:globalVerdict.provisionalPlanBlockReason || '(none)'},
       {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
       {label:'Base Status Label', value:String(statusChip.primaryState || '(none)')},
       {label:'Base Structure Label', value:structureQuality || '(none)'},

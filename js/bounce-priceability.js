@@ -46,8 +46,8 @@
     const hasCredibleEntryTrigger = nearValidPullback && stabilised && !weakStructure && reclaimedOrHoldingTrigger;
 
     let unpriceableBlockReason = '';
-    if(riskTooWide) unpriceableBlockReason = 'Trend is weakening - no reliable stop level yet.';
-    else if(!hasClearInvalidationLevel) unpriceableBlockReason = 'Trend is weakening - no reliable stop level yet.';
+    if(riskTooWide) unpriceableBlockReason = 'Stop distance is too wide to price risk cleanly.';
+    else if(!hasClearInvalidationLevel) unpriceableBlockReason = 'No valid invalidation level is available.';
     else if(!hasPriceablePlan) unpriceableBlockReason = 'Bounce is not clear enough to price yet.';
     else if(!hasCredibleEntryTrigger) unpriceableBlockReason = 'Developing - waiting for confirmation.';
 
