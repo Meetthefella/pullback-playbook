@@ -7728,6 +7728,109 @@ function renderWatchlistCardElement(record, options = {}){
     watchlistVisualState.trackProvisionalNearEntry = true;
     watchlistVisualState.trackProvisionalNearEntryReason = 'Fresh resolver remains watch/monitor; Near Entry gate is provisional.';
   }
+  const simplifiedState = window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'
+    ? window.SimplifiedTradeState.resolveRecordState(record, {
+      surface:'watchlist',
+      deps:{
+        effectivePlanForRecord,
+        riskSettingsProvider:currentRiskSettings,
+        analysisDerivedStatesFromRecord,
+        applySetupConfirmationPlanGate,
+        baseVerdictFromResolvedContract,
+        resolvePreLifecycleStateContract,
+        resolveFinalStateContract,
+        evaluatePlanRealism,
+        setupScoreForRecord,
+        isHostileMarketStatus,
+        scannerScoreGradientClass,
+        state,
+        normalizeGlobalVerdictKey,
+        normalizeVerdict,
+        getBadge,
+        getActions,
+        deriveTradeability,
+        evaluateRiskFit
+      }
+    })
+    : {
+      ticker:entry.ticker,
+      canonicalVerdict:'watch',
+      visualBucket:'monitor',
+      tone:'monitor',
+      badgeLabel:'Watch',
+      actionLabel:'WATCH',
+      planVisible:false,
+      planStatus:'missing',
+      mainBlocker:'Simplified pipeline unavailable.',
+      entryGatePass:false,
+      nearEntryGatePass:false,
+      blockers:['Simplified pipeline unavailable.'],
+      debug:{safeFallback:true}
+    };
+  const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  const simplifiedVisualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
+  const simplifiedTone = String(simplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const simplifiedBadgeClass = ({
+    entry:'badge--entry ready',
+    near_entry:'badge--near-entry near',
+    monitor:'badge--monitor watch',
+    diminishing:'badge--diminishing',
+    avoid:'badge--avoid avoid'
+  })[simplifiedVisualBucket] || 'badge--monitor watch';
+  const simplifiedCardClass = ({
+    entry:'card--entry',
+    near_entry:'card--near-entry',
+    monitor:'card--monitor',
+    diminishing:'card--diminishing',
+    avoid:'card--avoid'
+  })[simplifiedVisualBucket] || 'card--monitor';
+  const simplifiedVisualStateKey = simplifiedCanonicalVerdict === 'entry'
+    ? 'entry'
+    : (simplifiedCanonicalVerdict === 'near_entry'
+      ? 'near_entry'
+      : (simplifiedCanonicalVerdict === 'avoid' ? 'avoid' : 'watch'));
+  watchlistVisualState.state = simplifiedVisualStateKey;
+  watchlistVisualState.canonicalVerdict = simplifiedCanonicalVerdict;
+  watchlistVisualState.finalVerdict = simplifiedCanonicalVerdict;
+  watchlistVisualState.final_verdict = simplifiedCanonicalVerdict;
+  watchlistVisualState.renderedVerdict = simplifiedCanonicalVerdict;
+  watchlistVisualState.final_verdict_rendered = simplifiedCanonicalVerdict;
+  watchlistVisualState.visualBucket = simplifiedVisualBucket;
+  watchlistVisualState.presentationBucket = simplifiedVisualBucket;
+  watchlistVisualState.trackPresentationBucket = simplifiedVisualBucket;
+  watchlistVisualState.visual_tone = simplifiedTone;
+  watchlistVisualState.trackPresentationTone = simplifiedTone;
+  watchlistVisualState.tone = simplifiedTone;
+  watchlistVisualState.className = `visual-state-card visual-state-${simplifiedVisualStateKey} visual-tone-${simplifiedTone} ${simplifiedCardClass}`;
+  watchlistVisualState.toneClass = watchlistVisualState.className;
+  watchlistVisualState.styleAttr = '';
+  watchlistVisualState.badge = {
+    text:String(simplifiedState.badgeLabel || globalVerdictLabel(simplifiedCanonicalVerdict) || 'Watch'),
+    className:simplifiedBadgeClass
+  };
+  watchlistVisualState.decision_summary = String(simplifiedState.mainBlocker || simplifiedState.actionLabel || '').trim();
+  watchlistVisualState.watchlist_presentation_source = 'simplified_state_pipeline';
+  watchlistVisualState.simplifiedTrackCard = true;
+  resolvedContract.finalVerdict = globalVerdictLabel(simplifiedCanonicalVerdict);
+  resolvedContract.final_verdict = simplifiedCanonicalVerdict;
+  resolvedContract.actionLabel = String(simplifiedState.actionLabel || '').trim();
+  resolvedContract.actionShortLabel = String(simplifiedState.actionLabel || '').trim();
+  resolvedContract.planStatusKey = String(simplifiedState.planStatus || '').trim().toLowerCase();
+  resolvedContract.planStatusLabel = String(simplifiedState.planStatus || '').trim();
+  resolvedContract.blockerReason = String(simplifiedState.mainBlocker || '').trim();
+  resolvedContract.badgeText = String(simplifiedState.badgeLabel || '').trim();
+  resolvedContract.badgeClass = simplifiedBadgeClass;
+  resolvedContract.finalDisplayState = simplifiedCanonicalVerdict;
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[SIMPLIFIED_TRACK_CARD]', {
+      ticker:simplifiedState.ticker || entry.ticker,
+      canonicalVerdict:simplifiedState.canonicalVerdict,
+      visualBucket:simplifiedState.visualBucket,
+      tone:simplifiedState.tone,
+      badgeLabel:simplifiedState.badgeLabel,
+      mainBlocker:simplifiedState.mainBlocker
+    });
+  }
   const shortReason = decisionCopy.reason;
   const watchlistSignalRowMarkup = liveRefreshPending || watchlistVisualState.watchlist_presentation_source === 'strict_reconciled'
     ? ''
@@ -7752,9 +7855,7 @@ function renderWatchlistCardElement(record, options = {}){
   const primaryState = String(watchlistPresentation.primaryState || '').toLowerCase();
   const finalDisplayState = String(resolvedContract.finalDisplayState || '').toLowerCase();
   const presentationBucket = String(watchlistVisualState.presentationBucket || '').toLowerCase();
-  const renderedVerdict = normalizeGlobalVerdictKey(
-    watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || (globalVerdict && globalVerdict.final_verdict) || ''
-  );
+  const renderedVerdict = simplifiedCanonicalVerdict;
   const holdEnabled = !['avoid','dead','reject'].includes(renderedVerdict)
     && presentationBucket !== 'avoid'
     && (presentationBucket !== 'diminishing' || watchlistVisualState.diminishingTrackEligible === true);
@@ -7763,7 +7864,7 @@ function renderWatchlistCardElement(record, options = {}){
     : Number(priority.score || 0);
   watchlistVisualState.prioritySortValue = prioritySortValue;
   watchlistVisualState.holdEnabled = holdEnabled;
-  const planState = String(resolvedContract.planStatusKey || '').toLowerCase();
+  const planState = String(simplifiedState.planStatus || '').toLowerCase();
   const watchlistScoreText = liveRefreshPending
     ? 'Refreshing...'
     : (expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''));
@@ -7784,45 +7885,15 @@ function renderWatchlistCardElement(record, options = {}){
   const decisionSummary = watchlistVisualState.decision_summary;
   const refreshButtonLabel = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
   const refreshButtonDisabled = manualRefreshBusy ? ' disabled' : '';
-  const planUI = resolvePlanVisibility({
-    state:watchlistVisualState.finalVerdict,
-    bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
-    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState),
-    terminal_avoid_applied:globalVerdict && globalVerdict.terminal_avoid_applied === true,
-    avoid_trigger_source:globalVerdict && globalVerdict.avoid_trigger_source || '',
-    viability:globalVerdict && globalVerdict.viability || '',
-    rejected_by_viability_gate:globalVerdict && globalVerdict.rejected_by_viability_gate === true,
-    hasPriceablePlan:globalVerdict && globalVerdict.hasPriceablePlan === true,
-    hasProvisionalPriceablePlan:globalVerdict && globalVerdict.hasProvisionalPriceablePlan === true,
-    near_entry_gate_pass:globalVerdict && globalVerdict.near_entry_gate_pass === true
-  });
-  const entryConditionsSummary = buildEntryConditionsSummary({
-    ticker:entry.ticker,
-    finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
-    presentationState:presentationBucket,
-    resolvedContract,
-    globalVerdict,
-    derivedStates,
-    displayedPlan
-  });
-  const suppressPlanBlockerInHeadline = !!(entryConditionsSummary && entryConditionsSummary.suppressPlanBlockerInHeadline === true);
-  const diagnosticPlanBlocker = planUI.showPlan
-    ? resolvedContract.planStatusLabel
-    : (planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.');
-  const finalVerdictForHeadline = normalizeVerdict(watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '');
-  const isNearEntryVerdict = finalVerdictForHeadline === 'near_entry';
+  const entryConditionsSummary = null;
+  const diagnosticPlanBlocker = simplifiedState.planVisible
+    ? (simplifiedState.planStatus || 'valid')
+    : (simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.');
+  const isNearEntryVerdict = simplifiedCanonicalVerdict === 'near_entry';
   const isDiminishingVisualBucket = presentationBucket === 'diminishing';
   const isActionableSoonState = isNearEntryVerdict || isDiminishingVisualBucket;
   const mainCardPlanHeadlineEnabled = isActionableSoonState;
-  const watchlistPlanHeadline = suppressPlanBlockerInHeadline
-    ? (
-      isNearEntryVerdict
-        ? 'Bounce is forming - needs confirmation before entry.'
-        : (isDiminishingVisualBucket
-          ? 'Structure is weakening - wait for recovery.'
-          : diagnosticPlanBlocker)
-    )
-    : diagnosticPlanBlocker;
+  const watchlistPlanHeadline = diagnosticPlanBlocker;
   const compactPrimaryPlanHeadline = mainCardPlanHeadlineEnabled
     && watchlistPlanHeadline
     && watchlistPlanHeadline !== decisionSummary
@@ -7832,21 +7903,21 @@ function renderWatchlistCardElement(record, options = {}){
   const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
   const resolvedSectionKey = parentSectionKey || watchlistState || presentationBucket || '';
   const renderedBucket = parentSectionKey
-    ? sourceOfTruthVisualBucket
+    ? trackSectionKeyToVisualBucket(parentSectionKey)
     : String(watchlistVisualState.visualBucket || watchlistVisualState.presentationBucket || watchlistVisualState.trackPresentationBucket || '').trim().toLowerCase();
   const clickedCardProjectionSnapshot = {
     ticker:entry.ticker,
     finalVerdict:String(watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '').trim().toLowerCase(),
     canonicalVerdict:String(watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict || '').trim().toLowerCase(),
     renderedVerdict:String(watchlistVisualState.final_verdict_rendered || watchlistVisualState.renderedVerdict || watchlistVisualState.finalVerdict || '').trim().toLowerCase(),
-    visualBucket:String(sourceOfTruthVisualBucket || renderedBucket || '').trim().toLowerCase(),
-    renderedBucket:String(renderedBucket || sourceOfTruthVisualBucket || '').trim().toLowerCase(),
+    visualBucket:String(renderedBucket || '').trim().toLowerCase(),
+    renderedBucket:String(renderedBucket || '').trim().toLowerCase(),
     tone:String(watchlistVisualState.visual_tone || watchlistVisualState.trackPresentationTone || '').trim().toLowerCase(),
     sectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
     resolvedSectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
     decisionSummary:String(watchlistVisualState.decision_summary || '').trim(),
-    actionGuidance:String(resolvedContract && (resolvedContract.actionLabel || resolvedContract.actionShortLabel) || '').trim(),
-    sourceOfTruthVisualBucket:String(sourceOfTruthVisualBucket || '').trim().toLowerCase(),
+    actionGuidance:String(simplifiedState.actionLabel || '').trim(),
+    sourceOfTruthVisualBucket:String(renderedBucket || '').trim().toLowerCase(),
     usedProjectionBundle,
     recomputedDuringRender,
     capturedAt:new Date().toISOString()
@@ -7862,12 +7933,12 @@ function renderWatchlistCardElement(record, options = {}){
     canonicalVerdict:watchlistVisualState.canonicalVerdict || watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
     finalVerdict:watchlistVisualState.finalVerdict || watchlistVisualState.final_verdict,
     renderedVerdict:watchlistVisualState.final_verdict_rendered || watchlistVisualState.renderedVerdict || watchlistVisualState.finalVerdict,
-    visualBucket:sourceOfTruthVisualBucket || renderedBucket,
-    renderedBucket:sourceOfTruthVisualBucket || renderedBucket,
+    visualBucket:renderedBucket,
+    renderedBucket:renderedBucket,
     presentationBucket:presentationBucket || watchlistVisualState.presentationBucket,
     tone:watchlistVisualState.visual_tone || watchlistVisualState.trackPresentationTone || '',
     renderSource,
-    sourceOfTruthVisualBucket,
+    sourceOfTruthVisualBucket:renderedBucket,
     usedProjectionBundle,
     recomputedDuringRender,
     className:watchlistVisualState.className || watchlistVisualState.toneClass || '',
@@ -7886,14 +7957,14 @@ function renderWatchlistCardElement(record, options = {}){
     sourceFields:{
       badge:'watchlistVisualState.badge',
       headlineCopy:'watchlistVisualState.decision_summary',
-      actionGuidance:'resolvedContract.actionLabel',
-      shellColour:'watchlistVisualState.className/styleAttr',
-      leftAccentColour:'watchlistVisualState.className/styleAttr',
-      sectionBucket:'watchlistVisualState.presentationBucket/visualBucket'
+      actionGuidance:'simplifiedState.actionLabel',
+      shellColour:'simplifiedState.visualBucket/tone',
+      leftAccentColour:'simplifiedState.visualBucket/tone',
+      sectionBucket:'simplifiedState.visualBucket'
     },
     fromStoredFields:false,
-    fromResolvedStateBundleCache:watchlistVisualState.watchlist_presentation_source === 'pending_passthrough',
-    fromFreshResolverOutput:watchlistVisualState.watchlist_presentation_source !== 'pending_passthrough'
+    fromResolvedStateBundleCache:false,
+    fromFreshResolverOutput:true
   });
   div.className = `resultcompact result-card result-feed-card scan-card watchlist-card ${escapeHtml(watchlistVisualState.className || watchlistVisualState.toneClass || '')}`.trim();
   div.style.cssText = watchlistVisualState.styleAttr || '';
@@ -7937,6 +8008,296 @@ function renderWatchlistCardElement(record, options = {}){
   if(holdEnabled){
     bindEntryConditionsHoldInteractions(div);
   }
+  return div;
+}
+
+function renderWatchlistCardElement(record, options = {}){
+  const entry = tickerRecordToWatchlistEntry(record);
+  if(!entry) return null;
+  const view = options.precomputedView && typeof options.precomputedView === 'object'
+    ? options.precomputedView
+    : buildFinalSetupView(record);
+  const liveRefreshPending = isWatchlistLiveRefreshPending(record.ticker);
+  const manualRefreshBusy = isManualWatchlistRefreshInProgress(record.ticker);
+  const remaining = getTradingDaysRemaining(entry);
+  const lifecycleText = lifecycleLabel(record);
+  const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
+  const parentSectionKey = String(options.parentSectionKey || '').trim().toLowerCase();
+  const usedProjectionBundle = options.usedProjectionBundle === true;
+  const recomputedDuringRender = options.recomputedDuringRender === true;
+  const renderSource = String(options.renderSource || options.source || 'watchlist_render');
+  const symbol = normalizeTicker(record && record.ticker || '');
+  const lifecycleSnapshot = (
+    passCache && passCache.lifecycle instanceof Map && passCache.lifecycle.has(symbol)
+      ? passCache.lifecycle.get(symbol)
+      : (syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache}))
+  );
+  const expired = lifecycleSnapshot.state === 'expired' || record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
+  const expiryDate = record.lifecycle.expiresAt || 'Not set';
+  const priority = watchlistPriorityForRecord(record, {lifecycleSnapshot, passCache});
+  const derivedStates = analysisDerivedStatesFromRecord(record);
+  const displayedPlan = applySetupConfirmationPlanGate(record, deriveCurrentPlanState(
+    record.plan && record.plan.entry,
+    record.plan && record.plan.stop,
+    record.plan && record.plan.firstTarget,
+    record.marketData && record.marketData.currency
+  ), derivedStates);
+  const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
+  const rrResolution = resolveScannerStateWithTrace(record);
+  const simplifiedState = window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'
+    ? window.SimplifiedTradeState.resolveRecordState(record, {
+      surface:'watchlist',
+      deps:{
+        effectivePlanForRecord,
+        riskSettingsProvider:currentRiskSettings,
+        analysisDerivedStatesFromRecord,
+        applySetupConfirmationPlanGate,
+        baseVerdictFromResolvedContract,
+        resolvePreLifecycleStateContract,
+        resolveFinalStateContract,
+        evaluatePlanRealism,
+        setupScoreForRecord,
+        isHostileMarketStatus,
+        scannerScoreGradientClass,
+        state,
+        normalizeGlobalVerdictKey,
+        normalizeVerdict,
+        getBadge,
+        getActions,
+        deriveTradeability,
+        evaluateRiskFit
+      }
+    })
+    : {
+      ticker:entry.ticker,
+      canonicalVerdict:'watch',
+      visualBucket:'monitor',
+      tone:'monitor',
+      badgeLabel:'Watch',
+      actionLabel:'WATCH',
+      planVisible:false,
+      planStatus:'missing',
+      mainBlocker:'Simplified pipeline unavailable.',
+      entryGatePass:false,
+      nearEntryGatePass:false,
+      blockers:['Simplified pipeline unavailable.'],
+      debug:{safeFallback:true}
+    };
+  const globalVerdict = simplifiedState.debug && simplifiedState.debug.resolvedState
+    ? simplifiedState.debug.resolvedState
+    : null;
+  const canonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  const visualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
+  const tone = String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const badgeClass = ({
+    entry:'badge--entry ready',
+    near_entry:'badge--near-entry near',
+    monitor:'badge--monitor watch',
+    diminishing:'badge--diminishing',
+    avoid:'badge--avoid avoid'
+  })[visualBucket] || 'badge--monitor watch';
+  const cardClass = ({
+    entry:'card--entry',
+    near_entry:'card--near-entry',
+    monitor:'card--monitor',
+    diminishing:'card--diminishing',
+    avoid:'card--avoid'
+  })[visualBucket] || 'card--monitor';
+  const visualStateKey = canonicalVerdict === 'entry'
+    ? 'entry'
+    : (canonicalVerdict === 'near_entry'
+      ? 'near_entry'
+      : (canonicalVerdict === 'avoid' ? 'avoid' : 'watch'));
+  const className = `visual-state-card visual-state-${visualStateKey} visual-tone-${tone} ${cardClass}`;
+  const watchlistVisualState = {
+    state:visualStateKey,
+    canonicalVerdict,
+    finalVerdict:canonicalVerdict,
+    final_verdict:canonicalVerdict,
+    renderedVerdict:canonicalVerdict,
+    final_verdict_rendered:canonicalVerdict,
+    visualBucket,
+    presentationBucket:visualBucket,
+    trackPresentationBucket:visualBucket,
+    visual_tone:tone,
+    trackPresentationTone:tone,
+    tone,
+    className,
+    toneClass:className,
+    styleAttr:'',
+    badge:{
+      text:String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch'),
+      className:badgeClass
+    },
+    decision_summary:String(simplifiedState.mainBlocker || simplifiedState.actionLabel || '').trim(),
+    watchlist_presentation_source:'simplified_state_pipeline',
+    simplifiedTrackCard:true
+  };
+  const resolvedContract = {
+    finalVerdict:globalVerdictLabel(canonicalVerdict),
+    final_verdict:canonicalVerdict,
+    actionLabel:String(simplifiedState.actionLabel || '').trim(),
+    actionShortLabel:String(simplifiedState.actionLabel || '').trim(),
+    planStatusKey:String(simplifiedState.planStatus || '').trim().toLowerCase(),
+    planStatusLabel:String(simplifiedState.planStatus || '').trim(),
+    blockerReason:String(simplifiedState.mainBlocker || '').trim(),
+    badgeText:String(simplifiedState.badgeLabel || '').trim(),
+    badgeClass,
+    finalDisplayState:canonicalVerdict
+  };
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[SIMPLIFIED_TRACK_CARD]', {
+      ticker:simplifiedState.ticker || entry.ticker,
+      canonicalVerdict:simplifiedState.canonicalVerdict,
+      visualBucket:simplifiedState.visualBucket,
+      tone:simplifiedState.tone,
+      badgeLabel:simplifiedState.badgeLabel,
+      mainBlocker:simplifiedState.mainBlocker
+    });
+  }
+  record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+  if(!record.watchlist.debug.holdTrace){
+    const seededAt = new Date().toISOString();
+    record.watchlist.debug.holdTrace = `hold_helper.rendered | ${seededAt}`;
+    const history = Array.isArray(record.watchlist.debug.holdTraceHistory) ? record.watchlist.debug.holdTraceHistory : [];
+    record.watchlist.debug.holdTraceHistory = [`hold_helper.rendered | ${seededAt}`, ...history].slice(0, 8);
+  }
+  const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    rrResolution,
+    resolvedContract,
+    globalVisual:watchlistVisualState
+  });
+  const div = document.createElement('div');
+  const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
+  const presentationBucket = visualBucket;
+  const renderedVerdict = canonicalVerdict;
+  const holdEnabled = !['avoid','dead','reject'].includes(renderedVerdict)
+    && presentationBucket !== 'avoid'
+    && presentationBucket !== 'diminishing';
+  const prioritySortValue = Number.isFinite(Number(record.priorityScore ?? record.priority))
+    ? Number(record.priorityScore ?? record.priority)
+    : Number(priority.score || 0);
+  watchlistVisualState.prioritySortValue = prioritySortValue;
+  watchlistVisualState.holdEnabled = holdEnabled;
+  const watchlistScoreText = liveRefreshPending
+    ? 'Refreshing...'
+    : (expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''));
+  const watchlistScoreClass = liveRefreshPending ? 's-neutral' : 'visual-score';
+  const hideWatchlistScore = watchlistState === 'diminishing' || prioritySortValue <= 0;
+  const watchlistScoreMarkup = hideWatchlistScore
+    ? ''
+    : `<span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span>`;
+  const priorityClass = prioritySortValue <= 0
+    ? 'watchlist-card__priority watchlist-card__priority--zero'
+    : 'watchlist-card__priority';
+  const priorityLabel = prioritySortValue <= 0
+    ? 'Low priority'
+    : `Priority ${String(priority.score)}`;
+  const liveRefreshNote = liveRefreshPending
+    ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
+    : '';
+  const decisionSummary = watchlistVisualState.decision_summary;
+  const refreshButtonLabel = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
+  const refreshButtonDisabled = manualRefreshBusy ? ' disabled' : '';
+  const diagnosticPlanBlocker = simplifiedState.planVisible
+    ? (simplifiedState.planStatus || 'valid')
+    : (simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.');
+  const isActionableSoonState = canonicalVerdict === 'near_entry' || visualBucket === 'diminishing';
+  const compactPrimaryPlanHeadline = isActionableSoonState
+    && diagnosticPlanBlocker
+    && diagnosticPlanBlocker !== decisionSummary
+    ? diagnosticPlanBlocker
+    : '';
+  const resolvedSectionKey = parentSectionKey || watchlistState || visualBucket || '';
+  const renderedBucket = visualBucket;
+  const clickedCardProjectionSnapshot = {
+    ticker:entry.ticker,
+    finalVerdict:canonicalVerdict,
+    canonicalVerdict,
+    renderedVerdict:canonicalVerdict,
+    visualBucket:renderedBucket,
+    renderedBucket,
+    tone,
+    sectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
+    resolvedSectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
+    decisionSummary:String(decisionSummary || '').trim(),
+    actionGuidance:String(simplifiedState.actionLabel || '').trim(),
+    sourceOfTruthVisualBucket:renderedBucket,
+    usedProjectionBundle,
+    recomputedDuringRender,
+    capturedAt:new Date().toISOString()
+  };
+  maybeInvalidateActiveReviewProjectionFromTrack(entry.ticker, clickedCardProjectionSnapshot, 'track_projection_changed');
+  record.watchlist = record.watchlist && typeof record.watchlist === 'object' ? record.watchlist : {};
+  record.watchlist.lastTrackProjectionSnapshot = {...clickedCardProjectionSnapshot};
+  debugTickerStateSources(entry.ticker, 'track', {
+    source:'simplified_state_pipeline',
+    sectionKey:resolvedSectionKey,
+    parentSectionKey,
+    resolvedSectionKey,
+    canonicalVerdict,
+    finalVerdict:canonicalVerdict,
+    renderedVerdict:canonicalVerdict,
+    visualBucket:renderedBucket,
+    renderedBucket,
+    presentationBucket,
+    tone,
+    renderSource,
+    sourceOfTruthVisualBucket:renderedBucket,
+    usedProjectionBundle,
+    recomputedDuringRender,
+    className,
+    cardClass,
+    shellClass:'',
+    accentClass:'',
+    styleAttr:'',
+    structure:derivedStates.structureState || '',
+    pullback:derivedStates.pullbackZone || derivedStates.pullbackState || '',
+    bounce:derivedStates.bounceState || '',
+    viability:globalVerdict && globalVerdict.viability || '',
+    viabilityReason:globalVerdict && globalVerdict.viability_reason || '',
+    terminalAvoidApplied:globalVerdict && globalVerdict.terminal_avoid_applied === true,
+    hardTerminalAvoid:false,
+    explicitInvalidationReason:globalVerdict && globalVerdict.explicit_invalidation_reason || '',
+    sourceFields:{
+      badge:'simplifiedState.badgeLabel',
+      headlineCopy:'simplifiedState.mainBlocker/actionLabel',
+      actionGuidance:'simplifiedState.actionLabel',
+      shellColour:'simplifiedState.visualBucket/tone',
+      leftAccentColour:'simplifiedState.visualBucket/tone',
+      sectionBucket:'simplifiedState.visualBucket'
+    },
+    fromStoredFields:false,
+    fromResolvedStateBundleCache:false,
+    fromFreshResolverOutput:true
+  });
+  div.className = `resultcompact result-card result-feed-card scan-card watchlist-card ${escapeHtml(className)}`.trim();
+  div.style.cssText = '';
+  div.dataset.visualTone = tone;
+  div.dataset.visualState = visualStateKey;
+  div.dataset.watchlistTicker = entry.ticker;
+  div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(watchlistVisualState.badge.text || 'Watch')}</span>${watchlistScoreMarkup}<span class="tiny ${escapeHtml(priorityClass)}">${escapeHtml(priorityLabel)}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row"></div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}${compactPrimaryPlanHeadline ? `<div class="tiny watchlist-plan-meta">${escapeHtml(compactPrimaryPlanHeadline)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(diagnosticPlanBlocker)}</div><div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Log to Diary</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
+  div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
+  const cardProjectionSnapshot = {...clickedCardProjectionSnapshot};
+  div.querySelector('[data-act="review"]').onclick = () => {
+    reviewWatchlistTicker(entry.ticker, {sourceProjectionSnapshot:cardProjectionSnapshot});
+  };
+  div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
+  const refreshButton = div.querySelector('[data-act="refresh-life"]');
+  if(refreshButton){
+    refreshButton.disabled = manualRefreshBusy;
+    refreshButton.textContent = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
+    refreshButton.onclick = () => {
+      if(refreshButton.disabled) return;
+      refreshButton.disabled = true;
+      refreshButton.textContent = 'Refreshing...';
+      refreshWatchlistTicker(entry.ticker).catch(() => {});
+    };
+  }
+  div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
   return div;
 }
 
