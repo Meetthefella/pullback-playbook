@@ -7037,7 +7037,14 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const debugPlanUI = resolvePlanVisibility({
     state:globalVisual.finalVerdict || globalVisual.final_verdict,
     bounce_state:globalVerdict.bounce_state || (record && record.setup && record.setup.bounceState),
-    structure:globalVerdict.structure_state || (record && record.setup && record.setup.structureState)
+    structure:globalVerdict.structure_state || (record && record.setup && record.setup.structureState),
+    terminal_avoid_applied:globalVerdict.terminal_avoid_applied === true,
+    avoid_trigger_source:globalVerdict.avoid_trigger_source || '',
+    viability:globalVerdict.viability || '',
+    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
+    near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true
   });
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Final Decision', [
     {label:'App Version', value:APP_VERSION},
@@ -7694,6 +7701,33 @@ function renderWatchlistCardElement(record, options = {}){
       derivedStates,
       displayedPlan
     });
+  const authoritativeTrackVerdict = normalizeGlobalVerdictKey(
+    globalVerdict && (globalVerdict.final_verdict || globalVerdict.finalVerdict) || canonicalWatchlistVerdict || ''
+  );
+  const provisionalTrackNearEntry = !!(
+    globalVerdict
+    && globalVerdict.near_entry_gate_pass === true
+    && ['watch','monitor'].includes(authoritativeTrackVerdict || 'watch')
+  );
+  if(provisionalTrackNearEntry){
+    watchlistVisualState.visualBucket = 'monitor';
+    watchlistVisualState.presentationBucket = 'monitor';
+    watchlistVisualState.trackPresentationBucket = 'monitor';
+    watchlistVisualState.visual_tone = 'monitor';
+    watchlistVisualState.trackPresentationTone = 'monitor';
+    watchlistVisualState.badge = {text:'Watch', className:'badge--monitor watch'};
+    watchlistVisualState.badgeLabel = 'Watch';
+    watchlistVisualState.presentationBadge = 'Watch';
+    watchlistVisualState.presentationBadgeClass = 'badge--monitor';
+    watchlistVisualState.className = String(watchlistVisualState.className || '').replace(/\bcard--near-entry\b/g, 'card--monitor').replace(/\bvisual-tone-near_entry\b/g, 'visual-tone-monitor').replace(/\bvisual-state-near_entry\b/g, 'visual-state-watch');
+    watchlistVisualState.toneClass = String(watchlistVisualState.toneClass || '').replace(/\bcard--near-entry\b/g, 'card--monitor').replace(/\bvisual-tone-near_entry\b/g, 'visual-tone-monitor').replace(/\bvisual-state-near_entry\b/g, 'visual-state-watch');
+    watchlistVisualState.styleAttr = '';
+    if(!String(watchlistVisualState.decision_summary || '').trim() || /near entry/i.test(String(watchlistVisualState.decision_summary || ''))){
+      watchlistVisualState.decision_summary = 'Near Entry developing - waiting for confirmation.';
+    }
+    watchlistVisualState.trackProvisionalNearEntry = true;
+    watchlistVisualState.trackProvisionalNearEntryReason = 'Fresh resolver remains watch/monitor; Near Entry gate is provisional.';
+  }
   const shortReason = decisionCopy.reason;
   const watchlistSignalRowMarkup = liveRefreshPending || watchlistVisualState.watchlist_presentation_source === 'strict_reconciled'
     ? ''
@@ -7753,7 +7787,14 @@ function renderWatchlistCardElement(record, options = {}){
   const planUI = resolvePlanVisibility({
     state:watchlistVisualState.finalVerdict,
     bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
-    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
+    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState),
+    terminal_avoid_applied:globalVerdict && globalVerdict.terminal_avoid_applied === true,
+    avoid_trigger_source:globalVerdict && globalVerdict.avoid_trigger_source || '',
+    viability:globalVerdict && globalVerdict.viability || '',
+    rejected_by_viability_gate:globalVerdict && globalVerdict.rejected_by_viability_gate === true,
+    hasPriceablePlan:globalVerdict && globalVerdict.hasPriceablePlan === true,
+    hasProvisionalPriceablePlan:globalVerdict && globalVerdict.hasProvisionalPriceablePlan === true,
+    near_entry_gate_pass:globalVerdict && globalVerdict.near_entry_gate_pass === true
   });
   const entryConditionsSummary = buildEntryConditionsSummary({
     ticker:entry.ticker,
@@ -14833,6 +14874,77 @@ function bindEntryConditionsHoldInteractions(root){
   });
 }
 
+function terminalAvoidEvidenceForReviewCopy(source){
+  const item = source && typeof source === 'object' ? source : {};
+  const state = normalizeGlobalVerdictKey(item.state || item.finalVerdict || item.final_verdict || '');
+  const structure = String(item.structure || item.structureState || item.structure_state || '').trim().toLowerCase();
+  const lifecycle = String(item.lifecycle || item.lifecycleState || item.lifecycle_state || '').trim().toLowerCase();
+  const avoidSource = String(item.avoidTriggerSource || item.avoid_trigger_source || item.dead_trigger_source || '').trim().toLowerCase();
+  const viability = String(item.viability || '').trim().toLowerCase();
+  const explicitInvalidation = String(item.explicitInvalidationReason || item.explicit_invalidation_reason || '').trim().toLowerCase();
+  const realAvoidSource = !!(avoidSource && !['(none)','none','n/a'].includes(avoidSource));
+  const realInvalidation = !!(explicitInvalidation && !['(none)','none','n/a'].includes(explicitInvalidation));
+  return !!(
+    item.terminalAvoidApplied === true
+    || item.terminal_avoid_applied === true
+    || item.hardTerminalAvoid === true
+    || item.rejected_by_viability_gate === true
+    || realAvoidSource
+    || realInvalidation
+    || ['dead','terminal','terminal_avoid','expired'].includes(lifecycle)
+    || ['broken','dead','invalid','failed'].includes(structure)
+    || viability === 'reject'
+    || state === 'dead'
+  );
+}
+
+function provisionalPlanConfirmationCopy(setup){
+  const item = setup && typeof setup === 'object' ? setup : {};
+  const bounceState = String(item.bounce_state || item.bounceState || '').trim().toLowerCase();
+  const hasProvisionalPlan = item.hasProvisionalPriceablePlan === true || item.has_provisional_priceable_plan === true;
+  const hasPriceablePlan = item.hasPriceablePlan === true || item.has_priceable_plan === true;
+  const nearEntryGatePass = item.nearEntryGatePass === true || item.near_entry_gate_pass === true;
+  if(hasProvisionalPlan) return 'Provisional plan - waiting for confirmation.';
+  if(hasPriceablePlan && (nearEntryGatePass || bounceState === 'attempt' || bounceState === 'early')){
+    return 'Plan needs confirmation before entry.';
+  }
+  if(nearEntryGatePass || bounceState === 'attempt' || bounceState === 'early'){
+    return 'Bounce is developing - waiting for confirmation.';
+  }
+  return 'Bounce is not clear enough to price yet.';
+}
+
+function terminalAvoidCopyPattern(){
+  return /\bavoid\b|too weak|broken|leave it alone/i;
+}
+
+function sanitizeNonTerminalPlanCopy(message, setup){
+  const text = String(message || '').trim();
+  if(!text) return provisionalPlanConfirmationCopy(setup);
+  if(!terminalAvoidEvidenceForReviewCopy(setup) && terminalAvoidCopyPattern().test(text)){
+    return provisionalPlanConfirmationCopy(setup);
+  }
+  if(!terminalAvoidEvidenceForReviewCopy(setup) && /no actionable plan yet/i.test(text)){
+    const item = setup && typeof setup === 'object' ? setup : {};
+    if(item.hasProvisionalPriceablePlan === true || item.has_provisional_priceable_plan === true || item.hasPriceablePlan === true || item.has_priceable_plan === true){
+      return provisionalPlanConfirmationCopy(setup);
+    }
+  }
+  return text;
+}
+
+function hasUnconfirmedPriceablePlanForReviewCopy(setup){
+  const item = setup && typeof setup === 'object' ? setup : {};
+  if(terminalAvoidEvidenceForReviewCopy(item)) return false;
+  const bounceState = String(item.bounce_state || item.bounceState || '').trim().toLowerCase();
+  const bounceUnconfirmed = ['none','attempt','early','developing'].includes(bounceState);
+  const hasPlan = item.hasProvisionalPriceablePlan === true
+    || item.has_provisional_priceable_plan === true
+    || item.hasPriceablePlan === true
+    || item.has_priceable_plan === true;
+  return hasPlan && bounceUnconfirmed;
+}
+
 function resolvePlanVisibility(setup){
   const rawState = String(setup && (setup.state || setup.finalVerdict || '') || '').trim().toLowerCase();
   const state = normalizeGlobalVerdictKey(setup && (setup.state || setup.finalVerdict || '') || '');
@@ -14840,6 +14952,8 @@ function resolvePlanVisibility(setup){
   const structure = String(setup && setup.structure || '').trim().toLowerCase();
   const noConfirmation = bounceState === 'none' || bounceState === 'attempt';
   const weakStructure = structure === 'weakening' || structure === 'broken';
+  const terminalAvoidEvidence = terminalAvoidEvidenceForReviewCopy(setup);
+  const confirmationMessage = provisionalPlanConfirmationCopy(setup);
 
   if(rawState === 'diminishing'){
     return {
@@ -14847,8 +14961,10 @@ function resolvePlanVisibility(setup){
       showPositionSize:false,
       showCapital:false,
       showRR:false,
-      diagnosticsMessage:'Trend is weakening - no reliable stop level yet.',
-      diagnosticsTone:'danger'
+      diagnosticsMessage:terminalAvoidEvidence
+        ? 'Trend is weakening - no reliable stop level yet.'
+        : 'Structure is weakening. Setup quality is fading.',
+      diagnosticsTone:terminalAvoidEvidence ? 'danger' : 'warning'
     };
   }
 
@@ -14858,12 +14974,32 @@ function resolvePlanVisibility(setup){
       showPositionSize:false,
       showCapital:false,
       showRR:false,
-      diagnosticsMessage:'Bounce is not clear enough to price yet.',
+      diagnosticsMessage:sanitizeNonTerminalPlanCopy(confirmationMessage, setup),
       diagnosticsTone:'neutral'
     };
   }
 
   if(state === 'avoid' || state === 'dead' || weakStructure){
+    if(weakStructure && structure === 'weakening' && !terminalAvoidEvidence){
+      return {
+        showPlan:false,
+        showPositionSize:false,
+        showCapital:false,
+        showRR:false,
+        diagnosticsMessage:'Structure is weakening. Setup quality is fading.',
+        diagnosticsTone:'warning'
+      };
+    }
+    if(!terminalAvoidEvidence){
+      return {
+        showPlan:false,
+        showPositionSize:false,
+        showCapital:false,
+        showRR:false,
+        diagnosticsMessage:sanitizeNonTerminalPlanCopy(confirmationMessage, setup),
+        diagnosticsTone:'neutral'
+      };
+    }
     return {
       showPlan:false,
       showPositionSize:false,
@@ -14890,7 +15026,7 @@ function resolvePlanVisibility(setup){
     showPositionSize:false,
     showCapital:false,
     showRR:false,
-    diagnosticsMessage:'Bounce is not clear enough to price yet.',
+    diagnosticsMessage:sanitizeNonTerminalPlanCopy(confirmationMessage, setup),
     diagnosticsTone:'neutral'
   };
 }
@@ -14904,9 +15040,13 @@ function isDuplicatedStatusCopy(message, decisionSummary){
   return normalizeUiCopy(message) === normalizeUiCopy(decisionSummary);
 }
 
-function nonPlanCalcNoteText(message, decisionSummary){
-  if(isDuplicatedStatusCopy(message, decisionSummary)) return 'No actionable plan yet.';
-  return message || 'No actionable plan yet.';
+function nonPlanCalcNoteText(message, decisionSummary, setup){
+  const confirmationNeeded = hasUnconfirmedPriceablePlanForReviewCopy(setup);
+  if(isDuplicatedStatusCopy(message, decisionSummary)){
+    return confirmationNeeded ? 'Plan needs confirmation before entry.' : 'No actionable plan yet.';
+  }
+  if(message) return message;
+  return confirmationNeeded ? 'Plan needs confirmation before entry.' : 'No actionable plan yet.';
 }
 
 function nonPlanRealismSummaryText(message, decisionSummary){
@@ -19834,6 +19974,7 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
   const sectionKey = String(snapshot.sectionKey || snapshot.resolvedSectionKey || '').trim().toLowerCase();
   const decisionSummary = String(snapshot.decisionSummary || snapshot.headlineCopy || '').trim();
   const actionGuidance = String(snapshot.actionGuidance || snapshot.actionLabel || snapshot.actionShortLabel || '').trim();
+  const planStatusGuidance = String(snapshot.planStatusLabel || snapshot.planStatus || '').trim();
   const originalFinalVerdict = finalKey || canonicalKey || '';
   const originalVisualBucket = visualBucket || '';
   const avoidLikeBucket = ['avoid','avoid_dead','terminal','diminishing'].includes(visualBucket);
@@ -19918,12 +20059,20 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
   }
   const staleAvoidActionGuidance = !terminalAvoidReason
     && normalizeGlobalVerdictKey(finalKey || canonicalKey || '') !== 'avoid'
-    && /avoid|too weak|broken/i.test(actionGuidance);
+    && /avoid|too weak|broken|leave it alone/i.test(actionGuidance);
   const safeActionGuidance = staleAvoidActionGuidance
     ? (normalizeGlobalVerdictKey(finalKey || canonicalKey || '') === 'near_entry'
       ? 'Near Entry - waiting for confirmation'
       : 'Monitor - waiting for confirmation')
     : actionGuidance;
+  const staleAvoidPlanStatusGuidance = !terminalAvoidReason
+    && normalizeGlobalVerdictKey(finalKey || canonicalKey || '') !== 'avoid'
+    && /avoid|too weak|broken|leave it alone/i.test(planStatusGuidance);
+  const safePlanStatusGuidance = staleAvoidPlanStatusGuidance
+    ? (snapshot.hasProvisionalPriceablePlan === true
+      ? 'Provisional plan - waiting for confirmation.'
+      : 'Plan needs confirmation before entry.')
+    : planStatusGuidance;
   const nextBundle = {...baseBundle};
   const nextCanonical = {...(nextBundle.canonicalContract || {})};
   const nextResolved = {...(nextBundle.resolvedContract || {})};
@@ -19972,6 +20121,9 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
   if(safeActionGuidance){
     nextResolved.actionLabel = safeActionGuidance;
     nextResolved.actionShortLabel = safeActionGuidance;
+  }
+  if(safePlanStatusGuidance){
+    nextResolved.planStatusLabel = safePlanStatusGuidance;
   }
   nextVisual.review_presentation_source = 'track_projection_bundle';
   nextVisual.reviewProjectionPromotedByTrackBundle = !!(trackPromotionAttempted && !promotionSuppressed);
@@ -22427,6 +22579,13 @@ function renderReviewWorkspace(options = {}){
     structure_eligibility:visualState.structure_eligibility || globalVerdict.structure_eligibility,
     main_blocker:visualState.main_blocker || globalVerdict.main_blocker,
     is_extended:visualState.is_extended === true || globalVerdict.is_extended === true,
+    terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+    avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
+    viability:globalVerdict.viability || visualState.viability || '',
+    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
+    near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true,
     review_lifecycle_bias:reviewLifecycleBias.review_lifecycle_bias,
     review_lifecycle_copy_override_applied:reviewLifecycleBias.review_lifecycle_copy_override_applied,
     review_lifecycle_copy_reason:reviewLifecycleBias.review_lifecycle_copy_reason,
@@ -22725,7 +22884,16 @@ function renderReviewWorkspace(options = {}){
   const planUI = resolvePlanVisibility({
     state:resolvedFinalVerdictLabel,
     bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
-    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
+    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState),
+    terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+    avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
+    lifecycle:globalVerdict.lifecycle || '',
+    viability:globalVerdict.viability || visualState.viability || '',
+    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+    explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || visualState.explicit_invalidation_reason || '',
+    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
+    near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true
   });
   const tradeStatusText = planUI.showPlan
     ? tradeStatusMetricText({globalVerdict:reviewTradeStatusVerdict, displayedPlan, resolvedContract})
@@ -22775,7 +22943,17 @@ function renderReviewWorkspace(options = {}){
   const rawRrDisplay = planUI.showRR && displayedPlan.status === 'valid' && Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : 'No actionable plan yet.';
   const credibleRrDisplay = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   const planRealismSummary = planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.';
-  const primaryPlanMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
+  const primaryPlanMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary, {
+    bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
+    terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+    avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
+    lifecycle:globalVerdict.lifecycle || '',
+    viability:globalVerdict.viability || visualState.viability || '',
+    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+    explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || visualState.explicit_invalidation_reason || '',
+    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true
+  }) || '').trim();
   const secondaryPlanMessage = String(nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
   const dedupedPlanRealismSummary = !planUI.showPlan && primaryPlanMessage && (secondaryPlanMessage === primaryPlanMessage || secondaryPlanMessage === tradeStatusText.line1)
     ? ''
@@ -23630,6 +23808,13 @@ function syncPlanDisplayMeta(options = {}){
     structure_eligibility:visualState.structure_eligibility || globalVerdict.structure_eligibility,
     main_blocker:visualState.main_blocker || globalVerdict.main_blocker,
     is_extended:visualState.is_extended === true || globalVerdict.is_extended === true,
+    terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+    avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
+    viability:globalVerdict.viability || visualState.viability || '',
+    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
+    near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true,
     review_lifecycle_bias:reviewLifecycleBias.review_lifecycle_bias,
     review_lifecycle_copy_override_applied:reviewLifecycleBias.review_lifecycle_copy_override_applied,
     review_lifecycle_copy_reason:reviewLifecycleBias.review_lifecycle_copy_reason,
@@ -23641,7 +23826,16 @@ function syncPlanDisplayMeta(options = {}){
   const planUI = resolvePlanVisibility({
     state:visualState.final_verdict_rendered || visualState.finalVerdict,
     bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
-    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState)
+    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState),
+    terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+    avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
+    lifecycle:globalVerdict.lifecycle || '',
+    viability:globalVerdict.viability || visualState.viability || '',
+    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+    explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || visualState.explicit_invalidation_reason || '',
+    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
+    near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true
   });
   if(planStateBox) planStateBox.value = planUiState.label;
   const planQuality = planQualityForRr(displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null);
@@ -23672,7 +23866,17 @@ function syncPlanDisplayMeta(options = {}){
   if($('positionCostStat')) $('positionCostStat').classList.toggle('review-hidden', !planUI.showPlan);
   if($('fxBasisBox')) $('fxBasisBox').classList.toggle('review-hidden', !planUI.showCapital);
   if($('planRealismSummary')){
-    const calcMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
+    const calcMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary, {
+      bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
+      terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+      avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
+      lifecycle:globalVerdict.lifecycle || '',
+      viability:globalVerdict.viability || visualState.viability || '',
+      rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+      explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || visualState.explicit_invalidation_reason || '',
+      hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+      hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true
+    }) || '').trim();
     const realismMessage = String(nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
     $('planRealismSummary').textContent = planUI.showPlan
       ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
@@ -23838,7 +24042,16 @@ function calculate(options = {}){
   const planUI = resolvePlanVisibility({
     state:plannerVisualState.final_verdict_rendered || plannerVisualState.finalVerdict,
     bounce_state:plannerDerivedStates.bounceState || (activeRecord && activeRecord.setup && activeRecord.setup.bounceState),
-    structure:plannerDerivedStates.structureState || (activeRecord && activeRecord.setup && activeRecord.setup.structureState)
+    structure:plannerDerivedStates.structureState || (activeRecord && activeRecord.setup && activeRecord.setup.structureState),
+    terminal_avoid_applied:plannerVisualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+    avoid_trigger_source:globalVerdict.avoid_trigger_source || plannerVisualState.avoid_trigger_source || '',
+    lifecycle:globalVerdict.lifecycle || '',
+    viability:globalVerdict.viability || plannerVisualState.viability || '',
+    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+    explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || plannerVisualState.explicit_invalidation_reason || '',
+    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
+    near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true
   });
   $('rewardPerShareBox').textContent = Number.isFinite(displayedPlan.rewardPerShare) ? displayedPlan.rewardPerShare.toFixed(2) : '-';
   const riskFitLabel = riskStatusLabel(displayedPlan.status === 'valid' ? displayedPlan.riskFit.risk_status : (displayedPlan.status === 'invalid' ? 'invalid_plan' : 'plan_missing'));
@@ -23894,7 +24107,17 @@ function calculate(options = {}){
   if($('optimisticTargetBox')) $('optimisticTargetBox').value = planRealism.optimistic_target_flag ? 'Yes' : 'No';
   if($('targetAssessmentBox')) $('targetAssessmentBox').value = planRealism.credible_target_assessment || 'N/A';
   if($('planRealismSummary')){
-    const calcMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary) || '').trim();
+    const calcMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary, {
+      bounce_state:plannerDerivedStates.bounceState || (activeRecord && activeRecord.setup && activeRecord.setup.bounceState),
+      terminal_avoid_applied:plannerVisualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+      avoid_trigger_source:globalVerdict.avoid_trigger_source || plannerVisualState.avoid_trigger_source || '',
+      lifecycle:globalVerdict.lifecycle || '',
+      viability:globalVerdict.viability || plannerVisualState.viability || '',
+      rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+      explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || plannerVisualState.explicit_invalidation_reason || '',
+      hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+      hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true
+    }) || '').trim();
     const realismMessage = String(nonPlanRealismSummaryText(planUI.diagnosticsMessage, plannerDecisionSummary) || '').trim();
     $('planRealismSummary').textContent = planUI.showPlan
       ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
@@ -23912,7 +24135,17 @@ function calculate(options = {}){
     }
     if($('calcNote')){
       const tradeLine = String(tradeStatusText && tradeStatusText.line1 || '').trim();
-      const calcLine = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary) || '').trim();
+      const calcLine = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary, {
+        bounce_state:plannerDerivedStates.bounceState || (activeRecord && activeRecord.setup && activeRecord.setup.bounceState),
+        terminal_avoid_applied:plannerVisualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+        avoid_trigger_source:globalVerdict.avoid_trigger_source || plannerVisualState.avoid_trigger_source || '',
+        lifecycle:globalVerdict.lifecycle || '',
+        viability:globalVerdict.viability || plannerVisualState.viability || '',
+        rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+        explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || plannerVisualState.explicit_invalidation_reason || '',
+        hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+        hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true
+      }) || '').trim();
       $('calcNote').textContent = (calcLine && calcLine === tradeLine) ? '' : calcLine;
     }
     return;

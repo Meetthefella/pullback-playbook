@@ -78,6 +78,15 @@ function runReviewProjectionAssertions(){
   [
     'isAllowedCanonicalVisualPair',
     'hasProjectionTerminalAvoidReason',
+    'terminalAvoidEvidenceForReviewCopy',
+    'provisionalPlanConfirmationCopy',
+    'terminalAvoidCopyPattern',
+    'sanitizeNonTerminalPlanCopy',
+    'resolvePlanVisibility',
+    'hasUnconfirmedPriceablePlanForReviewCopy',
+    'normalizeUiCopy',
+    'isDuplicatedStatusCopy',
+    'nonPlanCalcNoteText',
     'applyProjectionSnapshotToReviewBundle'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), projectionSandbox, {filename:`app.js#${functionName}`});
@@ -142,7 +151,9 @@ function runReviewProjectionAssertions(){
     structureState:'intact',
     lifecycleState:'active',
     viability:'watchlist',
-    actionGuidance:'Avoid - too weak or broken'
+    actionGuidance:'Avoid - too weak or broken',
+    planStatusLabel:'Avoid - too weak or broken. Leave it alone.',
+    hasProvisionalPriceablePlan:true
   });
   const staleAvoidVisual = staleAvoidMonitor.bundle.visualState || {};
   const staleAvoidGlobal = staleAvoidMonitor.bundle.globalVerdict || {};
@@ -155,6 +166,76 @@ function runReviewProjectionAssertions(){
   }
   if(/avoid|too weak|broken/i.test(String(staleAvoidResolved.actionLabel || staleAvoidResolved.actionShortLabel || ''))){
     throw new Error('Stale non-terminal avoid + monitor projection must not retain stale Avoid wording.');
+  }
+  if(/avoid|too weak|broken|leave it alone/i.test(String(staleAvoidResolved.planStatusLabel || ''))){
+    throw new Error('Stale non-terminal avoid + monitor projection must sanitize stale Avoid plan status wording.');
+  }
+
+  const staleAvoidPlanCopy = projectionSandbox.resolvePlanVisibility({
+    state:'watch',
+    finalVerdict:'watch',
+    visualBucket:'monitor',
+    structure:'intact',
+    bounce_state:'attempt',
+    near_entry_gate_pass:true,
+    terminal_avoid_applied:false,
+    avoid_trigger_source:'',
+    lifecycle:'active',
+    hasProvisionalPriceablePlan:true,
+    stalePlanStatus:'Avoid - too weak or broken. Leave it alone.'
+  });
+  if(/avoid|too weak|broken|leave it alone/i.test(String(staleAvoidPlanCopy.diagnosticsMessage || ''))){
+    throw new Error('Non-terminal watch/monitor provisional plan copy must not display stale Avoid wording.');
+  }
+  if(!/provisional plan|confirmation/i.test(String(staleAvoidPlanCopy.diagnosticsMessage || ''))){
+    throw new Error('Non-terminal provisional plan copy must use confirmation/provisional wording.');
+  }
+  const diminishingPlanCopy = projectionSandbox.resolvePlanVisibility({
+    state:'diminishing',
+    finalVerdict:'watch',
+    visualBucket:'diminishing',
+    structure:'weakening',
+    bounce_state:'attempt',
+    terminal_avoid_applied:false,
+    avoid_trigger_source:'',
+    lifecycle:'active',
+    viability:'watchlist'
+  });
+  if(!/weakening|fading|losing momentum/i.test(String(diminishingPlanCopy.diagnosticsMessage || ''))){
+    throw new Error('Non-terminal diminishing plan copy must preserve deterioration wording.');
+  }
+  const missingPlanCopy = projectionSandbox.nonPlanCalcNoteText('', '', {
+    bounce_state:'attempt',
+    hasPriceablePlan:false,
+    hasProvisionalPriceablePlan:false,
+    terminal_avoid_applied:false
+  });
+  if(missingPlanCopy !== 'No actionable plan yet.'){
+    throw new Error('Missing/unpriceable plan calc note must remain "No actionable plan yet."');
+  }
+  const provisionalCalcCopy = projectionSandbox.nonPlanCalcNoteText('', '', {
+    bounce_state:'attempt',
+    hasPriceablePlan:true,
+    hasProvisionalPriceablePlan:false,
+    terminal_avoid_applied:false
+  });
+  if(!/confirmation/i.test(String(provisionalCalcCopy || ''))){
+    throw new Error('Unconfirmed priceable plan calc note must use confirmation wording.');
+  }
+
+  const explicitTerminalAvoidPlanCopy = projectionSandbox.resolvePlanVisibility({
+    state:'avoid',
+    finalVerdict:'avoid',
+    visualBucket:'avoid',
+    structure:'broken',
+    bounce_state:'attempt',
+    terminal_avoid_applied:true,
+    avoid_trigger_source:'structure_broken',
+    lifecycle:'dead',
+    viability:'reject'
+  });
+  if(!/avoid|too weak|broken|leave it alone/i.test(String(explicitTerminalAvoidPlanCopy.diagnosticsMessage || ''))){
+    throw new Error('Terminal Avoid plan copy must still display Avoid wording.');
   }
 
   const terminalAvoid = projectionSandbox.applyProjectionSnapshotToReviewBundle({}, {
@@ -170,12 +251,17 @@ function runReviewProjectionAssertions(){
     structureState:'broken',
     lifecycleState:'dead',
     viability:'reject',
-    actionGuidance:'Avoid - too weak or broken'
+    actionGuidance:'Avoid - too weak or broken',
+    planStatusLabel:'Avoid - too weak or broken. Leave it alone.'
   });
   const terminalVisual = terminalAvoid.bundle.visualState || {};
   const terminalGlobal = terminalAvoid.bundle.globalVerdict || {};
+  const terminalResolved = terminalAvoid.bundle.resolvedContract || {};
   if(terminalGlobal.final_verdict !== 'avoid' || terminalVisual.visualBucket !== 'avoid'){
     throw new Error('Terminal avoid projection must remain avoid.');
+  }
+  if(!/avoid|too weak|broken/i.test(String(terminalResolved.actionLabel || terminalResolved.planStatusLabel || ''))){
+    throw new Error('Terminal avoid projection must retain terminal Avoid wording.');
   }
 
   const suppressedTrackPromotion = projectionSandbox.applyProjectionSnapshotToReviewBundle({
