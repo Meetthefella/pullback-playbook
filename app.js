@@ -7063,13 +7063,27 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Conflicting Legacy State Detected', value:globalVisual.conflicting_legacy_state_detected ? 'true' : 'false'},
     {label:'Final Verdict', value:globalVerdict.final_verdict || 'n/a'},
     {label:'Canonical Final Verdict', value:globalVisual.canonicalFinalVerdict || '(none)'},
+    {label:'canonicalVerdict', value:'Trading decision state'},
+    {label:'canonicalVerdict Value', value:globalVisual.canonicalVerdict || globalVisual.finalVerdict || globalVisual.final_verdict || globalVerdict.final_verdict || 'n/a'},
     {label:'Tone', value:globalVerdict.tone || 'n/a'},
     {label:'Bucket', value:visualBucketLabel(
       lifecycleSnapshot.bucket || globalVerdict.bucket || 'monitor',
       globalVerdict.final_verdict || globalVerdict.finalVerdict || ''
     )},
     {label:'Viability', value:globalVerdict.viability || '(none)'},
+    {label:'visualBucket', value:'Presentation / lifecycle tone'},
     {label:'Visual Bucket', value:visualBucketLabel(globalVisual.presentationBucket || 'monitor')},
+    {label:'visualBucketReason', value:visualBucketReason(
+      globalVisual.canonicalVerdict || globalVisual.finalVerdict || globalVisual.final_verdict || globalVerdict.final_verdict || '',
+      globalVisual.presentationBucket || globalVisual.visualBucket || globalVisual.bucket || 'monitor',
+      {
+        terminalAvoidApplied:globalVerdict.terminal_avoid_applied === true || globalVisual.terminal_avoid_applied === true,
+        hardTerminalAvoid:globalVisual.hardTerminalAvoid === true,
+        lifecycleState:lifecycleSnapshot.state,
+        viability:globalVerdict.viability || '',
+        bounce:derivedStates.bounceState || ''
+      }
+    )},
     {label:'Track Visual Bucket', value:visualBucketLabel(globalVisual.trackPresentationBucket || globalVisual.presentationBucket || 'monitor')},
     {label:'Scan Visual Bucket', value:visualBucketLabel(globalVisual.scanPresentationBucket || 'monitor')},
     {label:'Scan/Track Mismatch Detected', value:globalVisual.scanTrackMismatchDetected ? 'true' : 'false'},
@@ -12358,6 +12372,72 @@ function visualBucketLabel(bucket, canonicalVerdict = ''){
   if(key === 'diminishing') return 'Diminishing';
   if(key === 'avoid') return 'Avoid';
   return 'Monitor';
+}
+
+function visualBucketReason(canonicalVerdict = '', visualBucket = '', context = {}){
+  const canonical = normalizeGlobalVerdictKey(canonicalVerdict || '');
+  const bucket = normalizeVisualBucketKey(visualBucket || '', canonical);
+  const state = context && typeof context === 'object' ? context : {};
+  const terminal = state.terminalAvoidApplied === true
+    || state.hardTerminalAvoid === true
+    || String(state.lifecycleState || '').toLowerCase() === 'dead'
+    || String(state.viability || '').toLowerCase() === 'reject';
+  if(bucket === 'avoid' && (terminal || canonical === 'avoid')) return 'terminal avoid';
+  if(bucket === 'diminishing') return 'weakening but not terminal';
+  if(bucket === 'entry') return 'entry momentum';
+  if(bucket === 'near_entry') return 'entry momentum';
+  if(bucket === 'monitor'){
+    const bounce = String(state.bounce || state.bounceState || '').trim().toLowerCase();
+    if(['early','attempt','developing'].includes(bounce)) return 'developing monitor';
+    return canonical === 'watch' ? 'developing monitor' : 'presentation monitor';
+  }
+  return 'presentation tone';
+}
+
+function resolveSimplifiedStateForSurface(record, surface = 'review', options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const ticker = normalizeTicker(item.ticker || item.symbol || '');
+  if(window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'){
+    return window.SimplifiedTradeState.resolveRecordState(item, {
+      surface,
+      log:options.log !== false,
+      deps:{
+        effectivePlanForRecord,
+        riskSettingsProvider:currentRiskSettings,
+        analysisDerivedStatesFromRecord,
+        applySetupConfirmationPlanGate,
+        baseVerdictFromResolvedContract,
+        resolvePreLifecycleStateContract,
+        resolveFinalStateContract,
+        evaluatePlanRealism,
+        setupScoreForRecord,
+        isHostileMarketStatus,
+        scannerScoreGradientClass,
+        state,
+        normalizeGlobalVerdictKey,
+        normalizeVerdict,
+        getBadge,
+        getActions,
+        deriveTradeability,
+        evaluateRiskFit
+      }
+    });
+  }
+  return {
+    ticker,
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    badgeLabel:'Watch',
+    actionLabel:'WATCH',
+    planVisible:false,
+    planStatus:'missing',
+    mainBlocker:'Simplified pipeline unavailable.',
+    entryGatePass:false,
+    nearEntryGatePass:false,
+    blockers:['Simplified pipeline unavailable.'],
+    debug:{safeFallback:true}
+  };
 }
 
 function runVerdictDriftParityChecks(record){
@@ -19607,15 +19687,9 @@ function analysisAdvisoryContextForRecord(record, analysis){
 
 function savedAiPlanNumbersAllowed(record){
   const item = normalizeTickerRecord(record || {});
-  const derivedStates = analysisDerivedStatesFromRecord(item);
-  const visualState = resolveVisualState(item, 'review', {derivedStates});
-  const planUI = resolvePlanVisibility({
-    state:visualState.final_verdict_rendered || visualState.finalVerdict || visualState.final_verdict,
-    bounce_state:derivedStates.bounceState || (item.setup && item.setup.bounceState),
-    structure:derivedStates.structureState || (item.setup && item.setup.structureState)
-  });
-  const verdict = normalizeGlobalVerdictKey(visualState.final_verdict_rendered || visualState.finalVerdict || visualState.final_verdict);
-  return planUI.showPlan && ['entry','near_entry'].includes(verdict);
+  const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {log:false});
+  const verdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  return simplifiedState.planVisible === true && ['entry','near_entry'].includes(verdict);
 }
 
 function renderAnalysisPanelFromRecord(record){
@@ -19874,6 +19948,15 @@ function loadTickerIntoReview(ticker, options = {}){
       return;
     }
     const record = upsertTickerRecord(symbol);
+    const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+    uiState.activeReviewSimplifiedStatePreview = {
+      ticker:simplifiedState.ticker || symbol,
+      canonicalVerdict:simplifiedState.canonicalVerdict,
+      visualBucket:simplifiedState.visualBucket,
+      tone:simplifiedState.tone,
+      badgeLabel:simplifiedState.badgeLabel,
+      mainBlocker:simplifiedState.mainBlocker
+    };
     const openBeforeSnapshot = reviewOpenMutationSnapshot(record, 'review_open');
     const readOnlyReviewOpen = options.recompute !== true;
     const inWatchlist = !!(record && record.watchlist && record.watchlist.inWatchlist);
@@ -20076,6 +20159,15 @@ function reviewWatchlistTicker(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   const record = getTickerRecord(symbol) || upsertTickerRecord(symbol);
+  const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+  uiState.activeReviewSimplifiedStatePreview = {
+    ticker:simplifiedState.ticker || symbol,
+    canonicalVerdict:simplifiedState.canonicalVerdict,
+    visualBucket:simplifiedState.visualBucket,
+    tone:simplifiedState.tone,
+    badgeLabel:simplifiedState.badgeLabel,
+    mainBlocker:simplifiedState.mainBlocker
+  };
   const sourceVerdict = reviewVerdictOverrideFromView(projectTickerForCard(record));
   const providedSnapshot = options.sourceProjectionSnapshot && typeof options.sourceProjectionSnapshot === 'object'
     ? options.sourceProjectionSnapshot
@@ -20540,6 +20632,13 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
   const state = bundle && typeof bundle === 'object' ? bundle : {};
   const canonicalVerdict = String(state.canonicalVerdict || state.finalVerdict || '').trim().toLowerCase();
   const visualBucket = String(state.visualBucket || state.presentationBucket || '').trim().toLowerCase();
+  const derivedVisualBucketReason = visualBucketReason(canonicalVerdict, visualBucket, {
+    terminalAvoidApplied:state.terminalAvoidApplied === true,
+    hardTerminalAvoid:state.hardTerminalAvoid === true,
+    lifecycleState:state.lifecycleState || state.sectionKey || '',
+    viability:state.viability || '',
+    bounce:state.bounce || ''
+  });
   const shellClass = String(state.shellClass || '').trim();
   const accentClass = String(state.accentClass || '').trim();
   const className = String(state.className || '').trim();
@@ -20557,9 +20656,12 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     parentSectionKey:String(state.parentSectionKey || ''),
     resolvedSectionKey:String(state.resolvedSectionKey || state.sectionKey || ''),
     canonicalVerdict:state.canonicalVerdict || '',
+    canonicalVerdictSemanticLabel:'Trading decision state',
     finalVerdict:state.finalVerdict || '',
     renderedVerdict:state.renderedVerdict || '',
     visualBucket:state.visualBucket || '',
+    visualBucketSemanticLabel:'Presentation / lifecycle tone',
+    visualBucketReason:derivedVisualBucketReason,
     renderedBucket:state.renderedBucket || state.visualBucket || '',
     presentationBucket:state.presentationBucket || '',
     tone:state.tone || '',
@@ -22699,6 +22801,32 @@ function renderReviewWorkspace(options = {}){
   }
   if(canonicalPlanSynced) commitTickerState();
   const record = normalizeTickerRecord(refreshedRecord);
+  const simplifiedState = resolveSimplifiedStateForSurface(record, 'review');
+  const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  const simplifiedVisualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
+  const simplifiedTone = String(simplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const simplifiedBadgeClass = ({
+    entry:'badge--entry ready',
+    near_entry:'badge--near-entry near',
+    monitor:'badge--monitor watch',
+    diminishing:'badge--diminishing',
+    avoid:'badge--avoid avoid'
+  })[simplifiedVisualBucket] || 'badge--monitor watch';
+  const simplifiedBadge = {
+    text:String(simplifiedState.badgeLabel || globalVerdictLabel(simplifiedCanonicalVerdict) || 'Watch'),
+    className:simplifiedBadgeClass
+  };
+  const simplifiedActionLabel = String(simplifiedState.actionLabel || '').trim();
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[SIMPLIFIED_REVIEW_STATE]', {
+      ticker:simplifiedState.ticker || record.ticker,
+      canonicalVerdict:simplifiedState.canonicalVerdict,
+      visualBucket:simplifiedState.visualBucket,
+      tone:simplifiedState.tone,
+      badgeLabel:simplifiedState.badgeLabel,
+      mainBlocker:simplifiedState.mainBlocker
+    });
+  }
   const analysisState = getReviewAnalysisState(record);
   const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
     ? analysisState.normalizedAnalysis.warning_state
@@ -22797,21 +22925,10 @@ function renderReviewWorkspace(options = {}){
     ? refreshBundle.visualState
     : {finalVerdict:'watch', final_verdict:'watch', renderedVerdict:'watch', final_verdict_rendered:'watch', decision_summary:'Developing - waiting for confirmation.'};
   const unifiedFinalReviewVerdict = normalizeReviewPresentationVerdict(
-    safeResolvedContract.finalVerdict
-    || safeResolvedContract.tradeabilityVerdict
-    || visualState.finalVerdict
-    || visualState.final_verdict
-    || visualState.final_verdict_rendered
-    || visualState.renderedVerdict
-    || displayStage
+    simplifiedCanonicalVerdict || 'watch'
   );
   const reviewFinalVerdictForPaperTrade = normalizeAnalysisVerdict(
-    safeResolvedContract.finalVerdict
-    || safeResolvedContract.tradeabilityVerdict
-    || visualState.finalVerdict
-    || visualState.final_verdict
-    || visualState.final_verdict_rendered
-    || displayStage
+    simplifiedCanonicalVerdict || 'watch'
   );
   const paperTradeEligibilityState = paperTradeEligibility.evaluatePaperTradeEligibility({
     finalVerdict:reviewFinalVerdictForPaperTrade,
@@ -22929,11 +23046,19 @@ function renderReviewWorkspace(options = {}){
   const paperTradePreviewMarkup = paperTradePreviewModel
     ? `${paperTradePreviewModel.debugForced ? '<div class="tiny warntext">Simulated Entry-ready preview (debug).</div>' : ''}<div class="tiny">Ticker ${escapeHtml(paperTradePreviewModel.ticker)} | Side ${escapeHtml(paperTradePreviewModel.side)} | Qty ${escapeHtml(String(paperTradePreviewModel.quantity))}</div><div class="tiny">Entry ${escapeHtml(fmtPrice(paperTradePreviewModel.entry))} | Stop ${escapeHtml(fmtPrice(paperTradePreviewModel.stop))} | Target ${escapeHtml(fmtPrice(paperTradePreviewModel.target))}</div><div class="tiny">Max loss ${escapeHtml(Number.isFinite(paperTradePreviewModel.maxLoss) ? formatGbp(paperTradePreviewModel.maxLoss) : 'n/a')} | RR ${escapeHtml(Number.isFinite(paperTradePreviewModel.rrRatio) ? `${paperTradePreviewModel.rrRatio.toFixed(2)}R` : 'n/a')}</div><div class="tiny">Capital ${escapeHtml(paperTradePreviewModel.capitalLabel)} | Market ${escapeHtml(paperTradePreviewModel.marketStatus || '')}</div>`
     : `<div class="tiny warntext">${escapeHtml(paperTradePrimaryReason || 'Unable to build paper-trade preview for this setup.')}</div>`;
-  const reviewLifecycleBias = resolveReviewLifecycleCopyBias(record, {
-    globalVerdict,
-    visualState,
-    derivedStates
-  });
+  const reviewLifecycleBias = {
+    review_lifecycle_bias:simplifiedVisualBucket,
+    review_presentation_source:'simplified_state_pipeline',
+    review_lifecycle_copy_override_applied:false,
+    review_lifecycle_copy_reason:'',
+    decisionSummary:String(simplifiedState.mainBlocker || simplifiedActionLabel || '').trim(),
+    tradeStatusLine1:String(simplifiedState.planStatus || '').trim(),
+    tradeStatusLine2:'',
+    trackPresentationBucket:simplifiedVisualBucket,
+    trackPresentationTone:simplifiedTone,
+    terminal_avoid_applied:false,
+    terminal_avoid_reason:''
+  };
   const reviewTradeStatusVerdict = {
     ...visualState,
     structure_state:visualState.structure_state || globalVerdict.structure_state,
@@ -22957,31 +23082,19 @@ function renderReviewWorkspace(options = {}){
   };
   const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary;
   const resolvedFinalVerdictKey = normalizeGlobalVerdictKey(
-    safeResolvedContract.finalVerdict
-    || safeResolvedContract.tradeabilityVerdict
-    || visualState.finalVerdict
-    || visualState.final_verdict
-    || visualState.final_verdict_rendered
-    || unifiedFinalReviewVerdict
-    || 'watch'
+    simplifiedCanonicalVerdict || 'watch'
   );
   const resolvedFinalVerdictLabel = globalVerdictLabel(resolvedFinalVerdictKey || 'watch');
-  const reviewBadge = getBadge(resolvedFinalVerdictLabel || 'Watch');
+  const reviewBadge = simplifiedBadge;
   const reviewRenderedVerdict = String(unifiedFinalReviewVerdict || '').trim().toLowerCase();
-  const sharedCanonicalVerdictKey = String(
-    bundleValid
-      && refreshBundle
-      && refreshBundle.canonicalContract
-      && refreshBundle.canonicalContract.canonicalVerdictKey
-      || ''
-  ).trim().toLowerCase();
+  const sharedCanonicalVerdictKey = simplifiedCanonicalVerdict;
   const explicitInvalidationReason = String(
     visualState.explicit_invalidation_reason
     || globalVerdict.explicit_invalidation_reason
     || ''
   ).trim().toLowerCase();
   const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
-  const resolvedReviewFinalVerdictKey = resolvedFinalVerdictKey;
+  const resolvedReviewFinalVerdictKey = simplifiedCanonicalVerdict;
   const terminalAvoidFlagged = !!(
     visualState.terminal_avoid_applied === true
     || reviewLifecycleBias.terminal_avoid_applied === true
@@ -23018,72 +23131,16 @@ function renderReviewWorkspace(options = {}){
   if(projectionSnapshotAuthority && !isReviewOpenRender){
     uiState.activeReviewProjectionSource = sourceProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve';
   }
-  const visualBucketSource = String(
-    sourceProjectionSnapshot && (sourceProjectionSnapshot.sourceOfTruthVisualBucket || sourceProjectionSnapshot.visualBucket)
-    || safeResolvedContract.visualBucket
-    || safeResolvedContract.presentationBucket
-    || safeResolvedContract.bucket
-    || ''
-  ).trim().toLowerCase();
-  const sourceOfTruthVisualBucket = String(
-    safeResolvedContract.visualBucket
-    || safeResolvedContract.presentationBucket
-    || safeResolvedContract.bucket
-    || ''
-  ).trim().toLowerCase();
-  const trackProjectionBucket = normalizeVisualBucketForPairing(
-    sourceProjectionSnapshot && (sourceProjectionSnapshot.sourceOfTruthVisualBucket || sourceProjectionSnapshot.visualBucket) || sourceOfTruthVisualBucket
-  );
-  const reviewBucketSource = 'resolved_contract';
-  const reviewBucketBeforeFallback = effectiveReviewPresentationState || '(none)';
+  const visualBucketSource = simplifiedVisualBucket;
+  const sourceOfTruthVisualBucket = simplifiedVisualBucket;
+  const trackProjectionBucket = simplifiedVisualBucket;
+  const reviewBucketSource = 'simplified_state_pipeline';
+  const reviewBucketBeforeFallback = simplifiedVisualBucket || '(none)';
   const canonicalAvoidActive = resolvedReviewFinalVerdictKey === 'avoid';
-  let finalReviewVisualBucket = 'monitor';
-  if(resolvedReviewFinalVerdictKey === 'entry'){
-    finalReviewVisualBucket = 'entry';
-  } else if (resolvedReviewFinalVerdictKey === 'near_entry'){
-    finalReviewVisualBucket = 'near_entry';
-  } else if (resolvedReviewFinalVerdictKey === 'avoid'){
-    if(['diminishing'].includes(visualBucketSource)){
-      finalReviewVisualBucket = 'diminishing';
-    }else{
-      finalReviewVisualBucket = 'avoid';
-    }
-  } else if (resolvedReviewFinalVerdictKey === 'watch'){
-    finalReviewVisualBucket = visualBucketSource === 'diminishing'
-      ? 'diminishing'
-      : 'monitor';
-  } else if (hardTerminalAvoid){
-    finalReviewVisualBucket = 'avoid';
-  }
-  let effectiveReviewProjectionSource = effectiveReviewProjectionSourceBase;
-  if(['avoid','dead'].includes(trackProjectionBucket) && !['avoid','dead','diminishing'].includes(finalReviewVisualBucket)){
-    const invalidationKey = `${normalizeTicker(record.ticker)}|${String(finalReviewVisualBucket)}|avoid|track_projection_changed`;
-    if(String(uiState.lastReviewProjectionInvalidationKey || '') !== invalidationKey){
-      console.info('[ReviewProjectionInvalidated]', {
-        ticker:record.ticker,
-        oldBucket:finalReviewVisualBucket,
-        newBucket:'avoid',
-        reason:'track_projection_changed'
-      });
-      uiState.lastReviewProjectionInvalidationKey = invalidationKey;
-    }
-    finalReviewVisualBucket = 'avoid';
-    effectiveReviewProjectionSource = 'track_projection_updated';
-    uiState.activeReviewProjectionSource = 'track_projection_updated';
-    if(sourceProjectionSnapshot && typeof sourceProjectionSnapshot === 'object'){
-      uiState.activeReviewSourceProjectionSnapshot = {
-        ...sourceProjectionSnapshot,
-        ticker:normalizeTicker(record.ticker),
-        sourceOfTruthVisualBucket:'avoid',
-        visualBucket:'avoid',
-        sectionKey:'avoid_dead',
-        resolvedSectionKey:'avoid_dead'
-      };
-    }
-  }else{
-    uiState.lastReviewProjectionInvalidationKey = '';
-  }
-  const reviewVisualTone = finalReviewVisualBucket;
+  const finalReviewVisualBucket = simplifiedVisualBucket;
+  const effectiveReviewProjectionSource = 'simplified_state_pipeline';
+  uiState.lastReviewProjectionInvalidationKey = '';
+  const reviewVisualTone = simplifiedTone || finalReviewVisualBucket;
   const finalReviewVisualState = finalReviewVisualBucket === 'near_entry'
     ? 'near_entry'
     : (finalReviewVisualBucket === 'entry'
@@ -23112,10 +23169,8 @@ function renderReviewWorkspace(options = {}){
     avoid:'--visual-state-background:#DC2626;--visual-state-border:rgba(220, 38, 38, 0.48);--visual-state-glow:rgba(0,0,0,0.144);--state-color:#DC2626;'
   };
   const reviewShellStyleAttr = reviewToneStyleAttrs[reviewVisualTone] || reviewToneStyleAttrs.monitor;
-  const reviewVisualStateSource = reviewVisualTone === 'avoid' && visualState.terminal_avoid_applied
-    ? 'terminal_avoid'
-    : (visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || 'resolver');
-  const reviewBadgeTone = String((visualState.badge && visualState.badge.className) || effectiveReviewBadge.className || '').trim() || '(none)';
+  const reviewVisualStateSource = 'simplified_state_pipeline';
+  const reviewBadgeTone = String(effectiveReviewBadge.className || '').trim() || '(none)';
   const reviewOuterClassList = reviewOuterShellClass.split(/\s+/).filter(Boolean);
   const originalReviewToneClasses = Array.from(new Set(String(`${visualState.className || ''} ${visualState.toneClass || ''}`)
     .match(/(?:card--[a-z-]+|visual-tone-[a-z-]+)/g) || []));
@@ -23144,6 +23199,7 @@ function renderReviewWorkspace(options = {}){
       usedCachedBundle:usedCachedBundle === true,
       reviewBundleMode:projectionBundleAdopted ? 'track_projection_bundle' : (usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle'),
       usedTrackProjectionSnapshot:sourceProjectionSnapshot != null,
+      source:'simplified_state_pipeline',
       reviewProjectionSource:effectiveReviewProjectionSource,
       effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
       finalReviewVisualBucket:finalReviewVisualBucket,
@@ -23152,12 +23208,12 @@ function renderReviewWorkspace(options = {}){
         presentationBucket:visualState.presentationBucket || '',
         reviewPresentationSource:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || ''
       },
-      reviewProjectionPromotedByTrackBundle:visualState.reviewProjectionPromotedByTrackBundle === true,
-      reviewProjectionPromotionSuppressed:visualState.reviewProjectionPromotionSuppressed === true,
-      reviewProjectionPromotionSuppressedReason:visualState.reviewProjectionPromotionSuppressedReason || '',
+      reviewProjectionPromotedByTrackBundle:false,
+      reviewProjectionPromotionSuppressed:false,
+      reviewProjectionPromotionSuppressedReason:'',
       shellClass:reviewOuterShellClass,
       accentClass:reviewAccentClass,
-      staleAvoidSuppressed:visualState.staleAvoidSuppressed === true
+      staleAvoidSuppressed:false
     });
     if(typeof window !== 'undefined' && window.PP_FORCE_STATE_DEBUG === true){
       console.warn('[REVIEW_STATE_SOURCE::mirror]', {
@@ -23175,6 +23231,7 @@ function renderReviewWorkspace(options = {}){
         usedCachedBundle:usedCachedBundle === true,
         reviewBundleMode:projectionBundleAdopted ? 'track_projection_bundle' : (usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle'),
         usedTrackProjectionSnapshot:sourceProjectionSnapshot != null,
+        source:'simplified_state_pipeline',
         reviewProjectionSource:effectiveReviewProjectionSource,
         effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
         finalReviewVisualBucket:finalReviewVisualBucket,
@@ -23183,19 +23240,19 @@ function renderReviewWorkspace(options = {}){
           presentationBucket:visualState.presentationBucket || '',
           reviewPresentationSource:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || ''
         },
-        reviewProjectionPromotedByTrackBundle:visualState.reviewProjectionPromotedByTrackBundle === true,
-        reviewProjectionPromotionSuppressed:visualState.reviewProjectionPromotionSuppressed === true,
-        reviewProjectionPromotionSuppressedReason:visualState.reviewProjectionPromotionSuppressedReason || '',
+        reviewProjectionPromotedByTrackBundle:false,
+        reviewProjectionPromotionSuppressed:false,
+        reviewProjectionPromotionSuppressedReason:'',
         shellClass:reviewOuterShellClass,
         accentClass:reviewAccentClass,
-        staleAvoidSuppressed:visualState.staleAvoidSuppressed === true
+        staleAvoidSuppressed:false
       });
     }
   }
   debugTickerStateSources(record.ticker, 'review', {
-    source:reviewRenderSource || 'review_render',
-    sectionKey:String(reviewLifecycleBias.review_lifecycle_bias || finalReviewVisualBucket || ''),
-    canonicalVerdict:sharedCanonicalVerdictKey || resolvedReviewFinalVerdictKey || visualState.canonicalVerdict,
+    source:'simplified_state_pipeline',
+    sectionKey:String(finalReviewVisualBucket || ''),
+    canonicalVerdict:simplifiedCanonicalVerdict,
     finalVerdict:resolvedFinalVerdictLabel,
     renderedVerdict:resolvedFinalVerdictLabel,
     visualBucket:finalReviewVisualBucket,
@@ -23205,9 +23262,9 @@ function renderReviewWorkspace(options = {}){
     usedProjectionBundle:sourceProjectionSnapshot != null,
     recomputedDuringRender:usedCachedBundle !== true,
     reviewProjectionSource:effectiveReviewProjectionSource,
-    reviewProjectionPromotedByTrackBundle:visualState.reviewProjectionPromotedByTrackBundle === true,
-    reviewProjectionPromotionSuppressed:visualState.reviewProjectionPromotionSuppressed === true,
-    reviewProjectionPromotionSuppressedReason:visualState.reviewProjectionPromotionSuppressedReason || '',
+    reviewProjectionPromotedByTrackBundle:false,
+    reviewProjectionPromotionSuppressed:false,
+    reviewProjectionPromotionSuppressedReason:'',
     className:reviewOuterShellClass || '',
     cardClass:reviewAccentClass || '',
     shellClass:reviewOuterShellClass || '',
@@ -23218,48 +23275,36 @@ function renderReviewWorkspace(options = {}){
     bounce:derivedStates.bounceState || '',
     viability:globalVerdict.viability || '',
     viabilityReason:globalVerdict.viability_reason || '',
-    terminalAvoidApplied:canonicalAvoidActive && (
-      terminalAvoidFlagged === true
-      || visualState.terminal_avoid_applied === true
-      || hardTerminalAvoid === true
-      || finalReviewVisualBucket === 'avoid'
-    ),
-    hardTerminalAvoid:hardTerminalAvoid === true,
+    terminalAvoidApplied:canonicalAvoidActive && finalReviewVisualBucket === 'avoid',
+    hardTerminalAvoid:canonicalAvoidActive && finalReviewVisualBucket === 'avoid',
     explicitInvalidationReason:explicitInvalidationReason || '',
     sourceFields:{
       badge:'effectiveReviewBadge',
-      headlineCopy:'decisionSummary/reviewLifecycleBias',
-      actionGuidance:'reviewAction',
-      shellColour:'finalReviewVisualBucket -> reviewOuterShellClass/reviewShellStyleAttr',
+      headlineCopy:'simplifiedState.mainBlocker/actionLabel',
+      actionGuidance:'simplifiedState.actionLabel',
+      shellColour:'simplifiedState.visualBucket/tone -> reviewOuterShellClass/reviewShellStyleAttr',
       leftAccentColour:'reviewAccentClass',
-      sectionBucket:'finalReviewVisualBucket/effectiveReviewPresentationState'
+      sectionBucket:'simplifiedState.visualBucket'
     },
     fromStoredFields:false,
-    fromResolvedStateBundleCache:usedCachedBundle === true,
-    fromFreshResolverOutput:usedCachedBundle !== true,
+    fromResolvedStateBundleCache:false,
+    fromFreshResolverOutput:true,
     finalReviewVisualBucket
   });
-  const reviewAction = getActions(resolvedFinalVerdictLabel);
-  const reviewNextActionLabel = String(reviewAction && reviewAction.label || '').trim() || 'Review setup inputs';
+  const reviewAction = {label:simplifiedActionLabel || 'Review setup inputs'};
+  const reviewNextActionLabel = String(simplifiedActionLabel || '').trim() || 'Review setup inputs';
   const reviewBadgeLabel = effectiveReviewBadge.text;
-  const planUI = resolvePlanVisibility({
-    state:resolvedFinalVerdictLabel,
-    bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
-    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState),
-    terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
-    avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
-    lifecycle:globalVerdict.lifecycle || '',
-    viability:globalVerdict.viability || visualState.viability || '',
-    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
-    explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || visualState.explicit_invalidation_reason || '',
-    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
-    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
-    near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true
-  });
+  const planUI = {
+    showPlan:simplifiedState.planVisible === true,
+    showRR:simplifiedState.planVisible === true,
+    showCapital:simplifiedState.planVisible === true,
+    showPositionSize:simplifiedState.planVisible === true,
+    diagnosticsMessage:String(simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.').trim()
+  };
   const tradeStatusText = planUI.showPlan
-    ? tradeStatusMetricText({globalVerdict:reviewTradeStatusVerdict, displayedPlan, resolvedContract})
+    ? {line1:simplifiedState.planStatus || 'Plan visible', line2:simplifiedState.mainBlocker || ''}
     : {line1:planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.', line2:''};
-  const modifierMarkup = emojiModifierMarkup(resolvedContract);
+  const modifierMarkup = '';
   const scannerPresentation = resolveEmojiPresentation(record, {
     context:'scanner',
     finalVerdict:scannerStatus,
@@ -23355,10 +23400,10 @@ function renderReviewWorkspace(options = {}){
     ? `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="capital-sim-50">Simulate 50%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-65">Simulate 65%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-85">Simulate 85%</button><button class="ghost compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>`
     : '';
   const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${renderDebugSectionMarkup('Final Decision', [
-    {label:'UI State Source', value:visualState.ui_state_source || '(none)'},
-    {label:'Final Verdict Rendered', value:visualState.final_verdict_rendered || visualState.finalVerdict || '(none)'},
-    {label:'Rendered Verdict', value:visualState.renderedVerdict || visualState.final_verdict_rendered || '(none)'},
-    {label:'Bucket Rendered', value:visualBucketLabel(visualState.bucket_rendered || visualState.bucket || 'monitor')},
+    {label:'UI State Source', value:'simplified_state_pipeline'},
+    {label:'Final Verdict Rendered', value:simplifiedCanonicalVerdict || '(none)'},
+    {label:'Rendered Verdict', value:simplifiedCanonicalVerdict || '(none)'},
+    {label:'Bucket Rendered', value:visualBucketLabel(simplifiedVisualBucket || 'monitor')},
     {label:'Dead Guard Applied', value:visualState.dead_guard_applied ? 'true' : 'false'},
     {label:'Dead Trigger Source', value:visualState.dead_trigger_source || '(none)'},
     {label:'Explicit Invalidation Reason', value:visualState.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)'},
@@ -23368,31 +23413,45 @@ function renderReviewWorkspace(options = {}){
       ? (visualState.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')
       : (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false'))},
     {label:'Conflicting Legacy State Detected', value:visualState.conflicting_legacy_state_detected ? 'true' : 'false'},
-    {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
-    {label:'Tone', value:globalVerdict.tone || '(none)'},
+    {label:'Final Verdict', value:simplifiedCanonicalVerdict || '(none)'},
+    {label:'canonicalVerdict', value:'Trading decision state'},
+    {label:'canonicalVerdict Value', value:simplifiedCanonicalVerdict || '(none)'},
+    {label:'Tone', value:simplifiedTone || '(none)'},
     {label:'Bucket', value:visualBucketLabel(
-      globalVerdict.bucket || 'monitor',
-      globalVerdict.final_verdict || globalVerdict.finalVerdict || ''
+      simplifiedVisualBucket || 'monitor',
+      simplifiedCanonicalVerdict || ''
     )},
-    {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
+    {label:'visualBucket', value:'Presentation / lifecycle tone'},
+    {label:'visualBucketReason', value:visualBucketReason(
+      simplifiedCanonicalVerdict || '',
+      simplifiedVisualBucket || 'monitor',
+      {
+        terminalAvoidApplied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
+        hardTerminalAvoid:visualState.hardTerminalAvoid === true,
+        lifecycleState:reviewLifecycleBias.review_lifecycle_bias || '',
+        viability:globalVerdict.viability || '',
+        bounce:globalVerdict.bounce_state || ''
+      }
+    )},
+    {label:'Badge', value:simplifiedState.badgeLabel || '(none)'},
     {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
     {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
     {label:'Tracked', value:globalVerdict.tracked ? 'true' : 'false'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
     {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
-    {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
-    {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
-  ])}${renderDebugSectionMarkup('Review Lifecycle Bias', [
+    {label:'Entry Gate Pass', value:simplifiedState.entryGatePass ? 'true' : 'false'},
+    {label:'Near Entry Gate Pass', value:simplifiedState.nearEntryGatePass ? 'true' : 'false'}
+  ])}${renderDebugSectionMarkup('Review Presentation Source', [
     {label:'Review Presentation State', value:visualState.review_presentation_state || '(none)'},
     {label:'Review Presentation Source', value:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || '(none)'},
-    {label:'Review Lifecycle Bias', value:reviewLifecycleBias.review_lifecycle_bias || '(none)'},
+    {label:'Review Lifecycle Bias Bypassed', value:'true'},
     {label:'Review Outer Class', value:reviewOuterShellClass || '(none)'},
     {label:'Review Outer Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
     {label:'Review Outer Tone Source', value:effectiveReviewPresentationState || '(none)'},
     {label:'Review Visual Tone', value:reviewVisualTone || '(none)'},
     {label:'Review Bucket Source', value:reviewBucketSource},
-    {label:'Review Bucket Before Fallback', value:reviewBucketBeforeFallback},
-    {label:'Review Bucket After Fallback', value:reviewBucketAfterFallback},
+    {label:'Review Bucket Before Fallback', value:'bypassed'},
+    {label:'Review Bucket After Fallback', value:'bypassed'},
     {label:'Final Review Visual Bucket', value:finalReviewVisualBucket || '(none)'},
     {label:'Used Cached Bundle', value:usedCachedBundle ? 'true' : 'false'},
     {label:'Missing Bundle Fields', value:missingBundleFields.join(', ') || '(none)'},
@@ -23401,8 +23460,8 @@ function renderReviewWorkspace(options = {}){
     {label:'Review Badge Tone', value:reviewBadgeTone},
     {label:'Review Visual State Source', value:reviewVisualStateSource || '(none)'},
     {label:'reviewProjectionPromotedByTrackBundle', value:visualState.reviewProjectionPromotedByTrackBundle ? 'true' : 'false'},
-    {label:'reviewProjectionPromotionSuppressed', value:visualState.reviewProjectionPromotionSuppressed ? 'true' : 'false'},
-    {label:'reviewProjectionPromotionSuppressedReason', value:visualState.reviewProjectionPromotionSuppressedReason || '(none)'},
+    {label:'reviewProjectionPromotionSuppressed', value:'false'},
+    {label:'reviewProjectionPromotionSuppressedReason', value:'bypassed by simplified_state_pipeline'},
     {label:'Review Root Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
     {label:'Review Score Style Applied', value:reviewScoreStyleApplied || '(none)'},
     {label:'Review State Style Applied', value:reviewPanelToneClass || '(none)'},
@@ -23418,7 +23477,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Previous Verdict', value:visualState.previousVerdict || '(none)'},
     {label:'Fresh Canonical Verdict', value:visualState.freshCanonicalVerdict || '(none)'},
     {label:'Fresh Visual Bucket', value:visualState.freshVisualBucket || '(none)'},
-    {label:'Stale Visual Field Ignored', value:visualState.staleVisualFieldIgnored ? 'true' : 'false'},
+    {label:'Stale Visual Field Ignored', value:'bypassed by simplified_state_pipeline'},
     {label:'Stale Avoid Suppressed', value:visualState.staleAvoidSuppressed ? 'true' : 'false'},
     {label:'Scan Visual Source', value:visualState.scanVisualSource || '(none)'},
     {label:'Review Visual Source', value:visualState.reviewVisualSource || '(none)'},
@@ -23432,7 +23491,7 @@ function renderReviewWorkspace(options = {}){
   ])}${renderDebugSectionMarkup('Execution State', [
     {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
     {label:'Action State', value:resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)'},
-    {label:'Plan Status', value:planUI.showPlan ? (resolvedContract.planStatusLabel || '(none)') : (planUI.diagnosticsMessage || '(none)')},
+    {label:'Plan Status', value:simplifiedState.planStatus || (planUI.diagnosticsMessage || '(none)')},
     {label:'Plan Visible', value:planUI.showPlan ? 'true' : 'false'},
     {label:'RR Confidence', value:resolvedContract.rrConfidenceLabel || '(none)'},
     {label:'Capital Fit', value:(capitalComfort.label || 'Unknown') || '(none)'},
@@ -24079,6 +24138,7 @@ function syncPlanDisplayMeta(options = {}){
     : ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
   if(canonicalPlanSynced) commitTickerState();
   const record = normalizeTickerRecord(liveRecord);
+  const metaSimplifiedState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
   const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
   const entryValue = $('entryPrice') ? $('entryPrice').value : effectivePlan.entry;
   const stopValue = $('stopPrice') ? $('stopPrice').value : effectivePlan.stop;
@@ -24157,12 +24217,16 @@ function syncPlanDisplayMeta(options = {}){
     displayedPlan,
     setupScore:setupScoreForRecord(record)
   });
-  const reviewLifecycleBias = resolveReviewLifecycleCopyBias(record, {
-    globalVerdict,
-    visualState,
-    derivedStates
-  });
-  const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary || '';
+  const reviewLifecycleBias = {
+    review_lifecycle_bias:normalizeVisualBucketForPairing(metaSimplifiedState.visualBucket || 'monitor'),
+    review_lifecycle_copy_override_applied:false,
+    review_lifecycle_copy_reason:'',
+    tradeStatusLine1:String(metaSimplifiedState.planStatus || '').trim(),
+    tradeStatusLine2:'',
+    trackPresentationBucket:normalizeVisualBucketForPairing(metaSimplifiedState.visualBucket || 'monitor'),
+    trackPresentationTone:String(metaSimplifiedState.tone || metaSimplifiedState.visualBucket || 'monitor').trim().toLowerCase()
+  };
+  const decisionSummary = String(metaSimplifiedState.mainBlocker || metaSimplifiedState.actionLabel || '').trim();
   const reviewTradeStatusVerdict = {
     ...visualState,
     structure_state:visualState.structure_state || globalVerdict.structure_state,
@@ -24184,20 +24248,13 @@ function syncPlanDisplayMeta(options = {}){
     track_presentation_bucket:reviewLifecycleBias.trackPresentationBucket,
     track_presentation_tone:reviewLifecycleBias.trackPresentationTone
   };
-  const planUI = resolvePlanVisibility({
-    state:visualState.final_verdict_rendered || visualState.finalVerdict,
-    bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
-    structure:derivedStates.structureState || (record && record.setup && record.setup.structureState),
-    terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
-    avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
-    lifecycle:globalVerdict.lifecycle || '',
-    viability:globalVerdict.viability || visualState.viability || '',
-    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
-    explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || visualState.explicit_invalidation_reason || '',
-    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
-    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
-    near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true
-  });
+  const planUI = {
+    showPlan:metaSimplifiedState.planVisible === true,
+    showRR:metaSimplifiedState.planVisible === true,
+    showCapital:metaSimplifiedState.planVisible === true,
+    showPositionSize:metaSimplifiedState.planVisible === true,
+    diagnosticsMessage:String(metaSimplifiedState.mainBlocker || metaSimplifiedState.planStatus || 'No actionable plan yet.').trim()
+  };
   if(planStateBox) planStateBox.value = planUiState.label;
   const planQuality = planQualityForRr(displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null);
   if(planQualityBox) planQualityBox.value = planQuality || 'N/A';
@@ -24217,7 +24274,7 @@ function syncPlanDisplayMeta(options = {}){
   }
   if($('tradeStatusBox')){
     const tradeStatusText = planUI.showPlan
-      ? tradeStatusMetricText({globalVerdict:reviewTradeStatusVerdict, displayedPlan, resolvedContract})
+      ? {line1:metaSimplifiedState.planStatus || 'Plan visible', line2:metaSimplifiedState.mainBlocker || ''}
       : {line1:planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.', line2:''};
     $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   }
@@ -24393,27 +24450,23 @@ function calculate(options = {}){
     emojiPresentation
   });
   const globalVerdict = activeRecord ? resolveGlobalVerdict(activeRecord) : {allow_plan:false};
+  const plannerSimplifiedState = activeRecord
+    ? resolveSimplifiedStateForSurface(activeRecord, 'review', {log:false})
+    : resolveSimplifiedStateForSurface({}, 'review', {log:false});
   const plannerVisualState = activeRecord ? resolveVisualState(activeRecord, 'review', {
     resolvedContract,
     derivedStates:plannerDerivedStates,
     displayedPlan,
     setupScore:setupScoreForRecord(activeRecord)
   }) : {finalVerdict:'watch'};
-  const plannerDecisionSummary = plannerVisualState && plannerVisualState.decision_summary ? plannerVisualState.decision_summary : '';
-  const planUI = resolvePlanVisibility({
-    state:plannerVisualState.final_verdict_rendered || plannerVisualState.finalVerdict,
-    bounce_state:plannerDerivedStates.bounceState || (activeRecord && activeRecord.setup && activeRecord.setup.bounceState),
-    structure:plannerDerivedStates.structureState || (activeRecord && activeRecord.setup && activeRecord.setup.structureState),
-    terminal_avoid_applied:plannerVisualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
-    avoid_trigger_source:globalVerdict.avoid_trigger_source || plannerVisualState.avoid_trigger_source || '',
-    lifecycle:globalVerdict.lifecycle || '',
-    viability:globalVerdict.viability || plannerVisualState.viability || '',
-    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
-    explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || plannerVisualState.explicit_invalidation_reason || '',
-    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
-    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
-    near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true
-  });
+  const plannerDecisionSummary = String(plannerSimplifiedState.mainBlocker || plannerSimplifiedState.actionLabel || '').trim();
+  const planUI = {
+    showPlan:plannerSimplifiedState.planVisible === true,
+    showRR:plannerSimplifiedState.planVisible === true,
+    showCapital:plannerSimplifiedState.planVisible === true,
+    showPositionSize:plannerSimplifiedState.planVisible === true,
+    diagnosticsMessage:String(plannerSimplifiedState.mainBlocker || plannerSimplifiedState.planStatus || 'No actionable plan yet.').trim()
+  };
   $('rewardPerShareBox').textContent = Number.isFinite(displayedPlan.rewardPerShare) ? displayedPlan.rewardPerShare.toFixed(2) : '-';
   const riskFitLabel = riskStatusLabel(displayedPlan.status === 'valid' ? displayedPlan.riskFit.risk_status : (displayedPlan.status === 'invalid' ? 'invalid_plan' : 'plan_missing'));
   const capitalUsage = capitalUsageAdvisory({
@@ -24439,7 +24492,7 @@ function calculate(options = {}){
     comfortLabel:capitalComfort.label
   });
   const tradeStatusText = planUI.showPlan
-    ? tradeStatusMetricText({globalVerdict:plannerVisualState, displayedPlan, resolvedContract})
+    ? {line1:plannerSimplifiedState.planStatus || 'Plan visible', line2:plannerSimplifiedState.mainBlocker || ''}
     : {line1:planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.', line2:''};
   if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
