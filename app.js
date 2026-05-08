@@ -11988,6 +11988,10 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
     return window.SimplifiedTradeState.resolveRecordState(item, {
       surface,
       log:options.log !== false,
+      renderPass:options.renderPass,
+      source:options.source,
+      reason:options.reason,
+      mutationSource:options.mutationSource,
       deps:{
         effectivePlanForRecord,
         riskSettingsProvider:currentRiskSettings,
@@ -22307,7 +22311,11 @@ function renderReviewWorkspace(options = {}){
   }
   if(canonicalPlanSynced) commitTickerState();
   const record = normalizeTickerRecord(refreshedRecord);
-  const simplifiedState = resolveSimplifiedStateForSurface(record, 'review');
+  const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {
+    renderPass:reviewRenderPass,
+    source:reviewRenderSource,
+    mutationSource:reviewRenderSource
+  });
   const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
   const simplifiedVisualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
   const simplifiedTone = String(simplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';

@@ -114,6 +114,144 @@
     };
   }
 
+  function stableDebugValue(value, depth = 0, seen){
+    if(value == null) return value;
+    const type = typeof value;
+    if(type === 'string' || type === 'boolean') return value;
+    if(type === 'number') return Number.isFinite(value) ? Number(value.toFixed ? value.toFixed(4) : value) : String(value);
+    if(type === 'function' || type === 'symbol' || type === 'undefined') return undefined;
+    if(depth > 4) return '[depth]';
+    const refs = seen || [];
+    if(refs.indexOf(value) >= 0) return '[circular]';
+    const nextSeen = refs.concat([value]);
+    if(Array.isArray(value)){
+      return value.slice(0, 60).map(entry => stableDebugValue(entry, depth + 1, nextSeen)).filter(entry => entry !== undefined);
+    }
+    if(type === 'object'){
+      const output = {};
+      Object.keys(value).sort().forEach(key => {
+        if(/^(chart|image|screenshot|rawAi|rawAnalysis|html|element|node)$/i.test(key)) return;
+        const stable = stableDebugValue(value[key], depth + 1, nextSeen);
+        if(stable !== undefined) output[key] = stable;
+      });
+      return output;
+    }
+    return String(value);
+  }
+
+  function stableDebugString(value){
+    try{
+      return JSON.stringify(stableDebugValue(value));
+    }catch(error){
+      return String(value == null ? '' : value);
+    }
+  }
+
+  function debugFingerprint(value){
+    const input = stableDebugString(value);
+    let hash = 2166136261;
+    for(let index = 0; index < input.length; index += 1){
+      hash ^= input.charCodeAt(index);
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    return `fp_${(hash >>> 0).toString(16).padStart(8, '0')}_${input.length}`;
+  }
+
+  function pickMarketDataForFingerprint(record){
+    const item = record && typeof record === 'object' ? record : {};
+    const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
+    return {
+      price:item.currentPrice ?? item.price ?? marketData.currentPrice ?? marketData.price ?? marketData.close,
+      sma20:marketData.sma20 ?? marketData.ma20 ?? item.sma20,
+      sma50:marketData.sma50 ?? marketData.ma50 ?? item.sma50,
+      sma200:marketData.sma200 ?? marketData.ma200 ?? item.sma200,
+      volume:marketData.volume ?? item.volume,
+      averageVolume:marketData.averageVolume ?? marketData.avgVolume ?? item.averageVolume,
+      changePercent:marketData.changePercent ?? marketData.changePct ?? item.changePercent,
+      asOf:marketData.asOf ?? marketData.timestamp ?? item.marketDataUpdatedAt
+    };
+  }
+
+  function pickInputForFingerprint(record){
+    const item = record && typeof record === 'object' ? record : {};
+    return {
+      ticker:item.ticker || item.symbol || '',
+      setup:item.setup || {},
+      plan:item.plan || {},
+      lifecycle:item.lifecycle || item.lifecycleState || item.reviewLifecycle || '',
+      tradeability:item.tradeability || item.tradeabilityState || '',
+      verdict:item.finalVerdict || item.final_verdict || item.verdict || '',
+      visual:item.visualBucket || item.bucket || item.tone || '',
+      marketData:pickMarketDataForFingerprint(item)
+    };
+  }
+
+  function derivePipelineDiagnostics(record, options, details){
+    const item = record && typeof record === 'object' ? record : {};
+    const ticker = String(item.ticker || item.symbol || '').trim().toUpperCase();
+    const surface = String(options.surface || options.context || 'scanner');
+    const derivedStates = details.derivedStates || {};
+    const planState = details.planState || {};
+    const resolvedState = details.resolvedState || {};
+    const result = details.result || {};
+    const inputFingerprint = debugFingerprint(pickInputForFingerprint(item));
+    const marketDataFingerprint = debugFingerprint(pickMarketDataForFingerprint(item));
+    const planFingerprint = debugFingerprint({
+      recordPlan:item.plan || {},
+      effectivePlan:details.effectivePlan || {},
+      planStatus:planState.status || '',
+      entry:planState.entry,
+      stop:planState.stop,
+      target:planState.target ?? planState.firstTarget,
+      rr:planState.rr
+    });
+    const store = global.__simplifiedStatePipelineDebug && typeof global.__simplifiedStatePipelineDebug === 'object'
+      ? global.__simplifiedStatePipelineDebug
+      : (global.__simplifiedStatePipelineDebug = {callCounter:0, byKey:{}});
+    store.callCounter = Number(store.callCounter || 0) + 1;
+    if(!store.byKey || typeof store.byKey !== 'object') store.byKey = {};
+    const key = `${surface}:${ticker || '(unknown)'}`;
+    const previous = store.byKey[key] || null;
+    const diagnostics = {
+      callCounter:store.callCounter,
+      renderPass:options.renderPass ?? options.reviewRenderPass ?? null,
+      surface,
+      ticker,
+      inputFingerprint,
+      marketDataFingerprint,
+      planFingerprint,
+      inputChangedSincePrevious:previous ? previous.inputFingerprint !== inputFingerprint : false,
+      marketDataChangedSincePrevious:previous ? previous.marketDataFingerprint !== marketDataFingerprint : false,
+      planChangedSincePrevious:previous ? previous.planFingerprint !== planFingerprint : false,
+      previousCanonicalVerdict:previous ? previous.canonicalVerdict : null,
+      previousVisualBucket:previous ? previous.visualBucket : null,
+      previousMainBlocker:previous ? previous.mainBlocker : null,
+      previousInputFingerprint:previous ? previous.inputFingerprint : null,
+      previousMarketDataFingerprint:previous ? previous.marketDataFingerprint : null,
+      previousPlanFingerprint:previous ? previous.planFingerprint : null,
+      structureState:String(derivedStates.structureState || resolvedState.structure_state || resolvedState.structural_state || '').toLowerCase(),
+      bounceState:String(derivedStates.bounceState || resolvedState.bounce_state || '').toLowerCase(),
+      pullbackZone:String(derivedStates.pullbackZone || resolvedState.pullback_zone || '').toLowerCase(),
+      planStatus:String(planState.status || result.planStatus || '').toLowerCase(),
+      viability:resolvedState.viability || resolvedState.viability_state || null,
+      rejectedByViabilityGate:resolvedState.rejected_by_viability_gate === true || resolvedState.rejectedByViabilityGate === true,
+      terminalAvoidApplied:resolvedState.terminal_avoid_applied === true || resolvedState.terminalAvoidApplied === true,
+      canonicalVerdict:result.canonicalVerdict || resolvedState.final_verdict || null,
+      visualBucket:result.visualBucket || null,
+      mainBlocker:result.mainBlocker || resolvedState.main_blocker || resolvedState.reason || '',
+      inputMutationSource:options.mutationSource || options.source || options.reason || options.renderSource || null
+    };
+    store.byKey[key] = {
+      inputFingerprint,
+      marketDataFingerprint,
+      planFingerprint,
+      canonicalVerdict:diagnostics.canonicalVerdict,
+      visualBucket:diagnostics.visualBucket,
+      mainBlocker:diagnostics.mainBlocker
+    };
+    return diagnostics;
+  }
+
   function resolveRecordState(record, options = {}){
     const surface = options.surface || options.context || 'scanner';
     try{
@@ -200,8 +338,19 @@
         effectivePlan,
         pipeline:'record->effectivePlan->planState->validate->ResolverCore->ResolverPresentation->presentationModel'
       };
+      const pipelineDiagnostics = derivePipelineDiagnostics(item, {...options, surface}, {
+        effectivePlan,
+        planState,
+        derivedStates,
+        resolvedState,
+        result
+      });
+      result.debug.pipelineDiagnostics = pipelineDiagnostics;
       if(options.log !== false && global.console && typeof global.console.info === 'function'){
-        global.console.info('[SIMPLIFIED_STATE_PIPELINE]', result);
+        global.console.info('[SIMPLIFIED_STATE_PIPELINE]', {
+          ...pipelineDiagnostics,
+          state:result
+        });
       }
       return result;
     }catch(error){
