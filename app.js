@@ -7016,6 +7016,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     structure:item && item.setup && item.setup.structureState,
     bounce:item && item.setup && item.setup.bounceState
   });
+  const simplifiedTrackDebugSource = String(globalVisual.watchlist_presentation_source || '').trim().toLowerCase() === 'simplified_state_pipeline';
   const capitalComfort = capitalComfortSummary({
     capitalFit:displayedPlan.capitalFit.capital_fit,
     capitalNote:displayedPlan.capitalFit.capital_note,
@@ -7092,9 +7093,11 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Badge Label', value:globalVisual.badgeLabel || globalVisual.presentationBadge || '(none)'},
     {label:'Card Class', value:globalVisual.cardClass || globalVisual.className || globalVisual.toneClass || '(none)'},
     {label:'Badge Class', value:globalVisual.badgeClass || (globalVisual.badge && globalVisual.badge.className) || '(none)'},
-    {label:'Legacy Bucket Input', value:globalVisual.legacyBucketInput || '(none)'},
-    {label:'Legacy Bucket Remapped', value:globalVisual.legacyBucketRemapped ? 'true' : 'false'},
-    {label:'Remap Reason', value:globalVisual.bucketRemapReason || '(none)'},
+    ...(simplifiedTrackDebugSource ? [] : [
+      {label:'Legacy Bucket Input', value:globalVisual.legacyBucketInput || '(none)'},
+      {label:'Legacy Bucket Remapped', value:globalVisual.legacyBucketRemapped ? 'true' : 'false'},
+      {label:'Remap Reason', value:globalVisual.bucketRemapReason || '(none)'}
+    ]),
     {label:'Presentation Reason', value:globalVisual.presentationReason || '(none)'},
     {label:'Terminal Avoid Reason', value:globalVisual.terminalAvoidReason || '(none)'},
     {label:'Diminishing Reason', value:globalVisual.diminishingReason || '(none)'},
@@ -7108,8 +7111,10 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Current Resolver Verdict', value:globalVisual.currentResolverVerdict || '(none)'},
     {label:'Stored Lifecycle State', value:globalVisual.storedLifecycleState || '(none)'},
     {label:'Previous Lifecycle State', value:globalVisual.previousLifecycleState || '(none)'},
-    {label:'Stale Avoid Suppressed', value:globalVisual.staleAvoidSuppressed ? 'true' : 'false'},
-    {label:'Stale Reject Suppressed', value:globalVisual.staleRejectSuppressed ? 'true' : 'false'},
+    ...(simplifiedTrackDebugSource ? [] : [
+      {label:'Stale Avoid Suppressed', value:globalVisual.staleAvoidSuppressed ? 'true' : 'false'},
+      {label:'Stale Reject Suppressed', value:globalVisual.staleRejectSuppressed ? 'true' : 'false'}
+    ]),
     {label:'Structural Alive At Refresh', value:typeof globalVisual.structuralAliveAtRefresh === 'boolean' ? (globalVisual.structuralAliveAtRefresh ? 'true' : 'false') : '(none)'},
     {label:'Avoid Allowed By Structure Guard', value:typeof globalVisual.avoidAllowedByStructureGuard === 'boolean' ? (globalVisual.avoidAllowedByStructureGuard ? 'true' : 'false') : '(none)'},
     {label:'Explicit Invalidation Reason (Effective)', value:globalVisual.explicitInvalidationReason || '(none)'},
@@ -7839,6 +7844,8 @@ function renderWatchlistCardElement(record, options = {}){
     renderedBucket,
     presentationBucket,
     tone,
+    badgeLabel:simplifiedState.badgeLabel || '',
+    mainBlocker:simplifiedState.mainBlocker || '',
     renderSource,
     sourceOfTruthVisualBucket:renderedBucket,
     usedProjectionBundle,
@@ -20118,6 +20125,7 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     ? window.__tickerStateSourceDebug.byTicker
     : (window.__tickerStateSourceDebug.byTicker = new Map());
   const state = bundle && typeof bundle === 'object' ? bundle : {};
+  const simplifiedPipelineSource = String(state.source || '').trim().toLowerCase() === 'simplified_state_pipeline';
   const canonicalVerdict = String(state.canonicalVerdict || state.finalVerdict || '').trim().toLowerCase();
   const visualBucket = String(state.visualBucket || state.presentationBucket || '').trim().toLowerCase();
   const derivedVisualBucketReason = visualBucketReason(canonicalVerdict, visualBucket, {
@@ -20153,8 +20161,17 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     renderedBucket:state.renderedBucket || state.visualBucket || '',
     presentationBucket:state.presentationBucket || '',
     tone:state.tone || '',
+    badgeLabel:state.badgeLabel || '',
+    mainBlocker:state.mainBlocker || '',
     sourceOfTruthVisualBucket:state.sourceOfTruthVisualBucket || '',
     usedProjectionBundle:state.usedProjectionBundle === true,
+    usedProjectionBundleMeaning:simplifiedPipelineSource
+      ? 'transitional metadata only; projection data is not authoritative for simplified state fields'
+      : '',
+    projectionBundleAuthoritative:false,
+    authoritativeStateFields:simplifiedPipelineSource
+      ? 'canonicalVerdict | visualBucket | tone | badgeLabel | mainBlocker from simplifiedState'
+      : '',
     recomputedDuringRender:state.recomputedDuringRender === true,
     reviewProjectionSource:String(state.reviewProjectionSource || ''),
     className:state.className || '',
@@ -20210,17 +20227,18 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     }
   }
   if(next.track){
+    const trackSimplifiedPipelineSource = String(next.track.source || '').trim().toLowerCase() === 'simplified_state_pipeline';
     const parentSectionKey = String(next.track.parentSectionKey || '').trim().toLowerCase();
     const renderedBucket = normalizeVisualBucketForPairing(next.track.renderedBucket || next.track.visualBucket || '');
-    if(parentSectionKey === 'diminishing' && !['diminishing'].includes(renderedBucket)){
+    if(!trackSimplifiedPipelineSource && parentSectionKey === 'diminishing' && !['diminishing'].includes(renderedBucket)){
       bumpVerdictDriftMismatch();
       console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'section_bucket_mismatch', parentSectionKey, renderedBucket});
     }
-    if(parentSectionKey === 'avoid_dead' && !['avoid','dead'].includes(renderedBucket)){
+    if(!trackSimplifiedPipelineSource && parentSectionKey === 'avoid_dead' && !['avoid','dead'].includes(renderedBucket)){
       bumpVerdictDriftMismatch();
       console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'section_bucket_mismatch', parentSectionKey, renderedBucket});
     }
-    if(parentSectionKey === 'active' && ['avoid','dead'].includes(renderedBucket)){
+    if(!trackSimplifiedPipelineSource && parentSectionKey === 'active' && ['avoid','dead'].includes(renderedBucket)){
       bumpVerdictDriftMismatch();
       console.warn('[TickerStateSource][Warning]', {ticker:symbol, code:'section_bucket_mismatch', parentSectionKey, renderedBucket});
     }
@@ -22696,9 +22714,7 @@ function renderReviewWorkspace(options = {}){
         presentationBucket:visualState.presentationBucket || '',
         reviewPresentationSource:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || ''
       },
-      reviewProjectionPromotedByTrackBundle:false,
-      reviewProjectionPromotionSuppressed:false,
-      reviewProjectionPromotionSuppressedReason:'',
+      projectionBundleAuthoritative:false,
       shellClass:reviewOuterShellClass,
       accentClass:reviewAccentClass,
       staleAvoidSuppressed:false
@@ -22728,9 +22744,7 @@ function renderReviewWorkspace(options = {}){
           presentationBucket:visualState.presentationBucket || '',
           reviewPresentationSource:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || ''
         },
-        reviewProjectionPromotedByTrackBundle:false,
-        reviewProjectionPromotionSuppressed:false,
-        reviewProjectionPromotionSuppressedReason:'',
+        projectionBundleAuthoritative:false,
         shellClass:reviewOuterShellClass,
         accentClass:reviewAccentClass,
         staleAvoidSuppressed:false
@@ -22746,13 +22760,13 @@ function renderReviewWorkspace(options = {}){
     visualBucket:finalReviewVisualBucket,
     presentationBucket:finalReviewVisualBucket,
     tone:reviewVisualTone || '',
+    badgeLabel:simplifiedState.badgeLabel || '',
+    mainBlocker:simplifiedState.mainBlocker || '',
     sourceOfTruthVisualBucket:sourceOfTruthVisualBucket || visualBucketSource || '',
     usedProjectionBundle:sourceProjectionSnapshot != null,
     recomputedDuringRender:usedCachedBundle !== true,
     reviewProjectionSource:effectiveReviewProjectionSource,
-    reviewProjectionPromotedByTrackBundle:false,
-    reviewProjectionPromotionSuppressed:false,
-    reviewProjectionPromotionSuppressedReason:'',
+    projectionBundleAuthoritative:false,
     className:reviewOuterShellClass || '',
     cardClass:reviewAccentClass || '',
     shellClass:reviewOuterShellClass || '',
@@ -22930,16 +22944,13 @@ function renderReviewWorkspace(options = {}){
     {label:'Entry Gate Pass', value:simplifiedState.entryGatePass ? 'true' : 'false'},
     {label:'Near Entry Gate Pass', value:simplifiedState.nearEntryGatePass ? 'true' : 'false'}
   ])}${renderDebugSectionMarkup('Review Presentation Source', [
-    {label:'Review Presentation State', value:visualState.review_presentation_state || '(none)'},
-    {label:'Review Presentation Source', value:visualState.review_presentation_source || reviewLifecycleBias.review_presentation_source || '(none)'},
-    {label:'Review Lifecycle Bias Bypassed', value:'true'},
+    {label:'Review Presentation State', value:simplifiedCanonicalVerdict || '(none)'},
+    {label:'Review Presentation Source', value:'simplified_state_pipeline'},
     {label:'Review Outer Class', value:reviewOuterShellClass || '(none)'},
     {label:'Review Outer Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
     {label:'Review Outer Tone Source', value:effectiveReviewPresentationState || '(none)'},
     {label:'Review Visual Tone', value:reviewVisualTone || '(none)'},
     {label:'Review Bucket Source', value:reviewBucketSource},
-    {label:'Review Bucket Before Fallback', value:'bypassed'},
-    {label:'Review Bucket After Fallback', value:'bypassed'},
     {label:'Final Review Visual Bucket', value:finalReviewVisualBucket || '(none)'},
     {label:'Used Cached Bundle', value:usedCachedBundle ? 'true' : 'false'},
     {label:'Missing Bundle Fields', value:missingBundleFields.join(', ') || '(none)'},
@@ -22947,9 +22958,6 @@ function renderReviewWorkspace(options = {}){
     {label:'Review Accent Tone', value:reviewAccentClass || '(none)'},
     {label:'Review Badge Tone', value:reviewBadgeTone},
     {label:'Review Visual State Source', value:reviewVisualStateSource || '(none)'},
-    {label:'reviewProjectionPromotedByTrackBundle', value:visualState.reviewProjectionPromotedByTrackBundle ? 'true' : 'false'},
-    {label:'reviewProjectionPromotionSuppressed', value:'false'},
-    {label:'reviewProjectionPromotionSuppressedReason', value:'bypassed by simplified_state_pipeline'},
     {label:'Review Root Class List', value:reviewOuterClassList.join(' | ') || '(none)'},
     {label:'Review Score Style Applied', value:reviewScoreStyleApplied || '(none)'},
     {label:'Review State Style Applied', value:reviewPanelToneClass || '(none)'},
@@ -22965,8 +22973,6 @@ function renderReviewWorkspace(options = {}){
     {label:'Previous Verdict', value:visualState.previousVerdict || '(none)'},
     {label:'Fresh Canonical Verdict', value:visualState.freshCanonicalVerdict || '(none)'},
     {label:'Fresh Visual Bucket', value:visualState.freshVisualBucket || '(none)'},
-    {label:'Stale Visual Field Ignored', value:'bypassed by simplified_state_pipeline'},
-    {label:'Stale Avoid Suppressed', value:visualState.staleAvoidSuppressed ? 'true' : 'false'},
     {label:'Scan Visual Source', value:visualState.scanVisualSource || '(none)'},
     {label:'Review Visual Source', value:visualState.reviewVisualSource || '(none)'},
     {label:'Structure Source', value:visualState.structureSource || '(none)'},
