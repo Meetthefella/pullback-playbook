@@ -713,6 +713,22 @@
       ));
     }
     if(planInvalidLabel && !viableRrExists && !bounceUseful){
+      if(structureEligibility === 'alive' && !hardInvalidation){
+        return enrich(asWatchlist(
+          'Structurally alive - waiting for confirmation.',
+          'No bounce confirmation yet.',
+          'alive_invalid_plan_no_bounce_watchlist',
+          'Alive invalid plan no bounce watchlist'
+        ));
+      }
+      if(structureEligibility === 'damaged' && !hardInvalidation){
+        return enrich(asLowPriority(
+          'Weakening setup - monitor only if it improves.',
+          'Trend is weakening - no reliable stop level yet.',
+          'damaged_invalid_plan_no_bounce_low_priority',
+          'Damaged invalid plan no bounce low priority'
+        ));
+      }
       return enrich(asReject(
         'No bounce and no valid plan.',
         'Invalid plan with no credible RR.',
@@ -1220,6 +1236,28 @@
   function runTradeReadinessGateAssertions(){
     const cases = [
       {
+        id:'alive-invalid-plan-no-rr-no-bounce-watchlist',
+        viability:{
+          structureEligibility:'alive',
+          structureState:'intact',
+          bounceState:'none',
+          pullbackZone:'near_50ma',
+          setupScore:6,
+          planOk:false,
+          planStatusKey:'invalid',
+          rrOk:false,
+          credibleRr:null,
+          tradeabilityOk:false,
+          hasEntry:false,
+          hasStop:false,
+          hasTarget:false,
+          hardTrendBroken:false,
+          terminalAvoidFlag:false,
+          explicitInvalidationReason:''
+        },
+        expect:{viability:'watchlist', branch:'alive_invalid_plan_no_bounce_watchlist'}
+      },
+      {
         id:'A',
         ctx:{structure_state:'intact', bounce_state:'attempt', plan_visible:false, has_entry:false, has_stop:false, plan_status:'needs_adjustment', plan_status_text:'Bounce is not clear enough to price yet.', pullback_zone:'near_20ma', tradeability:'watch'},
         expect:{near:false, entry:false}
@@ -1390,6 +1428,19 @@
       }
     ];
     const results = cases.map(testCase => {
+      if(testCase.viability){
+        const viability = resolveWatchlistViability(testCase.viability);
+        const pass = viability.viability === testCase.expect.viability
+          && viability.viabilityBranchId === testCase.expect.branch
+          && viability.viability !== 'reject';
+        return {
+          id:testCase.id,
+          pass,
+          viability:viability.viability,
+          viabilityBranchId:viability.viabilityBranchId,
+          viabilityReason:viability.viabilityReason
+        };
+      }
       const near = canPromoteToNearEntry(testCase.ctx);
       const entry = canPromoteToEntry(testCase.ctx);
       const pass = near.pass === testCase.expect.near && (testCase.expect.entry === undefined || entry.pass === testCase.expect.entry);
