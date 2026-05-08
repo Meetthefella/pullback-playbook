@@ -2874,6 +2874,8 @@ function analysisDerivedStatesFromRecord(record){
     pullbackState:pullback.pullbackState,
     pullbackQuality:pullback.pullbackQuality,
     structureState:String(analysisProjection.structure_state || normalizedAnalysis.structure_state || '').trim().toLowerCase(),
+    setupLocationState:String(analysisProjection.setup_location_state || normalizedAnalysis.setup_location_state || pullback.pullbackState || '').trim().toLowerCase(),
+    priceabilityState:String(analysisProjection.priceability_state || normalizedAnalysis.priceability_state || '').trim().toLowerCase(),
     stabilisationState:String(analysisProjection.stabilisation_state || normalizedAnalysis.stabilisation_state || '').trim().toLowerCase(),
     bounceState:String(analysisProjection.bounce_state || normalizedAnalysis.bounce_state || '').trim().toLowerCase(),
     volumeState:String(analysisProjection.volume_state || normalizedAnalysis.volume_state || '').trim().toLowerCase(),
@@ -7083,6 +7085,9 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
         hardTerminalAvoid:globalVisual.hardTerminalAvoid === true,
         lifecycleState:lifecycleSnapshot.state,
         viability:globalVerdict.viability || '',
+        structureState:globalVerdict.structure_state || derivedStates.structureState || '',
+        setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
+        priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
         bounce:derivedStates.bounceState || ''
       }
     )},
@@ -7855,6 +7860,7 @@ function renderWatchlistCardElement(record, options = {}){
     tone,
     badgeLabel:simplifiedState.badgeLabel || '',
     mainBlocker:simplifiedState.mainBlocker || '',
+    primaryBlockerSource:globalVerdict && globalVerdict.primary_blocker_source || '',
     renderSource,
     sourceOfTruthVisualBucket:renderedBucket,
     usedProjectionBundle,
@@ -7865,6 +7871,8 @@ function renderWatchlistCardElement(record, options = {}){
     accentClass:'',
     styleAttr:'',
     structure:derivedStates.structureState || '',
+    setupLocationState:derivedStates.setupLocationState || '',
+    priceabilityState:derivedStates.priceabilityState || '',
     pullback:derivedStates.pullbackZone || derivedStates.pullbackState || '',
     bounce:derivedStates.bounceState || '',
     viability:globalVerdict && globalVerdict.viability || '',
@@ -10135,6 +10143,7 @@ function renderCompactResultCardFromView(view){
       tone:simplifiedState.tone,
       badgeLabel:simplifiedState.badgeLabel,
       mainBlocker:simplifiedState.mainBlocker,
+      primaryBlockerSource:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.primary_blocker_source || '',
       projectionBundleAuthoritative:false
     });
   }
@@ -10149,6 +10158,7 @@ function renderCompactResultCardFromView(view){
     tone,
     badgeLabel:simplifiedState.badgeLabel || '',
     mainBlocker:simplifiedState.mainBlocker || '',
+    primaryBlockerSource:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.primary_blocker_source || '',
     sourceOfTruthVisualBucket:visualBucket,
     projectionBundleAuthoritative:false,
     className,
@@ -10157,6 +10167,8 @@ function renderCompactResultCardFromView(view){
     accentClass:'',
     styleAttr:'',
     structure:setupStates.structureState || '',
+    setupLocationState:setupStates.setupLocationState || '',
+    priceabilityState:setupStates.priceabilityState || '',
     pullback:setupStates.pullbackZone || setupStates.pullbackState || '',
     bounce:setupStates.bounceState || '',
     viability:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.viability || '',
@@ -12043,7 +12055,16 @@ function visualBucketReason(canonicalVerdict = '', visualBucket = '', context = 
     || String(state.lifecycleState || '').toLowerCase() === 'dead'
     || String(state.viability || '').toLowerCase() === 'reject';
   if(bucket === 'avoid' && (terminal || canonical === 'avoid')) return 'terminal avoid';
-  if(bucket === 'diminishing') return 'weakening but not terminal';
+  if(bucket === 'diminishing'){
+    const location = String(state.setupLocationState || state.setup_location_state || '').trim().toLowerCase();
+    const priceability = String(state.priceabilityState || state.priceability_state || '').trim().toLowerCase();
+    const structure = String(state.structureState || state.structure_state || '').trim().toLowerCase();
+    if(location === 'extended') return 'too extended to price reliably';
+    if(location === 'volatile' || priceability === 'unpriceable') return 'too volatile to price reliably';
+    if(['weak','weakening','developing_loose'].includes(structure)) return 'weakening but not terminal';
+    if(String(state.viability || '').toLowerCase() === 'low_priority') return 'low-priority but structurally alive';
+    return 'setup quality fading';
+  }
   if(bucket === 'entry') return 'entry momentum';
   if(bucket === 'near_entry') return 'entry momentum';
   if(bucket === 'monitor'){
@@ -14001,7 +14022,7 @@ function savedAiNoPlanMarkup(chartReadDisplay){
     && chartReadDisplay.matchedPhrase
     ? `<div class="tiny">${escapeHtml(chartReadDisplay.text || 'Price has lost the 50MA and the setup is deteriorating.')}</div>`
     : '';
-  return `<div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">Trend is weakening - no reliable stop level yet.</div>${correctionLine}`;
+  return `<div class="tiny"><strong>Plan:</strong> No actionable plan yet.</div><div class="tiny">No clean pullback entry is available yet.</div>${correctionLine}`;
 }
 
 function reconcileWatchlistPresentation({
@@ -18207,12 +18228,23 @@ function deriveSetupStates(card, data, checks, tradePlan){
     pullbackZone = 'extended';
   }
 
-  let structureState = 'weakening';
+  let setupLocationState = 'unclear';
+  if(['near_20ma','near_50ma'].includes(pullbackZone)){
+    setupLocationState = 'usable_pullback';
+  }else if(pullbackZone === 'extended'){
+    setupLocationState = 'extended';
+  }else if(['off_level','none'].includes(pullbackZone)){
+    setupLocationState = 'off_level';
+  }
+
+  let structureState = 'developing_clean';
   if(safeChecks.structureBroken || trendState === 'broken'){
     structureState = 'broken';
-  }else if(safeChecks.trendStrong && (pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') && Number.isFinite(perf1w) && perf1w > -4){
+  }else if(trendState === 'strong' && safeChecks.trendStrong){
+    structureState = 'strong';
+  }else if((trendState === 'strong' || trendState === 'acceptable') && Number.isFinite(perf1w) && perf1w > -4){
     structureState = 'intact';
-  }else{
+  }else if(trendState === 'weak'){
     structureState = 'weakening';
   }
 
@@ -18233,10 +18265,13 @@ function deriveSetupStates(card, data, checks, tradePlan){
   const worseningCloses = recentCloses.length >= 3 && recentCloses[0] < recentCloses[1] && recentCloses[1] < recentCloses[2];
   const pullbackStoppedWorsening = (recentCloses.length >= 2 && recentCloses[0] >= recentCloses[1] * 0.995)
     || (Number.isFinite(localPivotLow) && Number.isFinite(price) && price >= localPivotLow);
-  const strongStructureContext = structureState === 'intact' && trendState !== 'broken';
+  const strongStructureContext = ['strong','intact'].includes(structureState) && trendState !== 'broken';
   const supportiveVolume = safeChecks.volume || (Number.isFinite(volume) && Number.isFinite(avgVolume30d) && volume >= avgVolume30d * 0.95);
   if(structureState !== 'broken' && (trendState === 'weak' || worseningHighs || worseningCloses || (Number.isFinite(perf1w) && perf1w < -2))){
     structureState = 'weak';
+  }
+  if(setupLocationState === 'unclear' && (Math.abs(Number(dist20 || 0)) > 0.08 || Math.abs(Number(dist50 || 0)) > 0.10)){
+    setupLocationState = 'volatile';
   }
 
   let stabilisationState = 'none';
@@ -18280,6 +18315,9 @@ function deriveSetupStates(card, data, checks, tradePlan){
     riskTooWide:false
   });
   bounceState = bouncePriceability.adjustedBounceState;
+  const priceabilityState = bouncePriceability.hasPriceablePlan
+    ? 'priceable'
+    : (bouncePriceability.hasClearInvalidationLevel && entryDefined && stopDefined && targetDefined ? 'provisional' : 'unpriceable');
 
   let volumeState = 'normal';
   if(safeChecks.volume && bounceState !== 'none'){
@@ -18292,6 +18330,8 @@ function deriveSetupStates(card, data, checks, tradePlan){
   return {
     trend_state:trendState,
     pullback_zone:pullbackZone,
+    setup_location_state:setupLocationState,
+    priceability_state:priceabilityState,
     structure_state:structureState,
     stabilisation_state:stabilisationState,
     bounce_state:bounceState,
@@ -20238,6 +20278,9 @@ function debugTickerStateSources(ticker, surface, bundle = {}){
     hardTerminalAvoid:state.hardTerminalAvoid === true,
     lifecycleState:state.lifecycleState || state.sectionKey || '',
     viability:state.viability || '',
+    structureState:state.structure || state.structureState || '',
+    setupLocationState:state.setupLocationState || state.setup_location_state || '',
+    priceabilityState:state.priceabilityState || state.priceability_state || '',
     bounce:state.bounce || ''
   });
   const shellClass = String(state.shellClass || '').trim();
@@ -22810,6 +22853,11 @@ function renderReviewWorkspace(options = {}){
       visualBucket:finalReviewVisualBucket,
       presentationBucket:finalReviewVisualBucket,
       tone:reviewVisualTone,
+      structureState:globalVerdict.structure_state || derivedStates.structureState || '',
+      structureEligibility:globalVerdict.structure_eligibility || '',
+      setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
+      priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
+      primaryBlockerSource:globalVerdict.primary_blocker_source || '',
       sourceOfTruthVisualBucket:sourceOfTruthVisualBucket || visualBucketSource || '',
       usedCachedBundle:usedCachedBundle === true,
       reviewBundleMode:projectionBundleAdopted ? 'track_projection_bundle' : (usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle'),
@@ -22840,6 +22888,11 @@ function renderReviewWorkspace(options = {}){
         visualBucket:finalReviewVisualBucket,
         presentationBucket:finalReviewVisualBucket,
         tone:reviewVisualTone,
+        structureState:globalVerdict.structure_state || derivedStates.structureState || '',
+        structureEligibility:globalVerdict.structure_eligibility || '',
+        setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
+        priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
+        primaryBlockerSource:globalVerdict.primary_blocker_source || '',
         sourceOfTruthVisualBucket:sourceOfTruthVisualBucket || visualBucketSource || '',
         usedCachedBundle:usedCachedBundle === true,
         reviewBundleMode:projectionBundleAdopted ? 'track_projection_bundle' : (usedCachedBundle === true ? 'cached_bundle' : 'fresh_bundle'),
@@ -23045,6 +23098,9 @@ function renderReviewWorkspace(options = {}){
         hardTerminalAvoid:visualState.hardTerminalAvoid === true,
         lifecycleState:reviewLifecycleBias.review_lifecycle_bias || '',
         viability:globalVerdict.viability || '',
+        structureState:globalVerdict.structure_state || derivedStates.structureState || '',
+        setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
+        priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
         bounce:globalVerdict.bounce_state || ''
       }
     )},
@@ -23092,6 +23148,10 @@ function renderReviewWorkspace(options = {}){
     {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
     {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
     {label:'Structure', value:globalVerdict.structure_state || '(none)'},
+    {label:'Structure Eligibility', value:globalVerdict.structure_eligibility || '(none)'},
+    {label:'Setup Location State', value:globalVerdict.setup_location_state || derivedStates.setupLocationState || '(none)'},
+    {label:'Priceability State', value:globalVerdict.priceability_state || derivedStates.priceabilityState || '(none)'},
+    {label:'Primary Blocker Source', value:globalVerdict.primary_blocker_source || '(none)'},
     {label:'Bounce', value:globalVerdict.bounce_state || '(none)'},
     {label:'Market', value:globalVerdict.market_regime || '(none)'},
     {label:'Volume', value:(record && record.setup && record.setup.volumeState) || '(none)'}
@@ -23137,6 +23197,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Duplicate validateCurrentPlan Removed', value:globalVerdict.duplicateValidateCurrentPlanRemoved ? 'true' : 'false'},
     {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
     {label:'Base Status Label', value:scannerStatus || '(none)'},
+    {label:'Base Status Label Non-Authoritative Legacy Debug', value:'true'},
     {label:'Base Review Label', value:displayStage || '(none)'},
     {label:'Structure Label', value:resolvedContract.structuralStateLabel || resolvedContract.finalDisplayState || '(none)'},
     {label:'Base Tradeability', value:resolvedContract.tradeabilityVerdictLabel || resolvedContract.tradeabilityLabel || '(none)'},

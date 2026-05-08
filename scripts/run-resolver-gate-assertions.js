@@ -456,6 +456,49 @@ function runSimplifiedPipelineAssertions(){
   if(missingPlan.planVisible !== false || missingPlan.planStatus !== 'missing' || missingPlan.canonicalVerdict !== 'watch' || missingPlan.visualBucket !== 'monitor'){
     throw new Error('Missing plan must produce planVisible:false and safe Watch/Monitor output.');
   }
+
+  const strongExtendedUnpriceable = pipeline.resolveRecordState({
+    ticker:'DINOX',
+    in_watchlist:true,
+    plan:{entry:62.73, stop:56.58, firstTarget:81.19},
+    marketData:{price:71.08, ma20:61, ma50:57, ma200:45, currency:'GBP'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'strong',
+      trendState:'intact',
+      setupLocationState:'extended',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'none',
+      pullbackZone:'extended',
+      volumeState:'supportive'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'needs_adjustment',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Bounce is not clear enough to price yet.',
+      reasonSummary:'Strong trend, but no clean pullback entry yet.',
+      terminal:false,
+      baseVerdict:'watch'
+    })
+  });
+  const dinoResolved = strongExtendedUnpriceable.debug && strongExtendedUnpriceable.debug.resolvedState || {};
+  if(strongExtendedUnpriceable.canonicalVerdict !== 'watch'){
+    throw new Error('Strong extended unpriceable setup must remain canonical Watch.');
+  }
+  if(strongExtendedUnpriceable.entryGatePass !== false || strongExtendedUnpriceable.nearEntryGatePass !== false){
+    throw new Error('Strong extended unpriceable setup must not pass Entry/Near Entry gates.');
+  }
+  if(dinoResolved.rejected_by_viability_gate === true || dinoResolved.lifecycle === 'drop'){
+    throw new Error('Strong extended unpriceable setup must not become terminal Avoid/Dead.');
+  }
+  if(/weakening|broken/i.test(String(strongExtendedUnpriceable.mainBlocker || dinoResolved.reason || ''))){
+    throw new Error('Strong extended unpriceable setup reason must reference priceability/location, not weakening/broken structure.');
+  }
 }
 
 runSimplifiedPipelineAssertions();

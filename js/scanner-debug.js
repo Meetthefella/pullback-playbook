@@ -434,6 +434,7 @@
       {label:'provisionalPlanBlockReason', value:globalVerdict.provisionalPlanBlockReason || '(none)'},
       {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
       {label:'Base Status Label', value:String(statusChip.primaryState || '(none)')},
+      {label:'Base Status Label Non-Authoritative Legacy Debug', value:'true'},
       {label:'Base Structure Label', value:structureQuality || '(none)'},
       {label:'Base Bounce Label', value:bounceState || '(none)'},
       {label:'Resolver Reason', value:globalVerdict.reason || '(none)'},

@@ -543,6 +543,9 @@
     const structureEligibility = String(ctx.structureEligibility || '').toLowerCase();
     const structureState = String(ctx.structureState || '').toLowerCase();
     const bounceState = String(ctx.bounceState || '').toLowerCase();
+    const setupLocationState = String(ctx.setupLocationState || '').toLowerCase();
+    const priceabilityState = String(ctx.priceabilityState || '').toLowerCase();
+    const priceabilityInferred = ctx.priceabilityInferred === true;
     const pullbackZone = String(ctx.pullbackZone || '').toLowerCase();
     const setupScore = Number.isFinite(Number(ctx.setupScore)) ? Number(ctx.setupScore) : 0;
     const planOk = ctx.planOk === true;
@@ -586,6 +589,9 @@
     const baseViabilityInputs = {
       structureEligibility,
       structureState,
+      setupLocationState,
+      priceabilityState,
+      priceabilityInferred,
       bounceState,
       hasUsefulBounce:bounceUseful,
       planStateKey:String(ctx.planStatusKey || '').toLowerCase(),
@@ -675,6 +681,14 @@
         'No low-risk entry is available yet.',
         'extended_alive_low_priority',
         'Extended alive low priority'
+      ));
+    }
+    if(structureEligibility === 'alive' && priceabilityState === 'unpriceable' && !priceabilityInferred){
+      return enrich(asLowPriority(
+        'Strong trend, but too volatile to price reliably.',
+        'Strong trend, but too volatile to price reliably.',
+        'alive_unpriceable_low_priority',
+        'Alive unpriceable low priority'
       ));
     }
     if(structureEligibility === 'damaged' && noBounce && !planOk && setupScore < 5){
@@ -816,6 +830,9 @@
     const planStatusKey = String(resolved.planStatusKey || '').toLowerCase();
     const tradeabilityState = String(displayedPlan.tradeability || '').toLowerCase();
     const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+    const setupLocationState = String(derivedStates.setupLocationState || '').toLowerCase();
+    let priceabilityState = String(derivedStates.priceabilityState || '').toLowerCase();
+    let priceabilityInferred = false;
     const volumeRequired = item && item.setup && item.setup.volumeRequired === true;
     const pullbackZone = String(derivedStates.pullbackZone || '').toLowerCase();
     const currentPrice = numericValueOrNull(item && item.marketData && item.marketData.price);
@@ -836,6 +853,12 @@
     const hasTarget = Number.isFinite(planTarget);
     const planVisible = String(displayedPlan && displayedPlan.status || '').toLowerCase() === 'valid';
     const stopDistanceTooWide = String(displayedPlan && displayedPlan.riskFit && displayedPlan.riskFit.risk_status || '').toLowerCase() === 'too_wide';
+    if(!priceabilityState){
+      priceabilityInferred = true;
+      priceabilityState = planVisible && ['tradable', 'entry', 'ready', 'action_now'].includes(tradeabilityState)
+        ? 'priceable'
+        : 'unpriceable';
+    }
     const planStatusText = String(resolved && resolved.blockerReason || '');
     const pullbackValid = nearEntryPullbackZoneOk(pullbackZone);
     const sma50 = numericValueOrNull(item && item.marketData && item.marketData.sma50);
@@ -996,6 +1019,9 @@
     const viability = resolveWatchlistViability({
       structureEligibility:structureLayer.structureEligibility,
       structureState,
+      setupLocationState,
+      priceabilityState,
+      priceabilityInferred,
       bounceState,
       pullbackZone,
       setupScore,
@@ -1026,6 +1052,8 @@
         trackedReason = 'Trend is weakening - no reliable stop level yet.';
       }else if(isExtended && ['strong','intact'].includes(structureState)){
         trackedReason = 'Trend is strong but extended beyond a safe entry zone. No low-risk entry is available yet.';
+      }else if(structureLayer.structureEligibility === 'alive' && priceabilityState === 'unpriceable' && !priceabilityInferred){
+        trackedReason = 'Strong trend, but too volatile to price reliably.';
       }else{
         trackedReason = viability.mainBlocker || viability.viabilityReason || trackedReason;
       }
@@ -1126,6 +1154,9 @@
       setup_score:Number.isFinite(setupScore) ? setupScore : null,
       priority_score_adjustment:isExtended ? -0.35 : 0,
       is_extended:isExtended,
+      setup_location_state:setupLocationState,
+      priceability_state:priceabilityState,
+      priceability_inferred:priceabilityInferred,
       structure_eligibility:structureLayer.structureEligibility,
       structure_reason:structureLayer.structureReason,
       viability:viability.viability,
@@ -1140,6 +1171,7 @@
       reject_blocked_by_incomplete_inputs:viability.rejectBlockedByIncompleteInputs === true,
       viability_visual_bucket:viability.visualBucket || '',
       main_blocker:trackedReason || viability.mainBlocker || '',
+      primary_blocker_source:(resolved && resolved.primaryBlockerSource) || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (isExtended ? 'setup_location' : (priceabilityState === 'unpriceable' && !priceabilityInferred ? 'priceability' : 'resolver'))),
       rejected_by_viability_gate:viability.viability === 'reject',
       low_priority_by_viability_gate:viability.viability === 'low_priority',
       structure_state:structureState || '',

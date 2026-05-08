@@ -61,15 +61,23 @@
     const structureState = String(globalVerdict && globalVerdict.structure_state || '').toLowerCase();
     const structureEligibility = String(globalVerdict && globalVerdict.structure_eligibility || '').toLowerCase();
     const isExtended = globalVerdict && globalVerdict.is_extended === true;
+    const setupLocationState = String(globalVerdict && globalVerdict.setup_location_state || '').toLowerCase();
+    const priceabilityState = String(globalVerdict && globalVerdict.priceability_state || '').toLowerCase();
     const mainBlocker = String(globalVerdict && globalVerdict.main_blocker || '').trim();
     const reviewLifecycleBias = String(globalVerdict && globalVerdict.review_lifecycle_bias || '').trim().toLowerCase();
     const reviewLifecycleLine1 = String(globalVerdict && globalVerdict.review_lifecycle_line1 || '').trim();
     const reviewLifecycleLine2 = String(globalVerdict && globalVerdict.review_lifecycle_line2 || '').trim();
     const trackPresentationBucket = String(globalVerdict && globalVerdict.track_presentation_bucket || '').trim().toLowerCase();
-    if(isExtended){
+    if(isExtended || setupLocationState === 'extended'){
       return {
-        line1:'No pullback structure to define entry yet.',
+        line1:'Strong trend, but no clean pullback entry yet.',
         line2:'Buyers in control, but price is stretched away from support'
+      };
+    }
+    if(setupLocationState === 'volatile' || priceabilityState === 'unpriceable'){
+      return {
+        line1:'Strong trend, but too volatile to price reliably.',
+        line2:'No actionable entry yet.'
       };
     }
     if(reviewLifecycleBias === 'diminishing' || trackPresentationBucket === 'diminishing'){

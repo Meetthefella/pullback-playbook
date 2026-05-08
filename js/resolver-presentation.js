@@ -62,6 +62,11 @@
     const structureEligibility = String(options.structureEligibility || '').trim().toLowerCase();
     const structureState = String(options.structureState || '').trim().toLowerCase();
     const viability = String(options.viability || '').trim().toLowerCase();
+    const setupLocationState = String(options.setupLocationState || '').trim().toLowerCase();
+    const priceabilityState = String(options.priceabilityState || '').trim().toLowerCase();
+    if(['extended','volatile','off_level'].includes(setupLocationState) || priceabilityState === 'unpriceable'){
+      return 'diminishing';
+    }
     if(structureEligibility === 'damaged' || structureState === 'weakening' || viability === 'low_priority'){
       return 'diminishing';
     }
@@ -83,6 +88,10 @@
     if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
     if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
     const structureEligibility = String(options && options.structureEligibility || '').toLowerCase();
+    const setupLocationState = String(options && options.setupLocationState || '').toLowerCase();
+    const priceabilityState = String(options && options.priceabilityState || '').toLowerCase();
+    if(setupLocationState === 'extended') return 'Watch - strong trend, but no clean pullback entry yet.';
+    if(setupLocationState === 'volatile' || priceabilityState === 'unpriceable') return 'Watch - strong trend, but too volatile to price reliably.';
     if(structureEligibility === 'damaged') return 'Watch - structure weakening.';
     return 'Watch - waiting for confirmation.';
   }
@@ -138,6 +147,10 @@
     const structureEligibility = String(legacyVerdict && legacyVerdict.structure_eligibility || '').trim().toLowerCase();
     const viability = String(legacyVerdict && legacyVerdict.viability || '').trim().toLowerCase();
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
+    const setupLocationState = String((derivedStates && derivedStates.setupLocationState) || (legacyVerdict && legacyVerdict.setup_location_state) || '').trim().toLowerCase();
+    const derivedPriceabilityState = String(derivedStates && derivedStates.priceabilityState || '').trim().toLowerCase();
+    const legacyPriceabilityInferred = legacyVerdict && legacyVerdict.priceability_inferred === true;
+    const priceabilityState = String(derivedPriceabilityState || (legacyPriceabilityInferred ? '' : (legacyVerdict && legacyVerdict.priceability_state)) || '').trim().toLowerCase();
     const hardStructureFailure = structureEligibility === 'broken' || structureState === 'broken';
     const weakOrWeakeningStructure = structureState === 'weakening' || structureState === 'weak';
     const weakeningLowPriorityRecovery = (
@@ -166,6 +179,8 @@
     const visualBucket = visualBucketForCanonical(finalVerdict, {
       structureEligibility,
       structureState,
+      setupLocationState,
+      priceabilityState,
       viability
     }, deps);
     let visual_tone = visualBucket;
@@ -176,11 +191,11 @@
     const summaryOptions = {
       structuralState:resolvedContract && resolvedContract.structuralState,
       structureState:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase(),
-      structureEligibility:legacyVerdict && legacyVerdict.structure_eligibility
+      structureEligibility:legacyVerdict && legacyVerdict.structure_eligibility,
+      setupLocationState,
+      priceabilityState
     };
-    const resolvedSummary = weakeningButAlive
-      ? 'Watch - setup weakening but still alive.'
-      : decisionSummaryForVerdict(renderedVerdict, summaryOptions, deps);
+    const resolvedSummary = decisionSummaryForVerdict(renderedVerdict, summaryOptions, deps);
     const cardClass = cardClassForBucket(visualBucket);
     const staleVisualFieldIgnored = true;
     const staleAvoidSuppressed = previousVerdict === 'avoid' && finalVerdict !== 'avoid';
@@ -228,6 +243,8 @@
       dead_trigger_source:null,
       explicit_invalidation_reason:legacyVerdict && legacyVerdict.explicit_invalidation_reason ? String(legacyVerdict.explicit_invalidation_reason) : '(none)',
       structure_to_label_mapping_source:'resolveVisualState(structure_guard)',
+      setup_location_state:setupLocationState,
+      priceability_state:priceabilityState,
       lifecycle_drop_reason:legacyVerdict && legacyVerdict.lifecycle_drop_reason ? String(legacyVerdict.lifecycle_drop_reason) : '(none)',
       avoid_allowed_by_structure_consistency_guard:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase() === 'broken',
       conflicting_legacy_state_detected:false,

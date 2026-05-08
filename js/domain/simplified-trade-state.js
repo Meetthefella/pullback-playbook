@@ -80,6 +80,8 @@
     const setup = item.setup && typeof item.setup === 'object' ? item.setup : {};
     return {
       structureState:String(setup.structureState || setup.structure_state || '').toLowerCase(),
+      setupLocationState:String(setup.setupLocationState || setup.setup_location_state || '').toLowerCase(),
+      priceabilityState:String(setup.priceabilityState || setup.priceability_state || '').toLowerCase(),
       trendState:String(setup.trendState || setup.trend_state || '').toLowerCase(),
       bounceState:String(setup.bounceState || setup.bounce_state || '').toLowerCase(),
       stabilisationState:String(setup.stabilisationState || setup.stabilisation_state || '').toLowerCase(),
@@ -230,6 +232,8 @@
       previousMarketDataFingerprint:previous ? previous.marketDataFingerprint : null,
       previousPlanFingerprint:previous ? previous.planFingerprint : null,
       structureState:String(derivedStates.structureState || resolvedState.structure_state || resolvedState.structural_state || '').toLowerCase(),
+      setupLocationState:String(derivedStates.setupLocationState || resolvedState.setup_location_state || '').toLowerCase(),
+      priceabilityState:String(derivedStates.priceabilityState || resolvedState.priceability_state || '').toLowerCase(),
       bounceState:String(derivedStates.bounceState || resolvedState.bounce_state || '').toLowerCase(),
       pullbackZone:String(derivedStates.pullbackZone || resolvedState.pullback_zone || '').toLowerCase(),
       planStatus:String(planState.status || result.planStatus || '').toLowerCase(),
