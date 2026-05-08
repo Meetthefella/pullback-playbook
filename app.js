@@ -9834,6 +9834,26 @@ function renderCompactResultCard(record){
   return renderCompactResultCardFromView(view);
 }
 
+function simplifiedVisualBadgeClass(visualBucket){
+  return ({
+    entry:'badge--entry ready',
+    near_entry:'badge--near-entry near',
+    monitor:'badge--monitor watch',
+    diminishing:'badge--diminishing',
+    avoid:'badge--avoid avoid'
+  })[normalizeVisualBucketForPairing(visualBucket || 'monitor')] || 'badge--monitor watch';
+}
+
+function simplifiedVisualCardClass(visualBucket){
+  return ({
+    entry:'card--entry',
+    near_entry:'card--near-entry',
+    monitor:'card--monitor',
+    diminishing:'card--diminishing',
+    avoid:'card--avoid'
+  })[normalizeVisualBucketForPairing(visualBucket || 'monitor')] || 'card--monitor';
+}
+
 /* LEGACY COLOUR LOGIC DISABLED
    Replaced by resolveGlobalVisualState(...)
    Left in place temporarily for later review
@@ -10053,69 +10073,97 @@ function cardVisualStyleAttr(setupScore, structureState){
 function renderCompactResultCardFromView(view){
   const item = view && view.item ? view.item : {};
   const setupStates = view && view.setupStates ? view.setupStates : analysisDerivedStatesFromRecord(item);
-  const statusChip = primaryShortlistStatusChip(view);
-  const isTrackedTicker = !!(item && item.watchlist && item.watchlist.inWatchlist);
-  const cachedSharedBundle = isTrackedTicker && item && item.resolvedStateBundleCache && typeof item.resolvedStateBundleCache === 'object'
-    ? withLiveRecordFromCache(item, item.resolvedStateBundleCache)
-    : null;
-  const sharedBundle = isTrackedTicker
-    ? (cachedSharedBundle || buildResolvedStateBundleFromRecord(item, {
-      source:'scan_render_shared_bundle',
-      sourceSurface:'scan',
-      reason:'scan_track_alignment'
-    }))
-    : null;
-  const visualState = sharedBundle && sharedBundle.visualState
-    ? sharedBundle.visualState
-    : resolveVisualState(item, 'scanner', {
-      displayedPlan:view && view.displayedPlan,
-      derivedStates:setupStates,
-      pendingResolution:!!(view && view.resolutionPending),
-      setupScore:view && view.setupScore
-    });
-  const sourceVerdict = globalVerdictLabel(visualState.finalVerdict || visualState.final_verdict);
+  const simplifiedState = resolveSimplifiedStateForSurface(item, 'scan', {
+    source:'scan_render',
+    mutationSource:'scan_render'
+  });
+  const canonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  const visualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
+  const tone = String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const badgeClass = simplifiedVisualBadgeClass(visualBucket);
+  const cardClass = simplifiedVisualCardClass(visualBucket);
+  const visualStateKey = canonicalVerdict === 'entry'
+    ? 'entry'
+    : (canonicalVerdict === 'near_entry'
+      ? 'near_entry'
+      : (canonicalVerdict === 'avoid' ? 'avoid' : 'watch'));
+  const className = `visual-state-card visual-state-${visualStateKey} visual-tone-${tone} ${cardClass}`;
+  const sourceVerdict = globalVerdictLabel(canonicalVerdict);
   const scoreLabel = view && view.setupScoreDisplay ? view.setupScoreDisplay : 'Setup --/10';
-  const resolvedBadge = visualState.badge || statusChip;
   const menuState = currentScanCardMenuState(item.ticker);
-  const secondaryUiMarkup = renderScanCardSecondaryUi(view);
+  const renderView = {
+    ...view,
+    simplifiedState,
+    canonicalVerdict,
+    visualBucket,
+    tone,
+    badgeLabel:simplifiedState.badgeLabel,
+    actionLabel:simplifiedState.actionLabel,
+    planVisible:simplifiedState.planVisible,
+    planStatus:simplifiedState.planStatus,
+    mainBlocker:simplifiedState.mainBlocker,
+    entryGatePass:simplifiedState.entryGatePass,
+    nearEntryGatePass:simplifiedState.nearEntryGatePass,
+    blockers:simplifiedState.blockers,
+    displayStage:globalVerdictLabel(canonicalVerdict),
+    finalVerdict:globalVerdictLabel(canonicalVerdict)
+  };
+  const secondaryUiMarkup = renderScanCardSecondaryUi(renderView);
   const companyLine = [item && item.meta && item.meta.companyName || '', item && item.meta && item.meta.exchange || ''].filter(Boolean).join(' | ');
   const technicalSummary = scanCardTechnicalSummaryForView(view);
-  const decisionSummary = visualState.decision_summary || compactReasonLineForView(view, 3) || scanCardPrimaryActionLabel(view);
+  const decisionSummary = String(simplifiedState.mainBlocker || simplifiedState.actionLabel || '').trim()
+    || compactReasonLineForView(view, 3)
+    || scanCardPrimaryActionLabel(view);
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[SIMPLIFIED_SCAN_STATE]', {
+      ticker:simplifiedState.ticker || item.ticker,
+      canonicalVerdict:simplifiedState.canonicalVerdict,
+      visualBucket:simplifiedState.visualBucket,
+      tone:simplifiedState.tone,
+      badgeLabel:simplifiedState.badgeLabel,
+      mainBlocker:simplifiedState.mainBlocker,
+      projectionBundleAuthoritative:false
+    });
+  }
   debugTickerStateSources(item && item.ticker, 'scan', {
-    source:'scan_render',
+    source:'simplified_state_pipeline',
     sectionKey:'scan',
-    canonicalVerdict:visualState.canonicalVerdict || visualState.finalVerdict || visualState.final_verdict,
-    finalVerdict:visualState.finalVerdict || visualState.final_verdict,
-    renderedVerdict:visualState.final_verdict_rendered || visualState.renderedVerdict || visualState.finalVerdict,
-    visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket,
-    presentationBucket:visualState.presentationBucket || visualState.visualBucket,
-    tone:visualState.visual_tone,
-    className:visualState.className || visualState.toneClass || '',
-    cardClass:String(visualState.className || '').match(/card--[a-z-]+/)?.[0] || '',
+    canonicalVerdict,
+    finalVerdict:canonicalVerdict,
+    renderedVerdict:canonicalVerdict,
+    visualBucket,
+    presentationBucket:visualBucket,
+    tone,
+    badgeLabel:simplifiedState.badgeLabel || '',
+    mainBlocker:simplifiedState.mainBlocker || '',
+    sourceOfTruthVisualBucket:visualBucket,
+    projectionBundleAuthoritative:false,
+    className,
+    cardClass,
     shellClass:'',
     accentClass:'',
-    styleAttr:visualState.styleAttr || '',
+    styleAttr:'',
     structure:setupStates.structureState || '',
     pullback:setupStates.pullbackZone || setupStates.pullbackState || '',
     bounce:setupStates.bounceState || '',
-    viability:visualState.legacyVerdict && visualState.legacyVerdict.viability || '',
-    viabilityReason:visualState.legacyVerdict && visualState.legacyVerdict.viability_reason || '',
-    terminalAvoidApplied:visualState.terminal_avoid_applied === true,
+    viability:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.viability || '',
+    viabilityReason:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.viability_reason || '',
+    terminalAvoidApplied:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.terminal_avoid_applied === true,
     hardTerminalAvoid:false,
-    explicitInvalidationReason:visualState.explicit_invalidation_reason || '',
+    explicitInvalidationReason:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.explicit_invalidation_reason || '',
     sourceFields:{
-      badge:'visualState.badge',
-      headlineCopy:'visualState.decision_summary',
-      actionGuidance:'resolvedContract/action fallback',
-      shellColour:'visualState.className/styleAttr',
-      leftAccentColour:'visualState.className/styleAttr',
-      sectionBucket:'visualState.presentationBucket/visualBucket'
+      badge:'simplifiedState.badgeLabel',
+      headlineCopy:'simplifiedState.mainBlocker/actionLabel',
+      actionGuidance:'simplifiedState.actionLabel',
+      shellColour:'simplifiedState.visualBucket/tone',
+      leftAccentColour:'simplifiedState.visualBucket/tone',
+      sectionBucket:'simplifiedState.visualBucket'
     },
     fromStoredFields:false,
-    fromResolvedStateBundleCache:!!(sharedBundle && cachedSharedBundle),
-    fromFreshResolverOutput:!(sharedBundle && cachedSharedBundle)
+    fromResolvedStateBundleCache:false,
+    fromFreshResolverOutput:true
   });
-  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(visualState.className || visualState.toneClass || '')}" style="${escapeHtml(visualState.styleAttr || '')}" data-visual-tone="${escapeHtml(visualState.visual_tone || '')}" data-visual-state="${escapeHtml(visualState.state || '')}" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="scan-card__header"><div class="scan-card__header-row"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div></div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(resolvedBadge.className || statusChip.className || 'watch')}">${escapeHtml(resolvedBadge.text || resolvedBadge.label || statusChip.label || 'Watch')}</span><span class="score visual-score scan-card__score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="scan-card__company tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="scan-card__body"><div class="scan-card__technical tiny">${escapeHtml(technicalSummary)}</div><div class="scan-card__decision resultreason decision-summary">${escapeHtml(decisionSummary)}</div></div><div class="scan-card__footer"><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button></div>${secondaryUiMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(className)}" style="" data-visual-tone="${escapeHtml(tone)}" data-visual-state="${escapeHtml(visualStateKey)}" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="scan-card__header"><div class="scan-card__header-row"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div></div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch')}</span><span class="score visual-score scan-card__score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="scan-card__company tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="scan-card__body"><div class="scan-card__technical tiny">${escapeHtml(technicalSummary)}</div><div class="scan-card__decision resultreason decision-summary">${escapeHtml(decisionSummary)}</div></div><div class="scan-card__footer"><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button></div>${secondaryUiMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
