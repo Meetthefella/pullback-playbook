@@ -19,6 +19,25 @@
     return '';
   }
 
+  function normalizeMainBlockerCopy(mainBlocker, resolved){
+    const text = String(mainBlocker || '').trim();
+    const state = resolved && typeof resolved === 'object' ? resolved : {};
+    const structureState = String(state.structure_state || state.structureState || '').trim().toLowerCase();
+    const rejectedByViability = state.rejected_by_viability_gate === true
+      || state.rejectedByViabilityGate === true
+      || String(state.viability || '').trim().toLowerCase() === 'reject';
+    if(
+      rejectedByViability
+      && /^structure is broken\.?$/i.test(text)
+      && ['weak','weakening','developing_loose'].includes(structureState)
+    ){
+      return structureState === 'weak'
+        ? 'Structure is weak and viability rejected the setup.'
+        : 'Trend is weakening and viability rejected the setup.';
+    }
+    return text;
+  }
+
   function buildPresentationModel({surface = 'scanner', record, planState, resolvedState, visualState} = {}){
     const item = record && typeof record === 'object' ? record : {};
     const resolved = resolvedState && typeof resolvedState === 'object' ? resolvedState : {};
@@ -40,13 +59,13 @@
       .concat(nearReasons)
       .concat(entryReasons)
       .filter(Boolean);
-    const mainBlocker = firstText([
+    const mainBlocker = normalizeMainBlockerCopy(firstText([
       resolved.main_blocker,
       resolved.promotionBlockedReason,
       visual.reason,
       resolved.reason,
       blockers
-    ]);
+    ]), resolved);
 
     return {
       ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),

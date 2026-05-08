@@ -6960,7 +6960,8 @@ function legacyWatchlistNextStateGuidance(record, lifecycleSnapshot, context = {
   if(['dead','expired'].includes(String(lifecycleSnapshot && lifecycleSnapshot.state || ''))){
     return {nextPossibleState:'None', mainBlocker:'Setup is no longer active'};
   }
-  if(['broken','weak'].includes(structureState)) return {nextPossibleState:'💀 Dead', mainBlocker:'Structure is broken'};
+  if(structureState === 'broken') return {nextPossibleState:'💀 Dead', mainBlocker:'Structure is broken'};
+  if(structureState === 'weak') return {nextPossibleState:'💀 Dead', mainBlocker:'Structure is weak and viability rejected the setup.'};
   if(['none','unconfirmed','early','attempt'].includes(bounceState)) return {nextPossibleState:'🎯 Near Entry', mainBlocker:'Needs stronger bounce'};
   if(volumeState === 'weak') return {nextPossibleState:'🎯 Near Entry', mainBlocker:'Needs stronger volume'};
   if(hostileMarket) return {nextPossibleState:'🎯 Near Entry', mainBlocker:'Needs better market conditions'};
@@ -7153,6 +7154,10 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Plan Status', value:debugPlanUI.showPlan ? (resolved.planStatusLabel || 'n/a') : (debugPlanUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.')},
     {label:'Plan Visible', value:debugPlanUI.showPlan ? 'true' : 'false'},
     {label:'RR Confidence', value:resolved.rrConfidenceLabel || 'n/a'},
+    {label:'Viability Branch ID', value:globalVerdict.viabilityBranchId || '(none)'},
+    {label:'Viability Branch Label', value:globalVerdict.viabilityBranchLabel || '(none)'},
+    {label:'Viability Branch Reason', value:globalVerdict.viabilityBranchReason || '(none)'},
+    {label:'Viability Inputs', value:JSON.stringify(globalVerdict.viabilityInputs || {}) || '(none)'},
     {label:'Capital Fit', value:capitalComfort.label || 'n/a'},
     {label:'Capital Usage', value:capitalUsageDebugText(displayedPlan)},
     {label:'Next Possible', value:debug.nextPossibleState || resolved.nextPossibleState || 'n/a'}
@@ -7426,6 +7431,10 @@ function trackCardRenderSignatureSnapshot(record){
     styleAttr:String(watchlistVisualState.styleAttr || ''),
     viability:String(globalVerdict && globalVerdict.viability || ''),
     viabilityReason:String(globalVerdict && globalVerdict.viability_reason || ''),
+    viabilityBranchId:String(globalVerdict && globalVerdict.viabilityBranchId || ''),
+    viabilityBranchLabel:String(globalVerdict && globalVerdict.viabilityBranchLabel || ''),
+    viabilityBranchReason:String(globalVerdict && globalVerdict.viabilityBranchReason || ''),
+    viabilityInputs:globalVerdict && globalVerdict.viabilityInputs || null,
     score:String((item.scan && item.scan.score) ?? ''),
     decisionSummary,
     actionGuidance,
@@ -7860,6 +7869,10 @@ function renderWatchlistCardElement(record, options = {}){
     bounce:derivedStates.bounceState || '',
     viability:globalVerdict && globalVerdict.viability || '',
     viabilityReason:globalVerdict && globalVerdict.viability_reason || '',
+    viabilityBranchId:globalVerdict && globalVerdict.viabilityBranchId || '',
+    viabilityBranchLabel:globalVerdict && globalVerdict.viabilityBranchLabel || '',
+    viabilityBranchReason:globalVerdict && globalVerdict.viabilityBranchReason || '',
+    viabilityInputs:globalVerdict && globalVerdict.viabilityInputs || null,
     terminalAvoidApplied:globalVerdict && globalVerdict.terminal_avoid_applied === true,
     hardTerminalAvoid:false,
     explicitInvalidationReason:globalVerdict && globalVerdict.explicit_invalidation_reason || '',
@@ -10148,6 +10161,10 @@ function renderCompactResultCardFromView(view){
     bounce:setupStates.bounceState || '',
     viability:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.viability || '',
     viabilityReason:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.viability_reason || '',
+    viabilityBranchId:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.viabilityBranchId || '',
+    viabilityBranchLabel:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.viabilityBranchLabel || '',
+    viabilityBranchReason:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.viabilityBranchReason || '',
+    viabilityInputs:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.viabilityInputs || null,
     terminalAvoidApplied:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.terminal_avoid_applied === true,
     hardTerminalAvoid:false,
     explicitInvalidationReason:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.explicit_invalidation_reason || '',
@@ -11327,9 +11344,17 @@ function legacyResolveFinalStateContract(record, options = {}){
   const capitalHeavy = executionCapitalHeavy(displayedPlan);
   const bounceUnconfirmed = ['none','unconfirmed','attempt','early'].includes(bounceState);
   const weakVolume = volumeState === 'weak';
-  const rrConfidenceLabel = planInvalid || planMissing || planUnrealistic
-    ? 'Invalid plan'
-    : (rrResolution.rr_label || 'Low confidence');
+  const rrConfidenceLabel = normalizeRrConfidenceLabel({
+    rrLabel:rrResolution.rr_label,
+    reason:rrResolution.reason || rrResolution.remapReason,
+    rr:rrResolution.rr_value,
+    hasPriceablePlan:displayedPlan.status === 'valid',
+    rrKnown:Number.isFinite(actionableRrValueForPlan(displayedPlan)),
+    missingEntry:displayedPlan.status !== 'valid' && !Number.isFinite(displayedPlan.entry),
+    missingStop:displayedPlan.status !== 'valid' && !Number.isFinite(displayedPlan.stop),
+    missingTarget:displayedPlan.status !== 'valid' && !Number.isFinite(displayedPlan.target),
+    impossibleMath:planInvalid || planMissing || planUnrealistic
+  });
   const planStatusLabel = planUiState.label || 'Invalid plan';
   let primaryState = String(baseEmoji.primaryState || 'monitor').toLowerCase();
   let primaryEmoji = String(baseEmoji.primaryEmoji || '🧐');
@@ -11540,7 +11565,7 @@ function legacyResolveFinalStateContract(record, options = {}){
   if(lowControl && !planInvalid) addReason('Weak control');
   if(planNeedsAdjustment && !planInvalid) addReason('Plan needs adjustment');
   if(planUnrealistic && !planInvalid) addReason('Target is too optimistic');
-  if(rrConfidenceLabel === 'Low confidence' && !planInvalid && !planUnrealistic) addReason('Low-confidence RR');
+  if(rrConfidenceLabel === 'Developing' && !planInvalid && !planUnrealistic) addReason('Developing RR confidence');
 
   const reasonSummary = reasonParts.slice(0, 2).join(' + ');
   const nonActionableButAlive = !hardStructureBroken
@@ -11627,7 +11652,7 @@ function evaluatePlanRealism(record, options = {}){
   };
 
   let rrRealism = 'invalid';
-  let rrRealismLabel = 'Unavailable';
+  let rrRealismLabel = 'Invalid';
   let credibleTargetAssessment = 'No usable plan yet';
   let credibleRr = null;
 
@@ -11637,17 +11662,17 @@ function evaluatePlanRealism(record, options = {}){
     credibleRr = rawRr;
     if(weakStructure || (optimisticTargetFlag && (bounceUnclear || hostileMarket || lowControl || weakVolume || developingSetup))){
       rrRealism = 'low';
-      rrRealismLabel = 'Low confidence';
+      rrRealismLabel = optimisticTargetFlag ? 'Optimistic' : 'Developing';
       credibleRr = Math.min(rawRr, 2.5);
       credibleTargetAssessment = optimisticTargetFlag ? 'Optimistic target for current structure' : 'Low-confidence target';
     }else if(looseStructure || developingSetup || bounceUnclear || weakVolume || hostileMarket || lowControl){
       rrRealism = 'conditional';
-      rrRealismLabel = 'Conditional';
+      rrRealismLabel = 'Developing';
       credibleRr = Math.min(rawRr, 3);
       credibleTargetAssessment = 'Needs better confirmation before trusting full target';
     }else{
       rrRealism = 'high';
-      rrRealismLabel = 'High confidence';
+      rrRealismLabel = 'Credible';
       credibleTargetAssessment = 'Target is realistic for current structure';
     }
   }
@@ -15336,6 +15361,34 @@ function actionableRrValueForPlan(displayedPlan){
   if(!Number.isFinite(plan.rewardRisk.riskPerShare) || plan.rewardRisk.riskPerShare <= 0) return null;
   if(!Number.isFinite(plan.rewardPerShare) || plan.rewardPerShare <= 0) return null;
   return plan.rewardRisk.rrRatio;
+}
+
+function normalizeRrConfidenceLabel(inputs = {}){
+  const source = inputs && typeof inputs === 'object' ? inputs : {};
+  const rawLabel = String(source.rrLabel || source.rr_label || source.rrConfidenceLabel || source.rrConfidence || '').trim().toLowerCase();
+  const rawReason = String(source.reason || source.planRealismReason || source.plan_realism_reason || '').trim().toLowerCase();
+  const resolvedRr = numericOrNull(source.resolvedRr ?? source.resolved_rr ?? source.rr ?? source.raw_rr);
+  const rrKnown = source.rrKnown === true || source.rr_known === true || Number.isFinite(resolvedRr);
+  const hasPriceablePlan = source.hasPriceablePlan === true || source.has_priceable_plan === true || source.hasProvisionalPriceablePlan === true || source.has_provisional_priceable_plan === true;
+  const impossibleMath = source.impossibleMath === true || source.impossible_math === true;
+  const malformed = source.malformed === true || source.malformed_values === true;
+  const missingPlanValue = source.missingEntry === true
+    || source.missingStop === true
+    || source.missingTarget === true
+    || source.missing_entry === true
+    || source.missing_stop === true
+    || source.missing_target === true;
+  if(hasPriceablePlan && rrKnown){
+    if(rawLabel.includes('optimistic') || rawReason.includes('optimistic')) return 'Optimistic';
+    if(rawLabel.includes('credible') || rawLabel.includes('high confidence') || rawLabel === 'high') return 'Credible';
+    if(rawLabel.includes('develop') || rawLabel.includes('conditional') || rawLabel.includes('low confidence') || rawLabel.includes('needs bounce') || rawLabel === 'low') return 'Developing';
+    return 'Developing';
+  }
+  if(impossibleMath || malformed || missingPlanValue || rawLabel === 'invalid' || rawLabel === 'invalid plan') return 'Invalid';
+  if(rawLabel.includes('optimistic') || rawReason.includes('optimistic')) return 'Optimistic';
+  if(rawLabel.includes('credible') || rawLabel.includes('high confidence') || rawLabel === 'high') return 'Credible';
+  if(rawLabel.includes('develop') || rawLabel.includes('conditional') || rawLabel.includes('low confidence') || rawLabel.includes('needs bounce') || rawLabel === 'low') return 'Developing';
+  return 'Unknown';
 }
 
 function canDisplayActionableRR(view){
@@ -22833,6 +22886,10 @@ function renderReviewWorkspace(options = {}){
     bounce:derivedStates.bounceState || '',
     viability:globalVerdict.viability || '',
     viabilityReason:globalVerdict.viability_reason || '',
+    viabilityBranchId:globalVerdict.viabilityBranchId || '',
+    viabilityBranchLabel:globalVerdict.viabilityBranchLabel || '',
+    viabilityBranchReason:globalVerdict.viabilityBranchReason || '',
+    viabilityInputs:globalVerdict.viabilityInputs || null,
     terminalAvoidApplied:canonicalAvoidActive && finalReviewVisualBucket === 'avoid',
     hardTerminalAvoid:canonicalAvoidActive && finalReviewVisualBucket === 'avoid',
     explicitInvalidationReason:explicitInvalidationReason || '',
@@ -23044,6 +23101,10 @@ function renderReviewWorkspace(options = {}){
     {label:'Plan Status', value:simplifiedState.planStatus || (planUI.diagnosticsMessage || '(none)')},
     {label:'Plan Visible', value:planUI.showPlan ? 'true' : 'false'},
     {label:'RR Confidence', value:resolvedContract.rrConfidenceLabel || '(none)'},
+    {label:'Viability Branch ID', value:globalVerdict.viabilityBranchId || '(none)'},
+    {label:'Viability Branch Label', value:globalVerdict.viabilityBranchLabel || '(none)'},
+    {label:'Viability Branch Reason', value:globalVerdict.viabilityBranchReason || '(none)'},
+    {label:'Viability Inputs', value:JSON.stringify(globalVerdict.viabilityInputs || {}) || '(none)'},
     {label:'Capital Fit', value:(capitalComfort.label || 'Unknown') || '(none)'},
     {label:'Capital Usage', value:capitalUsageDebugText(displayedPlan)},
     {label:'Next Possible', value:(globalVerdict.action && globalVerdict.action.label) || '(none)'},
@@ -25613,7 +25674,7 @@ function resolveFinalStateContract(record, options = {}){
     ? verdictCap.blockerFlags
     : {};
   const rrResolution = options.rrResolution || {
-    rr_label:planStateKey !== 'valid' ? 'Invalid plan' : 'Low confidence',
+    rr_label:planStateKey !== 'valid' ? 'Invalid' : 'Developing',
     rawResolverVerdict:finalVerdict,
     status:finalVerdict,
     remapReason:''
@@ -25761,9 +25822,17 @@ function resolveFinalStateContract(record, options = {}){
   const tradeabilityVerdict = structuralStateKey === 'dead'
     ? 'Avoid'
     : (finalVerdict || 'Watch');
-  const rrConfidenceLabel = planStateKey !== 'valid'
-    ? 'Invalid plan'
-    : (rrResolution.rr_label || 'Low confidence');
+  const rrConfidenceLabel = normalizeRrConfidenceLabel({
+    rrLabel:rrResolution.rr_label,
+    reason:rrResolution.reason || rrResolution.remapReason,
+    rr:rrResolution.rr_value,
+    hasPriceablePlan:displayedPlan.status === 'valid',
+    rrKnown:Number.isFinite(actionableRrValueForPlan(displayedPlan)),
+    missingEntry:displayedPlan.status !== 'valid' && !Number.isFinite(displayedPlan.entry),
+    missingStop:displayedPlan.status !== 'valid' && !Number.isFinite(displayedPlan.stop),
+    missingTarget:displayedPlan.status !== 'valid' && !Number.isFinite(displayedPlan.target),
+    impossibleMath:planStateKey === 'invalid' || planStateKey === 'missing'
+  });
   const remapReason = rrResolution.remapReason
     || ((tradeabilityVerdict === 'Avoid' && structuralStateKey !== 'dead') ? 'weak but still technically alive' : '');
   const reasonSummary = reasonParts.slice(0, 2).join(' + ');

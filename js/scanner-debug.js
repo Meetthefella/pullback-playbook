@@ -114,17 +114,24 @@
     if(['none','attempt'].includes(bounceState)) addReason('bounce_not_confirmed');
     if(planRealism.optimistic_target_flag) addReason('first_target_too_optimistic');
 
+    const rrCalculable = Number.isFinite(rrValue);
     let rrReliability = 'high';
-    let rrLabel = 'High confidence';
-    if(planValidation === 'needs_adjustment' || hasPlanAdjustmentBlock){
+    let rrLabel = 'Credible';
+    if(!rrCalculable || planValidation === 'invalid' || planValidation === 'missing'){
       rrReliability = 'low';
-      rrLabel = 'Invalid plan';
+      rrLabel = 'Invalid';
+    }else if(planRealism.optimistic_target_flag){
+      rrReliability = 'low';
+      rrLabel = 'Optimistic';
+    }else if(planValidation === 'needs_adjustment' || hasPlanAdjustmentBlock){
+      rrReliability = 'low';
+      rrLabel = 'Developing';
     }else if(structureState !== 'strong'){
       rrReliability = 'low';
-      rrLabel = 'Low confidence';
+      rrLabel = 'Developing';
     }else if(bounceState === 'none'){
       rrReliability = 'conditional';
-      rrLabel = 'Needs bounce';
+      rrLabel = 'Developing';
     }
     addStep('rr reliability', `${Number.isFinite(rrValue) ? Number(rrValue).toFixed(2) : 'n/a'} | ${rrLabel}`);
 

@@ -541,6 +541,7 @@
 
   function resolveWatchlistViability(ctx = {}){
     const structureEligibility = String(ctx.structureEligibility || '').toLowerCase();
+    const structureState = String(ctx.structureState || '').toLowerCase();
     const bounceState = String(ctx.bounceState || '').toLowerCase();
     const pullbackZone = String(ctx.pullbackZone || '').toLowerCase();
     const setupScore = Number.isFinite(Number(ctx.setupScore)) ? Number(ctx.setupScore) : 0;
@@ -582,9 +583,34 @@
     const incompleteInputs = incompleteInputCount > 0;
     const hardInvalidation = structureEligibility === 'broken' || hardTrendBroken || terminalAvoidFlag || hasExplicitInvalidation;
     const defaultLowPriorityBucket = structureEligibility === 'damaged' || bounceEarly ? 'diminishing' : 'monitor';
+    const baseViabilityInputs = {
+      structureEligibility,
+      structureState,
+      bounceState,
+      hasUsefulBounce:bounceUseful,
+      planStateKey:String(ctx.planStatusKey || '').toLowerCase(),
+      planValid:planOk,
+      tradeabilityOk,
+      rrOk,
+      rrKnown:credibleRrValue !== null,
+      resolvedRR:credibleRrValue,
+      setupScore,
+      pullbackZone,
+      below50WithoutReclaim:ctx.below50WithoutReclaim === true,
+      below200ma:ctx.below200ma === true,
+      ma50Below200ma:ctx.ma50Below200ma === true,
+      hardInvalidation,
+      explicitInvalidationReason:explicitInvalidationReason || '',
+      inputCompleteness,
+      rejectBlockedByIncompleteInputs:false
+    };
     const enrich = (result) => {
       const base = result && typeof result === 'object' ? result : {};
       const rejectBlockedByIncompleteInputs = base.viability === 'reject' && incompleteInputs && !hardInvalidation;
+      const viabilityInputs = {
+        ...baseViabilityInputs,
+        rejectBlockedByIncompleteInputs
+      };
       if(rejectBlockedByIncompleteInputs){
         return {
           viability:'low_priority',
@@ -593,87 +619,115 @@
           rejectReason:'',
           visualBucket:defaultLowPriorityBucket,
           inputCompleteness,
-          rejectBlockedByIncompleteInputs:true
+          rejectBlockedByIncompleteInputs:true,
+          viabilityBranchId:'incomplete_inputs_softened_low_priority',
+          viabilityBranchLabel:'Incomplete inputs softened to low priority',
+          viabilityBranchReason:'Reject softened because inputs are incomplete and no hard invalidation is present.',
+          viabilityInputs,
+          originalViabilityBranchId:base.viabilityBranchId || ''
         };
       }
       return {
         ...base,
         visualBucket:base.viability === 'reject' ? 'avoid' : (base.visualBucket || defaultLowPriorityBucket),
         inputCompleteness,
-        rejectBlockedByIncompleteInputs:false
+        rejectBlockedByIncompleteInputs:false,
+        viabilityInputs
       };
     };
-    const asReject = (viabilityReason, mainBlocker, rejectReason) => ({
+    const withBranch = (result, branchId, branchLabel, branchReason) => ({
+      ...result,
+      viabilityBranchId:branchId,
+      viabilityBranchLabel:branchLabel,
+      viabilityBranchReason:branchReason || result.viabilityReason || result.mainBlocker || ''
+    });
+    const asReject = (viabilityReason, mainBlocker, rejectReason, branchId, branchLabel) => withBranch({
       viability:'reject',
       viabilityReason,
       mainBlocker,
       rejectReason:String(rejectReason || viabilityReason || mainBlocker || 'Rejected by viability gate.')
-    });
-    const asLowPriority = (viabilityReason, mainBlocker) => ({
+    }, branchId, branchLabel, viabilityReason);
+    const asLowPriority = (viabilityReason, mainBlocker, branchId, branchLabel) => withBranch({
       viability:'low_priority',
       viabilityReason,
       mainBlocker,
       rejectReason:''
-    });
-    const asWatchlist = (viabilityReason, mainBlocker) => ({
+    }, branchId, branchLabel, viabilityReason);
+    const asWatchlist = (viabilityReason, mainBlocker, branchId, branchLabel) => withBranch({
       viability:'watchlist',
       viabilityReason,
       mainBlocker,
       rejectReason:''
-    });
+    }, branchId, branchLabel, viabilityReason);
 
     if(structureEligibility === 'broken'){
       return enrich(asReject(
         'Setup no longer viable - structure is broken.',
         'Structure is broken.',
-        'structure_broken'
+        'structure_broken',
+        'broken_structure_reject',
+        'Broken structure reject'
       ));
     }
     if(isExtended && structureEligibility === 'alive'){
       return enrich(asLowPriority(
         'Trend is strong but extended beyond a safe entry zone.',
-        'No low-risk entry is available yet.'
+        'No low-risk entry is available yet.',
+        'extended_alive_low_priority',
+        'Extended alive low priority'
       ));
     }
     if(structureEligibility === 'damaged' && noBounce && !planOk && setupScore < 5){
       return enrich(asReject(
         'Setup no longer viable - structure is weakening.',
         'Trend is weakening - no reliable stop level yet.',
-        'damaged_no_bounce_no_plan_low_score'
+        'damaged_no_bounce_no_plan_low_score',
+        'damaged_no_bounce_no_plan_low_score_reject',
+        'Damaged, no bounce, no plan, low score reject'
       ));
     }
     if(structureEligibility === 'damaged' && !tradeabilityOk && !rrOk){
       if(bounceUseful || setupScore >= 5){
         return enrich(asLowPriority(
           'Weakening setup - wait for recovery.',
-          'Trend is weakening - no reliable stop level yet.'
+          'Trend is weakening - no reliable stop level yet.',
+          'damaged_tradeability_rr_fail_softened_low_priority',
+          'Damaged tradeability/RR failure softened to low priority'
         ));
       }
       return enrich(asReject(
         'No bounce and no valid plan.',
         'Trend is weakening - no reliable stop level yet.',
-        'damaged_not_tradeable_no_rr_no_recovery'
+        'damaged_not_tradeable_no_rr_no_recovery',
+        'damaged_tradeability_rr_fail_reject',
+        'Damaged tradeability/RR failure reject'
       ));
     }
     if(setupScore < 5 && noBounce){
       return enrich(asReject(
         'Setup has slipped below watchlist quality.',
         'No bounce confirmation yet.',
-        'low_score_no_bounce'
+        'low_score_no_bounce',
+        'low_score_no_bounce_reject',
+        'Low score with no bounce reject'
       ));
     }
     if(planInvalidLabel && !viableRrExists && !bounceUseful){
       return enrich(asReject(
         'No bounce and no valid plan.',
         'Invalid plan with no credible RR.',
-        'invalid_plan_no_rr_no_bounce'
+        'invalid_plan_no_rr_no_bounce',
+        'invalid_plan_no_rr_no_bounce_reject',
+        'Invalid plan with no RR and no bounce reject'
       ));
     }
 
     if(structureEligibility === 'damaged' && bounceEarly){
       return enrich(asLowPriority(
         'Weakening setup - monitor only if it improves.',
-        'Trend is weakening - no reliable stop level yet.'
+        'Trend is weakening - no reliable stop level yet.',
+        'damaged_with_early_bounce_low_priority',
+        'Damaged structure with early bounce low priority'
       ));
     }
     if(setupScore >= 5 && setupScore < 7 && (pullbackOk || bounceEarly || structureEligibility !== 'broken')){
@@ -681,14 +735,18 @@
         'Low-priority watch - needs structure repair.',
         structureEligibility === 'damaged'
           ? 'Trend is weakening - no reliable stop level yet.'
-          : (noBounce ? 'No bounce confirmation yet.' : 'Conditions are not strong enough for active focus.')
+          : (noBounce ? 'No bounce confirmation yet.' : 'Conditions are not strong enough for active focus.'),
+        'mid_score_context_low_priority',
+        'Mid-score contextual low priority'
       ));
     }
 
     if(structureEligibility === 'alive' && (pullbackOk || bounceEarly || setupScore >= 7)){
       return enrich(asWatchlist(
         'Structurally alive - waiting for confirmation.',
-        noBounce ? 'No bounce confirmation yet.' : 'Needs confirmation before promotion.'
+        noBounce ? 'No bounce confirmation yet.' : 'Needs confirmation before promotion.',
+        'alive_watchlist',
+        'Alive watchlist'
       ));
     }
 
@@ -696,7 +754,9 @@
       'Conditions are not strong enough for active focus.',
       structureEligibility === 'damaged'
         ? 'Trend is weakening - no reliable stop level yet.'
-        : (noBounce ? 'No bounce confirmation yet.' : 'No pullback structure to define entry yet.')
+        : (noBounce ? 'No bounce confirmation yet.' : 'No pullback structure to define entry yet.'),
+      'fallback_low_priority',
+      'Fallback low priority'
     ));
   }
 
@@ -919,6 +979,7 @@
     let trackedReason = guardedVerdict.reason || reason;
     const viability = resolveWatchlistViability({
       structureEligibility:structureLayer.structureEligibility,
+      structureState,
       bounceState,
       pullbackZone,
       setupScore,
@@ -934,7 +995,10 @@
       hasTarget,
       hardTrendBroken:trendState === 'broken' || (priceBelow50MA && weakStructure),
       terminalAvoidFlag:item && item.terminal_avoid_applied === true,
-      explicitInvalidationReason
+      explicitInvalidationReason,
+      below50WithoutReclaim:priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true)),
+      below200ma:priceBelow200MA,
+      ma50Below200ma:ma50Below200MA
     });
     if(trackedVerdict !== 'entry' && trackedVerdict !== 'near_entry'){
       if(viability.viability === 'reject'){
@@ -1050,6 +1114,11 @@
       structure_reason:structureLayer.structureReason,
       viability:viability.viability,
       viability_reason:viability.viabilityReason,
+      viabilityBranchId:viability.viabilityBranchId || '',
+      viabilityBranchLabel:viability.viabilityBranchLabel || '',
+      viabilityBranchReason:viability.viabilityBranchReason || '',
+      viabilityInputs:viability.viabilityInputs || null,
+      originalViabilityBranchId:viability.originalViabilityBranchId || '',
       reject_reason:viability.rejectReason || '',
       input_completeness:viability.inputCompleteness || null,
       reject_blocked_by_incomplete_inputs:viability.rejectBlockedByIncompleteInputs === true,
