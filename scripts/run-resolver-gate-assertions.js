@@ -67,6 +67,15 @@ function extractFunctionSource(source, functionName){
   throw new Error(`Unable to extract ${functionName} from app.js.`);
 }
 
+function extractRegistryAccessorSource(source){
+  const start = source.indexOf('const SCANNER_PROJECTION_FIELD_REGISTRY');
+  if(start < 0) throw new Error('Unable to find SCANNER_PROJECTION_FIELD_REGISTRY in app.js.');
+  const helperSource = extractFunctionSource(source, 'scannerProjectionFieldRegistry');
+  const helperStart = source.indexOf(helperSource, start);
+  if(helperStart < 0) throw new Error('Unable to find scannerProjectionFieldRegistry after registry in app.js.');
+  return source.slice(start, helperStart + helperSource.length);
+}
+
 function runReviewProjectionAssertions(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const projectionSandbox = {
@@ -393,6 +402,37 @@ function runReviewProjectionAssertions(){
   if(!/^Avoid for now/i.test(String(blockedChecklistSummary || '')) || /Strong uptrend|broken/i.test(String(blockedChecklistSummary || ''))){
     throw new Error('Blocked Review checklist summary must lead with blocked/no-actionable-plan language, not bullish summary copy.');
   }
+
+  const recoveryChecklistContext = {
+    canonicalVerdict:'watch',
+    visualBucket:'diminishing',
+    mainBlocker:'Avoid for now - setup is too volatile to price reliably.',
+    planVisible:false,
+    planStatus:'invalid',
+    planValid:false,
+    entry:250,
+    stop:255,
+    target:245,
+    structureState:'broken',
+    bounceState:'attempt',
+    stabilisationState:'none',
+    pullbackZone:'extended',
+    viability:'low_priority',
+    rejectedByViabilityGate:false,
+    nonTerminalRecoveryBlocker:true
+  };
+  const recoveryChecklist = projectionSandbox.resolvedReviewChecksForDisplay(rawBullishChecklist, recoveryChecklistContext);
+  const recoverySummary = projectionSandbox.buildSummary(
+    recoveryChecklist,
+    projectionSandbox.scoreAndStatusFromChecks(recoveryChecklist, recoveryChecklistContext).status,
+    recoveryChecklistContext
+  );
+  if(recoveryChecklist.stabilising === true || recoveryChecklist.targetDefined === true){
+    throw new Error('Volatile recovery checklist must not keep stabilising/target checks from raw bullish inputs.');
+  }
+  if(/Structure is broken|Strong uptrend/i.test(String(recoverySummary || '')) || !/volatile|No actionable plan/i.test(String(recoverySummary || ''))){
+    throw new Error('Volatile recovery checklist summary must use non-terminal volatility/no-actionable-plan wording.');
+  }
 }
 
 runReviewProjectionAssertions();
@@ -567,10 +607,337 @@ function runSimplifiedPipelineAssertions(){
   if(/weakening|broken/i.test(String(strongExtendedUnpriceable.mainBlocker || dinoResolved.reason || ''))){
     throw new Error('Strong extended unpriceable setup reason must reference priceability/location, not weakening/broken structure.');
   }
+
+  const volatileRecovery = pipeline.resolveRecordState({
+    ticker:'TSLAX',
+    in_watchlist:true,
+    reclaimAttempt:true,
+    reclaimsLevel:true,
+    plan:{entry:250, stop:255, firstTarget:245},
+    marketData:{price:260, ma20:230, ma50:220, ma200:180, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'broken',
+      trendState:'strong',
+      setupLocationState:'volatile',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'attempt',
+      pullbackZone:'extended',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Avoid',
+      structuralState:'dead',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'invalid',
+      tradeabilityVerdict:'Avoid',
+      blockerReason:'Structure is broken.',
+      reasonSummary:'Structure is broken.',
+      terminal:true,
+      baseVerdict:'avoid'
+    })
+  });
+  const volatileResolved = volatileRecovery.debug && volatileRecovery.debug.resolvedState || {};
+  const volatileReasonText = [
+    volatileRecovery.mainBlocker,
+    volatileResolved.reason,
+    volatileResolved.main_blocker,
+    volatileResolved.semantic_blocker_reason
+  ].join(' | ');
+  if(volatileRecovery.entryGatePass !== false || volatileRecovery.nearEntryGatePass !== false){
+    throw new Error('Volatile recovery setup must not pass Entry/Near Entry gates.');
+  }
+  if(/structure is broken|dead|terminal/i.test(volatileReasonText)){
+    throw new Error('Volatile recovery setup must not display terminal broken/dead wording.');
+  }
+  if(!/volatile|recovery attempt|stabili[sz]e|price reliably|pullback/i.test(volatileReasonText)){
+    throw new Error('Volatile recovery setup reason must mention volatility/recovery/stabilisation/priceability.');
+  }
+  if(volatileResolved.non_terminal_recovery_blocker !== true || !volatileResolved.semantic_blocker_code){
+    throw new Error('Volatile recovery setup must expose semantic non-terminal blocker debug fields.');
+  }
+
+  const legacyAiSaysReady = pipeline.resolveRecordState({
+    ticker:'AILEGACY',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:50, ma20:52, ma50:55, ma200:40, currency:'GBP'},
+    review:{
+      analysisState:{
+        normalized:{
+          ai_observation_only:true,
+          verdict:'Entry',
+          final_verdict:'Entry',
+          coach_summary:'Looks ready for entry from the AI text.'
+        }
+      }
+    }
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'weak',
+      trendState:'weak',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'near_50ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'No actionable plan yet.',
+      reasonSummary:'Plan not ready.',
+      terminal:false,
+      baseVerdict:'watch'
+    })
+  });
+  if(['entry','near_entry'].includes(legacyAiSaysReady.canonicalVerdict) || legacyAiSaysReady.entryGatePass !== false || legacyAiSaysReady.nearEntryGatePass !== false){
+    throw new Error('Legacy AI verdict/readiness text must not promote weak/no-plan resolver state.');
+  }
 }
 
 runSimplifiedPipelineAssertions();
 
+function runAiContractAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const promptSource = extractFunctionSource(appSource, 'buildPromptBody');
+  if(!/chart coach|observation and explanation only|deterministic resolver/i.test(promptSource)){
+    throw new Error('AI prompt must frame the model as an observation-only chart coach.');
+  }
+  if(/verdict must be|app_verdict_ceiling|quality_score =|confidence_score =|Always propose entry/i.test(promptSource)){
+    throw new Error('AI prompt must not request verdicts, app scores, readiness ceilings, or trade-plan authority.');
+  }
+  if(!/coach_summary|constructive_evidence|risk_evidence|what_needs_to_improve|ai_observation_only/i.test(promptSource)){
+    throw new Error('AI prompt must request evidence/narrative fields.');
+  }
+  const normalizeSource = extractFunctionSource(appSource, 'normalizeAnalysisResponse');
+  if(!/aiObservation|rawOpinion|final_verdict:''|ai_observation_only:true/i.test(normalizeSource)){
+    throw new Error('AI ingestion must quarantine legacy verdict-like fields as non-authoritative observation data.');
+  }
+  const normalizeSandbox = {
+    cloneData(value, fallback){
+      if(value === undefined || value === null) return fallback;
+      return JSON.parse(JSON.stringify(value));
+    }
+  };
+  vm.createContext(normalizeSandbox);
+  vm.runInContext(normalizeSource, normalizeSandbox, {filename:'app.js#normalizeAnalysisResponse'});
+  const normalized = normalizeSandbox.normalizeAnalysisResponse({
+    coach_summary:'Constructive, but not ready.',
+    verdict:'Watch',
+    aiObservation:{
+      rawOpinion:{
+        verdict:'Entry',
+        final_verdict:'Entry',
+        entry:'101',
+        stop:'95',
+        first_target:'120'
+      }
+    }
+  });
+  if(!normalized || normalized.aiObservation.rawOpinion.verdict !== 'Entry' || normalized.entry || normalized.first_target || normalized.final_verdict){
+    throw new Error('Frontend AI normalization must preserve supplied rawOpinion while keeping canonical plan/verdict fields blank.');
+  }
+  const effectivePlanSource = extractFunctionSource(appSource, 'effectivePlanForRecord');
+  if(/analysis\.plan_metrics_valid|source:'ai'/.test(effectivePlanSource)){
+    throw new Error('Effective plan must not source canonical plan levels from AI observation output.');
+  }
+  const mergeLegacySource = extractFunctionSource(appSource, 'mergeLegacyCardIntoRecord');
+  if(/source:'analysis'/.test(mergeLegacySource) || !/rawPlanOpinion|nonAuthoritative/.test(mergeLegacySource)){
+    throw new Error('Legacy card merge must quarantine lastAnalysis plan levels instead of writing canonical record.plan.');
+  }
+  const analysisVerdictSource = extractFunctionSource(appSource, 'analysisVerdictForRecord');
+  if(/normalizedAnalysis|aiVerdict|final_verdict \|\| normalizedAnalysis\.verdict/.test(analysisVerdictSource)){
+    throw new Error('AI verdict fields must not participate in canonical/display verdict selection.');
+  }
+  const evidenceSandbox = {};
+  vm.createContext(evidenceSandbox);
+  vm.runInContext(extractRegistryAccessorSource(appSource), evidenceSandbox, {filename:'app.js#scannerProjectionFieldRegistry'});
+  [
+    'resolvePullbackInterpretation',
+    'projectionValue',
+    'scannerProjectionFieldRegistry',
+    'scannerProjectionValues',
+    'hasUsableAnalysisProjection',
+    'scannerProjectionPresentFields',
+    'scannerProjectionTrustedFields',
+    'hasAiObservationEvidenceHints',
+    'resolveDerivedStateSource',
+    'aiObservationEvidenceStates',
+    'analysisDerivedStatesFromRecord'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});
+  });
+  const directDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
+    review:{
+      normalizedAnalysis:{
+        ai_observation_only:true,
+        coach_summary:'Strong trend, but price is extended and too volatile to price reliably.',
+        constructive_evidence:['Strong uptrend remains intact.'],
+        risk_evidence:['No clean pullback base and no reliable stop yet.'],
+        bounce_evidence:'Rebound attempt, not confirmed.',
+        priceability_evidence:'Too volatile to price reliably.'
+      }
+    }
+  });
+  if(directDerived.derivedStateSource !== 'ai_observation_hints' || directDerived.aiObservationEvidenceApplied !== true || directDerived.structureState !== 'unknown' || directDerived.pullbackZone !== 'none' || directDerived.setupLocationState !== 'none' || directDerived.priceabilityState !== '' || directDerived.aiEvidenceStructureHint !== 'mixed' || directDerived.aiEvidenceLocationHint !== 'extended' || directDerived.aiEvidencePriceabilityHint !== 'unpriceable' || directDerived.aiEvidenceBounceHint !== 'attempt_observed'){
+    throw new Error('Direct chart-analysis records without scanner projection must expose non-authoritative ai_observation_evidence hints.');
+  }
+  const directEvidence = evidenceSandbox.aiObservationEvidenceStates({
+    ai_observation_only:true,
+    coach_summary:'Strong trend, but price is extended and too volatile to price reliably.'
+  });
+  if(Object.keys(directEvidence).some(key => /(?:^|_)(structure|trend|bounce|volume|priceability|stabilisation|setup_location)_state$/.test(key))){
+    throw new Error('AI observation evidence must not expose canonical-looking *_state fields.');
+  }
+  const aiBrokenDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
+    review:{
+      normalizedAnalysis:{
+        ai_observation_only:true,
+        coach_summary:'The trend looks broken and damaged, with failed structure.',
+        risk_evidence:['Trend broken. Structure failed.']
+      }
+    }
+  });
+  if(aiBrokenDerived.structureState !== 'unknown' || aiBrokenDerived.aiEvidenceStructureHint !== 'damaged_context'){
+    throw new Error('AI observation evidence must not emit hard broken/weakening/intact/strong structureState.');
+  }
+  const metadataOnlyDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
+    scan:{analysisProjection:{scan_type:'20MA', setup_type_reason:'metadata only'}},
+    review:{
+      normalizedAnalysis:{
+        ai_observation_only:true,
+        coach_summary:'Trend broken and damaged, but this is AI observation only.'
+      }
+    }
+  });
+  if(metadataOnlyDerived.derivedStateSource !== 'ai_observation_hints' || metadataOnlyDerived.structureState !== 'unknown' || metadataOnlyDerived.aiEvidenceStructureHint !== 'damaged_context'){
+    throw new Error('Metadata-only scanner projection must not suppress neutral AI evidence fallback.');
+  }
+  const camelCaseProjected = evidenceSandbox.analysisDerivedStatesFromRecord({
+    scan:{analysisProjection:{structureState:'broken', bounceState:'none', pullbackZone:'near_50ma', stabilisationState:'none'}},
+    review:{
+      normalizedAnalysis:{
+        ai_observation_only:true,
+        coach_summary:'AI says constructive recovery, but scanner projection owns state.'
+      }
+    }
+  });
+  if(camelCaseProjected.derivedStateSource !== 'scanner_projection+ai_observation_hints' || camelCaseProjected.structureState !== 'broken' || camelCaseProjected.bounceState !== 'none' || camelCaseProjected.pullbackZone !== 'near_50ma' || camelCaseProjected.aiObservationEvidenceApplied !== true || !camelCaseProjected.scannerProjectionTrustedFieldsApplied.includes('structureState')){
+    throw new Error('CamelCase scanner projection fields must be detected and consumed consistently.');
+  }
+  const projectedDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
+    scan:{analysisProjection:{structure_state:'weak', bounce_state:'none', priceability_state:'unpriceable'}},
+    review:{
+      normalizedAnalysis:{
+        ai_observation_only:true,
+        coach_summary:'Strong trend with confirmed bounce.',
+        priceability_evidence:'Looks priceable.'
+      }
+    }
+  });
+  if(projectedDerived.derivedStateSource !== 'scanner_projection+ai_observation_hints' || projectedDerived.aiObservationEvidenceApplied !== true || projectedDerived.structureState !== 'weak' || projectedDerived.bounceState !== 'none' || projectedDerived.priceabilityState !== 'unpriceable' || !projectedDerived.scannerProjectionTrustedFieldsApplied.includes('bounceState') || projectedDerived.aiEvidenceBounceHint !== 'confirmed_observed'){
+    throw new Error('Scanner projection must win over AI observation evidence hints.');
+  }
+  const priceabilityOnlyProjected = evidenceSandbox.analysisDerivedStatesFromRecord({
+    scan:{analysisProjection:{priceability_state:'unpriceable'}},
+    review:{normalizedAnalysis:null}
+  });
+  if(priceabilityOnlyProjected.derivedStateSource !== 'scanner_projection' || priceabilityOnlyProjected.priceabilityState !== 'unpriceable' || !priceabilityOnlyProjected.scannerProjectionTrustedFieldsApplied.includes('priceabilityState')){
+    throw new Error('Consumed scanner priceability field must be reflected in source diagnostics.');
+  }
+  const metadataOnlyProjectionFields = evidenceSandbox.analysisDerivedStatesFromRecord({
+    scan:{analysisProjection:{scan_type:'20MA', setup_type_reason:'metadata only'}},
+    review:{normalizedAnalysis:null}
+  });
+  if(metadataOnlyProjectionFields.derivedStateSource !== 'unknown' || metadataOnlyProjectionFields.scannerProjectionTrustedFieldsApplied.length !== 0 || !metadataOnlyProjectionFields.scannerProjectionFieldsPresent.includes('scanType')){
+    throw new Error('Metadata-only scanner projection must be present but not trusted/applied.');
+  }
+  const partialProjected = evidenceSandbox.analysisDerivedStatesFromRecord({
+    scan:{analysisProjection:{pullback_zone:'near_20ma'}},
+    review:{
+      normalizedAnalysis:{
+        ai_observation_only:true,
+        coach_summary:'Trend broken and damaged, but this is AI observation only.',
+        bounce_evidence:'Bounce attempt observed.'
+      }
+    }
+  });
+  if(partialProjected.derivedStateSource !== 'scanner_projection+ai_observation_hints' || partialProjected.aiObservationEvidenceApplied !== true || partialProjected.pullbackZone !== 'near_20ma' || partialProjected.structureState !== 'unknown' || partialProjected.bounceState !== '' || partialProjected.aiEvidenceStructureHint !== 'damaged_context' || !partialProjected.scannerProjectionTrustedFieldsApplied.includes('pullbackZone')){
+    throw new Error('Partial scanner projection must merge per-field without allowing AI to emit canonical structure/bounce.');
+  }
+  const unknownStructurePromotion = resolverCore.resolveGlobalVerdict({
+    ticker:'AINEUTRAL',
+    in_watchlist:true,
+    plan:{entry:100, stop:95, firstTarget:115},
+    marketData:{price:101, ma20:100, ma50:98, ma200:90, currency:'USD'}
+  }, {
+    analysisDerivedStatesFromRecord:() => ({
+      structureState:'unknown',
+      trendState:'',
+      bounceState:'confirmed',
+      pullbackZone:'near_20ma',
+      stabilisationState:'clear',
+      volumeState:'strong'
+    }),
+    effectivePlanForRecord:() => ({entry:100, stop:95, firstTarget:115}),
+    deriveCurrentPlanState:() => ({
+      entry:100,
+      stop:95,
+      target:115,
+      status:'valid',
+      tradeability:'entry',
+      rewardRisk:{valid:true, rrRatio:3},
+      riskFit:{risk_status:'ok'},
+      capitalFit:{capital_fit:'ok'}
+    }),
+    applySetupConfirmationPlanGate:(unusedRecord, displayedPlan) => displayedPlan,
+    resolveFinalStateContract:() => ({
+      finalVerdict:'Entry',
+      structuralState:'entry',
+      actionStateKey:'ready_to_act',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Entry',
+      blockerReason:'',
+      terminal:false,
+      baseVerdict:'entry'
+    }),
+    resolvePreLifecycleStateContract:() => ({
+      finalVerdict:'Entry',
+      structuralState:'entry',
+      actionStateKey:'ready_to_act',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Entry',
+      blockerReason:'',
+      terminal:false,
+      baseVerdict:'entry'
+    }),
+    baseVerdictFromResolvedContract:() => 'entry',
+    evaluatePlanRealism:() => ({credible_rr:3}),
+    setupScoreForRecord:() => 9,
+    scannerScoreGradientClass:() => '',
+    isHostileMarketStatus:() => false,
+    state:{marketStatus:''}
+  });
+  if(unknownStructurePromotion.entry_gate_pass === true || unknownStructurePromotion.near_entry_gate_pass === true){
+    throw new Error('Unknown structure from AI fallback must not allow Entry/Near Entry promotion.');
+  }
+  const analyseSetupSource = fs.readFileSync(path.join(root, 'netlify/functions/analyse-setup.js'), 'utf8');
+  if(!/max_output_tokens:\s*(9\d\d|1\d{3,})/.test(analyseSetupSource)){
+    throw new Error('AI chart-coach endpoint must allow enough output tokens for the expanded evidence schema.');
+  }
+  if(/Entry, Near Entry, Watch, Monitor, Diminishing, Avoid, Buy, Sell, or Hold/.test(analyseSetupSource)){
+    throw new Error('AI endpoint prompt must not prime explicit final app labels.');
+  }
+}
+
+runAiContractAssertions();
+
 console.log(`Resolver gate assertions passed (${results.length} cases).`);
 console.log('Review projection invariant assertions passed.');
 console.log('Simplified state pipeline assertions passed.');
+console.log('AI chart-coach contract assertions passed.');

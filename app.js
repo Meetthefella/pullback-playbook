@@ -6,10 +6,10 @@ const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.4.10';
+const APP_VERSION = 'v4.4.11';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.4.10',
+    version:'4.4.11',
     commit:'817dad5',
     branch:'main',
     builtAt:'2026-05-06T10:39Z'
@@ -2853,6 +2853,8 @@ function analysisDerivedStatesFromRecord(record){
   const analysisProjection = rawRecord.scan && rawRecord.scan.analysisProjection && typeof rawRecord.scan.analysisProjection === 'object'
     ? rawRecord.scan.analysisProjection
     : {};
+  const hasAnalysisProjection = hasUsableAnalysisProjection(analysisProjection);
+  const scannerValues = scannerProjectionValues(analysisProjection);
   const normalizedAnalysis = rawRecord.review
     && rawRecord.review.analysisState
     && rawRecord.review.analysisState.normalized
@@ -2861,30 +2863,182 @@ function analysisDerivedStatesFromRecord(record){
       : (rawRecord.review && rawRecord.review.normalizedAnalysis && typeof rawRecord.review.normalizedAnalysis === 'object'
       ? rawRecord.review.normalizedAnalysis
       : {});
+  const aiEvidence = aiObservationEvidenceStates(normalizedAnalysis);
+  const aiObservationEvidenceApplied = hasAiObservationEvidenceHints(aiEvidence);
+  const scannerProjectionFieldsPresent = scannerProjectionPresentFields(scannerValues);
+  const scannerProjectionTrustedFieldsApplied = scannerProjectionTrustedFields(scannerValues);
+  const derivedStateSource = resolveDerivedStateSource({
+    hasAnalysisProjection,
+    scannerProjectionTrustedFieldsApplied,
+    aiObservationEvidenceApplied
+  });
   const pullback = resolvePullbackInterpretation({
-    pullbackZone:analysisProjection.pullback_zone || normalizedAnalysis.pullback_zone,
-    pullbackStatus:analysisProjection.pullback_status || normalizedAnalysis.pullback_status,
-    chartRead:normalizedAnalysis.plain_english_chart_read || normalizedAnalysis.chart_read,
-    keyReasons:normalizedAnalysis.key_reasons,
-    risks:normalizedAnalysis.risks
+    pullbackZone:scannerValues.pullbackZone,
+    pullbackStatus:scannerValues.pullbackStatus,
+    chartRead:'',
+    keyReasons:[],
+    risks:[]
   });
   return {
-    trendState:String(analysisProjection.trend_state || analysisProjection.trend_status || normalizedAnalysis.trend_state || '').trim().toLowerCase(),
+    trendState:String(scannerValues.trendState || '').trim().toLowerCase(),
     pullbackZone:pullback.pullbackZone,
     pullbackState:pullback.pullbackState,
     pullbackQuality:pullback.pullbackQuality,
-    structureState:String(analysisProjection.structure_state || normalizedAnalysis.structure_state || '').trim().toLowerCase(),
-    setupLocationState:String(analysisProjection.setup_location_state || normalizedAnalysis.setup_location_state || pullback.pullbackState || '').trim().toLowerCase(),
-    priceabilityState:String(analysisProjection.priceability_state || normalizedAnalysis.priceability_state || '').trim().toLowerCase(),
-    stabilisationState:String(analysisProjection.stabilisation_state || normalizedAnalysis.stabilisation_state || '').trim().toLowerCase(),
-    bounceState:String(analysisProjection.bounce_state || normalizedAnalysis.bounce_state || '').trim().toLowerCase(),
-    volumeState:String(analysisProjection.volume_state || normalizedAnalysis.volume_state || '').trim().toLowerCase(),
-    scanType:String(analysisProjection.scan_type || normalizedAnalysis.scan_type || '').trim(),
-    evaluationScanType:String(analysisProjection.evaluation_scan_type || normalizedAnalysis.evaluation_scan_type || '').trim(),
-    importedScanType:String(analysisProjection.imported_scan_type || normalizedAnalysis.imported_scan_type || '').trim(),
-    globalSetupType:String(analysisProjection.global_setup_type || normalizedAnalysis.global_setup_type || '').trim(),
-    setupTypeOverlapDetected:String(analysisProjection.setup_type_overlap_detected || normalizedAnalysis.setup_type_overlap_detected || '').trim().toLowerCase(),
-    setupTypeReason:String(analysisProjection.setup_type_reason || normalizedAnalysis.setup_type_reason || '').trim()
+    structureState:String(scannerValues.structureState || (hasAnalysisProjection || aiObservationEvidenceApplied ? 'unknown' : '')).trim().toLowerCase(),
+    setupLocationState:String(scannerValues.setupLocationState || pullback.pullbackState || '').trim().toLowerCase(),
+    priceabilityState:String(scannerValues.priceabilityState || '').trim().toLowerCase(),
+    stabilisationState:String(scannerValues.stabilisationState || '').trim().toLowerCase(),
+    bounceState:String(scannerValues.bounceState || '').trim().toLowerCase(),
+    volumeState:String(scannerValues.volumeState || '').trim().toLowerCase(),
+    scanType:String(scannerValues.scanType || '').trim(),
+    evaluationScanType:String(scannerValues.evaluationScanType || '').trim(),
+    importedScanType:String(scannerValues.importedScanType || '').trim(),
+    globalSetupType:String(scannerValues.globalSetupType || '').trim(),
+    setupTypeOverlapDetected:String(scannerValues.setupTypeOverlapDetected || '').trim().toLowerCase(),
+    setupTypeReason:String(scannerValues.setupTypeReason || '').trim(),
+    aiObservationOnly:normalizedAnalysis.ai_observation_only === true,
+    derivedStateSource,
+    scannerProjectionFieldsPresent,
+    scannerProjectionTrustedFieldsApplied,
+    aiObservationEvidence:aiObservationEvidenceApplied, // Back-compatible alias for aiObservationEvidenceApplied in older debug consumers.
+    aiObservationEvidenceApplied,
+    aiEvidenceStructureHint:String(aiEvidence.aiEvidenceStructureHint || '').trim(),
+    aiEvidenceLocationHint:String(aiEvidence.aiEvidenceLocationHint || '').trim(),
+    aiEvidencePriceabilityHint:String(aiEvidence.aiEvidencePriceabilityHint || '').trim(),
+    aiEvidenceBounceHint:String(aiEvidence.aiEvidenceBounceHint || '').trim(),
+    aiEvidenceStabilisationHint:String(aiEvidence.aiEvidenceStabilisationHint || '').trim(),
+    aiEvidenceVolumeHint:String(aiEvidence.aiEvidenceVolumeHint || '').trim()
+  };
+}
+
+function projectionValue(projection, ...fields){
+  const source = projection && typeof projection === 'object' ? projection : {};
+  for(let index = 0; index < fields.length; index += 1){
+    const value = source[fields[index]];
+    if(value !== null && value !== undefined && String(value).trim() !== '') return value;
+  }
+  return '';
+}
+
+const SCANNER_PROJECTION_FIELD_REGISTRY = [
+  {key:'structureState', aliases:['structure_state', 'structureState'], trusted:true},
+  {key:'trendState', aliases:['trend_state', 'trendState', 'trend_status', 'trendStatus'], trusted:true},
+  {key:'pullbackZone', aliases:['pullback_zone', 'pullbackZone'], trusted:true},
+  {key:'pullbackStatus', aliases:['pullback_status', 'pullbackStatus'], trusted:true},
+  {key:'bounceState', aliases:['bounce_state', 'bounceState'], trusted:true},
+  {key:'stabilisationState', aliases:['stabilisation_state', 'stabilisationState'], trusted:true},
+  {key:'setupLocationState', aliases:['setup_location_state', 'setupLocationState', 'setup_location', 'setupLocation'], trusted:true},
+  {key:'priceabilityState', aliases:['priceability_state', 'priceabilityState'], trusted:true},
+  {key:'volumeState', aliases:['volume_state', 'volumeState'], trusted:true},
+  {key:'scanType', aliases:['scan_type', 'scanType'], trusted:false},
+  {key:'evaluationScanType', aliases:['evaluation_scan_type', 'evaluationScanType'], trusted:false},
+  {key:'importedScanType', aliases:['imported_scan_type', 'importedScanType'], trusted:false},
+  {key:'globalSetupType', aliases:['global_setup_type', 'globalSetupType'], trusted:false},
+  {key:'setupTypeOverlapDetected', aliases:['setup_type_overlap_detected', 'setupTypeOverlapDetected'], trusted:false},
+  {key:'setupTypeReason', aliases:['setup_type_reason', 'setupTypeReason'], trusted:false}
+];
+
+function scannerProjectionFieldRegistry(){
+  return SCANNER_PROJECTION_FIELD_REGISTRY.slice();
+}
+
+function scannerProjectionValues(analysisProjection){
+  const projection = analysisProjection && typeof analysisProjection === 'object' ? analysisProjection : {};
+  return scannerProjectionFieldRegistry().reduce((values, field) => {
+    values[field.key] = projectionValue(projection, ...field.aliases);
+    return values;
+  }, {});
+}
+
+function hasUsableAnalysisProjection(analysisProjection){
+  const values = scannerProjectionValues(analysisProjection);
+  return scannerProjectionFieldRegistry()
+    .filter(field => field.trusted)
+    .some(field => String(values[field.key] || '').trim() !== '');
+}
+
+function scannerProjectionPresentFields(scannerValues){
+  const values = scannerValues && typeof scannerValues === 'object' ? scannerValues : {};
+  return scannerProjectionFieldRegistry()
+    .filter(field => values[field.key] !== null && values[field.key] !== undefined && String(values[field.key]).trim() !== '')
+    .map(field => field.key);
+}
+
+function scannerProjectionTrustedFields(scannerValues){
+  const values = scannerValues && typeof scannerValues === 'object' ? scannerValues : {};
+  return scannerProjectionFieldRegistry()
+    .filter(field => field.trusted && values[field.key] !== null && values[field.key] !== undefined && String(values[field.key]).trim() !== '')
+    .map(field => field.key);
+}
+
+function hasAiObservationEvidenceHints(aiEvidence){
+  const evidence = aiEvidence && typeof aiEvidence === 'object' ? aiEvidence : {};
+  return [
+    evidence.aiEvidenceStructureHint,
+    evidence.aiEvidenceLocationHint,
+    evidence.aiEvidencePriceabilityHint,
+    evidence.aiEvidenceBounceHint,
+    evidence.aiEvidenceStabilisationHint,
+    evidence.aiEvidenceVolumeHint
+  ].some(value => {
+    const hint = String(value || '').trim().toLowerCase();
+    return !!hint;
+  });
+}
+
+function resolveDerivedStateSource({hasAnalysisProjection = false, scannerProjectionTrustedFieldsApplied = [], aiObservationEvidenceApplied = false} = {}){
+  const scannerFields = Array.isArray(scannerProjectionTrustedFieldsApplied) ? scannerProjectionTrustedFieldsApplied : [];
+  if(hasAnalysisProjection && aiObservationEvidenceApplied) return 'scanner_projection+ai_observation_hints';
+  if(hasAnalysisProjection && scannerFields.length) return 'scanner_projection';
+  if(aiObservationEvidenceApplied) return 'ai_observation_hints';
+  return 'unknown';
+}
+
+function aiObservationEvidenceStates(normalizedAnalysis){
+  const analysis = normalizedAnalysis && typeof normalizedAnalysis === 'object' ? normalizedAnalysis : {};
+  if(analysis.ai_observation_only !== true) return {};
+  const evidenceParts = [
+    analysis.coach_summary,
+    analysis.plain_english_chart_read,
+    analysis.structure_evidence,
+    analysis.location_evidence,
+    analysis.bounce_evidence,
+    analysis.stabilisation_evidence,
+    analysis.volume_evidence,
+    analysis.priceability_evidence,
+    ...(Array.isArray(analysis.constructive_evidence) ? analysis.constructive_evidence : []),
+    ...(Array.isArray(analysis.risk_evidence) ? analysis.risk_evidence : []),
+    ...(Array.isArray(analysis.what_needs_to_improve) ? analysis.what_needs_to_improve : [])
+  ].map(value => String(value || '').trim()).filter(Boolean);
+  if(!evidenceParts.length) return {};
+  const evidenceText = evidenceParts.join(' | ');
+  const text = evidenceText.toLowerCase();
+  const notPriceable = /unpriceable|not priceable|cannot be priced|can't be priced|too volatile|high volatility|no clean stop|no reliable stop|risk too wide/.test(text);
+  const extended = /extended|overextended|chasing|too far from|away from (support|the moving average|the ma)|no clean pullback/.test(text);
+  const offLevel = /off[\s-]?level|not near (support|the 20|the 50|a moving average)|no clean pullback base/.test(text);
+  const damagedContext = /\b(structure|trend)\b[^.]{0,60}\b(broken|failed|dead|weakening|deteriorating|lower low|lower high|fading|damaged)\b/.test(text)
+    && !/not (broken|dead)|not terminally broken/.test(text);
+  const looseContext = /(loose|volatile|wide candles|choppy|unstable|not stabili[sz]ed|has not stabili[sz]ed)/.test(text);
+  const supportiveContext = /\b(strong trend|uptrend|constructive|higher highs|higher lows|buyers defending|reclaim attempt|recovery attempt)\b/.test(text);
+  const mixedContext = supportiveContext && (damagedContext || looseContext || notPriceable || extended || offLevel);
+  const bounceConfirmed = /(confirmed bounce|follow-through|buyers (have )?taken control|clear bounce)/.test(text) && !/(not confirmed|needs confirmation|no follow-through)/.test(text);
+  const bounceAttempt = /(bounce attempt|rebound attempt|trying to bounce|first reaction|wick|reclaim attempt|buyers may be trying|recovery attempt)/.test(text);
+  const stabilisingClear = /(base forming|higher lows|stabili[sz]ation is clear|price has stabilised|price has stabilized)/.test(text);
+  const stabilisingEarly = /(stabili[sz]ing|momentum slowing|smaller candles|trying to stabilise|trying to stabilize)/.test(text);
+  const notStabilised = /(not stabili[sz]ed|has not stabili[sz]ed|no clean stabili[sz]ation|still volatile|still falling)/.test(text);
+  const volumeWeak = /(weak volume|low volume|lack of conviction)/.test(text);
+  const volumeStrong = /(strong volume|volume confirmation|higher volume|volume support)/.test(text);
+  return {
+    source:'ai_observation_evidence',
+    evidenceText,
+    key_reasons:Array.isArray(analysis.constructive_evidence) ? analysis.constructive_evidence : [],
+    risks:Array.isArray(analysis.risk_evidence) ? analysis.risk_evidence : [],
+    aiEvidenceStructureHint:damagedContext ? 'damaged_context' : (mixedContext ? 'mixed' : (looseContext ? 'loose' : (supportiveContext ? 'supportive' : 'uncertain'))),
+    aiEvidenceLocationHint:extended ? 'extended' : (offLevel ? 'off_level' : 'uncertain'),
+    aiEvidencePriceabilityHint:notPriceable ? 'unpriceable' : 'uncertain',
+    aiEvidenceBounceHint:bounceConfirmed ? 'confirmed_observed' : (bounceAttempt ? 'attempt_observed' : 'uncertain'),
+    aiEvidenceStabilisationHint:notStabilised ? 'not_stabilised' : (stabilisingClear ? 'clear_observed' : (stabilisingEarly ? 'early_observed' : 'uncertain')),
+    aiEvidenceVolumeHint:volumeWeak ? 'weak_observed' : (volumeStrong ? 'strong_observed' : 'uncertain')
   };
 }
 
@@ -3123,19 +3277,12 @@ function planValuesEqual(left, right){
 }
 
 function aiPlanCandidateForRecord(record){
-  const analysisState = getReviewAnalysisState(record || {});
-  const analysis = analysisState.normalizedAnalysis;
-  if(!(analysis && analysis.plan_metrics_valid)) return null;
-  return {
-    entry:numericOrNull(analysis.entry),
-    stop:numericOrNull(analysis.stop),
-    firstTarget:numericOrNull(analysis.first_target)
-  };
+  return null;
 }
 
 function resolvePlanSource(record, planCandidate = {}, requestedSource = ''){
   const source = String(requestedSource || '').trim().toLowerCase();
-  if(source === 'analysis') return 'ai';
+  if(source === 'analysis') return 'scanner_estimate';
   if(source === 'scanner') return 'scanner';
   const normalizedCandidate = {
     entry:numericOrNull(planCandidate.entry),
@@ -3150,9 +3297,6 @@ function resolvePlanSource(record, planCandidate = {}, requestedSource = ''){
   if(planValuesEqual(normalizedCandidate, currentPlan) && record && record.plan && record.plan.source){
     return String(record.plan.source);
   }
-  const aiPlan = aiPlanCandidateForRecord(record);
-  if(aiPlan && planValuesEqual(normalizedCandidate, aiPlan)) return 'ai';
-  if(aiPlan) return 'mixed';
   if(source === 'review' || source === 'planner') return 'manual';
   return source || String(record && record.plan && record.plan.source || '');
 }
@@ -3346,15 +3490,21 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   record.meta.updatedAt = String(card.updatedAt || record.meta.updatedAt || new Date().toISOString());
   record.meta.pinned = !!(card.pinned || record.meta.pinned);
   if(card.lastAnalysis && card.lastAnalysis.plan_metrics_valid){
-    applyPlanCandidateToRecord(record, {
-      entry:card.lastAnalysis.entry,
-      stop:card.lastAnalysis.stop,
-      firstTarget:card.lastAnalysis.first_target
-    }, {
-      source:'analysis',
-      lastPlannedAt:card.updatedAt || new Date().toISOString()
-    });
-  }else if(card.manualReview && typeof card.manualReview === 'object'){
+    record.aiObservation = record.aiObservation && typeof record.aiObservation === 'object'
+      ? record.aiObservation
+      : {};
+    record.aiObservation.observationOnly = true;
+    record.aiObservation.rawPlanOpinion = {
+      source:'legacy_lastAnalysis',
+      nonAuthoritative:true,
+      entry:String(card.lastAnalysis.entry || ''),
+      stop:String(card.lastAnalysis.stop || ''),
+      first_target:String(card.lastAnalysis.first_target || ''),
+      reward_risk:card.lastAnalysis.reward_risk == null ? null : String(card.lastAnalysis.reward_risk || ''),
+      plan_metrics_valid:card.lastAnalysis.plan_metrics_valid === true
+    };
+  }
+  if(card.manualReview && typeof card.manualReview === 'object'){
     applyPlanCandidateToRecord(record, {
       entry:card.manualReview.entry,
       stop:card.manualReview.stop,
@@ -3371,17 +3521,6 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
     }, {
       source:'card',
       lastPlannedAt:card.updatedAt || new Date().toISOString()
-    });
-  }
-  if(card.lastAnalysis && String(card.lastAnalysis.verdict || '').toLowerCase() === 'avoid'){
-    setLifecycleStage(record, {
-      stage:'avoided',
-      status:'inactive',
-      changedAt:card.updatedAt || new Date().toISOString(),
-      expiresAt:'',
-      expiryReason:'',
-      reason:'AI analysis marked the setup as avoid.',
-      source:'review'
     });
   }
 }
@@ -10271,14 +10410,7 @@ function scanCardTechnicalSummaryForView(view){
 }
 
 function hasAiStageForRecord(record){
-  const rawRecord = record && typeof record === 'object' ? record : {};
-  const review = rawRecord.review && typeof rawRecord.review === 'object' ? rawRecord.review : {};
-  const analysisState = review.analysisState && typeof review.analysisState === 'object' ? review.analysisState : {};
-  const normalized = (analysisState.normalized && typeof analysisState.normalized === 'object')
-    ? analysisState.normalized
-    : (review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object' ? review.normalizedAnalysis : null);
-  const finalVerdict = String(normalized && normalized.final_verdict || '').trim();
-  return ['Entry','Near Entry','Watch','Avoid'].includes(finalVerdict);
+  return false;
 }
 
 function focusQueueRecords(options = {}){
@@ -10777,8 +10909,12 @@ function buildSummary(checks, status, context = {}){
   const planStatus = String(context.planStatus || '').trim().toLowerCase();
   const finalVerdict = String(context.canonicalVerdict || context.finalVerdict || '').trim().toLowerCase();
   const mainBlocker = String(context.mainBlocker || '').trim();
+  const nonTerminalRecoveryBlocker = context.nonTerminalRecoveryBlocker === true;
   const viabilityRejected = context.viability === 'reject' || context.rejectedByViabilityGate === true;
   const planBlocked = context.planValid === false || ['invalid','missing'].includes(planStatus) || context.planVisible === false;
+  if(nonTerminalRecoveryBlocker){
+    return `${mainBlocker || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.'} No actionable plan yet - entry/stop/target cannot be priced reliably.`;
+  }
   if(finalVerdict === 'avoid' || viabilityRejected || planBlocked || ['weak','weakening','broken'].includes(structureState) || bounceState === 'none'){
     if(finalVerdict === 'avoid' || viabilityRejected || ['weak','weakening','broken'].includes(structureState)){
       let reason = mainBlocker || (planBlocked ? 'No actionable plan is available yet.' : 'The setup is not actionable yet.');
@@ -10849,6 +10985,11 @@ function reviewChecklistContextForRecord(record, options = {}){
     pullbackZone:String(derivedStates.pullbackZone || derivedStates.pullback_zone || '').trim().toLowerCase(),
     viability:String(resolvedState.viability || '').trim().toLowerCase(),
     rejectedByViabilityGate:resolvedState.rejected_by_viability_gate === true
+      || resolvedState.rejectedByViabilityGate === true,
+    nonTerminalRecoveryBlocker:resolvedState.non_terminal_recovery_blocker === true
+      || resolvedState.nonTerminalRecoveryBlocker === true,
+    semanticBlockerCode:String(resolvedState.semantic_blocker_code || resolvedState.semanticBlockerCode || '').trim(),
+    semanticBlockerReason:String(resolvedState.semantic_blocker_reason || resolvedState.semanticBlockerReason || '').trim()
   };
 }
 
@@ -12454,36 +12595,13 @@ function currentRuntimeTimestampForRecord(record){
 }
 
 function analysisVerdictForRecord(record, options = {}){
-  const rawRecord = record && typeof record === 'object' ? record : {};
-  const ticker = normalizeTicker(rawRecord.ticker || '');
-  const review = rawRecord.review && typeof rawRecord.review === 'object' ? rawRecord.review : {};
-  const analysisState = review.analysisState && typeof review.analysisState === 'object' ? review.analysisState : {};
-  const cachedState = ticker && uiState.reviewAnalysisCache && typeof uiState.reviewAnalysisCache === 'object'
-    ? uiState.reviewAnalysisCache[ticker]
-    : null;
-  const normalizedAnalysis = (
-    analysisState.normalized && typeof analysisState.normalized === 'object'
-      ? analysisState.normalized
-      : (review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object' ? review.normalizedAnalysis : null)
-  ) || (
-    cachedState && cachedState.normalized && typeof cachedState.normalized === 'object'
-      ? cachedState.normalized
-      : null
-  );
-  const baseVerdict = baseVerdictForRecord(rawRecord, options);
-
-  const aiVerdict = normalizeAnalysisVerdict(
-    normalizedAnalysis && (normalizedAnalysis.final_verdict || normalizedAnalysis.verdict) || ''
-  );
   const fallbackVerdict = options.includeRuntimeFallback === false
     ? ''
-    : normalizeAnalysisVerdict(runtimeFallbackVerdictForRecord(rawRecord) || '');
+    : normalizeAnalysisVerdict(runtimeFallbackVerdictForRecord(record) || '');
 
   const candidates = [];
-  if(['Entry','Near Entry','Watch','Avoid'].includes(aiVerdict)){
-    candidates.push(mostConservativeVerdict(baseVerdict, aiVerdict));
-  }
   if(['Entry','Near Entry','Watch','Avoid'].includes(fallbackVerdict)){
+    const baseVerdict = baseVerdictForRecord(record, options);
     candidates.push(mostConservativeVerdict(baseVerdict, fallbackVerdict));
   }
 
@@ -18535,23 +18653,72 @@ function normalizeAnalysisVerdict(value){
 
 function normalizeAnalysisResponse(raw){
   if(!raw || typeof raw !== 'object') return null;
-  return {
-    setup_type:String(raw.setup_type || '').trim(),
-    verdict:normalizeAnalysisVerdict(raw.verdict),
-    plain_english_chart_read:String(raw.plain_english_chart_read || raw.chart_read || '').trim(),
-    chart_match_status:String(raw.chart_match_status || '').trim().toLowerCase(),
-    chart_match_warning:String(raw.chart_match_warning || '').trim(),
+  const coachSummary = String(raw.coach_summary || raw.plain_english_chart_read || raw.chart_read || '').trim();
+  const constructiveEvidence = Array.isArray(raw.constructive_evidence) ? raw.constructive_evidence.map(item => String(item).trim()).filter(Boolean) : [];
+  const riskEvidence = Array.isArray(raw.risk_evidence) ? raw.risk_evidence.map(item => String(item).trim()).filter(Boolean) : [];
+  const needsImprove = Array.isArray(raw.what_needs_to_improve) ? raw.what_needs_to_improve.map(item => String(item).trim()).filter(Boolean) : [];
+  const uncertaintyNotes = Array.isArray(raw.uncertainty_notes) ? raw.uncertainty_notes.map(item => String(item).trim()).filter(Boolean) : [];
+  const suppliedAiObservation = raw.aiObservation && typeof raw.aiObservation === 'object'
+    ? raw.aiObservation
+    : null;
+  const suppliedRawOpinion = suppliedAiObservation && suppliedAiObservation.rawOpinion && typeof suppliedAiObservation.rawOpinion === 'object'
+    ? cloneData(suppliedAiObservation.rawOpinion, {})
+    : null;
+  const rawOpinion = suppliedRawOpinion || {
+    verdict:String(raw.verdict || '').trim(),
+    final_verdict:String(raw.final_verdict || '').trim(),
+    readiness:String(raw.readiness || '').trim(),
+    recommendation:String(raw.recommendation || '').trim(),
+    setupRating:String(raw.setupRating || raw.setup_rating || '').trim(),
+    score:raw.score ?? raw.quality_score ?? null,
+    bucket:String(raw.bucket || '').trim(),
+    tone:String(raw.tone || '').trim(),
+    state:String(raw.state || '').trim(),
+    action:String(raw.action || '').trim(),
+    decision:String(raw.decision || '').trim(),
+    tradeable:raw.tradeable ?? raw.tradeability ?? null,
     entry:String(raw.entry || raw.proposed_entry || '').trim(),
     stop:String(raw.stop || raw.proposed_stop || '').trim(),
     first_target:String(raw.first_target || raw.target || raw.proposed_first_target || '').trim(),
-    risk_per_share:String(raw.risk_per_share || '').trim(),
-    position_size:String(raw.position_size || '').trim(),
-    reward_risk:raw.reward_risk == null || raw.reward_risk === '' ? null : String(raw.reward_risk).trim(),
-    quality_score:Number.isFinite(Number(raw.quality_score)) ? Math.max(1, Math.min(10, Number(raw.quality_score))) : null,
-    confidence_score:Number.isFinite(Number(raw.confidence_score)) ? Math.max(1, Math.min(100, Number(raw.confidence_score))) : null,
-    key_reasons:Array.isArray(raw.key_reasons) ? raw.key_reasons.map(item => String(item).trim()).filter(Boolean) : [],
-    risks:Array.isArray(raw.risks) ? raw.risks.map(item => String(item).trim()).filter(Boolean) : [],
-    final_verdict:String(raw.final_verdict || raw.summary || '').trim()
+    reward_risk:raw.reward_risk == null || raw.reward_risk === '' ? null : String(raw.reward_risk).trim()
+  };
+  return {
+    setup_type:String(raw.setup_type || '').trim(),
+    verdict:'Watch',
+    coach_summary:coachSummary,
+    plain_english_chart_read:coachSummary,
+    chart_match_status:String(raw.chart_match_status || '').trim().toLowerCase(),
+    chart_match_warning:String(raw.chart_match_warning || '').trim(),
+    entry:'',
+    stop:'',
+    first_target:'',
+    risk_per_share:'',
+    position_size:'',
+    reward_risk:null,
+    quality_score:null,
+    confidence_score:null,
+    key_reasons:constructiveEvidence.length ? constructiveEvidence : (
+      Array.isArray(raw.key_reasons) ? raw.key_reasons.map(item => String(item).trim()).filter(Boolean) : []
+    ),
+    risks:riskEvidence.length ? riskEvidence : (
+      Array.isArray(raw.risks) ? raw.risks.map(item => String(item).trim()).filter(Boolean) : []
+    ),
+    what_needs_to_improve:needsImprove,
+    uncertainty_notes:uncertaintyNotes,
+    constructive_evidence:constructiveEvidence,
+    risk_evidence:riskEvidence,
+    structure_evidence:String(raw.structure_evidence || '').trim(),
+    location_evidence:String(raw.location_evidence || '').trim(),
+    bounce_evidence:String(raw.bounce_evidence || '').trim(),
+    stabilisation_evidence:String(raw.stabilisation_evidence || '').trim(),
+    volume_evidence:String(raw.volume_evidence || '').trim(),
+    priceability_evidence:String(raw.priceability_evidence || '').trim(),
+    ai_observation_only:true,
+    aiObservation:{
+      observationOnly:true,
+      rawOpinion
+    },
+    final_verdict:''
   };
 }
 
@@ -18769,16 +18936,6 @@ function effectivePlanForRecord(record, options = {}){
       source:'manual'
     };
   }
-  const analysisState = getReviewAnalysisState(item);
-  const analysis = analysisState.normalizedAnalysis;
-  if(analysis && analysis.plan_metrics_valid && (analysis.entry || analysis.stop || analysis.first_target)){
-    return {
-      entry:String(analysis.entry || ''),
-      stop:String(analysis.stop || ''),
-      firstTarget:String(analysis.first_target || ''),
-      source:'ai'
-    };
-  }
   const fallbackPlan = allowScannerFallback
     ? fallbackPlanProposalForCard({
       ticker:item.ticker,
@@ -18796,7 +18953,7 @@ function effectivePlanForRecord(record, options = {}){
       entry:String(fallbackPlan.entry || ''),
       stop:String(fallbackPlan.stop || ''),
       firstTarget:String(fallbackPlan.first_target || ''),
-      source:'ai'
+      source:'scanner_estimate'
     };
   }
   return {
@@ -18843,6 +19000,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   const parsed = normalizeAnalysisResponse(rawAnalysis) || {
     setup_type:'',
     verdict:'Watch',
+    coach_summary:'',
     plain_english_chart_read:'',
     entry:'',
     stop:'',
@@ -18856,10 +19014,9 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     risks:[],
     final_verdict:''
   };
-  const fallbackProposal = fallbackPlanProposalForCard(previousState);
-  const entry = normalizeAnalysisPlanField(parsed.entry || (fallbackProposal && fallbackProposal.entry) || '');
-  const stop = normalizeAnalysisPlanField(parsed.stop || (fallbackProposal && fallbackProposal.stop) || '');
-  const firstTarget = normalizeAnalysisPlanField(parsed.first_target || (fallbackProposal && fallbackProposal.first_target) || '');
+  const entry = '';
+  const stop = '';
+  const firstTarget = '';
   const hasPlanFields = !!(entry || stop || firstTarget);
   const numericEntry = numericOrNull(entry);
   const numericStop = numericOrNull(stop);
@@ -18868,7 +19025,6 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   const planValid = rewardRisk.valid;
   const derivedStates = analysisDerivedStates(previousState);
   const marketStatus = previousState.marketStatus || state.marketStatus || '';
-  const tightenedVerdict = tightenPlaybookVerdict(parsed.final_verdict || parsed.verdict, derivedStates, marketStatus);
   const chartReadGuard = guardAnalysisMovingAverageLanguage(parsed.plain_english_chart_read, {
     price:previousState.marketData && previousState.marketData.price,
     sma20:previousState.marketData && previousState.marketData.sma20,
@@ -18895,6 +19051,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   return {
     setup_type:parsed.setup_type || previousState.setupType || '',
     verdict:parsed.verdict,
+    coach_summary:parsed.coach_summary || chartReadGuard.text,
     plain_english_chart_read:chartReadGuard.text,
     chart_match_status:mismatchStatus,
     chart_match_warning:mismatchWarning,
@@ -18916,7 +19073,19 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     confidence_score:parsed.confidence_score,
     key_reasons:keyReasons,
     risks:finalRisks,
-    final_verdict:tightenedVerdict,
+    what_needs_to_improve:parsed.what_needs_to_improve || [],
+    uncertainty_notes:parsed.uncertainty_notes || [],
+    constructive_evidence:parsed.constructive_evidence || [],
+    risk_evidence:parsed.risk_evidence || [],
+    structure_evidence:parsed.structure_evidence || '',
+    location_evidence:parsed.location_evidence || '',
+    bounce_evidence:parsed.bounce_evidence || '',
+    stabilisation_evidence:parsed.stabilisation_evidence || '',
+    volume_evidence:parsed.volume_evidence || '',
+    priceability_evidence:parsed.priceability_evidence || '',
+    ai_observation_only:true,
+    aiObservation:parsed.aiObservation || {observationOnly:true, rawOpinion:{}},
+    final_verdict:'',
     ai_ma_language_guard_applied:chartReadGuard.applied,
     ai_ma_language_guard_reason:chartReadGuard.reason,
     ai_ma_guard_applied:chartReadGuard.applied,
@@ -18938,9 +19107,9 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
         ...(existingTickerState && existingTickerState.plan ? existingTickerState.plan : {}),
         plannedRR:planValid ? rewardRisk.rrRatio : null
       }
-    }, {final_verdict:tightenedVerdict, verdict:parsed.verdict}, derivedStates),
-    plan_metrics_valid:planValid,
-    plan_fields_present:hasPlanFields,
+    }, {final_verdict:'', verdict:''}, derivedStates),
+    plan_metrics_valid:false,
+    plan_fields_present:false,
     estimated_reward_risk:previousState.analysis && previousState.analysis.reward_risk ? String(previousState.analysis.reward_risk) : ''
   };
 }
@@ -19277,7 +19446,7 @@ async function analyseSetup(ticker){
         })() : null);
       if(proposedPlan){
         applyPlanCandidateToRecord(record, proposedPlan, {
-          source:'analysis',
+          source:'scanner_estimate',
           updatedAt:card.updatedAt,
           lastPlannedAt:card.updatedAt
         });
@@ -19394,7 +19563,7 @@ function renderAnalysisPanel(card){
     const staleAnalysis = isAnalysisStaleForRecord(card);
     const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No key reasons returned.</li>';
     const risks = analysis.risks.length ? analysis.risks.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No risks returned.</li>';
-    const confidence = Number.isFinite(analysis.confidence_score) ? `${analysis.confidence_score}/100` : 'n/a';
+    const confidence = 'observation only';
     const renderModel = {
       verdict:analysis.verdict,
       setup_type:analysis.setup_type || 'Not given',
@@ -19409,7 +19578,7 @@ function renderAnalysisPanel(card){
       ? `<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div>`
       : `<div class="analysisplanmini">${savedAiNoPlanMarkup(chartReadDisplay)}</div>`;
     logAnalysisDebug('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
-    return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div>${planMarkup}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
+    return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI role: ${escapeHtml(confidence)}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div>${planMarkup}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
   }
   return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
@@ -19417,17 +19586,11 @@ function renderAnalysisPanel(card){
 function analysisAdvisoryContextForRecord(record, analysis){
   const item = normalizeTickerRecord(record);
   const finalReviewVerdict = normalizeAnalysisVerdict(reviewHeaderVerdictForRecord(item) || displayStageForRecord(item) || '');
-  const savedAiVerdict = normalizeAnalysisVerdict(
-    analysis && (analysis.final_verdict || analysis.verdict) || ''
-  );
-  const finalRank = verdictRank(finalReviewVerdict);
-  const aiRank = verdictRank(savedAiVerdict);
-  const reviewMoreConservative = finalRank != null && aiRank != null && finalRank < aiRank;
   return {
     finalReviewVerdict,
-    savedAiVerdict,
-    reviewMoreConservative,
-    advisoryNote:'This is the saved AI read, not the final app decision.'
+    savedAiVerdict:'',
+    reviewMoreConservative:false,
+    advisoryNote:'This is the saved AI chart read. The app resolver decides the final state.'
   };
 }
 
@@ -19470,7 +19633,7 @@ function renderAnalysisPanelFromRecord(record){
     const staleAnalysis = isAnalysisStaleForRecord(item);
     const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(entry => `<li>${escapeHtml(entry)}</li>`).join('') : '<li>No key reasons returned.</li>';
     const risks = analysis.risks.length ? analysis.risks.map(entry => `<li>${escapeHtml(entry)}</li>`).join('') : '<li>No risks returned.</li>';
-    const confidence = Number.isFinite(analysis.confidence_score) ? `${analysis.confidence_score}/100` : 'n/a';
+    const confidence = 'observation only';
     const renderModel = {
       verdict:analysis.verdict,
       setup_type:analysis.setup_type || 'Not given',
@@ -19482,7 +19645,7 @@ function renderAnalysisPanelFromRecord(record){
     const planMarkup = showPlanNumbers
       ? `<div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div>`
       : savedAiNoPlanMarkup(chartReadDisplay);
-    return `<div class="responsegrid">${analysisRunning ? `<div class="summary ai-progress-text">🤖 ${escapeHtml(analysisRunningStage)}</div>` : ''}<div class="summary tiny ai-summary-message">${escapeHtml(advisory.advisoryNote)}</div>${advisory.reviewMoreConservative ? '<div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>Final review is more conservative than the saved AI read.</strong></div>' : ''}${staleAnalysis ? '<div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="summary tiny ai-summary-message ai-summary-message--failed"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Metrics</summary><div class="tiny">AI confidence: ${escapeHtml(confidence)}${Number.isFinite(analysis.quality_score) ? ` | AI raw score: ${escapeHtml(`${analysis.quality_score}/10`)}` : ''}</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div>${planMarkup}</div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
+    return `<div class="responsegrid">${analysisRunning ? `<div class="summary ai-progress-text">🤖 ${escapeHtml(analysisRunningStage)}</div>` : ''}<div class="summary tiny ai-summary-message">${escapeHtml(advisory.advisoryNote)}</div>${staleAnalysis ? '<div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="summary tiny ai-summary-message ai-summary-message--failed"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<details class="compact-details"><summary>Saved AI Role</summary><div class="tiny">AI role: ${escapeHtml(confidence)}. Resolver state remains authoritative.</div></details><div class="analysislead"><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div><div class="analysisplanmini"><div class="tiny"><strong>Setup:</strong> ${escapeHtml(renderModel.setup_type)}</div>${planMarkup}</div><details class="compact-details"><summary>Reasons And Risks</summary><div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div></details><details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details></div>`;
   }
   if(analysisRunning){
     return `<div class="responsegrid"><div class="summary ai-progress-text">🤖 ${escapeHtml(analysisRunningStage)}</div><div class="tiny ai-progress-subtext">${analysisState.hasSavedAnalysis ? 'Refreshing saved analysis...' : 'Analysing current setup...'}</div></div>`;
@@ -24606,12 +24769,22 @@ function buildPromptBody(payload){
     : 'unclear';
   const chartWarning = String(payload.chartMatchWarning || '').trim();
   const lines = [
-    'Quality Pullback setup. Return JSON only.',
+    'Quality Pullback chart-coach read. Return JSON only.',
     '',
-    'You are analysing a stock for a swing-trading Quality Pullback strategy.',
+    'You are a calm, relatable chart coach for a novice retail trader.',
     '',
     'Goal:',
-    'Identify strong stocks in uptrends that are pulling back toward support (20MA or 50MA) and assess whether they are Watch, Near Entry, Entry, or Avoid.',
+    'Explain what the chart appears to be doing in plain English. Your role is observation and explanation only.',
+    'The app canonical resolver will decide final state, readiness, score, tone, bucket, and trade action.',
+    '',
+    'Coach role:',
+    '- You may freely interpret the chart like a calm trading coach.',
+    '- Explain what looks constructive, what looks risky, and what needs to improve before action.',
+    '- Be honest about uncertainty and avoid pretending the chart is clearer than it is.',
+    '- Do not issue buy/sell advice.',
+    '- Do not assign final readiness/verdict labels or buy/sell/hold-style decisions.',
+    '- Do not assign final app score, tone, bucket, promotion/demotion state, readiness, tradeability, or trade decision.',
+    '- Do not override the deterministic resolver.',
     '',
     'Context:',
     `ticker=${payload.ticker}`,
@@ -24621,7 +24794,6 @@ function buildPromptBody(payload){
     `max_loss_gbp=${payload.maxRisk}`,
     `chart_attached=${chartAttached ? 'yes' : 'no'}`,
     `chart_filename=${payload.chartFileName || 'none'}`,
-    `app_verdict_ceiling=${payload.appVerdictCeiling || 'Watch'}`,
     '',
     'Inputs:',
     `trend_state=${payload.trendState}`,
@@ -24634,7 +24806,7 @@ function buildPromptBody(payload){
     `stop_defined=${payload.stopDefined}`,
     `target_defined=${payload.targetDefined}`,
     '',
-    'Guidance:',
+    'Evidence guidance:',
     '',
     'Trend:',
     '- Prefer strong or acceptable trends',
@@ -24657,82 +24829,48 @@ function buildPromptBody(payload){
     '',
     'If scan_type=20MA:',
     '- Expect shallow pullbacks near 20MA',
-    '- Require stabilisation or bounce for Near Entry',
-    '- Require bounce or confirmation for Entry',
+    '- A nearly actionable setup still needs stabilisation or an initial bounce',
+    '- An actionable setup still needs a confirmed bounce or clear follow-through',
     '',
     'If scan_type=50MA:',
     '- Expect deeper pullbacks near 50MA',
-    '- Allow Watch without stabilisation',
-    '- Require stabilisation for Near Entry',
-    '- Require bounce or confirmation for Entry',
+    '- It can remain observe-only without stabilisation',
+    '- A nearly actionable setup still needs stabilisation',
+    '- An actionable setup still needs a bounce or confirmation',
     '',
-    'Hard fail -> Avoid if:',
-    '- structure_state = broken',
-    '- trend_state = broken',
-    '- stop_defined = no',
-    '- target_defined = no',
-    '',
-    'Do NOT automatically mark Avoid just because stabilisation is missing.',
-    '',
-    'Trade plan:',
-    '- Always propose entry, stop, and first_target for any analyzable setup, even for Watch or Near Entry',
-    '- Use conditional trigger levels when the setup is early rather than leaving plan fields blank',
-    '- Entry should be logical (reclaim, bounce, breakout, or continuation trigger)',
-    '- Stop should sit below support, the pullback low, or the invalidation level',
-    '- First target should be prior swing high or logical resistance',
-    `- Must respect ${formatPound(payload.maxRisk)} max loss`,
-    '- Respect entry / stop / target values as constraints',
-    '- If plan is invalid, too wide, heavy, or unaffordable, do NOT promote setup',
-    '- High reward:risk does NOT justify upgrading a weak setup',
-    '- Structure and confirmation take priority over reward',
-    '',
-    'Structured output discipline:',
-    '- If your chart read contains cautionary language, include matching items in risks',
-    '- Do not return an empty risks array when meaningful concerns are present',
-    '- weakening structure -> include a risk about weakening structure',
-    '- low volume -> include a risk about weak volume / low conviction',
-    '- market below 50MA -> include a risk about hostile market regime',
-    '- pullback deeper than preferred -> include a risk about setup quality / depth of pullback',
-    '- Keep key_reasons constructive and risks concise, factual, and non-duplicative',
+    'Output discipline:',
+    '- Evidence fields are narrative only and are not canonical resolver state.',
+    '- If your coach_summary contains cautionary language, include matching risk_evidence or what_needs_to_improve items.',
+    '- Do not return an empty risk_evidence array when meaningful concerns are present.',
+    '- Keep constructive_evidence, risk_evidence, and what_needs_to_improve concise, factual, and non-duplicative.',
     '',
     'Chart verification:',
     '- If a chart image is attached, first check whether it plausibly matches the supplied ticker',
     '- If the uploaded chart looks like a different ticker/symbol, flag that strongly',
-    '- A likely ticker/chart mismatch should be treated as Avoid until corrected',
+    '- A likely ticker/chart mismatch should be flagged in chart_match_status and chart_match_warning only',
     `- Current chart_match_status context: ${chartStatus}`,
     `- Current chart_match_warning context: ${chartWarning || 'none'}`,
     '',
     'Output keys:',
-    'setup_type',
-    'plain_english_chart_read',
+    'coach_summary',
+    'constructive_evidence',
+    'risk_evidence',
+    'what_needs_to_improve',
+    'structure_evidence',
+    'location_evidence',
+    'bounce_evidence',
+    'stabilisation_evidence',
+    'volume_evidence',
+    'priceability_evidence',
+    'uncertainty_notes',
+    'ai_observation_only',
     'chart_match_status',
     'chart_match_warning',
-    'entry',
-    'stop',
-    'first_target',
-    'risk_per_share',
-    'position_size',
-    'reward_risk',
-    'quality_score',
-    'confidence_score',
-    'key_reasons',
-    'risks',
-    'verdict',
-    'final_verdict',
     '',
     'Rules:',
-    '- verdict must be: Watch | Near Entry | Entry | Avoid',
-    '- Do NOT return a verdict above app_verdict_ceiling',
-    '- If app_verdict_ceiling = Watch, only Watch or Avoid are allowed',
-    '- If app_verdict_ceiling = Near Entry, only Near Entry, Watch, or Avoid are allowed',
-    '- If app_verdict_ceiling = Entry, downgrade if needed but do not exceed Entry',
-    '- quality_score = integer 1-10',
-    '- confidence_score = integer 1-100',
+    '- ai_observation_only must be true',
     '- chart_match_status must be: match | mismatch | unclear',
-    '- if chart_match_status = mismatch, final_verdict should be Avoid',
-    '- risks must always be present as an array',
-    '- risks: concise items that match cautionary content in chart read',
-    '- Only use an empty risks array if the setup is genuinely clean and low-risk relative to the strategy',
+    '- constructive_evidence, risk_evidence, what_needs_to_improve, and uncertainty_notes must be arrays',
     '- If unknown -> null',
     '- Keep explanations short and practical'
   ];

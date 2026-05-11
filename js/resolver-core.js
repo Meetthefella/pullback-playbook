@@ -539,6 +539,82 @@
     return (pullbackZone === 'extended') || (stretchedFrom20 && noRecentPullbackStructure);
   }
 
+  function resolveNonTerminalSetupBlocker(ctx = {}){
+    const structureState = String(ctx.structureState || '').trim().toLowerCase();
+    const trendState = String(ctx.trendState || '').trim().toLowerCase();
+    const bounceState = String(ctx.bounceState || '').trim().toLowerCase();
+    const stabilisationState = String(ctx.stabilisationState || '').trim().toLowerCase();
+    const pullbackZone = String(ctx.pullbackZone || '').trim().toLowerCase();
+    const setupLocationState = String(ctx.setupLocationState || '').trim().toLowerCase();
+    const priceabilityState = String(ctx.priceabilityState || '').trim().toLowerCase();
+    const hasRecoveryAttempt = ctx.reclaimAttempt === true
+      || ctx.reclaimsLevel === true
+      || ['attempt','early','confirmed'].includes(bounceState);
+    const below200ma = ctx.below200ma === true;
+    const ma50Below200ma = ctx.ma50Below200ma === true;
+    const below50WithoutReclaim = ctx.below50WithoutReclaim === true;
+    const hardInvalidation = ctx.hardInvalidation === true;
+    const structurallyBrokenLabel = structureState === 'broken' || trendState === 'broken';
+    const liveRecoveryEvidence = structurallyBrokenLabel
+      && hasRecoveryAttempt
+      && !below200ma
+      && !ma50Below200ma
+      && !below50WithoutReclaim
+      && !hardInvalidation;
+    if(!liveRecoveryEvidence){
+      return {
+        applies:false,
+        blockerCode:'',
+        reason:'',
+        structureEligibility:'',
+        structureReason:''
+      };
+    }
+    if(priceabilityState === 'unpriceable' || setupLocationState === 'volatile'){
+      return {
+        applies:true,
+        blockerCode:'volatile_not_stabilised',
+        reason:'Avoid for now - setup is too volatile to price reliably.',
+        structureEligibility:'alive',
+        structureReason:'Recovery attempt in progress; structure is not terminally broken.'
+      };
+    }
+    if(setupLocationState === 'extended' || pullbackZone === 'extended'){
+      return {
+        applies:true,
+        blockerCode:'extended_not_priceable',
+        reason:'Strong rebound, but price has not stabilised into a clean pullback yet.',
+        structureEligibility:'alive',
+        structureReason:'Recovery attempt in progress; structure is not terminally broken.'
+      };
+    }
+    if(stabilisationState !== 'clear'){
+      return {
+        applies:true,
+        blockerCode:'recovery_attempt_not_stabilised',
+        reason:'Recovery attempt in progress. Wait for price to stabilise before considering entry.',
+        structureEligibility:'alive',
+        structureReason:'Recovery attempt in progress; structure is not terminally broken.'
+      };
+    }
+    if(!['near_20ma','near_50ma','recently_left_20ma','recently_left_50ma'].includes(pullbackZone)){
+      return {
+        applies:true,
+        blockerCode:'no_clean_pullback_base',
+        reason:'No clean pullback base yet. Wait for price to stabilise before considering entry.',
+        structureEligibility:'alive',
+        structureReason:'Recovery attempt in progress; structure is not terminally broken.'
+      };
+    }
+    return {
+      applies:true,
+      blockerCode:'recovery_attempt_not_stabilised',
+      reason:'Recovery attempt in progress. Wait for price to stabilise before considering entry.',
+      structureEligibility:'alive',
+      structureReason:'Recovery attempt in progress; structure is not terminally broken.'
+    };
+  }
+
   function resolveWatchlistViability(ctx = {}){
     const structureEligibility = String(ctx.structureEligibility || '').toLowerCase();
     const structureState = String(ctx.structureState || '').toLowerCase();
@@ -892,8 +968,24 @@
       || ''
     ).toLowerCase();
     const affordability = String((displayedPlan && displayedPlan.affordability) || (rawDisplayedPlan && rawDisplayedPlan.affordability) || '').toLowerCase();
+    const semanticBlocker = resolveNonTerminalSetupBlocker({
+      structureState,
+      trendState,
+      bounceState,
+      stabilisationState:String(derivedStates.stabilisationState || '').toLowerCase(),
+      pullbackZone,
+      setupLocationState,
+      priceabilityState,
+      reclaimAttempt:item && item.reclaimAttempt === true,
+      reclaimsLevel:item && item.reclaimsLevel === true,
+      below50WithoutReclaim:priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true)),
+      below200ma:priceBelow200MA,
+      ma50Below200ma:ma50Below200MA,
+      hardInvalidation:brokenBelowStop || (item && item.terminal_avoid_applied === true)
+    });
+    const nonTerminalRecoveryBlocker = semanticBlocker.applies === true;
     const explicitInvalidationFlag = !!(item && item.plan && item.plan.invalidatedState);
-    const explicitInvalidationReason = explicitInvalidationFlag && (structureState === 'broken' || trendState === 'broken' || brokenBelowStop)
+    const explicitInvalidationReason = explicitInvalidationFlag && !nonTerminalRecoveryBlocker && (structureState === 'broken' || trendState === 'broken' || brokenBelowStop)
       ? (structureState === 'broken'
         ? 'Structure is broken.'
         : (trendState === 'broken'
@@ -901,15 +993,24 @@
           : 'Price breached stop structure.'))
       : '';
     const structurallyBroken = !!(
-      structureState === 'broken'
-      || trendState === 'broken'
-      || brokenBelowStop
+      !nonTerminalRecoveryBlocker
+      && (
+        structureState === 'broken'
+        || trendState === 'broken'
+        || brokenBelowStop
+      )
     );
-    const structureLayer = resolveStructureEligibility({
+    const rawStructureLayer = resolveStructureEligibility({
       structureState,
       trendState,
       brokenBelowStop
     });
+    const structureLayer = nonTerminalRecoveryBlocker
+      ? {
+        structureEligibility:semanticBlocker.structureEligibility || 'alive',
+        structureReason:semanticBlocker.structureReason || 'Recovery attempt in progress; structure is not terminally broken.'
+      }
+      : rawStructureLayer;
     const isExtended = resolveExtendedState({
       pullbackZone,
       priceDistanceFrom20MA
@@ -1035,7 +1136,7 @@
       hasEntry,
       hasStop,
       hasTarget,
-      hardTrendBroken:trendState === 'broken' || (priceBelow50MA && weakStructure),
+      hardTrendBroken:!nonTerminalRecoveryBlocker && (trendState === 'broken' || (priceBelow50MA && weakStructure)),
       terminalAvoidFlag:item && item.terminal_avoid_applied === true,
       explicitInvalidationReason,
       below50WithoutReclaim:priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true)),
@@ -1048,7 +1149,9 @@
       }else{
         trackedVerdict = 'monitor';
       }
-      if(structureLayer.structureEligibility === 'damaged'){
+      if(nonTerminalRecoveryBlocker){
+        trackedReason = semanticBlocker.reason || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.';
+      }else if(structureLayer.structureEligibility === 'damaged'){
         trackedReason = 'Trend is weakening - no reliable stop level yet.';
       }else if(isExtended && ['strong','intact'].includes(structureState)){
         trackedReason = 'Trend is strong but extended beyond a safe entry zone. No low-risk entry is available yet.';
@@ -1157,6 +1260,9 @@
       setup_location_state:setupLocationState,
       priceability_state:priceabilityState,
       priceability_inferred:priceabilityInferred,
+      semantic_blocker_code:semanticBlocker.blockerCode || '',
+      semantic_blocker_reason:semanticBlocker.reason || '',
+      non_terminal_recovery_blocker:nonTerminalRecoveryBlocker,
       structure_eligibility:structureLayer.structureEligibility,
       structure_reason:structureLayer.structureReason,
       viability:viability.viability,

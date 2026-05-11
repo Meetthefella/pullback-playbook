@@ -22,6 +22,11 @@
   function normalizeMainBlockerCopy(mainBlocker, resolved){
     const text = String(mainBlocker || '').trim();
     const state = resolved && typeof resolved === 'object' ? resolved : {};
+    const semanticReason = String(state.semantic_blocker_reason || state.semanticBlockerReason || '').trim();
+    const semanticCode = String(state.semantic_blocker_code || state.semanticBlockerCode || '').trim();
+    if(state.non_terminal_recovery_blocker === true || semanticCode){
+      return semanticReason || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.';
+    }
     const structureState = String(state.structure_state || state.structureState || '').trim().toLowerCase();
     const rejectedByViability = state.rejected_by_viability_gate === true
       || state.rejectedByViabilityGate === true

@@ -246,7 +246,7 @@ function analysisVerdictForRecord(record){
       : (record && record.review && record.review.normalizedAnalysis && typeof record.review.normalizedAnalysis === 'object'
         ? record.review.normalizedAnalysis
         : null);
-  const verdict = stringOrEmpty(normalizedAnalysis && (normalizedAnalysis.final_verdict || normalizedAnalysis.verdict) || record && record.scan && record.scan.verdict || 'Watch').trim();
+  const verdict = stringOrEmpty(record && record.scan && record.scan.verdict || 'Watch').trim();
   return ['Entry','Near Entry','Watch','Avoid'].includes(verdict) ? verdict : 'Watch';
 }
 

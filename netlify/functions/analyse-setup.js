@@ -60,7 +60,7 @@ function buildRequestBody(model, instructions, content){
         type: 'json_object'
       }
     },
-    max_output_tokens: 300
+    max_output_tokens: 1000
   };
 }
 
@@ -165,23 +165,58 @@ function normaliseStringArray(value){
 }
 
 function normaliseAnalysis(obj){
+  const rawOpinion = {
+    verdict: normaliseString(obj?.verdict, ''),
+    final_verdict: normaliseString(obj?.final_verdict, ''),
+    readiness: normaliseString(obj?.readiness, ''),
+    recommendation: normaliseString(obj?.recommendation, ''),
+    setupRating: normaliseString(obj?.setupRating || obj?.setup_rating, ''),
+    score: obj?.score ?? obj?.quality_score ?? null,
+    bucket: normaliseString(obj?.bucket, ''),
+    tone: normaliseString(obj?.tone, ''),
+    state: normaliseString(obj?.state, ''),
+    action: normaliseString(obj?.action, ''),
+    decision: normaliseString(obj?.decision, ''),
+    tradeable: obj?.tradeable ?? obj?.tradeability ?? null,
+    entry: normaliseString(obj?.entry || obj?.proposed_entry, ''),
+    stop: normaliseString(obj?.stop || obj?.proposed_stop, ''),
+    first_target: normaliseString(obj?.first_target || obj?.target || obj?.proposed_first_target, ''),
+    reward_risk: obj?.reward_risk == null || obj?.reward_risk === '' ? null : normaliseString(obj?.reward_risk, '')
+  };
+  const coachSummary = normaliseString(obj?.coach_summary || obj?.plain_english_chart_read || obj?.chart_read, '');
   return {
     setup_type: normaliseString(obj?.setup_type, ''),
-    verdict: normaliseString(obj?.verdict, 'Watch'),
-    plain_english_chart_read: normaliseString(obj?.plain_english_chart_read, ''),
+    verdict: 'Watch',
+    coach_summary: coachSummary,
+    plain_english_chart_read: coachSummary,
     chart_match_status: normaliseString(obj?.chart_match_status, ''),
     chart_match_warning: normaliseString(obj?.chart_match_warning, ''),
-    entry: normaliseString(obj?.entry, ''),
-    stop: normaliseString(obj?.stop, ''),
-    first_target: normaliseString(obj?.first_target, ''),
-    risk_per_share: normaliseString(obj?.risk_per_share, ''),
-    position_size: normaliseString(obj?.position_size, ''),
-    reward_risk: obj?.reward_risk == null || obj?.reward_risk === '' ? null : normaliseString(obj?.reward_risk, ''),
-    quality_score: Number.isFinite(Number(obj?.quality_score)) ? Number(obj?.quality_score) : null,
-    confidence_score: Number.isFinite(Number(obj?.confidence_score)) ? Number(obj?.confidence_score) : null,
-    key_reasons: normaliseStringArray(obj?.key_reasons),
-    risks: normaliseStringArray(obj?.risks),
-    final_verdict: normaliseString(obj?.final_verdict, '')
+    entry: '',
+    stop: '',
+    first_target: '',
+    risk_per_share: '',
+    position_size: '',
+    reward_risk: null,
+    quality_score: null,
+    confidence_score: null,
+    key_reasons: normaliseStringArray(obj?.constructive_evidence || obj?.key_reasons),
+    risks: normaliseStringArray(obj?.risk_evidence || obj?.risks),
+    constructive_evidence: normaliseStringArray(obj?.constructive_evidence),
+    risk_evidence: normaliseStringArray(obj?.risk_evidence),
+    what_needs_to_improve: normaliseStringArray(obj?.what_needs_to_improve),
+    structure_evidence: normaliseString(obj?.structure_evidence, ''),
+    location_evidence: normaliseString(obj?.location_evidence, ''),
+    bounce_evidence: normaliseString(obj?.bounce_evidence, ''),
+    stabilisation_evidence: normaliseString(obj?.stabilisation_evidence, ''),
+    volume_evidence: normaliseString(obj?.volume_evidence, ''),
+    priceability_evidence: normaliseString(obj?.priceability_evidence, ''),
+    uncertainty_notes: normaliseStringArray(obj?.uncertainty_notes),
+    ai_observation_only: true,
+    aiObservation: {
+      observationOnly: true,
+      rawOpinion
+    },
+    final_verdict: ''
   };
 }
 
@@ -254,16 +289,18 @@ exports.handler = async function handler(event){
   }
 
   const instructions = [
-    'Analyse a Quality Pullback stock setup.',
-    'Use plain English.',
-    'Respect the supplied market status and risk limits.',
+    'Analyse a Quality Pullback chart as an observation-only chart coach.',
+    'Use plain English for a novice retail trader.',
+    'Be honest about uncertainty.',
     'Do not invent chart details that are not provided.',
+    'Do not issue buy/sell advice.',
+    'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
+    'The deterministic app resolver will decide final state.',
     'If a chart image is attached, first verify whether it plausibly matches the supplied ticker.',
     'If the uploaded chart looks like the wrong ticker, wrong symbol, or a likely mismatch, flag that strongly.',
     'If the chart/ticker match is doubtful, return chart_match_status as mismatch or unclear and explain it in chart_match_warning.',
-    'If there is a likely chart/ticker mismatch, set final_verdict to Avoid.',
     'Return exactly one JSON object.',
-    'Verdict must be one of: Watch, Near Entry, Entry, Avoid.',
+    'Return evidence fields only; ai_observation_only must be true.',
     'If a field is unknown, return null.'
   ].join('\n');
 
