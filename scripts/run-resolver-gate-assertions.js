@@ -406,7 +406,7 @@ function runReviewProjectionAssertions(){
   const recoveryChecklistContext = {
     canonicalVerdict:'watch',
     visualBucket:'diminishing',
-    mainBlocker:'Avoid for now - setup is too volatile to price reliably.',
+    mainBlocker:'Avoid for now — setup is too volatile to price reliably.',
     planVisible:false,
     planStatus:'invalid',
     planValid:false,
@@ -430,7 +430,7 @@ function runReviewProjectionAssertions(){
   if(recoveryChecklist.stabilising === true || recoveryChecklist.targetDefined === true){
     throw new Error('Volatile recovery checklist must not keep stabilising/target checks from raw bullish inputs.');
   }
-  if(/Structure is broken|Strong uptrend/i.test(String(recoverySummary || '')) || !/volatile|No actionable plan/i.test(String(recoverySummary || ''))){
+  if(/Structure is broken|Strong uptrend/i.test(String(recoverySummary || '')) || !/volatile|Entry, stop, and target cannot be priced reliably yet/i.test(String(recoverySummary || ''))){
     throw new Error('Volatile recovery checklist summary must use non-terminal volatility/no-actionable-plan wording.');
   }
 }

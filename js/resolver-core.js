@@ -574,7 +574,7 @@
       return {
         applies:true,
         blockerCode:'volatile_not_stabilised',
-        reason:'Avoid for now - setup is too volatile to price reliably.',
+        reason:'Avoid for now — setup is too volatile to price reliably.',
         structureEligibility:'alive',
         structureReason:'Recovery attempt in progress; structure is not terminally broken.'
       };

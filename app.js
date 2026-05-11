@@ -10913,7 +10913,7 @@ function buildSummary(checks, status, context = {}){
   const viabilityRejected = context.viability === 'reject' || context.rejectedByViabilityGate === true;
   const planBlocked = context.planValid === false || ['invalid','missing'].includes(planStatus) || context.planVisible === false;
   if(nonTerminalRecoveryBlocker){
-    return `${mainBlocker || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.'} No actionable plan yet - entry/stop/target cannot be priced reliably.`;
+    return `${mainBlocker || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.'} Entry, stop, and target cannot be priced reliably yet.`;
   }
   if(finalVerdict === 'avoid' || viabilityRejected || planBlocked || ['weak','weakening','broken'].includes(structureState) || bounceState === 'none'){
     if(finalVerdict === 'avoid' || viabilityRejected || ['weak','weakening','broken'].includes(structureState)){
@@ -10923,7 +10923,7 @@ function buildSummary(checks, status, context = {}){
           ? 'the pullback is too weak to price reliably and no actionable plan is available yet.'
           : 'the pullback is too weak to price reliably.';
       }
-      return `Avoid for now - ${reason} No entry until price stabilises, a clear bounce forms, and a valid entry/stop/target plan is available.`;
+      return `Avoid for now — ${reason} No entry until price stabilises, a clear bounce forms, and a valid entry, stop, and target plan is available.`;
     }
     if(planBlocked){
       return `${mainBlocker || 'No actionable plan yet.'} Wait for a valid entry, stop, and first target before treating this as actionable.`;
