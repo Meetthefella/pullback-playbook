@@ -11079,14 +11079,16 @@ function setupUiClass(setupState){
 }
 
 function planUiLabel(planValidity){
-  if(planValidity === 'valid') return '✅ Plan valid';
-  if(planValidity === 'needs_adjustment') return '🟠 Needs adjustment';
-  if(planValidity === 'unrealistic_rr') return '🚫 Unrealistic R:R';
-  return '❌ Invalid plan';
+  if(planValidity === 'missing') return 'No actionable plan yet';
+  if(planValidity === 'valid') return '\u2705 Plan valid';
+  if(planValidity === 'needs_adjustment') return '\uD83D\uDEE0\uFE0F Needs adjustment';
+  if(planValidity === 'unrealistic_rr') return '\uD83D\uDEAB Unrealistic R:R';
+  return '\u274C Invalid plan';
 }
 
 function planUiClass(planValidity){
   if(planValidity === 'valid') return 'ready';
+  if(planValidity === 'missing') return 'watch';
   if(planValidity === 'needs_adjustment') return 'near';
   if(planValidity === 'unrealistic_rr') return 'avoid';
   return 'avoid';
@@ -11099,13 +11101,6 @@ function setupUiLabel(setupState){
   if(setupState === 'developing') return '\uD83C\uDF31 Developing';
   if(setupState === 'entry') return '\uD83D\uDE80 Entry';
   return '\uD83E\uDDD0 Monitor';
-}
-
-function planUiLabel(planValidity){
-  if(planValidity === 'valid') return '\u2705 Plan valid';
-  if(planValidity === 'needs_adjustment') return '\uD83D\uDEE0\uFE0F Needs adjustment';
-  if(planValidity === 'unrealistic_rr') return '\uD83D\uDEAB Unrealistic R:R';
-  return '\u274C Invalid plan';
 }
 
 function getPlanUiState(record, options = {}){
@@ -11147,6 +11142,8 @@ function getPlanUiState(record, options = {}){
 
   if(setupState === 'broken'){
     stateKey = 'invalid';
+  }else if(displayedPlan.status === 'missing'){
+    stateKey = hasAnyPlanFields(item) ? 'invalid' : 'missing';
   }else if(displayedPlan.status !== 'valid'){
     stateKey = 'invalid';
   }else if(!Number.isFinite(positionSize) || positionSize <= 0){
@@ -11916,7 +11913,13 @@ function evaluatePlanRealism(record, options = {}){
   let credibleRr = null;
 
   if(!Number.isFinite(rawRr)){
-    pushReason('Plan is mathematically incomplete or invalid.');
+    if(displayedPlan.status === 'missing' && !hasAnyPlanFields(item)){
+      rrRealism = 'unknown';
+      rrRealismLabel = 'N/A';
+      pushReason('No actionable plan yet.');
+    }else{
+      pushReason('Plan is mathematically incomplete or invalid.');
+    }
   }else{
     credibleRr = rawRr;
     if(weakStructure || (optimisticTargetFlag && (bounceUnclear || hostileMarket || lowControl || weakVolume || developingSetup))){
@@ -18924,7 +18927,7 @@ function effectivePlanForRecord(record, options = {}){
       entry:Number.isFinite(item.plan.entry) ? String(Number(item.plan.entry.toFixed(2))) : '',
       stop:Number.isFinite(item.plan.stop) ? String(Number(item.plan.stop.toFixed(2))) : '',
       firstTarget:Number.isFinite(item.plan.firstTarget) ? String(Number(item.plan.firstTarget.toFixed(2))) : '',
-      source:String(item.plan.source || '')
+      source:String(item.plan.source || 'manual')
     };
   }
   const hasCompleteManualPlan = manualReview && [manualReview.entry, manualReview.stop, manualReview.target].every(value => Number.isFinite(numericOrNull(value)));
@@ -18933,6 +18936,24 @@ function effectivePlanForRecord(record, options = {}){
       entry:String(manualReview.entry || ''),
       stop:String(manualReview.stop || ''),
       firstTarget:String(manualReview.target || ''),
+      source:'manual'
+    };
+  }
+  const hasPartialCanonicalPlan = [item.plan.entry, item.plan.stop, item.plan.firstTarget].some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
+  if(hasPartialCanonicalPlan){
+    return {
+      entry:String(item.plan.entry ?? ''),
+      stop:String(item.plan.stop ?? ''),
+      firstTarget:String(item.plan.firstTarget ?? ''),
+      source:String(item.plan.source || 'manual')
+    };
+  }
+  const hasPartialManualPlan = manualReview && [manualReview.entry, manualReview.stop, manualReview.target].some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
+  if(hasPartialManualPlan){
+    return {
+      entry:String(manualReview.entry ?? ''),
+      stop:String(manualReview.stop ?? ''),
+      firstTarget:String(manualReview.target ?? ''),
       source:'manual'
     };
   }
@@ -18960,8 +18981,22 @@ function effectivePlanForRecord(record, options = {}){
     entry:'',
     stop:'',
     firstTarget:'',
-    source:String(item.plan.source || '')
+    source:'not_generated'
   };
+}
+
+function planSourceForDiagnostics(record, effectivePlan = null){
+  const item = record && typeof record === 'object' ? record : {};
+  const plan = effectivePlan && typeof effectivePlan === 'object' ? effectivePlan : effectivePlanForRecord(item, {allowScannerFallback:true});
+  const source = String(plan.source || (item.plan && item.plan.source) || '').trim();
+  const hasUserPlanFields = hasAnyPlanFields(item);
+  const hasEffectivePlanFields = [plan.entry, plan.stop, plan.firstTarget].some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
+  if(!hasUserPlanFields && !hasEffectivePlanFields) return 'not_generated';
+  if(source === 'manual' && !hasUserPlanFields) return 'not_generated';
+  if(!source) return hasUserPlanFields ? 'manual' : 'not_generated';
+  if(source === 'not_generated' && hasUserPlanFields) return 'manual';
+  if(source === 'not_generated' && hasEffectivePlanFields) return 'generated';
+  return source;
 }
 
 function recordPlanHasConcreteValues(record){
@@ -23647,7 +23682,7 @@ function renderReviewWorkspace(options = {}){
               <div><label>Credible RR</label><input id="credibleRrBox" readonly value="${escapeHtml(credibleRrDisplay)}" /></div>
               <div><label>Optimistic Target</label><input id="optimisticTargetBox" readonly value="${escapeHtml(planRealism.optimistic_target_flag ? 'Yes' : 'No')}" /></div>
               <div><label>Target Assessment</label><input id="targetAssessmentBox" readonly value="${escapeHtml(planRealism.credible_target_assessment)}" /></div>
-              <div><label>Plan Source</label><input id="planSourceBox" readonly value="${escapeHtml(String(record.plan.source || effectivePlan.source || ''))}" /></div>
+              <div><label>Plan Source</label><input id="planSourceBox" readonly value="${escapeHtml(planSourceForDiagnostics(record, effectivePlan))}" /></div>
               <div><label>Trigger State</label><input id="triggerStateBox" readonly value="${escapeHtml(triggerStateLabel(record.plan.triggerState))}" /></div>
               <div><label>Plan Check</label><input id="planValidationBox" readonly value="${escapeHtml(planValidationStateLabel(planCheckState))}" /></div>
               <div><label>Execution Mode</label><input id="exitModeBox" readonly value="${escapeHtml(executionModeText)}" /></div>
@@ -24211,7 +24246,7 @@ function syncPlanDisplayMeta(options = {}){
   if($('credibleRrBox')) $('credibleRrBox').value = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   if($('optimisticTargetBox')) $('optimisticTargetBox').value = planRealism.optimistic_target_flag ? 'Yes' : 'No';
   if($('targetAssessmentBox')) $('targetAssessmentBox').value = planRealism.credible_target_assessment || 'N/A';
-  if(planSourceBox) planSourceBox.value = String(record.plan.source || effectivePlan.source || '').trim() || 'manual';
+  if(planSourceBox) planSourceBox.value = planSourceForDiagnostics(record, effectivePlan);
   if(exitModeBox) exitModeBox.value = executionModeLabel(executionState.exitMode);
   if(triggerStateBox) triggerStateBox.value = triggerStateLabel(record.plan.triggerState);
   if(planValidationBox) planValidationBox.value = planValidationStateLabel(planCheckState);
@@ -25987,14 +26022,14 @@ function resolveFinalStateContract(record, options = {}){
     ? verdictCap.blockerFlags
     : {};
   const rrResolution = options.rrResolution || {
-    rr_label:planStateKey !== 'valid' ? 'Invalid' : 'Developing',
+    rr_label:planStateKey === 'missing' ? 'Unknown' : (planStateKey !== 'valid' ? 'Invalid' : 'Developing'),
     rawResolverVerdict:finalVerdict,
     status:finalVerdict,
     remapReason:''
   };
 
   const planStatusLabel = ({
-    missing:'Missing plan',
+    missing:'No actionable plan yet',
     invalid:'Invalid plan',
     needs_adjustment:'Needs adjustment',
     unrealistic_rr:'Unrealistic R:R',
@@ -26058,7 +26093,7 @@ function resolveFinalStateContract(record, options = {}){
     setPrimaryBlocker(planOrBounceCode, bounceGuard.unpriceableBlockReason || ((planStateKey === 'needs_adjustment' && (capitalBlocked || capitalHeavy))
       ? (capitalConstraintReasonForPlan(displayedPlan) || 'Capital usage is heavy for this account size.')
       : (({
-        missing:'Plan not defined',
+        missing:'No actionable plan yet.',
         invalid:'Invalid plan',
         needs_adjustment:'Bounce is not clear enough to price yet.',
         unrealistic_rr:'R:R is not realistic'

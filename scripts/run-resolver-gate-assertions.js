@@ -937,7 +937,127 @@ function runAiContractAssertions(){
 
 runAiContractAssertions();
 
+function runPlanSemanticsAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    console,
+    state:{marketStatus:''},
+    numericOrNull:value => {
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    fallbackPlanProposalForCard:() => null,
+    resolverSeedVerdictForRecord:() => 'Watch',
+    cloneData:(value, fallback) => value == null ? fallback : JSON.parse(JSON.stringify(value)),
+    currentRiskSettings:() => ({}),
+    currentMaxLoss:() => 40,
+    currentAccountSizeGbp:() => 4000,
+    evaluateRewardRisk:(entry, stop, target) => {
+      const values = [entry, stop, target].map(Number);
+      if(values.some(value => !Number.isFinite(value))) return {valid:false, rrRatio:null, riskPerShare:null, rewardPerShare:null, rrState:'invalid'};
+      const risk = values[0] - values[1];
+      const reward = values[2] - values[0];
+      const valid = risk > 0 && reward > 0;
+      return {valid, rrRatio:valid ? reward / risk : null, riskPerShare:risk, rewardPerShare:reward, rrState:valid ? 'valid' : 'invalid'};
+    },
+    evaluateRiskFit:({entry, stop}) => Number.isFinite(Number(entry)) && Number.isFinite(Number(stop)) && Number(entry) > Number(stop)
+      ? {max_loss:40, risk_per_share:Number(entry) - Number(stop), position_size:8, risk_status:'fits_risk'}
+      : {max_loss:40, risk_per_share:null, position_size:0, risk_status:'plan_missing'},
+    evaluateCapitalFit:() => ({capital_fit:'acceptable', capital_ok:true, position_cost:800, position_cost_gbp:800}),
+    deriveTradeability:(status, riskStatus) => status === 'valid' && riskStatus === 'fits_risk' ? 'tradable' : 'invalid',
+    deriveAffordability:() => 'affordable',
+    analysisDerivedStatesFromRecord:() => ({structureState:'intact', trendState:'uptrend', bounceState:'none', pullbackZone:'near_50ma', stabilisationState:'none', volumeState:'neutral'}),
+    actionableRrValueForPlan:plan => plan && plan.status === 'valid' && plan.rewardRisk && plan.rewardRisk.valid ? plan.rewardRisk.rrRatio : null,
+    evaluateSetupQualityAdjustments:() => ({weakRegimePenalty:false, lowControlSetup:false, tooWideForQualityPullback:false}),
+    normalizeAnalysisVerdict:value => String(value || 'Watch'),
+    getSetupUiState:() => ({state:'monitor'}),
+    isHostileMarketStatus:() => false,
+    planUiLabel:planValidity => planValidity === 'missing'
+      ? 'No actionable plan yet'
+      : (planValidity === 'valid' ? 'Plan valid' : (planValidity === 'needs_adjustment' ? 'Needs adjustment' : (planValidity === 'unrealistic_rr' ? 'Unrealistic R:R' : 'Invalid plan')))
+  };
+  vm.createContext(sandbox);
+  [
+    'hasAnyPlanFields',
+    'effectivePlanForRecord',
+    'planSourceForDiagnostics',
+    'deriveCurrentPlanState',
+    'planUiClass',
+    'getPlanUiState',
+    'evaluatePlanRealism'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});
+  });
+
+  const noPlanRecord = {ticker:'NOPLAN', plan:{entry:null, stop:null, firstTarget:null, source:'manual'}, review:{manualReview:null}, scan:{}, marketData:{currency:'USD'}};
+  const noPlanEffective = sandbox.effectivePlanForRecord(noPlanRecord, {allowScannerFallback:false});
+  const noPlanState = sandbox.deriveCurrentPlanState(noPlanEffective.entry, noPlanEffective.stop, noPlanEffective.firstTarget, 'USD');
+  const noPlanUi = sandbox.getPlanUiState(noPlanRecord, {displayedPlan:noPlanState, effectivePlan:noPlanEffective});
+  const noPlanRealism = sandbox.evaluatePlanRealism(noPlanRecord, {displayedPlan:noPlanState});
+  if(noPlanEffective.source === 'manual' || sandbox.planSourceForDiagnostics(noPlanRecord, noPlanEffective) === 'manual'){
+    throw new Error('Missing AI/chart plan with no user-entered fields must not be diagnosed as manual.');
+  }
+  if(noPlanUi.state !== 'missing' || /Invalid plan/i.test(noPlanUi.label) || noPlanRealism.rr_realism_label !== 'N/A'){
+    throw new Error('Missing generated plan must display as pending/no actionable plan with RR realism N/A.');
+  }
+
+  const partialManualRecord = {ticker:'PARTIAL', plan:{entry:100, stop:null, firstTarget:null, source:'manual'}, review:{manualReview:null}, scan:{}, marketData:{currency:'USD'}};
+  const partialEffective = sandbox.effectivePlanForRecord(partialManualRecord, {allowScannerFallback:false});
+  const partialState = sandbox.deriveCurrentPlanState(partialEffective.entry, partialEffective.stop, partialEffective.firstTarget, 'USD');
+  const partialUi = sandbox.getPlanUiState(partialManualRecord, {displayedPlan:partialState, effectivePlan:partialEffective});
+  if(sandbox.planSourceForDiagnostics(partialManualRecord, partialEffective) !== 'manual' || partialUi.state !== 'invalid'){
+    throw new Error('User-entered incomplete plan fields may remain manual and invalid/incomplete.');
+  }
+
+  const validManualRecord = {ticker:'VALIDMANUAL', plan:{entry:100, stop:95, firstTarget:115, source:'manual'}, review:{manualReview:null}, scan:{}, marketData:{price:100, currency:'USD'}};
+  const validEffective = sandbox.effectivePlanForRecord(validManualRecord, {allowScannerFallback:false});
+  const validState = sandbox.deriveCurrentPlanState(validEffective.entry, validEffective.stop, validEffective.firstTarget, 'USD');
+  if(sandbox.planSourceForDiagnostics(validManualRecord, validEffective) !== 'manual' || validState.status !== 'valid'){
+    throw new Error('Complete manual plan must remain manual and use normal validation math.');
+  }
+  const validPricesWithoutConfirmation = {
+    structure_state:'intact',
+    trend_state:'uptrend',
+    bounce_state:'none',
+    stabilisation_state:'none',
+    pullback_zone:'near_50ma',
+    market_regime:'supportive',
+    volume_state:'normal',
+    plan_visible:true,
+    plan_status:'valid',
+    plan_blocked:false,
+    has_entry:true,
+    has_stop:true,
+    entry:100,
+    stop:95,
+    target:115,
+    rr:3,
+    credible_rr:3,
+    tradeability:'tradable',
+    pullback_valid:true,
+    entry_trigger_hit:false,
+    stop_distance_too_wide:false,
+    capital_fit:'acceptable',
+    affordability:'affordable',
+    price_below_50ma:false,
+    price_below_200ma:false,
+    ma50_below_200ma:false,
+    terminal_avoid_applied:false
+  };
+  const caseCEntryGate = resolverCore.canPromoteToEntry(validPricesWithoutConfirmation);
+  const caseCNearEntryGate = resolverCore.canPromoteToNearEntry(validPricesWithoutConfirmation);
+  const caseCGuarded = resolverCore.applyPromotionGuards({final_verdict:'watch', reason:''}, validPricesWithoutConfirmation);
+  if(caseCEntryGate.pass === true || caseCNearEntryGate.pass === true || caseCGuarded.final_verdict === 'entry' || caseCGuarded.final_verdict === 'near_entry'){
+    throw new Error('Valid manual prices alone must not promote without bounce/stabilisation confirmation gates.');
+  }
+}
+
+runPlanSemanticsAssertions();
+
 console.log(`Resolver gate assertions passed (${results.length} cases).`);
 console.log('Review projection invariant assertions passed.');
 console.log('Simplified state pipeline assertions passed.');
 console.log('AI chart-coach contract assertions passed.');
+console.log('Plan source semantics assertions passed.');
