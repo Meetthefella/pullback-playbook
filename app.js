@@ -10732,7 +10732,7 @@ function removeCard(ticker){
   renderFocusQueue();
 }
 
-function scoreAndStatusFromChecks(checks){
+function scoreAndStatusFromChecks(checks, context = {}){
   const nearMA = !!(checks.near20 || checks.near50);
   const trendStrong = !!checks.trendStrong;
   const above50 = !!checks.above50;
@@ -10742,6 +10742,9 @@ function scoreAndStatusFromChecks(checks){
   const bounce = !!checks.bounce;
   const volume = !!checks.volume;
   const tradePlan = !!(checks.entryDefined && checks.stopDefined && checks.targetDefined);
+  const finalVerdict = String(context.canonicalVerdict || context.finalVerdict || '').trim().toLowerCase();
+  const viabilityRejected = context.viability === 'reject' || context.rejectedByViabilityGate === true;
+  const planInvalid = context.planValid === false || ['invalid','missing'].includes(String(context.planStatus || '').trim().toLowerCase());
   let score = 0;
   if(trendStrong) score += 2;
   if(above50) score += 1;
@@ -10757,16 +10760,42 @@ function scoreAndStatusFromChecks(checks){
   if(hardFail) status = 'Avoid';
   else if(stabilising && bounce && tradePlan) status = 'Entry';
   else if(stabilising) status = 'Near Entry';
+  if(finalVerdict === 'avoid' || viabilityRejected) status = 'Avoid';
+  else if(planInvalid && status === 'Entry') status = 'Watch';
   return {score, status};
 }
 
-function buildSummary(checks, status){
+function buildSummary(checks, status, context = {}){
   const nearMA = checks.near20 || checks.near50;
   const stabilising = !!checks.stabilising;
   const bounce = !!checks.bounce;
   const trendStrong = !!checks.trendStrong;
   const above50 = !!checks.above50;
   const above200 = !!checks.above200;
+  const structureState = String(context.structureState || '').trim().toLowerCase();
+  const bounceState = String(context.bounceState || '').trim().toLowerCase();
+  const planStatus = String(context.planStatus || '').trim().toLowerCase();
+  const finalVerdict = String(context.canonicalVerdict || context.finalVerdict || '').trim().toLowerCase();
+  const mainBlocker = String(context.mainBlocker || '').trim();
+  const viabilityRejected = context.viability === 'reject' || context.rejectedByViabilityGate === true;
+  const planBlocked = context.planValid === false || ['invalid','missing'].includes(planStatus) || context.planVisible === false;
+  if(finalVerdict === 'avoid' || viabilityRejected || planBlocked || ['weak','weakening','broken'].includes(structureState) || bounceState === 'none'){
+    if(finalVerdict === 'avoid' || viabilityRejected || ['weak','weakening','broken'].includes(structureState)){
+      let reason = mainBlocker || (planBlocked ? 'No actionable plan is available yet.' : 'The setup is not actionable yet.');
+      if(['weak','weakening'].includes(structureState) && /broken/i.test(reason)){
+        reason = planBlocked
+          ? 'the pullback is too weak to price reliably and no actionable plan is available yet.'
+          : 'the pullback is too weak to price reliably.';
+      }
+      return `Avoid for now - ${reason} No entry until price stabilises, a clear bounce forms, and a valid entry/stop/target plan is available.`;
+    }
+    if(planBlocked){
+      return `${mainBlocker || 'No actionable plan yet.'} Wait for a valid entry, stop, and first target before treating this as actionable.`;
+    }
+    if(bounceState === 'none'){
+      return `${mainBlocker || 'No bounce confirmation yet.'} Wait for price to stabilise and form a clear bounce before entry.`;
+    }
+  }
   if(!trendStrong || !above50 || !above200 || !nearMA){
     let reason = 'The stock does not meet the basic Quality Pullback rules.';
     if(!trendStrong) reason += ' Trend quality is not strong enough.';
@@ -10779,6 +10808,83 @@ function buildSummary(checks, status){
   if(stabilising && bounce && status === 'Entry') return `${text} Price is stabilising and a bounce is forming. Setup is close to actionable if risk stays controlled.`;
   if(stabilising) return `${text} Price is stabilising, but the bounce still needs confirmation.`;
   return `${text} There is no clear stabilisation or bounce yet.`;
+}
+
+function reviewChecklistContextForRecord(record, options = {}){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item) return {};
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
+  const rawPlan = options.displayedPlan || deriveCurrentPlanState(
+    effectivePlan.entry,
+    effectivePlan.stop,
+    effectivePlan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const displayedPlan = options.displayedPlan || applySetupConfirmationPlanGate(item, rawPlan, derivedStates);
+  const simplifiedState = options.simplifiedState || resolveSimplifiedStateForSurface(item, 'review_checklist', {
+    log:false,
+    mutationSource:'review_checklist'
+  });
+  const resolvedState = simplifiedState && simplifiedState.debug && simplifiedState.debug.resolvedState
+    ? simplifiedState.debug.resolvedState
+    : {};
+  return {
+    ticker:item.ticker,
+    canonicalVerdict:String(simplifiedState && simplifiedState.canonicalVerdict || '').trim().toLowerCase(),
+    visualBucket:String(simplifiedState && simplifiedState.visualBucket || '').trim().toLowerCase(),
+    mainBlocker:String((simplifiedState && simplifiedState.mainBlocker) || resolvedState.main_blocker || resolvedState.reason || '').trim(),
+    planVisible:simplifiedState ? simplifiedState.planVisible === true : displayedPlan.status === 'valid',
+    planStatus:String((simplifiedState && simplifiedState.planStatus) || displayedPlan.status || '').trim().toLowerCase(),
+    planValid:displayedPlan.status === 'valid'
+      && displayedPlan.rewardRisk
+      && displayedPlan.rewardRisk.valid === true
+      && Number.isFinite(displayedPlan.rewardRisk.rrRatio),
+    entry:Number.isFinite(numericOrNull(displayedPlan.entry)) ? Number(numericOrNull(displayedPlan.entry)) : null,
+    stop:Number.isFinite(numericOrNull(displayedPlan.stop)) ? Number(numericOrNull(displayedPlan.stop)) : null,
+    target:Number.isFinite(numericOrNull(displayedPlan.target)) ? Number(numericOrNull(displayedPlan.target)) : null,
+    structureState:String(derivedStates.structureState || derivedStates.structure_state || resolvedState.structure_state || '').trim().toLowerCase(),
+    bounceState:String(derivedStates.bounceState || derivedStates.bounce_state || resolvedState.bounce_state || '').trim().toLowerCase(),
+    stabilisationState:String(derivedStates.stabilisationState || derivedStates.stabilisation_state || '').trim().toLowerCase(),
+    pullbackZone:String(derivedStates.pullbackZone || derivedStates.pullback_zone || '').trim().toLowerCase(),
+    viability:String(resolvedState.viability || '').trim().toLowerCase(),
+    rejectedByViabilityGate:resolvedState.rejected_by_viability_gate === true
+  };
+}
+
+function reviewChecklistContextForActiveTicker(options = {}){
+  const ticker = activeReviewTicker();
+  const record = ticker ? getTickerRecord(ticker) : null;
+  return reviewChecklistContextForRecord(record, options);
+}
+
+function resolvedReviewChecksForDisplay(rawChecks, context = {}){
+  const checks = {};
+  checklistIds.forEach(id => {
+    checks[id] = !!(rawChecks && rawChecks[id]);
+  });
+  const entry = numericOrNull(context.entry);
+  const stop = numericOrNull(context.stop);
+  const target = numericOrNull(context.target);
+  const hasEntry = Number.isFinite(entry);
+  const hasStop = hasEntry && Number.isFinite(stop) && entry > stop;
+  const hasTarget = hasEntry && Number.isFinite(target) && target > entry;
+  checks.entryDefined = hasEntry;
+  checks.stopDefined = hasStop;
+  checks.targetDefined = hasTarget && context.planValid === true;
+  const structureState = String(context.structureState || '').trim().toLowerCase();
+  const bounceState = String(context.bounceState || '').trim().toLowerCase();
+  const stabilisationState = String(context.stabilisationState || '').trim().toLowerCase();
+  if(['weak','weakening','broken'].includes(structureState)){
+    checks.trendStrong = false;
+  }
+  if(bounceState === 'none'){
+    checks.bounce = false;
+    checks.stabilising = false;
+  }else if(stabilisationState === 'none'){
+    checks.stabilising = false;
+  }
+  return checks;
 }
 
 function statusClass(status){
@@ -23603,17 +23709,23 @@ function loadCard(ticker, options = {}){
 function refreshReview(options = {}){
   const reviewSeq = reviewRenderSeqForOptions(options);
   if(!isCurrentReviewRender(reviewSeq)) return;
-  const checks = currentChecks();
-  const result = scoreAndStatusFromChecks(checks);
+  const rawChecks = currentChecks();
+  const checklistContext = reviewChecklistContextForActiveTicker();
+  const checks = resolvedReviewChecksForDisplay(rawChecks, checklistContext);
+  const result = scoreAndStatusFromChecks(checks, checklistContext);
   if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
     window.requestAnimationFrame(() => {
       if(!isCurrentReviewRender(reviewSeq)) return;
       const summaryBox = $('summaryBox');
       const progressText = $('progressText');
       const progressFill = $('progressFill');
+      checklistIds.forEach(id => {
+        const input = $(id);
+        if(input && typeof input.checked === 'boolean') input.checked = !!checks[id];
+      });
       if(!refreshReview._missingTextTargetsLogged) refreshReview._missingTextTargetsLogged = new Set();
       if(summaryBox){
-        summaryBox.textContent = buildSummary(checks, result.status);
+        summaryBox.textContent = buildSummary(checks, result.status, checklistContext);
       }else if(!refreshReview._missingTextTargetsLogged.has('summaryBox')){
         refreshReview._missingTextTargetsLogged.add('summaryBox');
         if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'summaryBox', selector:'#summaryBox'});
@@ -23642,7 +23754,9 @@ function persistActiveReviewDraft(options = {}){
   }
   const source = String(options.source || 'review_draft');
   const isManualSave = options.manual === true || source === 'review_save';
-  const checks = currentChecks();
+  const rawChecks = currentChecks();
+  const checklistContext = reviewChecklistContextForActiveTicker();
+  const checks = resolvedReviewChecksForDisplay(rawChecks, checklistContext);
   const fallbackMeta = getReviewChecklistFallbackMeta(ticker);
   const activeRenderPass = Number(uiState && uiState.reviewRenderPass || 0);
   const fallbackAppliesToActiveTicker = !!(
@@ -23666,7 +23780,7 @@ function persistActiveReviewDraft(options = {}){
     }
     return {saved:false, skipped:true, reason:'checklist_fallback', ticker, source, fallbackMeta};
   }
-  const result = scoreAndStatusFromChecks(checks);
+  const result = scoreAndStatusFromChecks(checks, checklistContext);
   const record = upsertTickerRecord(ticker);
   setActiveReviewTicker(ticker);
   record.review.cardOpen = true;
@@ -23678,7 +23792,7 @@ function persistActiveReviewDraft(options = {}){
     target:($('targetPrice') && $('targetPrice').value) || '',
     score:result.score,
     status:result.status,
-    summary:buildSummary(checks, result.status),
+    summary:buildSummary(checks, result.status, checklistContext),
     savedAt:new Date().toISOString()
   };
   record.review.manualReview = manualReview;

@@ -40,7 +40,21 @@ if(failures.length){
 function extractFunctionSource(source, functionName){
   const start = source.indexOf(`function ${functionName}`);
   if(start < 0) throw new Error(`Unable to find ${functionName} in app.js.`);
-  const bodyStart = source.indexOf('{', start);
+  const paramsStart = source.indexOf('(', start);
+  let paramDepth = 0;
+  let paramsEnd = -1;
+  for(let index = paramsStart; index < source.length; index += 1){
+    const char = source[index];
+    if(char === '(') paramDepth += 1;
+    else if(char === ')'){
+      paramDepth -= 1;
+      if(paramDepth === 0){
+        paramsEnd = index;
+        break;
+      }
+    }
+  }
+  const bodyStart = source.indexOf('{', paramsEnd > -1 ? paramsEnd : start);
   let depth = 0;
   for(let index = bodyStart; index < source.length; index += 1){
     const char = source[index];
@@ -76,9 +90,16 @@ function runReviewProjectionAssertions(){
     normalizeTicker(value){
       return String(value || '').trim().toUpperCase();
     },
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
     verdictPresentationLabelForKey(value){
       return String(value || '').trim();
-    }
+    },
+    checklistIds:['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined']
   };
   vm.createContext(projectionSandbox);
   [
@@ -93,6 +114,9 @@ function runReviewProjectionAssertions(){
     'normalizeUiCopy',
     'isDuplicatedStatusCopy',
     'nonPlanCalcNoteText',
+    'scoreAndStatusFromChecks',
+    'buildSummary',
+    'resolvedReviewChecksForDisplay',
     'applyProjectionSnapshotToReviewBundle'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), projectionSandbox, {filename:`app.js#${functionName}`});
@@ -324,6 +348,50 @@ function runReviewProjectionAssertions(){
   const authoritativeGlobal = authoritativeNearEntry.bundle.globalVerdict || {};
   if(authoritativeGlobal.final_verdict !== 'near_entry' || authoritativeVisual.visualBucket !== 'near_entry'){
     throw new Error('Authoritative fresh near_entry resolver state must remain near_entry.');
+  }
+
+  const rawBullishChecklist = {
+    trendStrong:true,
+    above50:true,
+    above200:true,
+    ma50gt200:true,
+    near20:false,
+    near50:true,
+    stabilising:true,
+    bounce:true,
+    volume:true,
+    entryDefined:true,
+    stopDefined:true,
+    targetDefined:true
+  };
+  const blockedChecklistContext = {
+    canonicalVerdict:'avoid',
+    visualBucket:'avoid',
+    mainBlocker:'Structure is broken.',
+    planVisible:false,
+    planStatus:'invalid',
+    planValid:false,
+    entry:100,
+    stop:102,
+    target:98,
+    structureState:'weak',
+    bounceState:'none',
+    stabilisationState:'none',
+    pullbackZone:'near_50ma',
+    viability:'reject',
+    rejectedByViabilityGate:true
+  };
+  const displayedChecklist = projectionSandbox.resolvedReviewChecksForDisplay(rawBullishChecklist, blockedChecklistContext);
+  const blockedChecklistScore = projectionSandbox.scoreAndStatusFromChecks(displayedChecklist, blockedChecklistContext);
+  const blockedChecklistSummary = projectionSandbox.buildSummary(displayedChecklist, blockedChecklistScore.status, blockedChecklistContext);
+  if(blockedChecklistScore.score >= 10){
+    throw new Error('Blocked Review checklist must not display 10/10 when the effective plan is invalid.');
+  }
+  if(displayedChecklist.entryDefined !== true || displayedChecklist.stopDefined !== false || displayedChecklist.targetDefined !== false){
+    throw new Error('Review checklist plan fields must reflect the effective valid long-plan shape.');
+  }
+  if(!/^Avoid for now/i.test(String(blockedChecklistSummary || '')) || /Strong uptrend|broken/i.test(String(blockedChecklistSummary || ''))){
+    throw new Error('Blocked Review checklist summary must lead with blocked/no-actionable-plan language, not bullish summary copy.');
   }
 }
 
