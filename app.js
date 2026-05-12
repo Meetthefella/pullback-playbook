@@ -8110,6 +8110,11 @@ function renderWatchlistCardElement(record, options = {}){
     const holdWrapper = document.createElement('div');
     holdWrapper.innerHTML = watchlistEntryConditionsHelper;
     if(holdWrapper.firstElementChild) div.appendChild(holdWrapper.firstElementChild);
+    const holdAffordance = document.createElement('div');
+    holdAffordance.className = 'entry-conditions-affordance no-card-click';
+    holdAffordance.setAttribute('aria-hidden', 'true');
+    holdAffordance.textContent = '👆';
+    div.appendChild(holdAffordance);
     bindEntryConditionsHoldInteractions(div);
   }
   return div;
