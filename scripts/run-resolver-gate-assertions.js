@@ -737,6 +737,42 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('Constructive waiting Watch must not inherit deterioration or unpriceable copy.');
   }
 
+  const constructiveUnpriceableWaitingWatch = pipeline.resolveRecordState({
+    ticker:'MARX',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:260, ma20:255, ma50:245, ma200:220, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'strong',
+      trendState:'intact',
+      setupLocationState:'usable_pullback',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'supportive'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Needs confirmation before promotion.',
+      reasonSummary:'Bounce still tentative.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 9)
+  });
+  if(constructiveUnpriceableWaitingWatch.canonicalVerdict !== 'watch' || constructiveUnpriceableWaitingWatch.visualBucket !== 'monitor' || constructiveUnpriceableWaitingWatch.tone !== 'monitor' || constructiveUnpriceableWaitingWatch.badgeLabel !== 'Watch'){
+    throw new Error('Constructive high-score Watch must not become Diminishing solely because priceability is currently unpriceable.');
+  }
+  if(constructiveUnpriceableWaitingWatch.entryGatePass !== false || constructiveUnpriceableWaitingWatch.nearEntryGatePass !== false){
+    throw new Error('Constructive unpriceable Watch must still fail Entry/Near Entry gates.');
+  }
+
   const weakeningWatch = pipeline.resolveRecordState({
     ticker:'DOWX',
     in_watchlist:true,

@@ -97,7 +97,6 @@
       || (['missing','invalid'].includes(planStatus) && ['none','extended','volatile','off_level','unclear'].includes(setupLocationState || 'none'));
     const deteriorationEvidence = ['damaged','broken'].includes(structureEligibility)
       || ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
-      || priceabilityState === 'unpriceable'
       || setupLocationState === 'volatile'
       || viabilityBranchId.includes('damaged')
       || viabilityBranchId.includes('low_score')

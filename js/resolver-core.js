@@ -1206,7 +1206,6 @@
       && (
         structureLayer.structureEligibility === 'damaged'
         || ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
-        || priceabilityState === 'unpriceable'
         || setupLocationState === 'volatile'
         || viabilityBranchId.includes('damaged')
         || viabilityBranchId.includes('low_score')
