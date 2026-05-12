@@ -457,13 +457,13 @@ function runSimplifiedPipelineAssertions(){
     'blockers',
     'debug'
   ];
-  function depsFor(derivedStates, finalContract){
+  function depsFor(derivedStates, finalContract, setupScore = 8){
     return {
       riskSettings:{account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
       analysisDerivedStatesFromRecord:() => derivedStates,
       resolvePreLifecycleStateContract:() => finalContract,
       resolveFinalStateContract:() => finalContract,
-      setupScoreForRecord:() => 8,
+      setupScoreForRecord:() => setupScore,
       isHostileMarketStatus:() => false,
       scannerScoreGradientClass:() => ''
     };
@@ -606,6 +606,82 @@ function runSimplifiedPipelineAssertions(){
   }
   if(/weakening|broken/i.test(String(strongExtendedUnpriceable.mainBlocker || dinoResolved.reason || ''))){
     throw new Error('Strong extended unpriceable setup reason must reference priceability/location, not weakening/broken structure.');
+  }
+
+  const amznDiminishingWatch = pipeline.resolveRecordState({
+    ticker:'AMZNX',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:190, ma20:184, ma50:175, ma200:145, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'strong',
+      trendState:'intact',
+      setupLocationState:'none',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'none',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'No bounce confirmation yet.',
+      reasonSummary:'No bounce confirmation yet.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 3)
+  });
+  const amznResolved = amznDiminishingWatch.debug && amznDiminishingWatch.debug.resolvedState || {};
+  if(amznDiminishingWatch.canonicalVerdict !== 'watch' || amznDiminishingWatch.entryGatePass !== false || amznDiminishingWatch.nearEntryGatePass !== false){
+    throw new Error('AMZN-style poor setup must remain canonical Watch and fail Entry/Near Entry gates.');
+  }
+  if(amznResolved.terminal_avoid_applied === true || amznResolved.rejected_by_viability_gate === true){
+    throw new Error('AMZN-style poor setup must not become terminal Avoid.');
+  }
+  if(amznDiminishingWatch.visualBucket !== 'diminishing' || amznDiminishingWatch.tone !== 'diminishing' || amznDiminishingWatch.badgeLabel !== 'Watch'){
+    throw new Error('AMZN-style poor setup must render as Diminishing Watch with Watch badge.');
+  }
+  if(/^\s*No bounce confirmation yet\.?\s*$/i.test(String(amznDiminishingWatch.mainBlocker || '')) || !/no usable pullback|too extended|price reliably|cleaner reset|support/i.test(String(amznDiminishingWatch.mainBlocker || ''))){
+    throw new Error('AMZN-style poor setup copy must explain pullback/priceability quality, not only bounce confirmation.');
+  }
+
+  const developingWatch = pipeline.resolveRecordState({
+    ticker:'DEVWATCH',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:99, ma20:100, ma50:94, ma200:80, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'intact',
+      trendState:'intact',
+      setupLocationState:'usable_pullback',
+      priceabilityState:'provisional',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Bounce is developing but not confirmed.',
+      reasonSummary:'Waiting for confirmation.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 6)
+  });
+  if(developingWatch.canonicalVerdict !== 'watch' || developingWatch.visualBucket !== 'monitor' || developingWatch.tone !== 'monitor' || developingWatch.badgeLabel !== 'Watch'){
+    throw new Error('Developing constructive Watch must remain Monitor tone with Watch badge.');
   }
 
   const volatileRecovery = pipeline.resolveRecordState({

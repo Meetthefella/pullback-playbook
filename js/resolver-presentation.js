@@ -62,9 +62,30 @@
     const structureEligibility = String(options.structureEligibility || '').trim().toLowerCase();
     const structureState = String(options.structureState || '').trim().toLowerCase();
     const viability = String(options.viability || '').trim().toLowerCase();
+    const viabilityBranchId = String(options.viabilityBranchId || '').trim().toLowerCase();
     const setupLocationState = String(options.setupLocationState || '').trim().toLowerCase();
     const priceabilityState = String(options.priceabilityState || '').trim().toLowerCase();
-    if(['extended','volatile','off_level'].includes(setupLocationState) || priceabilityState === 'unpriceable'){
+    const bounceState = String(options.bounceState || '').trim().toLowerCase();
+    const stabilisationState = String(options.stabilisationState || '').trim().toLowerCase();
+    const pullbackZone = String(options.pullbackZone || '').trim().toLowerCase();
+    const planStatus = String(options.planStatus || '').trim().toLowerCase();
+    const setupScore = Number.isFinite(Number(options.setupScore)) ? Number(options.setupScore) : null;
+    const developingWatch = ['near_20ma','near_50ma','recently_left_20ma','recently_left_50ma'].includes(pullbackZone)
+      && ['attempt','early','confirmed'].includes(bounceState)
+      && ['early','present','clear'].includes(stabilisationState)
+      && priceabilityState !== 'unpriceable';
+    const structureAllowsDevelopingWatch = structureEligibility === 'alive'
+      || (
+        !structureEligibility
+        && ['strong','intact','developing_clean'].includes(structureState)
+      );
+    if(developingWatch && structureAllowsDevelopingWatch){
+      return 'monitor';
+    }
+    const lowQualityWatch = viabilityBranchId.includes('low_score')
+      || (setupScore !== null && setupScore < 5)
+      || (['missing','invalid'].includes(planStatus) && ['none','extended','volatile','off_level','unclear'].includes(setupLocationState || 'none'));
+    if(!developingWatch && (['none','extended','volatile','off_level','unclear'].includes(setupLocationState) || priceabilityState === 'unpriceable' || lowQualityWatch)){
       return 'diminishing';
     }
     if(structureEligibility === 'damaged' || structureState === 'weakening' || viability === 'low_priority'){
@@ -90,8 +111,13 @@
     const structureEligibility = String(options && options.structureEligibility || '').toLowerCase();
     const setupLocationState = String(options && options.setupLocationState || '').toLowerCase();
     const priceabilityState = String(options && options.priceabilityState || '').toLowerCase();
+    const viabilityBranchId = String(options && options.viabilityBranchId || '').toLowerCase();
+    const setupScore = Number.isFinite(Number(options && options.setupScore)) ? Number(options.setupScore) : null;
     if(setupLocationState === 'extended') return 'Watch - strong trend, but no clean pullback entry yet.';
-    if(setupLocationState === 'volatile' || priceabilityState === 'unpriceable') return 'Watch - strong trend, but too volatile to price reliably.';
+    if(setupLocationState === 'volatile') return 'Watch - setup is too volatile to price reliably.';
+    if(setupLocationState === 'none' || setupLocationState === 'off_level' || setupLocationState === 'unclear') return 'Watch - strong trend, but no usable pullback setup yet.';
+    if(priceabilityState === 'unpriceable') return 'Watch - price is too extended to price reliably.';
+    if(viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5)) return 'Watch - setup quality has slipped below useful watchlist quality.';
     if(structureEligibility === 'damaged') return 'Watch - structure weakening.';
     return 'Watch - waiting for confirmation.';
   }
@@ -146,11 +172,16 @@
     const terminalAvoidApplied = legacyVerdict && legacyVerdict.terminal_avoid_applied === true;
     const structureEligibility = String(legacyVerdict && legacyVerdict.structure_eligibility || '').trim().toLowerCase();
     const viability = String(legacyVerdict && legacyVerdict.viability || '').trim().toLowerCase();
+    const viabilityBranchId = String(legacyVerdict && legacyVerdict.viabilityBranchId || '').trim().toLowerCase();
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
     const setupLocationState = String((derivedStates && derivedStates.setupLocationState) || (legacyVerdict && legacyVerdict.setup_location_state) || '').trim().toLowerCase();
     const derivedPriceabilityState = String(derivedStates && derivedStates.priceabilityState || '').trim().toLowerCase();
     const legacyPriceabilityInferred = legacyVerdict && legacyVerdict.priceability_inferred === true;
     const priceabilityState = String(derivedPriceabilityState || (legacyPriceabilityInferred ? '' : (legacyVerdict && legacyVerdict.priceability_state)) || '').trim().toLowerCase();
+    const bounceState = String(derivedStates && derivedStates.bounceState || legacyVerdict && legacyVerdict.bounce_state || '').trim().toLowerCase();
+    const stabilisationState = String(derivedStates && derivedStates.stabilisationState || '').trim().toLowerCase();
+    const pullbackZone = String(derivedStates && derivedStates.pullbackZone || legacyVerdict && legacyVerdict.pullback_zone || '').trim().toLowerCase();
+    const planStatus = String(resolvedContract && resolvedContract.planStatusKey || displayedPlan && displayedPlan.status || '').trim().toLowerCase();
     const hardStructureFailure = structureEligibility === 'broken' || structureState === 'broken';
     const weakOrWeakeningStructure = structureState === 'weakening' || structureState === 'weak';
     const weakeningLowPriorityRecovery = (
@@ -181,7 +212,13 @@
       structureState,
       setupLocationState,
       priceabilityState,
-      viability
+      viability,
+      viabilityBranchId,
+      bounceState,
+      stabilisationState,
+      pullbackZone,
+      planStatus,
+      setupScore:options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord)
     }, deps);
     let visual_tone = visualBucket;
     if(visual_tone === 'diminishing' && finalVerdict !== 'watch') visual_tone = finalVerdict === 'avoid' ? 'avoid' : 'monitor';
@@ -193,7 +230,9 @@
       structureState:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase(),
       structureEligibility:legacyVerdict && legacyVerdict.structure_eligibility,
       setupLocationState,
-      priceabilityState
+      priceabilityState,
+      viabilityBranchId,
+      setupScore:options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord)
     };
     const resolvedSummary = decisionSummaryForVerdict(renderedVerdict, summaryOptions, deps);
     const cardClass = cardClassForBucket(visualBucket);

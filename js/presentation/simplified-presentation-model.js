@@ -40,6 +40,33 @@
         ? 'Structure is weak and viability rejected the setup.'
         : 'Trend is weakening and viability rejected the setup.';
     }
+    const resolvedVerdict = canonicalVerdict(state.final_verdict || state.finalVerdict || 'watch');
+    const structureEligibility = String(state.structure_eligibility || state.structureEligibility || '').trim().toLowerCase();
+    const setupLocationState = String(state.setup_location_state || state.setupLocationState || '').trim().toLowerCase();
+    const priceabilityState = String(state.priceability_state || state.priceabilityState || '').trim().toLowerCase();
+    const viabilityBranchId = String(state.viabilityBranchId || state.viability_branch_id || '').trim().toLowerCase();
+    const setupScoreValue = state.setup_score ?? state.setupScore;
+    const setupScore = Number.isFinite(Number(setupScoreValue)) ? Number(setupScoreValue) : null;
+    const weakBounceOnlyCopy = /^no bounce confirmation yet\.?$/i.test(text) || /^developing - waiting for confirmation\.?$/i.test(text);
+    if(
+      resolvedVerdict === 'watch'
+      && structureEligibility === 'alive'
+      && weakBounceOnlyCopy
+      && (
+        ['none','extended','volatile','off_level','unclear'].includes(setupLocationState)
+        || priceabilityState === 'unpriceable'
+        || viabilityBranchId.includes('low_score')
+        || (setupScore !== null && setupScore < 5)
+      )
+    ){
+      if(setupLocationState === 'none' || setupLocationState === 'off_level' || setupLocationState === 'unclear'){
+        return 'Strong trend, but no usable pullback setup yet. Wait for a cleaner reset near support.';
+      }
+      if(priceabilityState === 'unpriceable' || setupLocationState === 'extended' || setupLocationState === 'volatile'){
+        return 'Setup is not priceable yet. No reliable entry or stop area is available.';
+      }
+      return 'Setup quality has slipped below useful watchlist quality. Wait for a cleaner reset near support.';
+    }
     return text;
   }
 
