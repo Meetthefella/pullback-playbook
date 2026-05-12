@@ -1149,12 +1149,17 @@
       }else{
         trackedVerdict = 'monitor';
       }
+      const alivePoorLocation = structureLayer.structureEligibility === 'alive'
+        && ['none','off_level','unclear'].includes(setupLocationState)
+        && (priceabilityState === 'unpriceable' || String(viability.viabilityBranchId || '').includes('low_score') || setupScore < 5 || invalidPlan);
       if(nonTerminalRecoveryBlocker){
         trackedReason = semanticBlocker.reason || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.';
       }else if(structureLayer.structureEligibility === 'damaged'){
         trackedReason = 'Trend is weakening - no reliable stop level yet.';
       }else if(isExtended && ['strong','intact'].includes(structureState)){
         trackedReason = 'Trend is strong but extended beyond a safe entry zone. No low-risk entry is available yet.';
+      }else if(alivePoorLocation){
+        trackedReason = 'Strong trend, but no usable pullback setup yet. Wait for a cleaner reset near support.';
       }else if(structureLayer.structureEligibility === 'alive' && priceabilityState === 'unpriceable' && !priceabilityInferred){
         trackedReason = 'Strong trend, but too volatile to price reliably.';
       }else{

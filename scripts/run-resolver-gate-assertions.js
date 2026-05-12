@@ -650,6 +650,14 @@ function runSimplifiedPipelineAssertions(){
   if(/^\s*No bounce confirmation yet\.?\s*$/i.test(String(amznDiminishingWatch.mainBlocker || '')) || !/no usable pullback|too extended|price reliably|cleaner reset|support/i.test(String(amznDiminishingWatch.mainBlocker || ''))){
     throw new Error('AMZN-style poor setup copy must explain pullback/priceability quality, not only bounce confirmation.');
   }
+  const amznLifecycleCopy = [
+    amznResolved.main_blocker,
+    amznResolved.reason,
+    amznResolved.downgrade_reason
+  ].join(' | ');
+  if(/^\s*(No bounce confirmation yet\.?\s*\|?\s*)+$/i.test(amznLifecycleCopy) || !/no usable pullback|too extended|price reliably|cleaner reset|support|not priceable/i.test(amznLifecycleCopy)){
+    throw new Error('AMZN-style lifecycle/downgrade copy must prefer setup quality or priceability wording over bounce-only wording.');
+  }
 
   const developingWatch = pipeline.resolveRecordState({
     ticker:'DEVWATCH',
@@ -682,6 +690,45 @@ function runSimplifiedPipelineAssertions(){
   });
   if(developingWatch.canonicalVerdict !== 'watch' || developingWatch.visualBucket !== 'monitor' || developingWatch.tone !== 'monitor' || developingWatch.badgeLabel !== 'Watch'){
     throw new Error('Developing constructive Watch must remain Monitor tone with Watch badge.');
+  }
+  if(/no usable pullback|too extended|price reliably|cleaner reset|support|not priceable/i.test(String(developingWatch.mainBlocker || ''))){
+    throw new Error('Developing constructive Watch must not inherit Diminishing Watch pullback/priceability copy.');
+  }
+
+  const constructiveWaitingWatch = pipeline.resolveRecordState({
+    ticker:'CTVAX',
+    in_watchlist:true,
+    plan:{entry:82.17, stop:79.42, firstTarget:90.41},
+    marketData:{price:82.1, ma20:80, ma50:76, ma200:65, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'strong',
+      trendState:'intact',
+      setupLocationState:'none',
+      priceabilityState:'priceable',
+      stabilisationState:'none',
+      bounceState:'attempt',
+      pullbackZone:'none',
+      volumeState:'supportive'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Needs confirmation before promotion.',
+      reasonSummary:'Bounce still tentative.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 9)
+  });
+  if(constructiveWaitingWatch.canonicalVerdict !== 'watch' || constructiveWaitingWatch.visualBucket !== 'monitor' || constructiveWaitingWatch.tone !== 'monitor' || constructiveWaitingWatch.badgeLabel !== 'Watch'){
+    throw new Error('Constructive waiting Watch with valid plan and bounce attempt must remain Monitor, not Diminishing.');
+  }
+  if(/diminish|weakening|no usable pullback|too extended|not priceable/i.test(String(constructiveWaitingWatch.mainBlocker || ''))){
+    throw new Error('Constructive waiting Watch must not inherit deterioration or unpriceable copy.');
   }
 
   const volatileRecovery = pipeline.resolveRecordState({

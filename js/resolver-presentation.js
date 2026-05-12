@@ -70,22 +70,30 @@
     const pullbackZone = String(options.pullbackZone || '').trim().toLowerCase();
     const planStatus = String(options.planStatus || '').trim().toLowerCase();
     const setupScore = Number.isFinite(Number(options.setupScore)) ? Number(options.setupScore) : null;
+    const aliveStructure = structureEligibility === 'alive'
+      || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
+    const constructiveWaiting = aliveStructure
+      && ['attempt','early','confirmed'].includes(bounceState)
+      && priceabilityState !== 'unpriceable'
+      && (setupScore === null || setupScore >= 5)
+      && !['invalid','rebuild_required','too_wide'].includes(planStatus);
     const developingWatch = ['near_20ma','near_50ma','recently_left_20ma','recently_left_50ma'].includes(pullbackZone)
       && ['attempt','early','confirmed'].includes(bounceState)
       && ['early','present','clear'].includes(stabilisationState)
       && priceabilityState !== 'unpriceable';
-    const structureAllowsDevelopingWatch = structureEligibility === 'alive'
-      || (
-        !structureEligibility
-        && ['strong','intact','developing_clean'].includes(structureState)
-      );
+    const structureAllowsDevelopingWatch = aliveStructure;
     if(developingWatch && structureAllowsDevelopingWatch){
+      return 'monitor';
+    }
+    if(setupLocationState === 'none' && constructiveWaiting){
       return 'monitor';
     }
     const lowQualityWatch = viabilityBranchId.includes('low_score')
       || (setupScore !== null && setupScore < 5)
       || (['missing','invalid'].includes(planStatus) && ['none','extended','volatile','off_level','unclear'].includes(setupLocationState || 'none'));
-    if(!developingWatch && (['none','extended','volatile','off_level','unclear'].includes(setupLocationState) || priceabilityState === 'unpriceable' || lowQualityWatch)){
+    const poorLocation = ['extended','volatile','off_level','unclear'].includes(setupLocationState)
+      || (setupLocationState === 'none' && !constructiveWaiting);
+    if(!developingWatch && (poorLocation || priceabilityState === 'unpriceable' || lowQualityWatch)){
       return 'diminishing';
     }
     if(structureEligibility === 'damaged' || structureState === 'weakening' || viability === 'low_priority'){
@@ -111,8 +119,19 @@
     const structureEligibility = String(options && options.structureEligibility || '').toLowerCase();
     const setupLocationState = String(options && options.setupLocationState || '').toLowerCase();
     const priceabilityState = String(options && options.priceabilityState || '').toLowerCase();
+    const bounceState = String(options && options.bounceState || '').toLowerCase();
+    const planStatus = String(options && options.planStatus || '').toLowerCase();
     const viabilityBranchId = String(options && options.viabilityBranchId || '').toLowerCase();
     const setupScore = Number.isFinite(Number(options && options.setupScore)) ? Number(options.setupScore) : null;
+    const structureState = String(options && options.structureState || '').toLowerCase();
+    const aliveStructure = structureEligibility === 'alive'
+      || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
+    const constructiveWaiting = aliveStructure
+      && ['attempt','early','confirmed'].includes(bounceState)
+      && priceabilityState !== 'unpriceable'
+      && (setupScore === null || setupScore >= 5)
+      && !['invalid','rebuild_required','too_wide'].includes(planStatus);
+    if(setupLocationState === 'none' && constructiveWaiting) return 'Watch - waiting for confirmation.';
     if(setupLocationState === 'extended') return 'Watch - strong trend, but no clean pullback entry yet.';
     if(setupLocationState === 'volatile') return 'Watch - setup is too volatile to price reliably.';
     if(setupLocationState === 'none' || setupLocationState === 'off_level' || setupLocationState === 'unclear') return 'Watch - strong trend, but no usable pullback setup yet.';
@@ -231,6 +250,8 @@
       structureEligibility:legacyVerdict && legacyVerdict.structure_eligibility,
       setupLocationState,
       priceabilityState,
+      bounceState,
+      planStatus,
       viabilityBranchId,
       setupScore:options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord)
     };
