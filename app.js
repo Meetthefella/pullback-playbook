@@ -7283,7 +7283,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Avoid Track Eligible', value:globalVisual.avoidTrackEligible ? 'true' : 'false'},
     {label:'Priority Score', value:Number.isFinite(globalVisual.priorityScore) ? String(globalVisual.priorityScore) : String(priority.score)},
     {label:'Priority Sort Value', value:Number.isFinite(globalVisual.prioritySortValue) ? String(globalVisual.prioritySortValue) : String(priority.score)},
-    {label:'Hold Enabled', value:globalVisual.holdEnabled === false ? 'false' : 'true'},
+    {label:'Entry Hold Bound', value:globalVisual.entryConditionsHoldBound === true ? 'true' : 'false'},
     {label:'Current Resolver Verdict', value:globalVisual.currentResolverVerdict || '(none)'},
     {label:'Stored Lifecycle State', value:globalVisual.storedLifecycleState || '(none)'},
     {label:'Previous Lifecycle State', value:globalVisual.previousLifecycleState || '(none)'},
@@ -7945,6 +7945,21 @@ function renderWatchlistCardElement(record, options = {}){
     const history = Array.isArray(record.watchlist.debug.holdTraceHistory) ? record.watchlist.debug.holdTraceHistory : [];
     record.watchlist.debug.holdTraceHistory = [`hold_helper.rendered | ${seededAt}`, ...history].slice(0, 8);
   }
+  const entryConditionsSummary = buildEntryConditionsSummary({
+    ticker:entry.ticker,
+    finalVerdict:canonicalVerdict,
+    presentationState:visualBucket,
+    resolvedContract,
+    globalVerdict,
+    derivedStates,
+    displayedPlan
+  });
+  const watchlistPanelId = entryConditionsPanelId('watchlist', entry.ticker);
+  const watchlistEntryConditionsHelper = renderEntryConditionsHoldHelper(entryConditionsSummary, 'watchlist', entry.ticker, {mode:'card'});
+  const entryConditionsHoldBound = !!watchlistEntryConditionsHelper;
+  watchlistVisualState.entryConditionsHoldBound = entryConditionsHoldBound;
+  watchlistVisualState.longPressHelperBound = entryConditionsHoldBound;
+  watchlistVisualState.holdEnabled = entryConditionsHoldBound;
   const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
     derivedStates,
     displayedPlan,
@@ -7957,14 +7972,10 @@ function renderWatchlistCardElement(record, options = {}){
   const watchlistState = String(lifecycleSnapshot.state || '').toLowerCase();
   const presentationBucket = visualBucket;
   const renderedVerdict = canonicalVerdict;
-  const holdEnabled = !['avoid','dead','reject'].includes(renderedVerdict)
-    && presentationBucket !== 'avoid'
-    && presentationBucket !== 'diminishing';
   const prioritySortValue = Number.isFinite(Number(record.priorityScore ?? record.priority))
     ? Number(record.priorityScore ?? record.priority)
     : Number(priority.score || 0);
   watchlistVisualState.prioritySortValue = prioritySortValue;
-  watchlistVisualState.holdEnabled = holdEnabled;
   const watchlistScoreText = liveRefreshPending
     ? 'Refreshing...'
     : (expired ? 'Expired' : view.setupScoreDisplay.replace('Setup ', ''));
@@ -8090,6 +8101,17 @@ function renderWatchlistCardElement(record, options = {}){
     };
   }
   div.querySelector('[data-act="remove-watch"]').onclick = () => removeFromWatchlist(entry.ticker);
+  if(watchlistEntryConditionsHelper){
+    div.setAttribute('data-entry-hold-helper', '1');
+    div.setAttribute('data-hold-card-trigger', '1');
+    div.setAttribute('data-hold-ticker', entry.ticker);
+    div.setAttribute('data-panel-id', watchlistPanelId);
+    div.setAttribute('data-hold-ms', '550');
+    const holdWrapper = document.createElement('div');
+    holdWrapper.innerHTML = watchlistEntryConditionsHelper;
+    if(holdWrapper.firstElementChild) div.appendChild(holdWrapper.firstElementChild);
+    bindEntryConditionsHoldInteractions(div);
+  }
   return div;
 }
 
@@ -14452,6 +14474,7 @@ function reconcileWatchlistPresentation({
 function resolveSetupPatternUi({
   setupScore,
   verdict,
+  presentationState,
   structureState,
   trendState,
   bounceState,
@@ -14463,6 +14486,7 @@ function resolveSetupPatternUi({
   entryChecks
 } = {}){
   const numericSetupScore = Number.isFinite(Number(setupScore)) ? Number(setupScore) : null;
+  const presentation = String(presentationState || '').trim().toLowerCase();
   const structureWeak = ['weak','weakening','developing_loose'].includes(structureState);
   const structureBroken = structureState === 'broken';
   const bounceNone = ['none','unconfirmed','early'].includes(bounceState);
@@ -14489,6 +14513,7 @@ function resolveSetupPatternUi({
   const developingBounce = ['attempt','early','unconfirmed'].includes(bounceState);
   const readyStructureStates = ['strong','intact','developing_clean'];
   const terminalVerdict = ['avoid','dead'].includes(normalizeVerdict(verdict || ''));
+  const trueDiminishing = presentation === 'diminishing';
   const confirmedDeterioration = structureWeak && trendWeak && bounceNone && damagePoints >= 3;
   const supportFailure = !pullbackValid && bounceNone && (structureWeak || trendWeak);
   const strictFallingKnife = structureBroken
@@ -14510,10 +14535,8 @@ function resolveSetupPatternUi({
   // 2) Weak / deteriorating structure
   if(
     (Number.isFinite(numericSetupScore) && numericSetupScore <= 3)
-    || 
-    (Number.isFinite(numericSetupScore) && numericSetupScore >= 4 && numericSetupScore <= 6)
     || structureState === 'weakening'
-    || bounceState === 'none'
+    || (trueDiminishing && (structureWeak || trendWeak || volumeWeak || rrWeak))
   ){
     return {
       id:'weak_pullback',
@@ -14521,6 +14544,26 @@ function resolveSetupPatternUi({
       label:'Weak pullback',
       explanation:'low buying interest',
       footer:'Trade structure is not clear enough to price safely yet.'
+    };
+  }
+
+  if(readyStructureStates.includes(structureState) && bounceState === 'none'){
+    return {
+      id:'waiting_for_bounce',
+      wordingTone:'healthy_pullback',
+      label:'Waiting for bounce',
+      explanation:'needs confirmation',
+      footer:'Trend is still alive, but buyers need to prove they are stepping back in.'
+    };
+  }
+
+  if(readyStructureStates.includes(structureState) && planUnclear && !trueDiminishing){
+    return {
+      id:'plan_pending',
+      wordingTone:'healthy_pullback',
+      label:'Plan pending',
+      explanation:'needs a cleaner entry and stop',
+      footer:'No actionable plan yet. Entry, stop, and target need to become reliable first.'
     };
   }
 
@@ -14688,6 +14731,7 @@ function buildEntryConditionsSummary({
   const pattern = resolveSetupPatternUi({
     setupScore:Number.isFinite(globalVerdict && globalVerdict.setup_score) ? globalVerdict.setup_score : null,
     verdict,
+    presentationState:presentation,
     structureState,
     trendState:String((derivedStates && derivedStates.trendState) || '').toLowerCase(),
     bounceState,
@@ -14699,7 +14743,31 @@ function buildEntryConditionsSummary({
     entryChecks
   });
 
-  if(['avoid'].includes(verdict)) return {show:false};
+  if(['avoid'].includes(verdict)){
+    const structureBroken = ['broken','invalid','dead','failed'].includes(structureState)
+      || String(globalVerdict && globalVerdict.terminal_avoid_applied || '').toLowerCase() === 'true';
+    const triggerLine = structureBroken
+      ? 'Becomes actionable IF: structure repairs and the setup is rebuilt from a clean base.'
+      : 'Becomes actionable IF: the blocker clears and a valid entry, stop, and target can be priced.';
+    return {
+      show:true,
+      ready:false,
+      ticker:normalizeTicker(ticker || ''),
+      header:'Avoid - setup blocked',
+      primary:structureBroken ? 'Structure is broken - avoid acting' : 'Setup is blocked - avoid acting',
+      definitionLine:'Avoid means the app is not treating this as actionable.',
+      wording_tone:'broken_falling_knife',
+      pattern_label:'Avoid',
+      pattern_explanation:'Setup blocked',
+      secondary:structureBroken
+        ? ['Structure must repair', 'A new base must form', 'Risk/reward must become realistic']
+        : ['Current blocker must clear', 'A valid plan must form', 'Risk/reward must become realistic'],
+      triggerLine,
+      futureStateLine:'Resets to: Monitor only after the setup repairs.',
+      footer:`${triggerLine} Resets to: Monitor only after the setup repairs.`,
+      suppressPlanBlockerInHeadline:true
+    };
+  }
   if(verdict === 'entry' && entryGatePass){
     return {
       show:false,
@@ -14714,6 +14782,9 @@ function buildEntryConditionsSummary({
   }
   if(presentation === 'diminishing'){
     const structuralState = String((resolvedContract && resolvedContract.structuralState) || '').toLowerCase();
+    const setupLocationState = String((globalVerdict && globalVerdict.setup_location_state) || (derivedStates && derivedStates.setupLocationState) || '').toLowerCase();
+    const priceabilityState = String((globalVerdict && globalVerdict.priceability_state) || (derivedStates && derivedStates.priceabilityState) || '').toLowerCase();
+    const blockerText = String((globalVerdict && (globalVerdict.main_blocker || globalVerdict.reason || globalVerdict.downgrade_reason)) || (resolvedContract && (resolvedContract.blockerReason || resolvedContract.reasonSummary)) || '').trim();
     const explicitInvalidationReason = String((globalVerdict && globalVerdict.explicit_invalidation_reason) || '');
     const normalizedInvalidationReason = explicitInvalidationReason.trim().toLowerCase();
     const hasExplicitInvalidation = !!(
@@ -14731,6 +14802,26 @@ function buildEntryConditionsSummary({
       || ['broken','invalid','dead','failed'].includes(structuralState)
       || hasExplicitInvalidation
       || deadGuardApplied === true;
+    const trueWeakening = ['weak','weakening','developing_loose'].includes(structureState)
+      || ['weak','weakening','developing_loose'].includes(structuralState);
+    const volatileOrUnpriceable = setupLocationState === 'volatile'
+      || priceabilityState === 'unpriceable'
+      || /volatile|price reliably|reliable stop|no reliable stop/i.test(blockerText);
+    const primary = trueWeakening
+      ? 'Weakening setup - losing quality'
+      : (volatileOrUnpriceable
+        ? 'Volatile setup - not priceable yet'
+        : 'Setup quality is fading - wait for repair');
+    const definitionLine = trueWeakening
+      ? 'Quality is deteriorating - wait for structure to stabilise.'
+      : (volatileOrUnpriceable
+        ? 'Volatility or stop uncertainty is too high to price reliably.'
+        : 'Setup quality has slipped below useful watchlist quality.');
+    const secondary = trueWeakening
+      ? ['Structure must stabilise', 'Bounce must improve', 'Risk/reward must become realistic']
+      : (volatileOrUnpriceable
+        ? ['Volatility must settle', 'A reliable stop area must appear', 'Risk/reward must become realistic']
+        : ['Setup quality must improve', 'Bounce must improve', 'Risk/reward must become realistic']);
     const triggerLine = 'Becomes actionable IF: Structure stabilises and buyers reclaim control.';
     const futureStateLine = structureBroken
       ? 'Drops to: ⛔ Avoid.'
@@ -14739,17 +14830,13 @@ function buildEntryConditionsSummary({
       show:true,
       ready:false,
       ticker:normalizeTicker(ticker || ''),
-      header:'📉 Diminishing - structure weakening',
-      primary:'Weakening setup - losing quality',
-      definitionLine:'Quality is deteriorating - wait for structure to stabilise.',
+      header:trueWeakening ? 'Diminishing - structure weakening' : 'Diminishing - setup quality fading',
+      primary,
+      definitionLine,
       wording_tone:'weakening_setup',
-      pattern_label:'Weakening setup',
-      pattern_explanation:'Losing quality',
-      secondary:[
-        'Structure must stabilise',
-        'Bounce must improve',
-        'Risk/reward must become realistic'
-      ],
+      pattern_label:trueWeakening ? 'Weakening setup' : (volatileOrUnpriceable ? 'Volatile setup' : 'Fading setup'),
+      pattern_explanation:trueWeakening ? 'Losing quality' : (volatileOrUnpriceable ? 'Not priceable yet' : 'Quality fading'),
+      secondary,
       triggerLine,
       futureStateLine,
       footer:`${triggerLine} ${futureStateLine}`,

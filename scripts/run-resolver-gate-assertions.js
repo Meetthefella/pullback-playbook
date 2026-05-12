@@ -435,7 +435,113 @@ function runReviewProjectionAssertions(){
   }
 }
 
+function runEntryConditionsSummaryAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  if(!/entryConditionsHoldBound/.test(appSource) || !/bindEntryConditionsHoldInteractions\(div\)/.test(appSource)){
+    throw new Error('Watchlist long-press helper binding diagnostics must be wired to the active card renderer.');
+  }
+  const summarySandbox = {
+    normalizeVerdict(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'near_entry' || safe === 'nearentry') return 'near_entry';
+      if(['entry','watch','avoid','dead','monitor','developing'].includes(safe)) return safe;
+      return safe || 'watch';
+    },
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    }
+  };
+  vm.createContext(summarySandbox);
+  [
+    'resolveSetupPatternUi',
+    'entryTriggerConditionForSummary',
+    'nextUpgradeStateForSummary',
+    'nextUpgradeStateForSummaryLabel',
+    'buildEntryConditionsSummary'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), summarySandbox, {filename:`app.js#${functionName}`});
+  });
+
+  const healthyMissingPlan = summarySandbox.buildEntryConditionsSummary({
+    ticker:'MAR',
+    finalVerdict:'watch',
+    presentationState:'monitor',
+    resolvedContract:{planStatusKey:'missing', structuralState:'developing', rrConfidenceLabel:'invalid'},
+    globalVerdict:{
+      final_verdict:'watch',
+      setup_score:8,
+      entry_gate_pass:false,
+      entry_gate_checks:{structure_ok:true, bounce_ok:false, plan_ok:false, pullback_ok:false, rr_ok:false, volume_ok:false}
+    },
+    derivedStates:{structureState:'strong', trendState:'strong', bounceState:'none', stabilisationState:'none', pullbackZone:'none', volumeState:'weak'},
+    displayedPlan:{}
+  });
+  const healthyText = [healthyMissingPlan.header, healthyMissingPlan.primary, healthyMissingPlan.definitionLine, healthyMissingPlan.footer, healthyMissingPlan.secondary && healthyMissingPlan.secondary.join(' ')].join(' ');
+  if(!healthyMissingPlan.show || !/waiting for bounce|needs confirmation|alive|stepping back in/i.test(healthyText)){
+    throw new Error('Healthy missing-plan/no-bounce Watch long-press summary must describe confirmation, not deterioration.');
+  }
+  if(/weak pullback|weakening|damaged|deteriorating|losing quality/i.test(healthyText)){
+    throw new Error('Healthy Watch long-press summary must not use weak/damaged/deteriorating language.');
+  }
+
+  const missingPlanOnly = summarySandbox.buildEntryConditionsSummary({
+    ticker:'BK',
+    finalVerdict:'watch',
+    presentationState:'monitor',
+    resolvedContract:{planStatusKey:'missing', structuralState:'watchlist'},
+    globalVerdict:{
+      final_verdict:'watch',
+      setup_score:9,
+      entry_gate_checks:{structure_ok:true, bounce_ok:false, plan_ok:false, pullback_ok:true, rr_ok:false}
+    },
+    derivedStates:{structureState:'strong', trendState:'strong', bounceState:'attempt', stabilisationState:'early', pullbackZone:'near_20ma', volumeState:'supportive'},
+    displayedPlan:{}
+  });
+  const missingPlanText = [missingPlanOnly.primary, missingPlanOnly.footer].join(' ');
+  if(!/plan pending|cleaner entry and stop|no actionable plan/i.test(missingPlanText)){
+    throw new Error('Missing plan alone must produce plan-pending long-press wording.');
+  }
+  if(/diminishing|weakening|deteriorating|damaged/i.test(missingPlanText)){
+    throw new Error('Missing plan alone must not produce Diminishing long-press wording.');
+  }
+
+  const trueDiminishing = summarySandbox.buildEntryConditionsSummary({
+    ticker:'DOW',
+    finalVerdict:'watch',
+    presentationState:'diminishing',
+    resolvedContract:{planStatusKey:'valid', structuralState:'developing'},
+    globalVerdict:{
+      final_verdict:'watch',
+      setup_score:5,
+      main_blocker:'Trend is weakening - no reliable stop level yet.',
+      viabilityBranchId:'damaged_tradeability_rr_fail_softened_low_priority',
+      entry_gate_checks:{structure_ok:false, bounce_ok:false, plan_ok:true, rr_ok:false}
+    },
+    derivedStates:{structureState:'weakening', trendState:'weak', bounceState:'none', stabilisationState:'none', pullbackZone:'none', volumeState:'normal'},
+    displayedPlan:{}
+  });
+  const diminishingText = [trueDiminishing.header, trueDiminishing.primary, trueDiminishing.definitionLine, trueDiminishing.secondary && trueDiminishing.secondary.join(' ')].join(' ');
+  if(!/diminishing|weakening|deteriorating|stabilise|quality/i.test(diminishingText)){
+    throw new Error('True Diminishing long-press summary must retain weakening/fading language.');
+  }
+
+  const terminalAvoid = summarySandbox.buildEntryConditionsSummary({
+    ticker:'AVD',
+    finalVerdict:'avoid',
+    presentationState:'avoid',
+    resolvedContract:{planStatusKey:'invalid'},
+    globalVerdict:{final_verdict:'avoid', terminal_avoid_applied:true},
+    derivedStates:{structureState:'broken'},
+    displayedPlan:{}
+  });
+  const terminalAvoidText = [terminalAvoid.header, terminalAvoid.primary, terminalAvoid.definitionLine, terminalAvoid.secondary && terminalAvoid.secondary.join(' ')].join(' ');
+  if(terminalAvoid.show !== true || !/avoid|blocked|broken|repair/i.test(terminalAvoidText)){
+    throw new Error('Terminal Avoid long-press summary must remain clearly blocked/avoid.');
+  }
+}
+
 runReviewProjectionAssertions();
+runEntryConditionsSummaryAssertions();
 
 function runSimplifiedPipelineAssertions(){
   const pipeline = sandbox.window.SimplifiedTradeState;
@@ -1330,6 +1436,7 @@ runPlanSemanticsAssertions();
 
 console.log(`Resolver gate assertions passed (${results.length} cases).`);
 console.log('Review projection invariant assertions passed.');
+console.log('Watchlist long-press summary assertions passed.');
 console.log('Simplified state pipeline assertions passed.');
 console.log('AI chart-coach contract assertions passed.');
 console.log('Plan source semantics assertions passed.');
