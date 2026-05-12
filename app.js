@@ -2879,6 +2879,10 @@ function analysisDerivedStatesFromRecord(record){
     keyReasons:[],
     risks:[]
   });
+  let priceabilityState = String(scannerValues.priceabilityState || '').trim().toLowerCase();
+  if(priceabilityState === 'unpriceable' && hasMathematicallyPriceablePlan(rawRecord)){
+    priceabilityState = 'priceable';
+  }
   return {
     trendState:String(scannerValues.trendState || '').trim().toLowerCase(),
     pullbackZone:pullback.pullbackZone,
@@ -2886,7 +2890,7 @@ function analysisDerivedStatesFromRecord(record){
     pullbackQuality:pullback.pullbackQuality,
     structureState:String(scannerValues.structureState || (hasAnalysisProjection || aiObservationEvidenceApplied ? 'unknown' : '')).trim().toLowerCase(),
     setupLocationState:String(scannerValues.setupLocationState || pullback.pullbackState || '').trim().toLowerCase(),
-    priceabilityState:String(scannerValues.priceabilityState || '').trim().toLowerCase(),
+    priceabilityState,
     stabilisationState:String(scannerValues.stabilisationState || '').trim().toLowerCase(),
     bounceState:String(scannerValues.bounceState || '').trim().toLowerCase(),
     volumeState:String(scannerValues.volumeState || '').trim().toLowerCase(),
@@ -2909,6 +2913,33 @@ function analysisDerivedStatesFromRecord(record){
     aiEvidenceStabilisationHint:String(aiEvidence.aiEvidenceStabilisationHint || '').trim(),
     aiEvidenceVolumeHint:String(aiEvidence.aiEvidenceVolumeHint || '').trim()
   };
+}
+
+function hasMathematicallyPriceablePlan(record){
+  const item = record && typeof record === 'object' ? record : {};
+  try{
+    const plan = typeof effectivePlanForRecord === 'function'
+      ? effectivePlanForRecord(item, {allowScannerFallback:false})
+      : {
+        entry:item.plan && item.plan.entry,
+        stop:item.plan && item.plan.stop,
+        firstTarget:item.plan && item.plan.firstTarget
+      };
+    const entry = numericOrNull(plan && plan.entry);
+    const stop = numericOrNull(plan && plan.stop);
+    const target = numericOrNull(plan && (plan.firstTarget ?? plan.target));
+    if(!Number.isFinite(entry) || !Number.isFinite(stop) || !Number.isFinite(target)) return false;
+    if(!(entry > stop && target > entry)) return false;
+    const rewardRisk = typeof evaluateRewardRisk === 'function' ? evaluateRewardRisk(entry, stop, target) : null;
+    if(!rewardRisk || rewardRisk.valid !== true || !Number.isFinite(numericOrNull(rewardRisk.rrRatio))) return false;
+    const displayedPlan = typeof deriveCurrentPlanState === 'function'
+      ? deriveCurrentPlanState(entry, stop, target, item.marketData && item.marketData.currency)
+      : null;
+    const riskStatus = String(displayedPlan && displayedPlan.riskFit && displayedPlan.riskFit.risk_status || '').trim().toLowerCase();
+    return !(riskStatus === 'too_wide' || riskStatus === 'invalid_plan' || riskStatus === 'plan_missing');
+  }catch(error){
+    return false;
+  }
 }
 
 function projectionValue(projection, ...fields){

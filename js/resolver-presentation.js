@@ -75,6 +75,9 @@
     const constructiveWaiting = aliveStructure
       && ['attempt','early','confirmed'].includes(bounceState)
       && priceabilityState !== 'unpriceable'
+      && viability !== 'low_priority'
+      && !viabilityBranchId.includes('extended')
+      && !viabilityBranchId.includes('low_score')
       && (setupScore === null || setupScore >= 5)
       && !['invalid','rebuild_required','too_wide'].includes(planStatus);
     const developingWatch = ['near_20ma','near_50ma','recently_left_20ma','recently_left_50ma'].includes(pullbackZone)
@@ -121,6 +124,7 @@
     const priceabilityState = String(options && options.priceabilityState || '').toLowerCase();
     const bounceState = String(options && options.bounceState || '').toLowerCase();
     const planStatus = String(options && options.planStatus || '').toLowerCase();
+    const viability = String(options && options.viability || '').toLowerCase();
     const viabilityBranchId = String(options && options.viabilityBranchId || '').toLowerCase();
     const setupScore = Number.isFinite(Number(options && options.setupScore)) ? Number(options.setupScore) : null;
     const structureState = String(options && options.structureState || '').toLowerCase();
@@ -129,6 +133,9 @@
     const constructiveWaiting = aliveStructure
       && ['attempt','early','confirmed'].includes(bounceState)
       && priceabilityState !== 'unpriceable'
+      && viability !== 'low_priority'
+      && !viabilityBranchId.includes('extended')
+      && !viabilityBranchId.includes('low_score')
       && (setupScore === null || setupScore >= 5)
       && !['invalid','rebuild_required','too_wide'].includes(planStatus);
     if(setupLocationState === 'none' && constructiveWaiting) return 'Watch - waiting for confirmation.';
@@ -248,6 +255,7 @@
       structuralState:resolvedContract && resolvedContract.structuralState,
       structureState:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase(),
       structureEligibility:legacyVerdict && legacyVerdict.structure_eligibility,
+      viability,
       setupLocationState,
       priceabilityState,
       bounceState,

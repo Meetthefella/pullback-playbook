@@ -565,7 +565,7 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('Missing plan must produce planVisible:false and safe Watch/Monitor output.');
   }
 
-  const strongExtendedUnpriceable = pipeline.resolveRecordState({
+  const strongExtendedPriceable = pipeline.resolveRecordState({
     ticker:'DINOX',
     in_watchlist:true,
     plan:{entry:62.73, stop:56.58, firstTarget:81.19},
@@ -577,35 +577,41 @@ function runSimplifiedPipelineAssertions(){
       structureState:'strong',
       trendState:'intact',
       setupLocationState:'extended',
-      priceabilityState:'unpriceable',
+      priceabilityState:'priceable',
       stabilisationState:'early',
-      bounceState:'none',
+      bounceState:'attempt',
       pullbackZone:'extended',
       volumeState:'supportive'
     }, {
       finalVerdict:'Watch',
       structuralState:'developing',
-      actionStateKey:'recalculate_plan',
-      planStatusKey:'needs_adjustment',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
       tradeabilityVerdict:'Watch',
-      blockerReason:'Bounce is not clear enough to price yet.',
+      blockerReason:'Target is optimistic for current structure.',
       reasonSummary:'Strong trend, but no clean pullback entry yet.',
       terminal:false,
       baseVerdict:'watch'
     })
   });
-  const dinoResolved = strongExtendedUnpriceable.debug && strongExtendedUnpriceable.debug.resolvedState || {};
-  if(strongExtendedUnpriceable.canonicalVerdict !== 'watch'){
-    throw new Error('Strong extended unpriceable setup must remain canonical Watch.');
+  const dinoResolved = strongExtendedPriceable.debug && strongExtendedPriceable.debug.resolvedState || {};
+  if(strongExtendedPriceable.canonicalVerdict !== 'watch' || strongExtendedPriceable.planStatus !== 'valid'){
+    throw new Error('Strong extended mathematically priceable setup must remain canonical Watch with valid plan status.');
   }
-  if(strongExtendedUnpriceable.entryGatePass !== false || strongExtendedUnpriceable.nearEntryGatePass !== false){
-    throw new Error('Strong extended unpriceable setup must not pass Entry/Near Entry gates.');
+  if(dinoResolved.priceability_state === 'unpriceable'){
+    throw new Error('Strong extended setup with valid plan math must not be labelled mathematically unpriceable.');
+  }
+  if(strongExtendedPriceable.visualBucket !== 'diminishing' || strongExtendedPriceable.tone !== 'diminishing'){
+    throw new Error('Strong extended mathematically priceable setup must remain Diminishing Watch due to poor pullback location.');
+  }
+  if(strongExtendedPriceable.entryGatePass !== false || strongExtendedPriceable.nearEntryGatePass !== false){
+    throw new Error('Strong extended mathematically priceable setup must not pass Entry/Near Entry gates.');
   }
   if(dinoResolved.rejected_by_viability_gate === true || dinoResolved.lifecycle === 'drop'){
-    throw new Error('Strong extended unpriceable setup must not become terminal Avoid/Dead.');
+    throw new Error('Strong extended mathematically priceable setup must not become terminal Avoid/Dead.');
   }
-  if(/weakening|broken/i.test(String(strongExtendedUnpriceable.mainBlocker || dinoResolved.reason || ''))){
-    throw new Error('Strong extended unpriceable setup reason must reference priceability/location, not weakening/broken structure.');
+  if(/weakening|broken|missing plan|no actionable plan/i.test(String(strongExtendedPriceable.mainBlocker || dinoResolved.reason || '')) || !/extended|low-risk|pullback|optimistic|safe entry/i.test(String(strongExtendedPriceable.mainBlocker || dinoResolved.reason || ''))){
+    throw new Error('Strong extended mathematically priceable setup reason must reference extension/strategy fit, not missing math or weakening structure.');
   }
 
   const amznDiminishingWatch = pipeline.resolveRecordState({
@@ -877,7 +883,32 @@ function runAiContractAssertions(){
   if(/normalizedAnalysis|aiVerdict|final_verdict \|\| normalizedAnalysis\.verdict/.test(analysisVerdictSource)){
     throw new Error('AI verdict fields must not participate in canonical/display verdict selection.');
   }
-  const evidenceSandbox = {};
+  const evidenceSandbox = {
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    evaluateRewardRisk(entry, stop, target){
+      const numericEntry = Number(entry);
+      const numericStop = Number(stop);
+      const numericTarget = Number(target);
+      const risk = numericEntry - numericStop;
+      const reward = numericTarget - numericEntry;
+      const rrRatio = risk > 0 ? reward / risk : null;
+      return {valid:Number.isFinite(rrRatio) && rrRatio > 0, rrRatio};
+    },
+    deriveCurrentPlanState(entry, stop, target){
+      const numericEntry = Number(entry);
+      const numericStop = Number(stop);
+      const numericTarget = Number(target);
+      const risk = numericEntry - numericStop;
+      const reward = numericTarget - numericEntry;
+      const valid = Number.isFinite(risk) && Number.isFinite(reward) && risk > 0 && reward > 0;
+      return {status:valid ? 'valid' : 'invalid', riskFit:{risk_status:valid ? 'fits_risk' : 'invalid_plan'}};
+    }
+  };
   vm.createContext(evidenceSandbox);
   vm.runInContext(extractRegistryAccessorSource(appSource), evidenceSandbox, {filename:'app.js#scannerProjectionFieldRegistry'});
   [
@@ -891,6 +922,7 @@ function runAiContractAssertions(){
     'hasAiObservationEvidenceHints',
     'resolveDerivedStateSource',
     'aiObservationEvidenceStates',
+    'hasMathematicallyPriceablePlan',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});
@@ -972,6 +1004,14 @@ function runAiContractAssertions(){
   });
   if(priceabilityOnlyProjected.derivedStateSource !== 'scanner_projection' || priceabilityOnlyProjected.priceabilityState !== 'unpriceable' || !priceabilityOnlyProjected.scannerProjectionTrustedFieldsApplied.includes('priceabilityState')){
     throw new Error('Consumed scanner priceability field must be reflected in source diagnostics.');
+  }
+  const mathematicallyPriceableProjection = evidenceSandbox.analysisDerivedStatesFromRecord({
+    plan:{entry:62.73, stop:56.58, firstTarget:81.19},
+    marketData:{currency:'USD'},
+    scan:{analysisProjection:{priceability_state:'unpriceable', setup_location_state:'extended'}}
+  });
+  if(mathematicallyPriceableProjection.priceabilityState === 'unpriceable'){
+    throw new Error('Scanner priceability must not stay unpriceable when deterministic plan math is valid.');
   }
   const metadataOnlyProjectionFields = evidenceSandbox.analysisDerivedStatesFromRecord({
     scan:{analysisProjection:{scan_type:'20MA', setup_type_reason:'metadata only'}},
