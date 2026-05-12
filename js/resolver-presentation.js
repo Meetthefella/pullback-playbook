@@ -70,6 +70,7 @@
     const pullbackZone = String(options.pullbackZone || '').trim().toLowerCase();
     const planStatus = String(options.planStatus || '').trim().toLowerCase();
     const setupScore = Number.isFinite(Number(options.setupScore)) ? Number(options.setupScore) : null;
+    const noUsefulBounce = !bounceState || ['none','unconfirmed'].includes(bounceState);
     const aliveStructure = structureEligibility === 'alive'
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const constructiveWaiting = aliveStructure
@@ -94,12 +95,20 @@
     const lowQualityWatch = viabilityBranchId.includes('low_score')
       || (setupScore !== null && setupScore < 5)
       || (['missing','invalid'].includes(planStatus) && ['none','extended','volatile','off_level','unclear'].includes(setupLocationState || 'none'));
-    const poorLocation = ['extended','volatile','off_level','unclear'].includes(setupLocationState)
-      || (setupLocationState === 'none' && !constructiveWaiting);
-    if(!developingWatch && (poorLocation || priceabilityState === 'unpriceable' || lowQualityWatch)){
+    const deteriorationEvidence = ['damaged','broken'].includes(structureEligibility)
+      || ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
+      || priceabilityState === 'unpriceable'
+      || setupLocationState === 'volatile'
+      || viabilityBranchId.includes('damaged')
+      || viabilityBranchId.includes('low_score')
+      || viabilityBranchId.includes('failed')
+      || viabilityBranchId.includes('recovery')
+      || (setupScore !== null && setupScore < 5)
+      || (['missing','invalid'].includes(planStatus) && noUsefulBounce && ['none','extended','volatile','off_level','unclear'].includes(setupLocationState || 'none'));
+    if(!developingWatch && deteriorationEvidence){
       return 'diminishing';
     }
-    if(structureEligibility === 'damaged' || structureState === 'weakening' || viability === 'low_priority'){
+    if(structureEligibility === 'damaged' || structureState === 'weakening'){
       return 'diminishing';
     }
     return 'monitor';
@@ -141,7 +150,7 @@
     if(setupLocationState === 'none' && constructiveWaiting) return 'Watch - waiting for confirmation.';
     if(setupLocationState === 'extended') return 'Watch - strong trend, but no clean pullback entry yet.';
     if(setupLocationState === 'volatile') return 'Watch - setup is too volatile to price reliably.';
-    if(setupLocationState === 'none' || setupLocationState === 'off_level' || setupLocationState === 'unclear') return 'Watch - strong trend, but no usable pullback setup yet.';
+    if((setupLocationState === 'none' || setupLocationState === 'off_level' || setupLocationState === 'unclear') && (viability === 'low_priority' || viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5) || priceabilityState === 'unpriceable')) return 'Watch - strong trend, but no usable pullback setup yet.';
     if(priceabilityState === 'unpriceable') return 'Watch - price is too extended to price reliably.';
     if(viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5)) return 'Watch - setup quality has slipped below useful watchlist quality.';
     if(structureEligibility === 'damaged') return 'Watch - structure weakening.';

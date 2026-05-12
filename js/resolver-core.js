@@ -1201,7 +1201,19 @@
     const tone = getTone(canonicalFinalVerdict);
     const badge = getBadge(canonicalFinalVerdict);
     const action = getActions(canonicalFinalVerdict);
-    const bucket = (canonicalFinalVerdict === 'watch' && viability.viability === 'low_priority')
+    const viabilityBranchId = String(viability.viabilityBranchId || '').toLowerCase();
+    const deteriorationLowPriority = viability.viability === 'low_priority'
+      && (
+        structureLayer.structureEligibility === 'damaged'
+        || ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
+        || priceabilityState === 'unpriceable'
+        || setupLocationState === 'volatile'
+        || viabilityBranchId.includes('damaged')
+        || viabilityBranchId.includes('low_score')
+        || viabilityBranchId.includes('failed')
+        || viabilityBranchId.includes('recovery')
+      );
+    const bucket = (canonicalFinalVerdict === 'watch' && deteriorationLowPriority)
       ? 'lower_priority'
       : getBucket(canonicalFinalVerdict);
     const guardedForPresentation = normalizeVerdict(guardedVerdict.final_verdict);

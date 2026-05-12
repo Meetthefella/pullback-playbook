@@ -3855,8 +3855,8 @@ function shouldForceLowerPriorityByViability(globalVerdict, priorityScore){
   const resolverBucket = String(globalVerdict && globalVerdict.bucket || '').trim().toLowerCase();
   const rawFinalVerdict = String(globalVerdict && (globalVerdict.final_verdict || globalVerdict.finalVerdict) || '').trim().toLowerCase();
   const finalVerdict = normalizeVerdict(rawFinalVerdict);
-  if(viability === 'reject' || viability === 'low_priority') return true;
-  if(['lower_priority','reject','low_priority_avoid'].includes(resolverBucket)) return true;
+  if(viability === 'reject') return true;
+  if(['reject','low_priority_avoid'].includes(resolverBucket)) return true;
   if(Number.isFinite(Number(priorityScore)) && Number(priorityScore) <= 0) return true;
   if(['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(finalVerdict)) return true;
   return false;
@@ -13996,6 +13996,13 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     || ''
   ).trim().toLowerCase();
   const sourceBucket = String(verdictSource && verdictSource.bucket || '').trim().toLowerCase();
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const setupLocationState = String(derivedStates.setupLocationState || verdictSource && verdictSource.setup_location_state || '').trim().toLowerCase();
+  const priceabilityState = String(derivedStates.priceabilityState || verdictSource && verdictSource.priceability_state || '').trim().toLowerCase();
+  const bounceState = String(derivedStates.bounceState || verdictSource && verdictSource.bounce_state || '').trim().toLowerCase();
+  const planStatus = String(verdictSource && (verdictSource.plan_status || verdictSource.planStatusKey) || '').trim().toLowerCase();
+  const viabilityBranchId = String(verdictSource && (verdictSource.viabilityBranchId || verdictSource.viability_branch_id) || '').trim().toLowerCase();
+  const setupScore = Number(setupScoreForRecord(item));
   const explicitInvalidationReason = String(verdictSource && verdictSource.explicit_invalidation_reason || '').trim().toLowerCase();
   const explicitInvalidation = explicitInvalidationReason && explicitInvalidationReason !== '(none)';
   const structuralAliveAtRefresh = String(lifecycleSnapshot && lifecycleSnapshot.structural_alive_at_refresh || '').trim().toLowerCase() === 'true';
@@ -14015,6 +14022,17 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const canonicalAvoidVerdict = currentResolverVerdict === 'avoid';
   const displayAvoid = canonicalAvoidVerdict || rejectedByViabilityGate || avoidByBroken || avoidByExplicitInvalidation;
   const weakening = structureEligibility === 'damaged' || structureState === 'weakening';
+  const noUsefulBounce = !bounceState || ['none','unconfirmed'].includes(bounceState);
+  const positiveDeterioration = weakening
+    || ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
+    || priceabilityState === 'unpriceable'
+    || setupLocationState === 'volatile'
+    || viabilityBranchId.includes('damaged')
+    || viabilityBranchId.includes('low_score')
+    || viabilityBranchId.includes('failed')
+    || viabilityBranchId.includes('recovery')
+    || (Number.isFinite(setupScore) && setupScore < 5)
+    || (['missing','invalid'].includes(planStatus) && noUsefulBounce && ['none','extended','volatile','off_level','unclear'].includes(setupLocationState || 'none'));
   const monitorResolverVerdict = ['monitor','watch'].includes(currentResolverVerdict) || ['monitor','watch'].includes(baseVerdict);
   const staleAvoidSuppressed = monitorResolverVerdict
     && !displayAvoid
@@ -14049,13 +14067,13 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const activeTrackEligible = finalIsMonitorWatch
     && structureEligibility !== 'damaged'
     && structureState !== 'weakening'
-    && effectiveViability === 'watchlist'
+    && effectiveViability !== 'reject'
     && resolvedPriority > 0
     && !avoidByVerdict
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
   const diminishingTrackEligible = finalIsMonitorWatch
-    && (weakening || lowPriorityByViability || !activeTrackEligible)
+    && positiveDeterioration
     && !avoidByVerdict
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
@@ -14067,7 +14085,7 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     presentationBucket = normalizedFinalVerdict === 'entry' ? 'entry' : 'near_entry';
   }else if(activeTrackEligible){
     presentationBucket = 'monitor';
-  }else if(diminishingTrackEligible || finalIsMonitorWatch){
+  }else if(diminishingTrackEligible){
     presentationBucket = 'diminishing';
   }else{
     presentationBucket = 'monitor';

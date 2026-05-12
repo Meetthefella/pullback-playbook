@@ -601,8 +601,8 @@ function runSimplifiedPipelineAssertions(){
   if(dinoResolved.priceability_state === 'unpriceable'){
     throw new Error('Strong extended setup with valid plan math must not be labelled mathematically unpriceable.');
   }
-  if(strongExtendedPriceable.visualBucket !== 'diminishing' || strongExtendedPriceable.tone !== 'diminishing'){
-    throw new Error('Strong extended mathematically priceable setup must remain Diminishing Watch due to poor pullback location.');
+  if(strongExtendedPriceable.visualBucket !== 'monitor' || strongExtendedPriceable.tone !== 'monitor'){
+    throw new Error('Strong extended mathematically priceable setup without deterioration must remain Monitor Watch.');
   }
   if(strongExtendedPriceable.entryGatePass !== false || strongExtendedPriceable.nearEntryGatePass !== false){
     throw new Error('Strong extended mathematically priceable setup must not pass Entry/Near Entry gates.');
@@ -735,6 +735,39 @@ function runSimplifiedPipelineAssertions(){
   }
   if(/diminish|weakening|no usable pullback|too extended|not priceable/i.test(String(constructiveWaitingWatch.mainBlocker || ''))){
     throw new Error('Constructive waiting Watch must not inherit deterioration or unpriceable copy.');
+  }
+
+  const weakeningWatch = pipeline.resolveRecordState({
+    ticker:'DOWX',
+    in_watchlist:true,
+    plan:{entry:50, stop:47, firstTarget:59},
+    marketData:{price:49.5, ma20:51, ma50:53, ma200:45, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'weakening',
+      trendState:'weak',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'none',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Trend is weakening - no reliable stop level yet.',
+      reasonSummary:'Weakening setup - wait for recovery.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 5)
+  });
+  if(weakeningWatch.canonicalVerdict !== 'watch' || weakeningWatch.visualBucket !== 'diminishing' || weakeningWatch.tone !== 'diminishing'){
+    throw new Error('Weakening Watch must remain Diminishing.');
   }
 
   const volatileRecovery = pipeline.resolveRecordState({
