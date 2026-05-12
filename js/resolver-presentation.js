@@ -70,7 +70,6 @@
     const pullbackZone = String(options.pullbackZone || '').trim().toLowerCase();
     const planStatus = String(options.planStatus || '').trim().toLowerCase();
     const setupScore = Number.isFinite(Number(options.setupScore)) ? Number(options.setupScore) : null;
-    const noUsefulBounce = !bounceState || ['none','unconfirmed'].includes(bounceState);
     const aliveStructure = structureEligibility === 'alive'
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const constructiveWaiting = aliveStructure
@@ -102,8 +101,7 @@
       || viabilityBranchId.includes('low_score')
       || viabilityBranchId.includes('failed')
       || viabilityBranchId.includes('recovery')
-      || (setupScore !== null && setupScore < 5)
-      || (['missing','invalid'].includes(planStatus) && noUsefulBounce && ['none','extended','volatile','off_level','unclear'].includes(setupLocationState || 'none'));
+      || (setupScore !== null && setupScore < 5);
     if(!developingWatch && deteriorationEvidence){
       return 'diminishing';
     }

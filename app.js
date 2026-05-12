@@ -14022,7 +14022,6 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const canonicalAvoidVerdict = currentResolverVerdict === 'avoid';
   const displayAvoid = canonicalAvoidVerdict || rejectedByViabilityGate || avoidByBroken || avoidByExplicitInvalidation;
   const weakening = structureEligibility === 'damaged' || structureState === 'weakening';
-  const noUsefulBounce = !bounceState || ['none','unconfirmed'].includes(bounceState);
   const positiveDeterioration = weakening
     || ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
     || setupLocationState === 'volatile'
@@ -14030,8 +14029,7 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     || viabilityBranchId.includes('low_score')
     || viabilityBranchId.includes('failed')
     || viabilityBranchId.includes('recovery')
-    || (Number.isFinite(setupScore) && setupScore < 5)
-    || (['missing','invalid'].includes(planStatus) && noUsefulBounce && ['none','extended','volatile','off_level','unclear'].includes(setupLocationState || 'none'));
+    || (Number.isFinite(setupScore) && setupScore < 5);
   const monitorResolverVerdict = ['monitor','watch'].includes(currentResolverVerdict) || ['monitor','watch'].includes(baseVerdict);
   const staleAvoidSuppressed = monitorResolverVerdict
     && !displayAvoid

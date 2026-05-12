@@ -773,6 +773,46 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('Constructive unpriceable Watch must still fail Entry/Near Entry gates.');
   }
 
+  const constructiveNoPlanNoBounceWatch = pipeline.resolveRecordState({
+    ticker:'MARLIVE',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:350.83, ma20:340, ma50:325, ma200:290, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'strong',
+      trendState:'strong',
+      setupLocationState:'none',
+      priceabilityState:'',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'none',
+      volumeState:'weak'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'No valid invalidation level is available.',
+      reasonSummary:'No valid invalidation level is available. + Weak volume',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 8)
+  });
+  const marLiveResolved = constructiveNoPlanNoBounceWatch.debug && constructiveNoPlanNoBounceWatch.debug.resolvedState || {};
+  if(constructiveNoPlanNoBounceWatch.canonicalVerdict !== 'watch' || constructiveNoPlanNoBounceWatch.visualBucket !== 'monitor' || constructiveNoPlanNoBounceWatch.tone !== 'monitor' || constructiveNoPlanNoBounceWatch.badgeLabel !== 'Watch'){
+    throw new Error('Strong high-score Watch with missing plan/no bounce must remain Monitor unless deterioration evidence exists.');
+  }
+  if(marLiveResolved.viability !== 'watchlist' || marLiveResolved.rejected_by_viability_gate === true || marLiveResolved.terminal_avoid_applied === true){
+    throw new Error('Strong high-score missing-plan Watch must remain non-terminal watchlist.');
+  }
+  if(constructiveNoPlanNoBounceWatch.entryGatePass !== false || constructiveNoPlanNoBounceWatch.nearEntryGatePass !== false){
+    throw new Error('Strong high-score missing-plan Watch must still fail Entry/Near Entry gates.');
+  }
+
   const weakeningWatch = pipeline.resolveRecordState({
     ticker:'DOWX',
     in_watchlist:true,
