@@ -45,6 +45,21 @@
     const setupLocationState = String(state.setup_location_state || state.setupLocationState || '').trim().toLowerCase();
     const priceabilityState = String(state.priceability_state || state.priceabilityState || '').trim().toLowerCase();
     const viabilityBranchId = String(state.viabilityBranchId || state.viability_branch_id || '').trim().toLowerCase();
+    const aliveStructure = structureEligibility === 'alive'
+      || ['strong','intact','developing_clean'].includes(structureState);
+    const structuralWeakness = ['damaged','broken'].includes(structureEligibility)
+      || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
+    if(
+      resolvedVerdict === 'watch'
+      && aliveStructure
+      && !structuralWeakness
+      && /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(text)
+    ){
+      if(setupLocationState === 'volatile' || priceabilityState === 'unpriceable'){
+        return 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
+      }
+      return 'Setup is not actionable yet. Wait for clearer stabilisation and a reliable entry/stop area.';
+    }
     const setupScoreValue = state.setup_score ?? state.setupScore;
     const setupScore = Number.isFinite(Number(setupScoreValue)) ? Number(setupScoreValue) : null;
     const weakBounceOnlyCopy = /^no bounce confirmation yet\.?$/i.test(text) || /^developing - waiting for confirmation\.?$/i.test(text);

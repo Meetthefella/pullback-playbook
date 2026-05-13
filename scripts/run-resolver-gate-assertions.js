@@ -105,6 +105,9 @@ function runReviewProjectionAssertions(){
       const numeric = Number(value);
       return Number.isFinite(numeric) ? numeric : null;
     },
+    currentRrThreshold(){
+      return 2;
+    },
     verdictPresentationLabelForKey(value){
       return String(value || '').trim();
     },
@@ -123,6 +126,8 @@ function runReviewProjectionAssertions(){
     'normalizeUiCopy',
     'isDuplicatedStatusCopy',
     'nonPlanCalcNoteText',
+    'buildReviewSemanticStatus',
+    'reviewSetupQualitySummary',
     'clampReviewChecklistScore',
     'setupQualityLabelForScore',
     'resolverAlignedSetupScore',
@@ -441,6 +446,64 @@ function runReviewProjectionAssertions(){
   }
   if(/Checks met\s*:/i.test(appSource) || /review-checklist-panel/.test(appSource)){
     throw new Error('Review must not render the legacy visible checklist count/panel.');
+  }
+
+  const aliveVolatileSemantic = projectionSandbox.buildReviewSemanticStatus({
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      mainBlocker:'Trend is weakening - no reliable stop level yet.',
+      planStatus:'valid',
+      planVisible:true,
+      entryGatePass:false,
+      nearEntryGatePass:false
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      setup_location_state:'volatile',
+      priceability_state:'unpriceable',
+      bounce_state:'attempt',
+      main_blocker:'Trend is weakening - no reliable stop level yet.'
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'volatile',
+      priceabilityState:'unpriceable',
+      bounceState:'attempt',
+      stabilisationState:'none'
+    },
+    displayedPlan:{
+      status:'valid',
+      entry:100,
+      stop:95,
+      target:115,
+      rewardRisk:{valid:true, rrRatio:3}
+    },
+    planRealism:{raw_rr:3}
+  });
+  const aliveVolatileText = [
+    aliveVolatileSemantic.blocker,
+    aliveVolatileSemantic.tradeStatus && aliveVolatileSemantic.tradeStatus.line1,
+    aliveVolatileSemantic.tradeStatus && aliveVolatileSemantic.tradeStatus.line2,
+    aliveVolatileSemantic.rrDisplay
+  ].join(' | ');
+  if(/Trend is weakening|structure.*(?:broken|weakening)|failed/i.test(aliveVolatileText)){
+    throw new Error('Alive volatile/recovery Review semantics must not use structural weakening wording.');
+  }
+  if(!/Recovery attempt|stabilised|price reliably|Draft plan possible but weak|No actionable trade yet/i.test(aliveVolatileText)){
+    throw new Error('Alive volatile/recovery Review semantics must use recovery/priceability/draft-plan wording.');
+  }
+
+  const trueWeakeningSemantic = projectionSandbox.buildReviewSemanticStatus({
+    simplifiedState:{canonicalVerdict:'watch', mainBlocker:'Trend is weakening - no reliable stop level yet.', planStatus:'valid', planVisible:true},
+    globalVerdict:{final_verdict:'watch', structure_state:'weakening', structure_eligibility:'damaged', main_blocker:'Trend is weakening - no reliable stop level yet.'},
+    derivedStates:{structureState:'weakening'},
+    displayedPlan:{status:'valid', entry:50, stop:47, target:59, rewardRisk:{valid:true, rrRatio:3}},
+    planRealism:{raw_rr:3}
+  });
+  if(!/Trend is weakening/i.test(String(trueWeakeningSemantic.blocker || ''))){
+    throw new Error('True weakening setup may still render trend weakening wording.');
   }
 
   const recoveryChecklistContext = {
@@ -796,8 +859,8 @@ function runSimplifiedPipelineAssertions(){
   if(amznResolved.terminal_avoid_applied === true || amznResolved.rejected_by_viability_gate === true){
     throw new Error('AMZN-style poor setup must not become terminal Avoid.');
   }
-  if(amznDiminishingWatch.visualBucket !== 'diminishing' || amznDiminishingWatch.tone !== 'diminishing' || amznDiminishingWatch.badgeLabel !== 'Watch'){
-    throw new Error('AMZN-style poor setup must render as Diminishing Watch with Watch badge.');
+  if(amznDiminishingWatch.visualBucket !== 'monitor' || amznDiminishingWatch.tone !== 'monitor' || amznDiminishingWatch.badgeLabel !== 'Watch'){
+    throw new Error('Alive but non-actionable poor setup must remain Monitor Watch unless structural deterioration is present.');
   }
   if(/^\s*No bounce confirmation yet\.?\s*$/i.test(String(amznDiminishingWatch.mainBlocker || '')) || !/no usable pullback|too extended|price reliably|cleaner reset|support/i.test(String(amznDiminishingWatch.mainBlocker || ''))){
     throw new Error('AMZN-style poor setup copy must explain pullback/priceability quality, not only bounce confirmation.');

@@ -91,17 +91,11 @@
     if(setupLocationState === 'none' && constructiveWaiting){
       return 'monitor';
     }
-    const lowQualityWatch = viabilityBranchId.includes('low_score')
-      || (setupScore !== null && setupScore < 5)
-      || (['missing','invalid'].includes(planStatus) && ['none','extended','volatile','off_level','unclear'].includes(setupLocationState || 'none'));
     const deteriorationEvidence = ['damaged','broken'].includes(structureEligibility)
       || ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
-      || setupLocationState === 'volatile'
       || viabilityBranchId.includes('damaged')
-      || viabilityBranchId.includes('low_score')
       || viabilityBranchId.includes('failed')
-      || viabilityBranchId.includes('recovery')
-      || (setupScore !== null && setupScore < 5);
+      || viabilityBranchId.includes('weakening');
     if(!developingWatch && deteriorationEvidence){
       return 'diminishing';
     }

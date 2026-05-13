@@ -11101,9 +11101,11 @@ function reviewChecklistContextForRecord(record, options = {}){
     stop:Number.isFinite(numericOrNull(displayedPlan.stop)) ? Number(numericOrNull(displayedPlan.stop)) : null,
     target:Number.isFinite(numericOrNull(displayedPlan.target)) ? Number(numericOrNull(displayedPlan.target)) : null,
     structureState:String(derivedStates.structureState || derivedStates.structure_state || resolvedState.structure_state || '').trim().toLowerCase(),
+    structureEligibility:String(resolvedState.structure_eligibility || resolvedState.structureEligibility || '').trim().toLowerCase(),
     bounceState:String(derivedStates.bounceState || derivedStates.bounce_state || resolvedState.bounce_state || '').trim().toLowerCase(),
     stabilisationState:String(derivedStates.stabilisationState || derivedStates.stabilisation_state || '').trim().toLowerCase(),
     pullbackZone:String(derivedStates.pullbackZone || derivedStates.pullback_zone || '').trim().toLowerCase(),
+    setupLocationState:String(derivedStates.setupLocationState || derivedStates.setup_location_state || resolvedState.setup_location_state || '').trim().toLowerCase(),
     priceabilityState:String(derivedStates.priceabilityState || derivedStates.priceability_state || resolvedState.priceability_state || '').trim().toLowerCase(),
     viability:String(resolvedState.viability || '').trim().toLowerCase(),
     rejectedByViabilityGate:resolvedState.rejected_by_viability_gate === true
@@ -15561,6 +15563,134 @@ function setReviewAdvancedOpen(ticker, open){
 
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
   return tradeStatusMetricTextImpl({globalVerdict, displayedPlan, resolvedContract}, reviewPresentationBridgeDeps());
+}
+
+function buildReviewSemanticStatus({
+  simplifiedState,
+  globalVerdict,
+  derivedStates,
+  displayedPlan,
+  planRealism
+} = {}){
+  const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const verdict = String(simplified.canonicalVerdict || global.final_verdict || 'watch').trim().toLowerCase();
+  const structureState = String(derived.structureState || global.structure_state || '').trim().toLowerCase();
+  const structureEligibility = String(global.structure_eligibility || '').trim().toLowerCase();
+  const setupLocationState = String(global.setup_location_state || derived.setupLocationState || '').trim().toLowerCase();
+  const priceabilityState = String(global.priceability_state || derived.priceabilityState || '').trim().toLowerCase();
+  const bounceState = String(global.bounce_state || derived.bounceState || '').trim().toLowerCase();
+  const stabilisationState = String(derived.stabilisationState || '').trim().toLowerCase();
+  const rawBlocker = String(simplified.mainBlocker || global.main_blocker || global.reason || '').trim();
+  const planStatus = String(simplified.planStatus || plan.status || global.plan_status || '').trim().toLowerCase();
+  const planMathValid = plan.status === 'valid'
+    || (plan.rewardRisk && plan.rewardRisk.valid === true && Number.isFinite(numericOrNull(plan.rewardRisk.rrRatio)))
+    || planStatus === 'valid';
+  const planFieldsPresent = [plan.entry, plan.stop, plan.target].some(value => Number.isFinite(numericOrNull(value)) || String(value || '').trim());
+  const rrValue = planRealism && Number.isFinite(numericOrNull(planRealism.raw_rr))
+    ? Number(numericOrNull(planRealism.raw_rr))
+    : (plan.rewardRisk && Number.isFinite(numericOrNull(plan.rewardRisk.rrRatio)) ? Number(numericOrNull(plan.rewardRisk.rrRatio)) : null);
+  const rrAcceptable = Number.isFinite(rrValue) && rrValue >= currentRrThreshold();
+  const terminalAvoid = verdict === 'avoid' && (
+    global.terminal_avoid_applied === true
+    || global.rejected_by_viability_gate === true
+    || ['broken','dead','failed'].includes(structureState)
+    || String(global.viability || '').trim().toLowerCase() === 'reject'
+  );
+  const structuralWeakness = ['damaged','broken'].includes(structureEligibility)
+    || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
+  const aliveStructure = structureEligibility === 'alive'
+    || ['strong','intact','developing_clean'].includes(structureState);
+  const staleWeakCopy = /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(rawBlocker);
+  let blocker = rawBlocker;
+  if(terminalAvoid && ['broken','dead','failed'].includes(structureState)){
+    blocker = rawBlocker || 'Structure is broken. No trade until price rebuilds from a clean base.';
+  }else if(structuralWeakness){
+    blocker = rawBlocker || 'Trend is weakening - no reliable stop level yet.';
+  }else if(aliveStructure && staleWeakCopy){
+    blocker = 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
+  }else if(aliveStructure && (setupLocationState === 'volatile' || priceabilityState === 'unpriceable')){
+    blocker = rawBlocker && !staleWeakCopy
+      ? rawBlocker
+      : 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
+  }else if(!blocker){
+    blocker = bounceState === 'none' || stabilisationState === 'none'
+      ? 'Needs confirmation before promotion.'
+      : 'No actionable trade yet.';
+  }
+  const actionable = ['entry','near_entry'].includes(verdict)
+    && simplified.entryGatePass === true
+    && planMathValid
+    && rrAcceptable;
+  const draftPlan = planMathValid && verdict === 'watch';
+  let tradeStatus = {line1:'No actionable trade yet.', line2:blocker};
+  if(actionable){
+    tradeStatus = {line1:'Actionable plan.', line2:rrAcceptable ? 'Risk/reward and gates are aligned.' : ''};
+  }else if(draftPlan){
+    tradeStatus = {line1:'Draft plan possible but weak.', line2:'No actionable trade yet.'};
+  }else if(planFieldsPresent && !planMathValid){
+    tradeStatus = {line1:'Plan needs work.', line2:'No actionable trade yet.'};
+  }else{
+    tradeStatus = {line1:'No actionable trade yet.', line2:'Entry, stop, and target cannot be priced reliably yet.'};
+  }
+  const rrDisplay = actionable && Number.isFinite(rrValue)
+    ? `${rrValue.toFixed(2)}R`
+    : (draftPlan ? 'No actionable trade yet.' : 'No actionable plan yet.');
+  return {
+    blocker,
+    setupSummary:blocker,
+    tradeStatus,
+    planActionable:actionable,
+    draftPlan,
+    planMathValid,
+    planFieldsPresent,
+    rrDisplay,
+    showPlanFields:planMathValid || planFieldsPresent,
+    showPlanMetrics:actionable,
+    showCapital:actionable
+  };
+}
+
+function reviewSetupQualitySummary(checks, result, context = {}){
+  const semantic = buildReviewSemanticStatus({
+    simplifiedState:{
+      canonicalVerdict:context.canonicalVerdict,
+      mainBlocker:context.mainBlocker,
+      planStatus:context.planStatus,
+      planVisible:context.planVisible,
+      entryGatePass:context.entryGatePass
+    },
+    globalVerdict:{
+      final_verdict:context.canonicalVerdict,
+      main_blocker:context.mainBlocker,
+      structure_state:context.structureState,
+      structure_eligibility:context.structureEligibility,
+      setup_location_state:context.setupLocationState,
+      priceability_state:context.priceabilityState,
+      bounce_state:context.bounceState,
+      viability:context.viability,
+      rejected_by_viability_gate:context.rejectedByViabilityGate === true,
+      terminal_avoid_applied:context.terminalAvoidApplied === true
+    },
+    derivedStates:{
+      structureState:context.structureState,
+      setupLocationState:context.setupLocationState,
+      priceabilityState:context.priceabilityState,
+      bounceState:context.bounceState,
+      stabilisationState:context.stabilisationState
+    },
+    displayedPlan:{
+      status:context.planStatus,
+      entry:context.entry,
+      stop:context.stop,
+      target:context.target,
+      rewardRisk:{valid:context.planValid === true, rrRatio:null}
+    },
+    planRealism:null
+  });
+  return semantic.setupSummary || buildSummary(checks, result && result.status, context);
 }
 
 function normalizeExitMode(exitMode){
@@ -23043,7 +23173,7 @@ function renderReviewWorkspace(options = {}){
   const setupScore = reviewSetupQuality.score;
   const setupScoreDisplay = `Setup ${setupScore}/10`;
   const setupQualityLabel = reviewSetupQuality.qualityLabel || setupQualityLabelForScore(setupScore);
-  const setupQualitySummary = buildSummary(displayedReviewChecks, reviewSetupQuality.status, reviewChecklistContext);
+  const setupQualitySummary = reviewSetupQualitySummary(displayedReviewChecks, reviewSetupQuality, reviewChecklistContext);
   const setupQualityEvidence = 'Weighted by resolver state, current structure, bounce, plan validity, and priceability. Raw checklist evidence is kept internally only.';
   const convictionTier = convictionTierLabel(record.setup.convictionTier || '');
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {
@@ -23274,6 +23404,13 @@ function renderReviewWorkspace(options = {}){
     track_presentation_bucket:reviewLifecycleBias.trackPresentationBucket,
     track_presentation_tone:reviewLifecycleBias.trackPresentationTone
   };
+  const reviewSemanticStatus = buildReviewSemanticStatus({
+    simplifiedState,
+    globalVerdict:reviewTradeStatusVerdict,
+    derivedStates,
+    displayedPlan,
+    planRealism
+  });
   const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary;
   const resolvedFinalVerdictKey = normalizeGlobalVerdictKey(
     simplifiedCanonicalVerdict || 'watch'
@@ -23499,15 +23636,13 @@ function renderReviewWorkspace(options = {}){
   const reviewNextActionLabel = String(simplifiedActionLabel || '').trim() || 'Review setup inputs';
   const reviewBadgeLabel = effectiveReviewBadge.text;
   const planUI = {
-    showPlan:simplifiedState.planVisible === true,
-    showRR:simplifiedState.planVisible === true,
-    showCapital:simplifiedState.planVisible === true,
-    showPositionSize:simplifiedState.planVisible === true,
-    diagnosticsMessage:String(simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.').trim()
+    showPlan:reviewSemanticStatus.showPlanFields === true,
+    showRR:reviewSemanticStatus.showPlanMetrics === true,
+    showCapital:reviewSemanticStatus.showCapital === true,
+    showPositionSize:reviewSemanticStatus.showCapital === true,
+    diagnosticsMessage:String(reviewSemanticStatus.blocker || simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.').trim()
   };
-  const tradeStatusText = planUI.showPlan
-    ? {line1:simplifiedState.planStatus || 'Plan visible', line2:simplifiedState.mainBlocker || ''}
-    : {line1:planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.', line2:''};
+  const tradeStatusText = reviewSemanticStatus.tradeStatus || {line1:planUI.diagnosticsMessage || 'No actionable trade yet.', line2:''};
   const modifierMarkup = '';
   const scannerPresentation = resolveEmojiPresentation(record, {
     context:'scanner',
@@ -23550,7 +23685,7 @@ function renderReviewWorkspace(options = {}){
   const analysisPanelClass = `reviewanalysispanel ${reviewPanelToneClass}`.trim();
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
-  const rawRrDisplay = planUI.showRR && displayedPlan.status === 'valid' && Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : 'No actionable plan yet.';
+  const rawRrDisplay = planUI.showRR && displayedPlan.status === 'valid' && Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : reviewSemanticStatus.rrDisplay;
   const credibleRrDisplay = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   const planRealismSummary = planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.';
   const primaryPlanMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary, {
@@ -23877,7 +24012,7 @@ function renderReviewWorkspace(options = {}){
       </div>
       <div class="reviewstats plan-grid plan-grid-stats reviewstats--compact">
         <div class="stat stat--trade-status"><div>Trade Status</div><div class="big" id="tradeStatusBox">${renderTradeStatusMarkup(tradeStatusText)}</div></div>
-        <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(rrDisplayClass(planRealism.raw_rr))}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
+        <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(planUI.showRR ? rrDisplayClass(planRealism.raw_rr) : '')}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
         <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)} ${planUI.showCapital ? '' : 'review-hidden'}" id="capitalFitMetric"><div>Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitMetricText(capitalComfort.label))}</div></div>
         <div class="stat ${planUI.showPositionSize ? '' : 'review-hidden'}" id="positionSizeStat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
         <div class="stat ${planUI.showPlan ? '' : 'review-hidden'}" id="positionCostStat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(positionCostText)}</div></div>
@@ -24156,7 +24291,7 @@ function refreshReview(options = {}){
         if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'setupQualityText', selector:'#setupQualityText'});
       }
       if(setupQualitySummary){
-        setupQualitySummary.textContent = buildSummary(checks, result.status, checklistContext);
+        setupQualitySummary.textContent = reviewSetupQualitySummary(checks, result, checklistContext);
       }else if(!refreshReview._missingTextTargetsLogged.has('setupQualitySummary')){
         refreshReview._missingTextTargetsLogged.add('setupQualitySummary');
         if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'setupQualitySummary', selector:'#setupQualitySummary'});
@@ -24219,7 +24354,7 @@ function persistActiveReviewDraft(options = {}){
     target:($('targetPrice') && $('targetPrice').value) || '',
     score:result.score,
     status:result.status,
-    summary:buildSummary(checks, result.status, checklistContext),
+    summary:reviewSetupQualitySummary(checks, result, checklistContext),
     savedAt:new Date().toISOString()
   };
   record.review.manualReview = manualReview;
@@ -24459,12 +24594,19 @@ function syncPlanDisplayMeta(options = {}){
     track_presentation_bucket:reviewLifecycleBias.trackPresentationBucket,
     track_presentation_tone:reviewLifecycleBias.trackPresentationTone
   };
+  const reviewSemanticStatus = buildReviewSemanticStatus({
+    simplifiedState:metaSimplifiedState,
+    globalVerdict:reviewTradeStatusVerdict,
+    derivedStates,
+    displayedPlan,
+    planRealism
+  });
   const planUI = {
-    showPlan:metaSimplifiedState.planVisible === true,
-    showRR:metaSimplifiedState.planVisible === true,
-    showCapital:metaSimplifiedState.planVisible === true,
-    showPositionSize:metaSimplifiedState.planVisible === true,
-    diagnosticsMessage:String(metaSimplifiedState.mainBlocker || metaSimplifiedState.planStatus || 'No actionable plan yet.').trim()
+    showPlan:reviewSemanticStatus.showPlanFields === true,
+    showRR:reviewSemanticStatus.showPlanMetrics === true,
+    showCapital:reviewSemanticStatus.showCapital === true,
+    showPositionSize:reviewSemanticStatus.showCapital === true,
+    diagnosticsMessage:String(reviewSemanticStatus.blocker || metaSimplifiedState.mainBlocker || metaSimplifiedState.planStatus || 'No actionable plan yet.').trim()
   };
   if(planStateBox) planStateBox.value = planUiState.label;
   const planQuality = planQualityForRr(displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null);
@@ -24484,9 +24626,7 @@ function syncPlanDisplayMeta(options = {}){
       : 'Off';
   }
   if($('tradeStatusBox')){
-    const tradeStatusText = planUI.showPlan
-      ? {line1:metaSimplifiedState.planStatus || 'Plan visible', line2:metaSimplifiedState.mainBlocker || ''}
-      : {line1:planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.', line2:''};
+    const tradeStatusText = reviewSemanticStatus.tradeStatus || {line1:planUI.diagnosticsMessage || 'No actionable trade yet.', line2:''};
     $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   }
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
@@ -24671,12 +24811,26 @@ function calculate(options = {}){
     setupScore:setupScoreForRecord(activeRecord)
   }) : {finalVerdict:'watch'};
   const plannerDecisionSummary = String(plannerSimplifiedState.mainBlocker || plannerSimplifiedState.actionLabel || '').trim();
+  const plannerTradeStatusVerdict = {
+    ...plannerVisualState,
+    ...globalVerdict,
+    main_blocker:plannerSimplifiedState.mainBlocker || globalVerdict.main_blocker || plannerVisualState.main_blocker || '',
+    review_lifecycle_bias:plannerSimplifiedState.visualBucket || plannerVisualState.visualBucket || '',
+    track_presentation_bucket:plannerSimplifiedState.visualBucket || plannerVisualState.visualBucket || ''
+  };
+  const plannerSemanticStatus = buildReviewSemanticStatus({
+    simplifiedState:plannerSimplifiedState,
+    globalVerdict:plannerTradeStatusVerdict,
+    derivedStates:plannerDerivedStates,
+    displayedPlan,
+    planRealism
+  });
   const planUI = {
-    showPlan:plannerSimplifiedState.planVisible === true,
-    showRR:plannerSimplifiedState.planVisible === true,
-    showCapital:plannerSimplifiedState.planVisible === true,
-    showPositionSize:plannerSimplifiedState.planVisible === true,
-    diagnosticsMessage:String(plannerSimplifiedState.mainBlocker || plannerSimplifiedState.planStatus || 'No actionable plan yet.').trim()
+    showPlan:plannerSemanticStatus.showPlanFields === true,
+    showRR:plannerSemanticStatus.showPlanMetrics === true,
+    showCapital:plannerSemanticStatus.showCapital === true,
+    showPositionSize:plannerSemanticStatus.showCapital === true,
+    diagnosticsMessage:String(plannerSemanticStatus.blocker || plannerSimplifiedState.mainBlocker || plannerSimplifiedState.planStatus || 'No actionable plan yet.').trim()
   };
   $('rewardPerShareBox').textContent = Number.isFinite(displayedPlan.rewardPerShare) ? displayedPlan.rewardPerShare.toFixed(2) : '-';
   const riskFitLabel = riskStatusLabel(displayedPlan.status === 'valid' ? displayedPlan.riskFit.risk_status : (displayedPlan.status === 'invalid' ? 'invalid_plan' : 'plan_missing'));
@@ -24702,9 +24856,7 @@ function calculate(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalComfort.label
   });
-  const tradeStatusText = planUI.showPlan
-    ? {line1:plannerSimplifiedState.planStatus || 'Plan visible', line2:plannerSimplifiedState.mainBlocker || ''}
-    : {line1:planUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.', line2:''};
+  const tradeStatusText = plannerSemanticStatus.tradeStatus || {line1:planUI.diagnosticsMessage || 'No actionable trade yet.', line2:''};
   if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
   if($('capitalFitMetric')){
@@ -24751,7 +24903,7 @@ function calculate(options = {}){
   if(!planUI.showPlan){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = 'No actionable plan yet.';
+    $('rrValue').textContent = plannerSemanticStatus.rrDisplay || 'No actionable plan yet.';
     $('rrValue').className = 'big';
     if($('plannerBox')){
       const plannerBox = $('plannerBox');
@@ -24803,8 +24955,8 @@ function calculate(options = {}){
   }
   $('riskPerShare').textContent = Number.isFinite(displayedPlan.riskFit.risk_per_share) ? displayedPlan.riskFit.risk_per_share.toFixed(2) : '-';
   $('positionSize').textContent = displayedPlan.riskFit.position_size > 0 ? `${displayedPlan.riskFit.position_size} shares` : '0 shares';
-  $('rrValue').textContent = displayedPlan.rewardRisk.valid && Number.isFinite(displayedPlan.rewardRisk.rrRatio) ? `${displayedPlan.rewardRisk.rrRatio.toFixed(2)}R` : '-';
-  $('rrValue').className = `big ${rrDisplayClass(displayedPlan.rewardRisk.rrRatio)}`.trim();
+  $('rrValue').textContent = planUI.showRR && displayedPlan.rewardRisk.valid && Number.isFinite(displayedPlan.rewardRisk.rrRatio) ? `${displayedPlan.rewardRisk.rrRatio.toFixed(2)}R` : (plannerSemanticStatus.rrDisplay || '-');
+  $('rrValue').className = `big ${planUI.showRR ? rrDisplayClass(displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
   if($('plannerBox')){
     const plannerBox = $('plannerBox');
     const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';

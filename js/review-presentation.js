@@ -68,6 +68,25 @@
     const reviewLifecycleLine1 = String(globalVerdict && globalVerdict.review_lifecycle_line1 || '').trim();
     const reviewLifecycleLine2 = String(globalVerdict && globalVerdict.review_lifecycle_line2 || '').trim();
     const trackPresentationBucket = String(globalVerdict && globalVerdict.track_presentation_bucket || '').trim().toLowerCase();
+    const aliveStructure = structureEligibility === 'alive'
+      || ['strong','intact','developing_clean'].includes(structureState);
+    const structuralWeakness = ['damaged','broken'].includes(structureEligibility)
+      || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
+    const planStatus = String(globalVerdict && (globalVerdict.planStatus || globalVerdict.plan_status || globalVerdict.planStatusKey || globalVerdict.plan_status_key) || '').trim().toLowerCase();
+    const planMathValid = planStatus === 'valid' || hasPriceablePlan;
+    const nonActionablePlan = verdict === 'watch' && planMathValid && !nearEntryGatePass;
+    if(nonActionablePlan && aliveStructure && !structuralWeakness){
+      return {
+        line1:'Draft plan possible but weak.',
+        line2:'No actionable trade yet.'
+      };
+    }
+    if(aliveStructure && !structuralWeakness && /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(mainBlocker)){
+      return {
+        line1:'Recovery attempt is developing, but price has not stabilised enough yet.',
+        line2:'No actionable trade yet.'
+      };
+    }
     if(isExtended || setupLocationState === 'extended'){
       return {
         line1:'Strong trend, but no clean pullback entry yet.',
@@ -82,7 +101,7 @@
     }
     if(reviewLifecycleBias === 'diminishing' || trackPresentationBucket === 'diminishing'){
       return {
-        line1:reviewLifecycleLine1 || 'Trend is weakening - no reliable stop level yet.',
+        line1:reviewLifecycleLine1 || (aliveStructure && !structuralWeakness ? 'Setup is not clean enough to price reliably yet.' : 'Trend is weakening - no reliable stop level yet.'),
         line2:reviewLifecycleLine2 || 'Diminishing - setup quality is fading.'
       };
     }
