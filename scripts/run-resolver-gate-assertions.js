@@ -744,6 +744,82 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('Simplified pipeline must preserve resolver-derived Near Entry gate flags.');
   }
 
+  const reconciledPriceability = pipeline.resolveRecordState({
+    ticker:'PRICEFIX',
+    in_watchlist:true,
+    reclaimAttempt:true,
+    plan:{entry:100, stop:97, firstTarget:106},
+    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'developing_clean',
+      trendState:'intact',
+      setupLocationState:'near_20ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Near Entry',
+      structuralState:'near_entry',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Near Entry',
+      blockerReason:'Waiting for confirmation.',
+      reasonSummary:'Close to trigger.',
+      terminal:false,
+      baseVerdict:'near_entry'
+    })
+  });
+  const reconciledDerived = reconciledPriceability.debug && reconciledPriceability.debug.derivedStates || {};
+  const reconciledResolved = reconciledPriceability.debug && reconciledPriceability.debug.resolvedState || {};
+  const reconciledViabilityInputs = reconciledResolved.viabilityInputs || reconciledResolved.viability_inputs || {};
+  if(reconciledPriceability.planStatus !== 'valid' || reconciledDerived.priceabilityState === 'unpriceable' || reconciledViabilityInputs.priceabilityState === 'unpriceable'){
+    throw new Error('Valid effective plan must reconcile stale derived unpriceable before resolver viability inputs.');
+  }
+  if(reconciledPriceability.nearEntryGatePass !== true || reconciledPriceability.canonicalVerdict !== 'near_entry'){
+    throw new Error('Priceability reconciliation must preserve existing Near Entry gate outcome when gates already pass.');
+  }
+  const lowRrPlan = pipeline.resolveRecordState({
+    ticker:'LOWRR',
+    in_watchlist:true,
+    plan:{entry:100, stop:97, firstTarget:104},
+    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'developing_clean',
+      trendState:'intact',
+      setupLocationState:'near_20ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'RR is not good enough.',
+      reasonSummary:'RR is not good enough.',
+      terminal:false,
+      baseVerdict:'watch'
+    })
+  });
+  const lowRrDerived = lowRrPlan.debug && lowRrPlan.debug.derivedStates || {};
+  if(lowRrDerived.priceabilityState === 'priceable' || lowRrDerived.priceabilityReconciledFromPlan === true){
+    throw new Error('Low-RR valid plan must not reconcile stale unpriceable to priceable.');
+  }
+  if(lowRrPlan.entryGatePass === true){
+    throw new Error('Low-RR valid plan must not force Entry promotion.');
+  }
+
   const missingPlan = pipeline.resolveRecordState({
     ticker:'NOPLAN',
     in_watchlist:true,
@@ -772,6 +848,43 @@ function runSimplifiedPipelineAssertions(){
   });
   if(missingPlan.planVisible !== false || missingPlan.planStatus !== 'missing' || missingPlan.canonicalVerdict !== 'watch' || missingPlan.visualBucket !== 'monitor'){
     throw new Error('Missing plan must produce planVisible:false and safe Watch/Monitor output.');
+  }
+  if((missingPlan.debug && missingPlan.debug.derivedStates && missingPlan.debug.derivedStates.priceabilityState) === 'priceable'){
+    throw new Error('Missing plan must not reconcile unpriceable state to priceable.');
+  }
+
+  const invalidManualPlan = pipeline.resolveRecordState({
+    ticker:'BADMANUAL',
+    in_watchlist:true,
+    plan:{entry:100, stop:103, firstTarget:110, source:'manual'},
+    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'developing_clean',
+      trendState:'intact',
+      setupLocationState:'near_20ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'invalid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Plan needs adjustment.',
+      reasonSummary:'Plan needs adjustment.',
+      terminal:false,
+      baseVerdict:'watch'
+    })
+  });
+  const invalidManualDerived = invalidManualPlan.debug && invalidManualPlan.debug.derivedStates || {};
+  if(invalidManualPlan.planStatus === 'valid' || invalidManualDerived.priceabilityState === 'priceable' || invalidManualPlan.nearEntryGatePass === true || invalidManualPlan.entryGatePass === true){
+    throw new Error('Invalid manual/draft plan must not force priceability or promotion.');
   }
 
   const strongExtendedPriceable = pipeline.resolveRecordState({
@@ -980,6 +1093,9 @@ function runSimplifiedPipelineAssertions(){
   }
   if(constructiveUnpriceableWaitingWatch.entryGatePass !== false || constructiveUnpriceableWaitingWatch.nearEntryGatePass !== false){
     throw new Error('Constructive unpriceable Watch must still fail Entry/Near Entry gates.');
+  }
+  if((constructiveUnpriceableWaitingWatch.debug && constructiveUnpriceableWaitingWatch.debug.derivedStates && constructiveUnpriceableWaitingWatch.debug.derivedStates.priceabilityState) === 'priceable'){
+    throw new Error('Missing effective plan must not reconcile constructive unpriceable Watch to priceable.');
   }
 
   const constructiveNoPlanNoBounceWatch = pipeline.resolveRecordState({

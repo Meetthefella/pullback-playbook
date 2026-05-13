@@ -116,6 +116,59 @@
     };
   }
 
+  function numericOrNull(value){
+    if(value === null || value === undefined) return null;
+    if(typeof value === 'string' && value.trim() === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function planStateHasPriceableMath(planState){
+    const plan = planState && typeof planState === 'object' ? planState : {};
+    const entry = numericOrNull(plan.entry);
+    const stop = numericOrNull(plan.stop);
+    const target = numericOrNull(plan.target ?? plan.firstTarget);
+    const rr = numericOrNull(plan.rr ?? (plan.rewardRisk && plan.rewardRisk.rrRatio));
+    const status = String(plan.status || '').trim().toLowerCase();
+    const tradeability = String(plan.tradeability || '').trim().toLowerCase();
+    const riskStatus = String(plan.riskFit && plan.riskFit.risk_status || '').trim().toLowerCase();
+    const capitalFit = String(plan.capitalFit && plan.capitalFit.capital_fit || '').trim().toLowerCase();
+    const gatePriceableTradeability = ['tradable','entry','ready','action_now'].includes(tradeability);
+    const riskInvalid = ['invalid_plan','plan_missing','too_wide'].includes(riskStatus);
+    const capitalImpossible = ['too_heavy','too_expensive','impossible'].includes(capitalFit);
+    return status === 'valid'
+      && Number.isFinite(entry)
+      && Number.isFinite(stop)
+      && Number.isFinite(target)
+      && entry > stop
+      && target > entry
+      && Number.isFinite(rr)
+      && rr >= 2
+      && gatePriceableTradeability
+      && !riskInvalid
+      && !capitalImpossible;
+  }
+
+  function reconcileDerivedPriceabilityState(derivedStates, planState){
+    const source = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+    const current = String(source.priceabilityState || source.priceability_state || '').trim().toLowerCase();
+    const hasPriceableMath = planStateHasPriceableMath(planState);
+    if(current === 'unpriceable' && hasPriceableMath){
+      return {
+        ...source,
+        priceabilityState:'priceable',
+        priceability_state:'priceable',
+        originalPriceabilityState:current,
+        priceabilityReconciledFromPlan:true,
+        priceabilityReconciliationReason:'Effective plan has valid entry, stop, target, RR, risk fit, and tradeability.'
+      };
+    }
+    return {
+      ...source,
+      priceabilityReconciledFromPlan:false
+    };
+  }
+
   function stableDebugValue(value, depth = 0, seen){
     if(value == null) return value;
     const type = typeof value;
@@ -282,9 +335,10 @@
         ? deps.riskSettingsProvider(item)
         : (deps.riskSettings || options.riskSettings || {});
       const planState = global.SimplifiedPlanState.deriveCurrentPlanState(item, effectivePlan, riskSettings, deps);
-      const derivedStates = typeof deps.analysisDerivedStatesFromRecord === 'function'
+      const rawDerivedStates = typeof deps.analysisDerivedStatesFromRecord === 'function'
         ? deps.analysisDerivedStatesFromRecord(item)
         : fallbackDerivedStates(item);
+      const derivedStates = reconcileDerivedPriceabilityState(rawDerivedStates, planState);
       const validation = global.SimplifiedPlanState.validateCurrentPlan(item, planState, {derivedStates, deps});
       const resolverDeps = {
         ...deps,
@@ -343,6 +397,7 @@
         ...(result.debug || {}),
         validation,
         derivedStates,
+        originalDerivedStates:rawDerivedStates,
         effectivePlan,
         pipeline:'record->effectivePlan->planState->validate->ResolverCore->ResolverPresentation->presentationModel'
       };
