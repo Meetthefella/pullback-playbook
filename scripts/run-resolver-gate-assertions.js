@@ -744,6 +744,9 @@ function runSimplifiedPipelineAssertions(){
   if(nearEntry.nearEntryGatePass !== true || !nearEntry.debug || !nearEntry.debug.nearEntryGateChecks){
     throw new Error('Simplified pipeline must preserve resolver-derived Near Entry gate flags.');
   }
+  if(nearEntry.debug.nearEntryGateChecks.rr_priceable !== true){
+    throw new Error('Credible provisional RR must remain sufficient for Near Entry gate priceability.');
+  }
 
   const inferredProvisionalPriceability = pipeline.resolveRecordState({
     ticker:'FTIPROV',
@@ -868,6 +871,16 @@ function runSimplifiedPipelineAssertions(){
   }
   if(lowRrPlan.entryGatePass === true){
     throw new Error('Low-RR valid plan must not force Entry promotion.');
+  }
+  if(lowRrPlan.nearEntryGatePass === true || lowRrPlan.canonicalVerdict === 'near_entry'){
+    throw new Error('Calculable but unusable low RR must not promote to Near Entry.');
+  }
+  const lowRrNearChecks = lowRrPlan.debug && lowRrPlan.debug.nearEntryGateChecks || {};
+  if(lowRrNearChecks.rr_priceable !== false){
+    throw new Error('Low-RR Near Entry gate must require usable RR, not merely calculable RR.');
+  }
+  if(lowRrNearChecks.has_priceable_plan === true || lowRrNearChecks.has_provisional_priceable_plan === true){
+    throw new Error('Low-RR plan must not be exposed as priceable or provisionally priceable.');
   }
 
   const missingPlan = pipeline.resolveRecordState({

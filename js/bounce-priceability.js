@@ -23,7 +23,7 @@
       && entry > stop
       && target > entry
       && Number.isFinite(rr)
-      && rr > 0
+      && rr >= 2
     );
   }
 

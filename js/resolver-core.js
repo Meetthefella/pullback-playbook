@@ -215,7 +215,15 @@
       && Number.isFinite(rr)
       && entry > stop
       && target > entry
-      && rr > 0
+      && rr >= 2
+    );
+    const hasProvisionalPlanValues = !!(
+      Number.isFinite(entry)
+      && Number.isFinite(stop)
+      && Number.isFinite(target)
+      && Number.isFinite(rr)
+      && entry > stop
+      && target > entry
     );
     const hasContinuationEvidence = !!(
       bouncePriceability.reclaimSignalCount > 0
@@ -237,7 +245,9 @@
       if(ctx.stop_distance_too_wide === true) return 'Stop distance is too wide to price risk cleanly.';
       if(['too_heavy','too_expensive'].includes(String(ctx.capital_fit || '').trim().toLowerCase())) return 'Capital fit is impossible at this risk level.';
       if(String(ctx.affordability || '').trim().toLowerCase() === 'not_affordable') return 'Capital fit is impossible at this risk level.';
-      if(!hasProvisionalPriceablePlan) return 'Risk/reward cannot be calculated from the current plan.';
+      if(!hasProvisionalPriceablePlan) return hasProvisionalPlanValues
+        ? 'RR or credible RR must be at least 2.0.'
+        : 'Risk/reward cannot be calculated from the current plan.';
       if(!structureOk) return 'Structure is not strong/intact/developing clean.';
       if(!pullbackOk) return 'No low-risk entry is available yet.';
       if(!bounceAccepted) return 'Bounce is developing but not confirmed.';
@@ -347,6 +357,9 @@
     const planText = String(ctx.plan_status_text || '').trim().toLowerCase();
     const validTradeability = ['tradable', 'entry', 'ready', 'action_now'].includes(tradeability);
     const hasProvisionalPlan = provisionalPlan.hasProvisionalPriceablePlan === true && !provisionalPlan.provisionalPlanBlockReason;
+    const rrPriceable = credibleRrValue !== null
+      ? credibleRrValue >= 2
+      : ((rrValue !== null && rrValue >= 2) || (provisionalRrValue !== null && provisionalRrValue >= 2));
     const confirmedBounceOk = bounceState === 'confirmed' && !bouncePriceability.unpriceableBlockReason && bouncePriceability.reclaimConfirmed === true;
     const provisionalBounceOk = provisionalPlan.nearEntryProvisionalBounceApplied === true;
     const checks = {
@@ -364,7 +377,7 @@
       plan_ok:planStatus === 'valid' || hasProvisionalPlan,
       weak_bounce_plan_text:planText.includes('bounce is not clear enough to price yet') && !hasProvisionalPlan,
       risk_width_ok:ctx.stop_distance_too_wide !== true,
-      rr_priceable:credibleRrValue !== null || rrValue !== null || provisionalRrValue !== null,
+      rr_priceable:rrPriceable,
       tradeability_ok:validTradeability || hasProvisionalPlan,
       below_50_without_reclaim:ctx.price_below_50ma === true && ctx.reclaim_attempt !== true,
       below_200ma:ctx.price_below_200ma === true,
@@ -412,7 +425,7 @@
     if(!checks.plan_ok) reasons.push('Plan must be valid to qualify for Near Entry.');
     if(checks.weak_bounce_plan_text) reasons.push('Bounce is not clear enough to price yet.');
     if(!checks.risk_width_ok) reasons.push('Stop distance is too wide to price risk cleanly.');
-    if(!checks.rr_priceable) reasons.push('Risk/reward cannot be calculated from the current plan.');
+    if(!checks.rr_priceable) reasons.push('RR or credible RR must be at least 2.0.');
     if(!checks.tradeability_ok) reasons.push('Tradeability is not priceable yet.');
     if(checks.below_50_without_reclaim) reasons.push('Price is below the 50MA with no reclaim attempt.');
     if(checks.below_200ma) reasons.push('Price is below the 200MA.');
