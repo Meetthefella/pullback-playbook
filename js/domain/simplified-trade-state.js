@@ -123,7 +123,7 @@
     return Number.isFinite(numeric) ? numeric : null;
   }
 
-  function planStateHasPriceableMath(planState){
+  function priceabilityReconciliationDiagnostics(planState){
     const plan = planState && typeof planState === 'object' ? planState : {};
     const entry = numericOrNull(plan.entry);
     const stop = numericOrNull(plan.stop);
@@ -136,36 +136,64 @@
     const gatePriceableTradeability = ['tradable','entry','ready','action_now'].includes(tradeability);
     const riskInvalid = ['invalid_plan','plan_missing','too_wide'].includes(riskStatus);
     const capitalImpossible = ['too_heavy','too_expensive','impossible'].includes(capitalFit);
-    return status === 'valid'
-      && Number.isFinite(entry)
-      && Number.isFinite(stop)
-      && Number.isFinite(target)
-      && entry > stop
-      && target > entry
-      && Number.isFinite(rr)
-      && rr >= 2
-      && gatePriceableTradeability
-      && !riskInvalid
-      && !capitalImpossible;
+    const checks = {
+      statusValid:status === 'valid',
+      hasEntry:Number.isFinite(entry),
+      hasStop:Number.isFinite(stop),
+      hasTarget:Number.isFinite(target),
+      entryStopValid:Number.isFinite(entry) && Number.isFinite(stop) && entry > stop,
+      targetValid:Number.isFinite(entry) && Number.isFinite(target) && target > entry,
+      rrKnown:Number.isFinite(rr),
+      rrOk:Number.isFinite(rr) && rr >= 2,
+      tradeabilityOk:gatePriceableTradeability,
+      riskOk:!riskInvalid,
+      capitalOk:!capitalImpossible
+    };
+    const failedChecks = Object.keys(checks).filter(key => checks[key] !== true);
+    return {
+      canReconcile:failedChecks.length === 0,
+      failedChecks,
+      checks,
+      inputs:{
+        status,
+        entry,
+        stop,
+        target,
+        rr,
+        tradeability,
+        riskStatus,
+        capitalFit
+      }
+    };
+  }
+
+  function planStateHasPriceableMath(planState){
+    return priceabilityReconciliationDiagnostics(planState).canReconcile === true;
   }
 
   function reconcileDerivedPriceabilityState(derivedStates, planState){
     const source = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
     const current = String(source.priceabilityState || source.priceability_state || '').trim().toLowerCase();
-    const hasPriceableMath = planStateHasPriceableMath(planState);
-    if(current === 'unpriceable' && hasPriceableMath){
+    const diagnostics = priceabilityReconciliationDiagnostics(planState);
+    if(current === 'unpriceable' && diagnostics.canReconcile){
       return {
         ...source,
         priceabilityState:'priceable',
         priceability_state:'priceable',
         originalPriceabilityState:current,
         priceabilityReconciledFromPlan:true,
-        priceabilityReconciliationReason:'Effective plan has valid entry, stop, target, RR, risk fit, and tradeability.'
+        priceabilityReconciliationReason:'Effective plan has valid entry, stop, target, RR, risk fit, and tradeability.',
+        priceabilityReconciliationDiagnostics:diagnostics
       };
     }
     return {
       ...source,
-      priceabilityReconciledFromPlan:false
+      originalPriceabilityState:current,
+      priceabilityReconciledFromPlan:false,
+      priceabilityReconciliationReason:current === 'unpriceable'
+        ? `Not reconciled: ${diagnostics.failedChecks.join(', ') || 'no failed checks'}`
+        : 'No stale unpriceable state to reconcile.',
+      priceabilityReconciliationDiagnostics:diagnostics
     };
   }
 
@@ -287,6 +315,9 @@
       structureState:String(derivedStates.structureState || resolvedState.structure_state || resolvedState.structural_state || '').toLowerCase(),
       setupLocationState:String(derivedStates.setupLocationState || resolvedState.setup_location_state || '').toLowerCase(),
       priceabilityState:String(derivedStates.priceabilityState || resolvedState.priceability_state || '').toLowerCase(),
+      priceabilityReconciledFromPlan:derivedStates.priceabilityReconciledFromPlan === true,
+      priceabilityReconciliationReason:String(derivedStates.priceabilityReconciliationReason || ''),
+      priceabilityReconciliationDiagnostics:derivedStates.priceabilityReconciliationDiagnostics || null,
       bounceState:String(derivedStates.bounceState || resolvedState.bounce_state || '').toLowerCase(),
       pullbackZone:String(derivedStates.pullbackZone || resolvedState.pullback_zone || '').toLowerCase(),
       planStatus:String(planState.status || result.planStatus || '').toLowerCase(),

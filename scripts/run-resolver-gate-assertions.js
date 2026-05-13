@@ -775,10 +775,14 @@ function runSimplifiedPipelineAssertions(){
     })
   });
   const reconciledDerived = reconciledPriceability.debug && reconciledPriceability.debug.derivedStates || {};
+  const reconciledPipelineDiagnostics = reconciledPriceability.debug && reconciledPriceability.debug.pipelineDiagnostics || {};
   const reconciledResolved = reconciledPriceability.debug && reconciledPriceability.debug.resolvedState || {};
   const reconciledViabilityInputs = reconciledResolved.viabilityInputs || reconciledResolved.viability_inputs || {};
   if(reconciledPriceability.planStatus !== 'valid' || reconciledDerived.priceabilityState === 'unpriceable' || reconciledViabilityInputs.priceabilityState === 'unpriceable'){
     throw new Error('Valid effective plan must reconcile stale derived unpriceable before resolver viability inputs.');
+  }
+  if(reconciledDerived.priceabilityReconciledFromPlan !== true || reconciledPipelineDiagnostics.priceabilityReconciledFromPlan !== true){
+    throw new Error('Valid effective plan reconciliation must expose positive priceability diagnostics.');
   }
   if(reconciledPriceability.nearEntryGatePass !== true || reconciledPriceability.canonicalVerdict !== 'near_entry'){
     throw new Error('Priceability reconciliation must preserve existing Near Entry gate outcome when gates already pass.');
@@ -813,8 +817,12 @@ function runSimplifiedPipelineAssertions(){
     })
   });
   const lowRrDerived = lowRrPlan.debug && lowRrPlan.debug.derivedStates || {};
+  const lowRrDiagnostics = lowRrDerived.priceabilityReconciliationDiagnostics || {};
   if(lowRrDerived.priceabilityState === 'priceable' || lowRrDerived.priceabilityReconciledFromPlan === true){
     throw new Error('Low-RR valid plan must not reconcile stale unpriceable to priceable.');
+  }
+  if(!Array.isArray(lowRrDiagnostics.failedChecks) || !lowRrDiagnostics.failedChecks.includes('rrOk')){
+    throw new Error('Low-RR failed reconciliation must expose rrOk as the failed diagnostic check.');
   }
   if(lowRrPlan.entryGatePass === true){
     throw new Error('Low-RR valid plan must not force Entry promotion.');
