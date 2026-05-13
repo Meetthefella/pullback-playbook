@@ -1241,6 +1241,7 @@ function runAiContractAssertions(){
     'resolveDerivedStateSource',
     'aiObservationEvidenceStates',
     'hasMathematicallyPriceablePlan',
+    'resolveAlivePullbackReboundGuard',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});
@@ -1315,6 +1316,79 @@ function runAiContractAssertions(){
   });
   if(projectedDerived.derivedStateSource !== 'scanner_projection+ai_observation_hints' || projectedDerived.aiObservationEvidenceApplied !== true || projectedDerived.structureState !== 'weak' || projectedDerived.bounceState !== 'none' || projectedDerived.priceabilityState !== 'unpriceable' || !projectedDerived.scannerProjectionTrustedFieldsApplied.includes('bounceState') || projectedDerived.aiEvidenceBounceHint !== 'confirmed_observed'){
     throw new Error('Scanner projection must win over AI observation evidence hints.');
+  }
+  const ftiAlivePullbackDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
+    marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87},
+    scan:{analysisProjection:{
+      trend_state:'strong',
+      structure_state:'weak',
+      pullback_zone:'near_50ma',
+      stabilisation_state:'early',
+      bounce_state:'none',
+      priceability_state:'unpriceable'
+    }}
+  });
+  if(ftiAlivePullbackDerived.structureState === 'weak' || ftiAlivePullbackDerived.structureState === 'weakening' || ftiAlivePullbackDerived.bounceState === 'none' || ftiAlivePullbackDerived.alivePullbackReboundGuardApplied !== true){
+    throw new Error('Alive pullback/rebound evidence near support must prevent scanner weak/no-bounce downgrade.');
+  }
+  const freshSyntheticBounceGuard = evidenceSandbox.resolveAlivePullbackReboundGuard({
+    marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87},
+    trendState:'strong',
+    structureState:'intact',
+    pullbackZone:'near_50ma',
+    bounceState:'none',
+    allowBounceDowngradeCorrection:false
+  });
+  if(freshSyntheticBounceGuard.applied === true || freshSyntheticBounceGuard.bounceState === 'attempt'){
+    throw new Error('Fresh derivation must not let synthetic bounce none trigger the alive pullback guard.');
+  }
+  const freshActualWeakGuard = evidenceSandbox.resolveAlivePullbackReboundGuard({
+    marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87},
+    trendState:'strong',
+    structureState:'weak',
+    pullbackZone:'near_50ma',
+    stabilisationState:'early',
+    bounceState:'none',
+    allowBounceDowngradeCorrection:false
+  });
+  if(freshActualWeakGuard.applied !== true || freshActualWeakGuard.structureState === 'weak' || freshActualWeakGuard.bounceState !== 'attempt'){
+    throw new Error('Fresh derivation may only apply alive pullback guard after an actual structure downgrade exists.');
+  }
+  const blankTrendMarketOnlyDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
+    marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87},
+    scan:{analysisProjection:{
+      pullback_zone:'near_50ma',
+      bounce_state:'none'
+    }}
+  });
+  if(blankTrendMarketOnlyDerived.alivePullbackReboundGuardApplied === true || blankTrendMarketOnlyDerived.bounceState === 'attempt'){
+    throw new Error('Alive pullback guard must not create bounce attempts from market data when trend/structure context is blank.');
+  }
+  const trueBrokenProjection = evidenceSandbox.analysisDerivedStatesFromRecord({
+    marketData:{price:42, ma20:48, ma50:50, ma200:55, previousClose:43, changePercent:-2},
+    scan:{analysisProjection:{
+      trend_state:'broken',
+      structure_state:'broken',
+      pullback_zone:'extended',
+      stabilisation_state:'none',
+      bounce_state:'none'
+    }}
+  });
+  if(trueBrokenProjection.structureState !== 'broken' || trueBrokenProjection.bounceState !== 'none' || trueBrokenProjection.alivePullbackReboundGuardApplied === true){
+    throw new Error('Alive pullback guard must not soften true broken scanner projections.');
+  }
+  const trueWeakeningProjection = evidenceSandbox.analysisDerivedStatesFromRecord({
+    marketData:{price:49, ma20:52, ma50:55, ma200:44, previousClose:48.5, changePercent:1.1},
+    scan:{analysisProjection:{
+      trend_state:'weak',
+      structure_state:'weakening',
+      pullback_zone:'near_50ma',
+      stabilisation_state:'none',
+      bounce_state:'none'
+    }}
+  });
+  if(trueWeakeningProjection.structureState !== 'weakening' || trueWeakeningProjection.bounceState !== 'none' || trueWeakeningProjection.alivePullbackReboundGuardApplied === true){
+    throw new Error('Alive pullback guard must not soften genuine weak/weakening trend projections.');
   }
   const priceabilityOnlyProjected = evidenceSandbox.analysisDerivedStatesFromRecord({
     scan:{analysisProjection:{priceability_state:'unpriceable'}},

@@ -2883,16 +2883,30 @@ function analysisDerivedStatesFromRecord(record){
   if(priceabilityState === 'unpriceable' && hasMathematicallyPriceablePlan(rawRecord)){
     priceabilityState = 'priceable';
   }
+  const rawTrendState = String(scannerValues.trendState || '').trim().toLowerCase();
+  const rawStructureState = String(scannerValues.structureState || (hasAnalysisProjection || aiObservationEvidenceApplied ? 'unknown' : '')).trim().toLowerCase();
+  const rawStabilisationState = String(scannerValues.stabilisationState || '').trim().toLowerCase();
+  const rawBounceState = String(scannerValues.bounceState || '').trim().toLowerCase();
+  const alivePullbackGuard = resolveAlivePullbackReboundGuard({
+    record:rawRecord,
+    marketData:rawRecord.marketData,
+    trendState:rawTrendState,
+    structureState:rawStructureState,
+    bounceState:rawBounceState,
+    stabilisationState:rawStabilisationState,
+    pullbackZone:pullback.pullbackZone,
+    setupLocationState:String(scannerValues.setupLocationState || pullback.pullbackState || '').trim().toLowerCase()
+  });
   return {
-    trendState:String(scannerValues.trendState || '').trim().toLowerCase(),
+    trendState:rawTrendState,
     pullbackZone:pullback.pullbackZone,
     pullbackState:pullback.pullbackState,
     pullbackQuality:pullback.pullbackQuality,
-    structureState:String(scannerValues.structureState || (hasAnalysisProjection || aiObservationEvidenceApplied ? 'unknown' : '')).trim().toLowerCase(),
+    structureState:alivePullbackGuard.structureState || rawStructureState,
     setupLocationState:String(scannerValues.setupLocationState || pullback.pullbackState || '').trim().toLowerCase(),
     priceabilityState,
-    stabilisationState:String(scannerValues.stabilisationState || '').trim().toLowerCase(),
-    bounceState:String(scannerValues.bounceState || '').trim().toLowerCase(),
+    stabilisationState:rawStabilisationState,
+    bounceState:alivePullbackGuard.bounceState || rawBounceState,
     volumeState:String(scannerValues.volumeState || '').trim().toLowerCase(),
     scanType:String(scannerValues.scanType || '').trim(),
     evaluationScanType:String(scannerValues.evaluationScanType || '').trim(),
@@ -2906,6 +2920,10 @@ function analysisDerivedStatesFromRecord(record){
     scannerProjectionTrustedFieldsApplied,
     aiObservationEvidence:aiObservationEvidenceApplied, // Back-compatible alias for aiObservationEvidenceApplied in older debug consumers.
     aiObservationEvidenceApplied,
+    alivePullbackReboundGuardApplied:alivePullbackGuard.applied === true,
+    alivePullbackReboundGuardReason:String(alivePullbackGuard.reason || '').trim(),
+    originalScannerStructureState:rawStructureState,
+    originalScannerBounceState:rawBounceState,
     aiEvidenceStructureHint:String(aiEvidence.aiEvidenceStructureHint || '').trim(),
     aiEvidenceLocationHint:String(aiEvidence.aiEvidenceLocationHint || '').trim(),
     aiEvidencePriceabilityHint:String(aiEvidence.aiEvidencePriceabilityHint || '').trim(),
@@ -2940,6 +2958,99 @@ function hasMathematicallyPriceablePlan(record){
   }catch(error){
     return false;
   }
+}
+
+function resolveAlivePullbackReboundGuard(input = {}){
+  const record = input.record && typeof input.record === 'object' ? input.record : {};
+  const marketData = input.marketData && typeof input.marketData === 'object'
+    ? input.marketData
+    : (record.marketData && typeof record.marketData === 'object' ? record.marketData : {});
+  const structureState = String(input.structureState || '').trim().toLowerCase();
+  const trendState = String(input.trendState || '').trim().toLowerCase();
+  const bounceState = String(input.bounceState || '').trim().toLowerCase();
+  const stabilisationState = String(input.stabilisationState || '').trim().toLowerCase();
+  const pullbackZone = String(input.pullbackZone || '').trim().toLowerCase();
+  const setupLocationState = String(input.setupLocationState || '').trim().toLowerCase();
+  const price = numericOrNull(
+    marketData.price ?? marketData.currentPrice ?? marketData.close ?? record.price ?? record.currentPrice
+  );
+  const ma20 = numericOrNull(marketData.ma20 ?? marketData.sma20 ?? record.ma20 ?? record.sma20);
+  const ma50 = numericOrNull(marketData.ma50 ?? marketData.sma50 ?? record.ma50 ?? record.sma50);
+  const ma200 = numericOrNull(marketData.ma200 ?? marketData.sma200 ?? record.ma200 ?? record.sma200);
+  const previousClose = numericOrNull(marketData.previousClose ?? record.previousClose);
+  const changePercent = numericOrNull(
+    marketData.changePercent ?? marketData.changePct ?? record.changePercent ?? record.changePct
+  );
+  const structureWeak = ['weak','weakening','developing_loose'].includes(structureState);
+  const structureHardBroken = ['broken','failed','invalid'].includes(structureState);
+  const trendHardBroken = ['broken','failed','invalid'].includes(trendState);
+  const explicitlyConstructiveContext = [
+    'strong',
+    'intact',
+    'acceptable',
+    'developing_clean'
+  ].includes(trendState) || [
+    'strong',
+    'intact',
+    'acceptable',
+    'developing_clean'
+  ].includes(structureState);
+  const allowBounceDowngradeCorrection = input.allowBounceDowngradeCorrection !== false;
+  const explicitDowngradeToCorrect = structureWeak
+    || (allowBounceDowngradeCorrection && (bounceState === 'none' || bounceState === 'unconfirmed'));
+  const above200 = Number.isFinite(price) && Number.isFinite(ma200) && price > ma200;
+  const maStackConstructive = Number.isFinite(ma50) && Number.isFinite(ma200) ? ma50 > ma200 : above200;
+  const below200 = Number.isFinite(price) && Number.isFinite(ma200) && price < ma200;
+  const ma50Below200 = Number.isFinite(ma50) && Number.isFinite(ma200) && ma50 < ma200;
+  const near20 = Number.isFinite(price) && Number.isFinite(ma20) && ma20 > 0
+    ? price >= ma20 * 0.97 && price <= ma20 * 1.06
+    : false;
+  const near50 = Number.isFinite(price) && Number.isFinite(ma50) && ma50 > 0
+    ? price >= ma50 * 0.985 && price <= ma50 * 1.07
+    : false;
+  const pullbackSupportZone = [
+    'near_20ma',
+    'near_50ma',
+    'recently_left_20ma',
+    'recently_left_50ma',
+    'usable_pullback'
+  ].includes(pullbackZone) || setupLocationState === 'usable_pullback' || near20 || near50;
+  const positiveSession = (Number.isFinite(changePercent) && changePercent >= 1)
+    || (Number.isFinite(price) && Number.isFinite(previousClose) && previousClose > 0 && price >= previousClose * 1.01);
+  const reboundEvidence = input.reclaimConfirmed === true
+    || input.pullbackStoppedWorsening === true
+    || input.safeBounce === true
+    || ['early','present','clear'].includes(stabilisationState)
+    || positiveSession;
+  const hardInvalidation = input.hardInvalidation === true
+    || input.structureBroken === true
+    || record.terminal_avoid_applied === true
+    || (record.plan && record.plan.invalidatedState === true);
+  const aliveSupportRebound = !structureHardBroken
+    && !trendHardBroken
+    && explicitlyConstructiveContext
+    && explicitDowngradeToCorrect
+    && !below200
+    && !ma50Below200
+    && !hardInvalidation
+    && above200
+    && maStackConstructive
+    && pullbackSupportZone
+    && reboundEvidence;
+  const nextStructureState = aliveSupportRebound && structureWeak
+    ? (trendState === 'strong' ? 'intact' : 'developing_clean')
+    : structureState;
+  const nextBounceState = aliveSupportRebound && (!bounceState || ['none','unconfirmed'].includes(bounceState))
+    ? 'attempt'
+    : bounceState;
+  return {
+    applied:aliveSupportRebound && (nextStructureState !== structureState || nextBounceState !== bounceState),
+    structureState:nextStructureState,
+    bounceState:nextBounceState,
+    reason:aliveSupportRebound
+      ? 'Alive pullback/rebound evidence near support prevents weak/no-bounce downgrade.'
+      : ''
+  };
 }
 
 function projectionValue(projection, ...fields){
@@ -18775,6 +18886,8 @@ function deriveSetupStates(card, data, checks, tradePlan){
   const sma200 = numericOrNull(safeData.sma200 ?? safeCard.sma200);
   const perf1w = numericOrNull(safeData.perf1w ?? safeCard.perf1w);
   const perf3m = numericOrNull(safeData.perf3m ?? safeCard.perf3m);
+  const previousClose = numericOrNull(safeData.previousClose ?? safeCard.previousClose);
+  const changePercent = numericOrNull(safeData.changePercent ?? safeData.changePct ?? safeCard.changePercent ?? safeCard.changePct);
   const volume = numericOrNull(safeData.volume ?? safeCard.volume);
   const avgVolume30d = numericOrNull(safeData.avgVolume30d ?? safeCard.avgVolume30d);
   const rows = Array.isArray(safeData.history) ? safeData.history : [];
@@ -18843,11 +18956,32 @@ function deriveSetupStates(card, data, checks, tradePlan){
   const worseningCloses = recentCloses.length >= 3 && recentCloses[0] < recentCloses[1] && recentCloses[1] < recentCloses[2];
   const pullbackStoppedWorsening = (recentCloses.length >= 2 && recentCloses[0] >= recentCloses[1] * 0.995)
     || (Number.isFinite(localPivotLow) && Number.isFinite(price) && price >= localPivotLow);
-  const strongStructureContext = ['strong','intact'].includes(structureState) && trendState !== 'broken';
+  let strongStructureContext = ['strong','intact'].includes(structureState) && trendState !== 'broken';
   const supportiveVolume = safeChecks.volume || (Number.isFinite(volume) && Number.isFinite(avgVolume30d) && volume >= avgVolume30d * 0.95);
-  if(structureState !== 'broken' && (trendState === 'weak' || worseningHighs || worseningCloses || (Number.isFinite(perf1w) && perf1w < -2))){
+  const positiveSession = (Number.isFinite(changePercent) && changePercent >= 1)
+    || (Number.isFinite(price) && Number.isFinite(previousClose) && previousClose > 0 && price >= previousClose * 1.01);
+  const alivePullbackGuardBeforeBounce = resolveAlivePullbackReboundGuard({
+    record:safeCard,
+    marketData:safeData,
+    trendState,
+    structureState,
+    bounceState:'none',
+    allowBounceDowngradeCorrection:false,
+    stabilisationState:'',
+    pullbackZone,
+    setupLocationState,
+    reclaimConfirmed,
+    pullbackStoppedWorsening,
+    safeBounce:safeChecks.bounce,
+    structureBroken:safeChecks.structureBroken
+  });
+  if(structureState !== 'broken' && (trendState === 'weak' || worseningHighs || worseningCloses || (Number.isFinite(perf1w) && perf1w < -2)) && alivePullbackGuardBeforeBounce.applied !== true){
     structureState = 'weak';
   }
+  if(alivePullbackGuardBeforeBounce.applied === true && ['weak','weakening','developing_loose'].includes(structureState)){
+    structureState = alivePullbackGuardBeforeBounce.structureState;
+  }
+  strongStructureContext = ['strong','intact'].includes(structureState) && trendState !== 'broken';
   if(setupLocationState === 'unclear' && (Math.abs(Number(dist20 || 0)) > 0.08 || Math.abs(Number(dist50 || 0)) > 0.10)){
     setupLocationState = 'volatile';
   }
@@ -18872,10 +19006,29 @@ function deriveSetupStates(card, data, checks, tradePlan){
   ){
     bounceState = 'confirmed';
   }else if(
-    (safeChecks.bounce || stabilisationState === 'early' || (Number.isFinite(perf1w) && perf1w >= 0))
+    (safeChecks.bounce || stabilisationState === 'early' || (Number.isFinite(perf1w) && perf1w >= 0) || (alivePullbackGuardBeforeBounce.applied === true && positiveSession))
     && !safeChecks.structureBroken
   ){
     bounceState = 'attempt';
+  }
+  const alivePullbackGuardAfterBounce = resolveAlivePullbackReboundGuard({
+    record:safeCard,
+    marketData:safeData,
+    trendState,
+    structureState,
+    bounceState,
+    allowBounceDowngradeCorrection:false,
+    stabilisationState,
+    pullbackZone,
+    setupLocationState,
+    reclaimConfirmed,
+    pullbackStoppedWorsening,
+    safeBounce:safeChecks.bounce,
+    structureBroken:safeChecks.structureBroken
+  });
+  if(alivePullbackGuardAfterBounce.applied === true){
+    structureState = alivePullbackGuardAfterBounce.structureState;
+    bounceState = alivePullbackGuardAfterBounce.bounceState;
   }
 
   const bouncePriceability = evaluateBouncePriceabilityGuard({
@@ -18914,6 +19067,8 @@ function deriveSetupStates(card, data, checks, tradePlan){
     stabilisation_state:stabilisationState,
     bounce_state:bounceState,
     bounce_state_original:bouncePriceability.originalBounceState,
+    alive_pullback_rebound_guard_applied:(alivePullbackGuardBeforeBounce.applied || alivePullbackGuardAfterBounce.applied) ? 'yes' : 'no',
+    alive_pullback_rebound_guard_reason:alivePullbackGuardAfterBounce.reason || alivePullbackGuardBeforeBounce.reason || '',
     bounce_priceability_guard_applied:bouncePriceability.bouncePriceabilityGuardApplied ? 'yes' : 'no',
     bounce_priceability_guard_reason:bouncePriceability.bouncePriceabilityGuardReason || '',
     has_clear_invalidation_level:bouncePriceability.hasClearInvalidationLevel ? 'yes' : 'no',
