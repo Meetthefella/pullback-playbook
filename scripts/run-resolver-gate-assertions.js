@@ -666,7 +666,7 @@ function runSimplifiedPipelineAssertions(){
     'blockers',
     'debug'
   ];
-  function depsFor(derivedStates, finalContract, setupScore = 8){
+  function depsFor(derivedStates, finalContract, setupScore = 8, extraDeps = {}){
     return {
       riskSettings:{account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
       analysisDerivedStatesFromRecord:() => derivedStates,
@@ -674,7 +674,8 @@ function runSimplifiedPipelineAssertions(){
       resolveFinalStateContract:() => finalContract,
       setupScoreForRecord:() => setupScore,
       isHostileMarketStatus:() => false,
-      scannerScoreGradientClass:() => ''
+      scannerScoreGradientClass:() => '',
+      ...extraDeps
     };
   }
 
@@ -742,6 +743,47 @@ function runSimplifiedPipelineAssertions(){
   });
   if(nearEntry.nearEntryGatePass !== true || !nearEntry.debug || !nearEntry.debug.nearEntryGateChecks){
     throw new Error('Simplified pipeline must preserve resolver-derived Near Entry gate flags.');
+  }
+
+  const inferredProvisionalPriceability = pipeline.resolveRecordState({
+    ticker:'FTIPROV',
+    in_watchlist:true,
+    reclaimAttempt:true,
+    plan:{entry:100, stop:97, firstTarget:106},
+    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'intact',
+      trendState:'intact',
+      setupLocationState:'near_20ma',
+      priceabilityState:'',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Near Entry',
+      structuralState:'near_entry',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Near Entry',
+      blockerReason:'Bounce still tentative.',
+      reasonSummary:'Bounce still tentative.',
+      terminal:false,
+      baseVerdict:'near_entry'
+    }, 6, {
+      deriveTradeability:() => 'watch'
+    })
+  });
+  const inferredProvisionalResolved = inferredProvisionalPriceability.debug && inferredProvisionalPriceability.debug.resolvedState || {};
+  const inferredProvisionalViabilityInputs = inferredProvisionalResolved.viabilityInputs || inferredProvisionalResolved.viability_inputs || {};
+  if(inferredProvisionalPriceability.canonicalVerdict !== 'near_entry' || inferredProvisionalResolved.priceability_state === 'unpriceable' || inferredProvisionalViabilityInputs.priceabilityState === 'unpriceable'){
+    throw new Error('Blank priceability with valid provisional plan math must infer non-unpriceable resolver priceability.');
+  }
+  if(inferredProvisionalResolved.priceability_state !== 'provisional' || inferredProvisionalViabilityInputs.priceabilityInferred !== true){
+    throw new Error('Valid but confirmation-pending plan should infer provisional priceability with priceabilityInferred true.');
   }
 
   const reconciledPriceability = pipeline.resolveRecordState({

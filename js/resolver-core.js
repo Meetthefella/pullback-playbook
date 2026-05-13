@@ -668,6 +668,7 @@
       setupLocationState,
       priceabilityState,
       priceabilityInferred,
+      priceabilityInferenceReason:String(ctx.priceabilityInferenceReason || '').trim(),
       bounceState,
       hasUsefulBounce:bounceUseful,
       planStateKey:String(ctx.planStatusKey || '').toLowerCase(),
@@ -929,14 +930,32 @@
     const hasTarget = Number.isFinite(planTarget);
     const planVisible = String(displayedPlan && displayedPlan.status || '').toLowerCase() === 'valid';
     const stopDistanceTooWide = String(displayedPlan && displayedPlan.riskFit && displayedPlan.riskFit.risk_status || '').toLowerCase() === 'too_wide';
+    const pullbackValid = nearEntryPullbackZoneOk(pullbackZone);
+    const planMathProvisionallyPriceable = planVisible
+      && hasEntry
+      && hasStop
+      && hasTarget
+      && planEntry > planStop
+      && planTarget > planEntry
+      && Number.isFinite(rrValue)
+      && rrValue >= 2
+      && !stopDistanceTooWide
+      && pullbackValid;
+    let priceabilityInferenceReason = '';
     if(!priceabilityState){
       priceabilityInferred = true;
-      priceabilityState = planVisible && ['tradable', 'entry', 'ready', 'action_now'].includes(tradeabilityState)
-        ? 'priceable'
-        : 'unpriceable';
+      if(planVisible && ['tradable', 'entry', 'ready', 'action_now'].includes(tradeabilityState)){
+        priceabilityState = 'priceable';
+        priceabilityInferenceReason = 'Inferred priceable from valid plan and gate-priceable tradeability.';
+      }else if(planMathProvisionallyPriceable){
+        priceabilityState = 'provisional';
+        priceabilityInferenceReason = 'Inferred provisional from valid plan math while confirmation/tradeability remains pending.';
+      }else{
+        priceabilityState = 'unpriceable';
+        priceabilityInferenceReason = 'Inferred unpriceable because valid priceable plan math is not available.';
+      }
     }
     const planStatusText = String(resolved && resolved.blockerReason || '');
-    const pullbackValid = nearEntryPullbackZoneOk(pullbackZone);
     const sma50 = numericValueOrNull(item && item.marketData && item.marketData.sma50);
     const ma50 = sma50 !== null ? sma50 : numericValueOrNull(item && item.marketData && item.marketData.ma50);
     const sma200 = numericValueOrNull(item && item.marketData && item.marketData.sma200);
@@ -1123,6 +1142,7 @@
       setupLocationState,
       priceabilityState,
       priceabilityInferred,
+      priceabilityInferenceReason,
       bounceState,
       pullbackZone,
       setupScore,
@@ -1276,6 +1296,7 @@
       setup_location_state:setupLocationState,
       priceability_state:priceabilityState,
       priceability_inferred:priceabilityInferred,
+      priceability_inference_reason:priceabilityInferenceReason,
       semantic_blocker_code:semanticBlocker.blockerCode || '',
       semantic_blocker_reason:semanticBlocker.reason || '',
       non_terminal_recovery_blocker:nonTerminalRecoveryBlocker,
