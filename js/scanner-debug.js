@@ -133,7 +133,11 @@
       rrReliability = 'conditional';
       rrLabel = 'Developing';
     }
-    addStep('rr reliability', `${Number.isFinite(rrValue) ? Number(rrValue).toFixed(2) : 'n/a'} | ${rrLabel}`);
+    addStep('RR / confidence', [
+      Number.isFinite(rrValue) ? `rr=${Number(rrValue).toFixed(2)}` : 'rr=n/a',
+      `confidence=${rrLabel}`,
+      `reliability=${rrReliability}`
+    ].join(' | '));
 
     let bucket = 'filtered';
     let status = 'Avoid';
@@ -179,7 +183,7 @@
     const guardedDisplayState = finalDisplayState;
 
     addStep('base verdict', deps.normalizeGlobalVerdictKey(globalVerdict.base_verdict || status));
-    if(falseDeadGuard) addStep('alive setup guard', 'blocked false Dead/filtered classification');
+    if(falseDeadGuard) addStep('alive setup guard', 'legacy dead/filtered classification suppressed; setup remains technically alive');
     addStep('final display state', guardedDisplayState);
     if(remapReason) addStep('remap reason', remapReason);
     addStep('resulting bucket', finalDisplayBucket);

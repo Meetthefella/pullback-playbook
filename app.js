@@ -10922,6 +10922,63 @@ function removeCard(ticker){
   renderFocusQueue();
 }
 
+function clampReviewChecklistScore(score){
+  const numeric = Number(score);
+  if(!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(10, Math.round(numeric)));
+}
+
+function setupQualityLabelForScore(score){
+  const numeric = clampReviewChecklistScore(score);
+  if(numeric <= 3) return 'Poor';
+  if(numeric <= 5) return 'Weak';
+  if(numeric <= 7) return 'Developing';
+  if(numeric <= 8) return 'Constructive';
+  return 'Strong';
+}
+
+function resolverAlignedSetupScore(score, checks, context = {}){
+  const hasResolverContext = !!(context && typeof context === 'object' && Object.keys(context).length);
+  const finalVerdict = String(context.canonicalVerdict || context.finalVerdict || '').trim().toLowerCase();
+  const structureState = String(context.structureState || '').trim().toLowerCase();
+  const bounceState = String(context.bounceState || '').trim().toLowerCase();
+  const stabilisationState = String(context.stabilisationState || '').trim().toLowerCase();
+  const planStatus = String(context.planStatus || '').trim().toLowerCase();
+  const priceabilityState = String(context.priceabilityState || '').trim().toLowerCase();
+  const mainBlocker = String(context.mainBlocker || context.unpriceableBlockReason || '').trim();
+  const viabilityRejected = context.viability === 'reject' || context.rejectedByViabilityGate === true;
+  const terminalAvoid = context.terminalAvoidApplied === true || context.terminal_avoid_applied === true;
+  const planBlocked = context.planValid === false
+    || context.planVisible === false
+    || ['invalid','missing','blocked','not_generated'].includes(planStatus);
+  const noReliableStop = context.hasClearInvalidationLevel === false
+    || /no valid invalidation|no reliable stop|reliable stop|cannot be priced|not priceable/i.test(mainBlocker);
+  const unpriceable = priceabilityState === 'unpriceable'
+    || context.hasPriceablePlan === false
+    || /unpriceable|not priceable|cannot be priced/i.test(mainBlocker);
+  let cap = 10;
+  if(['broken','dead','failed'].includes(structureState) || terminalAvoid){
+    cap = Math.min(cap, finalVerdict === 'avoid' || viabilityRejected || terminalAvoid ? 2 : 3);
+  }else if(finalVerdict === 'avoid' || viabilityRejected){
+    cap = Math.min(cap, 3);
+  }else if(['weak','weakening'].includes(structureState)){
+    cap = Math.min(cap, 4);
+  }
+  if(planBlocked || noReliableStop || unpriceable){
+    cap = Math.min(cap, 6);
+  }
+  if((!bounceState || bounceState === 'none') && (!stabilisationState || stabilisationState === 'none')){
+    cap = Math.min(cap, 6);
+  }
+  if(hasResolverContext && finalVerdict !== 'entry' && context.entryGatePass !== true){
+    cap = Math.min(cap, 9);
+  }
+  if(hasResolverContext && !['entry','near_entry'].includes(finalVerdict) && context.nearEntryGatePass !== true && context.entryGatePass !== true){
+    cap = Math.min(cap, 8);
+  }
+  return Math.min(clampReviewChecklistScore(score), cap);
+}
+
 function scoreAndStatusFromChecks(checks, context = {}){
   const nearMA = !!(checks.near20 || checks.near50);
   const trendStrong = !!checks.trendStrong;
@@ -10952,7 +11009,10 @@ function scoreAndStatusFromChecks(checks, context = {}){
   else if(stabilising) status = 'Near Entry';
   if(finalVerdict === 'avoid' || viabilityRejected) status = 'Avoid';
   else if(planInvalid && status === 'Entry') status = 'Watch';
-  return {score, status};
+  if(status === 'Entry' && context.entryGatePass === false) status = 'Watch';
+  if(status === 'Near Entry' && context.nearEntryGatePass === false && context.entryGatePass !== true) status = 'Watch';
+  score = resolverAlignedSetupScore(score, checks, context);
+  return {score, status, qualityLabel:setupQualityLabelForScore(score)};
 }
 
 function buildSummary(checks, status, context = {}){
@@ -10976,6 +11036,9 @@ function buildSummary(checks, status, context = {}){
   if(finalVerdict === 'avoid' || viabilityRejected || planBlocked || ['weak','weakening','broken'].includes(structureState) || bounceState === 'none'){
     if(finalVerdict === 'avoid' || viabilityRejected || ['weak','weakening','broken'].includes(structureState)){
       let reason = mainBlocker || (planBlocked ? 'No actionable plan is available yet.' : 'The setup is not actionable yet.');
+      if(structureState === 'broken' && !mainBlocker){
+        reason = 'Trend context may be strong, but the pullback structure is broken.';
+      }
       if(['weak','weakening'].includes(structureState) && /broken/i.test(reason)){
         reason = planBlocked
           ? 'the pullback is too weak to price reliably and no actionable plan is available yet.'
@@ -11041,9 +11104,25 @@ function reviewChecklistContextForRecord(record, options = {}){
     bounceState:String(derivedStates.bounceState || derivedStates.bounce_state || resolvedState.bounce_state || '').trim().toLowerCase(),
     stabilisationState:String(derivedStates.stabilisationState || derivedStates.stabilisation_state || '').trim().toLowerCase(),
     pullbackZone:String(derivedStates.pullbackZone || derivedStates.pullback_zone || '').trim().toLowerCase(),
+    priceabilityState:String(derivedStates.priceabilityState || derivedStates.priceability_state || resolvedState.priceability_state || '').trim().toLowerCase(),
     viability:String(resolvedState.viability || '').trim().toLowerCase(),
     rejectedByViabilityGate:resolvedState.rejected_by_viability_gate === true
       || resolvedState.rejectedByViabilityGate === true,
+    terminalAvoidApplied:resolvedState.terminal_avoid_applied === true
+      || resolvedState.terminalAvoidApplied === true,
+    entryGatePass:simplifiedState && simplifiedState.entryGatePass === true
+      || resolvedState.entry_gate_pass === true
+      || resolvedState.entryGatePass === true,
+    nearEntryGatePass:simplifiedState && simplifiedState.nearEntryGatePass === true
+      || resolvedState.near_entry_gate_pass === true
+      || resolvedState.nearEntryGatePass === true,
+    hasClearInvalidationLevel:resolvedState.hasClearInvalidationLevel === true || resolvedState.has_clear_invalidation_level === true
+      ? true
+      : (resolvedState.hasClearInvalidationLevel === false || resolvedState.has_clear_invalidation_level === false ? false : undefined),
+    hasPriceablePlan:resolvedState.hasPriceablePlan === true || resolvedState.has_priceable_plan === true
+      ? true
+      : (resolvedState.hasPriceablePlan === false || resolvedState.has_priceable_plan === false ? false : undefined),
+    unpriceableBlockReason:String(resolvedState.unpriceableBlockReason || resolvedState.unpriceable_block_reason || '').trim(),
     nonTerminalRecoveryBlocker:resolvedState.non_terminal_recovery_blocker === true
       || resolvedState.nonTerminalRecoveryBlocker === true,
     semanticBlockerCode:String(resolvedState.semantic_blocker_code || resolvedState.semanticBlockerCode || '').trim(),
@@ -18300,6 +18379,10 @@ function currentChecks(){
     || {}
   );
   if(!currentChecks._missingLogged) currentChecks._missingLogged = new Set();
+  const checklistPanelMounted = checklistIds.some(id => {
+    const input = $(id);
+    return !!(input && typeof input.checked === 'boolean');
+  });
   let usedChecklistFallback = false;
   checklistIds.forEach(id => {
     const input = $(id);
@@ -18308,8 +18391,8 @@ function currentChecks(){
       return;
     }
     out[id] = !!savedChecks[id];
-    usedChecklistFallback = true;
-    if(!currentChecks._missingLogged.has(id)){
+    if(checklistPanelMounted) usedChecklistFallback = true;
+    if(checklistPanelMounted && !currentChecks._missingLogged.has(id)){
       currentChecks._missingLogged.add(id);
       if(isPerfDebugEnabled() && typeof console !== 'undefined' && console.debug){
         console.debug('[Review] checklist input not mounted; using saved/default value', {id, ticker:ticker || '(none)'});
@@ -22948,9 +23031,20 @@ function renderReviewWorkspace(options = {}){
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
   const rrRatio = displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null;
   const rewardPerShare = displayedPlan.rewardPerShare;
-  const setupScore = setupScoreForRecord(record);
-  const setupScoreDisplay = setupScoreDisplayForRecord(record);
   const derivedStates = refreshBundle.derivedStates || analysisDerivedStatesFromRecord(record);
+  const reviewChecklistContext = reviewChecklistContextForRecord(record, {
+    derivedStates,
+    effectivePlan,
+    displayedPlan,
+    simplifiedState
+  });
+  const displayedReviewChecks = resolvedReviewChecksForDisplay(reviewChecks, reviewChecklistContext);
+  const reviewSetupQuality = scoreAndStatusFromChecks(displayedReviewChecks, reviewChecklistContext);
+  const setupScore = reviewSetupQuality.score;
+  const setupScoreDisplay = `Setup ${setupScore}/10`;
+  const setupQualityLabel = reviewSetupQuality.qualityLabel || setupQualityLabelForScore(setupScore);
+  const setupQualitySummary = buildSummary(displayedReviewChecks, reviewSetupQuality.status, reviewChecklistContext);
+  const setupQualityEvidence = 'Weighted by resolver state, current structure, bounce, plan validity, and priceability. Raw checklist evidence is kept internally only.';
   const convictionTier = convictionTierLabel(record.setup.convictionTier || '');
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {
     displayedPlan,
@@ -23833,15 +23927,10 @@ function renderReviewWorkspace(options = {}){
             <summary>Prompt Preview</summary>
             <div class="mutebox scrollbox">${escapeHtml(promptText)}</div>
           </details>
-          <details class="compact-details reviewchecklist review-checklist-panel">
-            <summary><strong>Checklist</strong> <span id="progressText">Checks met: 0 / 10</span></summary>
-            <div class="prog"><div class="fill" id="progressFill"></div></div>
-            <div class="checks">
-              <div class="checkgroup"><h3>Trend</h3><label class="checkitem"><input type="checkbox" class="logic" id="trendStrong" ${reviewChecks.trendStrong ? 'checked' : ''}> Strong uptrend</label><label class="checkitem"><input type="checkbox" class="logic" id="above50" ${reviewChecks.above50 ? 'checked' : ''}> Above 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="above200" ${reviewChecks.above200 ? 'checked' : ''}> Above 200 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="ma50gt200" ${reviewChecks.ma50gt200 ? 'checked' : ''}> 50 MA above 200 MA</label></div>
-              <div class="checkgroup"><h3>Pullback + Confirmation</h3><label class="checkitem"><input type="checkbox" class="logic" id="near20" ${reviewChecks.near20 ? 'checked' : ''}> Near 20 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="near50" ${reviewChecks.near50 ? 'checked' : ''}> Near 50 MA</label><label class="checkitem"><input type="checkbox" class="logic" id="stabilising" ${reviewChecks.stabilising ? 'checked' : ''}> Stabilising</label><label class="checkitem"><input type="checkbox" class="logic" id="bounce" ${reviewChecks.bounce ? 'checked' : ''}> Bounce candle</label><label class="checkitem"><input type="checkbox" class="logic" id="volume" ${reviewChecks.volume ? 'checked' : ''}> Volume supportive</label></div>
-              <div class="checkgroup"><h3>Trade Plan</h3><label class="checkitem"><input type="checkbox" class="logic" id="entryDefined" ${reviewChecks.entryDefined ? 'checked' : ''}> Entry defined</label><label class="checkitem"><input type="checkbox" class="logic" id="stopDefined" ${reviewChecks.stopDefined ? 'checked' : ''}> Stop defined</label><label class="checkitem"><input type="checkbox" class="logic" id="targetDefined" ${reviewChecks.targetDefined ? 'checked' : ''}> Target defined</label></div>
-            </div>
-            <div class="summary" id="summaryBox">No setup reviewed yet.</div>
+          <details class="compact-details review-setup-quality-panel">
+            <summary><strong>Setup Quality</strong> <span id="setupQualityText">${escapeHtml(setupQualityLabel)} (${escapeHtml(String(setupScore))}/10)</span></summary>
+            <div class="summary" id="setupQualitySummary">${escapeHtml(setupQualitySummary)}</div>
+            <div class="tiny" id="setupQualityEvidence">${escapeHtml(setupQualityEvidence)}</div>
           </details>
           <details class="compact-details">
             <summary>AI detail trace</summary>
@@ -24052,27 +24141,29 @@ function refreshReview(options = {}){
   if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
     window.requestAnimationFrame(() => {
       if(!isCurrentReviewRender(reviewSeq)) return;
-      const summaryBox = $('summaryBox');
-      const progressText = $('progressText');
-      const progressFill = $('progressFill');
+      const setupQualityText = $('setupQualityText');
+      const setupQualitySummary = $('setupQualitySummary');
+      const setupQualityEvidence = $('setupQualityEvidence');
       checklistIds.forEach(id => {
         const input = $(id);
         if(input && typeof input.checked === 'boolean') input.checked = !!checks[id];
       });
       if(!refreshReview._missingTextTargetsLogged) refreshReview._missingTextTargetsLogged = new Set();
-      if(summaryBox){
-        summaryBox.textContent = buildSummary(checks, result.status, checklistContext);
-      }else if(!refreshReview._missingTextTargetsLogged.has('summaryBox')){
-        refreshReview._missingTextTargetsLogged.add('summaryBox');
-        if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'summaryBox', selector:'#summaryBox'});
+      if(setupQualityText){
+        setupQualityText.textContent = `${result.qualityLabel || setupQualityLabelForScore(result.score)} (${result.score}/10)`;
+      }else if(!refreshReview._missingTextTargetsLogged.has('setupQualityText')){
+        refreshReview._missingTextTargetsLogged.add('setupQualityText');
+        if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'setupQualityText', selector:'#setupQualityText'});
       }
-      if(progressText){
-        progressText.textContent = `Checks met: ${result.score} / 10`;
-      }else if(!refreshReview._missingTextTargetsLogged.has('progressText')){
-        refreshReview._missingTextTargetsLogged.add('progressText');
-        if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'progressText', selector:'#progressText'});
+      if(setupQualitySummary){
+        setupQualitySummary.textContent = buildSummary(checks, result.status, checklistContext);
+      }else if(!refreshReview._missingTextTargetsLogged.has('setupQualitySummary')){
+        refreshReview._missingTextTargetsLogged.add('setupQualitySummary');
+        if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'setupQualitySummary', selector:'#setupQualitySummary'});
       }
-      if(progressFill && progressFill.style) progressFill.style.width = `${result.score * 10}%`;
+      if(setupQualityEvidence){
+        setupQualityEvidence.textContent = 'Weighted by resolver state, current structure, bounce, plan validity, and priceability. Raw checklist evidence is kept internally only.';
+      }
       syncPlanDisplayMeta({readOnlyReviewOpen:options.readOnlyReviewOpen === true, reviewRenderSeq:reviewSeq});
     });
   }else{
@@ -24214,12 +24305,10 @@ function resetReview(){
     const input = $(id);
     if(input) input.checked = false;
   });
-  const summaryBox = $('summaryBox');
-  const progressText = $('progressText');
-  const progressFill = $('progressFill');
-  if(summaryBox) summaryBox.textContent = 'No setup reviewed yet.';
-  if(progressText) progressText.textContent = 'Checks met: 0 / 10';
-  if(progressFill && progressFill.style) progressFill.style.width = '0%';
+  const setupQualityText = $('setupQualityText');
+  const setupQualitySummary = $('setupQualitySummary');
+  if(setupQualityText) setupQualityText.textContent = 'Pending (0/10)';
+  if(setupQualitySummary) setupQualitySummary.textContent = 'No setup reviewed yet.';
   if($('calcNote')) $('calcNote').textContent = 'Enter planned entry, stop, and first target to calculate size.';
   ['riskPerShare','positionSize','rrValue'].forEach(id => {
     const el = $(id);

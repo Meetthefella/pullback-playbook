@@ -123,6 +123,9 @@ function runReviewProjectionAssertions(){
     'normalizeUiCopy',
     'isDuplicatedStatusCopy',
     'nonPlanCalcNoteText',
+    'clampReviewChecklistScore',
+    'setupQualityLabelForScore',
+    'resolverAlignedSetupScore',
     'scoreAndStatusFromChecks',
     'buildSummary',
     'resolvedReviewChecksForDisplay',
@@ -401,6 +404,43 @@ function runReviewProjectionAssertions(){
   }
   if(!/^Avoid for now/i.test(String(blockedChecklistSummary || '')) || /Strong uptrend|broken/i.test(String(blockedChecklistSummary || ''))){
     throw new Error('Blocked Review checklist summary must lead with blocked/no-actionable-plan language, not bullish summary copy.');
+  }
+
+  const brokenStructureChecklistContext = {
+    canonicalVerdict:'avoid',
+    visualBucket:'avoid',
+    mainBlocker:'',
+    planVisible:true,
+    planStatus:'valid',
+    planValid:true,
+    entry:100,
+    stop:95,
+    target:115,
+    structureState:'broken',
+    bounceState:'none',
+    stabilisationState:'none',
+    pullbackZone:'near_50ma',
+    viability:'reject',
+    rejectedByViabilityGate:true,
+    terminalAvoidApplied:true,
+    entryGatePass:false,
+    nearEntryGatePass:false
+  };
+  const brokenStructureChecklist = projectionSandbox.resolvedReviewChecksForDisplay(rawBullishChecklist, brokenStructureChecklistContext);
+  const brokenStructureScore = projectionSandbox.scoreAndStatusFromChecks(brokenStructureChecklist, brokenStructureChecklistContext);
+  const brokenStructureSummary = projectionSandbox.buildSummary(
+    brokenStructureChecklist,
+    brokenStructureScore.status,
+    brokenStructureChecklistContext
+  );
+  if(brokenStructureScore.score > 2 || brokenStructureScore.qualityLabel !== 'Poor'){
+    throw new Error('Terminal broken-structure Review quality must be capped low even when raw checklist fields are bullish.');
+  }
+  if(/Strong uptrend/i.test(String(brokenStructureSummary || '')) || !/pullback structure is broken|No entry until/i.test(String(brokenStructureSummary || ''))){
+    throw new Error('Terminal broken-structure Review summary must not use bullish checklist summary copy.');
+  }
+  if(/Checks met\s*:/i.test(appSource) || /review-checklist-panel/.test(appSource)){
+    throw new Error('Review must not render the legacy visible checklist count/panel.');
   }
 
   const recoveryChecklistContext = {
