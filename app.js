@@ -24423,7 +24423,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
     {label:'Tracked', value:globalVerdict.tracked ? 'true' : 'false'},
     {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
+    {label:'Blocker / Not-Promoted Reason', value:globalVerdict.downgrade_reason || '(none)'},
     {label:'Entry Gate Pass', value:simplifiedState.entryGatePass ? 'true' : 'false'},
     {label:'Near Entry Gate Pass', value:simplifiedState.nearEntryGatePass ? 'true' : 'false'}
   ])}${renderDebugSectionMarkup('Review Presentation Source', [
@@ -24454,8 +24454,8 @@ function renderReviewWorkspace(options = {}){
     {label:'Track Presentation Tone', value:reviewLifecycleBias.trackPresentationTone || '(none)'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
     {label:'Previous Verdict', value:visualState.previousVerdict || '(none)'},
-    {label:'Fresh Canonical Verdict', value:visualState.freshCanonicalVerdict || '(none)'},
-    {label:'Fresh Visual Bucket', value:visualState.freshVisualBucket || '(none)'},
+    {label:'Legacy Visual Recompute Verdict (Non-authoritative)', value:visualState.freshCanonicalVerdict || '(none)'},
+    {label:'Legacy Visual Recompute Bucket (Non-authoritative)', value:visualState.freshVisualBucket || '(none)'},
     {label:'Scan Visual Source', value:visualState.scanVisualSource || '(none)'},
     {label:'Review Visual Source', value:visualState.reviewVisualSource || '(none)'},
     {label:'Structure Source', value:visualState.structureSource || '(none)'},
@@ -24468,7 +24468,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Primary Blocker Source', value:globalVerdict.primary_blocker_source || '(none)'},
     {label:'Bounce', value:globalVerdict.bounce_state || '(none)'},
     {label:'Market', value:globalVerdict.market_regime || '(none)'},
-    {label:'Volume', value:(record && record.setup && record.setup.volumeState) || '(none)'}
+    {label:'Volume', value:globalVerdict.volume_state || derivedStates.volumeState || (record && record.setup && record.setup.volumeState) || '(none)'}
   ])}${renderDebugSectionMarkup('Execution State', [
     {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
     {label:'Action State', value:resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)'},

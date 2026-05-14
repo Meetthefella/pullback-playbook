@@ -99,7 +99,7 @@
     addStep('bounce state', derivedStates.bounceState || '(none)');
     addStep('volume state', derivedStates.volumeState || '(none)');
     addStep('market regime / caution', item.setup.marketCaution ? 'market caution' : 'normal');
-    addStep('estimated RR / tradeability', [
+    addStep('scanner estimated RR / tradeability', [
       Number.isFinite(baseView.rrValue) ? `rr=${Number(baseView.rrValue).toFixed(2)}` : 'rr=n/a',
       baseView.displayedPlan && baseView.displayedPlan.tradeability ? `tradeability=${baseView.displayedPlan.tradeability}` : 'tradeability=n/a'
     ].join(' | '));
@@ -133,7 +133,7 @@
       rrReliability = 'conditional';
       rrLabel = 'Developing';
     }
-    addStep('RR / confidence', [
+    addStep('scanner RR / confidence', [
       Number.isFinite(rrValue) ? `rr=${Number(rrValue).toFixed(2)}` : 'rr=n/a',
       `confidence=${rrLabel}`,
       `reliability=${rrReliability}`
@@ -272,6 +272,8 @@
     const globalVerdict = deps.resolveGlobalVerdict(item);
     const visualState = deps.resolveVisualState ? deps.resolveVisualState(item, 'scanner') : null;
     const nextAction = deps.getActions(globalVerdict.final_verdict || '');
+    const renderedVerdict = globalVerdict.final_verdict || '(none)';
+    const renderedBucket = globalVerdict.bucket || '(none)';
     const baseSection = renderDebugSectionMarkup('Base Assessment', [
       {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
       {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
@@ -281,9 +283,11 @@
       {label:'Volume', value:(view && view.setupStates && view.setupStates.volumeState) || resolution.volume_state || '(none)'}
     ], deps);
     const finalSection = renderDebugSectionMarkup('Final Decision', [
-      {label:'UI State Source', value:(visualState && visualState.ui_state_source) || '(none)'},
-      {label:'Final Verdict Rendered', value:(visualState && (visualState.final_verdict_rendered || visualState.finalVerdict)) || '(none)'},
-      {label:'Bucket Rendered', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
+      {label:'UI State Source', value:'scanner_resolution'},
+      {label:'Final Verdict Rendered', value:renderedVerdict},
+      {label:'Bucket Rendered', value:renderedBucket},
+      {label:'Legacy Visual Recompute Verdict (Non-authoritative)', value:(visualState && (visualState.final_verdict_rendered || visualState.finalVerdict)) || '(none)'},
+      {label:'Legacy Visual Recompute Bucket (Non-authoritative)', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
       {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
       {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
       {label:'Explicit Invalidation Reason', value:(visualState && visualState.explicit_invalidation_reason) || globalVerdict.explicit_invalidation_reason || '(none)'},
@@ -302,7 +306,7 @@
       {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
       {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
       {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-      {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
+      {label:'Blocker / Not-Promoted Reason', value:globalVerdict.downgrade_reason || '(none)'},
       {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
       {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
     ], deps);
@@ -374,9 +378,11 @@
       {label:'Volume', value:(view && view.setupStates && view.setupStates.volumeState) || resolution.volume_state || '(none)'}
     ], deps);
     const finalSection = renderDebugSectionMarkup('Final Decision', [
-      {label:'UI State Source', value:(visualState && visualState.ui_state_source) || '(none)'},
-      {label:'Final Verdict Rendered', value:(visualState && (visualState.final_verdict_rendered || visualState.finalVerdict)) || '(none)'},
-      {label:'Bucket Rendered', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
+      {label:'UI State Source', value:'scanner_resolution'},
+      {label:'Final Verdict Rendered', value:globalVerdict.final_verdict || '(none)'},
+      {label:'Bucket Rendered', value:globalVerdict.bucket || '(none)'},
+      {label:'Legacy Visual Recompute Verdict (Non-authoritative)', value:(visualState && (visualState.final_verdict_rendered || visualState.finalVerdict)) || '(none)'},
+      {label:'Legacy Visual Recompute Bucket (Non-authoritative)', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
       {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
       {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
       {label:'Explicit Invalidation Reason', value:(visualState && visualState.explicit_invalidation_reason) || globalVerdict.explicit_invalidation_reason || '(none)'},
@@ -395,7 +401,7 @@
       {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
       {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
       {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-      {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || '(none)'},
+      {label:'Blocker / Not-Promoted Reason', value:globalVerdict.downgrade_reason || '(none)'},
       {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
       {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
     ], deps);
