@@ -1861,6 +1861,10 @@ function runAiContractAssertions(){
   if(!proximityLabelTrace.debug.numericLabelToMaMatches || !proximityLabelTrace.debug.numericLabelToMaMatches.ma200){
     throw new Error('Numeric label to MA proximity matches must be included in chart verification diagnostics.');
   }
+  const proximityMarkup = evidenceSandbox.renderChartConsistencyTrace(proximityLabelTrace);
+  if(!/20 133\.90/.test(proximityMarkup) || !/50 125\.72/.test(proximityMarkup) || !/200 115\.09/.test(proximityMarkup)){
+    throw new Error('Proximity-mapped MA values must be shown in chart verification extracted display.');
+  }
   const proximityWithoutLineTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', chartVerificationMarketOpen:true, marketData:{price:140, ma20:133.85, ma50:125.37, ma200:114.92}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
@@ -1874,8 +1878,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor', planStatus:'missing'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(proximityWithoutLineTrace.indicatorStates.ma20_status === 'verified' || proximityWithoutLineTrace.indicatorStates.ma50_status === 'verified' || proximityWithoutLineTrace.indicatorStates.ma200_status === 'verified'){
-    throw new Error('Unassigned numeric labels must not verify MA values when the relevant MA lines are not visible.');
+  if(proximityWithoutLineTrace.indicatorStates.ma20_status !== 'likely_match' || proximityWithoutLineTrace.indicatorStates.ma50_status !== 'likely_match' || proximityWithoutLineTrace.indicatorStates.ma200_status !== 'likely_match'){
+    throw new Error('Unassigned numeric labels without line evidence must be likely_match, not missing or fully verified.');
   }
   const portraitSourceTrace = evidenceSandbox.buildChartImageSourceTrace({
     chartRef:{dataUrl:'data:image/png;base64,source', width:900, height:1600},

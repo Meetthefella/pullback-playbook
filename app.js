@@ -23422,7 +23422,9 @@ function valueWithinTolerance(visible, trusted, tolerancePct){
 function chartIndicatorVerificationStatus(lineVisible, value, options = {}){
   if(chartVerificationNumberOrNull(value) !== null){
     if(options.match === false) return 'mismatch';
-    if(options.match === true) return 'verified';
+    if(options.match === true) return options.matchSource === 'proximity' && !(lineVisible === true || options.lineDetected === true)
+      ? 'likely_match'
+      : 'verified';
     return lineVisible === true || options.lineDetected === true ? 'partial' : 'missing';
   }
   if(options.lineDetected === true || lineVisible === true) return 'partial';
@@ -23488,9 +23490,9 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   const toleranceConfig = chartVerificationToleranceConfig(safeRecord);
   const visibleNumericLabels = chartVerificationNumericLabels(safeAnalysis);
   const proximityMatches = chartVerificationProximityMatches(visibleNumericLabels, {
-    ma20:visibleMa20 === null && safeAnalysis.ma20_visible === true ? trustedMa20 : null,
-    ma50:visibleMa50 === null && safeAnalysis.ma50_visible === true ? trustedMa50 : null,
-    ma200:visibleMa200 === null && (safeAnalysis.ma200_visible === true || safeAnalysis.ma200_line_detected === true) ? trustedMa200 : null
+    ma20:visibleMa20 === null ? trustedMa20 : null,
+    ma50:visibleMa50 === null ? trustedMa50 : null,
+    ma200:visibleMa200 === null ? trustedMa200 : null
   }, toleranceConfig);
   const comparisonMa20 = visibleMa20 !== null ? visibleMa20 : (proximityMatches.ma20 && proximityMatches.ma20.value);
   const comparisonMa50 = visibleMa50 !== null ? visibleMa50 : (proximityMatches.ma50 && proximityMatches.ma50.value);
@@ -23536,6 +23538,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     {label:'200MA', status:ma200Status}
   ];
   const verifiedIndicators = indicatorStates.filter(item => item.status === 'verified').map(item => item.label);
+  const likelyMatchedIndicators = indicatorStates.filter(item => item.status === 'likely_match').map(item => item.label);
   const partialIndicators = indicatorStates.filter(item => item.status === 'partial').map(item => item.label);
   const inferredIndicators = indicatorStates.filter(item => item.status === 'inferred').map(item => item.label);
   const mismatchedIndicators = indicatorStates.filter(item => item.status === 'mismatch').map(item => item.label);
@@ -23599,11 +23602,14 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     status = 'uncertain_missing_context';
     title = 'Chart context uncertain';
     summary = 'The uploaded image does not show enough ticker/timeframe/price information for deterministic verification.';
-  }else if((partialIndicators.length || inferredIndicators.length) && !missingIndicators.length){
+  }else if((likelyMatchedIndicators.length || partialIndicators.length || inferredIndicators.length) && !missingIndicators.length){
     status = 'indicator_partial';
-    title = inferredIndicators.length && !partialIndicators.length ? 'Inferred indicator visibility' : 'Partial indicator visibility';
+    title = inferredIndicators.length && !partialIndicators.length && !likelyMatchedIndicators.length ? 'Inferred indicator visibility' : 'Partial indicator visibility';
     const verifiedSummary = verifiedIndicators.length
       ? `${verifiedIndicators.join(' and ')} ${verifiedIndicators.length === 1 ? 'was' : 'were'} verified. `
+      : '';
+    const likelySummary = likelyMatchedIndicators.length
+      ? `${likelyMatchedIndicators.join(' and ')} ${likelyMatchedIndicators.length === 1 ? 'matches' : 'match'} trusted values from visible chart labels.`
       : '';
     const partialSummary = partialIndicators.length
       ? `${partialIndicators.join(' and ')} line ${partialIndicators.length === 1 ? 'appears' : 'appear'} visible, but ${partialIndicators.length === 1 ? 'its numeric value could' : 'their numeric values could'} not be confirmed.`
@@ -23611,12 +23617,12 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     const inferredSummary = inferredIndicators.length
       ? `${inferredIndicators.join(' and ')} ${inferredIndicators.length === 1 ? 'is' : 'are'} likely present, but not OCR-confirmed.`
       : '';
-    summary = `${verifiedSummary}${[partialSummary, inferredSummary].filter(Boolean).join(' ')}`;
+    summary = `${verifiedSummary}${[likelySummary, partialSummary, inferredSummary].filter(Boolean).join(' ')}`;
   }else if(missingIndicators.length && !partialIndicators.length){
     status = 'indicator_missing';
     title = 'Indicators missing';
     summary = `${missingIndicators.join(' and ')} ${missingIndicators.length === 1 ? 'is' : 'are'} not visible, so full MA comparison could not be completed.`;
-  }else if(partialIndicators.length || inferredIndicators.length || missingIndicators.length){
+  }else if(likelyMatchedIndicators.length || partialIndicators.length || inferredIndicators.length || missingIndicators.length){
     status = 'indicator_incomplete';
     title = 'Indicator verification incomplete';
     summary = 'Some moving averages could not be fully verified from the uploaded image.';
@@ -23642,6 +23648,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     missing,
     missingIndicators,
     partialIndicators,
+    likelyMatchedIndicators,
     inferredIndicators,
     mismatchedIndicators,
     indicatorStates:{
@@ -23801,6 +23808,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       missing:deterministic.missing,
       missingIndicators:deterministic.missingIndicators,
       partialIndicators:deterministic.partialIndicators,
+      likelyMatchedIndicators:deterministic.likelyMatchedIndicators,
       inferredIndicators:deterministic.inferredIndicators,
       indicatorStates:deterministic.indicatorStates,
       extractedFacts:deterministic.extractedFacts,
@@ -23821,6 +23829,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         ma200_status:deterministic.indicatorStates && deterministic.indicatorStates.ma200_status,
         missingIndicators:deterministic.missingIndicators || [],
         partialIndicators:deterministic.partialIndicators || [],
+        likelyMatchedIndicators:deterministic.likelyMatchedIndicators || [],
         inferredIndicators:deterministic.inferredIndicators || [],
         ma200_line_detected:deterministic.extractedFacts && deterministic.extractedFacts.ma200_line_detected,
         ma200_text_detected:deterministic.extractedFacts && deterministic.extractedFacts.ma200_text_detected,
@@ -23836,9 +23845,9 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         staleDataPossible:deterministic.comparison && deterministic.comparison.staleDataPossible,
         extractedFormatted:{
           price:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_latest_price),
-          ma20:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_ma20),
-          ma50:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_ma50),
-          ma200:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_ma200)
+          ma20:chartVerificationDisplayValue((deterministic.extractedFacts && deterministic.extractedFacts.visible_ma20) ?? (deterministic.extractedFacts && deterministic.extractedFacts.mapped_ma20)),
+          ma50:chartVerificationDisplayValue((deterministic.extractedFacts && deterministic.extractedFacts.visible_ma50) ?? (deterministic.extractedFacts && deterministic.extractedFacts.mapped_ma50)),
+          ma200:chartVerificationDisplayValue((deterministic.extractedFacts && deterministic.extractedFacts.visible_ma200) ?? (deterministic.extractedFacts && deterministic.extractedFacts.mapped_ma200))
         },
         trustedFormatted:{
           price:chartVerificationDisplayValue(deterministic.trustedFacts && deterministic.trustedFacts.latest_price),
@@ -23930,6 +23939,9 @@ function renderChartConsistencyTrace(trace){
   const partialIndicators = Array.isArray(safe.partialIndicators) && safe.partialIndicators.length
     ? `<div class="tiny">Partial indicators: ${escapeHtml(safe.partialIndicators.join(', '))}</div>`
     : '';
+  const likelyMatchedIndicators = Array.isArray(safe.likelyMatchedIndicators) && safe.likelyMatchedIndicators.length
+    ? `<div class="tiny">Likely matched indicators: ${escapeHtml(safe.likelyMatchedIndicators.join(', '))}</div>`
+    : '';
   const inferredIndicators = Array.isArray(safe.inferredIndicators) && safe.inferredIndicators.length
     ? `<div class="tiny">Inferred indicators: ${escapeHtml(safe.inferredIndicators.join(', '))}</div>`
     : '';
@@ -23937,7 +23949,7 @@ function renderChartConsistencyTrace(trace){
     ? `<div class="tiny">Missing indicators: ${escapeHtml(safe.missingIndicators.join(', '))}</div>`
     : '';
   const extracted = facts
-    ? `<div class="tiny">Extracted: ticker ${escapeHtml(facts.visible_ticker || 'n/a')} | timeframe ${escapeHtml(facts.visible_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(facts.visible_latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>`
+    ? `<div class="tiny">Extracted: ticker ${escapeHtml(facts.visible_ticker || 'n/a')} | timeframe ${escapeHtml(facts.visible_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(facts.visible_latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20 ?? facts.mapped_ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50 ?? facts.mapped_ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200 ?? facts.mapped_ma200))}</div>`
     : '';
   const trustedFacts = trusted
     ? `<div class="tiny">Trusted: ticker ${escapeHtml(trusted.ticker || 'n/a')} | timeframe ${escapeHtml(trusted.expected_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(trusted.latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(trusted.ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(trusted.ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(trusted.ma200))}</div>`
@@ -23949,7 +23961,7 @@ function renderChartConsistencyTrace(trace){
     ? `<div class="tiny">Image source: ${escapeHtml(safe.chartImageSource.sourceKind || 'unknown')} | original ${escapeHtml(safe.chartImageSource.originalDimensions || 'unknown')} | preview ${escapeHtml(safe.chartImageSource.previewDimensions || 'unknown')} | verification ${escapeHtml(safe.chartImageSource.verificationSourceDimensions || 'unknown')}${safe.chartImageSource.limited ? ' | limited: original unavailable' : ''}</div>`
     : '';
   const className = safe.severity === 'warning' ? 'ai-summary-message--warning' : '';
-  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${partialIndicators}${inferredIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}</div>`;
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${likelyMatchedIndicators}${partialIndicators}${inferredIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}</div>`;
 }
 
 function renderReviewWorkspace(options = {}){
@@ -24693,6 +24705,7 @@ function renderReviewWorkspace(options = {}){
       ma200_status:chartConsistencyTrace.indicatorStates && chartConsistencyTrace.indicatorStates.ma200_status,
       missingIndicators:chartConsistencyTrace.missingIndicators || [],
       partialIndicators:chartConsistencyTrace.partialIndicators || [],
+      likelyMatchedIndicators:chartConsistencyTrace.likelyMatchedIndicators || [],
       inferredIndicators:chartConsistencyTrace.inferredIndicators || [],
       ma200_line_detected:chartConsistencyTrace.debug && chartConsistencyTrace.debug.ma200_line_detected,
       ma200_text_detected:chartConsistencyTrace.debug && chartConsistencyTrace.debug.ma200_text_detected,
