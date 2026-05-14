@@ -1745,6 +1745,55 @@ function runAiContractAssertions(){
   if(!/20 207\.25/.test(partialIndicatorMarkup) || !/50 191\.18/.test(partialIndicatorMarkup) || !/200 n\/a/.test(partialIndicatorMarkup) || !/200 185\.44/.test(partialIndicatorMarkup)){
     throw new Error('Chart verification display values must be formatted to 2 decimals and null as n/a.');
   }
+  const inferredIndicatorTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:225.83,
+      visible_ma20:207.25,
+      visible_ma50:191.18,
+      visible_ma200:null,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:false,
+      ma200_line_detected:false,
+      ma200_text_detected:false,
+      ma200_value_extracted:false,
+      ma200_confidence:0.62,
+      ma200_extraction_method_used:'200MA colour/context line inference'
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(inferredIndicatorTrace.indicatorStates.ma200_status !== 'inferred' || !inferredIndicatorTrace.inferredIndicators.includes('200MA') || inferredIndicatorTrace.missingIndicators.includes('200MA')){
+    throw new Error('Likely visible 200MA without OCR value must be inferred, not missing.');
+  }
+  if(inferredIndicatorTrace.extractedFacts.visible_ma200 !== null){
+    throw new Error('Inferred 200MA visibility must not fabricate a numeric MA value.');
+  }
+  const confidenceOnlyIndicatorTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:225.83,
+      visible_ma20:207.25,
+      visible_ma50:191.18,
+      visible_ma200:null,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:false,
+      ma200_line_detected:false,
+      ma200_text_detected:false,
+      ma200_value_extracted:false,
+      ma200_confidence:0.78,
+      ma200_extraction_method_used:'colour/context line inference'
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(confidenceOnlyIndicatorTrace.indicatorStates.ma200_status !== 'missing'){
+    throw new Error('MA confidence alone must not infer 200MA visibility without 200MA-specific evidence.');
+  }
   const portraitSourceTrace = evidenceSandbox.buildChartImageSourceTrace({
     chartRef:{dataUrl:'data:image/png;base64,source', width:900, height:1600},
     chartImageOriginal:{width:900, height:1600, dataUrlField:'chartRef.dataUrl'},

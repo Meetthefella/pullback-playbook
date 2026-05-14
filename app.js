@@ -19321,6 +19321,11 @@ function normalizeAnalysisResponse(raw){
     ma20_visible:raw.ma20_visible === true,
     ma50_visible:raw.ma50_visible === true,
     ma200_visible:raw.ma200_visible === true,
+    ma200_line_detected:raw.ma200_line_detected === true,
+    ma200_text_detected:raw.ma200_text_detected === true,
+    ma200_value_extracted:raw.ma200_value_extracted === true || analysisNumberOrNull(raw.visible_ma200) !== null,
+    ma200_confidence:analysisNumberOrNull(raw.ma200_confidence),
+    ma200_extraction_method_used:String(raw.ma200_extraction_method_used || raw.extraction_method_used || '').trim(),
     visible_price_range:String(raw.visible_price_range || '').trim(),
     visible_date_range:String(raw.visible_date_range || '').trim(),
     extraction_confidence:analysisNumberOrNull(raw.extraction_confidence),
@@ -19733,6 +19738,11 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     ma20_visible:parsed.ma20_visible === true,
     ma50_visible:parsed.ma50_visible === true,
     ma200_visible:parsed.ma200_visible === true,
+    ma200_line_detected:parsed.ma200_line_detected === true,
+    ma200_text_detected:parsed.ma200_text_detected === true,
+    ma200_value_extracted:parsed.ma200_value_extracted === true,
+    ma200_confidence:parsed.ma200_confidence,
+    ma200_extraction_method_used:parsed.ma200_extraction_method_used || '',
     visible_price_range:parsed.visible_price_range || '',
     visible_date_range:parsed.visible_date_range || '',
     extraction_confidence:parsed.extraction_confidence,
@@ -23337,9 +23347,11 @@ function valueWithinTolerance(visible, trusted, tolerancePct){
   return Math.abs(observed - expected) / Math.abs(expected) <= tolerancePct;
 }
 
-function chartIndicatorVerificationStatus(lineVisible, value){
+function chartIndicatorVerificationStatus(lineVisible, value, options = {}){
   if(chartVerificationNumberOrNull(value) !== null) return 'verified';
-  return lineVisible === true ? 'partial' : 'missing';
+  if(options.lineDetected === true || lineVisible === true) return 'partial';
+  if(options.inferred === true) return 'inferred';
+  return 'missing';
 }
 
 function chartVerificationDisplayValue(value){
@@ -23363,9 +23375,28 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   const trustedMa50 = chartVerificationNumberOrNull(marketData.ma50 ?? marketData.sma50 ?? safeRecord.ma50 ?? safeRecord.sma50);
   const trustedMa200 = chartVerificationNumberOrNull(marketData.ma200 ?? marketData.sma200 ?? safeRecord.ma200 ?? safeRecord.sma200);
   const extractionWarnings = chartConsistencyArray(safeAnalysis.extraction_warnings);
+  const ma200TextDetected = safeAnalysis.ma200_text_detected === true;
+  const ma200LineDetected = safeAnalysis.ma200_line_detected === true || safeAnalysis.ma200_visible === true;
+  const ma200ValueExtracted = safeAnalysis.ma200_value_extracted === true || visibleMa200 !== null;
+  const ma200Confidence = chartVerificationNumberOrNull(safeAnalysis.ma200_confidence);
+  const extractionMethodUsed = String(safeAnalysis.ma200_extraction_method_used || safeAnalysis.extraction_method_used || '').trim();
+  const extractionText = [
+    extractionMethodUsed,
+    ...extractionWarnings,
+    safeAnalysis.volume_evidence,
+    safeAnalysis.structure_evidence,
+    safeAnalysis.location_evidence
+  ].filter(Boolean).join(' ').toLowerCase();
+  const ma200Inferred = !ma200LineDetected && !ma200ValueExtracted && /\b(200\s*ma|200ma|sma\s*200|ma\s*200|long[-\s]?period ma|red moving average|red ma)\b/.test(extractionText);
   const ma20Status = chartIndicatorVerificationStatus(safeAnalysis.ma20_visible === true, visibleMa20);
   const ma50Status = chartIndicatorVerificationStatus(safeAnalysis.ma50_visible === true, visibleMa50);
-  const ma200Status = chartIndicatorVerificationStatus(safeAnalysis.ma200_visible === true, visibleMa200);
+  const ma200Status = chartIndicatorVerificationStatus(safeAnalysis.ma200_visible === true, visibleMa200, {
+    lineDetected:ma200LineDetected,
+    textDetected:ma200TextDetected,
+    valueExtracted:ma200ValueExtracted,
+    confidence:ma200Confidence,
+    inferred:ma200Inferred
+  });
   const indicatorStates = [
     {label:'20MA', status:ma20Status},
     {label:'50MA', status:ma50Status},
@@ -23373,6 +23404,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   ];
   const verifiedIndicators = indicatorStates.filter(item => item.status === 'verified').map(item => item.label);
   const partialIndicators = indicatorStates.filter(item => item.status === 'partial').map(item => item.label);
+  const inferredIndicators = indicatorStates.filter(item => item.status === 'inferred').map(item => item.label);
   const missingIndicators = indicatorStates.filter(item => item.status === 'missing').map(item => item.label);
   const hasExtractedEvidence = !!(
     visibleTicker
@@ -23433,18 +23465,24 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     status = 'uncertain_missing_context';
     title = 'Chart context uncertain';
     summary = 'The uploaded image does not show enough ticker/timeframe/price information for deterministic verification.';
-  }else if(partialIndicators.length && !missingIndicators.length){
+  }else if((partialIndicators.length || inferredIndicators.length) && !missingIndicators.length){
     status = 'indicator_partial';
-    title = 'Partial indicator visibility';
+    title = inferredIndicators.length && !partialIndicators.length ? 'Inferred indicator visibility' : 'Partial indicator visibility';
     const verifiedSummary = verifiedIndicators.length
       ? `${verifiedIndicators.join(' and ')} ${verifiedIndicators.length === 1 ? 'was' : 'were'} verified. `
       : '';
-    summary = `${verifiedSummary}${partialIndicators.join(' and ')} line ${partialIndicators.length === 1 ? 'appears' : 'appear'} visible, but ${partialIndicators.length === 1 ? 'its numeric value could' : 'their numeric values could'} not be confirmed.`;
+    const partialSummary = partialIndicators.length
+      ? `${partialIndicators.join(' and ')} line ${partialIndicators.length === 1 ? 'appears' : 'appear'} visible, but ${partialIndicators.length === 1 ? 'its numeric value could' : 'their numeric values could'} not be confirmed.`
+      : '';
+    const inferredSummary = inferredIndicators.length
+      ? `${inferredIndicators.join(' and ')} ${inferredIndicators.length === 1 ? 'is' : 'are'} likely present, but not OCR-confirmed.`
+      : '';
+    summary = `${verifiedSummary}${[partialSummary, inferredSummary].filter(Boolean).join(' ')}`;
   }else if(missingIndicators.length && !partialIndicators.length){
     status = 'indicator_missing';
     title = 'Indicators missing';
     summary = `${missingIndicators.join(' and ')} ${missingIndicators.length === 1 ? 'is' : 'are'} not visible, so full MA comparison could not be completed.`;
-  }else if(partialIndicators.length || missingIndicators.length){
+  }else if(partialIndicators.length || inferredIndicators.length || missingIndicators.length){
     status = 'indicator_incomplete';
     title = 'Indicator verification incomplete';
     summary = 'Some moving averages could not be fully verified from the uploaded image.';
@@ -23467,6 +23505,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     missing,
     missingIndicators,
     partialIndicators,
+    inferredIndicators,
     indicatorStates:{
       ma20_status:ma20Status,
       ma50_status:ma50Status,
@@ -23484,6 +23523,11 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
       ma20_visible:safeAnalysis.ma20_visible === true,
       ma50_visible:safeAnalysis.ma50_visible === true,
       ma200_visible:safeAnalysis.ma200_visible === true,
+      ma200_line_detected:ma200LineDetected,
+      ma200_text_detected:ma200TextDetected,
+      ma200_value_extracted:ma200ValueExtracted,
+      ma200_confidence:ma200Confidence,
+      extraction_method_used:extractionMethodUsed || (ma200Inferred ? 'context_inference' : ''),
       visible_price_range:String(safeAnalysis.visible_price_range || '').trim(),
       visible_date_range:String(safeAnalysis.visible_date_range || '').trim(),
       extraction_confidence:chartVerificationNumberOrNull(safeAnalysis.extraction_confidence)
@@ -23604,6 +23648,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       missing:deterministic.missing,
       missingIndicators:deterministic.missingIndicators,
       partialIndicators:deterministic.partialIndicators,
+      inferredIndicators:deterministic.inferredIndicators,
       indicatorStates:deterministic.indicatorStates,
       extractedFacts:deterministic.extractedFacts,
       trustedFacts:deterministic.trustedFacts,
@@ -23623,6 +23668,12 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         ma200_status:deterministic.indicatorStates && deterministic.indicatorStates.ma200_status,
         missingIndicators:deterministic.missingIndicators || [],
         partialIndicators:deterministic.partialIndicators || [],
+        inferredIndicators:deterministic.inferredIndicators || [],
+        ma200_line_detected:deterministic.extractedFacts && deterministic.extractedFacts.ma200_line_detected,
+        ma200_text_detected:deterministic.extractedFacts && deterministic.extractedFacts.ma200_text_detected,
+        ma200_value_extracted:deterministic.extractedFacts && deterministic.extractedFacts.ma200_value_extracted,
+        ma200_confidence:deterministic.extractedFacts && deterministic.extractedFacts.ma200_confidence,
+        extraction_method_used:deterministic.extractedFacts && deterministic.extractedFacts.extraction_method_used,
         extractedFormatted:{
           price:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_latest_price),
           ma20:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_ma20),
@@ -23719,6 +23770,9 @@ function renderChartConsistencyTrace(trace){
   const partialIndicators = Array.isArray(safe.partialIndicators) && safe.partialIndicators.length
     ? `<div class="tiny">Partial indicators: ${escapeHtml(safe.partialIndicators.join(', '))}</div>`
     : '';
+  const inferredIndicators = Array.isArray(safe.inferredIndicators) && safe.inferredIndicators.length
+    ? `<div class="tiny">Inferred indicators: ${escapeHtml(safe.inferredIndicators.join(', '))}</div>`
+    : '';
   const missingIndicators = Array.isArray(safe.missingIndicators) && safe.missingIndicators.length
     ? `<div class="tiny">Missing indicators: ${escapeHtml(safe.missingIndicators.join(', '))}</div>`
     : '';
@@ -23735,7 +23789,7 @@ function renderChartConsistencyTrace(trace){
     ? `<div class="tiny">Image source: ${escapeHtml(safe.chartImageSource.sourceKind || 'unknown')} | original ${escapeHtml(safe.chartImageSource.originalDimensions || 'unknown')} | preview ${escapeHtml(safe.chartImageSource.previewDimensions || 'unknown')} | verification ${escapeHtml(safe.chartImageSource.verificationSourceDimensions || 'unknown')}${safe.chartImageSource.limited ? ' | limited: original unavailable' : ''}</div>`
     : '';
   const className = safe.severity === 'warning' ? 'ai-summary-message--warning' : '';
-  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${partialIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}</div>`;
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${partialIndicators}${inferredIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}</div>`;
 }
 
 function renderReviewWorkspace(options = {}){
@@ -24479,6 +24533,12 @@ function renderReviewWorkspace(options = {}){
       ma200_status:chartConsistencyTrace.indicatorStates && chartConsistencyTrace.indicatorStates.ma200_status,
       missingIndicators:chartConsistencyTrace.missingIndicators || [],
       partialIndicators:chartConsistencyTrace.partialIndicators || [],
+      inferredIndicators:chartConsistencyTrace.inferredIndicators || [],
+      ma200_line_detected:chartConsistencyTrace.debug && chartConsistencyTrace.debug.ma200_line_detected,
+      ma200_text_detected:chartConsistencyTrace.debug && chartConsistencyTrace.debug.ma200_text_detected,
+      ma200_value_extracted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.ma200_value_extracted,
+      ma200_confidence:chartConsistencyTrace.debug && chartConsistencyTrace.debug.ma200_confidence,
+      extraction_method_used:chartConsistencyTrace.debug && chartConsistencyTrace.debug.extraction_method_used,
       extractedFormatted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.extractedFormatted,
       trustedFormatted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.trustedFormatted,
       chartImageSource:chartConsistencyTrace.chartImageSource || null
@@ -26112,6 +26172,8 @@ function buildPromptBody(payload){
     '',
     'Chart verification:',
     '- If a chart image is attached, extract visible facts only: visible ticker, timeframe, latest price, moving-average values, visible price/date range, and extraction confidence',
+    '- TradingView mobile/narrow screenshots may crop MA legend text or numeric labels. If an MA line is visible but the value is not readable, report the line as visible and keep the numeric value null.',
+    '- Do not fabricate MA values. Visibility can be partial/inferred; numeric values require readable text.',
     '- Do not decide whether the chart is authentic. The app compares extracted facts against trusted scanner and market data',
     '- legacy_ai_chart_match fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, use chart_match_status and chart_match_warning',
     `- Current chart_match_status context: ${chartStatus}`,
@@ -26138,6 +26200,11 @@ function buildPromptBody(payload){
     'ma20_visible',
     'ma50_visible',
     'ma200_visible',
+    'ma200_line_detected',
+    'ma200_text_detected',
+    'ma200_value_extracted',
+    'ma200_confidence',
+    'ma200_extraction_method_used',
     'visible_price_range',
     'visible_date_range',
     'extraction_confidence',
@@ -26150,7 +26217,11 @@ function buildPromptBody(payload){
     '- ai_observation_only must be true',
     '- visible_ticker and visible_timeframe must be extracted only if visible in the image',
     '- visible_latest_price and visible_ma* values must be numbers or null',
-    '- ma*_visible must be true only when that indicator value/line is visible enough to read',
+    '- ma*_visible means the moving-average line itself appears visible, even if its numeric label is cropped, faint, or unreadable',
+    '- visible_ma* values must stay null unless the numeric value is confidently readable',
+    '- For the 200MA, set ma200_line_detected when the long-period MA line is visually detected, ma200_text_detected when the legend/label text is visible, and ma200_value_extracted only when the numeric value is readable',
+    '- ma200_confidence should be 0-1 for line/text/value extraction confidence',
+    '- ma200_extraction_method_used should briefly state OCR, line_detection, colour/context, or none',
     '- extraction_confidence should be 0-1, or null when no image facts are visible',
     '- extraction_warnings must be an array',
     '- chart_match_status/chart_match_warning are legacy fallback fields only; do not use them as final authenticity decisions',
