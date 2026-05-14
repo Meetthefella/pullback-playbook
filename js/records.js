@@ -126,6 +126,9 @@
       review: {
         chartAvailable: false,
         chartRef: null,
+        chartImageOriginal: null,
+        chartImagePreview: null,
+        chartImageVerificationSource: null,
         importedFromScreenshot: false,
         notes: '',
         savedVerdict: '',
@@ -407,6 +410,9 @@
     if (!merged.review.analysisState.reviewedAt && merged.review.lastReviewedAt) merged.review.analysisState.reviewedAt = merged.review.lastReviewedAt;
     merged.review.cardOpen = !!merged.review.cardOpen;
     merged.review.chartAvailable = !!(merged.review.chartAvailable || (merged.review.chartRef && merged.review.chartRef.dataUrl));
+    merged.review.chartImageOriginal = merged.review.chartImageOriginal && typeof merged.review.chartImageOriginal === 'object' ? merged.review.chartImageOriginal : null;
+    merged.review.chartImagePreview = merged.review.chartImagePreview && typeof merged.review.chartImagePreview === 'object' ? merged.review.chartImagePreview : null;
+    merged.review.chartImageVerificationSource = merged.review.chartImageVerificationSource && typeof merged.review.chartImageVerificationSource === 'object' ? merged.review.chartImageVerificationSource : null;
     merged.review.importedFromScreenshot = !!merged.review.importedFromScreenshot;
     merged.review.manualReview = merged.review.manualReview && typeof merged.review.manualReview === 'object' ? merged.review.manualReview : null;
     merged.plan.hasValidPlan = !!merged.plan.hasValidPlan;

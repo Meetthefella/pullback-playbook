@@ -301,6 +301,14 @@ exports.handler = async function handler(event){
       });
     }
 
+    console.log('[CHART_IMAGE_SOURCE]', {
+      endpoint: 'analyse-setup',
+      verificationSource: String(chartRef.verificationSource || 'chartRef'),
+      width: Number.isFinite(Number(chartRef.width)) ? Number(chartRef.width) : null,
+      height: Number.isFinite(Number(chartRef.height)) ? Number(chartRef.height) : null,
+      bytesApprox: Math.round(chartRef.dataUrl.length * 0.75)
+    });
+
     content.push({
       type: 'input_image',
       image_url: chartRef.dataUrl,

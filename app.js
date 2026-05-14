@@ -2750,6 +2750,9 @@ function baseCard(ticker){
     manualReview:null,
     notes:'',
     chartRef:null,
+    chartImageOriginal:null,
+    chartImagePreview:null,
+    chartImageVerificationSource:null,
     lastPrompt:'',
     lastResponse:'',
     lastError:'',
@@ -3236,6 +3239,108 @@ function cloneData(value, fallback = null){
   return safeJsonParse(JSON.stringify(value == null ? fallback : value), fallback);
 }
 
+function chartImageDimensionsFromRef(ref){
+  const safe = ref && typeof ref === 'object' ? ref : {};
+  const width = numericOrNull(safe.width);
+  const height = numericOrNull(safe.height);
+  return {
+    width:Number.isFinite(width) ? width : null,
+    height:Number.isFinite(height) ? height : null
+  };
+}
+
+function chartImageDimensionsLabel(ref){
+  const dims = chartImageDimensionsFromRef(ref);
+  return Number.isFinite(dims.width) && Number.isFinite(dims.height)
+    ? `${Math.round(dims.width)}x${Math.round(dims.height)}`
+    : 'unknown';
+}
+
+function buildChartImageSourceTrace(review = {}){
+  const safe = review && typeof review === 'object' ? review : {};
+  const chartRef = safe.chartRef && typeof safe.chartRef === 'object' ? safe.chartRef : null;
+  const originalMeta = safe.chartImageOriginal && typeof safe.chartImageOriginal === 'object' ? safe.chartImageOriginal : null;
+  const previewMeta = safe.chartImagePreview && typeof safe.chartImagePreview === 'object' ? safe.chartImagePreview : null;
+  const explicitVerification = safe.chartImageVerificationSource && typeof safe.chartImageVerificationSource === 'object'
+    ? safe.chartImageVerificationSource
+    : null;
+  const originalAvailable = !!(originalMeta && (originalMeta.dataUrl || (originalMeta.dataUrlField && chartRef && chartRef.dataUrl)));
+  const sourceRef = originalAvailable
+    ? {...(chartRef || {}), ...originalMeta}
+    : (chartRef || previewMeta || null);
+  const sourceKind = originalAvailable
+    ? 'chartImageOriginal'
+    : (chartRef && chartRef.dataUrl ? 'legacy_chartRef_fallback' : (previewMeta ? 'chartImagePreview_fallback' : 'none'));
+  const originalDimensions = originalMeta || chartRef || null;
+  const previewDimensions = previewMeta || chartRef || null;
+  const verificationDimensions = explicitVerification || sourceRef || null;
+  const originalDims = chartImageDimensionsFromRef(originalDimensions);
+  const previewDims = chartImageDimensionsFromRef(previewDimensions);
+  const verificationDims = chartImageDimensionsFromRef(verificationDimensions);
+  const previewHasIndependentData = !!(previewMeta && previewMeta.dataUrl && chartRef && chartRef.dataUrl && previewMeta.dataUrl !== chartRef.dataUrl);
+  const resizedPreview = Number.isFinite(originalDims.width)
+    && Number.isFinite(originalDims.height)
+    && Number.isFinite(previewDims.width)
+    && Number.isFinite(previewDims.height)
+    && (Math.round(originalDims.width) !== Math.round(previewDims.width) || Math.round(originalDims.height) !== Math.round(previewDims.height));
+  const fallbackUsed = sourceKind !== 'chartImageOriginal' && sourceKind !== 'none';
+  return {
+    sourceKind,
+    originalAvailable,
+    fallbackUsed,
+    limited:!!fallbackUsed,
+    sourceField:sourceKind === 'chartImageOriginal' ? (originalMeta && originalMeta.dataUrlField || 'chartRef.dataUrl') : (sourceKind === 'none' ? '' : 'chartRef.dataUrl'),
+    originalDimensions:chartImageDimensionsLabel(originalDimensions),
+    previewDimensions:chartImageDimensionsLabel(previewDimensions),
+    verificationSourceDimensions:chartImageDimensionsLabel(verificationDimensions),
+    cropOrResizeOccurred:!!(previewHasIndependentData || resizedPreview),
+    objectFit:'cover (preview only)',
+    displayMode:previewMeta && previewMeta.displayMode || 'thumb_object_fit_cover',
+    verificationUsesCroppedPreview:false,
+    debug:{
+      originalDims,
+      previewDims,
+      verificationDims,
+      previewHasIndependentData,
+      resizedPreview,
+      explicitVerificationSource:explicitVerification && explicitVerification.source || ''
+    }
+  };
+}
+
+function chartImageForAnalysis(review = {}){
+  const safe = review && typeof review === 'object' ? review : {};
+  const sourceTrace = buildChartImageSourceTrace(safe);
+  const chartRef = safe.chartRef && typeof safe.chartRef === 'object' ? safe.chartRef : null;
+  const originalMeta = safe.chartImageOriginal && typeof safe.chartImageOriginal === 'object' ? safe.chartImageOriginal : null;
+  const originalDataUrl = originalMeta && typeof originalMeta.dataUrl === 'string'
+    ? originalMeta.dataUrl
+    : (chartRef && typeof chartRef.dataUrl === 'string' ? chartRef.dataUrl : '');
+  const previewMeta = safe.chartImagePreview && typeof safe.chartImagePreview === 'object' ? safe.chartImagePreview : null;
+  const previewDataUrl = previewMeta && typeof previewMeta.dataUrl === 'string' ? previewMeta.dataUrl : '';
+  const dataUrl = originalDataUrl || previewDataUrl;
+  return {
+    chartRef:dataUrl ? {
+      name:String((originalMeta && originalMeta.name) || (chartRef && chartRef.name) || 'chart.png'),
+      type:String((originalMeta && originalMeta.type) || (chartRef && chartRef.type) || 'image/png'),
+      dataUrl,
+      width:chartImageDimensionsFromRef(originalMeta || chartRef).width,
+      height:chartImageDimensionsFromRef(originalMeta || chartRef).height,
+      verificationSource:sourceTrace.sourceKind
+    } : null,
+    sourceTrace
+  };
+}
+
+function clearReviewChartImageSources(review){
+  if(!review || typeof review !== 'object') return;
+  review.chartRef = null;
+  review.chartImageOriginal = null;
+  review.chartImagePreview = null;
+  review.chartImageVerificationSource = null;
+  review.chartAvailable = false;
+}
+
 function appendLifecycleHistory(record, entry){
   if(!record || !entry) return;
   record.lifecycle.history = [
@@ -3602,6 +3707,9 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   }
   record.review.notes = String(card.notes || record.review.notes || '');
   record.review.chartRef = cloneData(card.chartRef || record.review.chartRef, null);
+  record.review.chartImageOriginal = cloneData(card.chartImageOriginal || record.review.chartImageOriginal, null);
+  record.review.chartImagePreview = cloneData(card.chartImagePreview || record.review.chartImagePreview, null);
+  record.review.chartImageVerificationSource = cloneData(card.chartImageVerificationSource || record.review.chartImageVerificationSource, null);
   record.review.chartAvailable = !!(record.review.chartRef && record.review.chartRef.dataUrl);
   record.review.importedFromScreenshot = !!(record.review.importedFromScreenshot || (record.review.chartRef && /latest-chart/i.test(String(record.review.chartRef.name || ''))));
   record.review.analysisState = {
@@ -3738,6 +3846,9 @@ function tickerRecordToLegacyCard(record){
     manualReview:cloneData(item.review.manualReview, null),
     notes:item.review.notes || '',
     chartRef:cloneData(item.review.chartRef, null),
+    chartImageOriginal:cloneData(item.review.chartImageOriginal, null),
+    chartImagePreview:cloneData(item.review.chartImagePreview, null),
+    chartImageVerificationSource:cloneData(item.review.chartImageVerificationSource, null),
     lastPrompt:item.review.lastPrompt || '',
     lastResponse:item.review.aiAnalysisRaw || '',
     lastError:item.review.lastError || '',
@@ -19926,6 +20037,14 @@ async function analyseSetup(ticker){
     }
     let lastFailureData = null;
     try{
+      const chartImageSource = chartImageForAnalysis(record.review);
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[CHART_IMAGE_SOURCE]', {
+          ticker,
+          request:analysisRequestId,
+          ...chartImageSource.sourceTrace
+        });
+      }
       const analysisRequestResult = await analysisService.requestAnalysisFromEndpoints({
         endpoints,
         timeoutMs:ANALYSIS_TIMEOUT_MS,
@@ -19934,7 +20053,7 @@ async function analyseSetup(ticker){
         buildRequestBody:() => ({
           payload:buildAnalysisPayload(card),
           prompt,
-          chartRef:card.chartRef ? {name:card.chartRef.name, type:card.chartRef.type, dataUrl:card.chartRef.dataUrl} : null
+          chartRef:chartImageSource.chartRef
         }),
         classifyAbortReason:() => {
           const activeMeta = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object' && uiState.analysisActiveRequest.id === analysisRequestId
@@ -22704,8 +22823,7 @@ function legacyRenderCardsFromCardList(){
     if(clearChartBtn){
       clearChartBtn.onclick = () => {
         const liveRecord = upsertTickerRecord(record.ticker);
-        liveRecord.review.chartRef = null;
-        liveRecord.review.chartAvailable = false;
+        clearReviewChartImageSources(liveRecord.review);
         commitTickerState();
         renderCards();
       };
@@ -23139,8 +23257,7 @@ function bindReviewWorkspaceActions(record){
   if(clearBtn){
     clearBtn.onclick = () => {
       const liveRecord = upsertTickerRecord(record.ticker);
-      liveRecord.review.chartRef = null;
-      liveRecord.review.chartAvailable = false;
+      clearReviewChartImageSources(liveRecord.review);
       commitTickerState();
       renderReviewWorkspace();
     };
@@ -23404,6 +23521,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
     : {};
   const chartRef = review.chartRef && typeof review.chartRef === 'object' ? review.chartRef : null;
   const hasChart = !!(chartRef && chartRef.dataUrl);
+  const chartImageSource = buildChartImageSourceTrace(review);
   const chartStatus = analysis ? String(analysis.chart_match_status || '').trim().toLowerCase() : '';
   const chartWarning = analysis ? String(analysis.chart_match_warning || '').trim() : '';
   const uncertaintyNotes = analysis ? chartConsistencyArray(analysis.uncertainty_notes) : [];
@@ -23465,6 +23583,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
   if(staleText && !sources.includes('uncertainty_notes')) sources.push('uncertainty_notes');
   if(mismatchText && !sources.includes('coach_summary')) sources.push('coach_summary');
   if(lowContextText && !sources.includes('coach_summary')) sources.push('coach_summary');
+  if(chartImageSource.limited && !sources.includes('chart_image_source')) sources.push('chart_image_source');
 
   const deterministic = buildDeterministicChartVerification(safeRecord, analysis);
   if(deterministic.available){
@@ -23479,7 +23598,9 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       severity:deterministic.severity,
       title:deterministic.title,
       summary:deterministic.summary,
-      evidence:[...new Set(deterministic.evidence.concat(fallbackEvidence))].slice(0, 5),
+      evidence:[...new Set(deterministic.evidence
+        .concat(chartImageSource.limited ? ['Chart verification limited: original image unavailable, using preview or legacy chart image.'] : [])
+        .concat(fallbackEvidence))].slice(0, 5),
       missing:deterministic.missing,
       missingIndicators:deterministic.missingIndicators,
       partialIndicators:deterministic.partialIndicators,
@@ -23487,6 +23608,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       extractedFacts:deterministic.extractedFacts,
       trustedFacts:deterministic.trustedFacts,
       sources:[...new Set(deterministic.sources.concat(fallbackSources))],
+      chartImageSource,
       debug:{
         ticker:String(safeRecord.ticker || '').trim(),
         source:'deterministic_chart_verification',
@@ -23495,6 +23617,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         hasAnalysis:!!analysis,
         chartMatchStatus:chartStatus || '',
         deterministicStatus:deterministic.status,
+        chartImageSource,
         ma20_status:deterministic.indicatorStates && deterministic.indicatorStates.ma20_status,
         ma50_status:deterministic.indicatorStates && deterministic.indicatorStates.ma50_status,
         ma200_status:deterministic.indicatorStates && deterministic.indicatorStates.ma200_status,
@@ -23543,6 +23666,11 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
     severity = 'warning';
     title = 'Chart context uncertain';
     summary = 'The uploaded image or saved AI context may not contain enough visible ticker/timeframe information.';
+  }else if(chartImageSource.limited && hasChart){
+    status = 'uncertain';
+    severity = 'warning';
+    title = 'Chart verification limited';
+    summary = 'Original image metadata is unavailable, so verification is using the saved chart image fallback.';
   }
   const visible = status !== 'consistent';
   return {
@@ -23551,14 +23679,18 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
     severity,
     title,
     summary,
-    evidence:[...new Set(evidence.map(item => String(item || '').trim()).filter(Boolean))].slice(0, 4),
+    evidence:[...new Set(evidence
+      .concat(chartImageSource.limited ? ['Chart verification limited: original image unavailable, using preview or legacy chart image.'] : [])
+      .map(item => String(item || '').trim()).filter(Boolean))].slice(0, 4),
     sources:[...new Set(sources.concat(visible ? ['legacy_ai_chart_match'] : []).map(item => String(item || '').trim()).filter(Boolean))],
+    chartImageSource,
     debug:{
       ticker:String(safeRecord.ticker || '').trim(),
       source:'legacy_ai_chart_match',
       hasChart,
       hasAnalysis:!!analysis,
       chartMatchStatus:chartStatus || '',
+      chartImageSource,
       scannerStructure,
       scannerBounce,
       scannerPullback,
@@ -23599,8 +23731,11 @@ function renderChartConsistencyTrace(trace){
   const sources = Array.isArray(safe.sources) && safe.sources.length
     ? `<div class="tiny">Sources: ${escapeHtml(safe.sources.join(', '))}</div>`
     : '';
+  const imageSource = safe.chartImageSource && typeof safe.chartImageSource === 'object'
+    ? `<div class="tiny">Image source: ${escapeHtml(safe.chartImageSource.sourceKind || 'unknown')} | original ${escapeHtml(safe.chartImageSource.originalDimensions || 'unknown')} | preview ${escapeHtml(safe.chartImageSource.previewDimensions || 'unknown')} | verification ${escapeHtml(safe.chartImageSource.verificationSourceDimensions || 'unknown')}${safe.chartImageSource.limited ? ' | limited: original unavailable' : ''}</div>`
+    : '';
   const className = safe.severity === 'warning' ? 'ai-summary-message--warning' : '';
-  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${partialIndicators}${missingIndicators}${extracted}${trustedFacts}${evidence}${sources}</div>`;
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${partialIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}</div>`;
 }
 
 function renderReviewWorkspace(options = {}){
@@ -24345,12 +24480,22 @@ function renderReviewWorkspace(options = {}){
       missingIndicators:chartConsistencyTrace.missingIndicators || [],
       partialIndicators:chartConsistencyTrace.partialIndicators || [],
       extractedFormatted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.extractedFormatted,
-      trustedFormatted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.trustedFormatted
+      trustedFormatted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.trustedFormatted,
+      chartImageSource:chartConsistencyTrace.chartImageSource || null
+    });
+  }
+  if(typeof console !== 'undefined' && console.info && record.review.chartRef && record.review.chartRef.dataUrl){
+    console.info('[CHART_IMAGE_SOURCE]', {
+      ticker:record.ticker,
+      ...buildChartImageSourceTrace(record.review)
     });
   }
   const chartConsistencyTraceMarkup = renderChartConsistencyTrace(chartConsistencyTrace);
-  const chartPreview = record.review.chartRef && record.review.chartRef.dataUrl
-    ? `<div class="thumbwrap"><img class="thumb reviewthumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>`
+  const previewRef = (record.review.chartImagePreview && record.review.chartImagePreview.dataUrl)
+    ? record.review.chartImagePreview
+    : record.review.chartRef;
+  const chartPreview = previewRef && previewRef.dataUrl
+    ? `<div class="thumbwrap"><img class="thumb reviewthumb" src="${escapeHtml(previewRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(previewRef.name || (record.review.chartRef && record.review.chartRef.name) || 'chart image')}</div><div class="tiny">Stored locally on this device. Preview may crop visually; verification uses the source image.</div></div></div>`
     : '<div class="tiny">No chart attached yet.</div>';
   const chartGuidance = record.review.chartRef && record.review.chartRef.dataUrl
     ? ''
@@ -24761,6 +24906,22 @@ function renderCards(){
   renderReviewWorkspace();
 }
 
+function readImageDataUrlDimensions(dataUrl){
+  return new Promise(resolve => {
+    if(!dataUrl || typeof Image === 'undefined'){
+      resolve({width:null, height:null});
+      return;
+    }
+    const img = new Image();
+    img.onload = () => resolve({
+      width:Number.isFinite(img.naturalWidth) ? img.naturalWidth : null,
+      height:Number.isFinite(img.naturalHeight) ? img.naturalHeight : null
+    });
+    img.onerror = () => resolve({width:null, height:null});
+    img.src = dataUrl;
+  });
+}
+
 function handleChartSelection(ticker, file){
   const statusBox = $('reviewWorkspaceStatus') || $(`cardStatus-${ticker}`);
   if(!file){
@@ -24776,16 +24937,64 @@ function handleChartSelection(ticker, file){
     return;
   }
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
+    const dataUrl = String(reader.result || '');
+    const dimensions = await readImageDataUrlDimensions(dataUrl);
+    const uploadedAt = new Date().toISOString();
     const record = upsertTickerRecord(ticker);
     record.review.cardOpen = true;
-    record.review.chartRef = {name:file.name, type:file.type, dataUrl:String(reader.result || '')};
+    record.review.chartRef = {
+      name:file.name,
+      type:file.type,
+      dataUrl,
+      width:dimensions.width,
+      height:dimensions.height,
+      bytes:file.size,
+      source:'file_upload',
+      uploadedAt
+    };
+    record.review.chartImageOriginal = {
+      name:file.name,
+      type:file.type,
+      width:dimensions.width,
+      height:dimensions.height,
+      bytes:file.size,
+      source:'file_upload',
+      dataUrlField:'chartRef.dataUrl',
+      uploadedAt
+    };
+    record.review.chartImagePreview = {
+      name:file.name,
+      type:file.type,
+      width:dimensions.width,
+      height:dimensions.height,
+      sourceField:'chartRef.dataUrl',
+      displayMode:'thumb_object_fit_cover',
+      objectFit:'cover',
+      croppedByCssOnly:true,
+      uploadedAt
+    };
+    record.review.chartImageVerificationSource = {
+      source:'chartImageOriginal',
+      sourceField:'chartRef.dataUrl',
+      width:dimensions.width,
+      height:dimensions.height,
+      cropOrResizeOccurred:false,
+      limited:false,
+      uploadedAt
+    };
     record.review.chartAvailable = true;
     record.review.importedFromScreenshot = true;
     setReviewAnalysisState(record, {raw:'', normalized:null, error:'', reviewedAt:''});
     record.review.lastReviewedAt = new Date().toISOString();
     record.meta.updatedAt = record.review.lastReviewedAt;
     commitTickerState();
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_IMAGE_SOURCE]', {
+        ticker:record.ticker,
+        ...buildChartImageSourceTrace(record.review)
+      });
+    }
     renderReviewWorkspace();
     queueAutoAnalysisForTicker(record.ticker);
     const liveStatus = $('reviewWorkspaceStatus') || $(`cardStatus-${ticker}`);

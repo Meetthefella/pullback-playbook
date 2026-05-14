@@ -1432,6 +1432,10 @@ function runAiContractAssertions(){
     'valueWithinTolerance',
     'chartIndicatorVerificationStatus',
     'chartVerificationDisplayValue',
+    'chartImageDimensionsFromRef',
+    'chartImageDimensionsLabel',
+    'buildChartImageSourceTrace',
+    'chartImageForAnalysis',
     'buildDeterministicChartVerification',
     'buildChartConsistencyTrace',
     'renderChartConsistencyTrace',
@@ -1619,7 +1623,7 @@ function runAiContractAssertions(){
     throw new Error('Partial scanner projection must merge per-field without allowing AI to emit canonical structure/bounce.');
   }
   const consistentTrace = evidenceSandbox.buildChartConsistencyTrace(
-    {ticker:'OK', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+    {ticker:'OK', review:{chartRef:{dataUrl:'data:image/png;base64,abc', width:900, height:1600}, chartImageOriginal:{width:900, height:1600, dataUrlField:'chartRef.dataUrl'}, chartImageVerificationSource:{source:'chartImageOriginal', width:900, height:1600}, normalizedAnalysis:{
       chart_match_status:'match',
       coach_summary:'Strong trend with a normal pullback attempt.',
       constructive_evidence:['Structure looks intact.'],
@@ -1740,6 +1744,29 @@ function runAiContractAssertions(){
   const partialIndicatorMarkup = evidenceSandbox.renderChartConsistencyTrace(partialIndicatorTrace);
   if(!/20 207\.25/.test(partialIndicatorMarkup) || !/50 191\.18/.test(partialIndicatorMarkup) || !/200 n\/a/.test(partialIndicatorMarkup) || !/200 185\.44/.test(partialIndicatorMarkup)){
     throw new Error('Chart verification display values must be formatted to 2 decimals and null as n/a.');
+  }
+  const portraitSourceTrace = evidenceSandbox.buildChartImageSourceTrace({
+    chartRef:{dataUrl:'data:image/png;base64,source', width:900, height:1600},
+    chartImageOriginal:{width:900, height:1600, dataUrlField:'chartRef.dataUrl'},
+    chartImagePreview:{width:360, height:480, displayMode:'thumb_object_fit_cover'},
+    chartImageVerificationSource:{source:'chartImageOriginal', width:900, height:1600}
+  });
+  if(portraitSourceTrace.verificationSourceDimensions !== '900x1600' || portraitSourceTrace.previewDimensions !== '360x480' || portraitSourceTrace.verificationUsesCroppedPreview !== false){
+    throw new Error('9:16 chart uploads must keep original dimensions for verification even when preview dimensions differ.');
+  }
+  const legacySourceTrace = evidenceSandbox.buildChartImageSourceTrace({
+    chartRef:{dataUrl:'data:image/png;base64,legacy', width:360, height:480}
+  });
+  if(legacySourceTrace.sourceKind !== 'legacy_chartRef_fallback' || legacySourceTrace.limited !== true){
+    throw new Error('Legacy chartRef without chartImageOriginal metadata must be marked as limited fallback verification.');
+  }
+  const sourceForAnalysis = evidenceSandbox.chartImageForAnalysis({
+    chartRef:{dataUrl:'data:image/png;base64,source', width:900, height:1600, name:'portrait.png', type:'image/png'},
+    chartImageOriginal:{width:900, height:1600, dataUrlField:'chartRef.dataUrl', name:'portrait.png', type:'image/png'},
+    chartImagePreview:{width:360, height:480, dataUrl:'data:image/png;base64,cropped-preview', displayMode:'thumb_object_fit_cover'}
+  });
+  if(!sourceForAnalysis.chartRef || sourceForAnalysis.chartRef.dataUrl !== 'data:image/png;base64,source' || sourceForAnalysis.sourceTrace.sourceKind !== 'chartImageOriginal'){
+    throw new Error('AI extraction must use the original source image, not the cropped preview image.');
   }
   const priceMismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
