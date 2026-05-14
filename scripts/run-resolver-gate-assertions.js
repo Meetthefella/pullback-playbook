@@ -1422,6 +1422,12 @@ function runAiContractAssertions(){
     'hasMathematicallyPriceablePlan',
     'resolveAlivePullbackReboundGuard',
     'chartConsistencyArray',
+    'chartVerificationNumberOrNull',
+    'normaliseVisibleTicker',
+    'normaliseVisibleTimeframe',
+    'isDailyTimeframe',
+    'valueWithinTolerance',
+    'buildDeterministicChartVerification',
     'buildChartConsistencyTrace',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
@@ -1655,6 +1661,100 @@ function runAiContractAssertions(){
   );
   if(missingContextTrace.visible !== true || !['uncertain','stale'].includes(missingContextTrace.status) || !missingContextTrace.sources.includes('chartRef')){
     throw new Error('Missing chart/ticker/timeframe context must produce a visible uncertainty trace.');
+  }
+  const deterministicMismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'ROST',
+      visible_timeframe:'1D',
+      visible_latest_price:500,
+      visible_ma20:490,
+      visible_ma50:460,
+      visible_ma200:400,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true,
+      chart_match_status:'match'
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(deterministicMismatchTrace.status !== 'ticker_mismatch' || !deterministicMismatchTrace.sources.includes('deterministic_chart_verification')){
+    throw new Error('Deterministic visible_ticker mismatch must be the primary chart verification source.');
+  }
+  const deterministicMissingTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_latest_price:500,
+      extraction_warnings:['Ticker and timeframe are not visible.']
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(deterministicMissingTrace.status !== 'uncertain_missing_context' || !deterministicMissingTrace.missing.includes('visible ticker') || !deterministicMissingTrace.missing.includes('visible timeframe')){
+    throw new Error('Missing deterministic ticker/timeframe facts must produce uncertain_missing_context.');
+  }
+  const indicatorMissingTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:500,
+      ma20_visible:false,
+      ma50_visible:false,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(indicatorMissingTrace.status !== 'indicator_missing'){
+    throw new Error('Hidden moving averages must produce indicator_missing deterministic verification.');
+  }
+  const priceMismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:430,
+      visible_ma20:490,
+      visible_ma50:460,
+      visible_ma200:400,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(priceMismatchTrace.status !== 'price_mismatch'){
+    throw new Error('Visible latest price outside tolerance must produce price_mismatch.');
+  }
+  const verifiedSuppressesLegacy = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:500,
+      visible_ma20:490,
+      visible_ma50:460,
+      visible_ma200:400,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true,
+      chart_match_status:'unclear',
+      chart_match_warning:'Legacy AI was unsure.'
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(verifiedSuppressesLegacy.status !== 'verified_match' || verifiedSuppressesLegacy.sources.includes('legacy_ai_chart_match')){
+    throw new Error('Deterministic verified_match must suppress legacy AI chart-match uncertainty.');
+  }
+  const legacyFallbackTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      chart_match_status:'mismatch',
+      chart_match_warning:'Legacy AI says the image may be a different ticker.'
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(legacyFallbackTrace.status !== 'possible_mismatch' || !legacyFallbackTrace.sources.includes('legacy_ai_chart_match')){
+    throw new Error('Legacy AI chart-match fields must remain fallback-only when deterministic extraction is unavailable.');
   }
   const unknownStructurePromotion = resolverCore.resolveGlobalVerdict({
     ticker:'AINEUTRAL',

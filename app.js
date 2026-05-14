@@ -19162,6 +19162,11 @@ function normalizeAnalysisVerdict(value){
 
 function normalizeAnalysisResponse(raw){
   if(!raw || typeof raw !== 'object') return null;
+  const analysisNumberOrNull = value => {
+    if(value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
   const coachSummary = String(raw.coach_summary || raw.plain_english_chart_read || raw.chart_read || '').trim();
   const constructiveEvidence = Array.isArray(raw.constructive_evidence) ? raw.constructive_evidence.map(item => String(item).trim()).filter(Boolean) : [];
   const riskEvidence = Array.isArray(raw.risk_evidence) ? raw.risk_evidence.map(item => String(item).trim()).filter(Boolean) : [];
@@ -19196,6 +19201,20 @@ function normalizeAnalysisResponse(raw){
     verdict:'Watch',
     coach_summary:coachSummary,
     plain_english_chart_read:coachSummary,
+    visible_ticker:String(raw.visible_ticker || '').trim().toUpperCase(),
+    visible_timeframe:String(raw.visible_timeframe || '').trim(),
+    visible_latest_price:analysisNumberOrNull(raw.visible_latest_price),
+    visible_ma20:analysisNumberOrNull(raw.visible_ma20),
+    visible_ma50:analysisNumberOrNull(raw.visible_ma50),
+    visible_ma200:analysisNumberOrNull(raw.visible_ma200),
+    ma20_visible:raw.ma20_visible === true,
+    ma50_visible:raw.ma50_visible === true,
+    ma200_visible:raw.ma200_visible === true,
+    visible_price_range:String(raw.visible_price_range || '').trim(),
+    visible_date_range:String(raw.visible_date_range || '').trim(),
+    extraction_confidence:analysisNumberOrNull(raw.extraction_confidence),
+    extraction_warnings:Array.isArray(raw.extraction_warnings) ? raw.extraction_warnings.map(item => String(item).trim()).filter(Boolean) : [],
+    // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
     chart_match_status:String(raw.chart_match_status || '').trim().toLowerCase(),
     chart_match_warning:String(raw.chart_match_warning || '').trim(),
     entry:'',
@@ -19594,6 +19613,19 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     verdict:parsed.verdict,
     coach_summary:parsed.coach_summary || chartReadGuard.text,
     plain_english_chart_read:chartReadGuard.text,
+    visible_ticker:parsed.visible_ticker || '',
+    visible_timeframe:parsed.visible_timeframe || '',
+    visible_latest_price:parsed.visible_latest_price,
+    visible_ma20:parsed.visible_ma20,
+    visible_ma50:parsed.visible_ma50,
+    visible_ma200:parsed.visible_ma200,
+    ma20_visible:parsed.ma20_visible === true,
+    ma50_visible:parsed.ma50_visible === true,
+    ma200_visible:parsed.ma200_visible === true,
+    visible_price_range:parsed.visible_price_range || '',
+    visible_date_range:parsed.visible_date_range || '',
+    extraction_confidence:parsed.extraction_confidence,
+    extraction_warnings:parsed.extraction_warnings || [],
     chart_match_status:mismatchStatus,
     chart_match_warning:mismatchWarning,
     entry,
@@ -20098,8 +20130,12 @@ function renderAnalysisPanel(card){
   if(card.lastAnalysis){
     const analysis = normalizeAnalysisResult(card.lastAnalysis, card);
     const chartReadDisplay = finalDisplayedAnalysisChartRead(card, analysis);
-    const chartMismatch = analysis.chart_match_status === 'mismatch';
-    const chartUnclear = analysis.chart_match_status === 'unclear';
+    const deterministicVerification = buildDeterministicChartVerification(card, analysis);
+    const allowLegacyAiChartMatch = !deterministicVerification.available
+      || ['uncertain_missing_context','indicator_missing'].includes(deterministicVerification.status);
+    // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
+    const chartMismatch = allowLegacyAiChartMatch && analysis.chart_match_status === 'mismatch';
+    const chartUnclear = allowLegacyAiChartMatch && analysis.chart_match_status === 'unclear';
     const chartWarning = analysis.chart_match_warning || '';
     const staleAnalysis = isAnalysisStaleForRecord(card);
     const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No key reasons returned.</li>';
@@ -20168,8 +20204,12 @@ function renderAnalysisPanelFromRecord(record){
     const analysis = analysisState.normalizedAnalysis;
     const chartReadDisplay = finalDisplayedAnalysisChartRead(item, analysis);
     const advisory = analysisAdvisoryContextForRecord(item, analysis);
-    const chartMismatch = analysis.chart_match_status === 'mismatch';
-    const chartUnclear = analysis.chart_match_status === 'unclear';
+    const deterministicVerification = buildDeterministicChartVerification(item, analysis);
+    const allowLegacyAiChartMatch = !deterministicVerification.available
+      || ['uncertain_missing_context','indicator_missing'].includes(deterministicVerification.status);
+    // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
+    const chartMismatch = allowLegacyAiChartMatch && analysis.chart_match_status === 'mismatch';
+    const chartUnclear = allowLegacyAiChartMatch && analysis.chart_match_status === 'unclear';
     const chartWarning = analysis.chart_match_warning || '';
     const staleAnalysis = isAnalysisStaleForRecord(item);
     const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(entry => `<li>${escapeHtml(entry)}</li>`).join('') : '<li>No key reasons returned.</li>';
@@ -23140,6 +23180,166 @@ function chartConsistencyArray(value){
   return Array.isArray(value) ? value.map(item => String(item || '').trim()).filter(Boolean) : [];
 }
 
+function chartVerificationNumberOrNull(value){
+  if(value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normaliseVisibleTicker(value){
+  return String(value || '').trim().toUpperCase().replace(/^[A-Z]+:/, '').replace(/[^A-Z0-9.-]/g, '');
+}
+
+function normaliseVisibleTimeframe(value){
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function isDailyTimeframe(value){
+  const safe = normaliseVisibleTimeframe(value);
+  return ['d','1d','day','daily'].includes(safe);
+}
+
+function valueWithinTolerance(visible, trusted, tolerancePct){
+  const observed = chartVerificationNumberOrNull(visible);
+  const expected = chartVerificationNumberOrNull(trusted);
+  if(observed === null || expected === null || expected === 0) return null;
+  return Math.abs(observed - expected) / Math.abs(expected) <= tolerancePct;
+}
+
+function buildDeterministicChartVerification(record = {}, analysis = null){
+  const safeRecord = record && typeof record === 'object' ? record : {};
+  const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : {};
+  const marketData = safeRecord.marketData && typeof safeRecord.marketData === 'object' ? safeRecord.marketData : {};
+  const expectedTicker = normaliseVisibleTicker(safeRecord.ticker || '');
+  const visibleTicker = normaliseVisibleTicker(safeAnalysis.visible_ticker || '');
+  const visibleTimeframe = String(safeAnalysis.visible_timeframe || '').trim();
+  const visiblePrice = chartVerificationNumberOrNull(safeAnalysis.visible_latest_price);
+  const visibleMa20 = chartVerificationNumberOrNull(safeAnalysis.visible_ma20);
+  const visibleMa50 = chartVerificationNumberOrNull(safeAnalysis.visible_ma50);
+  const visibleMa200 = chartVerificationNumberOrNull(safeAnalysis.visible_ma200);
+  const trustedPrice = chartVerificationNumberOrNull(marketData.price ?? safeRecord.price);
+  const trustedMa20 = chartVerificationNumberOrNull(marketData.ma20 ?? marketData.sma20 ?? safeRecord.ma20 ?? safeRecord.sma20);
+  const trustedMa50 = chartVerificationNumberOrNull(marketData.ma50 ?? marketData.sma50 ?? safeRecord.ma50 ?? safeRecord.sma50);
+  const trustedMa200 = chartVerificationNumberOrNull(marketData.ma200 ?? marketData.sma200 ?? safeRecord.ma200 ?? safeRecord.sma200);
+  const extractionWarnings = chartConsistencyArray(safeAnalysis.extraction_warnings);
+  const hasExtractedEvidence = !!(
+    visibleTicker
+    || visibleTimeframe
+    || visiblePrice !== null
+    || visibleMa20 !== null
+    || visibleMa50 !== null
+    || visibleMa200 !== null
+    || safeAnalysis.ma20_visible === true
+    || safeAnalysis.ma50_visible === true
+    || safeAnalysis.ma200_visible === true
+    || safeAnalysis.visible_price_range
+    || safeAnalysis.visible_date_range
+    || extractionWarnings.length
+  );
+  const missing = [];
+  const evidence = [];
+  if(!visibleTicker) missing.push('visible ticker');
+  if(!visibleTimeframe) missing.push('visible timeframe');
+  if(visiblePrice === null) missing.push('latest price');
+  if(!(safeAnalysis.ma20_visible === true && visibleMa20 !== null)) missing.push('20MA');
+  if(!(safeAnalysis.ma50_visible === true && visibleMa50 !== null)) missing.push('50MA');
+  if(!(safeAnalysis.ma200_visible === true && visibleMa200 !== null)) missing.push('200MA');
+
+  const priceOk = valueWithinTolerance(visiblePrice, trustedPrice, 0.035);
+  const ma20Ok = valueWithinTolerance(visibleMa20, trustedMa20, 0.06);
+  const ma50Ok = valueWithinTolerance(visibleMa50, trustedMa50, 0.06);
+  const ma200Ok = valueWithinTolerance(visibleMa200, trustedMa200, 0.06);
+  const maVisibleCount = [visibleMa20, visibleMa50, visibleMa200].filter(value => value !== null).length;
+
+  let status = 'uncertain_missing_context';
+  let severity = 'warning';
+  let title = 'Chart not verified';
+  let summary = 'The uploaded image does not show enough ticker/timeframe information for deterministic verification.';
+
+  if(!hasExtractedEvidence){
+    summary = 'No deterministic chart facts were extracted from the image.';
+  }else if(visibleTicker && expectedTicker && visibleTicker !== expectedTicker){
+    status = 'ticker_mismatch';
+    title = 'Ticker mismatch';
+    summary = `Uploaded chart appears to show ${visibleTicker}, but this review is for ${expectedTicker}.`;
+    evidence.push(summary);
+  }else if(visibleTimeframe && !isDailyTimeframe(visibleTimeframe)){
+    status = 'timeframe_mismatch';
+    title = 'Timeframe mismatch';
+    summary = `Uploaded chart appears to use ${visibleTimeframe}, but this review expects a daily chart.`;
+    evidence.push(summary);
+  }else if(priceOk === false){
+    status = 'price_mismatch';
+    title = 'Price mismatch';
+    summary = 'Visible latest price is outside the expected tolerance from trusted market data.';
+    evidence.push(`Visible price ${visiblePrice}; trusted price ${trustedPrice}.`);
+  }else if(ma20Ok === false || ma50Ok === false || ma200Ok === false){
+    status = 'indicator_value_mismatch';
+    title = 'Indicator value mismatch';
+    summary = 'One or more visible moving-average values differ from trusted scanner data.';
+    if(ma20Ok === false) evidence.push(`20MA visible ${visibleMa20}; trusted ${trustedMa20}.`);
+    if(ma50Ok === false) evidence.push(`50MA visible ${visibleMa50}; trusted ${trustedMa50}.`);
+    if(ma200Ok === false) evidence.push(`200MA visible ${visibleMa200}; trusted ${trustedMa200}.`);
+  }else if(missing.includes('visible ticker') || missing.includes('visible timeframe') || missing.includes('latest price')){
+    status = 'uncertain_missing_context';
+    title = 'Chart context uncertain';
+    summary = 'The uploaded image does not show enough ticker/timeframe/price information for deterministic verification.';
+  }else if(missing.includes('20MA') || missing.includes('50MA') || missing.includes('200MA')){
+    status = 'indicator_missing';
+    title = 'Indicators missing';
+    summary = '20MA/50MA/200MA are not all visible, so MA comparison could not be completed.';
+  }else{
+    status = maVisibleCount === 3 && priceOk !== false ? 'verified_match' : 'likely_match';
+    severity = 'info';
+    title = status === 'verified_match' ? 'Chart verified' : 'Chart likely matches';
+    summary = status === 'verified_match'
+      ? 'Ticker, timeframe, price, and visible moving averages match trusted scanner data.'
+      : 'Visible chart facts are consistent with trusted scanner data, but not every indicator could be checked.';
+  }
+
+  extractionWarnings.forEach(item => evidence.push(item));
+  return {
+    available:hasExtractedEvidence,
+    status,
+    severity,
+    title,
+    summary,
+    missing,
+    evidence:[...new Set(evidence.map(item => String(item || '').trim()).filter(Boolean))].slice(0, 5),
+    sources:['deterministic_chart_verification'],
+    extractedFacts:{
+      visible_ticker:visibleTicker,
+      visible_timeframe:visibleTimeframe,
+      visible_latest_price:visiblePrice,
+      visible_ma20:visibleMa20,
+      visible_ma50:visibleMa50,
+      visible_ma200:visibleMa200,
+      ma20_visible:safeAnalysis.ma20_visible === true,
+      ma50_visible:safeAnalysis.ma50_visible === true,
+      ma200_visible:safeAnalysis.ma200_visible === true,
+      visible_price_range:String(safeAnalysis.visible_price_range || '').trim(),
+      visible_date_range:String(safeAnalysis.visible_date_range || '').trim(),
+      extraction_confidence:chartVerificationNumberOrNull(safeAnalysis.extraction_confidence)
+    },
+    trustedFacts:{
+      ticker:expectedTicker,
+      expected_timeframe:'1D',
+      latest_price:trustedPrice,
+      ma20:trustedMa20,
+      ma50:trustedMa50,
+      ma200:trustedMa200
+    },
+    comparison:{
+      tickerMatch:visibleTicker && expectedTicker ? visibleTicker === expectedTicker : null,
+      timeframeMatch:visibleTimeframe ? isDailyTimeframe(visibleTimeframe) : null,
+      priceMatch:priceOk,
+      ma20Match:ma20Ok,
+      ma50Match:ma50Ok,
+      ma200Match:ma200Ok
+    }
+  };
+}
+
 function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisContext = {}){
   const safeRecord = record && typeof record === 'object' ? record : {};
   const review = safeRecord.review && typeof safeRecord.review === 'object' ? safeRecord.review : {};
@@ -23213,6 +23413,39 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
   if(mismatchText && !sources.includes('coach_summary')) sources.push('coach_summary');
   if(lowContextText && !sources.includes('coach_summary')) sources.push('coach_summary');
 
+  const deterministic = buildDeterministicChartVerification(safeRecord, analysis);
+  if(deterministic.available){
+    const incompleteDeterministic = ['uncertain_missing_context','indicator_missing'].includes(deterministic.status);
+    const fallbackEvidence = incompleteDeterministic && (chartStatus === 'mismatch' || chartStatus === 'unclear' || mismatchText || lowContextText)
+      ? evidence.map(item => `Legacy AI fallback: ${item}`)
+      : [];
+    const fallbackSources = fallbackEvidence.length ? ['legacy_ai_chart_match'] : [];
+    return {
+      visible:true,
+      status:deterministic.status,
+      severity:deterministic.severity,
+      title:deterministic.title,
+      summary:deterministic.summary,
+      evidence:[...new Set(deterministic.evidence.concat(fallbackEvidence))].slice(0, 5),
+      missing:deterministic.missing,
+      extractedFacts:deterministic.extractedFacts,
+      trustedFacts:deterministic.trustedFacts,
+      sources:[...new Set(deterministic.sources.concat(fallbackSources))],
+      debug:{
+        ticker:String(safeRecord.ticker || '').trim(),
+        source:'deterministic_chart_verification',
+        legacyAiChartMatchFallback:!!fallbackEvidence.length,
+        hasChart,
+        hasAnalysis:!!analysis,
+        chartMatchStatus:chartStatus || '',
+        deterministicStatus:deterministic.status,
+        canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
+        visualBucket:simplifiedState && simplifiedState.visualBucket || '',
+        comparison:deterministic.comparison
+      }
+    };
+  }
+
   let status = 'consistent';
   let severity = 'info';
   let title = 'Chart context looks consistent';
@@ -23246,9 +23479,10 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
     title,
     summary,
     evidence:[...new Set(evidence.map(item => String(item || '').trim()).filter(Boolean))].slice(0, 4),
-    sources:[...new Set(sources.map(item => String(item || '').trim()).filter(Boolean))],
+    sources:[...new Set(sources.concat(visible ? ['legacy_ai_chart_match'] : []).map(item => String(item || '').trim()).filter(Boolean))],
     debug:{
       ticker:String(safeRecord.ticker || '').trim(),
+      source:'legacy_ai_chart_match',
       hasChart,
       hasAnalysis:!!analysis,
       chartMatchStatus:chartStatus || '',
@@ -23269,14 +23503,25 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
 function renderChartConsistencyTrace(trace){
   const safe = trace && typeof trace === 'object' ? trace : {visible:false};
   if(!safe.visible) return '';
+  const facts = safe.extractedFacts && typeof safe.extractedFacts === 'object' ? safe.extractedFacts : null;
+  const trusted = safe.trustedFacts && typeof safe.trustedFacts === 'object' ? safe.trustedFacts : null;
   const evidence = Array.isArray(safe.evidence) && safe.evidence.length
     ? `<ul class="tiny">${safe.evidence.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+    : '';
+  const missing = Array.isArray(safe.missing) && safe.missing.length
+    ? `<div class="tiny">Missing: ${escapeHtml(safe.missing.join(', '))}</div>`
+    : '';
+  const extracted = facts
+    ? `<div class="tiny">Extracted: ticker ${escapeHtml(facts.visible_ticker || 'n/a')} | timeframe ${escapeHtml(facts.visible_timeframe || 'n/a')} | price ${escapeHtml(facts.visible_latest_price == null ? 'n/a' : String(facts.visible_latest_price))} | 20 ${escapeHtml(facts.visible_ma20 == null ? 'n/a' : String(facts.visible_ma20))} | 50 ${escapeHtml(facts.visible_ma50 == null ? 'n/a' : String(facts.visible_ma50))} | 200 ${escapeHtml(facts.visible_ma200 == null ? 'n/a' : String(facts.visible_ma200))}</div>`
+    : '';
+  const trustedFacts = trusted
+    ? `<div class="tiny">Trusted: ticker ${escapeHtml(trusted.ticker || 'n/a')} | timeframe ${escapeHtml(trusted.expected_timeframe || 'n/a')} | price ${escapeHtml(trusted.latest_price == null ? 'n/a' : String(trusted.latest_price))} | 20 ${escapeHtml(trusted.ma20 == null ? 'n/a' : String(trusted.ma20))} | 50 ${escapeHtml(trusted.ma50 == null ? 'n/a' : String(trusted.ma50))} | 200 ${escapeHtml(trusted.ma200 == null ? 'n/a' : String(trusted.ma200))}</div>`
     : '';
   const sources = Array.isArray(safe.sources) && safe.sources.length
     ? `<div class="tiny">Sources: ${escapeHtml(safe.sources.join(', '))}</div>`
     : '';
   const className = safe.severity === 'warning' ? 'ai-summary-message--warning' : '';
-  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart context')}</strong><div>${escapeHtml(safe.summary || '')}</div>${evidence}${sources}</div>`;
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${extracted}${trustedFacts}${evidence}${sources}</div>`;
 }
 
 function renderReviewWorkspace(options = {}){
@@ -25572,9 +25817,9 @@ function buildPromptBody(payload){
     '- Keep constructive_evidence, risk_evidence, and what_needs_to_improve concise, factual, and non-duplicative.',
     '',
     'Chart verification:',
-    '- If a chart image is attached, first check whether it plausibly matches the supplied ticker',
-    '- If the uploaded chart looks like a different ticker/symbol, flag that strongly',
-    '- A likely ticker/chart mismatch should be flagged in chart_match_status and chart_match_warning only',
+    '- If a chart image is attached, extract visible facts only: visible ticker, timeframe, latest price, moving-average values, visible price/date range, and extraction confidence',
+    '- Do not decide whether the chart is authentic. The app compares extracted facts against trusted scanner and market data',
+    '- legacy_ai_chart_match fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, use chart_match_status and chart_match_warning',
     `- Current chart_match_status context: ${chartStatus}`,
     `- Current chart_match_warning context: ${chartWarning || 'none'}`,
     '',
@@ -25590,12 +25835,31 @@ function buildPromptBody(payload){
     'volume_evidence',
     'priceability_evidence',
     'uncertainty_notes',
+    'visible_ticker',
+    'visible_timeframe',
+    'visible_latest_price',
+    'visible_ma20',
+    'visible_ma50',
+    'visible_ma200',
+    'ma20_visible',
+    'ma50_visible',
+    'ma200_visible',
+    'visible_price_range',
+    'visible_date_range',
+    'extraction_confidence',
+    'extraction_warnings',
     'ai_observation_only',
     'chart_match_status',
     'chart_match_warning',
     '',
     'Rules:',
     '- ai_observation_only must be true',
+    '- visible_ticker and visible_timeframe must be extracted only if visible in the image',
+    '- visible_latest_price and visible_ma* values must be numbers or null',
+    '- ma*_visible must be true only when that indicator value/line is visible enough to read',
+    '- extraction_confidence should be 0-1, or null when no image facts are visible',
+    '- extraction_warnings must be an array',
+    '- chart_match_status/chart_match_warning are legacy fallback fields only; do not use them as final authenticity decisions',
     '- chart_match_status must be: match | mismatch | unclear',
     '- constructive_evidence, risk_evidence, what_needs_to_improve, and uncertainty_notes must be arrays',
     '- If unknown -> null',

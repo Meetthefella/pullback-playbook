@@ -164,6 +164,12 @@ function normaliseStringArray(value){
   return Array.isArray(value) ? value.map(item => String(item)) : [];
 }
 
+function normaliseNumber(value){
+  if(value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function normaliseAnalysis(obj){
   const rawOpinion = {
     verdict: normaliseString(obj?.verdict, ''),
@@ -189,6 +195,20 @@ function normaliseAnalysis(obj){
     verdict: 'Watch',
     coach_summary: coachSummary,
     plain_english_chart_read: coachSummary,
+    visible_ticker: normaliseString(obj?.visible_ticker, ''),
+    visible_timeframe: normaliseString(obj?.visible_timeframe, ''),
+    visible_latest_price: normaliseNumber(obj?.visible_latest_price),
+    visible_ma20: normaliseNumber(obj?.visible_ma20),
+    visible_ma50: normaliseNumber(obj?.visible_ma50),
+    visible_ma200: normaliseNumber(obj?.visible_ma200),
+    ma20_visible: obj?.ma20_visible === true,
+    ma50_visible: obj?.ma50_visible === true,
+    ma200_visible: obj?.ma200_visible === true,
+    visible_price_range: normaliseString(obj?.visible_price_range, ''),
+    visible_date_range: normaliseString(obj?.visible_date_range, ''),
+    extraction_confidence: normaliseNumber(obj?.extraction_confidence),
+    extraction_warnings: normaliseStringArray(obj?.extraction_warnings),
+    // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
     chart_match_status: normaliseString(obj?.chart_match_status, ''),
     chart_match_warning: normaliseString(obj?.chart_match_warning, ''),
     entry: '',
@@ -296,9 +316,9 @@ exports.handler = async function handler(event){
     'Do not issue buy/sell advice.',
     'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
     'The deterministic app resolver will decide final state.',
-    'If a chart image is attached, first verify whether it plausibly matches the supplied ticker.',
-    'If the uploaded chart looks like the wrong ticker, wrong symbol, or a likely mismatch, flag that strongly.',
-    'If the chart/ticker match is doubtful, return chart_match_status as mismatch or unclear and explain it in chart_match_warning.',
+    'If a chart image is attached, extract visible facts only: visible ticker, timeframe, latest price, moving average values, visible price/date range, and confidence.',
+    'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',
+    'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
     'Return exactly one JSON object.',
     'Return evidence fields only; ai_observation_only must be true.',
     'If a field is unknown, return null.'
