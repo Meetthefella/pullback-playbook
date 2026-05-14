@@ -1421,6 +1421,8 @@ function runAiContractAssertions(){
     'aiObservationEvidenceStates',
     'hasMathematicallyPriceablePlan',
     'resolveAlivePullbackReboundGuard',
+    'chartConsistencyArray',
+    'buildChartConsistencyTrace',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});
@@ -1603,6 +1605,56 @@ function runAiContractAssertions(){
   });
   if(partialProjected.derivedStateSource !== 'scanner_projection+ai_observation_hints' || partialProjected.aiObservationEvidenceApplied !== true || partialProjected.pullbackZone !== 'near_20ma' || partialProjected.structureState !== 'unknown' || partialProjected.bounceState !== '' || partialProjected.aiEvidenceStructureHint !== 'damaged_context' || !partialProjected.scannerProjectionTrustedFieldsApplied.includes('pullbackZone')){
     throw new Error('Partial scanner projection must merge per-field without allowing AI to emit canonical structure/bounce.');
+  }
+  const consistentTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'OK', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      chart_match_status:'match',
+      coach_summary:'Strong trend with a normal pullback attempt.',
+      constructive_evidence:['Structure looks intact.'],
+      risk_evidence:[],
+      uncertainty_notes:[]
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(consistentTrace.visible !== false || consistentTrace.status !== 'consistent'){
+    throw new Error('Consistent scanner and AI evidence should not render a chart mismatch trace.');
+  }
+  const mismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MISS', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      chart_match_status:'mismatch',
+      chart_match_warning:'The uploaded chart appears to show a different ticker.',
+      uncertainty_notes:['Ticker symbol is unclear.']
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(mismatchTrace.visible !== true || mismatchTrace.status !== 'possible_mismatch' || !mismatchTrace.sources.includes('chart_match_status')){
+    throw new Error('AI chart mismatch evidence must produce a visible possible_mismatch trace.');
+  }
+  const conflictTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'CONFLICT', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      chart_match_status:'match',
+      coach_summary:'The trend looks broken and damaged, with failed structure.',
+      risk_evidence:['Structure failed badly.']
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor', planStatus:'valid'},
+    {derivedStates:{structureState:'strong', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(conflictTrace.visible !== true || conflictTrace.status !== 'conflict' || conflictTrace.debug.canonicalVerdict !== 'watch' || conflictTrace.debug.visualBucket !== 'monitor'){
+    throw new Error('Scanner/AI evidence conflict must show a trace without mutating verdict or bucket semantics.');
+  }
+  const missingContextTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NOCHART', review:{normalizedAnalysis:{
+      chart_match_status:'unclear',
+      coach_summary:'Ticker and timeframe are not visible enough to verify.',
+      uncertainty_notes:['Timeframe not visible.']
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(missingContextTrace.visible !== true || !['uncertain','stale'].includes(missingContextTrace.status) || !missingContextTrace.sources.includes('chartRef')){
+    throw new Error('Missing chart/ticker/timeframe context must produce a visible uncertainty trace.');
   }
   const unknownStructurePromotion = resolverCore.resolveGlobalVerdict({
     ticker:'AINEUTRAL',

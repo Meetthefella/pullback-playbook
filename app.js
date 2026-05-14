@@ -23136,6 +23136,149 @@ function updateReviewAiSummaryOverflowHint(){
   hint.hidden = !overflowing;
 }
 
+function chartConsistencyArray(value){
+  return Array.isArray(value) ? value.map(item => String(item || '').trim()).filter(Boolean) : [];
+}
+
+function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisContext = {}){
+  const safeRecord = record && typeof record === 'object' ? record : {};
+  const review = safeRecord.review && typeof safeRecord.review === 'object' ? safeRecord.review : {};
+  const analysis = analysisContext.normalizedAnalysis && typeof analysisContext.normalizedAnalysis === 'object'
+    ? analysisContext.normalizedAnalysis
+    : (review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object' ? review.normalizedAnalysis : null);
+  const derived = analysisContext.derivedStates && typeof analysisContext.derivedStates === 'object'
+    ? analysisContext.derivedStates
+    : {};
+  const chartRef = review.chartRef && typeof review.chartRef === 'object' ? review.chartRef : null;
+  const hasChart = !!(chartRef && chartRef.dataUrl);
+  const chartStatus = analysis ? String(analysis.chart_match_status || '').trim().toLowerCase() : '';
+  const chartWarning = analysis ? String(analysis.chart_match_warning || '').trim() : '';
+  const uncertaintyNotes = analysis ? chartConsistencyArray(analysis.uncertainty_notes) : [];
+  const riskEvidence = analysis ? chartConsistencyArray(analysis.risk_evidence || analysis.risks) : [];
+  const needsImprove = analysis ? chartConsistencyArray(analysis.what_needs_to_improve) : [];
+  const constructiveEvidence = analysis ? chartConsistencyArray(analysis.constructive_evidence || analysis.key_reasons) : [];
+  const coachSummary = analysis ? String(analysis.coach_summary || analysis.plain_english_chart_read || '').trim() : '';
+  const combinedText = [
+    chartWarning,
+    coachSummary,
+    analysis && analysis.structure_evidence,
+    analysis && analysis.location_evidence,
+    analysis && analysis.bounce_evidence,
+    analysis && analysis.stabilisation_evidence,
+    analysis && analysis.priceability_evidence,
+    ...uncertaintyNotes,
+    ...riskEvidence,
+    ...needsImprove,
+    ...constructiveEvidence
+  ].filter(Boolean).join(' ').toLowerCase();
+  const mismatchText = /\b(wrong|different|mismatch|does not match|not match|another ticker|different ticker|different symbol|wrong symbol|ticker unclear|symbol unclear)\b/.test(combinedText);
+  const staleText = /\b(stale|old chart|out of date|different timeframe|wrong timeframe|timeframe unclear|time frame unclear|not current)\b/.test(combinedText);
+  const lowContextText = /\b(unclear|uncertain|cannot verify|can't verify|not enough visible|ticker not visible|symbol not visible|timeframe not visible|low confidence|hard to confirm)\b/.test(combinedText);
+  const scannerStructure = String(
+    derived.structureState || derived.structure_state || (simplifiedState && simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.structure_state) || ''
+  ).trim().toLowerCase();
+  const scannerBounce = String(derived.bounceState || derived.bounce_state || '').trim().toLowerCase();
+  const scannerPullback = String(derived.pullbackZone || derived.pullback_zone || derived.setupLocationState || '').trim().toLowerCase();
+  const scannerStrong = ['strong','intact','developing_clean'].includes(scannerStructure);
+  const scannerDamaged = ['weak','weakening','broken','developing_loose'].includes(scannerStructure);
+  const aiDamaged = /\b(broken|damaged|failed structure|structure failed|weakening|deteriorating|lower low|failed reclaim)\b/.test(combinedText);
+  const aiSupportive = /\b(strong trend|intact|constructive|supportive|reclaim|bounce attempt|buyers stepping in|higher low)\b/.test(combinedText);
+  const conflict = !!((scannerStrong && aiDamaged) || (scannerDamaged && aiSupportive));
+  const evidence = [];
+  const sources = [];
+  if(chartStatus){
+    sources.push('chart_match_status');
+    if(chartStatus === 'mismatch') evidence.push(chartWarning || 'AI could not match the uploaded chart confidently to this ticker.');
+    if(chartStatus === 'unclear') evidence.push(chartWarning || 'AI could not verify the chart/ticker match confidently.');
+  }
+  if(chartWarning && !evidence.includes(chartWarning)){
+    sources.push('chart_match_warning');
+    evidence.push(chartWarning);
+  }
+  if(uncertaintyNotes.length){
+    sources.push('uncertainty_notes');
+    evidence.push(...uncertaintyNotes.slice(0, 2));
+  }
+  if(conflict){
+    sources.push('ai_observation_evidence');
+    evidence.push(scannerStrong
+      ? 'Scanner/app state is structurally constructive, but AI evidence describes damaged structure.'
+      : 'Scanner/app state is structurally weak, but AI evidence sounds constructive.');
+  }
+  if(!hasChart && analysis){
+    sources.push('chartRef');
+    evidence.push('No chart screenshot is attached to this saved AI context.');
+  }
+  if(staleText && !sources.includes('uncertainty_notes')) sources.push('uncertainty_notes');
+  if(mismatchText && !sources.includes('coach_summary')) sources.push('coach_summary');
+  if(lowContextText && !sources.includes('coach_summary')) sources.push('coach_summary');
+
+  let status = 'consistent';
+  let severity = 'info';
+  let title = 'Chart context looks consistent';
+  let summary = 'AI/chart notes do not show an obvious mismatch with the scanner state.';
+  if(chartStatus === 'mismatch' || mismatchText){
+    status = 'possible_mismatch';
+    severity = 'warning';
+    title = 'Possible chart mismatch';
+    summary = 'The chart notes may not clearly match this ticker or scanner state. Re-check the screenshot before relying on the AI read.';
+  }else if(conflict){
+    status = 'conflict';
+    severity = 'warning';
+    title = 'AI/chart evidence conflicts with scanner state';
+    summary = 'Treat this as a review warning, not a verdict. The deterministic resolver still owns the final state.';
+  }else if(staleText){
+    status = 'stale';
+    severity = 'warning';
+    title = 'Chart may be stale or from a different timeframe';
+    summary = 'The AI notes suggest the screenshot timing or timeframe may not match the current review context.';
+  }else if(chartStatus === 'unclear' || lowContextText || (!hasChart && analysis)){
+    status = 'uncertain';
+    severity = 'warning';
+    title = 'Chart context uncertain';
+    summary = 'The uploaded image or saved AI context may not contain enough visible ticker/timeframe information.';
+  }
+  const visible = status !== 'consistent';
+  return {
+    visible,
+    status,
+    severity,
+    title,
+    summary,
+    evidence:[...new Set(evidence.map(item => String(item || '').trim()).filter(Boolean))].slice(0, 4),
+    sources:[...new Set(sources.map(item => String(item || '').trim()).filter(Boolean))],
+    debug:{
+      ticker:String(safeRecord.ticker || '').trim(),
+      hasChart,
+      hasAnalysis:!!analysis,
+      chartMatchStatus:chartStatus || '',
+      scannerStructure,
+      scannerBounce,
+      scannerPullback,
+      aiDamaged,
+      aiSupportive,
+      mismatchText,
+      staleText,
+      lowContextText,
+      canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
+      visualBucket:simplifiedState && simplifiedState.visualBucket || ''
+    }
+  };
+}
+
+function renderChartConsistencyTrace(trace){
+  const safe = trace && typeof trace === 'object' ? trace : {visible:false};
+  if(!safe.visible) return '';
+  const evidence = Array.isArray(safe.evidence) && safe.evidence.length
+    ? `<ul class="tiny">${safe.evidence.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+    : '';
+  const sources = Array.isArray(safe.sources) && safe.sources.length
+    ? `<div class="tiny">Sources: ${escapeHtml(safe.sources.join(', '))}</div>`
+    : '';
+  const className = safe.severity === 'warning' ? 'ai-summary-message--warning' : '';
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart context')}</strong><div>${escapeHtml(safe.summary || '')}</div>${evidence}${sources}</div>`;
+}
+
 function renderReviewWorkspace(options = {}){
   uiState.reviewRenderPass = Number(uiState.reviewRenderPass || 0) + 1;
   const reviewRenderPass = Number(uiState.reviewRenderPass || 0);
@@ -23861,6 +24004,20 @@ function renderReviewWorkspace(options = {}){
   const calcNoteText = planUI.showPlan
     ? 'Enter planned entry, stop, and first target to calculate size.'
     : ((primaryPlanMessage && primaryPlanMessage === tradeStatusText.line1) ? '' : primaryPlanMessage);
+  const chartConsistencyTrace = buildChartConsistencyTrace(record, simplifiedState, {
+    normalizedAnalysis:analysisState.normalizedAnalysis,
+    derivedStates
+  });
+  if(typeof console !== 'undefined' && console.info && chartConsistencyTrace.visible){
+    console.info('[CHART_CONSISTENCY_TRACE]', {
+      ticker:record.ticker,
+      status:chartConsistencyTrace.status,
+      visible:chartConsistencyTrace.visible,
+      evidenceCount:Array.isArray(chartConsistencyTrace.evidence) ? chartConsistencyTrace.evidence.length : 0,
+      sources:chartConsistencyTrace.sources || []
+    });
+  }
+  const chartConsistencyTraceMarkup = renderChartConsistencyTrace(chartConsistencyTrace);
   const chartPreview = record.review.chartRef && record.review.chartRef.dataUrl
     ? `<div class="thumbwrap"><img class="thumb reviewthumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>`
     : '<div class="tiny">No chart attached yet.</div>';
@@ -24154,6 +24311,7 @@ function renderReviewWorkspace(options = {}){
         </div>
         <input id="reviewChartFile" type="file" accept="image/png,image/jpeg,image/*" hidden />
         ${chartPreview}
+        ${chartConsistencyTraceMarkup}
       </div>
     </div>
     <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(finalReviewVisualState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">
