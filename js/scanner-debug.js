@@ -109,6 +109,7 @@
     addStep('plan validation', planValidation || '(none)');
     addStep('plan adjustment block', hasPlanAdjustmentBlock ? 'true' : 'false');
     addStep('rr realism', `${planRealism.rr_realism_label || 'Unavailable'} | ${planRealism.credible_target_assessment || 'n/a'}`);
+    addStep('effective plan RR', planValidation === 'missing' || planValidation === 'invalid' ? 'rr=n/a' : (Number.isFinite(rrValue) ? `rr=${Number(rrValue).toFixed(2)}` : 'rr=n/a'));
     if(planRealism.optimistic_target_flag) addStep('target realism flag', 'first target too optimistic');
     if(item.setup.marketCaution) addReason('hostile_market');
     if(['none','attempt'].includes(bounceState)) addReason('bounce_not_confirmed');
@@ -286,8 +287,6 @@
       {label:'UI State Source', value:'scanner_resolution'},
       {label:'Final Verdict Rendered', value:renderedVerdict},
       {label:'Bucket Rendered', value:renderedBucket},
-      {label:'Legacy Visual Recompute Verdict (Non-authoritative)', value:(visualState && (visualState.final_verdict_rendered || visualState.finalVerdict)) || '(none)'},
-      {label:'Legacy Visual Recompute Bucket (Non-authoritative)', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
       {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
       {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
       {label:'Explicit Invalidation Reason', value:(visualState && visualState.explicit_invalidation_reason) || globalVerdict.explicit_invalidation_reason || '(none)'},
@@ -305,8 +304,8 @@
       {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
       {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
       {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
-      {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-      {label:'Blocker / Not-Promoted Reason', value:globalVerdict.downgrade_reason || '(none)'},
+      {label:'Promotion Blocked', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
+      {label:'Promotion Blocker', value:globalVerdict.downgrade_reason || '(none)'},
       {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
       {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
     ], deps);
@@ -315,6 +314,8 @@
       {label:'Action State', value:nextAction.label || '(none)'},
       {label:'Plan Status', value:view && view.planUiState && view.planUiState.label || 'Plan blocked'},
       {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
+      {label:'Effective Plan RR', value:globalVerdict.rr_known && Number.isFinite(globalVerdict.resolvedRR) ? Number(globalVerdict.resolvedRR).toFixed(2) : 'n/a'},
+      {label:'Scanner Estimated RR', value:Number.isFinite(resolution.rr_value) ? Number(resolution.rr_value).toFixed(2) : 'n/a'},
       {label:'RR Confidence', value:resolution.rr_label || '(none)'},
       {label:'Capital Fit', value:(view && view.planUiState && view.planUiState.capitalFitLabel) || '(none)'},
       {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
@@ -381,8 +382,6 @@
       {label:'UI State Source', value:'scanner_resolution'},
       {label:'Final Verdict Rendered', value:globalVerdict.final_verdict || '(none)'},
       {label:'Bucket Rendered', value:globalVerdict.bucket || '(none)'},
-      {label:'Legacy Visual Recompute Verdict (Non-authoritative)', value:(visualState && (visualState.final_verdict_rendered || visualState.finalVerdict)) || '(none)'},
-      {label:'Legacy Visual Recompute Bucket (Non-authoritative)', value:(visualState && (visualState.bucket_rendered || visualState.bucket)) || '(none)'},
       {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
       {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
       {label:'Explicit Invalidation Reason', value:(visualState && visualState.explicit_invalidation_reason) || globalVerdict.explicit_invalidation_reason || '(none)'},
@@ -400,8 +399,8 @@
       {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || statusChip.label || '(none)'},
       {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
       {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
-      {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-      {label:'Blocker / Not-Promoted Reason', value:globalVerdict.downgrade_reason || '(none)'},
+      {label:'Promotion Blocked', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
+      {label:'Promotion Blocker', value:globalVerdict.downgrade_reason || '(none)'},
       {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
       {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
     ], deps);
@@ -410,6 +409,8 @@
       {label:'Action State', value:nextAction.label || '(none)'},
       {label:'Plan Status', value:view && view.planUiState && view.planUiState.label || 'Plan blocked'},
       {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
+      {label:'Effective Plan RR', value:globalVerdict.rr_known && Number.isFinite(globalVerdict.resolvedRR) ? Number(globalVerdict.resolvedRR).toFixed(2) : 'n/a'},
+      {label:'Scanner Estimated RR', value:Number.isFinite(resolution.rr_value) ? Number(resolution.rr_value).toFixed(2) : 'n/a'},
       {label:'RR Confidence', value:resolution.rr_label || '(none)'},
       {label:'Capital Fit', value:(view && view.planUiState && view.planUiState.capitalFitLabel) || '(none)'},
       {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}

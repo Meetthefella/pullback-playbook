@@ -24422,8 +24422,8 @@ function renderReviewWorkspace(options = {}){
     {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
     {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
     {label:'Tracked', value:globalVerdict.tracked ? 'true' : 'false'},
-    {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-    {label:'Blocker / Not-Promoted Reason', value:globalVerdict.downgrade_reason || '(none)'},
+    {label:'Promotion Blocked', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
+    {label:'Promotion Blocker', value:globalVerdict.downgrade_reason || '(none)'},
     {label:'Entry Gate Pass', value:simplifiedState.entryGatePass ? 'true' : 'false'},
     {label:'Near Entry Gate Pass', value:simplifiedState.nearEntryGatePass ? 'true' : 'false'}
   ])}${renderDebugSectionMarkup('Review Presentation Source', [
@@ -24454,8 +24454,6 @@ function renderReviewWorkspace(options = {}){
     {label:'Track Presentation Tone', value:reviewLifecycleBias.trackPresentationTone || '(none)'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
     {label:'Previous Verdict', value:visualState.previousVerdict || '(none)'},
-    {label:'Legacy Visual Recompute Verdict (Non-authoritative)', value:visualState.freshCanonicalVerdict || '(none)'},
-    {label:'Legacy Visual Recompute Bucket (Non-authoritative)', value:visualState.freshVisualBucket || '(none)'},
     {label:'Scan Visual Source', value:visualState.scanVisualSource || '(none)'},
     {label:'Review Visual Source', value:visualState.reviewVisualSource || '(none)'},
     {label:'Structure Source', value:visualState.structureSource || '(none)'},
@@ -24474,6 +24472,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Action State', value:resolvedContract.actionStateLabel || resolvedContract.actionLabel || '(none)'},
     {label:'Plan Status', value:simplifiedState.planStatus || (planUI.diagnosticsMessage || '(none)')},
     {label:'Plan Visible', value:planUI.showPlan ? 'true' : 'false'},
+    {label:'Effective Plan RR', value:globalVerdict.rrKnown && Number.isFinite(globalVerdict.resolvedRR) ? Number(globalVerdict.resolvedRR).toFixed(2) : 'n/a'},
     {label:'RR Confidence', value:resolvedContract.rrConfidenceLabel || '(none)'},
     {label:'Viability Branch ID', value:globalVerdict.viabilityBranchId || '(none)'},
     {label:'Viability Branch Label', value:globalVerdict.viabilityBranchLabel || '(none)'},
