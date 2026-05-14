@@ -1429,9 +1429,15 @@ function runAiContractAssertions(){
     'normaliseVisibleTicker',
     'normaliseVisibleTimeframe',
     'isDailyTimeframe',
+    'chartVerificationExchangeTimeZone',
+    'chartVerificationMarketOpenNow',
+    'chartVerificationToleranceConfig',
+    'chartVerificationToleranceDetail',
     'valueWithinTolerance',
     'chartIndicatorVerificationStatus',
     'chartVerificationDisplayValue',
+    'chartVerificationNumericLabels',
+    'chartVerificationProximityMatches',
     'chartImageDimensionsFromRef',
     'chartImageDimensionsLabel',
     'buildChartImageSourceTrace',
@@ -1793,6 +1799,83 @@ function runAiContractAssertions(){
   );
   if(confidenceOnlyIndicatorTrace.indicatorStates.ma200_status !== 'missing'){
     throw new Error('MA confidence alone must not infer 200MA visibility without 200MA-specific evidence.');
+  }
+  const liveToleranceTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', chartVerificationMarketOpen:true, marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:226.90,
+      visible_ma20:207.92,
+      visible_ma50:191.74,
+      visible_ma200:185.99,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor', planStatus:'missing'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(liveToleranceTrace.status !== 'verified_match' || liveToleranceTrace.debug.marketOpenAssumed !== true || liveToleranceTrace.debug.staleDataPossible !== true){
+    throw new Error('Small visible value drift during market hours must verify within live-market tolerance.');
+  }
+  if(liveToleranceTrace.debug.canonicalVerdict !== 'watch' || liveToleranceTrace.debug.visualBucket !== 'monitor'){
+    throw new Error('Chart verification tolerance must not mutate verdict or bucket semantics.');
+  }
+  const closedToleranceTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', chartVerificationMarketOpen:false, marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:226.90,
+      visible_ma20:207.92,
+      visible_ma50:191.74,
+      visible_ma200:185.99,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor', planStatus:'missing'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(closedToleranceTrace.status !== 'price_mismatch' || closedToleranceTrace.debug.marketOpenAssumed !== false){
+    throw new Error('Closed-market tolerance must stay strict enough to flag stale or wrong chart values.');
+  }
+  const proximityLabelTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', chartVerificationMarketOpen:true, marketData:{price:140, ma20:133.85, ma50:125.37, ma200:114.92}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:140.05,
+      visible_ma20:null,
+      visible_ma50:null,
+      visible_ma200:null,
+      visible_numeric_labels:[133.90, 125.72, 115.09],
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor', planStatus:'missing'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(proximityLabelTrace.indicatorStates.ma20_status !== 'verified' || proximityLabelTrace.indicatorStates.ma50_status !== 'verified' || proximityLabelTrace.indicatorStates.ma200_status !== 'verified'){
+    throw new Error('Unassigned visible numeric labels must map to trusted MA values by proximity within tolerance.');
+  }
+  if(!proximityLabelTrace.debug.numericLabelToMaMatches || !proximityLabelTrace.debug.numericLabelToMaMatches.ma200){
+    throw new Error('Numeric label to MA proximity matches must be included in chart verification diagnostics.');
+  }
+  const proximityWithoutLineTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', chartVerificationMarketOpen:true, marketData:{price:140, ma20:133.85, ma50:125.37, ma200:114.92}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:140.05,
+      visible_numeric_labels:[133.90, 125.72, 115.09],
+      ma20_visible:false,
+      ma50_visible:false,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor', planStatus:'missing'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(proximityWithoutLineTrace.indicatorStates.ma20_status === 'verified' || proximityWithoutLineTrace.indicatorStates.ma50_status === 'verified' || proximityWithoutLineTrace.indicatorStates.ma200_status === 'verified'){
+    throw new Error('Unassigned numeric labels must not verify MA values when the relevant MA lines are not visible.');
   }
   const portraitSourceTrace = evidenceSandbox.buildChartImageSourceTrace({
     chartRef:{dataUrl:'data:image/png;base64,source', width:900, height:1600},

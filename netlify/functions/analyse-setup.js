@@ -201,6 +201,9 @@ function normaliseAnalysis(obj){
     visible_ma20: normaliseNumber(obj?.visible_ma20),
     visible_ma50: normaliseNumber(obj?.visible_ma50),
     visible_ma200: normaliseNumber(obj?.visible_ma200),
+    visible_numeric_labels: Array.isArray(obj?.visible_numeric_labels)
+      ? obj.visible_numeric_labels.map(item => normaliseNumber(item)).filter(value => value !== null)
+      : [],
     ma20_visible: obj?.ma20_visible === true,
     ma50_visible: obj?.ma50_visible === true,
     ma200_visible: obj?.ma200_visible === true,
@@ -330,6 +333,7 @@ exports.handler = async function handler(event){
     'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
     'The deterministic app resolver will decide final state.',
     'If a chart image is attached, extract visible facts only: visible ticker, timeframe, latest price, moving average values, visible price/date range, and confidence.',
+    'If numeric chart labels are visible but cannot be confidently assigned to latest price or a specific moving average, include them in visible_numeric_labels.',
     'TradingView mobile/narrow screenshots may crop MA legend text or numeric labels. If an MA line is visible but its value is unreadable, report the line as visible and keep the numeric value null.',
     'Do not fabricate MA values. Visibility can be partial/inferred; numeric values require readable text.',
     'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',

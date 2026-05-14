@@ -19318,6 +19318,9 @@ function normalizeAnalysisResponse(raw){
     visible_ma20:analysisNumberOrNull(raw.visible_ma20),
     visible_ma50:analysisNumberOrNull(raw.visible_ma50),
     visible_ma200:analysisNumberOrNull(raw.visible_ma200),
+    visible_numeric_labels:Array.isArray(raw.visible_numeric_labels)
+      ? raw.visible_numeric_labels.map(item => analysisNumberOrNull(item)).filter(value => value !== null)
+      : [],
     ma20_visible:raw.ma20_visible === true,
     ma50_visible:raw.ma50_visible === true,
     ma200_visible:raw.ma200_visible === true,
@@ -19735,6 +19738,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     visible_ma20:parsed.visible_ma20,
     visible_ma50:parsed.visible_ma50,
     visible_ma200:parsed.visible_ma200,
+    visible_numeric_labels:parsed.visible_numeric_labels || [],
     ma20_visible:parsed.ma20_visible === true,
     ma50_visible:parsed.ma50_visible === true,
     ma200_visible:parsed.ma200_visible === true,
@@ -23340,6 +23344,74 @@ function isDailyTimeframe(value){
   return ['d','1d','day','daily'].includes(safe);
 }
 
+function chartVerificationExchangeTimeZone(record = {}){
+  const exchange = String(record.exchange || record.market || record.primaryExchange || record.listingExchange || '').toUpperCase();
+  if(/\b(LSE|LON|XLON|LONDON)\b/.test(exchange)) return 'Europe/London';
+  return 'America/New_York';
+}
+
+function chartVerificationMarketOpenNow(record = {}, now = new Date()){
+  if(typeof record.chartVerificationMarketOpen === 'boolean') return record.chartVerificationMarketOpen;
+  const timeZone = chartVerificationExchangeTimeZone(record);
+  try{
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      weekday:'short',
+      hour:'2-digit',
+      minute:'2-digit',
+      hour12:false
+    }).formatToParts(now).reduce((acc, part) => {
+      acc[part.type] = part.value;
+      return acc;
+    }, {});
+    const weekday = String(parts.weekday || '').toLowerCase();
+    if(['sat', 'sun'].includes(weekday)) return false;
+    const hour = Number(parts.hour);
+    const minute = Number(parts.minute);
+    if(!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
+    const minutes = hour * 60 + minute;
+    const open = timeZone === 'Europe/London' ? 8 * 60 : 9 * 60 + 30;
+    const close = timeZone === 'Europe/London' ? 16 * 60 + 30 : 16 * 60;
+    return minutes >= open && minutes <= close;
+  }catch(_err){
+    return false;
+  }
+}
+
+function chartVerificationToleranceConfig(record = {}){
+  const marketOpenAssumed = chartVerificationMarketOpenNow(record);
+  return {
+    marketOpenAssumed,
+    staleDataPossible:marketOpenAssumed,
+    pricePct:marketOpenAssumed ? 0.0075 : 0.0035,
+    priceAbs:marketOpenAssumed ? 0.25 : 0.10,
+    maPct:marketOpenAssumed ? 0.0075 : 0.005,
+    maAbs:marketOpenAssumed ? 0.25 : 0.10
+  };
+}
+
+function chartVerificationToleranceDetail(visible, trusted, kind, toleranceConfig){
+  const observed = chartVerificationNumberOrNull(visible);
+  const expected = chartVerificationNumberOrNull(trusted);
+  if(observed === null || expected === null || expected === 0) return {
+    match:null,
+    delta:null,
+    deltaPct:null,
+    tolerance:null
+  };
+  const config = toleranceConfig || chartVerificationToleranceConfig();
+  const pctTolerance = kind === 'price' ? config.pricePct : config.maPct;
+  const absTolerance = kind === 'price' ? config.priceAbs : config.maAbs;
+  const tolerance = Math.max(Math.abs(expected) * pctTolerance, absTolerance);
+  const delta = Math.abs(observed - expected);
+  return {
+    match:delta <= tolerance,
+    delta,
+    deltaPct:delta / Math.abs(expected),
+    tolerance
+  };
+}
+
 function valueWithinTolerance(visible, trusted, tolerancePct){
   const observed = chartVerificationNumberOrNull(visible);
   const expected = chartVerificationNumberOrNull(trusted);
@@ -23348,7 +23420,11 @@ function valueWithinTolerance(visible, trusted, tolerancePct){
 }
 
 function chartIndicatorVerificationStatus(lineVisible, value, options = {}){
-  if(chartVerificationNumberOrNull(value) !== null) return 'verified';
+  if(chartVerificationNumberOrNull(value) !== null){
+    if(options.match === false) return 'mismatch';
+    if(options.match === true) return 'verified';
+    return lineVisible === true || options.lineDetected === true ? 'partial' : 'missing';
+  }
   if(options.lineDetected === true || lineVisible === true) return 'partial';
   if(options.inferred === true) return 'inferred';
   return 'missing';
@@ -23357,6 +23433,41 @@ function chartIndicatorVerificationStatus(lineVisible, value, options = {}){
 function chartVerificationDisplayValue(value){
   const numeric = chartVerificationNumberOrNull(value);
   return numeric === null ? 'n/a' : numeric.toFixed(2);
+}
+
+function chartVerificationNumericLabels(analysis){
+  const raw = analysis && Array.isArray(analysis.visible_numeric_labels) ? analysis.visible_numeric_labels : [];
+  return [...new Set(raw.map(item => chartVerificationNumberOrNull(item)).filter(value => value !== null))];
+}
+
+function chartVerificationProximityMatches(labels, trustedValues, toleranceConfig){
+  const unused = labels.slice();
+  const matches = {};
+  Object.entries(trustedValues || {}).forEach(([key, trusted]) => {
+    const expected = chartVerificationNumberOrNull(trusted);
+    if(expected === null) return;
+    let bestIndex = -1;
+    let bestDetail = null;
+    unused.forEach((candidate, index) => {
+      const detail = chartVerificationToleranceDetail(candidate, expected, 'ma', toleranceConfig);
+      if(detail.match !== true) return;
+      if(!bestDetail || detail.delta < bestDetail.delta){
+        bestDetail = detail;
+        bestIndex = index;
+      }
+    });
+    if(bestIndex >= 0){
+      matches[key] = {
+        value:unused[bestIndex],
+        source:'proximity',
+        delta:bestDetail.delta,
+        deltaPct:bestDetail.deltaPct,
+        tolerance:bestDetail.tolerance
+      };
+      unused.splice(bestIndex, 1);
+    }
+  });
+  return matches;
 }
 
 function buildDeterministicChartVerification(record = {}, analysis = null){
@@ -23374,6 +23485,16 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   const trustedMa20 = chartVerificationNumberOrNull(marketData.ma20 ?? marketData.sma20 ?? safeRecord.ma20 ?? safeRecord.sma20);
   const trustedMa50 = chartVerificationNumberOrNull(marketData.ma50 ?? marketData.sma50 ?? safeRecord.ma50 ?? safeRecord.sma50);
   const trustedMa200 = chartVerificationNumberOrNull(marketData.ma200 ?? marketData.sma200 ?? safeRecord.ma200 ?? safeRecord.sma200);
+  const toleranceConfig = chartVerificationToleranceConfig(safeRecord);
+  const visibleNumericLabels = chartVerificationNumericLabels(safeAnalysis);
+  const proximityMatches = chartVerificationProximityMatches(visibleNumericLabels, {
+    ma20:visibleMa20 === null && safeAnalysis.ma20_visible === true ? trustedMa20 : null,
+    ma50:visibleMa50 === null && safeAnalysis.ma50_visible === true ? trustedMa50 : null,
+    ma200:visibleMa200 === null && (safeAnalysis.ma200_visible === true || safeAnalysis.ma200_line_detected === true) ? trustedMa200 : null
+  }, toleranceConfig);
+  const comparisonMa20 = visibleMa20 !== null ? visibleMa20 : (proximityMatches.ma20 && proximityMatches.ma20.value);
+  const comparisonMa50 = visibleMa50 !== null ? visibleMa50 : (proximityMatches.ma50 && proximityMatches.ma50.value);
+  const comparisonMa200 = visibleMa200 !== null ? visibleMa200 : (proximityMatches.ma200 && proximityMatches.ma200.value);
   const extractionWarnings = chartConsistencyArray(safeAnalysis.extraction_warnings);
   const ma200TextDetected = safeAnalysis.ma200_text_detected === true;
   const ma200LineDetected = safeAnalysis.ma200_line_detected === true || safeAnalysis.ma200_visible === true;
@@ -23388,14 +23509,26 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     safeAnalysis.location_evidence
   ].filter(Boolean).join(' ').toLowerCase();
   const ma200Inferred = !ma200LineDetected && !ma200ValueExtracted && /\b(200\s*ma|200ma|sma\s*200|ma\s*200|long[-\s]?period ma|red moving average|red ma)\b/.test(extractionText);
-  const ma20Status = chartIndicatorVerificationStatus(safeAnalysis.ma20_visible === true, visibleMa20);
-  const ma50Status = chartIndicatorVerificationStatus(safeAnalysis.ma50_visible === true, visibleMa50);
-  const ma200Status = chartIndicatorVerificationStatus(safeAnalysis.ma200_visible === true, visibleMa200, {
+  const priceDetail = chartVerificationToleranceDetail(visiblePrice, trustedPrice, 'price', toleranceConfig);
+  const ma20Detail = chartVerificationToleranceDetail(comparisonMa20, trustedMa20, 'ma', toleranceConfig);
+  const ma50Detail = chartVerificationToleranceDetail(comparisonMa50, trustedMa50, 'ma', toleranceConfig);
+  const ma200Detail = chartVerificationToleranceDetail(comparisonMa200, trustedMa200, 'ma', toleranceConfig);
+  const ma20Status = chartIndicatorVerificationStatus(safeAnalysis.ma20_visible === true, comparisonMa20, {
+    match:ma20Detail.match,
+    matchSource:visibleMa20 !== null ? 'direct' : (proximityMatches.ma20 && proximityMatches.ma20.source)
+  });
+  const ma50Status = chartIndicatorVerificationStatus(safeAnalysis.ma50_visible === true, comparisonMa50, {
+    match:ma50Detail.match,
+    matchSource:visibleMa50 !== null ? 'direct' : (proximityMatches.ma50 && proximityMatches.ma50.source)
+  });
+  const ma200Status = chartIndicatorVerificationStatus(safeAnalysis.ma200_visible === true, comparisonMa200, {
     lineDetected:ma200LineDetected,
     textDetected:ma200TextDetected,
     valueExtracted:ma200ValueExtracted,
     confidence:ma200Confidence,
-    inferred:ma200Inferred
+    inferred:ma200Inferred,
+    match:ma200Detail.match,
+    matchSource:visibleMa200 !== null ? 'direct' : (proximityMatches.ma200 && proximityMatches.ma200.source)
   });
   const indicatorStates = [
     {label:'20MA', status:ma20Status},
@@ -23405,6 +23538,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   const verifiedIndicators = indicatorStates.filter(item => item.status === 'verified').map(item => item.label);
   const partialIndicators = indicatorStates.filter(item => item.status === 'partial').map(item => item.label);
   const inferredIndicators = indicatorStates.filter(item => item.status === 'inferred').map(item => item.label);
+  const mismatchedIndicators = indicatorStates.filter(item => item.status === 'mismatch').map(item => item.label);
   const missingIndicators = indicatorStates.filter(item => item.status === 'missing').map(item => item.label);
   const hasExtractedEvidence = !!(
     visibleTicker
@@ -23426,11 +23560,11 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   if(!visibleTimeframe) missing.push('visible timeframe');
   if(visiblePrice === null) missing.push('latest price');
 
-  const priceOk = valueWithinTolerance(visiblePrice, trustedPrice, 0.035);
-  const ma20Ok = valueWithinTolerance(visibleMa20, trustedMa20, 0.06);
-  const ma50Ok = valueWithinTolerance(visibleMa50, trustedMa50, 0.06);
-  const ma200Ok = valueWithinTolerance(visibleMa200, trustedMa200, 0.06);
-  const maVisibleCount = [visibleMa20, visibleMa50, visibleMa200].filter(value => value !== null).length;
+  const priceOk = priceDetail.match;
+  const ma20Ok = ma20Detail.match;
+  const ma50Ok = ma50Detail.match;
+  const ma200Ok = ma200Detail.match;
+  const maVisibleCount = [comparisonMa20, comparisonMa50, comparisonMa200].filter(value => chartVerificationNumberOrNull(value) !== null).length;
 
   let status = 'uncertain_missing_context';
   let severity = 'warning';
@@ -23452,15 +23586,15 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   }else if(priceOk === false){
     status = 'price_mismatch';
     title = 'Price mismatch';
-    summary = 'Visible latest price is outside the expected tolerance from trusted market data.';
+    summary = `Visible latest price is outside normal ${toleranceConfig.marketOpenAssumed ? 'live-market' : 'closed-market'} tolerance from trusted market data.`;
     evidence.push(`Visible price ${visiblePrice}; trusted price ${trustedPrice}.`);
   }else if(ma20Ok === false || ma50Ok === false || ma200Ok === false){
     status = 'indicator_value_mismatch';
     title = 'Indicator value mismatch';
-    summary = 'One or more visible moving-average values differ from trusted scanner data.';
-    if(ma20Ok === false) evidence.push(`20MA visible ${visibleMa20}; trusted ${trustedMa20}.`);
-    if(ma50Ok === false) evidence.push(`50MA visible ${visibleMa50}; trusted ${trustedMa50}.`);
-    if(ma200Ok === false) evidence.push(`200MA visible ${visibleMa200}; trusted ${trustedMa200}.`);
+    summary = 'One or more visible moving-average values differ from trusted scanner data beyond normal tolerance.';
+    if(ma20Ok === false) evidence.push(`20MA visible ${comparisonMa20}; trusted ${trustedMa20}.`);
+    if(ma50Ok === false) evidence.push(`50MA visible ${comparisonMa50}; trusted ${trustedMa50}.`);
+    if(ma200Ok === false) evidence.push(`200MA visible ${comparisonMa200}; trusted ${trustedMa200}.`);
   }else if(missing.includes('visible ticker') || missing.includes('visible timeframe') || missing.includes('latest price')){
     status = 'uncertain_missing_context';
     title = 'Chart context uncertain';
@@ -23491,8 +23625,11 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     severity = 'info';
     title = status === 'verified_match' ? 'Chart verified' : 'Chart likely matches';
     summary = status === 'verified_match'
-      ? 'Ticker, timeframe, price, and visible moving averages match trusted scanner data.'
+      ? `Values verified within normal ${toleranceConfig.marketOpenAssumed ? 'live-market' : 'closed-market'} tolerance.`
       : 'Visible chart facts are consistent with trusted scanner data, but not every indicator could be checked.';
+    if(toleranceConfig.staleDataPossible){
+      summary += ' Small differences can occur while the market is open because chart data may update faster than app data.';
+    }
   }
 
   extractionWarnings.forEach(item => evidence.push(item));
@@ -23506,6 +23643,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     missingIndicators,
     partialIndicators,
     inferredIndicators,
+    mismatchedIndicators,
     indicatorStates:{
       ma20_status:ma20Status,
       ma50_status:ma50Status,
@@ -23520,6 +23658,9 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
       visible_ma20:visibleMa20,
       visible_ma50:visibleMa50,
       visible_ma200:visibleMa200,
+      mapped_ma20:comparisonMa20 ?? null,
+      mapped_ma50:comparisonMa50 ?? null,
+      mapped_ma200:comparisonMa200 ?? null,
       ma20_visible:safeAnalysis.ma20_visible === true,
       ma50_visible:safeAnalysis.ma50_visible === true,
       ma200_visible:safeAnalysis.ma200_visible === true,
@@ -23549,7 +23690,19 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
       ma200Match:ma200Ok,
       ma20Status,
       ma50Status,
-      ma200Status
+      ma200Status,
+      marketOpenAssumed:toleranceConfig.marketOpenAssumed,
+      staleDataPossible:toleranceConfig.staleDataPossible,
+      priceToleranceUsed:priceDetail.tolerance,
+      maToleranceUsed:ma20Detail.tolerance ?? ma50Detail.tolerance ?? ma200Detail.tolerance,
+      visibleNumericLabels,
+      numericLabelToMaMatches:proximityMatches,
+      matchDeltas:{
+        price:priceDetail.delta,
+        ma20:ma20Detail.delta,
+        ma50:ma50Detail.delta,
+        ma200:ma200Detail.delta
+      }
     }
   };
 }
@@ -23674,6 +23827,13 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         ma200_value_extracted:deterministic.extractedFacts && deterministic.extractedFacts.ma200_value_extracted,
         ma200_confidence:deterministic.extractedFacts && deterministic.extractedFacts.ma200_confidence,
         extraction_method_used:deterministic.extractedFacts && deterministic.extractedFacts.extraction_method_used,
+        marketOpenAssumed:deterministic.comparison && deterministic.comparison.marketOpenAssumed,
+        priceToleranceUsed:deterministic.comparison && deterministic.comparison.priceToleranceUsed,
+        maToleranceUsed:deterministic.comparison && deterministic.comparison.maToleranceUsed,
+        visibleNumericLabels:deterministic.comparison && deterministic.comparison.visibleNumericLabels,
+        numericLabelToMaMatches:deterministic.comparison && deterministic.comparison.numericLabelToMaMatches,
+        matchDeltas:deterministic.comparison && deterministic.comparison.matchDeltas,
+        staleDataPossible:deterministic.comparison && deterministic.comparison.staleDataPossible,
         extractedFormatted:{
           price:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_latest_price),
           ma20:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_ma20),
@@ -24539,6 +24699,13 @@ function renderReviewWorkspace(options = {}){
       ma200_value_extracted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.ma200_value_extracted,
       ma200_confidence:chartConsistencyTrace.debug && chartConsistencyTrace.debug.ma200_confidence,
       extraction_method_used:chartConsistencyTrace.debug && chartConsistencyTrace.debug.extraction_method_used,
+      marketOpenAssumed:chartConsistencyTrace.debug && chartConsistencyTrace.debug.marketOpenAssumed,
+      priceToleranceUsed:chartConsistencyTrace.debug && chartConsistencyTrace.debug.priceToleranceUsed,
+      maToleranceUsed:chartConsistencyTrace.debug && chartConsistencyTrace.debug.maToleranceUsed,
+      visibleNumericLabels:chartConsistencyTrace.debug && chartConsistencyTrace.debug.visibleNumericLabels,
+      numericLabelToMaMatches:chartConsistencyTrace.debug && chartConsistencyTrace.debug.numericLabelToMaMatches,
+      matchDeltas:chartConsistencyTrace.debug && chartConsistencyTrace.debug.matchDeltas,
+      staleDataPossible:chartConsistencyTrace.debug && chartConsistencyTrace.debug.staleDataPossible,
       extractedFormatted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.extractedFormatted,
       trustedFormatted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.trustedFormatted,
       chartImageSource:chartConsistencyTrace.chartImageSource || null
@@ -26197,6 +26364,7 @@ function buildPromptBody(payload){
     'visible_ma20',
     'visible_ma50',
     'visible_ma200',
+    'visible_numeric_labels',
     'ma20_visible',
     'ma50_visible',
     'ma200_visible',
@@ -26217,6 +26385,7 @@ function buildPromptBody(payload){
     '- ai_observation_only must be true',
     '- visible_ticker and visible_timeframe must be extracted only if visible in the image',
     '- visible_latest_price and visible_ma* values must be numbers or null',
+    '- visible_numeric_labels should include readable chart/axis/indicator numeric labels that are visible but cannot be confidently assigned to a specific field',
     '- ma*_visible means the moving-average line itself appears visible, even if its numeric label is cropped, faint, or unreadable',
     '- visible_ma* values must stay null unless the numeric value is confidently readable',
     '- For the 200MA, set ma200_line_detected when the long-period MA line is visually detected, ma200_text_detected when the legend/label text is visible, and ma200_value_extracted only when the numeric value is readable',
