@@ -1404,6 +1404,9 @@ function runAiContractAssertions(){
       const reward = numericTarget - numericEntry;
       const valid = Number.isFinite(risk) && Number.isFinite(reward) && risk > 0 && reward > 0;
       return {status:valid ? 'valid' : 'invalid', riskFit:{risk_status:valid ? 'fits_risk' : 'invalid_plan'}};
+    },
+    escapeHtml(value){
+      return String(value == null ? '' : value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
     }
   };
   vm.createContext(evidenceSandbox);
@@ -1427,8 +1430,11 @@ function runAiContractAssertions(){
     'normaliseVisibleTimeframe',
     'isDailyTimeframe',
     'valueWithinTolerance',
+    'chartIndicatorVerificationStatus',
+    'chartVerificationDisplayValue',
     'buildDeterministicChartVerification',
     'buildChartConsistencyTrace',
+    'renderChartConsistencyTrace',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});
@@ -1707,6 +1713,34 @@ function runAiContractAssertions(){
   if(indicatorMissingTrace.status !== 'indicator_missing'){
     throw new Error('Hidden moving averages must produce indicator_missing deterministic verification.');
   }
+  if(indicatorMissingTrace.indicatorStates.ma200_status !== 'missing'){
+    throw new Error('200MA not visible at all must be reported as missing.');
+  }
+  const partialIndicatorTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:225.83, ma20:207.24949999999998, ma50:191.17760000000007, ma200:185.4411499999999}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:225.83,
+      visible_ma20:207.24949999999998,
+      visible_ma50:191.17760000000007,
+      visible_ma200:null,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(partialIndicatorTrace.status !== 'indicator_partial' || partialIndicatorTrace.indicatorStates.ma200_status !== 'partial' || !partialIndicatorTrace.partialIndicators.includes('200MA')){
+    throw new Error('200MA line visible but value missing must be partial, not missing.');
+  }
+  if(!/Partial indicator visibility/.test(partialIndicatorTrace.title) || /Indicators missing/.test(partialIndicatorTrace.title)){
+    throw new Error('Partial MA visibility must use partial wording, not missing-indicator wording.');
+  }
+  const partialIndicatorMarkup = evidenceSandbox.renderChartConsistencyTrace(partialIndicatorTrace);
+  if(!/20 207\.25/.test(partialIndicatorMarkup) || !/50 191\.18/.test(partialIndicatorMarkup) || !/200 n\/a/.test(partialIndicatorMarkup) || !/200 185\.44/.test(partialIndicatorMarkup)){
+    throw new Error('Chart verification display values must be formatted to 2 decimals and null as n/a.');
+  }
   const priceMismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
@@ -1744,6 +1778,9 @@ function runAiContractAssertions(){
   );
   if(verifiedSuppressesLegacy.status !== 'verified_match' || verifiedSuppressesLegacy.sources.includes('legacy_ai_chart_match')){
     throw new Error('Deterministic verified_match must suppress legacy AI chart-match uncertainty.');
+  }
+  if(verifiedSuppressesLegacy.indicatorStates.ma20_status !== 'verified' || verifiedSuppressesLegacy.indicatorStates.ma50_status !== 'verified' || verifiedSuppressesLegacy.indicatorStates.ma200_status !== 'verified'){
+    throw new Error('All visible matching MA values must report verified indicator states.');
   }
   const legacyFallbackTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{

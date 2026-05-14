@@ -23206,6 +23206,16 @@ function valueWithinTolerance(visible, trusted, tolerancePct){
   return Math.abs(observed - expected) / Math.abs(expected) <= tolerancePct;
 }
 
+function chartIndicatorVerificationStatus(lineVisible, value){
+  if(chartVerificationNumberOrNull(value) !== null) return 'verified';
+  return lineVisible === true ? 'partial' : 'missing';
+}
+
+function chartVerificationDisplayValue(value){
+  const numeric = chartVerificationNumberOrNull(value);
+  return numeric === null ? 'n/a' : numeric.toFixed(2);
+}
+
 function buildDeterministicChartVerification(record = {}, analysis = null){
   const safeRecord = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : {};
@@ -23222,6 +23232,17 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   const trustedMa50 = chartVerificationNumberOrNull(marketData.ma50 ?? marketData.sma50 ?? safeRecord.ma50 ?? safeRecord.sma50);
   const trustedMa200 = chartVerificationNumberOrNull(marketData.ma200 ?? marketData.sma200 ?? safeRecord.ma200 ?? safeRecord.sma200);
   const extractionWarnings = chartConsistencyArray(safeAnalysis.extraction_warnings);
+  const ma20Status = chartIndicatorVerificationStatus(safeAnalysis.ma20_visible === true, visibleMa20);
+  const ma50Status = chartIndicatorVerificationStatus(safeAnalysis.ma50_visible === true, visibleMa50);
+  const ma200Status = chartIndicatorVerificationStatus(safeAnalysis.ma200_visible === true, visibleMa200);
+  const indicatorStates = [
+    {label:'20MA', status:ma20Status},
+    {label:'50MA', status:ma50Status},
+    {label:'200MA', status:ma200Status}
+  ];
+  const verifiedIndicators = indicatorStates.filter(item => item.status === 'verified').map(item => item.label);
+  const partialIndicators = indicatorStates.filter(item => item.status === 'partial').map(item => item.label);
+  const missingIndicators = indicatorStates.filter(item => item.status === 'missing').map(item => item.label);
   const hasExtractedEvidence = !!(
     visibleTicker
     || visibleTimeframe
@@ -23241,9 +23262,6 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   if(!visibleTicker) missing.push('visible ticker');
   if(!visibleTimeframe) missing.push('visible timeframe');
   if(visiblePrice === null) missing.push('latest price');
-  if(!(safeAnalysis.ma20_visible === true && visibleMa20 !== null)) missing.push('20MA');
-  if(!(safeAnalysis.ma50_visible === true && visibleMa50 !== null)) missing.push('50MA');
-  if(!(safeAnalysis.ma200_visible === true && visibleMa200 !== null)) missing.push('200MA');
 
   const priceOk = valueWithinTolerance(visiblePrice, trustedPrice, 0.035);
   const ma20Ok = valueWithinTolerance(visibleMa20, trustedMa20, 0.06);
@@ -23284,10 +23302,21 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     status = 'uncertain_missing_context';
     title = 'Chart context uncertain';
     summary = 'The uploaded image does not show enough ticker/timeframe/price information for deterministic verification.';
-  }else if(missing.includes('20MA') || missing.includes('50MA') || missing.includes('200MA')){
+  }else if(partialIndicators.length && !missingIndicators.length){
+    status = 'indicator_partial';
+    title = 'Partial indicator visibility';
+    const verifiedSummary = verifiedIndicators.length
+      ? `${verifiedIndicators.join(' and ')} ${verifiedIndicators.length === 1 ? 'was' : 'were'} verified. `
+      : '';
+    summary = `${verifiedSummary}${partialIndicators.join(' and ')} line ${partialIndicators.length === 1 ? 'appears' : 'appear'} visible, but ${partialIndicators.length === 1 ? 'its numeric value could' : 'their numeric values could'} not be confirmed.`;
+  }else if(missingIndicators.length && !partialIndicators.length){
     status = 'indicator_missing';
     title = 'Indicators missing';
-    summary = '20MA/50MA/200MA are not all visible, so MA comparison could not be completed.';
+    summary = `${missingIndicators.join(' and ')} ${missingIndicators.length === 1 ? 'is' : 'are'} not visible, so full MA comparison could not be completed.`;
+  }else if(partialIndicators.length || missingIndicators.length){
+    status = 'indicator_incomplete';
+    title = 'Indicator verification incomplete';
+    summary = 'Some moving averages could not be fully verified from the uploaded image.';
   }else{
     status = maVisibleCount === 3 && priceOk !== false ? 'verified_match' : 'likely_match';
     severity = 'info';
@@ -23305,6 +23334,13 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     title,
     summary,
     missing,
+    missingIndicators,
+    partialIndicators,
+    indicatorStates:{
+      ma20_status:ma20Status,
+      ma50_status:ma50Status,
+      ma200_status:ma200Status
+    },
     evidence:[...new Set(evidence.map(item => String(item || '').trim()).filter(Boolean))].slice(0, 5),
     sources:['deterministic_chart_verification'],
     extractedFacts:{
@@ -23335,7 +23371,10 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
       priceMatch:priceOk,
       ma20Match:ma20Ok,
       ma50Match:ma50Ok,
-      ma200Match:ma200Ok
+      ma200Match:ma200Ok,
+      ma20Status,
+      ma50Status,
+      ma200Status
     }
   };
 }
@@ -23415,7 +23454,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
 
   const deterministic = buildDeterministicChartVerification(safeRecord, analysis);
   if(deterministic.available){
-    const incompleteDeterministic = ['uncertain_missing_context','indicator_missing'].includes(deterministic.status);
+    const incompleteDeterministic = ['uncertain_missing_context','indicator_missing','indicator_partial','indicator_incomplete'].includes(deterministic.status);
     const fallbackEvidence = incompleteDeterministic && (chartStatus === 'mismatch' || chartStatus === 'unclear' || mismatchText || lowContextText)
       ? evidence.map(item => `Legacy AI fallback: ${item}`)
       : [];
@@ -23428,6 +23467,9 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       summary:deterministic.summary,
       evidence:[...new Set(deterministic.evidence.concat(fallbackEvidence))].slice(0, 5),
       missing:deterministic.missing,
+      missingIndicators:deterministic.missingIndicators,
+      partialIndicators:deterministic.partialIndicators,
+      indicatorStates:deterministic.indicatorStates,
       extractedFacts:deterministic.extractedFacts,
       trustedFacts:deterministic.trustedFacts,
       sources:[...new Set(deterministic.sources.concat(fallbackSources))],
@@ -23439,6 +23481,23 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         hasAnalysis:!!analysis,
         chartMatchStatus:chartStatus || '',
         deterministicStatus:deterministic.status,
+        ma20_status:deterministic.indicatorStates && deterministic.indicatorStates.ma20_status,
+        ma50_status:deterministic.indicatorStates && deterministic.indicatorStates.ma50_status,
+        ma200_status:deterministic.indicatorStates && deterministic.indicatorStates.ma200_status,
+        missingIndicators:deterministic.missingIndicators || [],
+        partialIndicators:deterministic.partialIndicators || [],
+        extractedFormatted:{
+          price:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_latest_price),
+          ma20:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_ma20),
+          ma50:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_ma50),
+          ma200:chartVerificationDisplayValue(deterministic.extractedFacts && deterministic.extractedFacts.visible_ma200)
+        },
+        trustedFormatted:{
+          price:chartVerificationDisplayValue(deterministic.trustedFacts && deterministic.trustedFacts.latest_price),
+          ma20:chartVerificationDisplayValue(deterministic.trustedFacts && deterministic.trustedFacts.ma20),
+          ma50:chartVerificationDisplayValue(deterministic.trustedFacts && deterministic.trustedFacts.ma50),
+          ma200:chartVerificationDisplayValue(deterministic.trustedFacts && deterministic.trustedFacts.ma200)
+        },
         canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
         visualBucket:simplifiedState && simplifiedState.visualBucket || '',
         comparison:deterministic.comparison
@@ -23511,17 +23570,23 @@ function renderChartConsistencyTrace(trace){
   const missing = Array.isArray(safe.missing) && safe.missing.length
     ? `<div class="tiny">Missing: ${escapeHtml(safe.missing.join(', '))}</div>`
     : '';
+  const partialIndicators = Array.isArray(safe.partialIndicators) && safe.partialIndicators.length
+    ? `<div class="tiny">Partial indicators: ${escapeHtml(safe.partialIndicators.join(', '))}</div>`
+    : '';
+  const missingIndicators = Array.isArray(safe.missingIndicators) && safe.missingIndicators.length
+    ? `<div class="tiny">Missing indicators: ${escapeHtml(safe.missingIndicators.join(', '))}</div>`
+    : '';
   const extracted = facts
-    ? `<div class="tiny">Extracted: ticker ${escapeHtml(facts.visible_ticker || 'n/a')} | timeframe ${escapeHtml(facts.visible_timeframe || 'n/a')} | price ${escapeHtml(facts.visible_latest_price == null ? 'n/a' : String(facts.visible_latest_price))} | 20 ${escapeHtml(facts.visible_ma20 == null ? 'n/a' : String(facts.visible_ma20))} | 50 ${escapeHtml(facts.visible_ma50 == null ? 'n/a' : String(facts.visible_ma50))} | 200 ${escapeHtml(facts.visible_ma200 == null ? 'n/a' : String(facts.visible_ma200))}</div>`
+    ? `<div class="tiny">Extracted: ticker ${escapeHtml(facts.visible_ticker || 'n/a')} | timeframe ${escapeHtml(facts.visible_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(facts.visible_latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>`
     : '';
   const trustedFacts = trusted
-    ? `<div class="tiny">Trusted: ticker ${escapeHtml(trusted.ticker || 'n/a')} | timeframe ${escapeHtml(trusted.expected_timeframe || 'n/a')} | price ${escapeHtml(trusted.latest_price == null ? 'n/a' : String(trusted.latest_price))} | 20 ${escapeHtml(trusted.ma20 == null ? 'n/a' : String(trusted.ma20))} | 50 ${escapeHtml(trusted.ma50 == null ? 'n/a' : String(trusted.ma50))} | 200 ${escapeHtml(trusted.ma200 == null ? 'n/a' : String(trusted.ma200))}</div>`
+    ? `<div class="tiny">Trusted: ticker ${escapeHtml(trusted.ticker || 'n/a')} | timeframe ${escapeHtml(trusted.expected_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(trusted.latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(trusted.ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(trusted.ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(trusted.ma200))}</div>`
     : '';
   const sources = Array.isArray(safe.sources) && safe.sources.length
     ? `<div class="tiny">Sources: ${escapeHtml(safe.sources.join(', '))}</div>`
     : '';
   const className = safe.severity === 'warning' ? 'ai-summary-message--warning' : '';
-  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${extracted}${trustedFacts}${evidence}${sources}</div>`;
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${partialIndicators}${missingIndicators}${extracted}${trustedFacts}${evidence}${sources}</div>`;
 }
 
 function renderReviewWorkspace(options = {}){
@@ -24259,7 +24324,14 @@ function renderReviewWorkspace(options = {}){
       status:chartConsistencyTrace.status,
       visible:chartConsistencyTrace.visible,
       evidenceCount:Array.isArray(chartConsistencyTrace.evidence) ? chartConsistencyTrace.evidence.length : 0,
-      sources:chartConsistencyTrace.sources || []
+      sources:chartConsistencyTrace.sources || [],
+      ma20_status:chartConsistencyTrace.indicatorStates && chartConsistencyTrace.indicatorStates.ma20_status,
+      ma50_status:chartConsistencyTrace.indicatorStates && chartConsistencyTrace.indicatorStates.ma50_status,
+      ma200_status:chartConsistencyTrace.indicatorStates && chartConsistencyTrace.indicatorStates.ma200_status,
+      missingIndicators:chartConsistencyTrace.missingIndicators || [],
+      partialIndicators:chartConsistencyTrace.partialIndicators || [],
+      extractedFormatted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.extractedFormatted,
+      trustedFormatted:chartConsistencyTrace.debug && chartConsistencyTrace.debug.trustedFormatted
     });
   }
   const chartConsistencyTraceMarkup = renderChartConsistencyTrace(chartConsistencyTrace);
