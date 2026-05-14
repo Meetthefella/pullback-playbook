@@ -22498,6 +22498,7 @@ function renderScannerResults(){
         const detailsAction = node.querySelector('[data-act="open-details"]');
         const traceAction = node.querySelector('[data-act="open-trace"]');
         const visualDebugAction = node.querySelector('[data-act="open-visual-debug"]');
+        const copyDecisionTraceAction = node.querySelector('[data-act="copy-decision-trace"]');
         if(overflowMenu){
           overflowMenu.onclick = event => {
             event.stopPropagation();
@@ -22533,6 +22534,19 @@ function renderScannerResults(){
             event.stopPropagation();
             setScanCardActiveSubmenu(ticker, 'visual-debug');
             renderScannerResults();
+          };
+        }
+        if(copyDecisionTraceAction){
+          copyDecisionTraceAction.onclick = async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const traceContent = node.querySelector('[data-scan-decision-trace-content]');
+            const statusNode = node.querySelector('[data-copy-decision-trace-status]');
+            const traceText = traceContent ? (traceContent.textContent || traceContent.innerText || '').trim() : '';
+            const copied = traceText ? await copyText(traceText) : false;
+            if(statusNode){
+              statusNode.textContent = copied ? 'Copied.' : 'Copy failed.';
+            }
           };
         }
         if(secondaryPanel){

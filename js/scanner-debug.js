@@ -330,7 +330,7 @@
       {label:'provisionalPlanBlockReason', value:globalVerdict.provisionalPlanBlockReason || '(none)'},
       {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'}
     ], 'Promotion Gates', deps);
-    return `${finalSection}${baseSection}${executionSection}${gateSection}${advancedSection}`;
+    return `<div class="scan-decision-trace-actions no-card-click"><button type="button" class="helperbutton" data-act="copy-decision-trace">Copy trace</button><span class="tiny" data-copy-decision-trace-status></span></div><div data-scan-decision-trace-content>${finalSection}${baseSection}${executionSection}${gateSection}${advancedSection}</div>`;
   }
 
   function renderScannerDetailsContent(view, deps = {}){
