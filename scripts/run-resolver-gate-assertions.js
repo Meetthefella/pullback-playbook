@@ -1982,6 +1982,14 @@ function runAiContractAssertions(){
   if(strongMismatchSuppression.suppressed !== true || !/technical analysis could be unreliable/i.test(strongMismatchSuppression.message)){
     throw new Error('Strong chart mismatch must suppress normal AI technical commentary surfaces.');
   }
+  const traceDrivenSuppression = evidenceSandbox.chartVerificationAiSuppression(
+    {ticker:'CTVA', marketData:{price:83.30}},
+    {visible_ticker:'CTVA', visible_latest_price:440.56, coach_summary:'Strong rally with improving momentum.'},
+    {chartConsistencyTrace:strongMismatchTrace}
+  );
+  if(traceDrivenSuppression.suppressed !== true){
+    throw new Error('AI summary suppression must be able to use the already-computed chart verification trace.');
+  }
   const suppressionMarkup = evidenceSandbox.renderSuppressedAiAnalysisPanel(strongMismatchSuppression, 'raw ai response');
   if(!/AI analysis limited/.test(suppressionMarkup) || /Strong rally with improving momentum/.test(suppressionMarkup) || !/Raw Response/.test(suppressionMarkup)){
     throw new Error('Suppressed AI analysis panel must hide technical commentary and preserve raw response details.');

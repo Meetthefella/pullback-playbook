@@ -20405,9 +20405,23 @@ function savedAiPlanNumbersAllowed(record){
   return simplifiedState.planVisible === true && ['entry','near_entry'].includes(verdict);
 }
 
-function chartVerificationAiSuppression(record, analysis){
-  const chartImageSource = buildChartImageSourceTrace(record && record.review);
-  const fastPass = buildChartVerificationFastPass(record, analysis, chartImageSource);
+function chartVerificationAiSuppression(record, analysis, options = {}){
+  const trace = options.chartConsistencyTrace && typeof options.chartConsistencyTrace === 'object'
+    ? options.chartConsistencyTrace
+    : null;
+  if(trace && trace.aiAnalysisSuppressed === true){
+    return {
+      suppressed:true,
+      reason:trace.suppressionReason || 'Chart verification found a clear mismatch; technical AI commentary may be unreliable.',
+      message:'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
+    };
+  }
+  const chartImageSource = trace && trace.chartImageSource
+    ? trace.chartImageSource
+    : buildChartImageSourceTrace(record && record.review);
+  const fastPass = trace && trace.debug && trace.debug.fastPass
+    ? trace.debug.fastPass
+    : buildChartVerificationFastPass(record, analysis, chartImageSource);
   if(fastPass.earlyExit && ['ticker_mismatch','timeframe_mismatch','strong_mismatch'].includes(fastPass.status)){
     return {
       suppressed:true,
@@ -20440,7 +20454,7 @@ function renderSuppressedAiAnalysisPanel(suppression, rawResponse, options = {})
   return `<div class="responsegrid"><div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>AI analysis limited</strong><div>${escapeHtml(message)}</div></div>${raw ? `<details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(raw)}</div></details>` : ''}</div>`;
 }
 
-function renderAnalysisPanelFromRecord(record){
+function renderAnalysisPanelFromRecord(record, options = {}){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
   const runtime = getReviewAiRuntime();
@@ -20464,7 +20478,9 @@ function renderAnalysisPanelFromRecord(record){
   }
   if(analysisState.normalizedAnalysis){
     const analysis = analysisState.normalizedAnalysis;
-    const aiSuppression = chartVerificationAiSuppression(item, analysis);
+    const aiSuppression = chartVerificationAiSuppression(item, analysis, {
+      chartConsistencyTrace:options.chartConsistencyTrace
+    });
     if(aiSuppression.suppressed){
       return renderSuppressedAiAnalysisPanel(aiSuppression, analysisState.rawAnalysis);
     }
@@ -25200,7 +25216,7 @@ function renderReviewWorkspace(options = {}){
   })();
   const aiDetailTraceMarkup = aiAnalysisSuppressedByChartMismatch
     ? `<div class="summary warntext">${escapeHtml(aiSuppressionText)}</div>`
-    : renderAnalysisPanelFromRecord(record);
+    : renderAnalysisPanelFromRecord(record, {chartConsistencyTrace});
   const advancedOpen = isReviewAdvancedOpen(record.ticker);
   const capitalSimulationControls = advancedOpen
     ? `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="capital-sim-50">Simulate 50%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-65">Simulate 65%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-85">Simulate 85%</button><button class="ghost compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>`
