@@ -1861,6 +1861,9 @@ function runAiContractAssertions(){
   if(proximityLabelTrace.indicatorStates.ma20_status !== 'verified' || proximityLabelTrace.indicatorStates.ma50_status !== 'verified' || proximityLabelTrace.indicatorStates.ma200_status !== 'verified'){
     throw new Error('Unassigned visible numeric labels must map to trusted MA values by proximity within tolerance.');
   }
+  if(proximityLabelTrace.status !== 'verified_match' || proximityLabelTrace.title === 'Partial indicator visibility' || proximityLabelTrace.missingIndicators.length || proximityLabelTrace.partialIndicators.length || proximityLabelTrace.summaryDerivedFromFinalState !== true){
+    throw new Error('All proximity-mapped indicators must resolve final summary to verified, not stale partial/missing state.');
+  }
   if(!proximityLabelTrace.debug.numericLabelToMaMatches || !proximityLabelTrace.debug.numericLabelToMaMatches.ma200){
     throw new Error('Numeric label to MA proximity matches must be included in chart verification diagnostics.');
   }
@@ -1883,6 +1886,9 @@ function runAiContractAssertions(){
   );
   if(proximityWithoutLineTrace.indicatorStates.ma20_status !== 'likely_match' || proximityWithoutLineTrace.indicatorStates.ma50_status !== 'likely_match' || proximityWithoutLineTrace.indicatorStates.ma200_status !== 'likely_match'){
     throw new Error('Unassigned numeric labels without line evidence must be likely_match, not missing or fully verified.');
+  }
+  if(proximityWithoutLineTrace.status !== 'likely_match' || proximityWithoutLineTrace.title === 'Partial indicator visibility' || proximityWithoutLineTrace.missingIndicators.length || proximityWithoutLineTrace.partialIndicators.length){
+    throw new Error('All likely-matched indicators must resolve final summary to mostly verified, not stale partial/missing state.');
   }
   const portraitSourceTrace = evidenceSandbox.buildChartImageSourceTrace({
     chartRef:{dataUrl:'data:image/png;base64,source', width:900, height:1600},

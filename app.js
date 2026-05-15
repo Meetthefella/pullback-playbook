@@ -23548,6 +23548,10 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   const inferredIndicators = indicatorStates.filter(item => item.status === 'inferred').map(item => item.label);
   const mismatchedIndicators = indicatorStates.filter(item => item.status === 'mismatch').map(item => item.label);
   const missingIndicators = indicatorStates.filter(item => item.status === 'missing').map(item => item.label);
+  const finalVerifiedLikeIndicators = indicatorStates
+    .filter(item => ['verified','likely_match'].includes(item.status))
+    .map(item => item.label);
+  const allIndicatorsMatched = finalVerifiedLikeIndicators.length === 3;
   const hasExtractedEvidence = !!(
     visibleTicker
     || visibleTimeframe
@@ -23607,6 +23611,16 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     status = 'uncertain_missing_context';
     title = 'Chart context uncertain';
     summary = 'The uploaded image does not show enough ticker/timeframe/price information for deterministic verification.';
+  }else if(allIndicatorsMatched && priceOk !== false){
+    status = likelyMatchedIndicators.length ? 'likely_match' : 'verified_match';
+    severity = 'info';
+    title = status === 'verified_match' ? 'Chart verified' : 'Chart mostly verified';
+    summary = status === 'verified_match'
+      ? `Values verified within normal ${toleranceConfig.marketOpenAssumed ? 'live-market' : 'closed-market'} tolerance.`
+      : 'Ticker, timeframe, and indicators match trusted values.';
+    if(toleranceConfig.staleDataPossible){
+      summary += ' Small differences can occur while the market is open because chart data may update faster than app data.';
+    }
   }else if((likelyMatchedIndicators.length || partialIndicators.length || inferredIndicators.length) && !missingIndicators.length){
     status = 'indicator_partial';
     title = inferredIndicators.length && !partialIndicators.length && !likelyMatchedIndicators.length ? 'Inferred indicator visibility' : 'Partial indicator visibility';
@@ -23651,6 +23665,11 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     title,
     summary,
     missing,
+    initialMissingIndicators:indicatorStates
+      .filter(item => item.status === 'missing' || item.status === 'partial' || item.status === 'inferred')
+      .map(item => item.label),
+    finalMissingIndicators:missingIndicators,
+    summaryDerivedFromFinalState:true,
     missingIndicators,
     partialIndicators,
     likelyMatchedIndicators,
@@ -23820,6 +23839,9 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         .concat(chartImageSource.limited ? ['Chart verification limited: original image unavailable, using preview or legacy chart image.'] : [])
         .concat(fallbackEvidence))].slice(0, 5),
       missing:deterministic.missing,
+      initialMissingIndicators:deterministic.initialMissingIndicators,
+      finalMissingIndicators:deterministic.finalMissingIndicators,
+      summaryDerivedFromFinalState:deterministic.summaryDerivedFromFinalState === true,
       missingIndicators:deterministic.missingIndicators,
       partialIndicators:deterministic.partialIndicators,
       likelyMatchedIndicators:deterministic.likelyMatchedIndicators,
@@ -23842,6 +23864,9 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         ma50_status:deterministic.indicatorStates && deterministic.indicatorStates.ma50_status,
         ma200_status:deterministic.indicatorStates && deterministic.indicatorStates.ma200_status,
         missingIndicators:deterministic.missingIndicators || [],
+        initialMissingIndicators:deterministic.initialMissingIndicators || [],
+        finalMissingIndicators:deterministic.finalMissingIndicators || [],
+        summaryDerivedFromFinalState:deterministic.summaryDerivedFromFinalState === true,
         partialIndicators:deterministic.partialIndicators || [],
         likelyMatchedIndicators:deterministic.likelyMatchedIndicators || [],
         inferredIndicators:deterministic.inferredIndicators || [],
@@ -24767,6 +24792,9 @@ function renderReviewWorkspace(options = {}){
       ma50_status:chartConsistencyTrace.indicatorStates && chartConsistencyTrace.indicatorStates.ma50_status,
       ma200_status:chartConsistencyTrace.indicatorStates && chartConsistencyTrace.indicatorStates.ma200_status,
       missingIndicators:chartConsistencyTrace.missingIndicators || [],
+      initialMissingIndicators:chartConsistencyTrace.initialMissingIndicators || [],
+      finalMissingIndicators:chartConsistencyTrace.finalMissingIndicators || [],
+      summaryDerivedFromFinalState:chartConsistencyTrace.summaryDerivedFromFinalState === true,
       partialIndicators:chartConsistencyTrace.partialIndicators || [],
       likelyMatchedIndicators:chartConsistencyTrace.likelyMatchedIndicators || [],
       inferredIndicators:chartConsistencyTrace.inferredIndicators || [],
