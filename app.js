@@ -20437,11 +20437,15 @@ function chartVerificationAiSuppression(record, analysis, options = {}){
     };
   }
   const verification = buildDeterministicChartVerification(record, analysis);
-  if(verification && verification.aiAnalysisSuppressed === true){
+  const hasChart = !!(chartImageSource && chartImageSource.sourceKind && chartImageSource.sourceKind !== 'none');
+  const suppressForUncertainContext = verification && verification.status === 'uncertain_missing_context' && hasChart;
+  if(verification && (verification.aiAnalysisSuppressed === true || suppressForUncertainContext)){
     return {
       suppressed:true,
-      reason:verification.suppressionReason || 'Strong chart mismatch detected; technical AI commentary may be unreliable.',
-      message:'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
+      reason:verification.suppressionReason || (suppressForUncertainContext ? 'Chart context could not be independently verified; technical AI commentary may be unreliable.' : 'Strong chart mismatch detected; technical AI commentary may be unreliable.'),
+      message:suppressForUncertainContext
+        ? 'AI analysis limited. The chart could not be verified clearly enough, so technical analysis may be unreliable.'
+        : 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
     };
   }
   return {
@@ -24306,6 +24310,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       ? chartSpecificFallbackEvidence.map(item => String(item || '').startsWith('Legacy AI fallback:') ? String(item || '') : `Legacy AI fallback: ${item}`)
       : [];
     const fallbackSources = fallbackEvidence.length ? ['legacy_ai_chart_match'] : [];
+    const suppressForUncertainContext = chartContextIncomplete && hasChart;
     return {
       visible:true,
       status:deterministic.status,
@@ -24320,8 +24325,8 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       finalMissingIndicators:deterministic.finalMissingIndicators,
       summaryDerivedFromFinalState:deterministic.summaryDerivedFromFinalState === true,
       mismatchSeverity:deterministic.mismatchSeverity || '',
-      aiAnalysisSuppressed:deterministic.aiAnalysisSuppressed === true,
-      suppressionReason:deterministic.suppressionReason || '',
+      aiAnalysisSuppressed:deterministic.aiAnalysisSuppressed === true || suppressForUncertainContext,
+      suppressionReason:deterministic.suppressionReason || (suppressForUncertainContext ? 'Chart context could not be independently verified; technical AI commentary may be unreliable.' : ''),
       missingIndicators:deterministic.missingIndicators,
       partialIndicators:deterministic.partialIndicators,
       likelyMatchedIndicators:deterministic.likelyMatchedIndicators,
@@ -24349,8 +24354,8 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         finalMissingIndicators:deterministic.finalMissingIndicators || [],
         summaryDerivedFromFinalState:deterministic.summaryDerivedFromFinalState === true,
         mismatchSeverity:deterministic.mismatchSeverity || '',
-        aiAnalysisSuppressed:deterministic.aiAnalysisSuppressed === true,
-        suppressionReason:deterministic.suppressionReason || '',
+        aiAnalysisSuppressed:deterministic.aiAnalysisSuppressed === true || suppressForUncertainContext,
+        suppressionReason:deterministic.suppressionReason || (suppressForUncertainContext ? 'Chart context could not be independently verified; technical AI commentary may be unreliable.' : ''),
         partialIndicators:deterministic.partialIndicators || [],
         likelyMatchedIndicators:deterministic.likelyMatchedIndicators || [],
         inferredIndicators:deterministic.inferredIndicators || [],

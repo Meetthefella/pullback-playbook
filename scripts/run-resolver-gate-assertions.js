@@ -1719,6 +1719,18 @@ function runAiContractAssertions(){
   if(deterministicMissingTrace.debug.fastPass.fastStatus !== 'insufficient_context' || deterministicMissingTrace.debug.fastPass.earlyExit === true || deterministicMissingTrace.aiAnalysisSuppressed !== true){
     throw new Error('Insufficient fast-pass context must not falsely produce an early chart mismatch.');
   }
+  const finalUncertainSuppression = evidenceSandbox.chartVerificationAiSuppression(
+    {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}}},
+    {
+      visible_ticker:'NVDA',
+      visible_latest_price:500,
+      extraction_method_used:'ocr',
+      visible_numeric_labels:[500]
+    }
+  );
+  if(finalUncertainSuppression.suppressed !== true || !/could not be verified clearly enough/i.test(finalUncertainSuppression.message)){
+    throw new Error('Final uncertain_missing_context chart verification must suppress normal AI commentary.');
+  }
   const contextMirroringTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'CTVA',
