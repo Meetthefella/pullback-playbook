@@ -1438,6 +1438,7 @@ function runAiContractAssertions(){
     'chartVerificationDisplayValue',
     'chartVerificationNumericLabels',
     'chartVerificationProximityMatches',
+    'chartVerificationPriceMismatchSeverity',
     'chartImageDimensionsFromRef',
     'chartImageDimensionsLabel',
     'buildChartImageSourceTrace',
@@ -1839,7 +1840,7 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor', planStatus:'missing'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(closedToleranceTrace.status !== 'price_mismatch' || closedToleranceTrace.debug.marketOpenAssumed !== false){
+  if(!['minor_drift','possible_mismatch'].includes(closedToleranceTrace.status) || closedToleranceTrace.debug.marketOpenAssumed !== false){
     throw new Error('Closed-market tolerance must stay strict enough to flag stale or wrong chart values.');
   }
   const proximityLabelTrace = evidenceSandbox.buildChartConsistencyTrace(
@@ -1928,8 +1929,30 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(priceMismatchTrace.status !== 'price_mismatch'){
-    throw new Error('Visible latest price outside tolerance must produce price_mismatch.');
+  if(priceMismatchTrace.status !== 'possible_mismatch' || priceMismatchTrace.mismatchSeverity !== 'possible_mismatch' || priceMismatchTrace.aiAnalysisSuppressed === true){
+    throw new Error('Moderate visible latest price mismatch must produce possible_mismatch without suppressing AI analysis.');
+  }
+  const strongMismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'CTVA',
+      visible_timeframe:'1D',
+      visible_latest_price:440.56,
+      visible_ma20:80.95,
+      visible_ma50:80.99,
+      visible_ma200:72.13,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor', planStatus:'missing'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  const strongMismatchMarkup = evidenceSandbox.renderChartConsistencyTrace(strongMismatchTrace);
+  if(strongMismatchTrace.status !== 'strong_mismatch' || strongMismatchTrace.title !== 'Chart mismatch detected' || strongMismatchTrace.aiAnalysisSuppressed !== true || strongMismatchTrace.debug.canonicalVerdict !== 'watch'){
+    throw new Error('Severe chart price mismatch must produce strong_mismatch without changing resolver state.');
+  }
+  if(!/The uploaded chart is unlikely to match CTVA\./.test(strongMismatchMarkup) || /Visible price 440\.56/.test(strongMismatchMarkup.split('<summary>Show details</summary>')[0] || strongMismatchMarkup)){
+    throw new Error('Strong mismatch default wording must be short and non-technical.');
   }
   const verifiedSuppressesLegacy = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{

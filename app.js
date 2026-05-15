@@ -23477,6 +23477,18 @@ function chartVerificationProximityMatches(labels, trustedValues, toleranceConfi
   return matches;
 }
 
+function chartVerificationPriceMismatchSeverity(priceDetail, visiblePrice, trustedPrice){
+  if(!priceDetail || priceDetail.match !== false) return 'none';
+  const observed = chartVerificationNumberOrNull(visiblePrice);
+  const expected = chartVerificationNumberOrNull(trustedPrice);
+  const deltaPct = Number.isFinite(priceDetail.deltaPct) ? priceDetail.deltaPct : null;
+  const delta = Number.isFinite(priceDetail.delta) ? priceDetail.delta : null;
+  if(deltaPct !== null && deltaPct >= 0.15) return 'strong_mismatch';
+  if(delta !== null && delta >= 10 && expected !== null && expected < 200) return 'strong_mismatch';
+  if(deltaPct !== null && deltaPct >= 0.03) return 'possible_mismatch';
+  return 'minor_drift';
+}
+
 function buildDeterministicChartVerification(record = {}, analysis = null){
   const safeRecord = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : {};
@@ -23573,6 +23585,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   if(visiblePrice === null) missing.push('latest price');
 
   const priceOk = priceDetail.match;
+  const priceMismatchSeverity = chartVerificationPriceMismatchSeverity(priceDetail, visiblePrice, trustedPrice);
   const ma20Ok = ma20Detail.match;
   const ma50Ok = ma50Detail.match;
   const ma200Ok = ma200Detail.match;
@@ -23596,9 +23609,17 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     summary = `Uploaded chart appears to use ${visibleTimeframe}, but this review expects a daily chart.`;
     evidence.push(summary);
   }else if(priceOk === false){
-    status = 'price_mismatch';
-    title = 'Price mismatch';
-    summary = `Visible latest price is outside normal ${toleranceConfig.marketOpenAssumed ? 'live-market' : 'closed-market'} tolerance from trusted market data.`;
+    status = priceMismatchSeverity === 'strong_mismatch'
+      ? 'strong_mismatch'
+      : (priceMismatchSeverity === 'minor_drift' ? 'minor_drift' : 'possible_mismatch');
+    title = status === 'strong_mismatch'
+      ? 'Chart mismatch detected'
+      : (status === 'minor_drift' ? 'Small price drift detected' : 'Chart context uncertain');
+    summary = status === 'strong_mismatch'
+      ? `The uploaded chart is unlikely to match ${expectedTicker || 'the selected ticker'}.`
+      : (status === 'minor_drift'
+        ? 'The visible price is slightly different from app data.'
+        : 'The uploaded chart may not match the selected ticker.');
     evidence.push(`Visible price ${visiblePrice}; trusted price ${trustedPrice}.`);
   }else if(ma20Ok === false || ma50Ok === false || ma200Ok === false){
     status = 'indicator_value_mismatch';
@@ -23670,6 +23691,9 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
       .map(item => item.label),
     finalMissingIndicators:missingIndicators,
     summaryDerivedFromFinalState:true,
+    mismatchSeverity:status === 'strong_mismatch' ? 'strong_mismatch' : priceMismatchSeverity,
+    aiAnalysisSuppressed:status === 'strong_mismatch',
+    suppressionReason:status === 'strong_mismatch' ? 'Strong chart mismatch detected; technical AI commentary may be unreliable.' : '',
     missingIndicators,
     partialIndicators,
     likelyMatchedIndicators,
@@ -23716,6 +23740,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
       tickerMatch:visibleTicker && expectedTicker ? visibleTicker === expectedTicker : null,
       timeframeMatch:visibleTimeframe ? isDailyTimeframe(visibleTimeframe) : null,
       priceMatch:priceOk,
+      priceMismatchSeverity,
       ma20Match:ma20Ok,
       ma50Match:ma50Ok,
       ma200Match:ma200Ok,
@@ -23842,6 +23867,9 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       initialMissingIndicators:deterministic.initialMissingIndicators,
       finalMissingIndicators:deterministic.finalMissingIndicators,
       summaryDerivedFromFinalState:deterministic.summaryDerivedFromFinalState === true,
+      mismatchSeverity:deterministic.mismatchSeverity || '',
+      aiAnalysisSuppressed:deterministic.aiAnalysisSuppressed === true,
+      suppressionReason:deterministic.suppressionReason || '',
       missingIndicators:deterministic.missingIndicators,
       partialIndicators:deterministic.partialIndicators,
       likelyMatchedIndicators:deterministic.likelyMatchedIndicators,
@@ -23867,6 +23895,9 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         initialMissingIndicators:deterministic.initialMissingIndicators || [],
         finalMissingIndicators:deterministic.finalMissingIndicators || [],
         summaryDerivedFromFinalState:deterministic.summaryDerivedFromFinalState === true,
+        mismatchSeverity:deterministic.mismatchSeverity || '',
+        aiAnalysisSuppressed:deterministic.aiAnalysisSuppressed === true,
+        suppressionReason:deterministic.suppressionReason || '',
         partialIndicators:deterministic.partialIndicators || [],
         likelyMatchedIndicators:deterministic.likelyMatchedIndicators || [],
         inferredIndicators:deterministic.inferredIndicators || [],
@@ -24006,6 +24037,13 @@ function renderChartConsistencyTrace(trace){
     }else if(['indicator_partial','indicator_incomplete','indicator_missing'].includes(String(safe.status || ''))){
       summaryLines.push('Some indicators could not be confirmed from the uploaded image.');
     }
+  }else if(String(safe.status || '') === 'strong_mismatch'){
+    summaryLines.push(`The uploaded chart is unlikely to match ${(trusted && trusted.ticker) || 'the selected ticker'}.`);
+  }else if(String(safe.status || '') === 'possible_mismatch'){
+    summaryLines.push('The uploaded chart may not match the selected ticker.');
+  }else if(String(safe.status || '') === 'minor_drift'){
+    summaryLines.push('The visible price is slightly different from app data.');
+    summaryLines.push('This can happen while the market is open.');
   }else if(String(safe.status || '') === 'price_mismatch'){
     summaryLines.push('The visible price is outside the expected tolerance.');
     summaryLines.push('This can happen if chart data and app data are out of sync.');
@@ -24795,6 +24833,9 @@ function renderReviewWorkspace(options = {}){
       initialMissingIndicators:chartConsistencyTrace.initialMissingIndicators || [],
       finalMissingIndicators:chartConsistencyTrace.finalMissingIndicators || [],
       summaryDerivedFromFinalState:chartConsistencyTrace.summaryDerivedFromFinalState === true,
+      mismatchSeverity:chartConsistencyTrace.mismatchSeverity || '',
+      aiAnalysisSuppressed:chartConsistencyTrace.aiAnalysisSuppressed === true,
+      suppressionReason:chartConsistencyTrace.suppressionReason || '',
       partialIndicators:chartConsistencyTrace.partialIndicators || [],
       likelyMatchedIndicators:chartConsistencyTrace.likelyMatchedIndicators || [],
       inferredIndicators:chartConsistencyTrace.inferredIndicators || [],
@@ -24822,6 +24863,8 @@ function renderReviewWorkspace(options = {}){
     });
   }
   const chartConsistencyTraceMarkup = renderChartConsistencyTrace(chartConsistencyTrace);
+  const aiAnalysisSuppressedByChartMismatch = chartConsistencyTrace.aiAnalysisSuppressed === true;
+  const aiSuppressionText = 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
   const previewRef = (record.review.chartImagePreview && record.review.chartImagePreview.dataUrl)
     ? record.review.chartImagePreview
     : record.review.chartRef;
@@ -24842,6 +24885,7 @@ function renderReviewWorkspace(options = {}){
     ? `<details class="compact-details review-chart-controls"><summary>Change chart</summary>${chartControlsFullMarkup}</details>`
     : chartControlsFullMarkup;
   const aiSummaryPreview = (() => {
+    if(aiAnalysisSuppressedByChartMismatch) return aiSuppressionText;
     if(analysisState.error) return `AI analysis failed: ${analysisState.error}`;
     if(analysisUiState === 'running') return `🤖 ${analysisLoadingStage}`;
     if(analysisUiState === 'idle' || analysisUiState === 'ready') return 'No AI analysis saved yet.';
@@ -24853,6 +24897,9 @@ function renderReviewWorkspace(options = {}){
     const fallback = String(analysisState.rawAnalysis || '').trim();
     return fallback || 'No AI analysis saved yet.';
   })();
+  const aiDetailTraceMarkup = aiAnalysisSuppressedByChartMismatch
+    ? `<div class="summary warntext">${escapeHtml(aiSuppressionText)}</div>`
+    : renderAnalysisPanelFromRecord(record);
   const advancedOpen = isReviewAdvancedOpen(record.ticker);
   const capitalSimulationControls = advancedOpen
     ? `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="capital-sim-50">Simulate 50%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-65">Simulate 65%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-85">Simulate 85%</button><button class="ghost compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>`
@@ -25188,7 +25235,7 @@ function renderReviewWorkspace(options = {}){
           </details>
           <details class="compact-details">
             <summary>AI detail trace</summary>
-            ${renderAnalysisPanelFromRecord(record)}
+            ${aiDetailTraceMarkup}
           </details>
           <details class="compact-details">
             <summary>Workspace Status</summary>
