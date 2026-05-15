@@ -1429,6 +1429,10 @@ function runAiContractAssertions(){
     'normaliseVisibleTicker',
     'normaliseVisibleTimeframe',
     'isDailyTimeframe',
+    'simpleStableHash',
+    'chartImageIdForReview',
+    'logChartVerificationLifecycle',
+    'logChartVerificationFastPass',
     'chartVerificationExchangeTimeZone',
     'chartVerificationMarketOpenNow',
     'chartVerificationToleranceConfig',
@@ -1439,6 +1443,7 @@ function runAiContractAssertions(){
     'chartVerificationNumericLabels',
     'chartVerificationProximityMatches',
     'chartVerificationPriceMismatchSeverity',
+    'buildChartVerificationFastPass',
     'chartImageDimensionsFromRef',
     'chartImageDimensionsLabel',
     'buildChartImageSourceTrace',
@@ -1697,8 +1702,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(deterministicMismatchTrace.status !== 'ticker_mismatch' || !deterministicMismatchTrace.sources.includes('deterministic_chart_verification')){
-    throw new Error('Deterministic visible_ticker mismatch must be the primary chart verification source.');
+  if(deterministicMismatchTrace.status !== 'ticker_mismatch' || !deterministicMismatchTrace.sources.includes('chart_verification_fast_pass') || deterministicMismatchTrace.debug.fastPass.earlyExit !== true || deterministicMismatchTrace.aiAnalysisSuppressed !== true){
+    throw new Error('Fast visible_ticker mismatch must exit before full chart verification and suppress AI commentary.');
   }
   const deterministicMissingTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -1710,6 +1715,9 @@ function runAiContractAssertions(){
   );
   if(deterministicMissingTrace.status !== 'uncertain_missing_context' || !deterministicMissingTrace.missing.includes('visible ticker') || !deterministicMissingTrace.missing.includes('visible timeframe')){
     throw new Error('Missing deterministic ticker/timeframe facts must produce uncertain_missing_context.');
+  }
+  if(deterministicMissingTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || deterministicMissingTrace.debug.fastPass.earlyExit === true){
+    throw new Error('Insufficient fast-pass context must not falsely produce an early chart mismatch.');
   }
   const indicatorMissingTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -1950,8 +1958,8 @@ function runAiContractAssertions(){
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
   const strongMismatchMarkup = evidenceSandbox.renderChartConsistencyTrace(strongMismatchTrace);
-  if(strongMismatchTrace.status !== 'strong_mismatch' || strongMismatchTrace.title !== 'Chart mismatch detected' || strongMismatchTrace.aiAnalysisSuppressed !== true || strongMismatchTrace.debug.canonicalVerdict !== 'watch'){
-    throw new Error('Severe chart price mismatch must produce strong_mismatch without changing resolver state.');
+  if(strongMismatchTrace.status !== 'strong_mismatch' || strongMismatchTrace.title !== 'Chart mismatch detected' || strongMismatchTrace.aiAnalysisSuppressed !== true || strongMismatchTrace.debug.canonicalVerdict !== 'watch' || strongMismatchTrace.debug.fastPass.earlyExit !== true || strongMismatchTrace.debug.fastPass.deepVerificationQueued !== false){
+    throw new Error('Severe chart price mismatch must fast-exit as strong_mismatch without changing resolver state.');
   }
   if(!/The uploaded chart is unlikely to match CTVA\./.test(strongMismatchMarkup) || /Visible price 440\.56/.test(strongMismatchMarkup.split('<summary>Show details</summary>')[0] || strongMismatchMarkup)){
     throw new Error('Strong mismatch default wording must be short and non-technical.');
@@ -1997,6 +2005,9 @@ function runAiContractAssertions(){
   );
   if(verifiedSuppressesLegacy.status !== 'verified_match' || verifiedSuppressesLegacy.sources.includes('legacy_ai_chart_match')){
     throw new Error('Deterministic verified_match must suppress legacy AI chart-match uncertainty.');
+  }
+  if(verifiedSuppressesLegacy.debug.fastPass.fastStatus !== 'clear_match_candidate' || verifiedSuppressesLegacy.debug.fastPass.deepVerificationQueued !== true){
+    throw new Error('Valid fast-pass chart candidates must proceed to full deterministic verification.');
   }
   if(verifiedSuppressesLegacy.indicatorStates.ma20_status !== 'verified' || verifiedSuppressesLegacy.indicatorStates.ma50_status !== 'verified' || verifiedSuppressesLegacy.indicatorStates.ma200_status !== 'verified'){
     throw new Error('All visible matching MA values must report verified indicator states.');
@@ -2053,6 +2064,52 @@ function runAiContractAssertions(){
   }
   if(/lack of stabilization/i.test(previewFallbackEvidence) || previewFallbackTrace.sources.includes('legacy_ai_chart_match')){
     throw new Error('Legacy chart-match fallback must not surface non-chart risk evidence when deterministic chart facts exist.');
+  }
+  const staleChartTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'BWXT', marketData:{price:210.94, ma20:200, ma50:190, ma200:170}, review:{
+      chartRef:{dataUrl:'data:image/png;base64,new-bwxt-chart', imageId:'new_image', width:1080, height:2400},
+      chartImageOriginal:{imageId:'new_image', width:1080, height:2400, dataUrlField:'chartRef.dataUrl'},
+      normalizedAnalysis:{
+        __chartImageId:'old_image',
+        visible_ticker:'CTVA',
+        visible_timeframe:'1D',
+        visible_latest_price:83.31,
+        visible_ma20:80.95,
+        visible_ma50:80.99,
+        visible_ma200:72.13,
+        ma20_visible:true,
+        ma50_visible:true,
+        ma200_visible:true
+      }
+    }},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(staleChartTrace.status === 'ticker_mismatch' || /CTVA|83\.31/.test(JSON.stringify(staleChartTrace))){
+    throw new Error('Chart verification must ignore normalized analysis tied to a previous chart image id.');
+  }
+  const staleFastPass = evidenceSandbox.buildChartVerificationFastPass(
+    {ticker:'BWXT', marketData:{price:210.94}, review:{chartRef:{dataUrl:'data:image/png;base64,new-bwxt-chart', imageId:'new_image'}}},
+    {__chartImageId:'old_image', visible_ticker:'CTVA', visible_latest_price:83.31},
+    {imageId:'new_image'}
+  );
+  if(staleFastPass.fastStatus !== 'stale_state_detected' || staleFastPass.staleStateRejected !== true || staleFastPass.earlyExit !== true){
+    throw new Error('Fast chart verification must reject payloads tied to an older chart image version.');
+  }
+  const explicitlyClearedChartTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'BWXT', marketData:{price:210.94, ma20:200, ma50:190, ma200:170}, review:{
+      chartRef:{dataUrl:'data:image/png;base64,new-bwxt-chart', imageId:'new_image', width:1080, height:2400},
+      normalizedAnalysis:{
+        visible_ticker:'CTVA',
+        visible_timeframe:'1D',
+        visible_latest_price:83.31
+      }
+    }},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {normalizedAnalysis:null, derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(/CTVA|83\.31/.test(JSON.stringify(explicitlyClearedChartTrace))){
+    throw new Error('Explicitly cleared chart analysis must not fall back to stale review.normalizedAnalysis.');
   }
   const unknownStructurePromotion = resolverCore.resolveGlobalVerdict({
     ticker:'AINEUTRAL',
