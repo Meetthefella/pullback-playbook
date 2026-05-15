@@ -20429,6 +20429,13 @@ function chartVerificationAiSuppression(record, analysis, options = {}){
       message:'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
     };
   }
+  if(fastPass.fastStatus === 'stale_state_detected' || (fastPass.fastStatus === 'insufficient_context' && fastPass.hasFastFacts)){
+    return {
+      suppressed:true,
+      reason:fastPass.suppressionReason || 'Chart context was not independently verified; technical AI commentary may be unreliable.',
+      message:'AI analysis limited. The chart could not be verified clearly enough, so technical analysis may be unreliable.'
+    };
+  }
   const verification = buildDeterministicChartVerification(record, analysis);
   if(verification && verification.aiAnalysisSuppressed === true){
     return {
@@ -23647,11 +23654,49 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
   const visibleTimeframe = String(safeAnalysis.visible_timeframe || '').trim();
   const visiblePrice = chartVerificationNumberOrNull(safeAnalysis.visible_latest_price);
   const trustedPrice = chartVerificationNumberOrNull(marketData.price ?? safeRecord.price);
+  const extractionMethodUsed = String(safeAnalysis.extraction_method_used || safeAnalysis.ma200_extraction_method_used || '').trim();
+  const visibleTickerSource = String(safeAnalysis.visible_ticker_source || safeAnalysis.ticker_extraction_source || '').trim().toLowerCase();
+  const visiblePriceSource = String(safeAnalysis.visible_price_source || safeAnalysis.price_extraction_source || '').trim().toLowerCase();
+  const visibleTimeframeSource = String(safeAnalysis.visible_timeframe_source || safeAnalysis.timeframe_extraction_source || '').trim().toLowerCase();
+  const visibleNumericLabelsCount = chartVerificationNumericLabels(safeAnalysis).length;
+  const visibleMaValuesCount = ['visible_ma20','visible_ma50','visible_ma200']
+    .filter(key => chartVerificationNumberOrNull(safeAnalysis[key]) !== null)
+    .length;
+  const maVisibilityAssessedCount = ['ma20_visible','ma50_visible','ma200_visible','ma200_line_detected']
+    .filter(key => Object.prototype.hasOwnProperty.call(safeAnalysis, key))
+    .length;
+  const maLineEvidenceCount = ['ma20_visible','ma50_visible','ma200_visible','ma200_line_detected']
+    .filter(key => safeAnalysis[key] === true)
+    .length;
+  const sourceIsImageDerived = value => /\b(image|ocr|vision|visible|chart|extracted|screen|screenshot)\b/.test(String(value || ''));
+  const extractionMethodHasEvidence = !!(extractionMethodUsed && !/^none$/i.test(extractionMethodUsed));
+  const hasImageDerivedTicker = !!(visibleTicker && (sourceIsImageDerived(visibleTickerSource) || extractionMethodHasEvidence || visibleNumericLabelsCount > 0 || visibleMaValuesCount > 0 || maLineEvidenceCount > 0 || maVisibilityAssessedCount > 0));
+  const hasImageDerivedPrice = !!(visiblePrice !== null && (sourceIsImageDerived(visiblePriceSource) || visibleNumericLabelsCount > 0 || visibleMaValuesCount > 0 || extractionMethodHasEvidence || maVisibilityAssessedCount > 0));
+  const hasImageDerivedTimeframe = !!(visibleTimeframe && (sourceIsImageDerived(visibleTimeframeSource) || extractionMethodHasEvidence || maVisibilityAssessedCount > 0));
+  const evidenceSignals = [];
+  if(hasImageDerivedTicker) evidenceSignals.push('image_derived_ticker');
+  if(hasImageDerivedPrice) evidenceSignals.push('image_derived_price');
+  if(hasImageDerivedTimeframe) evidenceSignals.push('image_derived_timeframe');
+  if(visibleNumericLabelsCount > 0) evidenceSignals.push('visible_numeric_labels');
+  if(visibleMaValuesCount > 0 || maLineEvidenceCount > 0) evidenceSignals.push('ma_evidence');
+  if(maVisibilityAssessedCount > 0) evidenceSignals.push('ma_visibility_assessed');
+  if(extractionMethodHasEvidence) evidenceSignals.push('extraction_method');
+  const independentImageEvidence = evidenceSignals.length >= 2;
+  const contextMirroringSuspected = !!(
+    visibleTicker
+    && expectedTicker
+    && visibleTicker === expectedTicker
+    && visiblePrice !== null
+    && trustedPrice !== null
+    && Math.abs(visiblePrice - trustedPrice) < 0.0001
+    && !independentImageEvidence
+  );
   const currentImageId = chartImageSource && chartImageSource.imageId ? String(chartImageSource.imageId) : chartImageIdForReview(safeRecord.review || {});
   const analysisImageId = safeAnalysis.__chartImageId ? String(safeAnalysis.__chartImageId) : '';
   const priceDeltaPercent = visiblePrice !== null && trustedPrice !== null && trustedPrice !== 0
     ? Math.abs(visiblePrice - trustedPrice) / Math.abs(trustedPrice)
     : null;
+  const hasFastFacts = !!(visibleTicker || visibleTimeframe || visiblePrice !== null);
   let fastStatus = 'insufficient_context';
   let status = 'uncertain_missing_context';
   let reason = 'Not enough visible ticker/price/timeframe facts for a fast decision.';
@@ -23659,6 +23704,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
   let summary = 'The uploaded image does not show enough context to verify quickly.';
   let earlyExit = false;
   let staleStateRejected = false;
+  let clearMatchRejectedReason = '';
 
   if(currentImageId && analysisImageId && currentImageId !== analysisImageId){
     fastStatus = 'stale_state_detected';
@@ -23689,11 +23735,23 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     title = 'Chart mismatch detected';
     summary = `The uploaded chart is unlikely to match ${expectedTicker || 'the selected ticker'}.`;
     earlyExit = true;
-  }else if(visibleTicker || visibleTimeframe || visiblePrice !== null){
+  }else if((visibleTicker || visibleTimeframe || visiblePrice !== null) && independentImageEvidence){
     fastStatus = 'clear_match_candidate';
     status = 'clear_match_candidate';
     reason = 'Fast facts do not show an obvious contradiction.';
+  }else if(visibleTicker || visibleTimeframe || visiblePrice !== null){
+    clearMatchRejectedReason = contextMirroringSuspected
+      ? 'Extracted ticker/price match app context but lack independent image evidence.'
+      : 'Fast facts exist but are not independently supported by image evidence.';
+    reason = clearMatchRejectedReason;
   }
+  const aiAnalysisSuppressed = ['stale_state_detected','clear_mismatch'].includes(fastStatus)
+    || (fastStatus === 'insufficient_context' && hasFastFacts);
+  const suppressionReason = fastStatus === 'clear_mismatch'
+    ? 'Fast chart verification found a clear mismatch; technical AI commentary may be unreliable.'
+    : (fastStatus === 'stale_state_detected'
+      ? 'Chart verification state was stale for the current image.'
+      : 'Chart context was not independently verified; technical AI commentary may be unreliable.');
 
   return {
     fastStatus,
@@ -23704,13 +23762,30 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     visibleTicker,
     visibleTimeframe,
     visiblePrice,
+    hasFastFacts,
+    visibleTickerSource,
+    visiblePriceSource,
+    visibleTimeframeSource,
+    extractionMethodUsed:extractionMethodUsed || 'none',
+    independentImageEvidence,
+    evidenceQuality:independentImageEvidence ? 'independent' : 'weak',
+    evidenceSignals,
+    visibleNumericLabelsCount,
+    maEvidenceCount:visibleMaValuesCount + maLineEvidenceCount + maVisibilityAssessedCount,
+    hasImageDerivedTicker,
+    hasImageDerivedPrice,
+    hasImageDerivedTimeframe,
+    contextMirroringSuspected,
+    clearMatchRejectedReason,
     trustedPrice,
     priceDeltaPercent,
     imageId:currentImageId,
     analysisImageId,
     earlyExit,
     deepVerificationQueued:!earlyExit && fastStatus !== 'stale_state_detected',
-    staleStateRejected
+    staleStateRejected,
+    aiAnalysisSuppressed,
+    suppressionReason
   };
 }
 
@@ -24012,6 +24087,13 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       visiblePrice:staleFastPass.visiblePrice,
       trustedPrice:staleFastPass.trustedPrice,
       priceDeltaPercent:staleFastPass.priceDeltaPercent,
+      evidenceQuality:staleFastPass.evidenceQuality,
+      independentImageEvidence:staleFastPass.independentImageEvidence,
+      evidenceSignals:staleFastPass.evidenceSignals,
+      contextMirroringSuspected:staleFastPass.contextMirroringSuspected,
+      clearMatchRejectedReason:staleFastPass.clearMatchRejectedReason,
+      aiAnalysisSuppressed:staleFastPass.aiAnalysisSuppressed,
+      suppressionReason:staleFastPass.suppressionReason,
       earlyExit:staleFastPass.earlyExit,
       deepVerificationQueued:false,
       staleStateRejected:true
@@ -24100,6 +24182,13 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       visiblePrice:fastPass.visiblePrice,
       trustedPrice:fastPass.trustedPrice,
       priceDeltaPercent:fastPass.priceDeltaPercent,
+      evidenceQuality:fastPass.evidenceQuality,
+      independentImageEvidence:fastPass.independentImageEvidence,
+      evidenceSignals:fastPass.evidenceSignals,
+      contextMirroringSuspected:fastPass.contextMirroringSuspected,
+      clearMatchRejectedReason:fastPass.clearMatchRejectedReason,
+      aiAnalysisSuppressed:fastPass.aiAnalysisSuppressed,
+      suppressionReason:fastPass.suppressionReason,
       earlyExit:fastPass.earlyExit,
       deepVerificationQueued:fastPass.deepVerificationQueued,
       staleStateRejected:fastPass.staleStateRejected
@@ -24144,9 +24233,57 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         fastPass,
         deterministicStatus:fastPass.status,
         chartImageSource,
+        hasChart,
         mismatchSeverity:fastPass.status === 'strong_mismatch' ? 'strong_mismatch' : 'possible_mismatch',
         aiAnalysisSuppressed:suppressed,
         suppressionReason:suppressed ? 'Fast chart verification found a clear mismatch; technical AI commentary may be unreliable.' : '',
+        canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
+        visualBucket:simplifiedState && simplifiedState.visualBucket || ''
+      }
+    };
+  }
+  if(fastPass.fastStatus === 'insufficient_context' && analysis && fastPass.hasFastFacts){
+    return {
+      visible:true,
+      status:'uncertain_missing_context',
+      severity:'warning',
+      title:'Chart context uncertain',
+      summary:'The uploaded image does not clearly show enough information to verify the chart.',
+      evidence:[],
+      missing:['independent chart evidence'],
+      initialMissingIndicators:[],
+      finalMissingIndicators:[],
+      summaryDerivedFromFinalState:true,
+      mismatchSeverity:'none',
+      aiAnalysisSuppressed:true,
+      suppressionReason:fastPass.suppressionReason || 'Chart context was not independently verified; technical AI commentary may be unreliable.',
+      missingIndicators:[],
+      partialIndicators:[],
+      likelyMatchedIndicators:[],
+      inferredIndicators:[],
+      indicatorStates:{},
+      extractedFacts:{
+        visible_ticker:fastPass.visibleTicker,
+        visible_timeframe:fastPass.visibleTimeframe,
+        visible_latest_price:fastPass.visiblePrice
+      },
+      trustedFacts:{
+        ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
+        expected_timeframe:'1D',
+        latest_price:fastPass.trustedPrice
+      },
+      sources:['chart_verification_fast_pass'],
+      chartImageSource,
+      debug:{
+        ticker:String(safeRecord.ticker || '').trim(),
+        source:'chart_verification_fast_pass',
+        fastPass,
+        deterministicStatus:'uncertain_missing_context',
+        chartImageSource,
+        hasChart,
+        mismatchSeverity:'none',
+        aiAnalysisSuppressed:true,
+        suppressionReason:fastPass.suppressionReason || '',
         canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
         visualBucket:simplifiedState && simplifiedState.visualBucket || ''
       }

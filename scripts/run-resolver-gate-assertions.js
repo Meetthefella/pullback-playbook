@@ -1713,11 +1713,40 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(deterministicMissingTrace.status !== 'uncertain_missing_context' || !deterministicMissingTrace.missing.includes('visible ticker') || !deterministicMissingTrace.missing.includes('visible timeframe')){
+  if(deterministicMissingTrace.status !== 'uncertain_missing_context' || !deterministicMissingTrace.missing.includes('independent chart evidence')){
     throw new Error('Missing deterministic ticker/timeframe facts must produce uncertain_missing_context.');
   }
-  if(deterministicMissingTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || deterministicMissingTrace.debug.fastPass.earlyExit === true){
+  if(deterministicMissingTrace.debug.fastPass.fastStatus !== 'insufficient_context' || deterministicMissingTrace.debug.fastPass.earlyExit === true || deterministicMissingTrace.aiAnalysisSuppressed !== true){
     throw new Error('Insufficient fast-pass context must not falsely produce an early chart mismatch.');
+  }
+  const contextMirroringTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'CTVA',
+      visible_timeframe:'',
+      visible_latest_price:83.30,
+      extraction_method_used:'none',
+      visible_numeric_labels:[]
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(contextMirroringTrace.debug.fastPass.fastStatus !== 'insufficient_context' || contextMirroringTrace.debug.fastPass.contextMirroringSuspected !== true || contextMirroringTrace.aiAnalysisSuppressed !== true){
+    throw new Error('Ticker/price matching app context without independent image evidence must stay insufficient_context and suppress AI commentary.');
+  }
+  const independentFastPassTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'CTVA',
+      visible_timeframe:'1D',
+      visible_latest_price:83.30,
+      visible_numeric_labels:[83.30, 80.95],
+      extraction_method_used:'ocr',
+      ma20_visible:true
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(independentFastPassTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || independentFastPassTrace.debug.fastPass.independentImageEvidence !== true){
+    throw new Error('Independent ticker/timeframe/price evidence must allow clear_match_candidate and full verification.');
   }
   const indicatorMissingTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -2014,7 +2043,7 @@ function runAiContractAssertions(){
   if(verifiedSuppressesLegacy.status !== 'verified_match' || verifiedSuppressesLegacy.sources.includes('legacy_ai_chart_match')){
     throw new Error('Deterministic verified_match must suppress legacy AI chart-match uncertainty.');
   }
-  if(verifiedSuppressesLegacy.debug.fastPass.fastStatus !== 'clear_match_candidate' || verifiedSuppressesLegacy.debug.fastPass.deepVerificationQueued !== true){
+  if(verifiedSuppressesLegacy.debug.fastPass.fastStatus !== 'clear_match_candidate' || verifiedSuppressesLegacy.debug.fastPass.deepVerificationQueued !== true || verifiedSuppressesLegacy.debug.fastPass.independentImageEvidence !== true){
     throw new Error('Valid fast-pass chart candidates must proceed to full deterministic verification.');
   }
   if(verifiedSuppressesLegacy.indicatorStates.ma20_status !== 'verified' || verifiedSuppressesLegacy.indicatorStates.ma50_status !== 'verified' || verifiedSuppressesLegacy.indicatorStates.ma200_status !== 'verified'){
