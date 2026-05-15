@@ -20267,6 +20267,10 @@ function renderAnalysisPanel(card){
   if(!card.lastResponse) return '<div class="tiny">No AI response saved yet.</div>';
   if(card.lastAnalysis){
     const analysis = normalizeAnalysisResult(card.lastAnalysis, card);
+    const aiSuppression = chartVerificationAiSuppression(card, analysis);
+    if(aiSuppression.suppressed){
+      return renderSuppressedAiAnalysisPanel(aiSuppression, card.lastResponse, {legacy:true});
+    }
     const chartReadDisplay = finalDisplayedAnalysisChartRead(card, analysis);
     const deterministicVerification = buildDeterministicChartVerification(card, analysis);
     const allowLegacyAiChartMatch = !deterministicVerification.available
@@ -20316,6 +20320,32 @@ function savedAiPlanNumbersAllowed(record){
   return simplifiedState.planVisible === true && ['entry','near_entry'].includes(verdict);
 }
 
+function chartVerificationAiSuppression(record, analysis){
+  const verification = buildDeterministicChartVerification(record, analysis);
+  if(verification && verification.aiAnalysisSuppressed === true){
+    return {
+      suppressed:true,
+      reason:verification.suppressionReason || 'Strong chart mismatch detected; technical AI commentary may be unreliable.',
+      message:'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
+    };
+  }
+  return {
+    suppressed:false,
+    reason:'',
+    message:''
+  };
+}
+
+function renderSuppressedAiAnalysisPanel(suppression, rawResponse, options = {}){
+  const safe = suppression && typeof suppression === 'object' ? suppression : {};
+  const message = String(safe.message || 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.').replace(/^AI analysis limited\.\s*/, '');
+  const raw = String(rawResponse || '');
+  if(options.legacy === true){
+    return `<div class="responsegrid"><div class="mutebox warntext"><strong>AI analysis limited:</strong> ${escapeHtml(message)}</div>${raw ? `<details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(raw)}</div></details>` : ''}</div>`;
+  }
+  return `<div class="responsegrid"><div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>AI analysis limited</strong><div>${escapeHtml(message)}</div></div>${raw ? `<details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(raw)}</div></details>` : ''}</div>`;
+}
+
 function renderAnalysisPanelFromRecord(record){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
@@ -20340,6 +20370,10 @@ function renderAnalysisPanelFromRecord(record){
   }
   if(analysisState.normalizedAnalysis){
     const analysis = analysisState.normalizedAnalysis;
+    const aiSuppression = chartVerificationAiSuppression(item, analysis);
+    if(aiSuppression.suppressed){
+      return renderSuppressedAiAnalysisPanel(aiSuppression, analysisState.rawAnalysis);
+    }
     const chartReadDisplay = finalDisplayedAnalysisChartRead(item, analysis);
     const advisory = analysisAdvisoryContextForRecord(item, analysis);
     const deterministicVerification = buildDeterministicChartVerification(item, analysis);

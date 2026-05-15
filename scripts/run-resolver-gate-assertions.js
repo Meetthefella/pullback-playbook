@@ -1445,6 +1445,8 @@ function runAiContractAssertions(){
     'chartImageForAnalysis',
     'buildDeterministicChartVerification',
     'buildChartConsistencyTrace',
+    'chartVerificationAiSuppression',
+    'renderSuppressedAiAnalysisPanel',
     'renderChartConsistencyTrace',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
@@ -1954,6 +1956,28 @@ function runAiContractAssertions(){
   if(!/The uploaded chart is unlikely to match CTVA\./.test(strongMismatchMarkup) || /Visible price 440\.56/.test(strongMismatchMarkup.split('<summary>Show details</summary>')[0] || strongMismatchMarkup)){
     throw new Error('Strong mismatch default wording must be short and non-technical.');
   }
+  const strongMismatchSuppression = evidenceSandbox.chartVerificationAiSuppression(
+    {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}},
+    {
+      visible_ticker:'CTVA',
+      visible_timeframe:'1D',
+      visible_latest_price:440.56,
+      visible_ma20:80.95,
+      visible_ma50:80.99,
+      visible_ma200:72.13,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true,
+      coach_summary:'Strong rally with improving momentum.'
+    }
+  );
+  if(strongMismatchSuppression.suppressed !== true || !/technical analysis could be unreliable/i.test(strongMismatchSuppression.message)){
+    throw new Error('Strong chart mismatch must suppress normal AI technical commentary surfaces.');
+  }
+  const suppressionMarkup = evidenceSandbox.renderSuppressedAiAnalysisPanel(strongMismatchSuppression, 'raw ai response');
+  if(!/AI analysis limited/.test(suppressionMarkup) || /Strong rally with improving momentum/.test(suppressionMarkup) || !/Raw Response/.test(suppressionMarkup)){
+    throw new Error('Suppressed AI analysis panel must hide technical commentary and preserve raw response details.');
+  }
   const verifiedSuppressesLegacy = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
@@ -1976,6 +2000,24 @@ function runAiContractAssertions(){
   }
   if(verifiedSuppressesLegacy.indicatorStates.ma20_status !== 'verified' || verifiedSuppressesLegacy.indicatorStates.ma50_status !== 'verified' || verifiedSuppressesLegacy.indicatorStates.ma200_status !== 'verified'){
     throw new Error('All visible matching MA values must report verified indicator states.');
+  }
+  const verifiedSuppression = evidenceSandbox.chartVerificationAiSuppression(
+    {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}},
+    {
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:500,
+      visible_ma20:490,
+      visible_ma50:460,
+      visible_ma200:400,
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true,
+      coach_summary:'Normal chart commentary.'
+    }
+  );
+  if(verifiedSuppression.suppressed === true){
+    throw new Error('Verified charts must still allow normal AI analysis display.');
   }
   const legacyFallbackTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
