@@ -1751,6 +1751,9 @@ function runAiContractAssertions(){
   if(!/20 207\.25/.test(partialIndicatorMarkup) || !/50 191\.18/.test(partialIndicatorMarkup) || !/200 n\/a/.test(partialIndicatorMarkup) || !/200 185\.44/.test(partialIndicatorMarkup)){
     throw new Error('Chart verification display values must be formatted to 2 decimals and null as n/a.');
   }
+  if(!/Show details/.test(partialIndicatorMarkup) || !/200MA was partly visible\./.test(partialIndicatorMarkup)){
+    throw new Error('Chart verification panel must show a compact user-facing summary with diagnostics behind details.');
+  }
   const inferredIndicatorTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
@@ -1955,6 +1958,30 @@ function runAiContractAssertions(){
   );
   if(legacyFallbackTrace.status !== 'possible_mismatch' || !legacyFallbackTrace.sources.includes('legacy_ai_chart_match')){
     throw new Error('Legacy AI chart-match fields must remain fallback-only when deterministic extraction is unavailable.');
+  }
+  const previewFallbackTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{
+      chartImagePreview:{dataUrl:'data:image/png;base64,preview', width:1080, height:2400},
+      normalizedAnalysis:{
+        visible_ticker:'CTVA',
+        visible_timeframe:'1D',
+        visible_latest_price:83.30,
+        chart_match_status:'unclear',
+        risk_evidence:['The lack of stabilization raises uncertainty about the sustainability of the current bounce.']
+      }
+    }},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  const previewFallbackEvidence = (previewFallbackTrace.evidence || []).join(' ');
+  if(previewFallbackTrace.chartImageSource.sourceKind !== 'chartImagePreview_fallback' || previewFallbackTrace.debug.hasChart !== true){
+    throw new Error('Preview fallback image must count as an available chart source after app resume.');
+  }
+  if(/No chart screenshot is attached/i.test(previewFallbackEvidence)){
+    throw new Error('Preview fallback image must not also report that no chart screenshot is attached.');
+  }
+  if(/lack of stabilization/i.test(previewFallbackEvidence) || previewFallbackTrace.sources.includes('legacy_ai_chart_match')){
+    throw new Error('Legacy chart-match fallback must not surface non-chart risk evidence when deterministic chart facts exist.');
   }
   const unknownStructurePromotion = resolverCore.resolveGlobalVerdict({
     ticker:'AINEUTRAL',

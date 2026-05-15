@@ -3284,12 +3284,17 @@ function buildChartImageSourceTrace(review = {}){
     && Number.isFinite(previewDims.height)
     && (Math.round(originalDims.width) !== Math.round(previewDims.width) || Math.round(originalDims.height) !== Math.round(previewDims.height));
   const fallbackUsed = sourceKind !== 'chartImageOriginal' && sourceKind !== 'none';
+  const sourceField = sourceKind === 'chartImageOriginal'
+    ? (originalMeta && originalMeta.dataUrlField || 'chartRef.dataUrl')
+    : (sourceKind === 'legacy_chartRef_fallback'
+      ? 'chartRef.dataUrl'
+      : (sourceKind === 'chartImagePreview_fallback' ? 'chartImagePreview.dataUrl' : ''));
   return {
     sourceKind,
     originalAvailable,
     fallbackUsed,
     limited:!!fallbackUsed,
-    sourceField:sourceKind === 'chartImageOriginal' ? (originalMeta && originalMeta.dataUrlField || 'chartRef.dataUrl') : (sourceKind === 'none' ? '' : 'chartRef.dataUrl'),
+    sourceField,
     originalDimensions:chartImageDimensionsLabel(originalDimensions),
     previewDimensions:chartImageDimensionsLabel(previewDimensions),
     verificationSourceDimensions:chartImageDimensionsLabel(verificationDimensions),
@@ -23723,9 +23728,9 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
   const derived = analysisContext.derivedStates && typeof analysisContext.derivedStates === 'object'
     ? analysisContext.derivedStates
     : {};
-  const chartRef = review.chartRef && typeof review.chartRef === 'object' ? review.chartRef : null;
-  const hasChart = !!(chartRef && chartRef.dataUrl);
   const chartImageSource = buildChartImageSourceTrace(review);
+  const chartRef = review.chartRef && typeof review.chartRef === 'object' ? review.chartRef : null;
+  const hasChart = !!((chartRef && chartRef.dataUrl) || chartImageSource.sourceKind !== 'none');
   const chartStatus = analysis ? String(analysis.chart_match_status || '').trim().toLowerCase() : '';
   const chartWarning = analysis ? String(analysis.chart_match_warning || '').trim() : '';
   const uncertaintyNotes = analysis ? chartConsistencyArray(analysis.uncertainty_notes) : [];
@@ -23791,9 +23796,18 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
 
   const deterministic = buildDeterministicChartVerification(safeRecord, analysis);
   if(deterministic.available){
-    const incompleteDeterministic = ['uncertain_missing_context','indicator_missing','indicator_partial','indicator_incomplete'].includes(deterministic.status);
-    const fallbackEvidence = incompleteDeterministic && (chartStatus === 'mismatch' || chartStatus === 'unclear' || mismatchText || lowContextText)
-      ? evidence.map(item => `Legacy AI fallback: ${item}`)
+    const chartContextIncomplete = deterministic.status === 'uncertain_missing_context';
+    const chartSpecificFallbackEvidence = [];
+    if(chartStatus === 'mismatch') chartSpecificFallbackEvidence.push(chartWarning || 'AI could not match the uploaded chart confidently to this ticker.');
+    if(chartStatus === 'unclear' && chartContextIncomplete) chartSpecificFallbackEvidence.push(chartWarning || 'AI could not verify the chart/ticker match confidently.');
+    uncertaintyNotes
+      .filter(item => /\b(chart|ticker|symbol|timeframe|time frame|screenshot|image|visible|match|mismatch|stale|wrong|different)\b/i.test(String(item || '')))
+      .slice(0, 2)
+      .forEach(item => chartSpecificFallbackEvidence.push(item));
+    if(chartContextIncomplete && mismatchText) chartSpecificFallbackEvidence.push('Legacy AI fallback: chart/ticker context may not match this review.');
+    if(chartContextIncomplete && lowContextText) chartSpecificFallbackEvidence.push('Legacy AI fallback: chart context was not visible enough for AI confidence.');
+    const fallbackEvidence = chartContextIncomplete && chartSpecificFallbackEvidence.length
+      ? chartSpecificFallbackEvidence.map(item => String(item || '').startsWith('Legacy AI fallback:') ? String(item || '') : `Legacy AI fallback: ${item}`)
       : [];
     const fallbackSources = fallbackEvidence.length ? ['legacy_ai_chart_match'] : [];
     return {
@@ -23930,23 +23944,71 @@ function renderChartConsistencyTrace(trace){
   if(!safe.visible) return '';
   const facts = safe.extractedFacts && typeof safe.extractedFacts === 'object' ? safe.extractedFacts : null;
   const trusted = safe.trustedFacts && typeof safe.trustedFacts === 'object' ? safe.trustedFacts : null;
+  const indicatorStates = safe.indicatorStates && typeof safe.indicatorStates === 'object' ? safe.indicatorStates : {};
+  const statusText = {
+    ma20_status:'20MA',
+    ma50_status:'50MA',
+    ma200_status:'200MA'
+  };
+  const verifiedIndicators = Object.entries(statusText)
+    .filter(([key]) => ['verified','likely_match'].includes(String(indicatorStates[key] || '')))
+    .map(([, label]) => label);
+  const partialIndicatorsRaw = Array.isArray(safe.partialIndicators) ? safe.partialIndicators : [];
+  const inferredIndicatorsRaw = Array.isArray(safe.inferredIndicators) ? safe.inferredIndicators : [];
+  const missingIndicatorsRaw = Array.isArray(safe.missingIndicators) ? safe.missingIndicators : [];
+  const summaryLines = [];
+  if(['verified_match','likely_match','indicator_partial','indicator_incomplete','indicator_missing'].includes(String(safe.status || ''))){
+    if(String(safe.status || '') !== 'indicator_missing' && facts && facts.visible_ticker && facts.visible_timeframe){
+      summaryLines.push('Ticker and timeframe match.');
+    }
+    if(verifiedIndicators.length){
+      summaryLines.push(`${verifiedIndicators.join(' and ')} ${verifiedIndicators.length === 1 ? 'verified' : 'verified'}.`);
+    }
+    if(partialIndicatorsRaw.length){
+      summaryLines.push(`${partialIndicatorsRaw.join(' and ')} ${partialIndicatorsRaw.length === 1 ? 'was partly visible' : 'were partly visible'}.`);
+    }
+    if(inferredIndicatorsRaw.length){
+      summaryLines.push(`${inferredIndicatorsRaw.join(' and ')} ${inferredIndicatorsRaw.length === 1 ? 'was likely visible' : 'were likely visible'}.`);
+    }
+    if(missingIndicatorsRaw.length){
+      summaryLines.push(`${missingIndicatorsRaw.join(' and ')} ${missingIndicatorsRaw.length === 1 ? 'was not visible' : 'were not visible'}.`);
+    }
+    if(String(safe.status || '') === 'indicator_missing' && facts && facts.visible_ticker && facts.visible_timeframe){
+      summaryLines.push('Ticker and timeframe match.');
+    }
+    if(String(safe.status || '') === 'verified_match'){
+      summaryLines.push('Values are within expected market tolerance.');
+    }else if(['indicator_partial','indicator_incomplete','indicator_missing'].includes(String(safe.status || ''))){
+      summaryLines.push('Some indicators could not be confirmed from the uploaded image.');
+    }
+  }else if(String(safe.status || '') === 'price_mismatch'){
+    summaryLines.push('The visible price is outside the expected tolerance.');
+    summaryLines.push('This can happen if chart data and app data are out of sync.');
+  }else if(String(safe.status || '') === 'timeframe_mismatch'){
+    summaryLines.push('The uploaded chart may not match the selected timeframe.');
+  }else if(String(safe.status || '') === 'ticker_mismatch'){
+    summaryLines.push('The uploaded chart may show a different ticker.');
+  }else{
+    summaryLines.push(safe.summary || 'The uploaded image does not show enough context to fully verify the chart.');
+  }
+  const compactSummary = summaryLines.slice(0, 3).map(line => `<div>${escapeHtml(line)}</div>`).join('');
   const evidence = Array.isArray(safe.evidence) && safe.evidence.length
     ? `<ul class="tiny">${safe.evidence.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
     : '';
   const missing = Array.isArray(safe.missing) && safe.missing.length
-    ? `<div class="tiny">Missing: ${escapeHtml(safe.missing.join(', '))}</div>`
+    ? `<div class="tiny">Missing context: ${escapeHtml(safe.missing.join(', '))}</div>`
     : '';
-  const partialIndicators = Array.isArray(safe.partialIndicators) && safe.partialIndicators.length
-    ? `<div class="tiny">Partial indicators: ${escapeHtml(safe.partialIndicators.join(', '))}</div>`
+  const partialIndicators = partialIndicatorsRaw.length
+    ? `<div class="tiny">Partial indicators: ${escapeHtml(partialIndicatorsRaw.join(', '))}</div>`
     : '';
   const likelyMatchedIndicators = Array.isArray(safe.likelyMatchedIndicators) && safe.likelyMatchedIndicators.length
     ? `<div class="tiny">Likely matched indicators: ${escapeHtml(safe.likelyMatchedIndicators.join(', '))}</div>`
     : '';
-  const inferredIndicators = Array.isArray(safe.inferredIndicators) && safe.inferredIndicators.length
-    ? `<div class="tiny">Inferred indicators: ${escapeHtml(safe.inferredIndicators.join(', '))}</div>`
+  const inferredIndicators = inferredIndicatorsRaw.length
+    ? `<div class="tiny">Inferred indicators: ${escapeHtml(inferredIndicatorsRaw.join(', '))}</div>`
     : '';
-  const missingIndicators = Array.isArray(safe.missingIndicators) && safe.missingIndicators.length
-    ? `<div class="tiny">Missing indicators: ${escapeHtml(safe.missingIndicators.join(', '))}</div>`
+  const missingIndicators = missingIndicatorsRaw.length
+    ? `<div class="tiny">Missing indicators: ${escapeHtml(missingIndicatorsRaw.join(', '))}</div>`
     : '';
   const extracted = facts
     ? `<div class="tiny">Extracted: ticker ${escapeHtml(facts.visible_ticker || 'n/a')} | timeframe ${escapeHtml(facts.visible_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(facts.visible_latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20 ?? facts.mapped_ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50 ?? facts.mapped_ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200 ?? facts.mapped_ma200))}</div>`
@@ -23961,7 +24023,8 @@ function renderChartConsistencyTrace(trace){
     ? `<div class="tiny">Image source: ${escapeHtml(safe.chartImageSource.sourceKind || 'unknown')} | original ${escapeHtml(safe.chartImageSource.originalDimensions || 'unknown')} | preview ${escapeHtml(safe.chartImageSource.previewDimensions || 'unknown')} | verification ${escapeHtml(safe.chartImageSource.verificationSourceDimensions || 'unknown')}${safe.chartImageSource.limited ? ' | limited: original unavailable' : ''}</div>`
     : '';
   const className = safe.severity === 'warning' ? 'ai-summary-message--warning' : '';
-  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong><div>${escapeHtml(safe.summary || '')}</div>${missing}${likelyMatchedIndicators}${partialIndicators}${inferredIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}</div>`;
+  const details = `${missing}${likelyMatchedIndicators}${partialIndicators}${inferredIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}`;
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(safe.title || 'Chart Verification')}</strong>${compactSummary}<details class="compact-details"><summary>Show details</summary>${details}</details></div>`;
 }
 
 function renderReviewWorkspace(options = {}){
