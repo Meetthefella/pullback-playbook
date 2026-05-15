@@ -6,10 +6,10 @@ const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.4.11';
+const APP_VERSION = 'v4.4.12';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.4.11',
+    version:'4.4.12',
     commit:'817dad5',
     branch:'main',
     builtAt:'2026-05-06T10:39Z'
