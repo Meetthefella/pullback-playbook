@@ -92,6 +92,146 @@
     return 'filtered';
   }
 
+  function normalizeScanVisualBucket(value){
+    const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+    if(['entry','near_entry','monitor','diminishing','avoid','dead'].includes(safe)) return safe;
+    if(['watch','monitor_watch'].includes(safe)) return 'monitor';
+    if(['monitor_diminishing','diminishing_watch'].includes(safe)) return 'diminishing';
+    if(['tradeable_entry','entry_ready'].includes(safe)) return 'entry';
+    if(['low_priority','lower_priority','low_priority_avoid','avoid_dead'].includes(safe)) return 'avoid';
+    if(safe.includes('diminish')) return 'diminishing';
+    if(safe.includes('avoid') || safe.includes('dead') || safe.includes('broken')) return 'avoid';
+    if(safe.includes('near')) return 'near_entry';
+    return 'monitor';
+  }
+
+  function scanPresentationForView(view, deps = {}){
+    const item = view && view.item ? view.item : view || {};
+    const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object' ? view.simplifiedState : {};
+    const visualState = view && view.globalVerdict && typeof view.globalVerdict === 'object' ? view.globalVerdict : {};
+    const derived = view && view.setupStates
+      ? view.setupStates
+      : (deps.analysisDerivedStatesFromRecord ? deps.analysisDerivedStatesFromRecord(item) : {});
+    const normalizedVerdict = deps.normalizeGlobalVerdictKey || (value => String(value || '').trim().toLowerCase().replace(/\s+/g, '_'));
+    const verdictLabel = deps.globalVerdictLabel || (value => String(value || '').trim() || 'Watch');
+    const canonicalVerdict = normalizedVerdict(
+      simplified.canonicalVerdict
+      || view && view.canonicalVerdict
+      || view && view.finalVerdict
+      || visualState.finalVerdict
+      || visualState.final_verdict
+      || view && view.displayStage
+      || 'watch'
+    );
+    const visualBucket = normalizeScanVisualBucket(
+      simplified.visualBucket
+      || view && (view.visualBucket || view.presentationBucket)
+      || visualState.visualBucket
+      || visualState.bucket
+      || view && view.bucket
+      || (deps.getBucket ? deps.getBucket(canonicalVerdict) : canonicalVerdict)
+    );
+    const tone = normalizeScanVisualBucket(
+      simplified.tone
+      || view && view.tone
+      || visualState.tone
+      || visualState.visual_tone
+      || visualBucket
+    );
+    const structureState = String(derived && derived.structureState || '').toLowerCase();
+    const bounceState = String(derived && derived.bounceState || '').toLowerCase();
+    const setupLocationState = String(derived && (derived.setupLocationState || derived.pullbackState || derived.pullbackZone) || '').toLowerCase();
+    const priceabilityState = String(derived && derived.priceabilityState || '').toLowerCase();
+    const branchId = String(
+      simplified.viabilityBranchId
+      || simplified.debug && simplified.debug.resolvedState && simplified.debug.resolvedState.viabilityBranchId
+      || view && view.viabilityBranchId
+      || ''
+    ).toLowerCase();
+    const mainBlocker = String(
+      simplified.mainBlocker
+      || visualState.reason
+      || visualState.main_blocker
+      || view && view.mainBlocker
+      || ''
+    ).trim();
+    const reasonCodes = Array.isArray(view && view.reasonCodes) ? view.reasonCodes : [];
+    const hasDeteriorationEvidence = [
+      'weak',
+      'weakening',
+      'developing_loose'
+    ].includes(structureState)
+      || /weak|weakening|failed|reject|deteriorat|low_score|no_reliable_stop/.test(branchId)
+      || /trend is weakening|structure .*weak|failed reclaim|no reliable stop|setup quality .*(?:fading|slipped)|too volatile/i.test(mainBlocker);
+    const lowQualityWatch = canonicalVerdict === 'watch'
+      && (
+        visualBucket === 'diminishing'
+        || tone === 'diminishing'
+        || hasDeteriorationEvidence
+        || (bounceState === 'none' && ['weak','weakening','developing_loose'].includes(structureState))
+        || (priceabilityState === 'unpriceable' && hasDeteriorationEvidence)
+      );
+
+    let scanSection = 'monitor_watch';
+    let presentationBucket = 'monitor';
+    let presentationTone = 'monitor';
+    let sortPriority = 30;
+    if(canonicalVerdict === 'entry' || visualBucket === 'entry'){
+      scanSection = 'tradeable_entry';
+      presentationBucket = 'entry';
+      presentationTone = 'entry';
+      sortPriority = 10;
+    }else if(canonicalVerdict === 'near_entry' || visualBucket === 'near_entry'){
+      scanSection = 'near_entry';
+      presentationBucket = 'near_entry';
+      presentationTone = 'near_entry';
+      sortPriority = 20;
+    }else if(canonicalVerdict === 'avoid' || visualBucket === 'avoid' || visualBucket === 'dead'){
+      scanSection = 'avoid';
+      presentationBucket = 'avoid';
+      presentationTone = 'avoid';
+      sortPriority = 50;
+    }else if(lowQualityWatch){
+      scanSection = 'monitor_diminishing';
+      presentationBucket = 'diminishing';
+      presentationTone = 'diminishing';
+      sortPriority = 40;
+    }
+
+    let badgeLabel = verdictLabel(canonicalVerdict);
+    if(presentationBucket === 'entry') badgeLabel = 'Entry';
+    else if(presentationBucket === 'near_entry') badgeLabel = 'Near Entry';
+    else if(presentationBucket === 'avoid') badgeLabel = 'Avoid';
+    else badgeLabel = 'Watch';
+
+    let summary = mainBlocker || String(simplified.actionLabel || '').trim();
+    const genericConfirmation = /needs confirmation before promotion|needs confirmation$/i.test(summary);
+    if(scanSection === 'monitor_diminishing' && (!summary || genericConfirmation)){
+      summary = 'Setup quality is weakening. Wait for a cleaner reset before reviewing.';
+    }else if(scanSection === 'avoid' && (!summary || genericConfirmation)){
+      summary = 'Avoid for now. Structure or tradeability is not good enough.';
+    }else if(scanSection === 'monitor_watch' && !summary){
+      summary = 'Needs confirmation before promotion.';
+    }
+
+    return {
+      canonicalVerdict,
+      visualBucket,
+      presentationBucket,
+      scanSection,
+      tone:presentationTone,
+      badgeLabel,
+      summary,
+      reasonCode:reasonCodes[0] || branchId || setupLocationState || bounceState || '',
+      sortPriority,
+      structureState,
+      bounceState,
+      setupLocationState,
+      priceabilityState,
+      deteriorationEvidence:hasDeteriorationEvidence
+    };
+  }
+
   function buildFinalSetupView(record, options = {}, deps = {}){
     const view = deps.projectTickerForCard(record, {...options, includeExecutionDowngrade:false, includeRuntimeFallback:false});
     const derivedStates = deps.analysisDerivedStatesFromRecord(view.item);
@@ -190,6 +330,12 @@
       finalClassification:normalizedFinalClassification,
       bucket,
       globalVerdict:visualState,
+      scanPresentation:scanPresentationForView({
+        ...view,
+        setupStates:derivedStates,
+        globalVerdict:visualState,
+        reasonCodes:scannerResolution.reason_codes
+      }, deps),
       reasonCodes:scannerResolution.reason_codes,
       decisionTrace:scannerResolution.trace,
       decisionWarnings:scannerResolution.warnings,
@@ -271,13 +417,10 @@
   }
 
   function rankedVisibleSectionForView(view, deps = {}){
-    const item = view && view.item ? view.item : view;
-    const visualState = deps.resolveVisualState(item, 'scanner');
-    const finalVerdict = deps.normalizeGlobalVerdictKey(visualState.finalVerdict || visualState.final_verdict);
-    if(finalVerdict === 'entry') return 'tradeable_entry';
-    if(finalVerdict === 'near_entry') return 'near_entry';
-    if(finalVerdict === 'watch' || finalVerdict === 'monitor') return 'monitor_watch';
-    return 'lower_priority';
+    const presentation = view && view.scanPresentation
+      ? view.scanPresentation
+      : scanPresentationForView(view, deps);
+    return presentation.scanSection || 'monitor_watch';
   }
 
   function resultReasonForRecord(record, deps = {}){
@@ -391,6 +534,7 @@
     buildRankedBucketsFromViews,
     rankedDecisionBucketForView,
     rankedVisibleSectionForView,
+    scanPresentationForView,
     resultReasonForRecord,
     resultReasonForView,
     resultSupportLineForRecord,

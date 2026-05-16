@@ -23,6 +23,8 @@ runBrowserModule('js/resolver-presentation.js');
 runBrowserModule('js/domain/simplified-plan-state.js');
 runBrowserModule('js/presentation/simplified-presentation-model.js');
 runBrowserModule('js/domain/simplified-trade-state.js');
+runBrowserModule('js/scanner-view.js');
+runBrowserModule('js/scanner-results-support.js');
 
 const resolverCore = sandbox.window.ResolverCore;
 if(!resolverCore || typeof resolverCore.runTradeReadinessGateAssertions !== 'function'){
@@ -36,6 +38,137 @@ if(failures.length){
   console.error(JSON.stringify(failures, null, 2));
   process.exit(1);
 }
+
+function runScanPresentationAssertions(){
+  const scannerView = sandbox.window.ScannerView;
+  const scannerResultsSupport = sandbox.window.ScannerResultsSupport;
+  if(!scannerView || typeof scannerView.scanPresentationForView !== 'function'){
+    throw new Error('Scanner presentation helper is unavailable.');
+  }
+  if(!scannerResultsSupport || typeof scannerResultsSupport.scannerResultSections !== 'function'){
+    throw new Error('Scanner result section helper is unavailable.');
+  }
+  const deps = {
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid'].includes(safe)) return safe;
+      return safe || 'watch';
+    },
+    globalVerdictLabel(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    },
+    getBucket(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'entry') return 'entry';
+      if(safe === 'near_entry') return 'near_entry';
+      if(safe === 'avoid') return 'avoid';
+      return 'monitor';
+    },
+    analysisDerivedStatesFromRecord(record){
+      return record && record.derivedStates || {};
+    }
+  };
+  const makeView = (ticker, simplifiedState, setupStates, extra = {}) => ({
+    ticker,
+    item:{ticker, derivedStates:setupStates},
+    simplifiedState,
+    setupStates,
+    setupScore:extra.setupScore == null ? 6 : extra.setupScore,
+    rrValue:extra.rrValue == null ? 0 : extra.rrValue,
+    reasonCodes:extra.reasonCodes || []
+  });
+  const constructive = makeView('EW', {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    mainBlocker:'Needs confirmation before promotion.'
+  }, {
+    structureState:'strong',
+    bounceState:'attempt',
+    pullbackState:'near_50ma'
+  }, {setupScore:8});
+  constructive.scanPresentation = scannerView.scanPresentationForView(constructive, deps);
+  if(constructive.scanPresentation.scanSection !== 'monitor_watch' || constructive.scanPresentation.tone !== 'monitor'){
+    throw new Error('Constructive Watch with bounce attempt must remain in Monitor / Watch.');
+  }
+
+  const weakNoBounce = makeView('QSR', {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    mainBlocker:'Trend is weakening - no reliable stop level yet.'
+  }, {
+    structureState:'weak',
+    bounceState:'none',
+    pullbackState:'near_50ma',
+    priceabilityState:'unpriceable'
+  }, {setupScore:4});
+  weakNoBounce.scanPresentation = scannerView.scanPresentationForView(weakNoBounce, deps);
+  if(weakNoBounce.scanPresentation.scanSection !== 'monitor_diminishing' || weakNoBounce.scanPresentation.tone !== 'diminishing'){
+    throw new Error('Weak/no-bounce Watch must render as Monitor / Diminishing, not Monitor / Watch.');
+  }
+  if(/needs confirmation before promotion/i.test(weakNoBounce.scanPresentation.summary || '')){
+    throw new Error('Diminishing scan card must not use generic confirmation-promotion copy.');
+  }
+
+  const avoid = makeView('ABNB', {
+    canonicalVerdict:'avoid',
+    visualBucket:'avoid',
+    tone:'avoid',
+    mainBlocker:'Structure is broken.'
+  }, {
+    structureState:'broken',
+    bounceState:'none',
+    pullbackState:'none'
+  }, {setupScore:1});
+  avoid.scanPresentation = scannerView.scanPresentationForView(avoid, deps);
+  if(avoid.scanPresentation.scanSection !== 'avoid' || avoid.scanPresentation.badgeLabel !== 'Avoid' || avoid.scanPresentation.tone !== 'avoid'){
+    throw new Error('Avoid scan card must render as red Avoid in the bottom section.');
+  }
+
+  const lowPriorityWatch = makeView('AA', {
+    canonicalVerdict:'watch',
+    visualBucket:'diminishing',
+    tone:'diminishing',
+    mainBlocker:'Needs confirmation before promotion.'
+  }, {
+    structureState:'developing_loose',
+    bounceState:'none',
+    pullbackState:'near_20ma'
+  }, {setupScore:3});
+  lowPriorityWatch.scanPresentation = scannerView.scanPresentationForView(lowPriorityWatch, deps);
+  if(lowPriorityWatch.scanPresentation.scanSection !== 'monitor_diminishing'){
+    throw new Error('Low-quality non-terminal Watch must not be grouped with constructive Watch candidates.');
+  }
+  if(/needs confirmation before promotion/i.test(lowPriorityWatch.scanPresentation.summary || '')){
+    throw new Error('Low-quality/diminishing Watch must replace generic promotion copy.');
+  }
+
+  const sections = scannerResultsSupport.scannerResultSections([
+    avoid,
+    weakNoBounce,
+    constructive,
+    lowPriorityWatch
+  ], {
+    rankedVisibleSectionForView(view){
+      return view.scanPresentation.scanSection;
+    },
+    state:{marketStatus:'S&P above 50 MA'},
+    escapeHtml(value){ return String(value || ''); }
+  });
+  const populatedKeys = sections.filter(section => section.items.length).map(section => section.key);
+  const expectedOrder = ['monitor-watch','monitor-diminishing','avoid'];
+  if(JSON.stringify(populatedKeys) !== JSON.stringify(expectedOrder)){
+    throw new Error(`Scan sections must order constructive Watch, diminishing Watch, then Avoid. Got ${populatedKeys.join(', ')}`);
+  }
+}
+
+runScanPresentationAssertions();
 
 function extractFunctionSource(source, functionName){
   const start = source.indexOf(`function ${functionName}`);
@@ -183,6 +316,9 @@ function runReviewProjectionAssertions(){
   const fallbackGlobal = invalidButNonTerminal.bundle.globalVerdict || {};
   if(fallbackGlobal.final_verdict === 'avoid' || fallbackVisual.visualBucket === 'avoid'){
     throw new Error('Invalid non-terminal projection pair must fall back safely, not avoid.');
+  }
+  if(invalidButNonTerminal.coerced !== true || !invalidButNonTerminal.sanitizedProjectionSnapshot || invalidButNonTerminal.sanitizedProjectionSnapshot.visualBucket !== fallbackVisual.visualBucket || invalidButNonTerminal.sanitizedProjectionSnapshot.finalVerdict !== fallbackGlobal.final_verdict){
+    throw new Error('Coerced Review projection must return a sanitized snapshot so stale Track projection state is not reused.');
   }
 
   const staleAvoidMonitor = projectionSandbox.applyProjectionSnapshotToReviewBundle({}, {
