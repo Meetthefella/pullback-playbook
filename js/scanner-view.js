@@ -105,6 +105,14 @@
     return 'monitor';
   }
 
+  function firstFiniteNumber(...values){
+    for(const value of values){
+      const number = Number(value);
+      if(Number.isFinite(number)) return number;
+    }
+    return null;
+  }
+
   function scanPresentationForView(view, deps = {}){
     const item = view && view.item ? view.item : view || {};
     const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object' ? view.simplifiedState : {};
@@ -156,13 +164,73 @@
       || ''
     ).trim();
     const reasonCodes = Array.isArray(view && view.reasonCodes) ? view.reasonCodes : [];
+    const resolvedState = simplified && simplified.debug && simplified.debug.resolvedState && typeof simplified.debug.resolvedState === 'object'
+      ? simplified.debug.resolvedState
+      : {};
+    const entryGateChecks = resolvedState.entry_gate_checks || resolvedState.entryGateChecks || {};
+    const nearEntryGateChecks = resolvedState.near_entry_gate_checks || resolvedState.nearEntryGateChecks || {};
+    const setupScore = firstFiniteNumber(
+      simplified.setupScore,
+      simplified.setup_score,
+      resolvedState.setup_score,
+      view && view.setupScore,
+      view && view.score
+    );
+    const resolvedRR = firstFiniteNumber(
+      resolvedState.resolvedRR,
+      resolvedState.resolved_rr,
+      nearEntryGateChecks.resolved_rr,
+      entryGateChecks.resolved_rr,
+      view && view.rrValue
+    );
+    const blockedByBelow50NoReclaim = nearEntryGateChecks.below_50_without_reclaim === true
+      || entryGateChecks.below_50_without_reclaim === true
+      || resolvedState.below50WithoutReclaim === true;
+    const reclaimSignalCount = firstFiniteNumber(
+      nearEntryGateChecks.reclaim_signal_count,
+      entryGateChecks.reclaim_signal_count,
+      resolvedState.reclaimSignalCount
+    );
+    const hasClearInvalidationLevel = nearEntryGateChecks.has_clear_invalidation_level === true
+      || entryGateChecks.has_clear_invalidation_level === true
+      || resolvedState.hasClearInvalidationLevel === true;
+    const planStateKey = String(
+      resolvedState.planStateKey
+      || resolvedState.plan_state_key
+      || simplified.planStatus
+      || ''
+    ).toLowerCase();
+    const tradeabilityLabel = String(
+      resolvedState.tradeabilityLabel
+      || resolvedState.tradeabilityVerdict
+      || resolvedState.tradeability_state
+      || ''
+    ).toLowerCase();
+    const failedReclaimEvidence = canonicalVerdict === 'watch'
+      && (
+        reasonCodes.includes('score_below_watch_floor')
+        || setupScore !== null && setupScore <= 2
+        || blockedByBelow50NoReclaim
+      )
+      && (
+        blockedByBelow50NoReclaim
+        || reclaimSignalCount === 0
+      )
+      && (
+        hasClearInvalidationLevel === false
+        || priceabilityState === 'unpriceable'
+        || ['missing','invalid','not_generated'].includes(planStateKey)
+        || /not_ready|unpriceable|avoid/.test(tradeabilityLabel)
+        || resolvedRR !== null && resolvedRR < 2
+      );
     const hasDeteriorationEvidence = [
       'weak',
       'weakening',
       'developing_loose'
     ].includes(structureState)
       || /weak|weakening|failed|reject|deteriorat|low_score|no_reliable_stop/.test(branchId)
-      || /trend is weakening|structure .*weak|failed reclaim|no reliable stop|setup quality .*(?:fading|slipped)|too volatile/i.test(mainBlocker);
+      || /trend is weakening|structure .*weak|failed reclaim|no reliable stop|setup quality .*(?:fading|slipped)|too volatile/i.test(mainBlocker)
+      || failedReclaimEvidence;
     const lowQualityWatch = canonicalVerdict === 'watch'
       && (
         visualBucket === 'diminishing'
@@ -207,7 +275,9 @@
     let summary = mainBlocker || String(simplified.actionLabel || '').trim();
     const genericConfirmation = /needs confirmation before promotion|needs confirmation$/i.test(summary);
     if(scanSection === 'monitor_diminishing' && (!summary || genericConfirmation)){
-      summary = 'Setup quality is weakening. Wait for a cleaner reset before reviewing.';
+      summary = failedReclaimEvidence
+        ? 'Recent rebound failed - wait for stabilisation.'
+        : 'Setup quality is weakening. Wait for a cleaner reset before reviewing.';
     }else if(scanSection === 'avoid' && (!summary || genericConfirmation)){
       summary = 'Avoid for now. Structure or tradeability is not good enough.';
     }else if(scanSection === 'monitor_watch' && !summary){
@@ -228,6 +298,11 @@
       bounceState,
       setupLocationState,
       priceabilityState,
+      blockedByBelow50NoReclaim,
+      reclaimSignalCount,
+      hasClearInvalidationLevel,
+      resolvedRR,
+      failedReclaimEvidence,
       deteriorationEvidence:hasDeteriorationEvidence
     };
   }

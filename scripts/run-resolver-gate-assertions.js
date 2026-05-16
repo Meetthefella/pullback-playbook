@@ -133,20 +133,89 @@ function runScanPresentationAssertions(){
 
   const lowPriorityWatch = makeView('AA', {
     canonicalVerdict:'watch',
-    visualBucket:'diminishing',
-    tone:'diminishing',
+    visualBucket:'monitor',
+    tone:'monitor',
     mainBlocker:'Needs confirmation before promotion.'
   }, {
     structureState:'developing_loose',
     bounceState:'none',
-    pullbackState:'near_20ma'
-  }, {setupScore:3});
+    pullbackState:'near_20ma',
+    priceabilityState:'unpriceable'
+  }, {
+    setupScore:2,
+    rrValue:0.42,
+    reasonCodes:['bounce_not_confirmed', 'score_below_watch_floor']
+  });
+  lowPriorityWatch.simplifiedState.debug = {
+    resolvedState:{
+      setup_score:2,
+      planStateKey:'missing',
+      tradeabilityLabel:'not_ready',
+      near_entry_gate_checks:{
+        below_50_without_reclaim:true,
+        reclaim_signal_count:0,
+        has_clear_invalidation_level:false,
+        resolved_rr:0.42
+      }
+    }
+  };
   lowPriorityWatch.scanPresentation = scannerView.scanPresentationForView(lowPriorityWatch, deps);
   if(lowPriorityWatch.scanPresentation.scanSection !== 'monitor_diminishing'){
-    throw new Error('Low-quality non-terminal Watch must not be grouped with constructive Watch candidates.');
+    throw new Error('AA-style failed reclaim Watch must not be grouped with constructive Watch candidates.');
   }
   if(/needs confirmation before promotion/i.test(lowPriorityWatch.scanPresentation.summary || '')){
-    throw new Error('Low-quality/diminishing Watch must replace generic promotion copy.');
+    throw new Error('AA-style failed reclaim Watch must replace generic promotion copy.');
+  }
+  if(lowPriorityWatch.scanPresentation.presentationBucket !== 'diminishing' || lowPriorityWatch.scanPresentation.tone !== 'diminishing'){
+    throw new Error('AA-style failed reclaim Watch must render with diminishing, not yellow constructive Watch, tone.');
+  }
+  if(lowPriorityWatch.scanPresentation.failedReclaimEvidence !== true || lowPriorityWatch.scanPresentation.blockedByBelow50NoReclaim !== true){
+    throw new Error('AA-style failed reclaim evidence must be reflected in scan presentation diagnostics.');
+  }
+
+  const zeroEvidenceWatch = makeView('ZERO', {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    mainBlocker:'Needs confirmation before promotion.'
+  }, {
+    structureState:'developing_loose',
+    bounceState:'none',
+    pullbackState:'near_20ma',
+    priceabilityState:'unpriceable'
+  }, {
+    setupScore:9,
+    rrValue:3,
+    reasonCodes:['score_below_watch_floor']
+  });
+  zeroEvidenceWatch.simplifiedState.setupScore = 0;
+  zeroEvidenceWatch.simplifiedState.debug = {
+    resolvedState:{
+      setup_score:9,
+      planStateKey:'missing',
+      tradeabilityLabel:'not_ready',
+      resolvedRR:0,
+      near_entry_gate_checks:{
+        below_50_without_reclaim:true,
+        reclaim_signal_count:0,
+        has_clear_invalidation_level:false,
+        resolved_rr:1
+      },
+      entry_gate_checks:{
+        reclaim_signal_count:2,
+        resolved_rr:2
+      }
+    }
+  };
+  zeroEvidenceWatch.scanPresentation = scannerView.scanPresentationForView(zeroEvidenceWatch, deps);
+  if(zeroEvidenceWatch.scanPresentation.resolvedRR !== 0){
+    throw new Error('Scan presentation must preserve resolved_rr: 0 instead of falling through to stale fallback RR.');
+  }
+  if(zeroEvidenceWatch.scanPresentation.reclaimSignalCount !== 0){
+    throw new Error('Scan presentation must preserve explicit reclaim_signal_count: 0 instead of stale fallback counts.');
+  }
+  if(zeroEvidenceWatch.scanPresentation.failedReclaimEvidence !== true){
+    throw new Error('setupScore: 0 and resolved_rr: 0 must still trigger failed-reclaim presentation evidence.');
   }
 
   const sections = scannerResultsSupport.scannerResultSections([

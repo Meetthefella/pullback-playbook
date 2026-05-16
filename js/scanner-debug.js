@@ -1,5 +1,13 @@
 (function(global){
   // Scanner trace/debug helpers extracted from app.js.
+  function firstFiniteNumber(...values){
+    for(const value of values){
+      const number = Number(value);
+      if(Number.isFinite(number)) return number;
+    }
+    return null;
+  }
+
   function resolveScannerStateWithTrace(record, options = {}, deps = {}){
     const item = deps.normalizeTickerRecord(record);
     const baseView = options.baseView || deps.projectTickerForCard(item, {
@@ -177,10 +185,42 @@
     const falseDeadGuard = aliveDevelopingCandidate
       && ['needs_adjustment','pending_validation','invalid'].includes(planValidation)
       && ['developing','watch','avoid'].includes(String(baseView.displayStage || '').toLowerCase());
-    const finalDisplayBucket = deps.getBucket(scannerVerdict);
-    const remapReason = !invalidAvoidGuard && status === 'Avoid' && ['watch','monitor'].includes(scannerVerdict)
-      ? 'weak but still technically alive'
-      : '';
+    const gateChecks = globalVerdict && (globalVerdict.near_entry_gate_checks || globalVerdict.entry_gate_checks) || {};
+    const gateEntryChecks = globalVerdict && globalVerdict.entry_gate_checks || {};
+    const blockedByBelow50NoReclaim = gateChecks.below_50_without_reclaim === true
+      || gateEntryChecks.below_50_without_reclaim === true;
+    const reclaimSignalCount = firstFiniteNumber(
+      gateChecks.reclaim_signal_count,
+      gateEntryChecks.reclaim_signal_count
+    );
+    const hasClearInvalidationLevel = gateChecks.has_clear_invalidation_level === true
+      || gateEntryChecks.has_clear_invalidation_level === true;
+    const scannerRR = firstFiniteNumber(rrValue);
+    const failedReclaimSofteningBlock = status === 'Avoid'
+      && ['watch','monitor'].includes(scannerVerdict)
+      && (
+        reasonCodes.includes('score_below_watch_floor')
+        || Number.isFinite(setupScore) && setupScore <= 2
+        || blockedByBelow50NoReclaim
+      )
+      && (
+        blockedByBelow50NoReclaim
+        || reclaimSignalCount === 0
+      )
+      && (
+        hasClearInvalidationLevel === false
+        || rrReliability === 'low'
+        || scannerRR == null
+        || scannerRR < 2
+      );
+    const finalDisplayBucket = failedReclaimSofteningBlock
+      ? 'monitor_diminishing'
+      : deps.getBucket(scannerVerdict);
+    const remapReason = failedReclaimSofteningBlock
+      ? 'failed reclaim - low priority watch'
+      : (!invalidAvoidGuard && status === 'Avoid' && ['watch','monitor'].includes(scannerVerdict)
+        ? 'weak but still technically alive'
+        : '');
     const guardedDisplayState = finalDisplayState;
 
     addStep('base verdict', deps.normalizeGlobalVerdictKey(globalVerdict.base_verdict || status));
@@ -208,7 +248,27 @@
       && renderedVerdict !== 'avoid'
       && ['monitor'].includes(renderedVerdict)
     ){
-      warnings.push(`INFO: raw avoid softened before render. intermediate=${intermediateVerdict}, rendered=${renderedVerdict}`);
+      warnings.push(failedReclaimSofteningBlock
+        ? `INFO: raw avoid softened only to diminishing watch. intermediate=${intermediateVerdict}, rendered=${renderedVerdict}`
+        : `INFO: raw avoid softened before render. intermediate=${intermediateVerdict}, rendered=${renderedVerdict}`);
+    }
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[AVOID_SOFTENING_TRACE]', {
+        ticker:item && item.ticker || '',
+        baseVerdict:deps.normalizeGlobalVerdictKey(globalVerdict.base_verdict || status),
+        intermediateVerdict,
+        finalVerdict:renderedVerdict,
+        visualBucket:finalDisplayBucket,
+        tone:finalDisplayBucket === 'monitor_diminishing' ? 'diminishing' : renderedVerdict,
+        softenApplied:intermediateVerdict === 'avoid' && renderedVerdict !== 'avoid',
+        softenReason:remapReason,
+        blockedByBelow50NoReclaim,
+        score:setupScore,
+        hasClearInvalidationLevel,
+        tradeability:globalVerdict && (globalVerdict.tradeabilityLabel || globalVerdict.tradeabilityVerdict || globalVerdict.status) || '',
+        scannerRR,
+        reclaimSignalCount
+      });
     }
 
     return {
