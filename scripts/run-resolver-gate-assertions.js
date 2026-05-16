@@ -1439,6 +1439,122 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('Weakening Watch must remain Diminishing.');
   }
 
+  const fallingKnifeBreakdown = pipeline.resolveRecordState({
+    ticker:'WLKX',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:80, ma20:90, ma50:92, ma200:70, perf1w:-8.2, perf1m:-15.5, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'weakening',
+      trendState:'weak',
+      setupLocationState:'volatile',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'none',
+      volumeState:'weak'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Trend is weakening - no reliable stop level yet.',
+      reasonSummary:'Weakening setup - wait for recovery.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 2)
+  });
+  const fallingKnifeResolved = fallingKnifeBreakdown.debug && fallingKnifeBreakdown.debug.resolvedState || {};
+  const fallingKnifeText = [
+    fallingKnifeBreakdown.mainBlocker,
+    fallingKnifeResolved.main_blocker,
+    fallingKnifeResolved.reason,
+    fallingKnifeResolved.downgrade_reason
+  ].join(' | ');
+  if(fallingKnifeBreakdown.canonicalVerdict !== 'avoid' || fallingKnifeBreakdown.visualBucket !== 'avoid' || fallingKnifeBreakdown.tone !== 'avoid'){
+    throw new Error('WLK-style falling-knife breakdown must render red Avoid on Review.');
+  }
+  if(fallingKnifeResolved.falling_knife_detected !== true || fallingKnifeResolved.semantic_blocker_code !== 'falling_knife' || !/falling_knife/i.test(String(fallingKnifeResolved.viabilityBranchId || ''))){
+    throw new Error('WLK-style falling-knife breakdown must expose falling_knife reason diagnostics.');
+  }
+  if(!/Selling pressure is accelerating/i.test(fallingKnifeText) || /Trend is weakening - no reliable stop level yet/i.test(String(fallingKnifeBreakdown.mainBlocker || ''))){
+    throw new Error('WLK-style falling-knife copy must replace soft weakening copy.');
+  }
+
+  const rangeBoundWeakening = pipeline.resolveRecordState({
+    ticker:'EIXX',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:98, ma20:100, ma50:97, ma200:72, perf1w:-1.4, perf1m:-4.2, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'weakening',
+      trendState:'weak',
+      setupLocationState:'off_level',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'attempt',
+      pullbackZone:'none',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Trend is weakening - no reliable stop level yet.',
+      reasonSummary:'Weakening setup - wait for recovery.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 4)
+  });
+  const rangeBoundResolved = rangeBoundWeakening.debug && rangeBoundWeakening.debug.resolvedState || {};
+  if(rangeBoundWeakening.canonicalVerdict !== 'watch' || rangeBoundWeakening.visualBucket !== 'diminishing' || rangeBoundWeakening.tone !== 'diminishing'){
+    throw new Error('EIX-style weak but range-bound setup must remain Diminishing Watch, not Avoid.');
+  }
+  if(rangeBoundResolved.falling_knife_detected === true || /Selling pressure is accelerating/i.test(String(rangeBoundWeakening.mainBlocker || ''))){
+    throw new Error('Range-bound weakening must not trigger falling-knife copy.');
+  }
+
+  const brokenStructureAvoid = pipeline.resolveRecordState({
+    ticker:'BWXTX',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:55, ma20:65, ma50:70, ma200:80, perf1w:-7, perf1m:-18, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'broken',
+      trendState:'broken',
+      setupLocationState:'volatile',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'none',
+      volumeState:'weak'
+    }, {
+      finalVerdict:'Avoid',
+      structuralState:'dead',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Avoid',
+      blockerReason:'Structure is broken.',
+      reasonSummary:'Structure is broken.',
+      terminal:true,
+      baseVerdict:'avoid'
+    }, 1)
+  });
+  if(brokenStructureAvoid.canonicalVerdict !== 'avoid' || !/Structure is broken/i.test(String(brokenStructureAvoid.mainBlocker || ''))){
+    throw new Error('Broken structural Avoid must retain stronger structure-broken copy.');
+  }
+
   const volatileRecovery = pipeline.resolveRecordState({
     ticker:'TSLAX',
     in_watchlist:true,

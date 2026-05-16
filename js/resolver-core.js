@@ -628,6 +628,68 @@
     };
   }
 
+  const FALLING_KNIFE_COPY = 'Selling pressure is accelerating - wait for the stock to stabilise before reassessing.';
+
+  function resolveFallingKnifeRisk(ctx = {}){
+    const priceVs20 = numericValueOrNull(ctx.priceVs20);
+    const priceVs50 = numericValueOrNull(ctx.priceVs50);
+    const perf1w = numericValueOrNull(ctx.perf1w);
+    const perf1m = numericValueOrNull(ctx.perf1m);
+    const setupScore = numericValueOrNull(ctx.setupScore);
+    const structureEligibility = String(ctx.structureEligibility || '').trim().toLowerCase();
+    const structureState = String(ctx.structureState || '').trim().toLowerCase();
+    const stabilisationState = String(ctx.stabilisationState || '').trim().toLowerCase();
+    const priceabilityState = String(ctx.priceabilityState || '').trim().toLowerCase();
+    const tradeability = String(ctx.tradeability || '').trim().toLowerCase();
+    const reclaimSignals = Number.isFinite(Number(ctx.reclaimSignals)) ? Number(ctx.reclaimSignals) : 0;
+    const below20 = ctx.priceBelow20ma === true;
+    const below50 = ctx.priceBelow50ma === true || ctx.below50WithoutReclaim === true;
+    const below50WithoutReclaim = ctx.below50WithoutReclaim === true;
+    const materiallyBelow20 = priceVs20 !== null && priceVs20 <= -0.07;
+    const materiallyBelow50 = priceVs50 !== null && priceVs50 <= -0.05;
+    const severeWeeklyDrop = perf1w !== null && perf1w <= -6;
+    const severeMonthlyDrop = perf1m !== null && perf1m <= -12 && (perf1w === null || perf1w <= -2);
+    const largeBearishCandleDetected = ctx.largeBearishCandleDetected === true || severeWeeklyDrop;
+    const recentDownsideExpansion = largeBearishCandleDetected || severeWeeklyDrop || severeMonthlyDrop || (materiallyBelow20 && materiallyBelow50);
+    const noReclaim = below50WithoutReclaim && reclaimSignals === 0;
+    const failedStabilisation = !stabilisationState || ['none','failed','unconfirmed','weak'].includes(stabilisationState);
+    const noReliablePlan = ctx.planOk !== true
+      && (
+        ctx.hasClearInvalidationLevel !== true
+        || ctx.tradeabilityOk !== true
+        || ctx.rrOk !== true
+        || priceabilityState === 'unpriceable'
+        || ['not_ready','invalid','watch','risk_only'].includes(tradeability)
+      );
+    const weakQuality = (setupScore !== null && setupScore <= 3)
+      || structureEligibility === 'damaged'
+      || ['weak','weakening','developing_loose','failed'].includes(structureState);
+    const detected = below20
+      && below50
+      && noReclaim
+      && failedStabilisation
+      && noReliablePlan
+      && weakQuality
+      && recentDownsideExpansion;
+    return {
+      detected,
+      reason:detected
+        ? 'accelerating selling below the MA cluster with no reclaim or priceable plan'
+        : '',
+      copyKey:detected ? 'falling_knife' : '',
+      copy:detected ? FALLING_KNIFE_COPY : '',
+      priceVs20,
+      priceVs50,
+      recentDownsideExpansion,
+      largeBearishCandleDetected,
+      reclaimSignals,
+      stabilisationState,
+      hasClearInvalidationLevel:ctx.hasClearInvalidationLevel === true,
+      tradeability,
+      setupScore
+    };
+  }
+
   function resolveWatchlistViability(ctx = {}){
     const structureEligibility = String(ctx.structureEligibility || '').toLowerCase();
     const structureState = String(ctx.structureState || '').toLowerCase();
@@ -764,6 +826,19 @@
         'broken_structure_reject',
         'Broken structure reject'
       ));
+    }
+    const fallingKnife = resolveFallingKnifeRisk(ctx);
+    if(fallingKnife.detected){
+      const fallingKnifeReject = asReject(
+        FALLING_KNIFE_COPY,
+        FALLING_KNIFE_COPY,
+        'falling_knife',
+        'falling_knife_reject',
+        'Falling knife reject'
+      );
+      fallingKnifeReject.fallingKnife = fallingKnife;
+      fallingKnifeReject.semanticBlockerCode = 'falling_knife';
+      return enrich(fallingKnifeReject);
     }
     if(isExtended && structureEligibility === 'alive'){
       return enrich(asLowPriority(
@@ -926,7 +1001,8 @@
     const volumeRequired = item && item.setup && item.setup.volumeRequired === true;
     const pullbackZone = String(derivedStates.pullbackZone || '').toLowerCase();
     const currentPrice = numericValueOrNull(item && item.marketData && item.marketData.price);
-    const ma20 = numericValueOrNull(item && item.marketData && item.marketData.ma20);
+    const sma20 = numericValueOrNull(item && item.marketData && item.marketData.sma20);
+    const ma20 = sma20 !== null ? sma20 : numericValueOrNull(item && item.marketData && item.marketData.ma20);
     const priceDistanceFrom20MA = Number.isFinite(currentPrice) && Number.isFinite(ma20) && ma20 !== 0
       ? Math.abs((currentPrice - ma20) / ma20)
       : null;
@@ -975,6 +1051,9 @@
     const ma200 = sma200 !== null ? sma200 : numericValueOrNull(item && item.marketData && item.marketData.ma200);
     const priceBelow50MA = Number.isFinite(currentPrice) && Number.isFinite(ma50)
       ? currentPrice < ma50
+      : false;
+    const priceBelow20MA = Number.isFinite(currentPrice) && Number.isFinite(ma20)
+      ? currentPrice < ma20
       : false;
     const priceBelow200MA = Number.isFinite(currentPrice) && Number.isFinite(ma200)
       ? currentPrice < ma200
@@ -1147,6 +1226,16 @@
       structural_state:structurallyBroken ? 'dead' : String(resolved.structuralState || ''),
       structurally_broken:structurallyBroken
     });
+    const nearEntryGateChecks = guardedVerdict.near_entry_gate_checks || {};
+    const entryGateChecks = guardedVerdict.entry_gate_checks || {};
+    const hasClearInvalidationLevel = nearEntryGateChecks.has_clear_invalidation_level === true
+      || entryGateChecks.has_clear_invalidation_level === true;
+    const reclaimSignalCount = Number.isFinite(Number(nearEntryGateChecks.reclaim_signal_count))
+      ? Number(nearEntryGateChecks.reclaim_signal_count)
+      : (Number.isFinite(Number(entryGateChecks.reclaim_signal_count)) ? Number(entryGateChecks.reclaim_signal_count) : 0);
+    const reclaimDirectSignalCount = Number.isFinite(Number(nearEntryGateChecks.reclaim_direct_signal_count))
+      ? Number(nearEntryGateChecks.reclaim_direct_signal_count)
+      : (Number.isFinite(Number(entryGateChecks.reclaim_direct_signal_count)) ? Number(entryGateChecks.reclaim_direct_signal_count) : 0);
     let trackedVerdict = normalizeVerdict(guardedVerdict.final_verdict);
     let trackedReason = guardedVerdict.reason || reason;
     const viability = resolveWatchlistViability({
@@ -1173,8 +1262,19 @@
       terminalAvoidFlag:item && item.terminal_avoid_applied === true,
       explicitInvalidationReason,
       below50WithoutReclaim:priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true)),
+      priceBelow20ma:priceBelow20MA,
+      priceBelow50ma:priceBelow50MA,
+      priceVs20:Number.isFinite(currentPrice) && Number.isFinite(ma20) && ma20 !== 0 ? (currentPrice - ma20) / ma20 : null,
+      priceVs50:Number.isFinite(currentPrice) && Number.isFinite(ma50) && ma50 !== 0 ? (currentPrice - ma50) / ma50 : null,
       below200ma:priceBelow200MA,
-      ma50Below200ma:ma50Below200MA
+      ma50Below200ma:ma50Below200MA,
+      stabilisationState:String(derivedStates.stabilisationState || '').toLowerCase(),
+      hasClearInvalidationLevel,
+      tradeability:tradeabilityState,
+      reclaimSignals:reclaimSignalCount,
+      reclaimDirectSignals:reclaimDirectSignalCount,
+      perf1w:item && item.marketData && item.marketData.perf1w,
+      perf1m:item && item.marketData && item.marketData.perf1m
     });
     if(trackedVerdict !== 'entry' && trackedVerdict !== 'near_entry'){
       if(viability.viability === 'reject'){
@@ -1187,6 +1287,8 @@
         && (priceabilityState === 'unpriceable' || String(viability.viabilityBranchId || '').includes('low_score') || setupScore < 5 || invalidPlan);
       if(nonTerminalRecoveryBlocker){
         trackedReason = semanticBlocker.reason || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.';
+      }else if(String(viability.viabilityBranchId || '').toLowerCase().includes('falling_knife')){
+        trackedReason = viability.mainBlocker || FALLING_KNIFE_COPY;
       }else if(structureLayer.structureEligibility === 'damaged'){
         trackedReason = 'Trend is weakening - no reliable stop level yet.';
       }else if(isExtended && ['strong','intact'].includes(structureState)){
@@ -1248,6 +1350,48 @@
     const bucket = (canonicalFinalVerdict === 'watch' && deteriorationLowPriority)
       ? 'lower_priority'
       : getBucket(canonicalFinalVerdict);
+    const fallingKnifeTrace = viability.fallingKnife || resolveFallingKnifeRisk({
+      structureEligibility:structureLayer.structureEligibility,
+      structureState,
+      priceabilityState,
+      planOk:!invalidPlan,
+      rrOk:Number.isFinite(credibleRr) && credibleRr >= 1.5,
+      tradeabilityOk:['tradable', 'entry', 'ready', 'action_now'].includes(tradeabilityState),
+      tradeability:tradeabilityState,
+      setupScore,
+      stabilisationState:String(derivedStates.stabilisationState || '').toLowerCase(),
+      below50WithoutReclaim:priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true)),
+      priceBelow20ma:priceBelow20MA,
+      priceBelow50ma:priceBelow50MA,
+      priceVs20:Number.isFinite(currentPrice) && Number.isFinite(ma20) && ma20 !== 0 ? (currentPrice - ma20) / ma20 : null,
+      priceVs50:Number.isFinite(currentPrice) && Number.isFinite(ma50) && ma50 !== 0 ? (currentPrice - ma50) / ma50 : null,
+      hasClearInvalidationLevel,
+      reclaimSignals:reclaimSignalCount,
+      perf1w:item && item.marketData && item.marketData.perf1w,
+      perf1m:item && item.marketData && item.marketData.perf1m
+    });
+    const fallingKnifeApplied = String(viability.viabilityBranchId || '').toLowerCase().includes('falling_knife');
+    if(typeof console !== 'undefined' && console && typeof console.info === 'function' && (fallingKnifeApplied || (item && item.debugFallingKnifeTrace === true))){
+      console.info('[FALLING_KNIFE_TRACE]', {
+        ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
+        detected:fallingKnifeApplied,
+        reason:fallingKnifeTrace.reason || '',
+        finalVerdict:canonicalFinalVerdict,
+        visualBucket:canonicalFinalVerdict === 'avoid' ? 'avoid' : bucket,
+        presentationBucket:canonicalFinalVerdict === 'avoid' ? 'avoid' : bucket,
+        tone,
+        priceVs20:fallingKnifeTrace.priceVs20,
+        priceVs50:fallingKnifeTrace.priceVs50,
+        recentDownsideExpansion:fallingKnifeTrace.recentDownsideExpansion === true,
+        largeBearishCandleDetected:fallingKnifeTrace.largeBearishCandleDetected === true,
+        reclaimSignals:fallingKnifeTrace.reclaimSignals,
+        stabilisationState:fallingKnifeTrace.stabilisationState,
+        hasClearInvalidationLevel:fallingKnifeTrace.hasClearInvalidationLevel === true,
+        tradeability:fallingKnifeTrace.tradeability || tradeabilityState,
+        setupScore:fallingKnifeTrace.setupScore,
+        copyKey:fallingKnifeTrace.copyKey || ''
+      });
+    }
     const guardedForPresentation = normalizeVerdict(guardedVerdict.final_verdict);
     const promotionWasAttempted = requestedBeforeGuards === 'near_entry' || requestedBeforeGuards === 'entry';
     const guardBlockers = []
@@ -1310,8 +1454,19 @@
       priceability_state:priceabilityState,
       priceability_inferred:priceabilityInferred,
       priceability_inference_reason:priceabilityInferenceReason,
-      semantic_blocker_code:semanticBlocker.blockerCode || '',
-      semantic_blocker_reason:semanticBlocker.reason || '',
+      semantic_blocker_code:(fallingKnifeApplied ? 'falling_knife' : (semanticBlocker.blockerCode || '')),
+      semantic_blocker_reason:(fallingKnifeApplied ? FALLING_KNIFE_COPY : (semanticBlocker.reason || '')),
+      falling_knife_detected:fallingKnifeApplied,
+      falling_knife_reason:fallingKnifeApplied ? (fallingKnifeTrace.reason || '') : '',
+      falling_knife_trace:fallingKnifeApplied
+        ? fallingKnifeTrace
+        : {
+          ...fallingKnifeTrace,
+          detected:false,
+          reason:'',
+          copyKey:'',
+          copy:''
+        },
       non_terminal_recovery_blocker:nonTerminalRecoveryBlocker,
       structure_eligibility:structureLayer.structureEligibility,
       structure_reason:structureLayer.structureReason,
@@ -1327,7 +1482,9 @@
       reject_blocked_by_incomplete_inputs:viability.rejectBlockedByIncompleteInputs === true,
       viability_visual_bucket:viability.visualBucket || '',
       main_blocker:trackedReason || viability.mainBlocker || '',
-      primary_blocker_source:(resolved && resolved.primaryBlockerSource) || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (isExtended ? 'setup_location' : (priceabilityState === 'unpriceable' && !priceabilityInferred ? 'priceability' : 'resolver'))),
+      primary_blocker_source:fallingKnifeApplied
+        ? 'falling_knife'
+        : ((resolved && resolved.primaryBlockerSource) || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (isExtended ? 'setup_location' : (priceabilityState === 'unpriceable' && !priceabilityInferred ? 'priceability' : 'resolver')))),
       rejected_by_viability_gate:viability.viability === 'reject',
       low_priority_by_viability_gate:viability.viability === 'low_priority',
       structure_state:structureState || '',
@@ -1344,9 +1501,7 @@
       resolverCoreStop:planStop,
       resolverCoreTarget:planTarget,
       resolverCoreCurrentPrice:currentPrice,
-      hasClearInvalidationLevel:!!(
-        guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.has_clear_invalidation_level
-      ),
+      hasClearInvalidationLevel,
       hasPriceablePlan:!!(
         guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.has_priceable_plan
       ),
@@ -1383,12 +1538,8 @@
         || (guardedVerdict.entry_gate_checks && guardedVerdict.entry_gate_checks.unpriceable_block_reason)
         || ''
       ),
-      reclaimSignalCount:Number.isFinite(Number(
-        guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.reclaim_signal_count
-      )) ? Number(guardedVerdict.near_entry_gate_checks.reclaim_signal_count) : 0,
-      reclaimDirectSignalCount:Number.isFinite(Number(
-        guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.reclaim_direct_signal_count
-      )) ? Number(guardedVerdict.near_entry_gate_checks.reclaim_direct_signal_count) : 0,
+      reclaimSignalCount,
+      reclaimDirectSignalCount,
       reclaimConfirmedReason:String(
         (guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.reclaim_confirmed_reason)
         || (guardedVerdict.entry_gate_checks && guardedVerdict.entry_gate_checks.reclaim_confirmed_reason)
