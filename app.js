@@ -6,10 +6,10 @@ const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.4.12';
+const APP_VERSION = 'v4.4.13';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.4.12',
+    version:'4.4.13',
     commit:'817dad5',
     branch:'main',
     builtAt:'2026-05-06T10:39Z'
@@ -7538,6 +7538,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Structure Eligibility', value:globalVisual.structureEligibility || globalVerdict.structure_eligibility || '(none)'},
     {label:'Active Track Eligible', value:globalVisual.activeTrackEligible ? 'true' : 'false'},
     {label:'Diminishing Track Eligible', value:globalVisual.diminishingTrackEligible ? 'true' : 'false'},
+    {label:'Failed Reclaim Track Evidence', value:globalVisual.failedReclaimTrackEvidence ? 'true' : 'false'},
     {label:'Avoid Track Eligible', value:globalVisual.avoidTrackEligible ? 'true' : 'false'},
     {label:'Priority Score', value:Number.isFinite(globalVisual.priorityScore) ? String(globalVisual.priorityScore) : String(priority.score)},
     {label:'Priority Sort Value', value:Number.isFinite(globalVisual.prioritySortValue) ? String(globalVisual.prioritySortValue) : String(priority.score)},
@@ -14454,7 +14455,26 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const effectiveDisplayVerdict = normalizeGlobalVerdictKey(effectiveFinalVerdictKey || currentResolverVerdict || 'watch');
   const finalIsMonitorWatch = ['watch','monitor'].includes(effectiveFinalVerdictKey);
   const finalIsEntryNear = normalizedFinalVerdict === 'entry' || normalizedFinalVerdict === 'near_entry';
+  const viabilityInputs = verdictSource && verdictSource.viabilityInputs && typeof verdictSource.viabilityInputs === 'object'
+    ? verdictSource.viabilityInputs
+    : {};
+  const below50WithoutReclaim = viabilityInputs.below50WithoutReclaim === true
+    || (verdictSource && verdictSource.below50WithoutReclaim === true)
+    || (verdictSource && verdictSource.entry_gate_checks && verdictSource.entry_gate_checks.below_50_without_reclaim === true)
+    || (verdictSource && verdictSource.near_entry_gate_checks && verdictSource.near_entry_gate_checks.below_50_without_reclaim === true);
+  const hasClearInvalidationLevel = (verdictSource && verdictSource.hasClearInvalidationLevel === true)
+    || (verdictSource && verdictSource.near_entry_gate_checks && verdictSource.near_entry_gate_checks.has_clear_invalidation_level === true)
+    || (verdictSource && verdictSource.entry_gate_checks && verdictSource.entry_gate_checks.has_clear_invalidation_level === true);
+  const resolvedRr = Number(verdictSource && (verdictSource.resolvedRR ?? verdictSource.resolved_rr ?? viabilityInputs.resolvedRR));
+  const lowOrMissingRr = !Number.isFinite(resolvedRr) || resolvedRr < 2;
+  const failedReclaimTrackEvidence = finalIsMonitorWatch
+    && below50WithoutReclaim
+    && Number.isFinite(setupScore)
+    && setupScore <= 2
+    && !hasClearInvalidationLevel
+    && lowOrMissingRr;
   const activeTrackEligible = finalIsMonitorWatch
+    && !failedReclaimTrackEvidence
     && structureEligibility !== 'damaged'
     && structureState !== 'weakening'
     && effectiveViability !== 'reject'
@@ -14463,7 +14483,7 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
   const diminishingTrackEligible = finalIsMonitorWatch
-    && positiveDeterioration
+    && (positiveDeterioration || failedReclaimTrackEvidence)
     && !avoidByVerdict
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
@@ -14507,7 +14527,9 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     presentationBadge = 'Watch';
     presentationBadgeClass = 'badge--diminishing';
     presentationCardClass = 'card--diminishing';
-    presentationReason = 'Diminishing - structure weakening.';
+    presentationReason = failedReclaimTrackEvidence
+      ? 'Recent rebound failed - wait for stabilisation.'
+      : 'Diminishing - structure weakening.';
     diminishingReason = presentationReason;
   }else if(presentationBucket === 'entry'){
     presentationTone = 'entry';
@@ -14552,6 +14574,7 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     rejectedByViabilityGate,
     terminalAvoidReason:terminalAvoidReason || '(none)',
     diminishingReason:diminishingReason || '(none)',
+    failedReclaimTrackEvidence,
     structuralAliveAtRefresh,
     avoidAllowedByStructureGuard,
     explicitInvalidationReason:explicitInvalidationReason || '(none)',
