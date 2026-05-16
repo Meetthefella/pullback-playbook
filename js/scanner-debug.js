@@ -334,7 +334,11 @@
     const visualState = deps.resolveVisualState ? deps.resolveVisualState(item, 'scanner') : null;
     const nextAction = deps.getActions(globalVerdict.final_verdict || '');
     const renderedVerdict = globalVerdict.final_verdict || '(none)';
-    const renderedBucket = globalVerdict.bucket || '(none)';
+    const renderedBucket = resolution.bucket || globalVerdict.bucket || '(none)';
+    const failedReclaimPresentation = String(resolution.remapReason || '').toLowerCase().includes('failed reclaim');
+    const notPromotedReason = failedReclaimPresentation
+      ? 'Recent rebound failed - wait for stabilisation.'
+      : (globalVerdict.downgrade_reason || '(none)');
     const baseSection = renderDebugSectionMarkup('Base Assessment', [
       {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
       {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
@@ -364,8 +368,8 @@
       {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
       {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
       {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
-      {label:'Promotion Blocked', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-      {label:'Promotion Blocker', value:globalVerdict.downgrade_reason || '(none)'},
+      {label:'Promotion Blocked', value:(globalVerdict.downgrade_applied || failedReclaimPresentation) ? 'true' : 'false'},
+      {label:'Blocker / Not-Promoted Reason', value:notPromotedReason},
       {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
       {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
     ], deps);
@@ -430,6 +434,11 @@
     const clickTraceHistory = deps.scannerCardClickTraceHistoryForTicker(item.ticker);
     const reviewAnalysisState = deps.reviewAnalysisUiStateForRecord ? deps.reviewAnalysisUiStateForRecord(item) : '';
     const resolution = view && view.scannerResolution ? view.scannerResolution : {};
+    const renderedBucket = resolution.bucket || globalVerdict.bucket || '(none)';
+    const failedReclaimPresentation = String(resolution.remapReason || '').toLowerCase().includes('failed reclaim');
+    const notPromotedReason = failedReclaimPresentation
+      ? 'Recent rebound failed - wait for stabilisation.'
+      : (globalVerdict.downgrade_reason || '(none)');
     const baseSection = renderDebugSectionMarkup('Base Assessment', [
       {label:'Base Verdict', value:globalVerdict.base_verdict || '(none)'},
       {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : '(none)'},
@@ -441,7 +450,7 @@
     const finalSection = renderDebugSectionMarkup('Final Decision', [
       {label:'UI State Source', value:'scanner_resolution'},
       {label:'Final Verdict Rendered', value:globalVerdict.final_verdict || '(none)'},
-      {label:'Bucket Rendered', value:globalVerdict.bucket || '(none)'},
+      {label:'Bucket Rendered', value:renderedBucket},
       {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
       {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
       {label:'Explicit Invalidation Reason', value:(visualState && visualState.explicit_invalidation_reason) || globalVerdict.explicit_invalidation_reason || '(none)'},
@@ -459,8 +468,8 @@
       {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || statusChip.label || '(none)'},
       {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
       {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
-      {label:'Promotion Blocked', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-      {label:'Promotion Blocker', value:globalVerdict.downgrade_reason || '(none)'},
+      {label:'Promotion Blocked', value:(globalVerdict.downgrade_applied || failedReclaimPresentation) ? 'true' : 'false'},
+      {label:'Blocker / Not-Promoted Reason', value:notPromotedReason},
       {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
       {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
     ], deps);
