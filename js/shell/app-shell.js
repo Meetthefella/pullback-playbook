@@ -156,7 +156,9 @@
         caller:'setTrackRevealPending',
         reason,
         restoreTarget:Number.isFinite(Number(uiState.pendingTrackRestoreY)) ? Number(uiState.pendingTrackRestoreY) : null,
-        actualY:currentScrollY()
+        actualY:currentScrollY(),
+        trackRevealPending:pending === true,
+        panelHiddenBeforeActivate:pending === true
       });
     }
 
@@ -308,19 +310,12 @@
         if(!Number.isFinite(restoreTarget)) return;
         uiState.pendingTrackRestoreY = restoreTarget;
         if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = restoreTarget;
-        traceScrollEvent('track:scroll-restore:before', {
-          caller:'restoreWorkspaceViewportAfterOpen',
-          savedTrackScrollY:Number(uiState.trackScrollY || 0),
-          restoreTarget,
-          restoreActualBefore:currentScrollY(),
-          reason:'track_tab_activation'
-        });
-        scheduleTrackRestore(restoreTarget, 'track_tab_activation');
+        scheduleTrackRestore(restoreTarget, 'track_tab_activation', {immediate:true});
       }
       updateTrackScrollTopControl();
     }
 
-    function scheduleTrackRestore(target, reason = 'track_restore'){
+    function scheduleTrackRestore(target, reason = 'track_restore', options = {}){
       const restoreTarget = Math.max(0, Number(target) || 0);
       const concealUntilRestored = restoreTarget > 24;
       uiState.trackRestoreInProgress = true;
@@ -404,7 +399,8 @@
           reason,
           restoreTarget,
           restoreActualBefore:before,
-          attempt
+          attempt,
+          trackRevealPending:uiState.trackRevealPending === true
         });
         scrollWindowTo(restoreTarget, 'auto', reason);
         const after = currentScrollY();
@@ -414,7 +410,8 @@
           restoreTarget,
           restoreActualBefore:before,
           restoreActualAfter:after,
-          attempt
+          attempt,
+          scrollToAppliedBeforeReveal:uiState.trackRevealPending === true
         });
         if(attempt === 1 && Math.abs(after - restoreTarget) > 24){
           traceScrollEvent('delayed-scroll:scheduled', {
@@ -436,8 +433,13 @@
         caller:'scheduleTrackRestore',
         label:'track:scroll-restore',
         restoreTarget,
-        reason
+        reason,
+        duplicateRestoreSuppressed:options.immediate === true
       });
+      if(options.immediate === true){
+        runRestore(1);
+        return;
+      }
       if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
         window.requestAnimationFrame(() => window.requestAnimationFrame(() => runRestore(1)));
       }else{
