@@ -123,6 +123,17 @@
       }
     }
 
+    function extendActiveScrollSuppression(reason, durationMs = 350){
+      const safeReason = String(reason || uiState.suppressWorkspaceScrollSaveReason || 'programmatic_scroll_settling');
+      const until = nowMs() + Math.max(0, Number(durationMs) || 0);
+      uiState.suppressWorkspaceScrollSaveUntil = Math.max(Number(uiState.suppressWorkspaceScrollSaveUntil || 0), until);
+      uiState.suppressWorkspaceScrollSaveReason = safeReason;
+      if(typeof window !== 'undefined'){
+        window.__ppSuppressScrollMemoryUntil = uiState.suppressWorkspaceScrollSaveUntil;
+        window.__ppScrollMemorySuppressionReason = safeReason;
+      }
+    }
+
     function isWorkspaceVisiblyActive(tab){
       const normalized = normalizeTab(tab);
       if(typeof document === 'undefined') return false;
@@ -144,6 +155,7 @@
       );
       const now = nowMs();
       if(now < suppressUntil){
+        extendActiveScrollSuppression(`${suppressionReason}_settling`, 350);
         traceScrollEvent('track:scroll-save-suppressed', {
           caller:'saveActiveWorkspaceScroll',
           reason:suppressionReason,

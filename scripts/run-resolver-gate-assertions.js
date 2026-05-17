@@ -884,6 +884,9 @@ function runEntryConditionsSummaryAssertions(){
   if(!/suppressScrollMemory/.test(appShellSource) || !/track:scroll-save-suppressed/.test(appShellSource) || !/__ppSuppressScrollMemoryUntil/.test(appShellSource)){
     throw new Error('Programmatic scrolls must suppress Track scroll-memory overwrites.');
   }
+  if(!/extendActiveScrollSuppression/.test(appShellSource) || !/_settling/.test(appShellSource)){
+    throw new Error('Programmatic scroll suppression must extend until scroll movement settles.');
+  }
   if(!/review_initial_positioning/.test(appShellSource) || !/scroll_to_top_button/.test(appShellSource) || !/track_restore/.test(appShellSource)){
     throw new Error('Review positioning, Track restore, and Track scroll-to-top must carry explicit scroll-memory suppression reasons.');
   }
