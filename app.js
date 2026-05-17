@@ -5288,8 +5288,22 @@ function openContextSettings(sectionKey = 'market'){
   setControlFocus(nextSection, {scroll:false, instant:true});
   const target = contextSettingsSectionTarget(nextSection);
   if(!target) return;
+  traceScrollEvent('delayed-scroll:scheduled', {
+    caller:'openContextSettings',
+    label:'scrollIntoView',
+    target:`context-section:${nextSection}`
+  });
   requestAnimationFrame(() => {
+    traceScrollEvent('scrollIntoView:before', {
+      caller:'openContextSettings',
+      target:`context-section:${nextSection}`,
+      options:{behavior:'smooth', block:'nearest'}
+    });
     target.scrollIntoView({behavior:'smooth', block:'nearest'});
+    traceScrollEvent('scrollIntoView:after', {
+      caller:'openContextSettings',
+      target:`context-section:${nextSection}`
+    });
     highlightContextSettingsSection(target);
   });
 }
@@ -5300,8 +5314,22 @@ function openMarketCalendarShortcut(){
   if(advancedDetails) advancedDetails.open = true;
   const target = $('marketCalendarPanel') || $('marketCalendarGrid') || $('marketCalendarSummary') || $('advancedSection');
   if(!target) return;
+  traceScrollEvent('delayed-scroll:scheduled', {
+    caller:'openMarketCalendarShortcut',
+    label:'scrollIntoView',
+    target:target.id || target.className || 'market_calendar'
+  });
   requestAnimationFrame(() => {
+    traceScrollEvent('scrollIntoView:before', {
+      caller:'openMarketCalendarShortcut',
+      target:target.id || target.className || 'market_calendar',
+      options:{behavior:'smooth', block:'start'}
+    });
     target.scrollIntoView({behavior:'smooth', block:'start'});
+    traceScrollEvent('scrollIntoView:after', {
+      caller:'openMarketCalendarShortcut',
+      target:target.id || target.className || 'market_calendar'
+    });
     highlightContextSettingsSection(target.closest && target.closest('.panelbox') ? target.closest('.panelbox') : target);
   });
   if(typeof setLiveProcessStatus === 'function'){
@@ -6387,7 +6415,16 @@ function renderControlStripSelector(){
         setContextSettingsPanelOpen(true);
         const settings = $('headerRiskSettings');
         if(!settings) return;
+        traceScrollEvent('scrollIntoView:before', {
+          caller:'controlFocusAccountAction.onclick',
+          target:'#headerRiskSettings',
+          options:{behavior:'smooth', block:'nearest'}
+        });
         settings.scrollIntoView({behavior:'smooth', block:'nearest'});
+        traceScrollEvent('scrollIntoView:after', {
+          caller:'controlFocusAccountAction.onclick',
+          target:'#headerRiskSettings'
+        });
       };
     }
   }else{
@@ -6615,6 +6652,12 @@ function addToWatchlist(tickerData){
 function removeFromWatchlist(ticker){
   const symbol = normalizeTicker(ticker);
   const record = getTickerRecord(symbol);
+  const removeCardCountBefore = document.querySelectorAll('[data-workspace-card="track"] [data-watchlist-ticker]').length;
+  traceScrollEvent('track:remove:before', {
+    caller:'removeFromWatchlist',
+    ticker:symbol,
+    cardCountBefore:removeCardCountBefore
+  });
   const trackUiSnapshot = activeWorkspaceTab() === 'track' ? captureTrackUiState() : null;
   if(record){
     record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
@@ -6659,6 +6702,12 @@ function removeFromWatchlist(ticker){
     renderWatchlist();
   }
   renderFocusQueue();
+  traceScrollEvent('track:remove:after', {
+    caller:'removeFromWatchlist',
+    ticker:symbol,
+    cardCountBefore:removeCardCountBefore,
+    cardCountAfter:document.querySelectorAll('[data-workspace-card="track"] [data-watchlist-ticker]').length
+  });
 }
 
 function getTradingDaysRemaining(entry){
@@ -8551,8 +8600,34 @@ function isTrackSectionExpanded(sectionKey, sectionRecords = []){
   return stateMap[sectionKey] === true;
 }
 
+function traceScrollEvent(label, details = {}){
+  if(typeof window === 'undefined' || window.PP_SCROLL_TRACE !== true) return;
+  const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  const payload = {
+    label:String(label || ''),
+    activeTab:typeof activeWorkspaceTab === 'function' ? activeWorkspaceTab() : '',
+    scrollY:Number(window.scrollY || window.pageYOffset || 0),
+    viewportH:Number(window.innerHeight || 0),
+    docH:Number(document && document.documentElement ? document.documentElement.scrollHeight || 0 : 0),
+    time:Math.round(now),
+    ...details,
+    stack:details.stack || (new Error().stack)
+  };
+  window.__ppRecentScrollAction = {
+    label:payload.label,
+    time:payload.time,
+    details:{...details, scrollY:payload.scrollY}
+  };
+  console.log('[SCROLL_TRACE]', payload);
+}
+
 function startTrackRenderCycle(source = 'watchlist_render'){
   if(activeWorkspaceTab() !== 'track') return () => {};
+  traceScrollEvent('track:render:before', {
+    caller:'startTrackRenderCycle',
+    reason:String(source || 'watchlist_render'),
+    cardCountBefore:document.querySelectorAll('[data-workspace-card="track"] [data-watchlist-ticker]').length
+  });
   uiState.trackRenderInFlight = true;
   uiState.trackRenderLastStartedAt = Date.now();
   uiState.trackRenderLastSource = String(source || 'watchlist_render');
@@ -8562,6 +8637,11 @@ function startTrackRenderCycle(source = 'watchlist_render'){
     finished = true;
     uiState.trackRenderInFlight = false;
     uiState.trackRenderLastEndedAt = Date.now();
+    traceScrollEvent('track:render:after', {
+      caller:'startTrackRenderCycle.finish',
+      reason:String(source || 'watchlist_render'),
+      cardCountAfter:document.querySelectorAll('[data-workspace-card="track"] [data-watchlist-ticker]').length
+    });
   };
 }
 
@@ -8571,6 +8651,11 @@ function captureTrackUiState(){
     scrollY:typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : null,
     expandedState:readTrackSectionState()
   };
+  traceScrollEvent('track:scroll-save', {
+    caller:'captureTrackUiState',
+    savedTrackScrollY:state.scrollY,
+    reason:'track_ui_snapshot'
+  });
   if(watchlistList){
     const expanded = {};
     const sections = watchlistList.querySelectorAll('.watchlistgroup[data-group-key]');
@@ -8602,9 +8687,24 @@ function restoreTrackUiState(snapshot = null){
   if(!Number.isFinite(targetScrollY) || typeof window === 'undefined') return;
   const restoreScroll = () => {
     if(activeWorkspaceTab() !== 'track') return;
+    traceScrollEvent('track:scroll-restore:before', {
+      caller:'restoreTrackUiState',
+      savedTrackScrollY:targetScrollY,
+      reason:'track_dom_update'
+    });
     window.scrollTo({top:Math.max(0, targetScrollY), behavior:'auto'});
+    traceScrollEvent('track:scroll-restore:after', {
+      caller:'restoreTrackUiState',
+      savedTrackScrollY:targetScrollY,
+      reason:'track_dom_update'
+    });
   };
   if(typeof window.requestAnimationFrame === 'function'){
+    traceScrollEvent('delayed-scroll:scheduled', {
+      caller:'restoreTrackUiState',
+      label:'track:scroll-restore',
+      savedTrackScrollY:targetScrollY
+    });
     window.requestAnimationFrame(restoreScroll);
   }else{
     setTimeout(restoreScroll, 0);
@@ -11130,7 +11230,18 @@ async function buildCards(){
     const resultsToggle = $('resultsToggle');
     const resultsSection = $('resultsSection');
     if(resultsToggle) resultsToggle.open = true;
-    if(resultsSection) resultsSection.scrollIntoView({behavior:'smooth', block:'start'});
+    if(resultsSection){
+      traceScrollEvent('scrollIntoView:before', {
+        caller:'buildCards',
+        target:'#resultsSection',
+        options:{behavior:'smooth', block:'start'}
+      });
+      resultsSection.scrollIntoView({behavior:'smooth', block:'start'});
+      traceScrollEvent('scrollIntoView:after', {
+        caller:'buildCards',
+        target:'#resultsSection'
+      });
+    }
     return result;
   }catch(err){
     pushRuntimeDebugEntry('buildCards.catch', {
@@ -11202,7 +11313,16 @@ function removeTicker(ticker){
 function scrollToScannerResults(){
   const target = $('resultsSection') || $('results');
   if(!target) return;
+  traceScrollEvent('scrollIntoView:before', {
+    caller:'scrollToScannerResults',
+    target:target.id ? `#${target.id}` : 'scanner_results',
+    options:{behavior:'smooth', block:'start'}
+  });
   target.scrollIntoView({behavior:'smooth', block:'start'});
+  traceScrollEvent('scrollIntoView:after', {
+    caller:'scrollToScannerResults',
+    target:target.id ? `#${target.id}` : 'scanner_results'
+  });
 }
 
 function removeCard(ticker){
@@ -22601,7 +22721,20 @@ async function refreshTrackOnly(options = {}){
 }
 
 async function refreshWatchlistTicker(ticker){
-  return trackWatchlistFeature.refreshTicker(ticker);
+  traceScrollEvent('track:card-refresh:before', {
+    caller:'refreshWatchlistTicker',
+    ticker:normalizeTicker(ticker),
+    cardCountBefore:document.querySelectorAll('[data-workspace-card="track"] [data-watchlist-ticker]').length
+  });
+  try{
+    return await trackWatchlistFeature.refreshTicker(ticker);
+  }finally{
+    traceScrollEvent('track:card-refresh:after', {
+      caller:'refreshWatchlistTicker',
+      ticker:normalizeTicker(ticker),
+      cardCountAfter:document.querySelectorAll('[data-workspace-card="track"] [data-watchlist-ticker]').length
+    });
+  }
 }
 
 function analyseActiveReviewTicker(){
@@ -24785,6 +24918,11 @@ function renderReviewWorkspace(options = {}){
   if(!isCurrentReviewRender(reviewSeq)) return;
   const box = $('reviewWorkspace');
   if(!box) return;
+  traceScrollEvent('review:render:before', {
+    caller:'renderReviewWorkspace',
+    reason:String(options.source || options.reason || 'direct'),
+    ticker:activeReviewTicker() || ''
+  });
   perfMark('pp_review_workspace_render_start');
   const reviewRenderSource = String(options.source || options.reason || 'direct');
   if(PP_PERF_DEBUG){
@@ -24808,6 +24946,11 @@ function renderReviewWorkspace(options = {}){
         ...startupDebugRenderState()
       });
     }
+    traceScrollEvent('review:render:after', {
+      caller:'renderReviewWorkspace.finish',
+      reason:reviewRenderSource,
+      ticker:activeReviewTicker() || ''
+    });
   };
   box.className = 'list reviewworkspace-shell';
   box.innerHTML = '';
@@ -26132,6 +26275,12 @@ function loadCard(ticker, options = {}){
   const reviewSeq = reviewRenderSeqForOptions(options);
   if(!isCurrentReviewRender(reviewSeq)) return;
   const displayOnlyReviewOpen = options.recompute !== true && options.touchLifecycle !== true;
+  traceScrollEvent('review:update:before', {
+    caller:'loadCard',
+    ticker:normalizeTicker(ticker),
+    skipAutoScroll:options.skipAutoScroll === true,
+    recompute:options.recompute === true
+  });
   setScannerCardClickTrace(ticker, 'loadCard.enter', `touchLifecycle=${options.touchLifecycle === true} recompute=${options.recompute === true}`);
   logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
   setActiveReviewTicker(record.ticker);
@@ -26166,6 +26315,12 @@ function loadCard(ticker, options = {}){
   if(options.skipAutoScroll === true){
     setScannerCardClickTrace(ticker, 'loadCard.scroll_skipped', 'skipAutoScroll=true');
   }
+  traceScrollEvent('review:update:after', {
+    caller:'loadCard',
+    ticker:normalizeTicker(ticker),
+    skipAutoScroll:options.skipAutoScroll === true,
+    recompute:options.recompute === true
+  });
   setScannerCardClickTrace(ticker, 'loadCard.complete', `selectedTicker=${(($('selectedTicker') && $('selectedTicker').value) || '(none)')}`);
 }
 
@@ -26308,7 +26463,17 @@ function scheduleReviewDraftAutosave(options = {}){
 function saveReview(){
   const ticker = activeReviewTicker();
   if(!ticker){
-    if($('selectedTicker')) $('selectedTicker').focus();
+    if($('selectedTicker')){
+      traceScrollEvent('focus:before', {
+        caller:'saveReview',
+        target:'#selectedTicker'
+      });
+      $('selectedTicker').focus();
+      traceScrollEvent('focus:after', {
+        caller:'saveReview',
+        target:'#selectedTicker'
+      });
+    }
     return;
   }
   const saveResult = persistActiveReviewDraft({source:'review_save', render:true, manual:true});

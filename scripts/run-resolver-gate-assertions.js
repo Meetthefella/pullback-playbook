@@ -878,7 +878,7 @@ function runEntryConditionsSummaryAssertions(){
   if(!/primeWorkspaceViewportBeforeOpen\(nextTab\);[\s\S]{0,120}applyWorkspace\(nextTab\)/.test(appShellSource)){
     throw new Error('Review tab activation must prime the viewport before showing Review to avoid a visible jump.');
   }
-  if(!/reviewInitialTopPositioned/.test(appShellSource) || !/if\(uiState\.reviewInitialTopPositioned === true\) return/.test(appShellSource)){
+  if(!/reviewInitialTopPositioned/.test(appShellSource) || !/if\(uiState\.reviewInitialTopPositioned === true\)[\s\S]{0,400}return/.test(appShellSource)){
     throw new Error('Review top positioning must run only once per session.');
   }
   if(!/scrollY:typeof window !== 'undefined' \? Number\(window\.scrollY/.test(appSource) || !/function restoreTrackUiState[\s\S]{0,1200}window\.scrollTo\(\{top:Math\.max\(0, targetScrollY\), behavior:'auto'\}\)/.test(appSource)){

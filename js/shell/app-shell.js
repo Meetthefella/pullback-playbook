@@ -7,6 +7,8 @@
     const workspaceCards = Array.from(document.querySelectorAll('[data-workspace-card]'));
     const trackTopButton = document.getElementById('trackScrollTopBtn');
     const enabled = tabButtons.length > 0 && workspaceCards.length > 0;
+    let lastObservedScrollY = typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
+    let lastObservedScrollAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
 
     function normalizeTab(value){
       const tab = String(value || '').trim().toLowerCase();
@@ -17,6 +19,32 @@
       if(!element || typeof element.closest !== 'function') return '';
       const card = element.closest('[data-workspace-card]');
       return card ? normalizeTab(card.getAttribute('data-workspace-card')) : '';
+    }
+
+    function traceScrollEvent(label, details = {}){
+      if(typeof window === 'undefined' || window.PP_SCROLL_TRACE !== true) return;
+      const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+      const scrollY = Number(window.scrollY || window.pageYOffset || 0);
+      const payload = {
+        label:String(label || ''),
+        activeTab:normalizeTab(uiState.activeWorkspaceTab || ''),
+        scrollY,
+        viewportH:Number(window.innerHeight || 0),
+        docH:Number(document && document.documentElement ? document.documentElement.scrollHeight || 0 : 0),
+        time:Math.round(now),
+        ...details,
+        stack:details.stack || (new Error().stack)
+      };
+      window.__ppRecentScrollAction = {
+        label:payload.label,
+        time:payload.time,
+        details:{...details, scrollY}
+      };
+      console.log('[SCROLL_TRACE]', payload);
+    }
+
+    if(typeof window !== 'undefined'){
+      window.traceScrollEvent = window.traceScrollEvent || traceScrollEvent;
     }
 
     function blurFocusedElementForTab(nextTab){
@@ -39,9 +67,18 @@
       if(!workspace.hasAttribute('tabindex')) workspace.setAttribute('tabindex', '-1');
       if(options.focusWorkspace === false) return;
       if(typeof workspace.focus !== 'function') return;
+      traceScrollEvent(`${nextTab}:focus:before`, {
+        caller:'focusWorkspaceContainer',
+        target:`[data-workspace-card="${nextTab}"]`,
+        options:{preventScroll:true}
+      });
       try{
         workspace.focus({preventScroll:true});
       }catch(error){}
+      traceScrollEvent(`${nextTab}:focus:after`, {
+        caller:'focusWorkspaceContainer',
+        target:`[data-workspace-card="${nextTab}"]`
+      });
     }
 
     function workspaceCardForTab(tab){
@@ -74,31 +111,80 @@
 
     function saveActiveWorkspaceScroll(){
       const active = normalizeTab(uiState.activeWorkspaceTab || '');
-      if(active === 'track') uiState.trackScrollY = currentScrollY();
+      if(active === 'track'){
+        const oldSavedTrackScrollY = Number(uiState.trackScrollY);
+        const newSavedTrackScrollY = currentScrollY();
+        uiState.trackScrollY = newSavedTrackScrollY;
+        traceScrollEvent('track:scroll-save', {
+          caller:'saveActiveWorkspaceScroll',
+          oldSavedTrackScrollY:Number.isFinite(oldSavedTrackScrollY) ? oldSavedTrackScrollY : null,
+          newSavedTrackScrollY
+        });
+      }
       if(active === 'review') uiState.reviewScrollY = currentScrollY();
     }
 
     function scrollWindowTo(top, behavior = 'auto'){
       if(typeof window === 'undefined') return;
+      const targetTop = Math.max(0, Math.round(top));
+      traceScrollEvent('scrollTo:before', {
+        caller:'scrollWindowTo',
+        intendedTop:targetTop,
+        behavior
+      });
       try{
-        window.scrollTo({top:Math.max(0, Math.round(top)), behavior});
+        window.scrollTo({top:targetTop, behavior});
       }catch(_error){
-        window.scrollTo(0, Math.max(0, Math.round(top)));
+        window.scrollTo(0, targetTop);
       }
+      traceScrollEvent('scrollTo:after', {
+        caller:'scrollWindowTo',
+        intendedTop:targetTop,
+        behavior
+      });
     }
 
     function primeWorkspaceViewportBeforeOpen(tab){
       const normalized = normalizeTab(tab);
       if(normalized !== 'review') return;
-      if(uiState.reviewInitialTopPositioned === true) return;
+      traceScrollEvent('review:initial-top-check', {
+        caller:'primeWorkspaceViewportBeforeOpen',
+        reviewHasInitialTopPositioned:uiState.reviewInitialTopPositioned === true,
+        targetScrollY:0,
+        reason:'review_tab_activation'
+      });
+      if(uiState.reviewInitialTopPositioned === true){
+        traceScrollEvent('review:initial-top-skip', {
+          caller:'primeWorkspaceViewportBeforeOpen',
+          reviewHasInitialTopPositioned:true,
+          reason:'already_positioned'
+        });
+        return;
+      }
       uiState.reviewInitialTopPositioned = true;
+      traceScrollEvent('review:initial-top-apply', {
+        caller:'primeWorkspaceViewportBeforeOpen',
+        reviewHasInitialTopPositioned:true,
+        targetScrollY:0,
+        reason:'first_review_focus'
+      });
       scrollWindowTo(0, 'auto');
     }
 
     function restoreWorkspaceViewportAfterOpen(tab){
       const normalized = normalizeTab(tab);
       if(normalized === 'track' && Number.isFinite(Number(uiState.trackScrollY))){
+        traceScrollEvent('track:scroll-restore:before', {
+          caller:'restoreWorkspaceViewportAfterOpen',
+          savedTrackScrollY:Number(uiState.trackScrollY || 0),
+          reason:'track_tab_activation'
+        });
         scrollWindowTo(Number(uiState.trackScrollY || 0), 'auto');
+        traceScrollEvent('track:scroll-restore:after', {
+          caller:'restoreWorkspaceViewportAfterOpen',
+          savedTrackScrollY:Number(uiState.trackScrollY || 0),
+          reason:'track_tab_activation'
+        });
       }
       if(normalized === 'review' && uiState.reviewInitialTopPositioned === true && Number.isFinite(Number(uiState.reviewScrollY))){
         scrollWindowTo(Number(uiState.reviewScrollY || 0), 'auto');
@@ -135,6 +221,12 @@
 
     function switchWorkspace(tab, options = {}){
       const nextTab = normalizeTab(tab);
+      traceScrollEvent('tab:switch:before', {
+        caller:'switchWorkspace',
+        fromTab:normalizeTab(uiState.activeWorkspaceTab || ''),
+        toTab:nextTab,
+        options
+      });
       saveActiveWorkspaceScroll();
       blurFocusedElementForTab(nextTab);
       primeWorkspaceViewportBeforeOpen(nextTab);
@@ -149,6 +241,10 @@
         }catch(error){}
       }
       updateTrackScrollTopControl();
+      traceScrollEvent('tab:switch:after', {
+        caller:'switchWorkspace',
+        appliedTab
+      });
       return appliedTab;
     }
 
@@ -170,6 +266,20 @@
       });
       if(typeof window !== 'undefined'){
         window.addEventListener('scroll', () => {
+          const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+          const nextScrollY = currentScrollY();
+          const delta = nextScrollY - lastObservedScrollY;
+          if(window.PP_SCROLL_TRACE === true && ['track','review'].includes(normalizeTab(uiState.activeWorkspaceTab || '')) && Math.abs(delta) > 80 && (now - lastObservedScrollAt) <= 250){
+            traceScrollEvent('scroll:observed-jump', {
+              from:lastObservedScrollY,
+              to:nextScrollY,
+              delta,
+              activeTab:normalizeTab(uiState.activeWorkspaceTab || ''),
+              recentAction:window.__ppRecentScrollAction || null
+            });
+          }
+          lastObservedScrollY = nextScrollY;
+          lastObservedScrollAt = now;
           saveActiveWorkspaceScroll();
           updateTrackScrollTopControl();
         }, {passive:true});
