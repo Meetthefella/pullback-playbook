@@ -6,10 +6,10 @@ const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.4.13';
+const APP_VERSION = 'v4.4.14';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.4.13',
+    version:'4.4.14',
     commit:'817dad5',
     branch:'main',
     builtAt:'2026-05-06T10:39Z'
@@ -8129,8 +8129,9 @@ function renderWatchlistCardElement(record, options = {}){
     ? simplifiedState.debug.resolvedState
     : null;
   const canonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
-  const visualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
-  const tone = String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const trackPresentation = resolveTrackPresentationModel(record, globalVerdict || resolveGlobalVerdict(record), lifecycleSnapshot, priority);
+  const visualBucket = normalizeVisualBucketForPairing(trackPresentation.presentationBucket || simplifiedState.visualBucket || 'monitor');
+  const tone = String(trackPresentation.presentationTone || simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
   const badgeClass = ({
     entry:'badge--entry ready',
     near_entry:'badge--near-entry near',
@@ -8171,7 +8172,7 @@ function renderWatchlistCardElement(record, options = {}){
       text:String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch'),
       className:badgeClass
     },
-    decision_summary:String(simplifiedState.mainBlocker || simplifiedState.actionLabel || '').trim(),
+    decision_summary:String(trackPresentation.presentationReason || simplifiedState.mainBlocker || simplifiedState.actionLabel || '').trim(),
     watchlist_presentation_source:'simplified_state_pipeline',
     simplifiedTrackCard:true
   };
@@ -8194,7 +8195,10 @@ function renderWatchlistCardElement(record, options = {}){
       visualBucket:simplifiedState.visualBucket,
       tone:simplifiedState.tone,
       badgeLabel:simplifiedState.badgeLabel,
-      mainBlocker:simplifiedState.mainBlocker
+      mainBlocker:simplifiedState.mainBlocker,
+      trackPresentationBucket:trackPresentation.presentationBucket,
+      weakWatchDowngradeApplied:simplifiedState.weakWatchDowngradeApplied === true,
+      weakWatchDowngradeReasons:simplifiedState.weakWatchDowngradeReasons || []
     });
   }
   record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
@@ -8252,7 +8256,7 @@ function renderWatchlistCardElement(record, options = {}){
   const liveRefreshNote = liveRefreshPending
     ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
     : '';
-  const decisionSummary = watchlistVisualState.decision_summary;
+  const decisionSummary = trackPresentation.presentationReason || watchlistVisualState.decision_summary;
   const refreshButtonLabel = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
   const refreshButtonDisabled = manualRefreshBusy ? ' disabled' : '';
   const diagnosticPlanBlocker = simplifiedState.planVisible
