@@ -25654,6 +25654,21 @@ function renderReviewWorkspace(options = {}){
       reviewProjectionSource:effectiveReviewProjectionSource,
       effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
       finalReviewVisualBucket:finalReviewVisualBucket,
+      weakWatchDiminishingApplied:!!(visualState && visualState.weakWatchDiminishingApplied),
+      weakWatchDiminishingReason:String(visualState && visualState.weakWatchDiminishingReason || ''),
+      weakWatchDiminishingTrace:visualState && visualState.weakWatchDiminishingTrace ? {
+        applied:visualState.weakWatchDiminishingTrace.applied === true,
+        triggerTokens:Array.isArray(visualState.weakWatchDiminishingTrace.triggerTokens)
+          ? visualState.weakWatchDiminishingTrace.triggerTokens.slice()
+          : [],
+        returnPath:String(visualState.weakWatchDiminishingTrace.returnPath || ''),
+        evaluatedBeforeFinalMonitorFallback:visualState.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback === true,
+        priceabilityUnpriceable:visualState.weakWatchDiminishingTrace.priceabilityUnpriceable === true,
+        lowScore:visualState.weakWatchDiminishingTrace.lowScore === true,
+        below50WithoutReclaim:visualState.weakWatchDiminishingTrace.below50WithoutReclaim === true,
+        bounceState:String(visualState.weakWatchDiminishingTrace.bounceState || ''),
+        promotionBlocked:visualState.weakWatchDiminishingTrace.promotionBlocked === true
+      } : null,
       nonAuthoritativeVisualState:{
         visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket || '',
         presentationBucket:visualState.presentationBucket || '',
@@ -25689,6 +25704,21 @@ function renderReviewWorkspace(options = {}){
         reviewProjectionSource:effectiveReviewProjectionSource,
         effectiveReviewPresentationState:resolvedReviewFinalVerdictKey,
         finalReviewVisualBucket:finalReviewVisualBucket,
+        weakWatchDiminishingApplied:!!(visualState && visualState.weakWatchDiminishingApplied),
+        weakWatchDiminishingReason:String(visualState && visualState.weakWatchDiminishingReason || ''),
+        weakWatchDiminishingTrace:visualState && visualState.weakWatchDiminishingTrace ? {
+          applied:visualState.weakWatchDiminishingTrace.applied === true,
+          triggerTokens:Array.isArray(visualState.weakWatchDiminishingTrace.triggerTokens)
+            ? visualState.weakWatchDiminishingTrace.triggerTokens.slice()
+            : [],
+          returnPath:String(visualState.weakWatchDiminishingTrace.returnPath || ''),
+          evaluatedBeforeFinalMonitorFallback:visualState.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback === true,
+          priceabilityUnpriceable:visualState.weakWatchDiminishingTrace.priceabilityUnpriceable === true,
+          lowScore:visualState.weakWatchDiminishingTrace.lowScore === true,
+          below50WithoutReclaim:visualState.weakWatchDiminishingTrace.below50WithoutReclaim === true,
+          bounceState:String(visualState.weakWatchDiminishingTrace.bounceState || ''),
+          promotionBlocked:visualState.weakWatchDiminishingTrace.promotionBlocked === true
+        } : null,
         nonAuthoritativeVisualState:{
           visualBucket:visualState.visualBucket || visualState.presentationBucket || visualState.trackPresentationBucket || '',
           presentationBucket:visualState.presentationBucket || '',
@@ -25984,6 +26014,15 @@ function renderReviewWorkspace(options = {}){
     {label:'Weak Watch Diminishing Applied', value:visualState.weakWatchDiminishingApplied ? 'true' : 'false'},
     {label:'Weak Watch Diminishing Reason', value:visualState.weakWatchDiminishingReason || '(none)'},
     {label:'Weak Watch Diminishing Trace', value:JSON.stringify(visualState.weakWatchDiminishingTrace || {}, null, 0) || '(none)'},
+    {label:'Trace Applied', value:visualState.weakWatchDiminishingTrace && visualState.weakWatchDiminishingTrace.applied === true ? 'true' : 'false'},
+    {label:'Trace Tokens', value:Array.isArray(visualState.weakWatchDiminishingTrace && visualState.weakWatchDiminishingTrace.triggerTokens) ? visualState.weakWatchDiminishingTrace.triggerTokens.join(', ') : '(none)'},
+    {label:'Trace Return Path', value:visualState.weakWatchDiminishingTrace && visualState.weakWatchDiminishingTrace.returnPath || '(none)'},
+    {label:'Trace Before Monitor Fallback', value:visualState.weakWatchDiminishingTrace && visualState.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback === true ? 'true' : 'false'},
+    {label:'Trace Priceability Unpriceable', value:visualState.weakWatchDiminishingTrace && visualState.weakWatchDiminishingTrace.priceabilityUnpriceable === true ? 'true' : 'false'},
+    {label:'Trace Low Score', value:visualState.weakWatchDiminishingTrace && visualState.weakWatchDiminishingTrace.lowScore === true ? 'true' : 'false'},
+    {label:'Trace Below50 No Reclaim', value:visualState.weakWatchDiminishingTrace && visualState.weakWatchDiminishingTrace.below50WithoutReclaim === true ? 'true' : 'false'},
+    {label:'Trace Bounce State', value:visualState.weakWatchDiminishingTrace && visualState.weakWatchDiminishingTrace.bounceState || '(none)'},
+    {label:'Trace Promotion Blocked', value:visualState.weakWatchDiminishingTrace && visualState.weakWatchDiminishingTrace.promotionBlocked === true ? 'true' : 'false'},
     {label:'Track Visual Bucket', value:visualBucketLabel(reviewLifecycleBias.trackPresentationBucket || 'monitor')},
     {label:'Track Presentation Tone', value:reviewLifecycleBias.trackPresentationTone || '(none)'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
