@@ -3030,14 +3030,14 @@ body[data-active-workspace="review"] .contextstrip{
   z-index:0;
   border-radius:inherit;
   opacity:0;
-  transform:translateX(-104%) scaleX(.72);
+  transform:scaleX(0);
   transform-origin:left center;
   background:
     linear-gradient(90deg,
       rgba(245,158,11,.08) 0%,
-      rgba(245,158,11,.24) 46%,
-      rgba(251,191,36,.42) 72%,
-      rgba(251,191,36,.16) 88%,
+      rgba(245,158,11,.24) 62%,
+      rgba(251,191,36,.44) 82%,
+      rgba(251,191,36,.2) 92%,
       rgba(251,191,36,0) 100%);
   box-shadow:inset 0 0 18px rgba(251,191,36,.22), 0 0 18px rgba(245,158,11,.16);
   pointer-events:none;
@@ -3057,13 +3057,13 @@ body[data-active-workspace="review"] .contextstrip{
 .bottom-ribbon-nav__tab.is-pending-transition::before{
   opacity:1;
   will-change:transform, opacity;
-  animation:trackTabPendingSweep .62s cubic-bezier(.22,.61,.36,1) forwards;
+  animation:trackTabPendingFill 1.15s cubic-bezier(.22,.61,.36,1) forwards;
 }
-@keyframes trackTabPendingSweep{
-  0%{transform:translateX(-104%) scaleX(.72);opacity:0}
-  14%{opacity:.92}
-  72%{transform:translateX(-8%) scaleX(1.05);opacity:.92}
-  100%{transform:translateX(102%) scaleX(.82);opacity:0}
+@keyframes trackTabPendingFill{
+  0%{transform:scaleX(0);opacity:0}
+  10%{opacity:.88}
+  82%{transform:scaleX(.96);opacity:.88}
+  100%{transform:scaleX(1);opacity:.32}
 }
 
 .track-scroll-top-button{
