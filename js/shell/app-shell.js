@@ -90,7 +90,6 @@
     function positionWorkspaceViewport(tab, options = {}){
       const normalized = normalizeTab(tab);
       if(normalized === 'review'){
-        scrollWindowTo(workspacePageTop('review'), 'auto');
         return;
       }
       if(normalized !== 'track') return;

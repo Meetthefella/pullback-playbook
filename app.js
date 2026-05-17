@@ -16021,12 +16021,21 @@ function setReviewAdvancedOpen(ticker, open){
   ensureReviewAdvancedState()[symbol] = open === true;
 }
 
-function reviewAdvancedDebugPill(){
-  return $('marketSessionLedgerState') || $('liveProcessStatusText') || $('liveProcessStatusBanner');
+function reviewAdvancedDebugTrigger(){
+  return document.querySelector('[data-advanced-debug-trigger]');
 }
 
-function restoreReviewAdvancedDebugPill(){
-  const pill = reviewAdvancedDebugPill();
+function reviewAdvancedDebugFeedbackNode(trigger = null){
+  const root = trigger && typeof trigger.querySelector === 'function'
+    ? trigger
+    : reviewAdvancedDebugTrigger();
+  return root && typeof root.querySelector === 'function'
+    ? (root.querySelector('#addWatchlistActiveBtn') || root)
+    : root;
+}
+
+function restoreReviewAdvancedDebugTrigger(){
+  const pill = reviewAdvancedDebugFeedbackNode();
   if(!pill || !pill.dataset) return;
   const original = String(pill.dataset.reviewDebugOriginalText || '').trim();
   if(original) pill.textContent = original;
@@ -16034,7 +16043,7 @@ function restoreReviewAdvancedDebugPill(){
 }
 
 function showReviewAdvancedDebugFeedback(message, options = {}){
-  const pill = reviewAdvancedDebugPill();
+  const pill = reviewAdvancedDebugFeedbackNode();
   if(!pill) return;
   if(pill.dataset && !pill.dataset.reviewDebugOriginalText){
     pill.dataset.reviewDebugOriginalText = pill.textContent || '';
@@ -16046,12 +16055,16 @@ function showReviewAdvancedDebugFeedback(message, options = {}){
   }
   if(options.persist === true) return;
   uiState.reviewAdvancedDebugTap.restoreTimer = setTimeout(() => {
-    restoreReviewAdvancedDebugPill();
+    restoreReviewAdvancedDebugTrigger();
     uiState.reviewAdvancedDebugTap.restoreTimer = null;
   }, 2200);
 }
 
-function handleReviewAdvancedDebugTap(){
+function handleReviewAdvancedDebugTap(event){
+  const trigger = event && event.target && typeof event.target.closest === 'function'
+    ? event.target.closest('[data-advanced-debug-trigger]')
+    : null;
+  if(!trigger) return;
   const now = Date.now();
   const tap = uiState.reviewAdvancedDebugTap && typeof uiState.reviewAdvancedDebugTap === 'object'
     ? uiState.reviewAdvancedDebugTap
@@ -16082,12 +16095,10 @@ function handleReviewAdvancedDebugTap(){
 }
 
 function bindReviewAdvancedDebugGesture(){
-  const targets = [$('marketSessionLedgerState')].filter(Boolean);
-  targets.forEach(target => {
-    if(target.dataset && target.dataset.reviewAdvancedDebugBound === 'true') return;
-    if(target.dataset) target.dataset.reviewAdvancedDebugBound = 'true';
-    target.addEventListener('click', handleReviewAdvancedDebugTap);
-  });
+  if(document.body && document.body.dataset && document.body.dataset.reviewAdvancedDebugBound !== 'true'){
+    document.body.dataset.reviewAdvancedDebugBound = 'true';
+    document.body.addEventListener('click', handleReviewAdvancedDebugTap, true);
+  }
   syncAdvancedDebugVisibilityClass();
 }
 
@@ -25973,7 +25984,7 @@ function renderReviewWorkspace(options = {}){
         <button class="primary" id="paperTradeBtn" ${paperTradeButtonDisabled ? 'disabled' : ''}>${escapeHtml(paperTradeButtonLabel)}</button>
         <button class="secondary" id="saveReviewBtn">Save Review</button>
       </div>
-      <div class="review-action-row review-action-row--watchlist"><button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button></div>
+      <div class="review-action-row review-action-row--watchlist" data-advanced-debug-trigger="review-watchlist"><button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button></div>
       <div class="tiny review-next-action-primary">Can I trade this now? ${escapeHtml(reviewNextActionLabel)}</div>
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}

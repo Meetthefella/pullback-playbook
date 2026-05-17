@@ -1893,6 +1893,9 @@ body.debug-advanced .advanced-debug-only{
 .review-action-row--watchlist button{
   white-space:normal;
 }
+.review-action-row--watchlist[data-advanced-debug-trigger] button[disabled]{
+  pointer-events:none;
+}
 .review-action-stack{
   display:grid;
   gap:10px;

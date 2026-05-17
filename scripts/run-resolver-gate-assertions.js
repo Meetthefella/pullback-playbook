@@ -872,11 +872,17 @@ function runEntryConditionsSummaryAssertions(){
   if(/scheduleReviewWorkspaceScroll|scheduleReviewScrollAfterLoad|scrollReviewSectionIntoView/.test(appSource)){
     throw new Error('Review focus must not use delayed or post-render auto-scroll helpers.');
   }
+  if(/normalized === 'review'[\s\S]{0,120}scrollWindowTo/.test(appShellSource)){
+    throw new Error('Review tab activation must not call scrollWindowTo; layout should open at the Review panel without auto-scroll.');
+  }
   if(!/trackScrollTopBtn/.test(appShellSource)){
     throw new Error('Track floating scroll-to-top control must be wired in the app shell.');
   }
   if(!/isAdvancedDebugVisible/.test(appSource) || !/reviewAdvancedDebugTap/.test(appSource)){
     throw new Error('Review debug panels must be gated behind the advanced debug reveal path.');
+  }
+  if(!/data-advanced-debug-trigger/.test(appSource) || !/reviewAdvancedDebugFeedbackNode/.test(appSource) || !/document\.body\.addEventListener\('click', handleReviewAdvancedDebugTap, true\)/.test(appSource)){
+    throw new Error('Review advanced debug reveal must be delegated from the Review watchlist status button.');
   }
   const summarySandbox = {
     normalizeVerdict(value){
