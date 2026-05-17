@@ -20,6 +20,7 @@
     let pendingSuppressedTrackScrollSave = null;
     let lastTrackScrollTraceAt = 0;
     let lastSuppressedTrackScrollTraceAt = 0;
+    let postRestoreSnapApplied = false;
 
     function normalizeTab(value){
       const tab = String(value || '').trim().toLowerCase();
@@ -43,9 +44,11 @@
         viewportH:Number(window.innerHeight || 0),
         docH:Number(document && document.documentElement ? document.documentElement.scrollHeight || 0 : 0),
         time:Math.round(now),
-        ...details,
-        stack:details.stack || (new Error().stack)
+        ...details
       };
+      if(window.PP_SCROLL_TRACE_STACKS === true){
+        payload.stack = details.stack || (new Error().stack);
+      }
       window.__ppRecentScrollAction = {
         label:payload.label,
         time:payload.time,
@@ -196,6 +199,11 @@
         && (uiState.trackRestoreInProgress === true || uiState.trackRevealPending === true);
     }
 
+    function isPostTrackRestoreGuardActive(){
+      return normalizeTab(uiState.activeWorkspaceTab || '') === 'track'
+        && Number(uiState.postTrackRestoreGuardUntil || 0) > nowMs();
+    }
+
     function activeTrackRestoreTarget(){
       const pending = Number(uiState.pendingTrackRestoreY);
       if(Number.isFinite(pending)) return pending;
@@ -207,6 +215,11 @@
       if(Number.isFinite(remembered)) return remembered;
       const fallback = Number(uiState.trackScrollY);
       return Number.isFinite(fallback) ? fallback : null;
+    }
+
+    function postTrackRestoreTarget(){
+      const target = Number(uiState.postTrackRestoreTarget);
+      return Number.isFinite(target) ? target : activeTrackRestoreTarget();
     }
 
     function isProgrammaticTrackRestoreAllowed(reason = ''){
@@ -376,6 +389,15 @@
       const active = normalizeTab(uiState.activeWorkspaceTab || '');
       if(active !== 'track') return;
       const {suppressed, suppressionReason} = scrollSaveSuppressionState();
+      if(isPostTrackRestoreGuardActive()){
+        traceSuppressedTrackScrollSave({
+          reason:'post_restore_guard',
+          active,
+          attemptedScrollY:scrollY,
+          restoreTarget:postTrackRestoreTarget()
+        });
+        return;
+      }
       if(suppressed){
         traceSuppressedTrackScrollSave({
           reason:suppressionReason,
@@ -559,8 +581,8 @@
       const viewportH = Number(window && window.innerHeight || 0);
       const maxScrollableY = Math.max(0, docH - viewportH);
       const restoreTarget = Math.max(0, Number(target) || 0);
-      const canRestore = maxScrollableY >= Math.max(0, restoreTarget - 24);
-      return {restoreTarget, docH, viewportH, maxScrollableY, canRestore};
+      const scrollableToTarget = maxScrollableY >= Math.max(0, restoreTarget - 24);
+      return {restoreTarget, docH, viewportH, maxScrollableY, canRestore:scrollableToTarget, scrollableToTarget};
     }
 
     function canRestoreTrackScroll(target){
@@ -581,6 +603,28 @@
       setSmoothScrollDisabled(true, reason);
       let layoutWaitCount = 0;
       let verifyRetries = 0;
+      let lastLayoutDocH = 0;
+      let stableLayoutFrames = 0;
+      const stableLayoutMetrics = () => {
+        const metrics = trackRestoreLayoutMetrics(restoreTarget);
+        if(Math.abs(metrics.docH - lastLayoutDocH) <= 12){
+          stableLayoutFrames += 1;
+        }else{
+          stableLayoutFrames = 0;
+          lastLayoutDocH = metrics.docH;
+        }
+        const layoutStable = stableLayoutFrames >= 2;
+        const layoutReady = metrics.scrollableToTarget && layoutStable;
+        return {
+          ...metrics,
+          layoutStable,
+          stableLayoutFrames,
+          canRestore:layoutReady,
+          layoutReadiness:metrics.scrollableToTarget
+            ? (layoutStable ? 'layout-ready-stable' : 'layout-scrollable-but-not-stable')
+            : 'document_not_tall_enough'
+        };
+      };
       const finalizeTrackRestore = (finalReason, details = {}) => {
         if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
         uiState.trackRestoreCompletionCommitted = true;
@@ -594,6 +638,10 @@
         }
         uiState.trackRestoreInProgress = false;
         if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = false;
+        uiState.postTrackRestoreTarget = restoreTarget;
+        uiState.postTrackRestoreGuardUntil = nowMs() + 500;
+        postRestoreSnapApplied = false;
+        suppressScrollMemory('track_restore_post_guard', 650);
         setSmoothScrollDisabled(false, finalReason);
         if(concealUntilRestored) clearTrackRevealPending(finalReason);
         traceScrollEvent('track:restore:finalized', {
@@ -610,16 +658,17 @@
       const revealFallback = setTimeout(() => {
         if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
         if(concealUntilRestored && normalizeTab(uiState.activeWorkspaceTab || '') === 'track' && uiState.trackRevealPending === true){
-          const metrics = trackRestoreLayoutMetrics(restoreTarget);
+          const metrics = stableLayoutMetrics();
           if(!metrics.canRestore){
-            traceScrollEvent('track:reveal:fallback', {
+            traceScrollEvent('track:restore:fallback-blocked', {
               caller:'scheduleTrackRestore',
-              reason:'document_not_tall_enough',
+              reason:'layout_not_ready',
               restoreTarget,
               actualY:currentScrollY(),
               ...metrics,
-              revealBlockedReason:'document_not_tall_enough'
+              revealBlockedReason:metrics.layoutReadiness
             });
+            waitForLayoutThenRestore('fallback_layout_not_ready');
             return;
           }
           traceScrollEvent('track:reveal:fallback', {
@@ -635,12 +684,13 @@
       const waitForLayoutThenRestore = trigger => {
         if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
         if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
-        const metrics = trackRestoreLayoutMetrics(restoreTarget);
+        const metrics = stableLayoutMetrics();
         if(metrics.canRestore){
           traceScrollEvent('track:restore:layout-ready', {
             caller:'scheduleTrackRestore',
             reason:trigger,
             restoreDelayedUntilLayoutReady:layoutWaitCount > 0,
+            layoutReadiness:'layout-ready-stable',
             ...metrics
           });
           runRestore(Math.max(1, layoutWaitCount + 1));
@@ -651,17 +701,17 @@
           caller:'scheduleTrackRestore',
           reason:trigger,
           restoreDelayedUntilLayoutReady:true,
-          revealBlockedReason:'document_not_tall_enough',
+          revealBlockedReason:metrics.layoutReadiness,
           ...metrics
         });
-        if(layoutWaitCount >= 20){
-          traceScrollEvent('track:reveal:fallback', {
+        if(layoutWaitCount >= 60){
+          traceScrollEvent('track:restore:hard-timeout', {
             caller:'scheduleTrackRestore',
             reason:'layout_wait_limit_reached',
-            revealBlockedReason:'document_not_tall_enough',
+            revealBlockedReason:metrics.layoutReadiness,
             ...metrics
           });
-          finalizeTrackRestore('layout_wait_limit_reached', {revealStrategy:'layout_wait_limit'});
+          finalizeTrackRestore('layout_wait_limit_reached', {revealStrategy:'hard_timeout'});
           return;
         }
         if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
@@ -684,13 +734,13 @@
             finalizeTrackRestore('track_restore_verify_aborted', {revealStrategy:'aborted'});
             return;
           }
-          const metrics = trackRestoreLayoutMetrics(restoreTarget);
+          const metrics = stableLayoutMetrics();
           if(!metrics.canRestore){
             traceScrollEvent('track:restore:layout-not-ready', {
               caller:'scheduleTrackRestore.verify',
-              reason:'verify_document_not_tall_enough',
+              reason:'verify_layout_not_ready',
               restoreDelayedUntilLayoutReady:true,
-              revealBlockedReason:'document_not_tall_enough',
+              revealBlockedReason:metrics.layoutReadiness,
               actualY:currentScrollY(),
               ...metrics
             });
@@ -719,13 +769,13 @@
             if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
             if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
             const finalY = currentScrollY();
-            const finalMetrics = trackRestoreLayoutMetrics(restoreTarget);
+            const finalMetrics = stableLayoutMetrics();
             if(!finalMetrics.canRestore){
               traceScrollEvent('track:restore:layout-not-ready', {
                 caller:'scheduleTrackRestore.finalize',
-                reason:'finalize_document_not_tall_enough',
+                reason:'finalize_layout_not_ready',
                 restoreDelayedUntilLayoutReady:true,
-                revealBlockedReason:'document_not_tall_enough',
+                revealBlockedReason:finalMetrics.layoutReadiness,
                 actualY:finalY,
                 ...finalMetrics
               });
@@ -742,7 +792,7 @@
           finalizeTrackRestore('track_restore_aborted', {revealStrategy:'aborted'});
           return;
         }
-        const metrics = trackRestoreLayoutMetrics(restoreTarget);
+        const metrics = stableLayoutMetrics();
         if(!metrics.canRestore){
           waitForLayoutThenRestore('run_restore_layout_not_ready');
           return;
@@ -923,6 +973,25 @@
                 restoreInProgress:uiState.trackRestoreInProgress === true
               });
               scrollWindowTo(restoreTarget, 'auto', 'track_restore_external_scroll_guard');
+            }
+          }
+          if(isPostTrackRestoreGuardActive()){
+            const restoreTarget = postTrackRestoreTarget();
+            if(Number.isFinite(restoreTarget) && Math.abs(nextScrollY - restoreTarget) > 24){
+              const elapsedSinceFinalize = Math.max(0, 500 - (Number(uiState.postTrackRestoreGuardUntil || 0) - nowMs()));
+              traceScrollEvent('track:post-restore-drift', {
+                caller:'post_restore_scroll_guard',
+                restoreTarget,
+                actualY:nextScrollY,
+                delta:nextScrollY - restoreTarget,
+                elapsedSinceFinalize,
+                activeDriver:window.__ppRecentScrollAction || null,
+                snapBackApplied:postRestoreSnapApplied !== true
+              });
+              if(postRestoreSnapApplied !== true){
+                postRestoreSnapApplied = true;
+                scrollWindowTo(restoreTarget, 'auto', 'track_restore_post_guard_snap');
+              }
             }
           }
           if(window.PP_SCROLL_TRACE === true && ['track','review'].includes(normalizeTab(uiState.activeWorkspaceTab || '')) && Math.abs(delta) > 80 && (now - lastObservedScrollAt) <= 250){
