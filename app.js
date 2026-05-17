@@ -8568,6 +8568,7 @@ function startTrackRenderCycle(source = 'watchlist_render'){
 function captureTrackUiState(){
   const watchlistList = $('watchlistList');
   const state = {
+    scrollY:typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : null,
     expandedState:readTrackSectionState()
   };
   if(watchlistList){
@@ -8596,6 +8597,18 @@ function restoreTrackUiState(snapshot = null){
     const nextExpanded = readTrackSectionState()[key] === true;
     applyTrackSectionExpandedState(section, nextExpanded);
   });
+  if(activeWorkspaceTab() !== 'track') return;
+  const targetScrollY = Number(snapshot.scrollY);
+  if(!Number.isFinite(targetScrollY) || typeof window === 'undefined') return;
+  const restoreScroll = () => {
+    if(activeWorkspaceTab() !== 'track') return;
+    window.scrollTo({top:Math.max(0, targetScrollY), behavior:'auto'});
+  };
+  if(typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(restoreScroll);
+  }else{
+    setTimeout(restoreScroll, 0);
+  }
 }
 
 function setTrackSectionExpanded(sectionKey, expanded){
