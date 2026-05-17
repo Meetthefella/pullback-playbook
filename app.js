@@ -8679,14 +8679,19 @@ function startTrackRenderCycle(source = 'watchlist_render'){
 
 function captureTrackUiState(){
   const watchlistList = $('watchlistList');
+  const pendingRestoreY = typeof window !== 'undefined' ? Number(window.__ppPendingTrackRestoreY) : Number.NaN;
+  const resolvedScrollY = Number.isFinite(pendingRestoreY)
+    ? pendingRestoreY
+    : (typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : null);
   const state = {
-    scrollY:typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : null,
+    scrollY:resolvedScrollY,
     expandedState:readTrackSectionState()
   };
   traceScrollEvent('track:scroll-save', {
     caller:'captureTrackUiState',
     savedTrackScrollY:state.scrollY,
-    reason:'track_ui_snapshot'
+    reason:'track_ui_snapshot',
+    pendingRestoreApplied:Number.isFinite(pendingRestoreY)
   });
   if(watchlistList){
     const expanded = {};
@@ -8717,20 +8722,36 @@ function restoreTrackUiState(snapshot = null){
   if(activeWorkspaceTab() !== 'track') return;
   const targetScrollY = Number(snapshot.scrollY);
   if(!Number.isFinite(targetScrollY) || typeof window === 'undefined') return;
-  const restoreScroll = () => {
+  const restoreScroll = (attempt = 1) => {
     if(activeWorkspaceTab() !== 'track') return;
     traceScrollEvent('track:scroll-restore:before', {
       caller:'restoreTrackUiState',
       savedTrackScrollY:targetScrollY,
-      reason:'track_dom_update'
+      restoreTarget:targetScrollY,
+      restoreActualBefore:Number(window.scrollY || window.pageYOffset || 0),
+      reason:'track_dom_update',
+      attempt
     });
-    suppressScrollMemoryForAppScroll('track_dom_update_restore', 700);
+    suppressScrollMemoryForAppScroll('track_dom_update_restore', 900);
     window.scrollTo({top:Math.max(0, targetScrollY), behavior:'auto'});
+    const restoreActualAfter = Number(window.scrollY || window.pageYOffset || 0);
     traceScrollEvent('track:scroll-restore:after', {
       caller:'restoreTrackUiState',
       savedTrackScrollY:targetScrollY,
-      reason:'track_dom_update'
+      restoreTarget:targetScrollY,
+      restoreActualAfter,
+      reason:'track_dom_update',
+      attempt
     });
+    if(attempt === 1 && Math.abs(restoreActualAfter - targetScrollY) > 24){
+      if(typeof window.requestAnimationFrame === 'function'){
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => restoreScroll(2)));
+      }else{
+        setTimeout(() => restoreScroll(2), 0);
+      }
+    }else if(Math.abs(restoreActualAfter - targetScrollY) <= 24){
+      window.__ppPendingTrackRestoreY = undefined;
+    }
   };
   if(typeof window.requestAnimationFrame === 'function'){
     traceScrollEvent('delayed-scroll:scheduled', {
@@ -8738,9 +8759,9 @@ function restoreTrackUiState(snapshot = null){
       label:'track:scroll-restore',
       savedTrackScrollY:targetScrollY
     });
-    window.requestAnimationFrame(restoreScroll);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => restoreScroll(1)));
   }else{
-    setTimeout(restoreScroll, 0);
+    setTimeout(() => restoreScroll(1), 0);
   }
 }
 

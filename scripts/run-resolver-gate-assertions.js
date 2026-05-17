@@ -869,6 +869,15 @@ function runEntryConditionsSummaryAssertions(){
   if(!/saveActiveWorkspaceScroll/.test(appShellSource) || !/uiState\.trackScrollY/.test(appShellSource) || !/restoreWorkspaceViewportAfterOpen\(appliedTab\)/.test(appShellSource)){
     throw new Error('Track tab focus must save and restore the last Track scroll position.');
   }
+  if(!/lastKnownScrollByTab/.test(appShellSource) || !/pendingTrackRestoreY/.test(appShellSource) || !/__ppPendingTrackRestoreY/.test(appShellSource)){
+    throw new Error('Track restore must use an immutable per-tab restore target during tab switches and renders.');
+  }
+  if(!/window\.__ppPendingTrackRestoreY = undefined/.test(appShellSource) || !/lastKnownScrollByTab\.track = uiState\.trackScrollY/.test(appShellSource)){
+    throw new Error('Track pending restore targets must clear after restore/user scroll, and scroll-to-top must update per-tab memory.');
+  }
+  if(!/scheduleTrackRestore/.test(appShellSource) || !/track:scroll-restore-retry/.test(appShellSource) || !/restoreActualAfter/.test(appShellSource)){
+    throw new Error('Track restore must run after layout and retry when the first scrollTo is clamped.');
+  }
   if(!/!\['track','review'\]\.includes\(appliedTab\)/.test(appShellSource)){
     throw new Error('Track and Review tab focus must avoid forcing window scroll to top.');
   }
@@ -896,7 +905,7 @@ function runEntryConditionsSummaryAssertions(){
   if(/normalized === 'review'[\s\S]{0,160}scrollWindowTo/.test(appShellSource)){
     throw new Error('Review subsequent tab focuses must not force scroll restoration.');
   }
-  if(!/scrollY:typeof window !== 'undefined' \? Number\(window\.scrollY/.test(appSource) || !/function restoreTrackUiState[\s\S]*?window\.scrollTo\(\{top:Math\.max\(0, targetScrollY\), behavior:'auto'\}\)/.test(appSource)){
+  if(!/__ppPendingTrackRestoreY/.test(appSource) || !/pendingRestoreApplied/.test(appSource) || !/function restoreTrackUiState[\s\S]*?window\.scrollTo\(\{top:Math\.max\(0, targetScrollY\), behavior:'auto'\}\)/.test(appSource)){
     throw new Error('Track render/remove/refresh must preserve the captured Track page scroll position after DOM updates.');
   }
   if(!/trackScrollTopBtn/.test(appShellSource)){

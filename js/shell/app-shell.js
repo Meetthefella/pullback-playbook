@@ -7,6 +7,10 @@
     const workspaceCards = Array.from(document.querySelectorAll('[data-workspace-card]'));
     const trackTopButton = document.getElementById('trackScrollTopBtn');
     const enabled = tabButtons.length > 0 && workspaceCards.length > 0;
+    const lastKnownScrollByTab = uiState.lastKnownScrollByTab && typeof uiState.lastKnownScrollByTab === 'object'
+      ? uiState.lastKnownScrollByTab
+      : {};
+    uiState.lastKnownScrollByTab = lastKnownScrollByTab;
     let lastObservedScrollY = typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
     let lastObservedScrollAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
 
@@ -180,13 +184,20 @@
         const oldSavedTrackScrollY = Number(uiState.trackScrollY);
         const newSavedTrackScrollY = currentScrollY();
         uiState.trackScrollY = newSavedTrackScrollY;
+        lastKnownScrollByTab.track = newSavedTrackScrollY;
+        uiState.pendingTrackRestoreY = null;
+        if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
         traceScrollEvent('track:scroll-save', {
           caller:'saveActiveWorkspaceScroll',
           oldSavedTrackScrollY:Number.isFinite(oldSavedTrackScrollY) ? oldSavedTrackScrollY : null,
-          newSavedTrackScrollY
+          newSavedTrackScrollY,
+          saveAcceptedReason:'active_visible_track_user_scroll'
         });
       }
-      if(active === 'review') uiState.reviewScrollY = currentScrollY();
+      if(active === 'review'){
+        uiState.reviewScrollY = currentScrollY();
+        lastKnownScrollByTab.review = uiState.reviewScrollY;
+      }
     }
 
     function scrollWindowTo(top, behavior = 'auto', reason = 'programmatic_scroll'){
@@ -241,20 +252,76 @@
 
     function restoreWorkspaceViewportAfterOpen(tab){
       const normalized = normalizeTab(tab);
-      if(normalized === 'track' && Number.isFinite(Number(uiState.trackScrollY))){
+      if(normalized === 'track'){
+        const restoreTarget = Number.isFinite(Number(lastKnownScrollByTab.track))
+          ? Number(lastKnownScrollByTab.track)
+          : Number(uiState.trackScrollY);
+        if(!Number.isFinite(restoreTarget)) return;
+        uiState.pendingTrackRestoreY = restoreTarget;
+        if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = restoreTarget;
         traceScrollEvent('track:scroll-restore:before', {
           caller:'restoreWorkspaceViewportAfterOpen',
           savedTrackScrollY:Number(uiState.trackScrollY || 0),
+          restoreTarget,
+          restoreActualBefore:currentScrollY(),
           reason:'track_tab_activation'
         });
-        scrollWindowTo(Number(uiState.trackScrollY || 0), 'auto', 'track_restore');
-        traceScrollEvent('track:scroll-restore:after', {
-          caller:'restoreWorkspaceViewportAfterOpen',
-          savedTrackScrollY:Number(uiState.trackScrollY || 0),
-          reason:'track_tab_activation'
-        });
+        scheduleTrackRestore(restoreTarget, 'track_tab_activation');
       }
       updateTrackScrollTopControl();
+    }
+
+    function scheduleTrackRestore(target, reason = 'track_restore'){
+      const restoreTarget = Math.max(0, Number(target) || 0);
+      const runRestore = attempt => {
+        if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
+        suppressScrollMemory(reason, 900);
+        const before = currentScrollY();
+        traceScrollEvent('track:scroll-restore:before', {
+          caller:'scheduleTrackRestore',
+          reason,
+          restoreTarget,
+          restoreActualBefore:before,
+          attempt
+        });
+        scrollWindowTo(restoreTarget, 'auto', reason);
+        const after = currentScrollY();
+        traceScrollEvent('track:scroll-restore:after', {
+          caller:'scheduleTrackRestore',
+          reason,
+          restoreTarget,
+          restoreActualBefore:before,
+          restoreActualAfter:after,
+          attempt
+        });
+        if(attempt === 1 && Math.abs(after - restoreTarget) > 24){
+          traceScrollEvent('delayed-scroll:scheduled', {
+            caller:'scheduleTrackRestore',
+            label:'track:scroll-restore-retry',
+            restoreTarget,
+            restoreActualAfter:after
+          });
+          if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+            window.requestAnimationFrame(() => window.requestAnimationFrame(() => runRestore(2)));
+          }else{
+            setTimeout(() => runRestore(2), 0);
+          }
+        }else{
+          uiState.pendingTrackRestoreY = null;
+          if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
+        }
+      };
+      traceScrollEvent('delayed-scroll:scheduled', {
+        caller:'scheduleTrackRestore',
+        label:'track:scroll-restore',
+        restoreTarget,
+        reason
+      });
+      if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => runRestore(1)));
+      }else{
+        setTimeout(() => runRestore(1), 0);
+      }
     }
 
     function applyWorkspace(tab){
@@ -353,10 +420,14 @@
         trackTopButton.addEventListener('click', () => {
           if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
           uiState.trackScrollY = workspacePageTop('track');
+          lastKnownScrollByTab.track = uiState.trackScrollY;
+          uiState.pendingTrackRestoreY = null;
+          if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
           scrollWindowTo(workspacePageTop('track'), 'smooth', 'scroll_to_top_button');
           setTimeout(() => {
             if(normalizeTab(uiState.activeWorkspaceTab || '') === 'track'){
               uiState.trackScrollY = workspacePageTop('track');
+              lastKnownScrollByTab.track = uiState.trackScrollY;
               updateTrackScrollTopControl();
             }
           }, 450);
