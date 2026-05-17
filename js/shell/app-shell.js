@@ -582,7 +582,25 @@
       const maxScrollableY = Math.max(0, docH - viewportH);
       const restoreTarget = Math.max(0, Number(target) || 0);
       const scrollableToTarget = maxScrollableY >= Math.max(0, restoreTarget - 24);
-      return {restoreTarget, docH, viewportH, maxScrollableY, canRestore:scrollableToTarget, scrollableToTarget};
+      const lastStableTrackDocH = Math.max(
+        Number(uiState.lastStableTrackDocH || 0),
+        typeof window !== 'undefined' ? Number(window.__ppLastStableTrackDocH || 0) : 0
+      );
+      const renderComplete = !(uiState.trackRenderInFlight === true || (typeof window !== 'undefined' && window.__ppTrackRenderInFlight === true));
+      const nearLastStableHeight = !Number.isFinite(lastStableTrackDocH)
+        || lastStableTrackDocH <= 0
+        || docH >= Math.max(0, lastStableTrackDocH - 96);
+      return {
+        restoreTarget,
+        docH,
+        viewportH,
+        maxScrollableY,
+        canRestore:scrollableToTarget,
+        scrollableToTarget,
+        lastStableTrackDocH:Number.isFinite(lastStableTrackDocH) ? lastStableTrackDocH : 0,
+        renderComplete,
+        nearLastStableHeight
+      };
     }
 
     function canRestoreTrackScroll(target){
@@ -605,6 +623,7 @@
       let verifyRetries = 0;
       let lastLayoutDocH = 0;
       let stableLayoutFrames = 0;
+      let lastLayoutNotReadyTraceAt = 0;
       const stableLayoutMetrics = () => {
         const metrics = trackRestoreLayoutMetrics(restoreTarget);
         if(Math.abs(metrics.docH - lastLayoutDocH) <= 12){
@@ -614,16 +633,39 @@
           lastLayoutDocH = metrics.docH;
         }
         const layoutStable = stableLayoutFrames >= 2;
-        const layoutReady = metrics.scrollableToTarget && layoutStable;
+        const layoutReady = metrics.scrollableToTarget && layoutStable && metrics.renderComplete && metrics.nearLastStableHeight;
         return {
           ...metrics,
           layoutStable,
           stableLayoutFrames,
           canRestore:layoutReady,
-          layoutReadiness:metrics.scrollableToTarget
-            ? (layoutStable ? 'layout-ready-stable' : 'layout-scrollable-but-not-stable')
-            : 'document_not_tall_enough'
+          layoutReadiness:!metrics.scrollableToTarget
+            ? 'document_not_tall_enough'
+            : (!metrics.nearLastStableHeight
+              ? 'layout-below-last-stable-height'
+              : (!metrics.renderComplete
+                ? 'layout-render-in-progress'
+                : (layoutStable ? 'layout-ready-stable' : 'layout-scrollable-but-not-stable')))
         };
+      };
+      const traceLayoutNotReady = (caller, trigger, metrics, extra = {}) => {
+        const now = nowMs();
+        if(now - lastLayoutNotReadyTraceAt < 150 && !String(trigger || '').includes('fallback')) return;
+        lastLayoutNotReadyTraceAt = now;
+        traceScrollEvent(metrics.scrollableToTarget ? 'track:restore:layout-growing' : 'track:restore:layout-not-ready', {
+          caller,
+          reason:trigger,
+          restoreDelayedUntilLayoutReady:true,
+          revealBlockedReason:metrics.layoutReadiness,
+          currentDocH:metrics.docH,
+          previousDocH:lastLayoutDocH,
+          lastStableTrackDocH:metrics.lastStableTrackDocH,
+          restoreTarget,
+          stableFrameCount:metrics.stableLayoutFrames,
+          renderComplete:metrics.renderComplete === true,
+          ...metrics,
+          ...extra
+        });
       };
       const finalizeTrackRestore = (finalReason, details = {}) => {
         if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
@@ -686,7 +728,7 @@
         if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
         const metrics = stableLayoutMetrics();
         if(metrics.canRestore){
-          traceScrollEvent('track:restore:layout-ready', {
+          traceScrollEvent('track:restore:layout-ready-stable', {
             caller:'scheduleTrackRestore',
             reason:trigger,
             restoreDelayedUntilLayoutReady:layoutWaitCount > 0,
@@ -697,13 +739,7 @@
           return;
         }
         layoutWaitCount += 1;
-        traceScrollEvent('track:restore:layout-not-ready', {
-          caller:'scheduleTrackRestore',
-          reason:trigger,
-          restoreDelayedUntilLayoutReady:true,
-          revealBlockedReason:metrics.layoutReadiness,
-          ...metrics
-        });
+        traceLayoutNotReady('scheduleTrackRestore', trigger, metrics);
         if(layoutWaitCount >= 60){
           traceScrollEvent('track:restore:hard-timeout', {
             caller:'scheduleTrackRestore',
@@ -736,14 +772,7 @@
           }
           const metrics = stableLayoutMetrics();
           if(!metrics.canRestore){
-            traceScrollEvent('track:restore:layout-not-ready', {
-              caller:'scheduleTrackRestore.verify',
-              reason:'verify_layout_not_ready',
-              restoreDelayedUntilLayoutReady:true,
-              revealBlockedReason:metrics.layoutReadiness,
-              actualY:currentScrollY(),
-              ...metrics
-            });
+            traceLayoutNotReady('scheduleTrackRestore.verify', 'verify_layout_not_ready', metrics, {actualY:currentScrollY()});
             waitForLayoutThenRestore('verify_layout_not_ready');
             return;
           }
@@ -771,14 +800,7 @@
             const finalY = currentScrollY();
             const finalMetrics = stableLayoutMetrics();
             if(!finalMetrics.canRestore){
-              traceScrollEvent('track:restore:layout-not-ready', {
-                caller:'scheduleTrackRestore.finalize',
-                reason:'finalize_layout_not_ready',
-                restoreDelayedUntilLayoutReady:true,
-                revealBlockedReason:finalMetrics.layoutReadiness,
-                actualY:finalY,
-                ...finalMetrics
-              });
+              traceLayoutNotReady('scheduleTrackRestore.finalize', 'finalize_layout_not_ready', finalMetrics, {actualY:finalY});
               waitForLayoutThenRestore('finalize_layout_not_ready');
               return;
             }

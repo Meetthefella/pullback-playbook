@@ -8670,9 +8670,11 @@ function traceScrollEvent(label, details = {}){
     viewportH:Number(window.innerHeight || 0),
     docH:Number(document && document.documentElement ? document.documentElement.scrollHeight || 0 : 0),
     time:Math.round(now),
-    ...details,
-    stack:details.stack || (new Error().stack)
+    ...details
   };
+  if(window.PP_SCROLL_TRACE_STACKS === true){
+    payload.stack = details.stack || (new Error().stack);
+  }
   window.__ppRecentScrollAction = {
     label:payload.label,
     time:payload.time,
@@ -8691,6 +8693,7 @@ function suppressScrollMemoryForAppScroll(reason = 'programmatic_scroll', durati
 
 function startTrackRenderCycle(source = 'watchlist_render'){
   if(activeWorkspaceTab() !== 'track') return () => {};
+  if(typeof window !== 'undefined') window.__ppTrackRenderInFlight = true;
   traceScrollEvent('track:render:before', {
     caller:'startTrackRenderCycle',
     reason:String(source || 'watchlist_render'),
@@ -8704,12 +8707,27 @@ function startTrackRenderCycle(source = 'watchlist_render'){
     if(finished) return;
     finished = true;
     uiState.trackRenderInFlight = false;
+    if(typeof window !== 'undefined') window.__ppTrackRenderInFlight = false;
     uiState.trackRenderLastEndedAt = Date.now();
     traceScrollEvent('track:render:after', {
       caller:'startTrackRenderCycle.finish',
       reason:String(source || 'watchlist_render'),
       cardCountAfter:document.querySelectorAll('[data-workspace-card="track"] [data-watchlist-ticker]').length
     });
+    const publishStableTrackHeight = () => {
+      if(activeWorkspaceTab() !== 'track' || typeof window === 'undefined') return;
+      const docH = Number(document && document.documentElement ? document.documentElement.scrollHeight || 0 : 0);
+      const previous = Number(window.__ppLastStableTrackDocH || 0);
+      if(Number.isFinite(docH) && docH > 0){
+        window.__ppLastStableTrackDocH = Math.max(previous, docH);
+        uiState.lastStableTrackDocH = window.__ppLastStableTrackDocH;
+      }
+    };
+    if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+      window.requestAnimationFrame(() => window.requestAnimationFrame(publishStableTrackHeight));
+    }else{
+      setTimeout(publishStableTrackHeight, 50);
+    }
   };
 }
 
