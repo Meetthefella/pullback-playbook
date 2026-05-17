@@ -21089,22 +21089,11 @@ function loadTickerIntoReview(ticker, options = {}){
           });
           const openAfterSnapshot = reviewOpenMutationSnapshot(getTickerRecord(symbol) || record, 'review_open');
           logReviewOpenMutationTrace(symbol, 'loadTickerIntoReview.completeLoad.loadCard', openBeforeSnapshot, openAfterSnapshot);
-          if(skipAutoScroll !== true){
-            scheduleReviewScrollAfterLoad(symbol, 'loadTickerIntoReview.post', {
-              onSettled:() => {
-                if(allowReviewLoadingStatus && !(inWatchlist && sourceContext === 'scanner')){
-                  scheduleReviewLoadedStatus(symbol);
-                }
-                if(sourceContext === 'watchlist'){
-                  settleScannerSelectionStatusReviewPending(symbol, {failed:false, reviewRequestToken});
-                }
-              }
-            });
-          }else if(allowReviewLoadingStatus && !(inWatchlist && sourceContext === 'scanner')){
+          if(allowReviewLoadingStatus && !(inWatchlist && sourceContext === 'scanner')){
             scheduleReviewLoadedStatus(symbol);
-            if(sourceContext === 'watchlist'){
-              settleScannerSelectionStatusReviewPending(symbol, {failed:false, reviewRequestToken});
-            }
+          }
+          if(sourceContext === 'watchlist'){
+            settleScannerSelectionStatusReviewPending(symbol, {failed:false, reviewRequestToken});
           }
           if(inWatchlist && sourceContext === 'scanner'){
             setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
@@ -21143,59 +21132,6 @@ function loadTickerIntoReview(ticker, options = {}){
       if(!isCurrentReviewRender(reviewSeq)) return;
       runReviewLoad();
     }, 0);
-  }
-}
-
-function reviewWorkspaceReadyForTicker(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return false;
-  const box = $('reviewWorkspace');
-  if(!box || !box.childElementCount) return false;
-  const selected = normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
-  if(selected && selected !== symbol) return false;
-  return !!box.querySelector('#selectedTicker');
-}
-
-function scheduleReviewScrollAfterLoad(ticker, context = 'review_open', options = {}){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return;
-  const onSettled = typeof options.onSettled === 'function' ? options.onSettled : null;
-  let settled = false;
-  const settle = () => {
-    if(settled) return;
-    settled = true;
-    if(onSettled) onSettled();
-  };
-  uiState.reviewScrollToken = Number(uiState.reviewScrollToken || 0) + 1;
-  const token = Number(uiState.reviewScrollToken || 0);
-  let attempts = 0;
-  const maxAttempts = 6;
-  const run = () => {
-    if(token !== Number(uiState.reviewScrollToken || 0)){
-      settle();
-      return;
-    }
-    attempts += 1;
-    if(reviewWorkspaceReadyForTicker(symbol)){
-      scrollReviewSectionIntoView(symbol, `${context}.ready`, {immediate:true});
-      settle();
-      return;
-    }
-    if(attempts >= maxAttempts){
-      scrollReviewSectionIntoView(symbol, `${context}.fallback`, {immediate:true});
-      settle();
-      return;
-    }
-    if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-      window.requestAnimationFrame(run);
-    }else{
-      setTimeout(run, 40);
-    }
-  };
-  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-    window.requestAnimationFrame(run);
-  }else{
-    setTimeout(run, 0);
   }
 }
 
@@ -26220,34 +26156,6 @@ async function importLatestChart(ticker){
   }
 }
 
-function reviewWorkspaceScrollTarget(){
-  return document.querySelector('[data-workspace-card="review"]') || $('reviewSection') || $('reviewWorkspace');
-}
-
-function scrollReviewSectionIntoView(ticker, context = 'review_open', options = {}){
-  const symbol = normalizeTicker(ticker);
-  if(appShell && appShell.isEnabled && appShell.isEnabled()){
-    setActiveWorkspaceTab('review', {focusTop:false});
-    setScannerCardClickTrace(symbol, `${context}.workspace_tab`, 'review');
-  }
-  const runScroll = attempt => {
-    const scrollTarget = reviewWorkspaceScrollTarget();
-    if(!scrollTarget){
-      setScannerCardClickTrace(symbol, `${context}.scroll_missing`, `attempt=${attempt}`);
-      return;
-    }
-    try{
-      scrollTarget.scrollIntoView({behavior:'auto', block:'start'});
-    }catch(_error){
-      if(typeof window !== 'undefined' && typeof scrollTarget.getBoundingClientRect === 'function'){
-        window.scrollTo({top:Math.max(0, scrollTarget.getBoundingClientRect().top + window.scrollY - 86), behavior:'auto'});
-      }
-    }
-    setScannerCardClickTrace(symbol, `${context}.scrolled`, `${scrollTarget.id || 'reviewWorkspace'} attempt=${attempt}`);
-  };
-  runScroll(options.immediate === true ? 'immediate' : 'direct');
-}
-
 function loadCard(ticker, options = {}){
   const record = getTickerRecord(ticker);
   if(!record) return;
@@ -26256,9 +26164,6 @@ function loadCard(ticker, options = {}){
   const displayOnlyReviewOpen = options.recompute !== true && options.touchLifecycle !== true;
   const preserveScrollOnSkip = options.skipAutoScroll === true && typeof window !== 'undefined';
   const preservedScrollY = preserveScrollOnSkip ? Number(window.scrollY || window.pageYOffset || 0) : 0;
-  if(options.skipAutoScroll !== true && options.preScrolled !== true){
-    scrollReviewSectionIntoView(record.ticker, 'loadCard.pre');
-  }
   setScannerCardClickTrace(ticker, 'loadCard.enter', `touchLifecycle=${options.touchLifecycle === true} recompute=${options.recompute === true}`);
   logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
   setActiveReviewTicker(record.ticker);

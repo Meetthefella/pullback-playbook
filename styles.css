@@ -2957,6 +2957,9 @@ details>summary::-webkit-details-marker{display:none}
 .app-workspace-card[data-workspace-card="review"]{
   scroll-margin-top:96px;
 }
+body[data-active-workspace="review"] .contextstrip{
+  display:none;
+}
 .workspace-area .app-workspace-card > h2{
   margin:0 0 6px;
 }

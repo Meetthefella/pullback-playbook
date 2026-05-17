@@ -869,8 +869,8 @@ function runEntryConditionsSummaryAssertions(){
   if(!/!\['track','review'\]\.includes\(appliedTab\)/.test(appShellSource)){
     throw new Error('Track and Review tab focus must avoid forcing window scroll to top.');
   }
-  if(/scheduleReviewWorkspaceScroll/.test(appSource) || !/reviewWorkspaceScrollTarget/.test(appSource)){
-    throw new Error('Review focus must use direct Review panel positioning without delayed scroll scheduling.');
+  if(/scheduleReviewWorkspaceScroll|scheduleReviewScrollAfterLoad|scrollReviewSectionIntoView/.test(appSource)){
+    throw new Error('Review focus must not use delayed or post-render auto-scroll helpers.');
   }
   if(!/trackScrollTopBtn/.test(appShellSource)){
     throw new Error('Track floating scroll-to-top control must be wired in the app shell.');
