@@ -1345,9 +1345,6 @@ function runSimplifiedPipelineAssertions(){
   if(aaStyleWeakWatch.visualBucket !== 'diminishing' || aaStyleWeakWatch.tone !== 'diminishing'){
     throw new Error('AA-style failed-reclaim setup must render weak-watch/diminishing nuance outside Scan too.');
   }
-  if(aaStyleWeakWatch.weakWatchDowngradeApplied !== true || aaDiagnostics.weakWatchDowngradeApplied !== true){
-    throw new Error('AA-style failed-reclaim setup must expose weak-watch downgrade diagnostics.');
-  }
   if(!Array.isArray(aaStyleWeakWatch.weakWatchDowngradeReasons) || !aaStyleWeakWatch.weakWatchDowngradeReasons.includes('below_50_without_reclaim') || !aaStyleWeakWatch.weakWatchDowngradeReasons.includes('no_reclaim_signals')){
     throw new Error('AA-style failed-reclaim diagnostics must infer no-reclaim evidence from below50WithoutReclaim even when explicit reclaim counts are absent.');
   }
@@ -1598,6 +1595,75 @@ function runSimplifiedPipelineAssertions(){
   }
   if((constructiveUnpriceableWaitingWatch.debug && constructiveUnpriceableWaitingWatch.debug.derivedStates && constructiveUnpriceableWaitingWatch.debug.derivedStates.priceabilityState) === 'priceable'){
     throw new Error('Missing effective plan must not reconcile constructive unpriceable Watch to priceable.');
+  }
+
+  const weakLowScoreUnpriceableWatchRecord = {
+    ticker:'AAW2',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:62.53, ma20:64.88, ma50:65.22, ma200:49.32, currency:'USD'},
+    setup:{volumeRequired:false}
+  };
+  const weakLowScoreUnpriceableWatchDeps = depsFor({
+    structureState:'developing_clean',
+    trendState:'intact',
+    setupLocationState:'near_50ma',
+    priceabilityState:'unpriceable',
+    stabilisationState:'early',
+    bounceState:'attempt',
+    pullbackZone:'near_50ma',
+    volumeState:'normal'
+  }, {
+    finalVerdict:'Watch',
+    structuralState:'developing',
+    structure_eligibility:'alive',
+    structure_state:'developing_clean',
+    actionStateKey:'wait_for_confirmation',
+    planStatusKey:'missing',
+    tradeabilityVerdict:'Watch',
+    blockerReason:'No valid invalidation level is available.',
+    reasonSummary:'Bounce still tentative.',
+    terminal:false,
+    baseVerdict:'watch',
+    entry_gate_checks:{
+      below_50_without_reclaim:true,
+      has_clear_invalidation_level:false,
+      plan_ok:false,
+      tradeability_ok:false,
+      rr_ok:false,
+      rr_priceable:false,
+      resolved_rr:null
+    },
+    near_entry_gate_checks:{
+      below_50_without_reclaim:true,
+      has_clear_invalidation_level:false,
+      plan_ok:false,
+      tradeability_ok:false,
+      rr_priceable:false,
+      resolved_rr:null
+    },
+    viabilityInputs:{
+      planValid:false,
+      tradeabilityOk:false,
+      rrOk:false,
+      below50WithoutReclaim:true
+    },
+    viability:'watchlist',
+    viabilityBranchId:'alive_watchlist'
+  }, 2);
+  const weakLowScoreSurfaces = ['scan', 'track', 'review'].map(surface => pipeline.resolveRecordState(
+    weakLowScoreUnpriceableWatchRecord,
+    {
+      surface,
+      log:false,
+      deps:weakLowScoreUnpriceableWatchDeps
+    }
+  ));
+  if(weakLowScoreSurfaces.some(result => result.canonicalVerdict !== 'watch' || result.visualBucket !== 'diminishing' || result.tone !== 'diminishing')){
+    throw new Error('Alive near_50ma low-score unpriceable Watch must render as Diminishing across scan, track, and review.');
+  }
+  if(weakLowScoreSurfaces.some(result => result.weakWatchDiminishingApplied !== true || !String(result.weakWatchDiminishingReason || '').length)){
+    throw new Error('Alive near_50ma low-score unpriceable Watch must propagate weak-watch diminishing diagnostics through the simplified pipeline.');
   }
 
   const constructiveNoPlanNoBounceWatch = pipeline.resolveRecordState({

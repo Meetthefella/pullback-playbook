@@ -150,6 +150,8 @@
       visualBucketBeforeWeakWatchDowngrade:visual.visualBucketBeforeWeakWatchDowngrade || '',
       weakWatchDowngradeApplied:visual.weakWatchDowngradeApplied === true,
       weakWatchDowngradeReasons:Array.isArray(visual.weakWatchDowngradeReasons) ? visual.weakWatchDowngradeReasons.slice() : [],
+      weakWatchDiminishingApplied:visual.weakWatchDiminishingApplied === true,
+      weakWatchDiminishingReason:String(visual.weakWatchDiminishingReason || ''),
       finalVisualBucket:visual.finalVisualBucket || visual.visualBucket || visual.presentationBucket || '',
       debug:{
         surface,

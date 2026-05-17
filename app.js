@@ -25981,6 +25981,8 @@ function renderReviewWorkspace(options = {}){
     {label:'Terminal Avoid Applied', value:visualState.terminal_avoid_applied ? 'true' : 'false'},
     {label:'Terminal Avoid Reason', value:visualState.terminal_avoid_reason || reviewLifecycleBias.terminal_avoid_reason || '(none)'},
     {label:'Diminishing Preserved In Review', value:visualState.diminishing_preserved_in_review ? 'true' : 'false'},
+    {label:'Weak Watch Diminishing Applied', value:visualState.weakWatchDiminishingApplied ? 'true' : 'false'},
+    {label:'Weak Watch Diminishing Reason', value:visualState.weakWatchDiminishingReason || '(none)'},
     {label:'Track Visual Bucket', value:visualBucketLabel(reviewLifecycleBias.trackPresentationBucket || 'monitor')},
     {label:'Track Presentation Tone', value:reviewLifecycleBias.trackPresentationTone || '(none)'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
@@ -27612,7 +27614,7 @@ function clearSessionState(){
 }
 
 async function hardResetCachedAppState(){
-  if(!window.confirm('Hard reset cached shortlist/review state on this device? Watchlist, diary, saved reviews, and settings will be kept.')) return;
+  if(!window.confirm('This clears cached scanner/app state and reloads the app. Saved review cards should be preserved, but scanner-derived state may be rebuilt. Continue?')) return;
   clearTransientSessionState({persist:true, clearScannerCache:true, preserveSavedReviewCards:true});
   safeStorageSet(resetNoticeKey, {
     message:'Hard reset complete. Cleared cached shortlist, review workspace, scanner snapshots, and app caches.',
@@ -27930,7 +27932,7 @@ click('refreshViewBtn', refreshViewFromMemory);
 click('clearSessionBtn', clearSessionState);
 click('hardResetAppBtn', () => { hardResetCachedAppState().catch(() => setResetStatus('Hard reset could not complete cleanly.', 'warntext')); });
 click('resetAllBtn', () => {
-  if(!window.confirm('Are you sure? This resets the app and clears locally saved data on this device.')) return;
+  if(!window.confirm('This clears the main local app save and market cache. Some fallback data may still restore. Continue?')) return;
   resetAllData();
 });
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });

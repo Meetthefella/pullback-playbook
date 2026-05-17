@@ -118,6 +118,24 @@
     if(weakWatchDowngradeApplied){
       return 'diminishing';
     }
+    const weakWatchDiminishingApplied = verdict === 'watch'
+      && aliveStructure
+      && priceabilityState === 'unpriceable'
+      && setupScore !== null
+      && setupScore <= 2
+      && (
+        below50WithoutReclaim
+        || noReclaimEvidence
+        || !hasClearInvalidationLevel
+        || planStatus === 'missing'
+        || !planValid
+        || !tradeabilityOk
+        || !rrOk
+        || (resolvedRR !== null && resolvedRR < 2)
+      );
+    if(weakWatchDiminishingApplied){
+      return 'diminishing';
+    }
     if(structureEligibility === 'damaged' || structureState === 'weakening'){
       return 'diminishing';
     }
@@ -294,12 +312,32 @@
       safeRecord && safeRecord.meta && safeRecord.meta.previousFinalVerdict,
       deps
     );
+    const aliveStructure = structureEligibility === 'alive'
+      || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const weakeningButAlive = finalVerdict === 'watch'
       && (
         structureEligibility === 'damaged'
         || structureState === 'weakening'
         || viability === 'low_priority'
       );
+    const weakWatchDiminishingApplied = finalVerdict === 'watch'
+      && aliveStructure
+      && priceabilityState === 'unpriceable'
+      && numericSetupScore !== null
+      && numericSetupScore <= 2
+      && (
+        below50WithoutReclaim
+        || noReclaimEvidence
+        || !hasClearInvalidationLevel
+        || planStatus === 'missing'
+        || !planValid
+        || !tradeabilityOk
+        || !rrOk
+        || (resolvedRR !== null && resolvedRR < 2)
+      );
+    const weakWatchDiminishingReason = weakWatchDiminishingApplied
+      ? 'unpriceable_low_score_missing_plan'
+      : '';
     const visualBucketBeforeWeakWatchDowngrade = visualBucketForCanonical(finalVerdict, {
       structureEligibility,
       structureState,
@@ -391,7 +429,9 @@
       review_presentation_source:'resolver',
       terminal_avoid_applied:false,
       terminal_avoid_reason:null,
-      diminishing_preserved_in_review:weakeningButAlive,
+      diminishing_preserved_in_review:weakeningButAlive || weakWatchDiminishingApplied,
+      weakWatchDiminishingApplied,
+      weakWatchDiminishingReason,
       canonicalVerdict:finalVerdict,
       visualBucket,
       presentationBucket:visualBucket,
@@ -403,7 +443,7 @@
       reason:(legacyVerdict && legacyVerdict.main_blocker) || resolvedSummary,
       reason_state:finalVerdict === 'avoid'
         ? (String(derivedStates && derivedStates.structureState || '').trim().toLowerCase() === 'broken' ? 'broken_structure' : 'invalidated')
-        : (weakeningButAlive ? 'weakening_but_alive' : 'waiting_for_confirmation'),
+        : ((weakeningButAlive || weakWatchDiminishingApplied) ? 'weakening_but_alive' : 'waiting_for_confirmation'),
       ui_state_source:'resolveFinalStateContract',
       final_verdict_rendered:renderedVerdict,
       bucket_rendered:visualBucket,

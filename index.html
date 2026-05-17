@@ -297,13 +297,30 @@
         <div class="panelbox">
           <strong>Reset / Cache Controls</strong>
           <div class="tiny" style="margin-top:10px">Use these when the shortlist or review workspace feels stale. They do not change ranking rules.</div>
-          <div class="actions">
-            <button class="secondary" id="refreshViewBtn" type="button">Refresh View</button>
-            <button class="secondary" id="clearSessionBtn" type="button">Clear Session State</button>
-            <button class="danger" id="resetAllBtn" type="button">Reset All</button>
-            <button class="danger" id="hardResetAppBtn" type="button">Hard Reset App Data</button>
+          <div class="reset-control-list">
+            <div class="reset-control-item">
+              <button class="secondary" id="refreshViewBtn" type="button">Refresh View</button>
+              <div class="tiny">Rerenders the app from current memory. Does not delete data.</div>
+            </div>
+            <div class="reset-control-item">
+              <button class="secondary" id="clearSessionBtn" type="button">Clear Temporary View State</button>
+              <div class="tiny">Clears temporary review/scanner UI state. Saved data can return after reload.</div>
+            </div>
           </div>
-          <div id="resetStatus" class="subtle">Refresh rerenders only. Session clear drops shortlist/review working state. Hard reset also clears scanner caches and reloads.</div>
+          <details class="reset-advanced-tools">
+            <summary>Advanced / Repair Tools</summary>
+            <div class="reset-control-list reset-control-list--advanced">
+              <div class="reset-control-item">
+                <button class="secondary reset-warning-action" id="resetAllBtn" type="button">Reset Local App State</button>
+                <div class="tiny">Clears the main local app save and market cache. Some fallback data may restore.</div>
+              </div>
+              <div class="reset-control-item">
+                <button class="secondary reset-warning-action" id="hardResetAppBtn" type="button">Repair App Cache &amp; Reload</button>
+                <div class="tiny">Clears cached scanner/app state and reloads. Saved review cards are preserved.</div>
+              </div>
+            </div>
+          </details>
+          <div id="resetStatus" class="subtle">Refresh rerenders only. Temporary clear drops working view state. Advanced repair tools are collapsed below.</div>
         </div>
         <div class="panelbox" id="marketCalendarPanel">
           <strong>U.S. Market Calendar</strong>

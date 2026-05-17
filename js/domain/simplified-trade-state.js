@@ -360,6 +360,8 @@
       visualBucketBeforeWeakWatchDowngrade:result.visualBucketBeforeWeakWatchDowngrade || null,
       weakWatchDowngradeApplied:result.weakWatchDowngradeApplied === true,
       weakWatchDowngradeReasons:Array.isArray(result.weakWatchDowngradeReasons) ? result.weakWatchDowngradeReasons.slice() : [],
+      weakWatchDiminishingApplied:result.weakWatchDiminishingApplied === true,
+      weakWatchDiminishingReason:String(result.weakWatchDiminishingReason || ''),
       finalVisualBucket:result.finalVisualBucket || result.visualBucket || null,
       mainBlocker:result.mainBlocker || resolvedState.main_blocker || resolvedState.reason || '',
       inputMutationSource:options.mutationSource || options.source || options.reason || options.renderSource || null
@@ -370,6 +372,8 @@
       planFingerprint,
       canonicalVerdict:diagnostics.canonicalVerdict,
       visualBucket:diagnostics.visualBucket,
+      weakWatchDiminishingApplied:diagnostics.weakWatchDiminishingApplied,
+      weakWatchDiminishingReason:diagnostics.weakWatchDiminishingReason,
       mainBlocker:diagnostics.mainBlocker
     };
     return diagnostics;
