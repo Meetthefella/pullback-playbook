@@ -1255,25 +1255,7 @@ function runSimplifiedPipelineAssertions(){
       blockerReason:'No valid invalidation level is available.',
       reasonSummary:'No valid invalidation level is available.',
       terminal:false,
-      baseVerdict:'watch',
-      entry_gate_checks:{
-        below_50_without_reclaim:true,
-        reclaim_signal_count:0,
-        has_clear_invalidation_level:false,
-        resolved_rr:null,
-        rr_ok:false,
-        tradeability_ok:false,
-        plan_ok:false
-      },
-      near_entry_gate_checks:{
-        below_50_without_reclaim:true,
-        reclaim_signal_count:0,
-        has_clear_invalidation_level:false,
-        resolved_rr:null,
-        rr_priceable:false,
-        tradeability_ok:false,
-        plan_ok:false
-      }
+      baseVerdict:'watch'
     }, 2)
   });
   const aaDiagnostics = aaStyleWeakWatch.debug && aaStyleWeakWatch.debug.pipelineDiagnostics || {};
@@ -1287,7 +1269,7 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('AA-style failed-reclaim setup must expose weak-watch downgrade diagnostics.');
   }
   if(!Array.isArray(aaStyleWeakWatch.weakWatchDowngradeReasons) || !aaStyleWeakWatch.weakWatchDowngradeReasons.includes('below_50_without_reclaim') || !aaStyleWeakWatch.weakWatchDowngradeReasons.includes('no_reclaim_signals')){
-    throw new Error('AA-style failed-reclaim diagnostics must include below-50/no-reclaim reasons.');
+    throw new Error('AA-style failed-reclaim diagnostics must infer no-reclaim evidence from below50WithoutReclaim even when explicit reclaim counts are absent.');
   }
   if(/needs confirmation before promotion/i.test(String(aaStyleWeakWatch.mainBlocker || ''))){
     throw new Error('AA-style weak-watch output must not use clean Monitor promotion copy.');

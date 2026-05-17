@@ -77,12 +77,13 @@
     const tradeabilityOk = options.tradeabilityOk === true;
     const rrOk = options.rrOk === true;
     const planValid = options.planValid === true;
+    const noReclaimEvidence = reclaimSignalCount === 0 || below50WithoutReclaim;
     const weakWatchDowngradeApplied = verdict === 'watch'
       && setupScore !== null
       && setupScore <= 2
       && ['attempt','early','developing','none','unconfirmed',''].includes(bounceState)
       && below50WithoutReclaim
-      && reclaimSignalCount === 0
+      && noReclaimEvidence
       && hasClearInvalidationLevel === false
       && (priceabilityState === 'unpriceable' || !planValid || !tradeabilityOk || !rrOk || resolvedRR !== null && resolvedRR < 2);
     const aliveStructure = structureEligibility === 'alive'
@@ -268,7 +269,7 @@
     const numericSetupScore = Number.isFinite(Number(optionSetupScore)) ? Number(optionSetupScore) : null;
     if(numericSetupScore !== null && numericSetupScore <= 2) weakWatchDowngradeReasons.push('setup_score_below_watch_floor');
     if(below50WithoutReclaim) weakWatchDowngradeReasons.push('below_50_without_reclaim');
-    if(reclaimSignalCount === 0) weakWatchDowngradeReasons.push('no_reclaim_signals');
+    if(reclaimSignalCount === 0 || below50WithoutReclaim) weakWatchDowngradeReasons.push('no_reclaim_signals');
     if(hasClearInvalidationLevel === false) weakWatchDowngradeReasons.push('no_clear_invalidation_level');
     if(priceabilityState === 'unpriceable') weakWatchDowngradeReasons.push('unpriceable');
     if(!planValid) weakWatchDowngradeReasons.push('no_valid_plan');
