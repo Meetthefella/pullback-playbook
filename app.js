@@ -5315,6 +5315,15 @@ function openContextSettings(sectionKey = 'market'){
     target:`context-section:${nextSection}`
   });
   requestAnimationFrame(() => {
+    if(isTrackRestoreOrRevealPending()){
+      traceScrollDriver('scroll-driver:scrollIntoView', {
+        caller:'openContextSettings',
+        target:`context-section:${nextSection}`,
+        behavior:'smooth',
+        blocked:true
+      });
+      return;
+    }
     traceScrollEvent('scrollIntoView:before', {
       caller:'openContextSettings',
       target:`context-section:${nextSection}`,
@@ -5342,6 +5351,15 @@ function openMarketCalendarShortcut(){
     target:target.id || target.className || 'market_calendar'
   });
   requestAnimationFrame(() => {
+    if(isTrackRestoreOrRevealPending()){
+      traceScrollDriver('scroll-driver:scrollIntoView', {
+        caller:'openMarketCalendarShortcut',
+        target:target.id || target.className || 'market_calendar',
+        behavior:'smooth',
+        blocked:true
+      });
+      return;
+    }
     traceScrollEvent('scrollIntoView:before', {
       caller:'openMarketCalendarShortcut',
       target:target.id || target.className || 'market_calendar',
@@ -6371,10 +6389,19 @@ function applyRailFocus(index, options = {}){
     uiState.controlRailGestureStartLeft = null;
   }
   if(options.scroll !== false){
+    if(isTrackRestoreOrRevealPending()){
+      traceScrollDriver('scroll-driver:scrollTo', {
+        caller:'applyRailFocus',
+        target:'#controlFocusRail',
+        behavior:options.instant ? 'auto' : 'smooth',
+        blocked:true
+      });
+    }else{
     rail.scrollTo({
       left:centeredScrollLeftForRailItem(rail, item),
       behavior:options.instant ? 'auto' : 'smooth'
     });
+    }
   }
   renderControlStripSelector();
   updateControlFocusRailVisuals(rail);
@@ -6438,6 +6465,15 @@ function renderControlStripSelector(){
         setContextSettingsPanelOpen(true);
         const settings = $('headerRiskSettings');
         if(!settings) return;
+        if(isTrackRestoreOrRevealPending()){
+          traceScrollDriver('scroll-driver:scrollIntoView', {
+            caller:'controlFocusAccountAction.onclick',
+            target:'#headerRiskSettings',
+            behavior:'smooth',
+            blocked:true
+          });
+          return;
+        }
         traceScrollEvent('scrollIntoView:before', {
           caller:'controlFocusAccountAction.onclick',
           target:'#headerRiskSettings',
@@ -8742,7 +8778,12 @@ function restoreTrackUiState(snapshot = null){
       duplicateRestoreSuppressed:usePendingRestore
     });
     suppressScrollMemoryForAppScroll('track_dom_update_restore', 900);
-    window.scrollTo({top:Math.max(0, targetScrollY), behavior:'auto'});
+    window.__ppAllowTrackRestoreScrollDriver = true;
+    try{
+      window.scrollTo({top:Math.max(0, targetScrollY), behavior:'auto'});
+    }finally{
+      window.__ppAllowTrackRestoreScrollDriver = false;
+    }
     const restoreActualAfter = Number(window.scrollY || window.pageYOffset || 0);
     traceScrollEvent('track:scroll-restore:after', {
       caller:'restoreTrackUiState',
@@ -8783,6 +8824,19 @@ function restoreTrackUiState(snapshot = null){
   }else{
     setTimeout(() => restoreScroll(1), 0);
   }
+}
+
+function isTrackRestoreOrRevealPending(){
+  return typeof window !== 'undefined'
+    && (window.__ppTrackRestoreInProgress === true || Number.isFinite(Number(window.__ppPendingTrackRestoreY)));
+}
+
+function traceScrollDriver(label, details = {}){
+  traceScrollEvent(label, {
+    ...details,
+    restoreInProgress:typeof window !== 'undefined' && window.__ppTrackRestoreInProgress === true,
+    revealPending:typeof document !== 'undefined' && !!(document.body && document.body.classList.contains('track-restore-pending'))
+  });
 }
 
 function setTrackSectionExpanded(sectionKey, expanded){
@@ -11305,6 +11359,14 @@ async function buildCards(){
     const resultsSection = $('resultsSection');
     if(resultsToggle) resultsToggle.open = true;
     if(resultsSection){
+      if(isTrackRestoreOrRevealPending()){
+        traceScrollDriver('scroll-driver:scrollIntoView', {
+          caller:'buildCards',
+          target:'#resultsSection',
+          behavior:'smooth',
+          blocked:true
+        });
+      }else{
       traceScrollEvent('scrollIntoView:before', {
         caller:'buildCards',
         target:'#resultsSection',
@@ -11316,6 +11378,7 @@ async function buildCards(){
         caller:'buildCards',
         target:'#resultsSection'
       });
+      }
     }
     return result;
   }catch(err){
@@ -11388,6 +11451,15 @@ function removeTicker(ticker){
 function scrollToScannerResults(){
   const target = $('resultsSection') || $('results');
   if(!target) return;
+  if(isTrackRestoreOrRevealPending()){
+    traceScrollDriver('scroll-driver:scrollIntoView', {
+      caller:'scrollToScannerResults',
+      target:target.id ? `#${target.id}` : 'scanner_results',
+      behavior:'smooth',
+      blocked:true
+    });
+    return;
+  }
   traceScrollEvent('scrollIntoView:before', {
     caller:'scrollToScannerResults',
     target:target.id ? `#${target.id}` : 'scanner_results',
