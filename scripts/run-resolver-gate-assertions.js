@@ -881,8 +881,11 @@ function runEntryConditionsSummaryAssertions(){
   if(!/reviewInitialTopPositioned/.test(appShellSource) || !/if\(uiState\.reviewInitialTopPositioned === true\)[\s\S]{0,400}return/.test(appShellSource)){
     throw new Error('Review top positioning must run only once per session.');
   }
-  if(!/suppressWorkspaceScrollSaveUntil/.test(appShellSource) || !/suppressed_programmatic_tab_positioning/.test(appShellSource)){
-    throw new Error('Review initial top positioning must not overwrite remembered Track scroll.');
+  if(!/suppressScrollMemory/.test(appShellSource) || !/track:scroll-save-suppressed/.test(appShellSource) || !/__ppSuppressScrollMemoryUntil/.test(appShellSource)){
+    throw new Error('Programmatic scrolls must suppress Track scroll-memory overwrites.');
+  }
+  if(!/review_initial_positioning/.test(appShellSource) || !/scroll_to_top_button/.test(appShellSource) || !/track_restore/.test(appShellSource)){
+    throw new Error('Review positioning, Track restore, and Track scroll-to-top must carry explicit scroll-memory suppression reasons.');
   }
   if(!/isWorkspaceVisiblyActive/.test(appShellSource) || !/blocked_not_active_visible_track/.test(appShellSource)){
     throw new Error('Track scroll memory must only be saved when Track is the active visible workspace.');
@@ -890,11 +893,14 @@ function runEntryConditionsSummaryAssertions(){
   if(/normalized === 'review'[\s\S]{0,160}scrollWindowTo/.test(appShellSource)){
     throw new Error('Review subsequent tab focuses must not force scroll restoration.');
   }
-  if(!/scrollY:typeof window !== 'undefined' \? Number\(window\.scrollY/.test(appSource) || !/function restoreTrackUiState[\s\S]{0,1200}window\.scrollTo\(\{top:Math\.max\(0, targetScrollY\), behavior:'auto'\}\)/.test(appSource)){
+  if(!/scrollY:typeof window !== 'undefined' \? Number\(window\.scrollY/.test(appSource) || !/function restoreTrackUiState[\s\S]*?window\.scrollTo\(\{top:Math\.max\(0, targetScrollY\), behavior:'auto'\}\)/.test(appSource)){
     throw new Error('Track render/remove/refresh must preserve the captured Track page scroll position after DOM updates.');
   }
   if(!/trackScrollTopBtn/.test(appShellSource)){
     throw new Error('Track floating scroll-to-top control must be wired in the app shell.');
+  }
+  if(!/suppressScrollMemoryForAppScroll/.test(appSource) || !/track_dom_update_restore/.test(appSource)){
+    throw new Error('App-level programmatic scrolls must suppress Track scroll-memory saves.');
   }
   if(!/actualTrackPageScrollTop/.test(appSource) || /const scrollTop = Number\(trackWorkspace\.scrollTop/.test(appSource) || !/page_not_at_top/.test(appSource)){
     throw new Error('Track pull-to-refresh must use page scroll, not trackWorkspace.scrollTop, for top eligibility.');

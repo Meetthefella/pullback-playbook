@@ -5320,6 +5320,7 @@ function openContextSettings(sectionKey = 'market'){
       target:`context-section:${nextSection}`,
       options:{behavior:'smooth', block:'nearest'}
     });
+    suppressScrollMemoryForAppScroll('scroll_into_view_open_context_settings', 1000);
     target.scrollIntoView({behavior:'smooth', block:'nearest'});
     traceScrollEvent('scrollIntoView:after', {
       caller:'openContextSettings',
@@ -5346,6 +5347,7 @@ function openMarketCalendarShortcut(){
       target:target.id || target.className || 'market_calendar',
       options:{behavior:'smooth', block:'start'}
     });
+    suppressScrollMemoryForAppScroll('scroll_into_view_market_calendar', 1000);
     target.scrollIntoView({behavior:'smooth', block:'start'});
     traceScrollEvent('scrollIntoView:after', {
       caller:'openMarketCalendarShortcut',
@@ -6441,6 +6443,7 @@ function renderControlStripSelector(){
           target:'#headerRiskSettings',
           options:{behavior:'smooth', block:'nearest'}
         });
+        suppressScrollMemoryForAppScroll('scroll_into_view_risk_settings', 1000);
         settings.scrollIntoView({behavior:'smooth', block:'nearest'});
         traceScrollEvent('scrollIntoView:after', {
           caller:'controlFocusAccountAction.onclick',
@@ -8642,6 +8645,14 @@ function traceScrollEvent(label, details = {}){
   console.log('[SCROLL_TRACE]', payload);
 }
 
+function suppressScrollMemoryForAppScroll(reason = 'programmatic_scroll', durationMs = 700){
+  if(typeof window === 'undefined') return;
+  const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  const until = now + Math.max(0, Number(durationMs) || 0);
+  window.__ppSuppressScrollMemoryUntil = Math.max(Number(window.__ppSuppressScrollMemoryUntil || 0), until);
+  window.__ppScrollMemorySuppressionReason = String(reason || 'programmatic_scroll');
+}
+
 function startTrackRenderCycle(source = 'watchlist_render'){
   if(activeWorkspaceTab() !== 'track') return () => {};
   traceScrollEvent('track:render:before', {
@@ -8713,6 +8724,7 @@ function restoreTrackUiState(snapshot = null){
       savedTrackScrollY:targetScrollY,
       reason:'track_dom_update'
     });
+    suppressScrollMemoryForAppScroll('track_dom_update_restore', 700);
     window.scrollTo({top:Math.max(0, targetScrollY), behavior:'auto'});
     traceScrollEvent('track:scroll-restore:after', {
       caller:'restoreTrackUiState',
@@ -11257,6 +11269,7 @@ async function buildCards(){
         target:'#resultsSection',
         options:{behavior:'smooth', block:'start'}
       });
+      suppressScrollMemoryForAppScroll('scroll_into_view_scan_results', 1000);
       resultsSection.scrollIntoView({behavior:'smooth', block:'start'});
       traceScrollEvent('scrollIntoView:after', {
         caller:'buildCards',
@@ -11339,6 +11352,7 @@ function scrollToScannerResults(){
     target:target.id ? `#${target.id}` : 'scanner_results',
     options:{behavior:'smooth', block:'start'}
   });
+  suppressScrollMemoryForAppScroll('scroll_into_view_scanner_results', 1000);
   target.scrollIntoView({behavior:'smooth', block:'start'});
   traceScrollEvent('scrollIntoView:after', {
     caller:'scrollToScannerResults',
@@ -26489,6 +26503,7 @@ function saveReview(){
         caller:'saveReview',
         target:'#selectedTicker'
       });
+      suppressScrollMemoryForAppScroll('focus_selected_ticker', 500);
       $('selectedTicker').focus();
       traceScrollEvent('focus:after', {
         caller:'saveReview',

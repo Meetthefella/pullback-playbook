@@ -109,6 +109,20 @@
       return typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
     }
 
+    function nowMs(){
+      return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+    }
+
+    function suppressScrollMemory(reason, durationMs = 700){
+      const until = nowMs() + Math.max(0, Number(durationMs) || 0);
+      uiState.suppressWorkspaceScrollSaveUntil = Math.max(Number(uiState.suppressWorkspaceScrollSaveUntil || 0), until);
+      uiState.suppressWorkspaceScrollSaveReason = String(reason || 'programmatic_scroll');
+      if(typeof window !== 'undefined'){
+        window.__ppSuppressScrollMemoryUntil = uiState.suppressWorkspaceScrollSaveUntil;
+        window.__ppScrollMemorySuppressionReason = uiState.suppressWorkspaceScrollSaveReason;
+      }
+    }
+
     function isWorkspaceVisiblyActive(tab){
       const normalized = normalizeTab(tab);
       if(typeof document === 'undefined') return false;
@@ -119,27 +133,35 @@
 
     function saveActiveWorkspaceScroll(){
       const active = normalizeTab(uiState.activeWorkspaceTab || '');
-      const suppressUntil = Number(uiState.suppressWorkspaceScrollSaveUntil || 0);
-      const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+      const suppressUntil = Math.max(
+        Number(uiState.suppressWorkspaceScrollSaveUntil || 0),
+        typeof window !== 'undefined' ? Number(window.__ppSuppressScrollMemoryUntil || 0) : 0
+      );
+      const suppressionReason = String(
+        uiState.suppressWorkspaceScrollSaveReason
+        || (typeof window !== 'undefined' ? window.__ppScrollMemorySuppressionReason : '')
+        || 'programmatic_scroll'
+      );
+      const now = nowMs();
       if(now < suppressUntil){
-        traceScrollEvent('track:scroll-memory-overwrite', {
+        traceScrollEvent('track:scroll-save-suppressed', {
           caller:'saveActiveWorkspaceScroll',
-          reason:'suppressed_programmatic_tab_positioning',
+          reason:suppressionReason,
           active,
-          oldSavedTrackScrollY:Number.isFinite(Number(uiState.trackScrollY)) ? Number(uiState.trackScrollY) : null,
-          newSavedTrackScrollY:currentScrollY()
+          attemptedScrollY:currentScrollY(),
+          savedTrackScrollY:Number.isFinite(Number(uiState.trackScrollY)) ? Number(uiState.trackScrollY) : null
         });
         return;
       }
       if(active === 'track'){
         if(!isWorkspaceVisiblyActive('track')){
-          traceScrollEvent('track:scroll-memory-overwrite', {
+          traceScrollEvent('track:scroll-save-suppressed', {
             caller:'saveActiveWorkspaceScroll',
             reason:'blocked_not_active_visible_track',
             active,
             bodyActiveTab:String(document.body && document.body.getAttribute('data-active-workspace') || ''),
-            oldSavedTrackScrollY:Number.isFinite(Number(uiState.trackScrollY)) ? Number(uiState.trackScrollY) : null,
-            newSavedTrackScrollY:currentScrollY()
+            attemptedScrollY:currentScrollY(),
+            savedTrackScrollY:Number.isFinite(Number(uiState.trackScrollY)) ? Number(uiState.trackScrollY) : null
           });
           return;
         }
@@ -155,13 +177,15 @@
       if(active === 'review') uiState.reviewScrollY = currentScrollY();
     }
 
-    function scrollWindowTo(top, behavior = 'auto'){
+    function scrollWindowTo(top, behavior = 'auto', reason = 'programmatic_scroll'){
       if(typeof window === 'undefined') return;
       const targetTop = Math.max(0, Math.round(top));
+      suppressScrollMemory(reason, behavior === 'smooth' ? 1000 : 700);
       traceScrollEvent('scrollTo:before', {
         caller:'scrollWindowTo',
         intendedTop:targetTop,
-        behavior
+        behavior,
+        suppressionReason:reason
       });
       try{
         window.scrollTo({top:targetTop, behavior});
@@ -171,7 +195,8 @@
       traceScrollEvent('scrollTo:after', {
         caller:'scrollWindowTo',
         intendedTop:targetTop,
-        behavior
+        behavior,
+        suppressionReason:reason
       });
     }
 
@@ -199,9 +224,7 @@
         targetScrollY:0,
         reason:'first_review_focus'
       });
-      const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
-      uiState.suppressWorkspaceScrollSaveUntil = now + 300;
-      scrollWindowTo(0, 'auto');
+      scrollWindowTo(0, 'auto', 'review_initial_positioning');
     }
 
     function restoreWorkspaceViewportAfterOpen(tab){
@@ -212,7 +235,7 @@
           savedTrackScrollY:Number(uiState.trackScrollY || 0),
           reason:'track_tab_activation'
         });
-        scrollWindowTo(Number(uiState.trackScrollY || 0), 'auto');
+        scrollWindowTo(Number(uiState.trackScrollY || 0), 'auto', 'track_restore');
         traceScrollEvent('track:scroll-restore:after', {
           caller:'restoreWorkspaceViewportAfterOpen',
           savedTrackScrollY:Number(uiState.trackScrollY || 0),
@@ -267,7 +290,7 @@
         && (options.focusTop === true || options.focusTop !== false);
       if(shouldFocusTop){
         try{
-          window.scrollTo({top:0, behavior:'auto'});
+          scrollWindowTo(0, 'auto', 'workspace_top');
         }catch(error){}
       }
       updateTrackScrollTopControl();
@@ -318,7 +341,7 @@
         trackTopButton.addEventListener('click', () => {
           if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
           uiState.trackScrollY = workspacePageTop('track');
-          scrollWindowTo(workspacePageTop('track'), 'smooth');
+          scrollWindowTo(workspacePageTop('track'), 'smooth', 'scroll_to_top_button');
           setTimeout(() => {
             if(normalizeTab(uiState.activeWorkspaceTab || '') === 'track'){
               uiState.trackScrollY = workspacePageTop('track');
