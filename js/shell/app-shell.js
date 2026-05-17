@@ -319,6 +319,7 @@
       const restoreTarget = Math.max(0, Number(target) || 0);
       const concealUntilRestored = restoreTarget > 24;
       uiState.trackRestoreInProgress = true;
+      if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = true;
       if(concealUntilRestored) setTrackRevealPending(true, reason);
       setSmoothScrollDisabled(true, reason);
       const revealFallback = setTimeout(() => {
@@ -349,6 +350,7 @@
         setTimeout(() => {
           if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track'){
             uiState.trackRestoreInProgress = false;
+            if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = false;
             setSmoothScrollDisabled(false, 'track_restore_verify_aborted');
             clearTimeout(revealFallback);
             if(concealUntilRestored) clearTrackRevealPending('track_restore_verify_aborted');
@@ -378,6 +380,7 @@
               if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
             }
             uiState.trackRestoreInProgress = false;
+            if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = false;
             setSmoothScrollDisabled(false, 'track_restore_verify_complete');
             clearTimeout(revealFallback);
             if(concealUntilRestored) clearTrackRevealPending('track_restore_verify_complete');
@@ -387,6 +390,7 @@
       const runRestore = attempt => {
         if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track'){
           uiState.trackRestoreInProgress = false;
+          if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = false;
           setSmoothScrollDisabled(false, 'track_restore_aborted');
           clearTimeout(revealFallback);
           if(concealUntilRestored) clearTrackRevealPending('track_restore_aborted');

@@ -8720,17 +8720,26 @@ function restoreTrackUiState(snapshot = null){
     applyTrackSectionExpandedState(section, nextExpanded);
   });
   if(activeWorkspaceTab() !== 'track') return;
-  const targetScrollY = Number(snapshot.scrollY);
+  const pendingRestoreY = typeof window !== 'undefined' ? Number(window.__ppPendingTrackRestoreY) : Number.NaN;
+  const usePendingRestore = Number.isFinite(pendingRestoreY);
+  const targetScrollY = usePendingRestore ? pendingRestoreY : Number(snapshot.scrollY);
   if(!Number.isFinite(targetScrollY) || typeof window === 'undefined') return;
+  const setLocalSmoothDisabled = disabled => {
+    if(!document.documentElement) return;
+    document.documentElement.classList.toggle('no-smooth-scroll', disabled === true);
+  };
   const restoreScroll = (attempt = 1) => {
     if(activeWorkspaceTab() !== 'track') return;
+    if(usePendingRestore) setLocalSmoothDisabled(true);
     traceScrollEvent('track:scroll-restore:before', {
       caller:'restoreTrackUiState',
       savedTrackScrollY:targetScrollY,
       restoreTarget:targetScrollY,
       restoreActualBefore:Number(window.scrollY || window.pageYOffset || 0),
       reason:'track_dom_update',
-      attempt
+      attempt,
+      trackRevealPending:document.body && document.body.classList.contains('track-restore-pending'),
+      duplicateRestoreSuppressed:usePendingRestore
     });
     suppressScrollMemoryForAppScroll('track_dom_update_restore', 900);
     window.scrollTo({top:Math.max(0, targetScrollY), behavior:'auto'});
@@ -8741,7 +8750,8 @@ function restoreTrackUiState(snapshot = null){
       restoreTarget:targetScrollY,
       restoreActualAfter,
       reason:'track_dom_update',
-      attempt
+      attempt,
+      scrollToAppliedBeforeReveal:document.body && document.body.classList.contains('track-restore-pending')
     });
     if(attempt === 1 && Math.abs(restoreActualAfter - targetScrollY) > 24){
       if(typeof window.requestAnimationFrame === 'function'){
@@ -8752,7 +8762,17 @@ function restoreTrackUiState(snapshot = null){
     }else if(Math.abs(restoreActualAfter - targetScrollY) <= 24){
       window.__ppPendingTrackRestoreY = undefined;
     }
+    if(usePendingRestore){
+      setTimeout(() => {
+        if(window.__ppTrackRestoreInProgress === true) return;
+        setLocalSmoothDisabled(false);
+      }, 250);
+    }
   };
+  if(usePendingRestore){
+    restoreScroll(1);
+    return;
+  }
   if(typeof window.requestAnimationFrame === 'function'){
     traceScrollEvent('delayed-scroll:scheduled', {
       caller:'restoreTrackUiState',
