@@ -273,6 +273,47 @@
 
     function scheduleTrackRestore(target, reason = 'track_restore'){
       const restoreTarget = Math.max(0, Number(target) || 0);
+      const canRestoreToTarget = () => {
+        if(typeof document === 'undefined' || typeof window === 'undefined') return true;
+        const docH = Number(document.documentElement && document.documentElement.scrollHeight || 0);
+        const viewportH = Number(window.innerHeight || 0);
+        return restoreTarget <= Math.max(0, docH - viewportH + 32);
+      };
+      const scheduleVerify = () => {
+        if(typeof window === 'undefined') return;
+        traceScrollEvent('delayed-scroll:scheduled', {
+          caller:'scheduleTrackRestore',
+          label:'track:scroll-restore-verify',
+          restoreTarget,
+          reason
+        });
+        setTimeout(() => {
+          if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
+          const actualY = currentScrollY();
+          const delta = actualY - restoreTarget;
+          const retryApplied = Math.abs(delta) > 24 && canRestoreToTarget();
+          traceScrollEvent('track:scroll-restore:verify', {
+            caller:'scheduleTrackRestore.verify',
+            reason:retryApplied ? 'post_focus_drift' : 'within_tolerance',
+            restoreTarget,
+            actualY,
+            delta,
+            retryApplied
+          });
+          if(retryApplied){
+            suppressScrollMemory('track_restore_verify_retry', 900);
+            scrollWindowTo(restoreTarget, 'auto', 'track_restore_verify_retry');
+          }
+          setTimeout(() => {
+            if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
+            const finalY = currentScrollY();
+            if(Math.abs(finalY - restoreTarget) <= 24){
+              uiState.pendingTrackRestoreY = null;
+              if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
+            }
+          }, 450);
+        }, 350);
+      };
       const runRestore = attempt => {
         if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
         suppressScrollMemory(reason, 900);
@@ -307,8 +348,7 @@
             setTimeout(() => runRestore(2), 0);
           }
         }else{
-          uiState.pendingTrackRestoreY = null;
-          if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
+          scheduleVerify();
         }
       };
       traceScrollEvent('delayed-scroll:scheduled', {

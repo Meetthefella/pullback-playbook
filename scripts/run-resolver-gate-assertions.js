@@ -878,6 +878,9 @@ function runEntryConditionsSummaryAssertions(){
   if(!/scheduleTrackRestore/.test(appShellSource) || !/track:scroll-restore-retry/.test(appShellSource) || !/restoreActualAfter/.test(appShellSource)){
     throw new Error('Track restore must run after layout and retry when the first scrollTo is clamped.');
   }
+  if(!/track:scroll-restore:verify/.test(appShellSource) || !/track_restore_verify_retry/.test(appShellSource) || !/post_focus_drift/.test(appShellSource)){
+    throw new Error('Track restore must verify after post-focus drift and retry without saving drift positions.');
+  }
   if(!/!\['track','review'\]\.includes\(appliedTab\)/.test(appShellSource)){
     throw new Error('Track and Review tab focus must avoid forcing window scroll to top.');
   }
