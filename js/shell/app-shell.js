@@ -127,6 +127,27 @@
       }
     }
 
+    function computedHtmlScrollBehavior(){
+      if(typeof window === 'undefined' || typeof document === 'undefined' || !document.documentElement) return '';
+      try{
+        return String(window.getComputedStyle(document.documentElement).scrollBehavior || '');
+      }catch(_error){
+        return '';
+      }
+    }
+
+    function setSmoothScrollDisabled(disabled, reason = 'track_restore'){
+      if(typeof document === 'undefined' || !document.documentElement) return;
+      document.documentElement.classList.toggle('no-smooth-scroll', disabled === true);
+      traceScrollEvent(disabled === true ? 'scroll:smooth-disabled' : 'scroll:smooth-restored', {
+        caller:'setSmoothScrollDisabled',
+        reason,
+        computedHtmlScrollBehavior:computedHtmlScrollBehavior(),
+        restoreInProgress:uiState.trackRestoreInProgress === true,
+        activeSmoothDisabled:document.documentElement.classList.contains('no-smooth-scroll')
+      });
+    }
+
     function extendActiveScrollSuppression(reason, durationMs = 350){
       const safeReason = String(reason || uiState.suppressWorkspaceScrollSaveReason || 'programmatic_scroll_settling');
       const until = nowMs() + Math.max(0, Number(durationMs) || 0);
@@ -207,7 +228,12 @@
       traceScrollEvent('scrollTo:before', {
         caller:'scrollWindowTo',
         intendedTop:targetTop,
+        targetY:targetTop,
         behavior,
+        requestedBehavior:behavior,
+        computedHtmlScrollBehavior:computedHtmlScrollBehavior(),
+        restoreInProgress:uiState.trackRestoreInProgress === true,
+        activeSmoothDisabled:typeof document !== 'undefined' && !!(document.documentElement && document.documentElement.classList.contains('no-smooth-scroll')),
         suppressionReason:reason
       });
       try{
@@ -218,7 +244,12 @@
       traceScrollEvent('scrollTo:after', {
         caller:'scrollWindowTo',
         intendedTop:targetTop,
+        targetY:targetTop,
         behavior,
+        requestedBehavior:behavior,
+        computedHtmlScrollBehavior:computedHtmlScrollBehavior(),
+        restoreInProgress:uiState.trackRestoreInProgress === true,
+        activeSmoothDisabled:typeof document !== 'undefined' && !!(document.documentElement && document.documentElement.classList.contains('no-smooth-scroll')),
         suppressionReason:reason
       });
     }
@@ -273,6 +304,8 @@
 
     function scheduleTrackRestore(target, reason = 'track_restore'){
       const restoreTarget = Math.max(0, Number(target) || 0);
+      uiState.trackRestoreInProgress = true;
+      setSmoothScrollDisabled(true, reason);
       const canRestoreToTarget = () => {
         if(typeof document === 'undefined' || typeof window === 'undefined') return true;
         const docH = Number(document.documentElement && document.documentElement.scrollHeight || 0);
@@ -288,7 +321,11 @@
           reason
         });
         setTimeout(() => {
-          if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
+          if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track'){
+            uiState.trackRestoreInProgress = false;
+            setSmoothScrollDisabled(false, 'track_restore_verify_aborted');
+            return;
+          }
           const actualY = currentScrollY();
           const delta = actualY - restoreTarget;
           const retryApplied = Math.abs(delta) > 24 && canRestoreToTarget();
@@ -302,6 +339,7 @@
           });
           if(retryApplied){
             suppressScrollMemory('track_restore_verify_retry', 900);
+            setSmoothScrollDisabled(true, 'track_restore_verify_retry');
             scrollWindowTo(restoreTarget, 'auto', 'track_restore_verify_retry');
           }
           setTimeout(() => {
@@ -311,11 +349,17 @@
               uiState.pendingTrackRestoreY = null;
               if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
             }
+            uiState.trackRestoreInProgress = false;
+            setSmoothScrollDisabled(false, 'track_restore_verify_complete');
           }, 450);
         }, 350);
       };
       const runRestore = attempt => {
-        if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
+        if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track'){
+          uiState.trackRestoreInProgress = false;
+          setSmoothScrollDisabled(false, 'track_restore_aborted');
+          return;
+        }
         suppressScrollMemory(reason, 900);
         const before = currentScrollY();
         traceScrollEvent('track:scroll-restore:before', {

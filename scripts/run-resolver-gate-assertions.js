@@ -854,6 +854,7 @@ function runReviewProjectionAssertions(){
 function runEntryConditionsSummaryAssertions(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const appShellSource = fs.readFileSync(path.join(root, 'js/shell/app-shell.js'), 'utf8');
+  const stylesSource = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
   if(!/entryConditionsHoldBound/.test(appSource) || !/bindEntryConditionsHoldInteractions\(div\)/.test(appSource)){
     throw new Error('Watchlist long-press helper binding diagnostics must be wired to the active card renderer.');
   }
@@ -880,6 +881,9 @@ function runEntryConditionsSummaryAssertions(){
   }
   if(!/track:scroll-restore:verify/.test(appShellSource) || !/track_restore_verify_retry/.test(appShellSource) || !/post_focus_drift/.test(appShellSource)){
     throw new Error('Track restore must verify after post-focus drift and retry without saving drift positions.');
+  }
+  if(!/no-smooth-scroll/.test(stylesSource) || !/setSmoothScrollDisabled/.test(appShellSource) || !/computedHtmlScrollBehavior/.test(appShellSource) || !/track_restore_aborted/.test(appShellSource)){
+    throw new Error('Track restore must temporarily disable CSS smooth scrolling and trace computed scroll behavior.');
   }
   if(!/!\['track','review'\]\.includes\(appliedTab\)/.test(appShellSource)){
     throw new Error('Track and Review tab focus must avoid forcing window scroll to top.');
