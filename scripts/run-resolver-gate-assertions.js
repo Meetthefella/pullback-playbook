@@ -881,11 +881,26 @@ function runEntryConditionsSummaryAssertions(){
   if(!/reviewInitialTopPositioned/.test(appShellSource) || !/if\(uiState\.reviewInitialTopPositioned === true\)[\s\S]{0,400}return/.test(appShellSource)){
     throw new Error('Review top positioning must run only once per session.');
   }
+  if(!/suppressWorkspaceScrollSaveUntil/.test(appShellSource) || !/suppressed_programmatic_tab_positioning/.test(appShellSource)){
+    throw new Error('Review initial top positioning must not overwrite remembered Track scroll.');
+  }
+  if(!/isWorkspaceVisiblyActive/.test(appShellSource) || !/blocked_not_active_visible_track/.test(appShellSource)){
+    throw new Error('Track scroll memory must only be saved when Track is the active visible workspace.');
+  }
+  if(/normalized === 'review'[\s\S]{0,160}scrollWindowTo/.test(appShellSource)){
+    throw new Error('Review subsequent tab focuses must not force scroll restoration.');
+  }
   if(!/scrollY:typeof window !== 'undefined' \? Number\(window\.scrollY/.test(appSource) || !/function restoreTrackUiState[\s\S]{0,1200}window\.scrollTo\(\{top:Math\.max\(0, targetScrollY\), behavior:'auto'\}\)/.test(appSource)){
     throw new Error('Track render/remove/refresh must preserve the captured Track page scroll position after DOM updates.');
   }
   if(!/trackScrollTopBtn/.test(appShellSource)){
     throw new Error('Track floating scroll-to-top control must be wired in the app shell.');
+  }
+  if(!/actualTrackPageScrollTop/.test(appSource) || /const scrollTop = Number\(trackWorkspace\.scrollTop/.test(appSource) || !/page_not_at_top/.test(appSource)){
+    throw new Error('Track pull-to-refresh must use page scroll, not trackWorkspace.scrollTop, for top eligibility.');
+  }
+  if(!/track:deferred-startup-refresh:start/.test(appSource) || !/startup_refresh_full_user_open/.test(appSource)){
+    throw new Error('Deferred Track startup refresh must be traced distinctly from manual refreshes.');
   }
   if(!/isAdvancedDebugVisible/.test(appSource) || !/reviewAdvancedDebugTap/.test(appSource)){
     throw new Error('Review debug panels must be gated behind the advanced debug reveal path.');

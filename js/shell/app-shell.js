@@ -109,9 +109,40 @@
       return typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
     }
 
+    function isWorkspaceVisiblyActive(tab){
+      const normalized = normalizeTab(tab);
+      if(typeof document === 'undefined') return false;
+      if(String(document.body && document.body.getAttribute('data-active-workspace') || '').toLowerCase() !== normalized) return false;
+      const card = workspaceCardForTab(normalized);
+      return !!(card && !card.hidden && card.getAttribute('aria-hidden') !== 'true');
+    }
+
     function saveActiveWorkspaceScroll(){
       const active = normalizeTab(uiState.activeWorkspaceTab || '');
+      const suppressUntil = Number(uiState.suppressWorkspaceScrollSaveUntil || 0);
+      const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+      if(now < suppressUntil){
+        traceScrollEvent('track:scroll-memory-overwrite', {
+          caller:'saveActiveWorkspaceScroll',
+          reason:'suppressed_programmatic_tab_positioning',
+          active,
+          oldSavedTrackScrollY:Number.isFinite(Number(uiState.trackScrollY)) ? Number(uiState.trackScrollY) : null,
+          newSavedTrackScrollY:currentScrollY()
+        });
+        return;
+      }
       if(active === 'track'){
+        if(!isWorkspaceVisiblyActive('track')){
+          traceScrollEvent('track:scroll-memory-overwrite', {
+            caller:'saveActiveWorkspaceScroll',
+            reason:'blocked_not_active_visible_track',
+            active,
+            bodyActiveTab:String(document.body && document.body.getAttribute('data-active-workspace') || ''),
+            oldSavedTrackScrollY:Number.isFinite(Number(uiState.trackScrollY)) ? Number(uiState.trackScrollY) : null,
+            newSavedTrackScrollY:currentScrollY()
+          });
+          return;
+        }
         const oldSavedTrackScrollY = Number(uiState.trackScrollY);
         const newSavedTrackScrollY = currentScrollY();
         uiState.trackScrollY = newSavedTrackScrollY;
@@ -168,6 +199,8 @@
         targetScrollY:0,
         reason:'first_review_focus'
       });
+      const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+      uiState.suppressWorkspaceScrollSaveUntil = now + 300;
       scrollWindowTo(0, 'auto');
     }
 
@@ -185,9 +218,6 @@
           savedTrackScrollY:Number(uiState.trackScrollY || 0),
           reason:'track_tab_activation'
         });
-      }
-      if(normalized === 'review' && uiState.reviewInitialTopPositioned === true && Number.isFinite(Number(uiState.reviewScrollY))){
-        scrollWindowTo(Number(uiState.reviewScrollY || 0), 'auto');
       }
       updateTrackScrollTopControl();
     }

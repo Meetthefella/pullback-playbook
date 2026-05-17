@@ -1188,6 +1188,12 @@ function runStartupWatchlistRefreshCoordinator(options = {}){
 function maybeStartDeferredTrackStartupRefresh(reason = 'track_open'){
   if(!startupCoordinator.startupWatchlistRefreshDeferred) return;
   const now = Date.now();
+  traceScrollEvent('track:deferred-startup-refresh:check', {
+    caller:'maybeStartDeferredTrackStartupRefresh',
+    reason:String(reason || ''),
+    deferred:startupCoordinator.startupWatchlistRefreshDeferred === true,
+    nextAllowedAt:Number(startupCoordinator.nextAllowedStartupTrackRefreshAt || 0)
+  });
   if(now < Number(startupCoordinator.nextAllowedStartupTrackRefreshAt || 0)){
     const waitMs = Math.max(0, Number(startupCoordinator.nextAllowedStartupTrackRefreshAt || 0) - now);
     if(PP_PERF_DEBUG){
@@ -1198,12 +1204,22 @@ function maybeStartDeferredTrackStartupRefresh(reason = 'track_open'){
         ...startupDebugRenderState()
       });
     }
+    traceScrollEvent('track:deferred-startup-refresh:debounced', {
+      caller:'maybeStartDeferredTrackStartupRefresh',
+      reason:String(reason || ''),
+      waitMs
+    });
     setTimeout(() => maybeStartDeferredTrackStartupRefresh(`${reason}_debounced`), waitMs);
     return;
   }
   if(!shouldRunStartupUserOpenRefresh()){
     startupCoordinator.startupWatchlistRefreshDeferred = false;
     setStartupWatchlistRefreshState('complete', 'startup_refresh_full_user_open', {trigger:reason, skipped:'fresh_hydrated'});
+    traceScrollEvent('track:deferred-startup-refresh:skipped', {
+      caller:'maybeStartDeferredTrackStartupRefresh',
+      reason:String(reason || ''),
+      skipped:'fresh_hydrated'
+    });
     if(PP_PERF_DEBUG){
       console.debug('[PP_PERF] startup_refresh_skip_already_complete', {
         source:'startup_refresh_full_user_open',
@@ -1216,6 +1232,11 @@ function maybeStartDeferredTrackStartupRefresh(reason = 'track_open'){
     return;
   }
   startupCoordinator.startupWatchlistRefreshDeferred = false;
+  traceScrollEvent('track:deferred-startup-refresh:start', {
+    caller:'maybeStartDeferredTrackStartupRefresh',
+    reason:String(reason || ''),
+    source:'startup_refresh_full_user_open'
+  });
   runStartupWatchlistRefreshCoordinator({
     source:'startup_refresh_full_user_open',
     trigger:String(reason || 'user_open'),
@@ -27509,13 +27530,20 @@ function bindTrackPullRefreshGesture(){
   const TRACK_PULL_START_ZONE_MAX_OFFSET_PX = 80;
   const TRACK_PULL_VERTICAL_RATIO = 1.5;
   const TRACK_PULL_POST_RENDER_COOLDOWN_MS = 800;
+  const silentIgnoredReasons = new Set(['page_not_at_top', 'start_not_near_top']);
+  const actualTrackPageScrollTop = () => {
+    const scrollingElement = document.scrollingElement || document.documentElement || document.body;
+    const elementScrollTop = scrollingElement ? Number(scrollingElement.scrollTop || 0) : 0;
+    const windowScrollTop = typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
+    return Math.max(0, windowScrollTop, elementScrollTop);
+  };
   const atTop = () => {
-    const scrollTop = Number(trackWorkspace.scrollTop || 0);
-    return scrollTop <= TRACK_PULL_TOP_MAX_SCROLL_PX;
+    return actualTrackPageScrollTop() <= TRACK_PULL_TOP_MAX_SCROLL_PX;
   };
   const logIgnoredNoop = (reason, extra = {}) => {
     console.info('[TrackPullRefresh]', {event:'ignoredNoopConfirmed', reason:String(reason || ''), activeWorkspace:activeWorkspaceTab(), ...extra});
   };
+  const shouldLogIgnoredReason = reason => !!reason && !silentIgnoredReasons.has(String(reason || ''));
   const resetGesture = () => {
     trackPullStartY = null;
     trackPullStartX = null;
@@ -27588,18 +27616,24 @@ function bindTrackPullRefreshGesture(){
     const touch = event.touches && event.touches[0];
     const touchY = touch ? Number(touch.clientY) : null;
     const touchX = touch ? Number(touch.clientX) : null;
-    const scrollTop = Number(trackWorkspace.scrollTop || 0);
+    const pageScrollTop = actualTrackPageScrollTop();
     const containerTop = trackWorkspace.getBoundingClientRect ? Number(trackWorkspace.getBoundingClientRect().top || 0) : 0;
     const startOffsetY = Number.isFinite(touchY) ? Number(touchY - containerTop) : Number.NaN;
-    if(scrollTop > TRACK_PULL_TOP_MAX_SCROLL_PX){
-      trackPullIgnoredReason = 'not_at_top';
-      logIgnoredNoop('not_at_top', {scrollTop:Number(scrollTop.toFixed(1))});
+    if(pageScrollTop > TRACK_PULL_TOP_MAX_SCROLL_PX){
+      trackPullIgnoredReason = 'page_not_at_top';
+      traceScrollEvent('track:pull-refresh:ineligible', {
+        caller:'bindTrackPullRefreshGesture.touchstart',
+        reason:'page_not_at_top',
+        pageScrollTop:Number(pageScrollTop.toFixed(1))
+      });
       return;
     }
     if(Number.isFinite(startOffsetY) && startOffsetY > TRACK_PULL_START_ZONE_MAX_OFFSET_PX){
-      trackPullIgnoredReason = 'not_at_top';
-      logIgnoredNoop('not_at_top', {
-        scrollTop:Number(scrollTop.toFixed(1)),
+      trackPullIgnoredReason = 'start_not_near_top';
+      traceScrollEvent('track:pull-refresh:ineligible', {
+        caller:'bindTrackPullRefreshGesture.touchstart',
+        reason:'start_not_near_top',
+        pageScrollTop:Number(pageScrollTop.toFixed(1)),
         touchStartY:Number(touchY || 0),
         containerTop:Number(containerTop.toFixed(1))
       });
@@ -27609,7 +27643,7 @@ function bindTrackPullRefreshGesture(){
     trackPullStartX = touchX;
     trackPullLastY = trackPullStartY;
     trackPullLastX = trackPullStartX;
-    trackPullStartScrollTop = scrollTop;
+    trackPullStartScrollTop = pageScrollTop;
     trackPullStartContainerTop = containerTop;
     trackPullThresholdMet = false;
     trackPullCapturedScroll = false;
@@ -27620,7 +27654,7 @@ function bindTrackPullRefreshGesture(){
       console.info('[TrackPullRefresh]', {
         event:'pullRefreshGestureStart',
         activeWorkspace:activeWorkspaceTab(),
-        scrollTop:Number(scrollTop.toFixed(1)),
+        pageScrollTop:Number(pageScrollTop.toFixed(1)),
         touchStartY:Number(touchY || 0),
         containerTop:Number(containerTop.toFixed(1))
       });
@@ -27665,7 +27699,7 @@ function bindTrackPullRefreshGesture(){
   trackWorkspace.addEventListener('touchend', () => {
     const hadGesture = trackPullStartY != null;
     if(!hadGesture){
-      if(trackPullIgnoredReason){
+      if(shouldLogIgnoredReason(trackPullIgnoredReason)){
         console.info('[TrackPullRefresh]', {event:'pullRefreshIgnoredReason', reason:trackPullIgnoredReason, activeWorkspace:activeWorkspaceTab()});
       }
       resetGesture();
