@@ -150,7 +150,7 @@
       const threshold = Math.max(400, Math.round(Number(window.innerHeight || 0) * 0.75));
       const trackTop = workspacePageTop('track');
       const distance = Math.max(0, scrollY - trackTop);
-      const visible = active && distance > threshold;
+      const visible = active && uiState.trackRevealPending !== true && distance > threshold;
       trackTopButton.hidden = !visible;
       trackTopButton.classList.toggle('is-visible', visible);
     }
@@ -303,18 +303,18 @@
       document.body.classList.toggle('track-restore-pending', pending === true);
       uiState.trackRevealPending = pending === true;
       if(pending === true){
+        document.body.setAttribute('data-pending-workspace', 'track');
         traceScrollEvent('tab:visual-hold', {
           caller:'setTrackRevealPending',
           pendingTab:'track',
-          visibleSurface:'restore_overlay',
+          visibleSurface:uiState.visibleWorkspaceTab || normalizeTab(uiState.activeWorkspaceTab || ''),
           reason
         });
-        traceScrollEvent('track:restore-overlay-visible', {
-          caller:'setTrackRevealPending',
-          reason,
-          restoreTarget:Number.isFinite(Number(uiState.pendingTrackRestoreY)) ? Number(uiState.pendingTrackRestoreY) : null
-        });
       }else{
+        document.body.removeAttribute('data-pending-workspace');
+        uiState.visibleWorkspaceTab = normalizeTab(uiState.activeWorkspaceTab || 'track');
+        syncWorkspaceVisibility(uiState.activeWorkspaceTab || 'track', '');
+        syncWorkspaceTabs(uiState.activeWorkspaceTab || 'track');
         traceScrollEvent('tab:visual-swap-after-restore', {
           caller:'setTrackRevealPending',
           visibleTab:'track',
@@ -903,29 +903,62 @@
       }
     }
 
-    function applyWorkspace(tab){
-      const nextTab = normalizeTab(tab);
+    function syncWorkspaceTabs(visualTab){
+      const selectedTab = normalizeTab(visualTab || uiState.activeWorkspaceTab || 'scan');
+      tabButtons.forEach(button => {
+        const tab = normalizeTab(button.getAttribute('data-workspace-tab'));
+        const active = tab === selectedTab;
+        const pendingSource = uiState.trackRevealPending === true && selectedTab === 'review' && tab === 'review';
+        button.classList.toggle('is-active', active);
+        button.classList.toggle('is-pending-transition', pendingSource);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+        button.setAttribute('tabindex', active ? '0' : '-1');
+        if(pendingSource){
+          button.setAttribute('aria-busy', 'true');
+          button.setAttribute('data-pending-target', 'track');
+        }else{
+          button.removeAttribute('aria-busy');
+          button.removeAttribute('data-pending-target');
+        }
+      });
+    }
+
+    function syncWorkspaceVisibility(activeTab, visualHoldTab = ''){
+      const nextTab = normalizeTab(activeTab);
+      const heldTab = allowedTabs.has(String(visualHoldTab || '').trim().toLowerCase())
+        ? normalizeTab(visualHoldTab)
+        : '';
       uiState.activeWorkspaceTab = nextTab;
+      uiState.visibleWorkspaceTab = heldTab || nextTab;
       document.body.setAttribute('data-active-workspace', nextTab);
+      document.body.setAttribute('data-visible-workspace', uiState.visibleWorkspaceTab);
       workspaceCards.forEach(card => {
-        const active = String(card.getAttribute('data-workspace-card') || '').trim().toLowerCase() === nextTab;
-        card.hidden = !active;
+        const cardTab = normalizeTab(card.getAttribute('data-workspace-card'));
+        const active = cardTab === nextTab;
+        const visualHold = !!heldTab && cardTab === heldTab && heldTab !== nextTab;
+        const visible = active || visualHold;
+        card.hidden = !visible;
         if(active){
           card.removeAttribute('inert');
           card.removeAttribute('aria-hidden');
           if(!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '-1');
+        }else if(visualHold){
+          card.setAttribute('inert', '');
+          card.removeAttribute('aria-hidden');
         }else{
           card.setAttribute('inert', '');
           card.setAttribute('aria-hidden', 'true');
         }
         card.classList.toggle('is-active-workspace', active);
+        card.classList.toggle('is-visual-hold-workspace', visualHold);
       });
-      tabButtons.forEach(button => {
-        const active = String(button.getAttribute('data-workspace-tab') || '').trim().toLowerCase() === nextTab;
-        button.classList.toggle('is-active', active);
-        button.setAttribute('aria-selected', active ? 'true' : 'false');
-        button.setAttribute('tabindex', active ? '0' : '-1');
-      });
+    }
+
+    function applyWorkspace(tab, options = {}){
+      const nextTab = normalizeTab(tab);
+      const visualHoldTab = options.visualHoldTab ? normalizeTab(options.visualHoldTab) : '';
+      syncWorkspaceVisibility(nextTab, visualHoldTab && visualHoldTab !== nextTab ? visualHoldTab : '');
+      syncWorkspaceTabs(visualHoldTab && visualHoldTab !== nextTab ? visualHoldTab : nextTab);
       if(onTabChange) onTabChange(nextTab);
       return nextTab;
     }
@@ -956,9 +989,14 @@
       }else{
         clearTrackRevealPending('non_track_tab_activation');
       }
+      const visualHoldTab = nextTab === 'track' && previousTab === 'review' && uiState.trackRevealPending === true
+        ? 'review'
+        : '';
       blurFocusedElementForTab(nextTab);
       primeWorkspaceViewportBeforeOpen(nextTab);
-      const appliedTab = applyWorkspace(nextTab);
+      const appliedTab = visualHoldTab
+        ? applyWorkspace(nextTab, {visualHoldTab})
+        : applyWorkspace(nextTab);
       focusWorkspaceContainer(appliedTab, options);
       restoreWorkspaceViewportAfterOpen(appliedTab);
       const shouldFocusTop = !['track','review'].includes(appliedTab)
