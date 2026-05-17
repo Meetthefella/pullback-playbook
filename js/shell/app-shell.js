@@ -54,6 +54,42 @@
       console.log('[SCROLL_TRACE]', payload);
     }
 
+    function trackTimingDebugEnabled(){
+      try{
+        if(typeof window !== 'undefined' && window.PP_DEBUG_TRACK_TIMING === true) return true;
+        if(typeof window !== 'undefined' && window.localStorage){
+          return window.localStorage.getItem('PP_DEBUG_TRACK_TIMING') === '1';
+        }
+      }catch(_error){}
+      return false;
+    }
+
+    function markTrackTiming(name){
+      if(!trackTimingDebugEnabled() || typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
+      try{ performance.mark(name); }catch(_error){}
+    }
+
+    function measureTrackTiming(restoreTarget, actualFinalScrollY, verifyRetries, revealStrategy){
+      if(!trackTimingDebugEnabled() || typeof performance === 'undefined') return;
+      try{
+        if(typeof performance.mark === 'function') performance.mark('track-visible');
+        if(typeof performance.measure === 'function') performance.measure('review-to-track-visible', 'track-switch-start', 'track-visible');
+        const measures = typeof performance.getEntriesByName === 'function'
+          ? performance.getEntriesByName('review-to-track-visible')
+          : [];
+        const latest = measures && measures.length ? measures[measures.length - 1] : null;
+        if(typeof console !== 'undefined' && console.info){
+          console.info('[TRACK_TIMING]', {
+            durationMs:latest ? Math.round(Number(latest.duration || 0)) : null,
+            restoreTarget,
+            actualFinalScrollY,
+            verifyRetries,
+            revealStrategy
+          });
+        }
+      }catch(_error){}
+    }
+
     if(typeof window !== 'undefined'){
       window.traceScrollEvent = window.traceScrollEvent || traceScrollEvent;
     }
@@ -535,12 +571,44 @@
     function scheduleTrackRestore(target, reason = 'track_restore', options = {}){
       const restoreTarget = Math.max(0, Number(target) || 0);
       const concealUntilRestored = restoreTarget > 24;
+      const restoreRunId = (Number(uiState.trackRestoreRunId || 0) + 1);
+      uiState.trackRestoreRunId = restoreRunId;
+      uiState.trackRevealCompleted = false;
+      uiState.trackRestoreCompletionCommitted = false;
       uiState.trackRestoreInProgress = true;
       if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = true;
       if(concealUntilRestored) setTrackRevealPending(true, reason);
       setSmoothScrollDisabled(true, reason);
       let layoutWaitCount = 0;
+      let verifyRetries = 0;
+      const finalizeTrackRestore = (finalReason, details = {}) => {
+        if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
+        uiState.trackRestoreCompletionCommitted = true;
+        uiState.trackRevealCompleted = true;
+        clearTimeout(revealFallback);
+        const actualFinalScrollY = currentScrollY();
+        const finalMetrics = trackRestoreLayoutMetrics(restoreTarget);
+        if(Math.abs(actualFinalScrollY - restoreTarget) <= 24){
+          uiState.pendingTrackRestoreY = null;
+          if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
+        }
+        uiState.trackRestoreInProgress = false;
+        if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = false;
+        setSmoothScrollDisabled(false, finalReason);
+        if(concealUntilRestored) clearTrackRevealPending(finalReason);
+        traceScrollEvent('track:restore:finalized', {
+          caller:'finalizeTrackRestore',
+          reason:finalReason,
+          restoreTarget,
+          actualFinalScrollY,
+          verifyRetries,
+          revealStrategy:details.revealStrategy || finalReason,
+          ...finalMetrics
+        });
+        measureTrackTiming(restoreTarget, actualFinalScrollY, verifyRetries, details.revealStrategy || finalReason);
+      };
       const revealFallback = setTimeout(() => {
+        if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
         if(concealUntilRestored && normalizeTab(uiState.activeWorkspaceTab || '') === 'track' && uiState.trackRevealPending === true){
           const metrics = trackRestoreLayoutMetrics(restoreTarget);
           if(!metrics.canRestore){
@@ -561,10 +629,11 @@
             actualY:currentScrollY(),
             ...metrics
           });
-          clearTrackRevealPending('restore_reveal_timeout');
+          finalizeTrackRestore('restore_reveal_timeout', {revealStrategy:'fallback'});
         }
       }, 650);
       const waitForLayoutThenRestore = trigger => {
+        if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
         if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
         const metrics = trackRestoreLayoutMetrics(restoreTarget);
         if(metrics.canRestore){
@@ -592,6 +661,7 @@
             revealBlockedReason:'document_not_tall_enough',
             ...metrics
           });
+          finalizeTrackRestore('layout_wait_limit_reached', {revealStrategy:'layout_wait_limit'});
           return;
         }
         if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
@@ -609,12 +679,9 @@
           reason
         });
         setTimeout(() => {
+          if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
           if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track'){
-            uiState.trackRestoreInProgress = false;
-            if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = false;
-            setSmoothScrollDisabled(false, 'track_restore_verify_aborted');
-            clearTimeout(revealFallback);
-            if(concealUntilRestored) clearTrackRevealPending('track_restore_verify_aborted');
+            finalizeTrackRestore('track_restore_verify_aborted', {revealStrategy:'aborted'});
             return;
           }
           const metrics = trackRestoreLayoutMetrics(restoreTarget);
@@ -633,6 +700,7 @@
           const actualY = currentScrollY();
           const delta = actualY - restoreTarget;
           const retryApplied = Math.abs(delta) > 24 && canRestoreTrackScroll(restoreTarget);
+          if(retryApplied) verifyRetries += 1;
           traceScrollEvent('track:scroll-restore:verify', {
             caller:'scheduleTrackRestore.verify',
             reason:retryApplied ? 'post_focus_drift' : 'within_tolerance',
@@ -648,6 +716,7 @@
             scrollWindowTo(restoreTarget, 'auto', 'track_restore_verify_retry');
           }
           setTimeout(() => {
+            if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
             if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
             const finalY = currentScrollY();
             const finalMetrics = trackRestoreLayoutMetrics(restoreTarget);
@@ -663,25 +732,14 @@
               waitForLayoutThenRestore('finalize_layout_not_ready');
               return;
             }
-            if(Math.abs(finalY - restoreTarget) <= 24){
-              uiState.pendingTrackRestoreY = null;
-              if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
-            }
-            uiState.trackRestoreInProgress = false;
-            if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = false;
-            setSmoothScrollDisabled(false, 'track_restore_verify_complete');
-            clearTimeout(revealFallback);
-            if(concealUntilRestored) clearTrackRevealPending('track_restore_verify_complete');
+            finalizeTrackRestore('track_restore_verify_complete', {revealStrategy:retryApplied ? 'verify_retry' : 'verified'});
           }, retryApplied ? 180 : 120);
         }, 350);
       };
       const runRestore = attempt => {
+        if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
         if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track'){
-          uiState.trackRestoreInProgress = false;
-          if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = false;
-          setSmoothScrollDisabled(false, 'track_restore_aborted');
-          clearTimeout(revealFallback);
-          if(concealUntilRestored) clearTrackRevealPending('track_restore_aborted');
+          finalizeTrackRestore('track_restore_aborted', {revealStrategy:'aborted'});
           return;
         }
         const metrics = trackRestoreLayoutMetrics(restoreTarget);
@@ -776,6 +834,7 @@
     function switchWorkspace(tab, options = {}){
       const nextTab = normalizeTab(tab);
       const previousTab = normalizeTab(uiState.activeWorkspaceTab || '');
+      if(previousTab === 'review' && nextTab === 'track') markTrackTiming('track-switch-start');
       traceScrollEvent('tab:switch:before', {
         caller:'switchWorkspace',
         fromTab:previousTab,
