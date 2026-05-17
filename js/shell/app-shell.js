@@ -290,11 +290,38 @@
       }
     }
 
+    function revealTraceLabelForReason(reason, pending){
+      if(pending === true) return 'track:reveal:pending';
+      const safeReason = String(reason || '');
+      if(safeReason === 'track_restore_verify_complete' || safeReason === 'verified_restore') return 'track:reveal:after-verified-restore';
+      if(safeReason === 'restore_reveal_timeout' || safeReason === 'fallback_timeout' || safeReason === 'layout_wait_limit_reached') return 'track:reveal:fallback';
+      return 'track:reveal:after-restore';
+    }
+
     function setTrackRevealPending(pending, reason = 'track_restore'){
       if(typeof document === 'undefined' || !document.body) return;
       document.body.classList.toggle('track-restore-pending', pending === true);
       uiState.trackRevealPending = pending === true;
-      traceScrollEvent(pending === true ? 'track:reveal:pending' : 'track:reveal:after-restore', {
+      if(pending === true){
+        traceScrollEvent('tab:visual-hold', {
+          caller:'setTrackRevealPending',
+          pendingTab:'track',
+          visibleSurface:'restore_overlay',
+          reason
+        });
+        traceScrollEvent('track:restore-overlay-visible', {
+          caller:'setTrackRevealPending',
+          reason,
+          restoreTarget:Number.isFinite(Number(uiState.pendingTrackRestoreY)) ? Number(uiState.pendingTrackRestoreY) : null
+        });
+      }else{
+        traceScrollEvent('tab:visual-swap-after-restore', {
+          caller:'setTrackRevealPending',
+          visibleTab:'track',
+          reason
+        });
+      }
+      traceScrollEvent(revealTraceLabelForReason(reason, pending === true), {
         caller:'setTrackRevealPending',
         reason,
         restoreTarget:Number.isFinite(Number(uiState.pendingTrackRestoreY)) ? Number(uiState.pendingTrackRestoreY) : null,
@@ -713,14 +740,14 @@
             waitForLayoutThenRestore('fallback_layout_not_ready');
             return;
           }
-          traceScrollEvent('track:reveal:fallback', {
+          traceScrollEvent('track:restore:fallback-timeout', {
             caller:'scheduleTrackRestore',
             reason:'restore_reveal_timeout',
             restoreTarget,
             actualY:currentScrollY(),
             ...metrics
           });
-          finalizeTrackRestore('restore_reveal_timeout', {revealStrategy:'fallback'});
+          finalizeTrackRestore('fallback_timeout', {revealStrategy:'fallback_timeout'});
         }
       }, 650);
       const waitForLayoutThenRestore = trigger => {
@@ -804,7 +831,7 @@
               waitForLayoutThenRestore('finalize_layout_not_ready');
               return;
             }
-            finalizeTrackRestore('track_restore_verify_complete', {revealStrategy:retryApplied ? 'verify_retry' : 'verified'});
+            finalizeTrackRestore('verified_restore', {revealStrategy:retryApplied ? 'verified_after_retry' : 'verified'});
           }, retryApplied ? 180 : 120);
         }, 350);
       };

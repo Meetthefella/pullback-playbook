@@ -67,6 +67,34 @@ html.no-smooth-scroll{scroll-behavior:auto !important}
 body.track-restore-pending [data-workspace-card="track"]{
   visibility:hidden;
 }
+body.track-restore-pending::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  z-index:2100;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(16,185,129,.13), transparent 30%),
+    linear-gradient(180deg, rgba(11,19,38,.98), rgba(16,24,42,.98));
+  pointer-events:none;
+}
+body.track-restore-pending::after{
+  content:"Restoring Track";
+  position:fixed;
+  left:50%;
+  top:50%;
+  transform:translate(-50%, -50%);
+  z-index:2101;
+  padding:12px 16px;
+  border:1px solid rgba(159,176,198,.22);
+  border-radius:999px;
+  background:rgba(19,27,46,.92);
+  box-shadow:0 18px 42px rgba(5,11,24,.42);
+  color:var(--text-primary);
+  font-size:.92rem;
+  font-weight:700;
+  letter-spacing:.01em;
+  pointer-events:none;
+}
 body{
   margin:0;
   min-height:100vh;
