@@ -8330,7 +8330,7 @@ function renderWatchlistCardElement(record, options = {}){
     badgeClass,
     finalDisplayState:canonicalVerdict
   };
-  if(typeof console !== 'undefined' && console.info){
+  if(debugFlagEnabled('PP_DEBUG_SIMPLIFIED_TRACK_CARD') && typeof console !== 'undefined' && console.info){
     console.info('[SIMPLIFIED_TRACK_CARD]', {
       ticker:simplifiedState.ticker || entry.ticker,
       canonicalVerdict:simplifiedState.canonicalVerdict,
@@ -8340,7 +8340,7 @@ function renderWatchlistCardElement(record, options = {}){
       mainBlocker:simplifiedState.mainBlocker,
       trackPresentationBucket:trackPresentation.presentationBucket,
       weakWatchDowngradeApplied:simplifiedState.weakWatchDowngradeApplied === true,
-      weakWatchDowngradeReasons:simplifiedState.weakWatchDowngradeReasons || []
+      weakWatchDowngradeReasonCount:Array.isArray(simplifiedState.weakWatchDowngradeReasons) ? simplifiedState.weakWatchDowngradeReasons.length : 0
     });
   }
   record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};

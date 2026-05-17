@@ -1,4 +1,31 @@
 (function(global){
+  const simplifiedTraceState = {};
+
+  function simplifiedDebugFlagEnabled(flagName){
+    try{
+      if(global && global[flagName] === true) return true;
+      if(global && global.localStorage) return global.localStorage.getItem(flagName) === '1';
+    }catch(_error){}
+    return false;
+  }
+
+  function coalescedSimplifiedTrace(flagName, label, payload, options = {}){
+    if(!simplifiedDebugFlagEnabled(flagName) || !global.console || typeof global.console.info !== 'function') return;
+    const key = String(options.key || `${label}:${payload && payload.ticker || ''}`);
+    const now = Date.now();
+    const minIntervalMs = Number.isFinite(Number(options.minIntervalMs)) ? Number(options.minIntervalMs) : 1000;
+    const previous = simplifiedTraceState[key] || {last:0, count:0};
+    previous.count += 1;
+    if(now - previous.last < minIntervalMs){
+      simplifiedTraceState[key] = previous;
+      return;
+    }
+    previous.last = now;
+    simplifiedTraceState[key] = previous;
+    global.console.info(label, previous.count > 1 ? {...payload, coalescedCount:previous.count} : payload);
+    previous.count = 0;
+  }
+
   function safeWatchModel(record, surface, reason, error){
     const builder = global.SimplifiedPresentationModel && global.SimplifiedPresentationModel.buildPresentationModel;
     const fallback = {
@@ -444,17 +471,36 @@
         result
       });
       result.debug.pipelineDiagnostics = pipelineDiagnostics;
-      if(options.log !== false && global.console && typeof global.console.info === 'function'){
-        global.console.info('[SIMPLIFIED_STATE_PIPELINE]', {
-          ...pipelineDiagnostics,
-          state:result
-        });
+      if(options.log !== false){
+        coalescedSimplifiedTrace('PP_DEBUG_SIMPLIFIED_STATE_PIPELINE', '[SIMPLIFIED_STATE_PIPELINE]', {
+          ticker:pipelineDiagnostics.ticker,
+          surface:pipelineDiagnostics.surface,
+          callCounter:pipelineDiagnostics.callCounter,
+          renderPass:pipelineDiagnostics.renderPass,
+          canonicalVerdict:pipelineDiagnostics.canonicalVerdict,
+          visualBucket:pipelineDiagnostics.visualBucket,
+          planStatus:pipelineDiagnostics.planStatus,
+          priceabilityState:pipelineDiagnostics.priceabilityState,
+          setupLocationState:pipelineDiagnostics.setupLocationState,
+          mainBlocker:pipelineDiagnostics.mainBlocker,
+          inputChangedSincePrevious:pipelineDiagnostics.inputChangedSincePrevious,
+          marketDataChangedSincePrevious:pipelineDiagnostics.marketDataChangedSincePrevious,
+          planChangedSincePrevious:pipelineDiagnostics.planChangedSincePrevious,
+          weakWatchDowngradeApplied:result.weakWatchDowngradeApplied === true
+        }, {key:`pipeline:${pipelineDiagnostics.surface}:${pipelineDiagnostics.ticker}`, minIntervalMs:1000});
       }
       return result;
     }catch(error){
       const result = safeWatchModel(record, surface, 'Simplified pipeline failed safely.', error);
-      if(options.log !== false && global.console && typeof global.console.info === 'function'){
-        global.console.info('[SIMPLIFIED_STATE_PIPELINE]', result);
+      if(options.log !== false){
+        coalescedSimplifiedTrace('PP_DEBUG_SIMPLIFIED_STATE_PIPELINE', '[SIMPLIFIED_STATE_PIPELINE]', {
+          ticker:result.ticker || '',
+          surface,
+          canonicalVerdict:result.canonicalVerdict,
+          visualBucket:result.visualBucket,
+          mainBlocker:result.mainBlocker,
+          error:error && error.message ? String(error.message) : 'unknown'
+        }, {key:`pipeline-error:${surface}:${result.ticker || ''}`, minIntervalMs:1000});
       }
       return result;
     }
