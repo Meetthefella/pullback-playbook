@@ -41,9 +41,7 @@
       if(typeof workspace.focus !== 'function') return;
       try{
         workspace.focus({preventScroll:true});
-      }catch(error){
-        workspace.focus();
-      }
+      }catch(error){}
     }
 
     function workspaceCardForTab(tab){
@@ -56,14 +54,6 @@
       if(!card || typeof card.getBoundingClientRect !== 'function') return 0;
       const scrollY = typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
       return Math.max(0, Number(card.getBoundingClientRect().top || 0) + scrollY);
-    }
-
-    function saveTrackScrollPosition(){
-      if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
-      const scrollY = typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
-      const trackTop = workspacePageTop('track');
-      uiState.trackScrollY = scrollY;
-      uiState.trackScrollOffsetY = Math.max(0, scrollY - trackTop);
     }
 
     function updateTrackScrollTopControl(){
@@ -87,22 +77,10 @@
       }
     }
 
-    function positionWorkspaceViewport(tab, options = {}){
+    function primeWorkspaceViewportBeforeOpen(tab){
       const normalized = normalizeTab(tab);
-      if(normalized === 'review'){
-        return;
-      }
-      if(normalized !== 'track') return;
-      if(options.resetScroll === true || uiState.trackFocusedOnce !== true){
-        uiState.trackFocusedOnce = true;
-        uiState.trackScrollOffsetY = 0;
-        scrollWindowTo(workspacePageTop('track'), 'auto');
-        updateTrackScrollTopControl();
-        return;
-      }
-      const savedOffset = Number(uiState.trackScrollOffsetY || 0);
-      scrollWindowTo(workspacePageTop('track') + Math.max(0, savedOffset), 'auto');
-      updateTrackScrollTopControl();
+      if(normalized !== 'review') return;
+      scrollWindowTo(0, 'auto');
     }
 
     function applyWorkspace(tab){
@@ -134,13 +112,10 @@
 
     function switchWorkspace(tab, options = {}){
       const nextTab = normalizeTab(tab);
-      saveTrackScrollPosition();
       blurFocusedElementForTab(nextTab);
+      primeWorkspaceViewportBeforeOpen(nextTab);
       const appliedTab = applyWorkspace(nextTab);
       focusWorkspaceContainer(appliedTab, options);
-      if(['track','review'].includes(appliedTab)){
-        positionWorkspaceViewport(appliedTab, options);
-      }
       const shouldFocusTop = !['track','review'].includes(appliedTab)
         && (options.focusTop === true || options.focusTop !== false);
       if(shouldFocusTop){
@@ -170,7 +145,6 @@
       });
       if(typeof window !== 'undefined'){
         window.addEventListener('scroll', () => {
-          saveTrackScrollPosition();
           updateTrackScrollTopControl();
         }, {passive:true});
       }

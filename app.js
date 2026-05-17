@@ -8566,34 +8566,10 @@ function startTrackRenderCycle(source = 'watchlist_render'){
 }
 
 function captureTrackUiState(){
-  const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
   const watchlistList = $('watchlistList');
-  const pageScrollY = typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
-  const workspacePageTop = trackWorkspace && typeof trackWorkspace.getBoundingClientRect === 'function'
-    ? Math.max(0, Number(trackWorkspace.getBoundingClientRect().top || 0) + pageScrollY)
-    : 0;
   const state = {
-    scrollTop:pageScrollY,
-    scrollOffsetY:Math.max(0, pageScrollY - workspacePageTop),
-    anchorTicker:'',
-    anchorOffsetTop:0,
     expandedState:readTrackSectionState()
   };
-  if(trackWorkspace){
-    const workspaceTop = 0;
-    const cards = Array.from(trackWorkspace.querySelectorAll('[data-watchlist-ticker]'));
-    for(let index = 0; index < cards.length; index += 1){
-      const node = cards[index];
-      if(!node || typeof node.getBoundingClientRect !== 'function') continue;
-      const rect = node.getBoundingClientRect();
-      if(rect.bottom <= workspaceTop) continue;
-      const ticker = String(node.getAttribute('data-watchlist-ticker') || '').trim().toUpperCase();
-      if(!ticker) continue;
-      state.anchorTicker = ticker;
-      state.anchorOffsetTop = Number(rect.top - workspaceTop);
-      break;
-    }
-  }
   if(watchlistList){
     const expanded = {};
     const sections = watchlistList.querySelectorAll('.watchlistgroup[data-group-key]');
@@ -8611,45 +8587,15 @@ function restoreTrackUiState(snapshot = null){
   const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
   if(!trackWorkspace || !snapshot || typeof snapshot !== 'object') return;
   persistTrackSectionState(normalizeTrackSectionState(snapshot.expandedState || {}));
-  const runRestore = () => {
-    const watchlistList = $('watchlistList');
-    if(watchlistList){
-      const sections = watchlistList.querySelectorAll('.watchlistgroup[data-group-key]');
-      sections.forEach(section => {
-        const key = String(section.getAttribute('data-group-key') || '').trim().toLowerCase();
-        if(!key || !isTrackSectionCollapsible(key)) return;
-        const nextExpanded = readTrackSectionState()[key] === true;
-        applyTrackSectionExpandedState(section, nextExpanded);
-      });
-    }
-    if(snapshot.anchorTicker){
-      const anchorNode = trackWorkspace.querySelector(`[data-watchlist-ticker="${snapshot.anchorTicker}"]`);
-      if(anchorNode && typeof anchorNode.getBoundingClientRect === 'function'){
-        const workspaceTop = 0;
-        const rect = anchorNode.getBoundingClientRect();
-        const delta = Number((rect.top - workspaceTop) - Number(snapshot.anchorOffsetTop || 0));
-        if(typeof window !== 'undefined'){
-          window.scrollTo({top:Number(window.scrollY || window.pageYOffset || 0) + delta, behavior:'auto'});
-        }
-        return;
-      }
-    }
-    if(typeof window !== 'undefined'){
-      const pageScrollY = Number(window.scrollY || window.pageYOffset || 0);
-      const workspacePageTop = trackWorkspace && typeof trackWorkspace.getBoundingClientRect === 'function'
-        ? Math.max(0, Number(trackWorkspace.getBoundingClientRect().top || 0) + pageScrollY)
-        : 0;
-      const offset = Number.isFinite(Number(snapshot.scrollOffsetY))
-        ? Number(snapshot.scrollOffsetY)
-        : Math.max(0, Number(snapshot.scrollTop || 0) - workspacePageTop);
-      window.scrollTo({top:workspacePageTop + Math.max(0, offset), behavior:'auto'});
-    }
-  };
-  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-    window.requestAnimationFrame(() => window.requestAnimationFrame(runRestore));
-    return;
-  }
-  setTimeout(runRestore, 0);
+  const watchlistList = $('watchlistList');
+  if(!watchlistList) return;
+  const sections = watchlistList.querySelectorAll('.watchlistgroup[data-group-key]');
+  sections.forEach(section => {
+    const key = String(section.getAttribute('data-group-key') || '').trim().toLowerCase();
+    if(!key || !isTrackSectionCollapsible(key)) return;
+    const nextExpanded = readTrackSectionState()[key] === true;
+    applyTrackSectionExpandedState(section, nextExpanded);
+  });
 }
 
 function setTrackSectionExpanded(sectionKey, expanded){
@@ -26173,8 +26119,6 @@ function loadCard(ticker, options = {}){
   const reviewSeq = reviewRenderSeqForOptions(options);
   if(!isCurrentReviewRender(reviewSeq)) return;
   const displayOnlyReviewOpen = options.recompute !== true && options.touchLifecycle !== true;
-  const preserveScrollOnSkip = options.skipAutoScroll === true && typeof window !== 'undefined';
-  const preservedScrollY = preserveScrollOnSkip ? Number(window.scrollY || window.pageYOffset || 0) : 0;
   setScannerCardClickTrace(ticker, 'loadCard.enter', `touchLifecycle=${options.touchLifecycle === true} recompute=${options.recompute === true}`);
   logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
   setActiveReviewTicker(record.ticker);
@@ -26208,17 +26152,6 @@ function loadCard(ticker, options = {}){
   renderReviewLifecycleSummary(record.ticker);
   if(options.skipAutoScroll === true){
     setScannerCardClickTrace(ticker, 'loadCard.scroll_skipped', 'skipAutoScroll=true');
-    if(preserveScrollOnSkip && Number.isFinite(preservedScrollY)){
-      const restoreScroll = attempt => {
-        window.scrollTo({top:preservedScrollY, behavior:'auto'});
-        setScannerCardClickTrace(ticker, 'loadCard.scroll_restored', `top=${Math.round(preservedScrollY)} attempt=${attempt}`);
-      };
-      if(typeof window.requestAnimationFrame === 'function'){
-        window.requestAnimationFrame(() => window.requestAnimationFrame(() => restoreScroll('raf')));
-      }else{
-        setTimeout(() => restoreScroll('timeout'), 0);
-      }
-    }
   }
   setScannerCardClickTrace(ticker, 'loadCard.complete', `selectedTicker=${(($('selectedTicker') && $('selectedTicker').value) || '(none)')}`);
 }
