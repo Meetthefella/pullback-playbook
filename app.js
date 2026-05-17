@@ -9584,7 +9584,13 @@ function setStatus(id, html){
 }
 
 function debugFlagEnabled(flagName){
-  return typeof window !== 'undefined' && window && window[flagName] === true;
+  try{
+    if(typeof window !== 'undefined' && window && window[flagName] === true) return true;
+    if(typeof window !== 'undefined' && window && window.localStorage){
+      return window.localStorage.getItem(flagName) === '1';
+    }
+  }catch(error){}
+  return false;
 }
 
 function logDebug(flagName, ...args){
@@ -25801,7 +25807,7 @@ function renderReviewWorkspace(options = {}){
     normalizedAnalysis:analysisState.normalizedAnalysis,
     derivedStates
   });
-  if(typeof console !== 'undefined' && console.info && chartConsistencyTrace.visible){
+  if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info && chartConsistencyTrace.visible){
     console.info('[CHART_CONSISTENCY_TRACE]', {
       ticker:record.ticker,
       status:chartConsistencyTrace.status,
@@ -25838,7 +25844,7 @@ function renderReviewWorkspace(options = {}){
       chartImageSource:chartConsistencyTrace.chartImageSource || null
     });
   }
-  if(typeof console !== 'undefined' && console.info && record.review.chartRef && record.review.chartRef.dataUrl){
+  if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info && record.review.chartRef && record.review.chartRef.dataUrl){
     console.info('[CHART_IMAGE_SOURCE]', {
       ticker:record.ticker,
       ...buildChartImageSourceTrace(record.review)

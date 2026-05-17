@@ -1,5 +1,34 @@
 (function(global){
   // Canonical global-verdict helpers extracted from app.js.
+  const diagnosticTraceState = {};
+
+  function debugFlagEnabled(flagName){
+    try{
+      if(typeof global !== 'undefined' && global && global[flagName] === true) return true;
+      if(typeof global !== 'undefined' && global && global.localStorage){
+        return global.localStorage.getItem(flagName) === '1';
+      }
+    }catch(_error){}
+    return false;
+  }
+
+  function logDiagnosticTrace(flagName, label, payload, options = {}){
+    if(!debugFlagEnabled(flagName) || typeof console === 'undefined' || !console.info) return;
+    const key = String(options.key || `${label}:${payload && payload.ticker || ''}`);
+    const now = Date.now();
+    const minIntervalMs = Number.isFinite(Number(options.minIntervalMs)) ? Number(options.minIntervalMs) : 1000;
+    const previous = diagnosticTraceState[key] || {count:0, last:0};
+    previous.count += 1;
+    if(now - previous.last < minIntervalMs){
+      diagnosticTraceState[key] = previous;
+      return;
+    }
+    previous.last = now;
+    diagnosticTraceState[key] = previous;
+    console.info(label, previous.count > 1 ? {...payload, coalescedCount:previous.count} : payload);
+    previous.count = 0;
+  }
+
   function coerceCanonicalVerdict(verdict, fallback = 'watch'){
     const safe = String(verdict || '').trim().toLowerCase();
     if(safe === 'entry') return 'entry';
@@ -1371,8 +1400,8 @@
       perf1m:item && item.marketData && item.marketData.perf1m
     });
     const fallingKnifeApplied = String(viability.viabilityBranchId || '').toLowerCase().includes('falling_knife');
-    if(typeof console !== 'undefined' && console && typeof console.info === 'function' && (fallingKnifeApplied || (item && item.debugFallingKnifeTrace === true))){
-      console.info('[FALLING_KNIFE_TRACE]', {
+    if(fallingKnifeApplied || (item && item.debugFallingKnifeTrace === true)){
+      logDiagnosticTrace('PP_DEBUG_FALLING_KNIFE', '[FALLING_KNIFE_TRACE]', {
         ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
         detected:fallingKnifeApplied,
         reason:fallingKnifeTrace.reason || '',
@@ -1390,7 +1419,7 @@
         tradeability:fallingKnifeTrace.tradeability || tradeabilityState,
         setupScore:fallingKnifeTrace.setupScore,
         copyKey:fallingKnifeTrace.copyKey || ''
-      });
+      }, {key:`falling-knife:${String(item.ticker || item.symbol || '').trim().toUpperCase()}`, minIntervalMs:1500});
     }
     const guardedForPresentation = normalizeVerdict(guardedVerdict.final_verdict);
     const promotionWasAttempted = requestedBeforeGuards === 'near_entry' || requestedBeforeGuards === 'entry';

@@ -8,6 +8,35 @@
     return null;
   }
 
+  const diagnosticTraceState = {};
+
+  function debugFlagEnabled(flagName){
+    try{
+      if(typeof global !== 'undefined' && global && global[flagName] === true) return true;
+      if(typeof global !== 'undefined' && global && global.localStorage){
+        return global.localStorage.getItem(flagName) === '1';
+      }
+    }catch(_error){}
+    return false;
+  }
+
+  function logDiagnosticTrace(flagName, label, payload, options = {}){
+    if(!debugFlagEnabled(flagName) || typeof console === 'undefined' || !console.info) return;
+    const key = String(options.key || `${label}:${payload && payload.ticker || ''}`);
+    const now = Date.now();
+    const minIntervalMs = Number.isFinite(Number(options.minIntervalMs)) ? Number(options.minIntervalMs) : 1000;
+    const previous = diagnosticTraceState[key] || {count:0, last:0};
+    previous.count += 1;
+    if(now - previous.last < minIntervalMs){
+      diagnosticTraceState[key] = previous;
+      return;
+    }
+    previous.last = now;
+    diagnosticTraceState[key] = previous;
+    console.info(label, previous.count > 1 ? {...payload, coalescedCount:previous.count} : payload);
+    previous.count = 0;
+  }
+
   function resolveScannerStateWithTrace(record, options = {}, deps = {}){
     const item = deps.normalizeTickerRecord(record);
     const baseView = options.baseView || deps.projectTickerForCard(item, {
@@ -252,8 +281,7 @@
         ? `INFO: raw avoid softened only to diminishing watch. intermediate=${intermediateVerdict}, rendered=${renderedVerdict}`
         : `INFO: raw avoid softened before render. intermediate=${intermediateVerdict}, rendered=${renderedVerdict}`);
     }
-    if(typeof console !== 'undefined' && console.info){
-      console.info('[AVOID_SOFTENING_TRACE]', {
+    logDiagnosticTrace('PP_DEBUG_AVOID_SOFTENING', '[AVOID_SOFTENING_TRACE]', {
         ticker:item && item.ticker || '',
         baseVerdict:deps.normalizeGlobalVerdictKey(globalVerdict.base_verdict || status),
         intermediateVerdict,
@@ -268,8 +296,7 @@
         tradeability:globalVerdict && (globalVerdict.tradeabilityLabel || globalVerdict.tradeabilityVerdict || globalVerdict.status) || '',
         scannerRR,
         reclaimSignalCount
-      });
-    }
+      }, {key:`avoid-softening:${item && item.ticker || ''}:${finalDisplayBucket}`, minIntervalMs:1500});
 
     return {
       status,
