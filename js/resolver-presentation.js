@@ -221,7 +221,7 @@
       triggerTokens,
       applied,
       evaluatedBeforeFinalMonitorFallback:true,
-      returnPath:applied ? 'diminishing' : 'monitor_fallback',
+      returnPath:applied ? 'weak_watch_diminishing' : 'monitor_fallback',
       reason:triggerTokens.length ? triggerTokens.join('_') : 'weak_watch_diminishing_guard'
     };
   }
@@ -318,8 +318,7 @@
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
     const setupLocationState = String((derivedStates && derivedStates.setupLocationState) || (legacyVerdict && legacyVerdict.setup_location_state) || '').trim().toLowerCase();
     const derivedPriceabilityState = String(derivedStates && derivedStates.priceabilityState || '').trim().toLowerCase();
-    const legacyPriceabilityInferred = legacyVerdict && legacyVerdict.priceability_inferred === true;
-    const priceabilityState = String(derivedPriceabilityState || (legacyPriceabilityInferred ? '' : (legacyVerdict && legacyVerdict.priceability_state)) || '').trim().toLowerCase();
+    const priceabilityState = String(derivedPriceabilityState || (legacyVerdict && legacyVerdict.priceability_state) || '').trim().toLowerCase();
     const bounceState = String(derivedStates && derivedStates.bounceState || legacyVerdict && legacyVerdict.bounce_state || '').trim().toLowerCase();
     const stabilisationState = String(derivedStates && derivedStates.stabilisationState || '').trim().toLowerCase();
     const pullbackZone = String(derivedStates && derivedStates.pullbackZone || legacyVerdict && legacyVerdict.pullback_zone || '').trim().toLowerCase();

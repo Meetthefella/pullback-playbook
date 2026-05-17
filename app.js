@@ -25657,6 +25657,7 @@ function renderReviewWorkspace(options = {}){
       weakWatchDiminishingApplied:!!(visualState && visualState.weakWatchDiminishingApplied),
       weakWatchDiminishingReason:String(visualState && visualState.weakWatchDiminishingReason || ''),
       weakWatchDiminishingTrace:visualState && visualState.weakWatchDiminishingTrace ? {
+        priceabilityState:String(visualState.weakWatchDiminishingTrace.priceabilityState || ''),
         applied:visualState.weakWatchDiminishingTrace.applied === true,
         triggerTokens:Array.isArray(visualState.weakWatchDiminishingTrace.triggerTokens)
           ? visualState.weakWatchDiminishingTrace.triggerTokens.slice()
@@ -25707,6 +25708,7 @@ function renderReviewWorkspace(options = {}){
         weakWatchDiminishingApplied:!!(visualState && visualState.weakWatchDiminishingApplied),
         weakWatchDiminishingReason:String(visualState && visualState.weakWatchDiminishingReason || ''),
         weakWatchDiminishingTrace:visualState && visualState.weakWatchDiminishingTrace ? {
+          priceabilityState:String(visualState.weakWatchDiminishingTrace.priceabilityState || ''),
           applied:visualState.weakWatchDiminishingTrace.applied === true,
           triggerTokens:Array.isArray(visualState.weakWatchDiminishingTrace.triggerTokens)
             ? visualState.weakWatchDiminishingTrace.triggerTokens.slice()

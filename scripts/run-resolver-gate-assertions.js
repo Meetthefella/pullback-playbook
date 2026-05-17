@@ -1669,6 +1669,9 @@ function runSimplifiedPipelineAssertions(){
   if(weakLowScoreSurfaces.some(result => !result.weakWatchDiminishingTrace || result.weakWatchDiminishingTrace.applied !== true || result.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback !== true || !Array.isArray(result.weakWatchDiminishingTrace.triggerTokens))){
     throw new Error('Alive near_50ma low-score unpriceable Watch must expose a structured weak-watch diminishing trace.');
   }
+  if(weakLowScoreSurfaces.some(result => result.weakWatchDiminishingTrace.priceabilityState !== 'unpriceable' || result.weakWatchDiminishingTrace.priceabilityUnpriceable !== true || result.weakWatchDiminishingTrace.returnPath !== 'weak_watch_diminishing')){
+    throw new Error('Alive near_50ma low-score unpriceable Watch must use the normalized unpriceable priceability source and the weak_watch_diminishing return path.');
+  }
 
   const weakWatchReasonDeps = {
     resolveGlobalVerdict(){
@@ -1759,6 +1762,9 @@ function runSimplifiedPipelineAssertions(){
   if(!bounceAttemptOnlyVisual.weakWatchDiminishingTrace || !Array.isArray(bounceAttemptOnlyVisual.weakWatchDiminishingTrace.triggerTokens) || !bounceAttemptOnlyVisual.weakWatchDiminishingTrace.triggerTokens.includes('bounce_attempt_only') || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback !== true){
     throw new Error('Bounce-attempt-only weak Watch must expose the bounce_attempt_only trace token before final monitor fallback.');
   }
+  if(bounceAttemptOnlyVisual.weakWatchDiminishingTrace.priceabilityState !== 'unpriceable' || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.priceabilityUnpriceable !== true || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.returnPath !== 'weak_watch_diminishing'){
+    throw new Error('Bounce-attempt-only weak Watch must resolve normalized unpriceable priceability before final monitor fallback.');
+  }
 
   const invalidRrVisual = resolverPresentation.resolveVisualState({
     ticker:'INVRR',
@@ -1809,6 +1815,9 @@ function runSimplifiedPipelineAssertions(){
   }
   if(!invalidRrVisual.weakWatchDiminishingTrace || !Array.isArray(invalidRrVisual.weakWatchDiminishingTrace.triggerTokens) || !invalidRrVisual.weakWatchDiminishingTrace.triggerTokens.includes('invalid_rr') || invalidRrVisual.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback !== true){
     throw new Error('Invalid-RR weak Watch must expose the invalid_rr trace token before final monitor fallback.');
+  }
+  if(invalidRrVisual.weakWatchDiminishingTrace.priceabilityState !== 'unpriceable' || invalidRrVisual.weakWatchDiminishingTrace.priceabilityUnpriceable !== true || invalidRrVisual.weakWatchDiminishingTrace.returnPath !== 'weak_watch_diminishing'){
+    throw new Error('Invalid-RR weak Watch must resolve normalized unpriceable priceability before final monitor fallback.');
   }
 
   const constructiveNoPlanNoBounceWatch = pipeline.resolveRecordState({
