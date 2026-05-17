@@ -5,6 +5,7 @@
     const allowedTabs = new Set(['scan','review','track','diary']);
     const tabButtons = Array.from(document.querySelectorAll('[data-workspace-tab]'));
     const workspaceCards = Array.from(document.querySelectorAll('[data-workspace-card]'));
+    const trackTopButton = document.getElementById('trackScrollTopBtn');
     const enabled = tabButtons.length > 0 && workspaceCards.length > 0;
 
     function normalizeTab(value){
@@ -45,6 +46,66 @@
       }
     }
 
+    function workspaceCardForTab(tab){
+      const normalized = normalizeTab(tab);
+      return workspaceCards.find(card => normalizeTab(card.getAttribute('data-workspace-card')) === normalized) || null;
+    }
+
+    function workspacePageTop(tab){
+      const card = workspaceCardForTab(tab);
+      if(!card || typeof card.getBoundingClientRect !== 'function') return 0;
+      const scrollY = typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
+      return Math.max(0, Number(card.getBoundingClientRect().top || 0) + scrollY);
+    }
+
+    function saveTrackScrollPosition(){
+      if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
+      const scrollY = typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
+      const trackTop = workspacePageTop('track');
+      uiState.trackScrollY = scrollY;
+      uiState.trackScrollOffsetY = Math.max(0, scrollY - trackTop);
+    }
+
+    function updateTrackScrollTopControl(){
+      if(!trackTopButton || typeof window === 'undefined') return;
+      const active = normalizeTab(uiState.activeWorkspaceTab || '') === 'track';
+      const scrollY = Number(window.scrollY || window.pageYOffset || 0);
+      const threshold = Math.max(400, Math.round(Number(window.innerHeight || 0) * 0.75));
+      const trackTop = workspacePageTop('track');
+      const distance = Math.max(0, scrollY - trackTop);
+      const visible = active && distance > threshold;
+      trackTopButton.hidden = !visible;
+      trackTopButton.classList.toggle('is-visible', visible);
+    }
+
+    function scrollWindowTo(top, behavior = 'auto'){
+      if(typeof window === 'undefined') return;
+      try{
+        window.scrollTo({top:Math.max(0, Math.round(top)), behavior});
+      }catch(_error){
+        window.scrollTo(0, Math.max(0, Math.round(top)));
+      }
+    }
+
+    function positionWorkspaceViewport(tab, options = {}){
+      const normalized = normalizeTab(tab);
+      if(normalized === 'review'){
+        scrollWindowTo(workspacePageTop('review'), 'auto');
+        return;
+      }
+      if(normalized !== 'track') return;
+      if(options.resetScroll === true || uiState.trackFocusedOnce !== true){
+        uiState.trackFocusedOnce = true;
+        uiState.trackScrollOffsetY = 0;
+        scrollWindowTo(workspacePageTop('track'), 'auto');
+        updateTrackScrollTopControl();
+        return;
+      }
+      const savedOffset = Number(uiState.trackScrollOffsetY || 0);
+      scrollWindowTo(workspacePageTop('track') + Math.max(0, savedOffset), 'auto');
+      updateTrackScrollTopControl();
+    }
+
     function applyWorkspace(tab){
       const nextTab = normalizeTab(tab);
       uiState.activeWorkspaceTab = nextTab;
@@ -74,15 +135,21 @@
 
     function switchWorkspace(tab, options = {}){
       const nextTab = normalizeTab(tab);
+      saveTrackScrollPosition();
       blurFocusedElementForTab(nextTab);
       const appliedTab = applyWorkspace(nextTab);
       focusWorkspaceContainer(appliedTab, options);
-      const shouldFocusTop = options.focusTop === true || (options.focusTop !== false && !['track','review'].includes(appliedTab));
+      if(['track','review'].includes(appliedTab)){
+        positionWorkspaceViewport(appliedTab, options);
+      }
+      const shouldFocusTop = !['track','review'].includes(appliedTab)
+        && (options.focusTop === true || options.focusTop !== false);
       if(shouldFocusTop){
         try{
           window.scrollTo({top:0, behavior:'auto'});
         }catch(error){}
       }
+      updateTrackScrollTopControl();
       return appliedTab;
     }
 
@@ -102,7 +169,20 @@
           switchWorkspace(tab);
         });
       });
+      if(typeof window !== 'undefined'){
+        window.addEventListener('scroll', () => {
+          saveTrackScrollPosition();
+          updateTrackScrollTopControl();
+        }, {passive:true});
+      }
+      if(trackTopButton){
+        trackTopButton.addEventListener('click', () => {
+          if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track') return;
+          scrollWindowTo(workspacePageTop('track'), 'smooth');
+        });
+      }
       applyWorkspace(getActiveWorkspace());
+      updateTrackScrollTopControl();
     }
 
     return {

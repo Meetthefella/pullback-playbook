@@ -863,11 +863,17 @@ function runEntryConditionsSummaryAssertions(){
   if(!/existingCard\.remove\(\)/.test(appSource) || !/watchlist_remove/.test(appSource)){
     throw new Error('Track remove must immediately remove the visible card and invalidate watchlist render state.');
   }
+  if(!/positionWorkspaceViewport\(appliedTab/.test(appShellSource) || !/trackFocusedOnce/.test(appShellSource)){
+    throw new Error('Track and Review tab focus must use tab-specific scroll positioning and Track scroll memory.');
+  }
   if(!/!\['track','review'\]\.includes\(appliedTab\)/.test(appShellSource)){
     throw new Error('Track and Review tab focus must avoid forcing window scroll to top.');
   }
-  if(!/scheduleReviewWorkspaceScroll/.test(appSource) || !/reviewWorkspaceScrollTarget/.test(appSource)){
-    throw new Error('Review focus must scroll to the Review panel instead of the page top.');
+  if(/scheduleReviewWorkspaceScroll/.test(appSource) || !/reviewWorkspaceScrollTarget/.test(appSource)){
+    throw new Error('Review focus must use direct Review panel positioning without delayed scroll scheduling.');
+  }
+  if(!/trackScrollTopBtn/.test(appShellSource)){
+    throw new Error('Track floating scroll-to-top control must be wired in the app shell.');
   }
   if(!/isAdvancedDebugVisible/.test(appSource) || !/reviewAdvancedDebugTap/.test(appSource)){
     throw new Error('Review debug panels must be gated behind the advanced debug reveal path.');

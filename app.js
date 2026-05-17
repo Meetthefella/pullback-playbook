@@ -4755,7 +4755,6 @@ function renderWorkspaceSurface(tab, options = {}){
   if(targetTab === 'review'){
     renderCards();
     startupCoordinator.renderedTabs.review = true;
-    scheduleReviewWorkspaceScroll(options.scrollContext || 'review_tab_focus');
     return;
   }
   if(targetTab === 'track'){
@@ -6645,7 +6644,7 @@ function removeFromWatchlist(ticker){
         if(countNode) countNode.textContent = `(${String(remainingCards)})`;
         if(remainingCards === 0) section.remove();
       }
-      const trackBox = $('watchlist');
+      const trackBox = $('watchlistList');
       const remainingVisibleCards = trackBox ? trackBox.querySelectorAll('[data-watchlist-ticker]').length : 0;
       startupCoordinator.renderedTabs.track = true;
       if(trackBox && remainingVisibleCards === 0){
@@ -8569,14 +8568,19 @@ function startTrackRenderCycle(source = 'watchlist_render'){
 function captureTrackUiState(){
   const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
   const watchlistList = $('watchlistList');
+  const pageScrollY = typeof window !== 'undefined' ? Number(window.scrollY || window.pageYOffset || 0) : 0;
+  const workspacePageTop = trackWorkspace && typeof trackWorkspace.getBoundingClientRect === 'function'
+    ? Math.max(0, Number(trackWorkspace.getBoundingClientRect().top || 0) + pageScrollY)
+    : 0;
   const state = {
-    scrollTop:trackWorkspace ? Number(trackWorkspace.scrollTop || 0) : 0,
+    scrollTop:pageScrollY,
+    scrollOffsetY:Math.max(0, pageScrollY - workspacePageTop),
     anchorTicker:'',
     anchorOffsetTop:0,
     expandedState:readTrackSectionState()
   };
   if(trackWorkspace){
-    const workspaceTop = trackWorkspace.getBoundingClientRect ? trackWorkspace.getBoundingClientRect().top : 0;
+    const workspaceTop = 0;
     const cards = Array.from(trackWorkspace.querySelectorAll('[data-watchlist-ticker]'));
     for(let index = 0; index < cards.length; index += 1){
       const node = cards[index];
@@ -8621,14 +8625,25 @@ function restoreTrackUiState(snapshot = null){
     if(snapshot.anchorTicker){
       const anchorNode = trackWorkspace.querySelector(`[data-watchlist-ticker="${snapshot.anchorTicker}"]`);
       if(anchorNode && typeof anchorNode.getBoundingClientRect === 'function'){
-        const workspaceTop = trackWorkspace.getBoundingClientRect ? trackWorkspace.getBoundingClientRect().top : 0;
+        const workspaceTop = 0;
         const rect = anchorNode.getBoundingClientRect();
         const delta = Number((rect.top - workspaceTop) - Number(snapshot.anchorOffsetTop || 0));
-        trackWorkspace.scrollTop = Number(trackWorkspace.scrollTop || 0) + delta;
+        if(typeof window !== 'undefined'){
+          window.scrollTo({top:Number(window.scrollY || window.pageYOffset || 0) + delta, behavior:'auto'});
+        }
         return;
       }
     }
-    trackWorkspace.scrollTop = Number(snapshot.scrollTop || 0);
+    if(typeof window !== 'undefined'){
+      const pageScrollY = Number(window.scrollY || window.pageYOffset || 0);
+      const workspacePageTop = trackWorkspace && typeof trackWorkspace.getBoundingClientRect === 'function'
+        ? Math.max(0, Number(trackWorkspace.getBoundingClientRect().top || 0) + pageScrollY)
+        : 0;
+      const offset = Number.isFinite(Number(snapshot.scrollOffsetY))
+        ? Number(snapshot.scrollOffsetY)
+        : Math.max(0, Number(snapshot.scrollTop || 0) - workspacePageTop);
+      window.scrollTo({top:workspacePageTop + Math.max(0, offset), behavior:'auto'});
+    }
   };
   if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
     window.requestAnimationFrame(() => window.requestAnimationFrame(runRestore));
@@ -26209,33 +26224,6 @@ function reviewWorkspaceScrollTarget(){
   return document.querySelector('[data-workspace-card="review"]') || $('reviewSection') || $('reviewWorkspace');
 }
 
-function scheduleReviewWorkspaceScroll(context = 'review_focus', options = {}){
-  if(activeWorkspaceTab() !== 'review') return;
-  const runScroll = attempt => {
-    const scrollTarget = reviewWorkspaceScrollTarget();
-    if(!scrollTarget) return;
-    try{
-      scrollTarget.scrollIntoView({behavior:options.immediate === true ? 'auto' : 'smooth', block:'start'});
-    }catch(_error){
-      if(typeof window !== 'undefined'){
-        window.scrollTo({top:Math.max(0, scrollTarget.getBoundingClientRect().top + window.scrollY - 86), behavior:'auto'});
-      }
-    }
-    const symbol = normalizeTicker(activeReviewTicker());
-    if(symbol) setScannerCardClickTrace(symbol, `${context}.scrolled`, `${scrollTarget.id || 'review_card'} attempt=${attempt}`);
-  };
-  if(options.immediate === true){
-    runScroll('immediate');
-    return;
-  }
-  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => runScroll('raf')));
-    setTimeout(() => runScroll('timeout'), 100);
-    return;
-  }
-  setTimeout(() => runScroll('timeout'), 0);
-}
-
 function scrollReviewSectionIntoView(ticker, context = 'review_open', options = {}){
   const symbol = normalizeTicker(ticker);
   if(appShell && appShell.isEnabled && appShell.isEnabled()){
@@ -26248,19 +26236,16 @@ function scrollReviewSectionIntoView(ticker, context = 'review_open', options = 
       setScannerCardClickTrace(symbol, `${context}.scroll_missing`, `attempt=${attempt}`);
       return;
     }
-    scrollTarget.scrollIntoView({behavior:'smooth', block:'start'});
+    try{
+      scrollTarget.scrollIntoView({behavior:'auto', block:'start'});
+    }catch(_error){
+      if(typeof window !== 'undefined' && typeof scrollTarget.getBoundingClientRect === 'function'){
+        window.scrollTo({top:Math.max(0, scrollTarget.getBoundingClientRect().top + window.scrollY - 86), behavior:'auto'});
+      }
+    }
     setScannerCardClickTrace(symbol, `${context}.scrolled`, `${scrollTarget.id || 'reviewWorkspace'} attempt=${attempt}`);
   };
-  if(options.immediate === true){
-    runScroll('immediate');
-    return;
-  }
-  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => runScroll('raf')));
-    setTimeout(() => runScroll('timeout'), 80);
-    return;
-  }
-  setTimeout(() => runScroll('timeout'), 0);
+  runScroll(options.immediate === true ? 'immediate' : 'direct');
 }
 
 function loadCard(ticker, options = {}){
