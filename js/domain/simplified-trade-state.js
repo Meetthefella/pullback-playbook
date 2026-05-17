@@ -362,6 +362,9 @@
       weakWatchDowngradeReasons:Array.isArray(result.weakWatchDowngradeReasons) ? result.weakWatchDowngradeReasons.slice() : [],
       weakWatchDiminishingApplied:result.weakWatchDiminishingApplied === true,
       weakWatchDiminishingReason:String(result.weakWatchDiminishingReason || ''),
+      weakWatchDiminishingTrace:result.weakWatchDiminishingTrace && typeof result.weakWatchDiminishingTrace === 'object'
+        ? {...result.weakWatchDiminishingTrace}
+        : null,
       finalVisualBucket:result.finalVisualBucket || result.visualBucket || null,
       mainBlocker:result.mainBlocker || resolvedState.main_blocker || resolvedState.reason || '',
       inputMutationSource:options.mutationSource || options.source || options.reason || options.renderSource || null
@@ -374,6 +377,7 @@
       visualBucket:diagnostics.visualBucket,
       weakWatchDiminishingApplied:diagnostics.weakWatchDiminishingApplied,
       weakWatchDiminishingReason:diagnostics.weakWatchDiminishingReason,
+      weakWatchDiminishingTrace:diagnostics.weakWatchDiminishingTrace,
       mainBlocker:diagnostics.mainBlocker
     };
     return diagnostics;
@@ -487,10 +491,13 @@
           priceabilityState:pipelineDiagnostics.priceabilityState,
           setupLocationState:pipelineDiagnostics.setupLocationState,
           mainBlocker:pipelineDiagnostics.mainBlocker,
+          weakWatchDiminishingApplied:pipelineDiagnostics.weakWatchDiminishingApplied,
+          weakWatchDiminishingReason:pipelineDiagnostics.weakWatchDiminishingReason,
           inputChangedSincePrevious:pipelineDiagnostics.inputChangedSincePrevious,
           marketDataChangedSincePrevious:pipelineDiagnostics.marketDataChangedSincePrevious,
           planChangedSincePrevious:pipelineDiagnostics.planChangedSincePrevious,
-          weakWatchDowngradeApplied:result.weakWatchDowngradeApplied === true
+          weakWatchDowngradeApplied:result.weakWatchDowngradeApplied === true,
+          weakWatchDiminishingTrace:JSON.stringify(pipelineDiagnostics.weakWatchDiminishingTrace || {})
         }, {key:`pipeline:${pipelineDiagnostics.surface}:${pipelineDiagnostics.ticker}`, minIntervalMs:1000});
       }
       return result;
@@ -503,6 +510,8 @@
           canonicalVerdict:result.canonicalVerdict,
           visualBucket:result.visualBucket,
           mainBlocker:result.mainBlocker,
+          weakWatchDiminishingReason:result.weakWatchDiminishingReason || '',
+          weakWatchDiminishingTrace:JSON.stringify(result.weakWatchDiminishingTrace || {}),
           error:error && error.message ? String(error.message) : 'unknown'
         }, {key:`pipeline-error:${surface}:${result.ticker || ''}`, minIntervalMs:1000});
       }

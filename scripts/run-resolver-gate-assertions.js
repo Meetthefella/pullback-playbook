@@ -1666,6 +1666,9 @@ function runSimplifiedPipelineAssertions(){
   if(weakLowScoreSurfaces.some(result => result.weakWatchDiminishingApplied !== true || result.weakWatchDiminishingReason !== 'unpriceable_low_score_missing_plan_below50_no_reclaim')){
     throw new Error('Alive near_50ma low-score unpriceable Watch must propagate the derived weak-watch diminishing reason through the simplified pipeline.');
   }
+  if(weakLowScoreSurfaces.some(result => !result.weakWatchDiminishingTrace || result.weakWatchDiminishingTrace.applied !== true || result.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback !== true || !Array.isArray(result.weakWatchDiminishingTrace.triggerTokens))){
+    throw new Error('Alive near_50ma low-score unpriceable Watch must expose a structured weak-watch diminishing trace.');
+  }
 
   const weakWatchReasonDeps = {
     resolveGlobalVerdict(){
@@ -1726,21 +1729,23 @@ function runSimplifiedPipelineAssertions(){
       planStatusKey:'missing',
       entry_gate_checks:{
         below_50_without_reclaim:false,
-        has_clear_invalidation_level:false,
-        plan_ok:false,
-        tradeability_ok:false,
-        rr_ok:false,
-        rr_priceable:false,
-        resolved_rr:null
+        has_clear_invalidation_level:true,
+        plan_ok:true,
+        tradeability_ok:true,
+        rr_ok:true,
+        rr_priceable:true,
+        resolved_rr:2.2,
+        reclaim_signal_count:1
       },
       near_entry_gate_checks:{
         below_50_without_reclaim:false,
-        has_clear_invalidation_level:false,
-        plan_ok:false,
-        tradeability_ok:false,
-        rr_ok:false,
-        rr_priceable:false,
-        resolved_rr:null
+        has_clear_invalidation_level:true,
+        plan_ok:true,
+        tradeability_ok:true,
+        rr_ok:true,
+        rr_priceable:true,
+        resolved_rr:2.2,
+        reclaim_signal_count:1
       }
     },
     setupScore:2
@@ -1750,6 +1755,9 @@ function runSimplifiedPipelineAssertions(){
   }
   if(!String(bounceAttemptOnlyVisual.weakWatchDiminishingReason || '').includes('bounce_attempt_only') || /below50_no_reclaim/.test(bounceAttemptOnlyVisual.weakWatchDiminishingReason || '')){
     throw new Error('Bounce-attempt-only weak Watch must use the bounce_attempt_only reason token without claiming below50_no_reclaim.');
+  }
+  if(!bounceAttemptOnlyVisual.weakWatchDiminishingTrace || !Array.isArray(bounceAttemptOnlyVisual.weakWatchDiminishingTrace.triggerTokens) || !bounceAttemptOnlyVisual.weakWatchDiminishingTrace.triggerTokens.includes('bounce_attempt_only') || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback !== true){
+    throw new Error('Bounce-attempt-only weak Watch must expose the bounce_attempt_only trace token before final monitor fallback.');
   }
 
   const invalidRrVisual = resolverPresentation.resolveVisualState({
@@ -1798,6 +1806,9 @@ function runSimplifiedPipelineAssertions(){
   }
   if(!String(invalidRrVisual.weakWatchDiminishingReason || '').includes('invalid_rr') || /below50_no_reclaim/.test(invalidRrVisual.weakWatchDiminishingReason || '')){
     throw new Error('Invalid-RR weak Watch must include the invalid_rr reason token and must not claim below50_no_reclaim.');
+  }
+  if(!invalidRrVisual.weakWatchDiminishingTrace || !Array.isArray(invalidRrVisual.weakWatchDiminishingTrace.triggerTokens) || !invalidRrVisual.weakWatchDiminishingTrace.triggerTokens.includes('invalid_rr') || invalidRrVisual.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback !== true){
+    throw new Error('Invalid-RR weak Watch must expose the invalid_rr trace token before final monitor fallback.');
   }
 
   const constructiveNoPlanNoBounceWatch = pipeline.resolveRecordState({

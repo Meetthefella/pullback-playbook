@@ -25983,6 +25983,7 @@ function renderReviewWorkspace(options = {}){
     {label:'Diminishing Preserved In Review', value:visualState.diminishing_preserved_in_review ? 'true' : 'false'},
     {label:'Weak Watch Diminishing Applied', value:visualState.weakWatchDiminishingApplied ? 'true' : 'false'},
     {label:'Weak Watch Diminishing Reason', value:visualState.weakWatchDiminishingReason || '(none)'},
+    {label:'Weak Watch Diminishing Trace', value:JSON.stringify(visualState.weakWatchDiminishingTrace || {}, null, 0) || '(none)'},
     {label:'Track Visual Bucket', value:visualBucketLabel(reviewLifecycleBias.trackPresentationBucket || 'monitor')},
     {label:'Track Presentation Tone', value:reviewLifecycleBias.trackPresentationTone || '(none)'}
   ])}${renderDebugSectionMarkup('Base Assessment', [

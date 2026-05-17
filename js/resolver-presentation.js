@@ -126,21 +126,22 @@
     if(weakWatchDowngradeApplied){
       return 'diminishing';
     }
-    const weakWatchDiminishingApplied = verdict === 'watch'
-      && aliveStructure
-      && priceabilityState === 'unpriceable'
-      && setupScore !== null
-      && setupScore <= 2
-      && (
-        below50WithoutReclaim
-        || noReclaimEvidence
-        || !hasClearInvalidationLevel
-        || planStatus === 'missing'
-        || !planValid
-        || !tradeabilityOk
-        || !rrOk
-        || (resolvedRR !== null && resolvedRR < 2)
-      );
+    const weakWatchDiminishingApplied = weakWatchDiminishingTraceForState({
+      verdict,
+      structureEligibility,
+      structureState,
+      priceabilityState,
+      numericSetupScore:setupScore,
+      planStatus,
+      planValid,
+      tradeabilityOk,
+      rrOk,
+      resolvedRR,
+      hasClearInvalidationLevel,
+      below50WithoutReclaim,
+      reclaimSignalCount,
+      bounceState
+    }).applied;
     if(weakWatchDiminishingApplied){
       return 'diminishing';
     }
@@ -159,38 +160,74 @@
     return 'card--monitor';
   }
 
-  function weakWatchDiminishingReasonForState(details = {}){
-    const tokens = [];
+  function weakWatchDiminishingTraceForState(details = {}){
+    const verdictIsWatch = String(details.verdict || '').trim().toLowerCase() === 'watch';
+    const structureEligibility = String(details.structureEligibility || '').trim().toLowerCase();
+    const structureState = String(details.structureState || '').trim().toLowerCase();
+    const aliveStructure = structureEligibility === 'alive'
+      || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const priceabilityState = String(details.priceabilityState || '').trim().toLowerCase();
+    const priceabilityUnpriceable = priceabilityState === 'unpriceable';
     const numericSetupScore = Number.isFinite(Number(details.numericSetupScore))
       ? Number(details.numericSetupScore)
       : null;
+    const lowScore = numericSetupScore !== null && numericSetupScore <= 2;
     const planStatus = String(details.planStatus || '').trim().toLowerCase();
     const planValid = details.planValid === true;
     const rrOk = details.rrOk === true;
     const resolvedRR = Number.isFinite(Number(details.resolvedRR)) ? Number(details.resolvedRR) : null;
     const hasClearInvalidationLevel = details.hasClearInvalidationLevel === true;
     const below50WithoutReclaim = details.below50WithoutReclaim === true;
+    const reclaimSignalCount = Number.isFinite(Number(details.reclaimSignalCount)) ? Number(details.reclaimSignalCount) : null;
+    const noReclaimEvidence = reclaimSignalCount === 0 || below50WithoutReclaim;
     const bounceState = String(details.bounceState || '').trim().toLowerCase();
     const promotionBlocked = details.promotionBlocked === true;
 
-    if(priceabilityState === 'unpriceable') tokens.push('unpriceable');
-    if(numericSetupScore !== null && numericSetupScore <= 2) tokens.push('low_score');
+    const triggerTokens = [];
+    if(priceabilityUnpriceable) triggerTokens.push('unpriceable');
+    if(lowScore) triggerTokens.push('low_score');
+    if(planStatus === 'missing' || !planValid) triggerTokens.push('missing_plan');
+    else if(!rrOk || (resolvedRR !== null && resolvedRR < 2)) triggerTokens.push('invalid_rr');
+    else if(hasClearInvalidationLevel === false) triggerTokens.push('no_valid_invalidation');
+    else if(promotionBlocked) triggerTokens.push('promotion_blocked');
+    if(below50WithoutReclaim) triggerTokens.push('below50_no_reclaim');
+    else if(noReclaimEvidence) triggerTokens.push('no_reclaim_signals');
+    else if(bounceState === 'attempt') triggerTokens.push('bounce_attempt_only');
+    else if(promotionBlocked && !triggerTokens.includes('promotion_blocked')) triggerTokens.push('promotion_blocked');
 
-    let primaryBlocker = '';
-    if(planStatus === 'missing' || !planValid) primaryBlocker = 'missing_plan';
-    else if(!rrOk || (resolvedRR !== null && resolvedRR < 2)) primaryBlocker = 'invalid_rr';
-    else if(hasClearInvalidationLevel === false) primaryBlocker = 'no_valid_invalidation';
-    else if(promotionBlocked) primaryBlocker = 'promotion_blocked';
-    if(primaryBlocker) tokens.push(primaryBlocker);
+    const applied = verdictIsWatch
+      && aliveStructure
+      && priceabilityUnpriceable
+      && lowScore
+      && triggerTokens.length > 0;
 
-    let secondaryBlocker = '';
-    if(below50WithoutReclaim) secondaryBlocker = 'below50_no_reclaim';
-    else if(bounceState === 'attempt') secondaryBlocker = 'bounce_attempt_only';
-    else if(promotionBlocked && primaryBlocker !== 'promotion_blocked') secondaryBlocker = 'promotion_blocked';
-    if(secondaryBlocker && secondaryBlocker !== primaryBlocker) tokens.push(secondaryBlocker);
+    return {
+      verdictIsWatch,
+      aliveStructure,
+      priceabilityState,
+      priceabilityUnpriceable,
+      numericSetupScore,
+      lowScore,
+      planStatus,
+      planValid,
+      rrOk,
+      resolvedRR,
+      hasClearInvalidationLevel,
+      below50WithoutReclaim,
+      reclaimSignalCount,
+      noReclaimEvidence,
+      bounceState,
+      promotionBlocked,
+      triggerTokens,
+      applied,
+      evaluatedBeforeFinalMonitorFallback:true,
+      returnPath:applied ? 'diminishing' : 'monitor_fallback',
+      reason:triggerTokens.length ? triggerTokens.join('_') : 'weak_watch_diminishing_guard'
+    };
+  }
 
-    return tokens.length ? tokens.join('_') : 'weak_watch_diminishing_guard';
+  function weakWatchDiminishingReasonForState(details = {}){
+    return weakWatchDiminishingTraceForState(details).reason;
   }
 
   function decisionSummaryForVerdict(finalVerdict, options = {}, deps = {}){
@@ -363,41 +400,30 @@
         || structureState === 'weakening'
         || viability === 'low_priority'
       );
-    const weakWatchDiminishingApplied = finalVerdict === 'watch'
-      && aliveStructure
-      && priceabilityState === 'unpriceable'
-      && numericSetupScore !== null
-      && numericSetupScore <= 2
-      && (
-        below50WithoutReclaim
-        || noReclaimEvidence
-        || bounceState === 'attempt'
-        || !hasClearInvalidationLevel
-        || planStatus === 'missing'
-        || !planValid
-        || !tradeabilityOk
-        || !rrOk
-        || (resolvedRR !== null && resolvedRR < 2)
-      );
-    const weakWatchDiminishingReason = weakWatchDiminishingApplied
-      ? weakWatchDiminishingReasonForState({
-        priceabilityState,
-        numericSetupScore,
-        planStatus,
-        planValid,
-        rrOk,
-        resolvedRR,
-        hasClearInvalidationLevel,
-        below50WithoutReclaim,
-        bounceState,
-        promotionBlocked:resolvedContract && (
-          resolvedContract.presentationUpgradeBlocked === true
-          || resolvedContract.promotionBlockedBy
-          || resolvedContract.entry_gate_pass === false
-          || resolvedContract.near_entry_gate_pass === false
-        )
-      })
-      : '';
+    const weakWatchDiminishingTrace = weakWatchDiminishingTraceForState({
+      verdict:finalVerdict,
+      structureEligibility,
+      structureState,
+      priceabilityState,
+      numericSetupScore,
+      planStatus,
+      planValid,
+      tradeabilityOk,
+      rrOk,
+      resolvedRR,
+      hasClearInvalidationLevel,
+      below50WithoutReclaim,
+      reclaimSignalCount,
+      bounceState,
+      promotionBlocked:resolvedContract && (
+        resolvedContract.presentationUpgradeBlocked === true
+        || resolvedContract.promotionBlockedBy
+        || resolvedContract.entry_gate_pass === false
+        || resolvedContract.near_entry_gate_pass === false
+      )
+    });
+    const weakWatchDiminishingApplied = weakWatchDiminishingTrace.applied;
+    const weakWatchDiminishingReason = weakWatchDiminishingTrace.reason;
     const visualBucketBeforeWeakWatchDowngrade = visualBucketForCanonical(finalVerdict, {
       structureEligibility,
       structureState,
@@ -492,6 +518,7 @@
       diminishing_preserved_in_review:weakeningButAlive || weakWatchDiminishingApplied,
       weakWatchDiminishingApplied,
       weakWatchDiminishingReason,
+      weakWatchDiminishingTrace,
       canonicalVerdict:finalVerdict,
       visualBucket,
       presentationBucket:visualBucket,

@@ -152,6 +152,9 @@
       weakWatchDowngradeReasons:Array.isArray(visual.weakWatchDowngradeReasons) ? visual.weakWatchDowngradeReasons.slice() : [],
       weakWatchDiminishingApplied:visual.weakWatchDiminishingApplied === true,
       weakWatchDiminishingReason:String(visual.weakWatchDiminishingReason || ''),
+      weakWatchDiminishingTrace:visual.weakWatchDiminishingTrace && typeof visual.weakWatchDiminishingTrace === 'object'
+        ? {...visual.weakWatchDiminishingTrace}
+        : null,
       finalVisualBucket:visual.finalVisualBucket || visual.visualBucket || visual.presentationBucket || '',
       debug:{
         surface,
