@@ -148,6 +148,22 @@
       });
     }
 
+    function setTrackRevealPending(pending, reason = 'track_restore'){
+      if(typeof document === 'undefined' || !document.body) return;
+      document.body.classList.toggle('track-restore-pending', pending === true);
+      uiState.trackRevealPending = pending === true;
+      traceScrollEvent(pending === true ? 'track:reveal:pending' : 'track:reveal:after-restore', {
+        caller:'setTrackRevealPending',
+        reason,
+        restoreTarget:Number.isFinite(Number(uiState.pendingTrackRestoreY)) ? Number(uiState.pendingTrackRestoreY) : null,
+        actualY:currentScrollY()
+      });
+    }
+
+    function clearTrackRevealPending(reason = 'track_restore_complete'){
+      setTrackRevealPending(false, reason);
+    }
+
     function extendActiveScrollSuppression(reason, durationMs = 350){
       const safeReason = String(reason || uiState.suppressWorkspaceScrollSaveReason || 'programmatic_scroll_settling');
       const until = nowMs() + Math.max(0, Number(durationMs) || 0);
@@ -306,8 +322,21 @@
 
     function scheduleTrackRestore(target, reason = 'track_restore'){
       const restoreTarget = Math.max(0, Number(target) || 0);
+      const concealUntilRestored = restoreTarget > 24;
       uiState.trackRestoreInProgress = true;
+      if(concealUntilRestored) setTrackRevealPending(true, reason);
       setSmoothScrollDisabled(true, reason);
+      const revealFallback = setTimeout(() => {
+        if(concealUntilRestored && normalizeTab(uiState.activeWorkspaceTab || '') === 'track' && uiState.trackRevealPending === true){
+          traceScrollEvent('track:reveal:fallback', {
+            caller:'scheduleTrackRestore',
+            reason:'restore_reveal_timeout',
+            restoreTarget,
+            actualY:currentScrollY()
+          });
+          clearTrackRevealPending('restore_reveal_timeout');
+        }
+      }, 650);
       const canRestoreToTarget = () => {
         if(typeof document === 'undefined' || typeof window === 'undefined') return true;
         const docH = Number(document.documentElement && document.documentElement.scrollHeight || 0);
@@ -326,6 +355,8 @@
           if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track'){
             uiState.trackRestoreInProgress = false;
             setSmoothScrollDisabled(false, 'track_restore_verify_aborted');
+            clearTimeout(revealFallback);
+            if(concealUntilRestored) clearTrackRevealPending('track_restore_verify_aborted');
             return;
           }
           const actualY = currentScrollY();
@@ -353,13 +384,17 @@
             }
             uiState.trackRestoreInProgress = false;
             setSmoothScrollDisabled(false, 'track_restore_verify_complete');
-          }, 450);
+            clearTimeout(revealFallback);
+            if(concealUntilRestored) clearTrackRevealPending('track_restore_verify_complete');
+          }, retryApplied ? 120 : 0);
         }, 350);
       };
       const runRestore = attempt => {
         if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track'){
           uiState.trackRestoreInProgress = false;
           setSmoothScrollDisabled(false, 'track_restore_aborted');
+          clearTimeout(revealFallback);
+          if(concealUntilRestored) clearTrackRevealPending('track_restore_aborted');
           return;
         }
         suppressScrollMemory(reason, 900);
@@ -449,6 +484,18 @@
       saveActiveWorkspaceScroll();
       if(previousTab === 'review' && nextTab !== 'review'){
         uiState.reviewInitialTopPositioned = false;
+      }
+      if(nextTab === 'track'){
+        const restoreTarget = Number.isFinite(Number(lastKnownScrollByTab.track))
+          ? Number(lastKnownScrollByTab.track)
+          : Number(uiState.trackScrollY);
+        if(Number.isFinite(restoreTarget) && restoreTarget > 24){
+          uiState.pendingTrackRestoreY = restoreTarget;
+          if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = restoreTarget;
+          setTrackRevealPending(true, 'track_tab_activation_prepare');
+        }
+      }else{
+        clearTrackRevealPending('non_track_tab_activation');
       }
       blurFocusedElementForTab(nextTab);
       primeWorkspaceViewportBeforeOpen(nextTab);
