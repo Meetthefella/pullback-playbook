@@ -72,6 +72,11 @@
       || ['strong','intact','developing_clean'].includes(structureState);
     const structuralWeakness = ['damaged','broken'].includes(structureEligibility)
       || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
+    const bounceState = String(globalVerdict && globalVerdict.bounce_state || '').toLowerCase();
+    const bounceAttempt = ['attempt','early','developing'].includes(bounceState);
+    const aliveUnconfirmedCopy = priceabilityState === 'unpriceable' && bounceAttempt
+      ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
+      : 'Bounce attempt present, but confirmation is not strong enough yet.';
     const planStatus = String(globalVerdict && (globalVerdict.planStatus || globalVerdict.plan_status || globalVerdict.planStatusKey || globalVerdict.plan_status_key) || '').trim().toLowerCase();
     const planMathValid = planStatus === 'valid' || hasPriceablePlan;
     const nonActionablePlan = verdict === 'watch' && planMathValid && !nearEntryGatePass;
@@ -83,7 +88,7 @@
     }
     if(aliveStructure && !structuralWeakness && /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(mainBlocker)){
       return {
-        line1:'Recovery attempt is developing, but price has not stabilised enough yet.',
+        line1:aliveUnconfirmedCopy,
         line2:'No actionable trade yet.'
       };
     }
@@ -95,7 +100,7 @@
     }
     if(setupLocationState === 'volatile' || priceabilityState === 'unpriceable'){
       return {
-        line1:'Strong trend, but too volatile to price reliably.',
+        line1:bounceAttempt ? aliveUnconfirmedCopy : 'Strong trend, but too volatile to price reliably.',
         line2:'No actionable entry yet.'
       };
     }
@@ -115,11 +120,14 @@
       if(!terminalAvoidEvidence && /avoid|too weak|broken|leave it alone/i.test(mainBlocker)){
         return confirmationCopy;
       }
+      if(aliveStructure && !structuralWeakness && bounceAttempt && /no (?:signs? of )?(?:stabili[sz]ation|bounce)|no bounce(?: yet| confirmation)?|not clear enough to price/i.test(mainBlocker)){
+        return {line1:aliveUnconfirmedCopy, line2:'No actionable trade yet.'};
+      }
       return {line1:mainBlocker, line2:'Monitor - waiting for confirmation.'};
     }
     const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
     const bouncePrimary = ['strong','intact','developing_clean','developing'].includes(structureState)
-      ? 'Bounce is too weak to price cleanly.'
+      ? (bounceAttempt ? 'Bounce attempt present, but confirmation is not strong enough yet.' : 'Bounce is too weak to price cleanly.')
       : 'No pullback structure to define entry yet.';
     const summary = structuralState === 'developing'
       ? 'Developing - waiting for confirmation.'

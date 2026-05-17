@@ -320,6 +320,8 @@ function runReviewProjectionAssertions(){
     'isAllowedCanonicalVisualPair',
     'hasProjectionTerminalAvoidReason',
     'terminalAvoidEvidenceForReviewCopy',
+    'reviewCopyEvidence',
+    'sanitizeAliveWatchSemanticCopy',
     'provisionalPlanConfirmationCopy',
     'terminalAvoidCopyPattern',
     'sanitizeNonTerminalPlanCopy',
@@ -698,6 +700,112 @@ function runReviewProjectionAssertions(){
   }
   if(!/Recovery attempt|stabilised|price reliably|Draft plan possible but weak|No actionable trade yet/i.test(aliveVolatileText)){
     throw new Error('Alive volatile/recovery Review semantics must use recovery/priceability/draft-plan wording.');
+  }
+
+  const tgtStyleAliveWatchSemantic = projectionSandbox.buildReviewSemanticStatus({
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      mainBlocker:'No valid invalidation level is available.',
+      planStatus:'missing',
+      planVisible:false,
+      entryGatePass:false,
+      nearEntryGatePass:false
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'developing_clean',
+      structure_eligibility:'alive',
+      setup_location_state:'near_50ma',
+      priceability_state:'unpriceable',
+      bounce_state:'attempt',
+      main_blocker:'No valid invalidation level is available.'
+    },
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'near_50ma',
+      priceabilityState:'unpriceable',
+      bounceState:'attempt',
+      stabilisationState:'early',
+      volumeState:'weak'
+    },
+    displayedPlan:{status:'missing'},
+    planRealism:{}
+  });
+  const tgtStyleText = [
+    tgtStyleAliveWatchSemantic.blocker,
+    tgtStyleAliveWatchSemantic.tradeStatus && tgtStyleAliveWatchSemantic.tradeStatus.line1,
+    tgtStyleAliveWatchSemantic.tradeStatus && tgtStyleAliveWatchSemantic.tradeStatus.line2,
+    tgtStyleAliveWatchSemantic.rrDisplay
+  ].join(' | ');
+  if(!/broader uptrend is still intact|bounce attempt|not stable enough|price reliably|No actionable trade yet/i.test(tgtStyleText)){
+    throw new Error('TGT-style alive Watch copy must frame the setup as intact trend + unconfirmed bounce + not priceable yet.');
+  }
+  if(/structure (?:looks )?(?:weak|broken)|no signs of stabilisation|no bounce yet|no signs.*bounce/i.test(tgtStyleText)){
+    throw new Error('TGT-style alive Watch copy must not imply weak/broken structure or absent bounce.');
+  }
+
+  const sanitizedAliveAiCopy = projectionSandbox.sanitizeAliveWatchSemanticCopy(
+    'Overall structure looks weak. No signs of stabilisation or a bounce yet.',
+    {
+      finalVerdict:'watch',
+      structureState:'developing_clean',
+      structureEligibility:'alive',
+      setupLocationState:'near_50ma',
+      priceabilityState:'unpriceable',
+      bounceState:'attempt',
+      stabilisationState:'early'
+    }
+  );
+  if(!/broader uptrend is still intact|bounce attempt|price reliably/i.test(sanitizedAliveAiCopy)){
+    throw new Error('AI summary sanitisation must rewrite stale weak/no-bounce copy for alive bounce-attempt Watch setups.');
+  }
+  if(/structure (?:looks )?(?:weak|broken)|no signs of stabilisation|no bounce yet|no signs.*bounce/i.test(sanitizedAliveAiCopy)){
+    throw new Error('AI summary sanitisation must not leave weak/no-bounce wording when bounce attempt exists.');
+  }
+
+  const genuineNoBounceCopy = projectionSandbox.sanitizeAliveWatchSemanticCopy(
+    'No signs of stabilisation or a bounce yet.',
+    {
+      finalVerdict:'watch',
+      structureState:'strong',
+      structureEligibility:'alive',
+      priceabilityState:'unpriceable',
+      bounceState:'none',
+      stabilisationState:'none'
+    }
+  );
+  if(!/No signs of stabilisation or a bounce yet/i.test(genuineNoBounceCopy)){
+    throw new Error('Genuine no-bounce setups may still use no-bounce wording.');
+  }
+
+  const genuineDamagedCopy = projectionSandbox.sanitizeAliveWatchSemanticCopy(
+    'Structure looks weak and no bounce yet.',
+    {
+      finalVerdict:'watch',
+      structureState:'weakening',
+      structureEligibility:'damaged',
+      priceabilityState:'unpriceable',
+      bounceState:'none'
+    }
+  );
+  if(!/Structure looks weak/i.test(genuineDamagedCopy)){
+    throw new Error('Genuine damaged/weakening setups may still use weak-structure wording.');
+  }
+
+  const fallingKnifeCopyPreserved = projectionSandbox.sanitizeAliveWatchSemanticCopy(
+    'Selling pressure is accelerating  wait for the stock to stabilise before reassessing.',
+    {
+      finalVerdict:'avoid',
+      visualBucket:'avoid',
+      structureState:'weakening',
+      structureEligibility:'damaged',
+      priceabilityState:'unpriceable',
+      bounceState:'none',
+      semantic_blocker_code:'falling_knife'
+    }
+  );
+  if(!/Selling pressure is accelerating/i.test(fallingKnifeCopyPreserved)){
+    throw new Error('Falling-knife Avoid copy must be preserved by alive Watch sanitisation.');
   }
 
   const trueWeakeningSemantic = projectionSandbox.buildReviewSemanticStatus({

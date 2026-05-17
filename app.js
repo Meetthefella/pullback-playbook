@@ -14682,6 +14682,7 @@ function finalDisplayedAnalysisChartRead(record, analysis){
   const item = normalizeTickerRecord(record || {});
   const analysisState = analysis && typeof analysis === 'object' ? analysis : {};
   const derivedStates = analysisDerivedStatesFromRecord(item);
+  const globalVerdict = resolveGlobalVerdict(item);
   const correction = guardAnalysisMovingAverageLanguage(
     analysisState.plain_english_chart_read || analysisState.chart_read || '',
     {
@@ -14691,16 +14692,34 @@ function finalDisplayedAnalysisChartRead(record, analysis){
       structureState:derivedStates.structureState
     }
   );
+  const baseText = correction.text || String(analysisState.plain_english_chart_read || analysisState.chart_read || '').trim();
+  const sanitizedText = sanitizeAliveWatchSemanticCopy(
+    baseText,
+    {
+      finalVerdict:globalVerdict.final_verdict,
+      structureState:globalVerdict.structure_state || derivedStates.structureState,
+      structureEligibility:globalVerdict.structure_eligibility,
+      setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState,
+      priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState,
+      bounceState:globalVerdict.bounce_state || derivedStates.bounceState,
+      stabilisationState:derivedStates.stabilisationState,
+      viability:globalVerdict.viability,
+      terminalAvoidApplied:globalVerdict.terminal_avoid_applied,
+      rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate,
+      avoid_trigger_source:globalVerdict.avoid_trigger_source,
+      explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason
+    }
+  );
   return {
-    text:correction.text || String(analysisState.plain_english_chart_read || analysisState.chart_read || '').trim(),
+    text:sanitizedText,
     applied:correction.applied,
-    reason:correction.reason,
+    reason:sanitizedText !== baseText ? 'AI structural/bounce wording sanitized against resolver state.' : correction.reason,
     priceVs20:correction.priceVs20,
     priceVs50:correction.priceVs50,
     price:correction.price,
     sma50:correction.sma50,
     matchedPhrase:correction.matchedPhrase,
-    outputChanged:correction.outputChanged
+    outputChanged:correction.outputChanged || sanitizedText !== baseText
   };
 }
 
@@ -15686,6 +15705,63 @@ function terminalAvoidEvidenceForReviewCopy(source){
   );
 }
 
+function reviewCopyEvidence(setup = {}){
+  const item = setup && typeof setup === 'object' ? setup : {};
+  const verdict = normalizeGlobalVerdictKey(item.finalVerdict || item.final_verdict || item.canonicalVerdict || item.state || 'watch');
+  const structureState = String(item.structureState || item.structure_state || item.structure || '').trim().toLowerCase();
+  const structureEligibility = String(item.structureEligibility || item.structure_eligibility || '').trim().toLowerCase();
+  const bounceState = String(item.bounceState || item.bounce_state || '').trim().toLowerCase();
+  const stabilisationState = String(item.stabilisationState || item.stabilisation_state || '').trim().toLowerCase();
+  const setupLocationState = String(item.setupLocationState || item.setup_location_state || '').trim().toLowerCase();
+  const priceabilityState = String(item.priceabilityState || item.priceability_state || '').trim().toLowerCase();
+  const terminalAvoid = terminalAvoidEvidenceForReviewCopy(item) || verdict === 'avoid';
+  const structuralWeakness = ['damaged','broken'].includes(structureEligibility)
+    || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
+  const aliveStructure = !terminalAvoid
+    && !structuralWeakness
+    && (structureEligibility === 'alive' || ['strong','intact','developing_clean','developing'].includes(structureState));
+  return {
+    verdict,
+    structureState,
+    structureEligibility,
+    bounceState,
+    stabilisationState,
+    setupLocationState,
+    priceabilityState,
+    terminalAvoid,
+    structuralWeakness,
+    aliveStructure,
+    bounceAttempt:['attempt','early','developing'].includes(bounceState),
+    noBounce:['none','unconfirmed',''].includes(bounceState),
+    unpriceable:priceabilityState === 'unpriceable' || setupLocationState === 'volatile',
+    stabilisationUnclear:['none','early','unconfirmed',''].includes(stabilisationState)
+  };
+}
+
+function sanitizeAliveWatchSemanticCopy(text, setup = {}){
+  const original = String(text || '').trim();
+  const evidence = reviewCopyEvidence(setup);
+  if(!original || evidence.terminalAvoid || evidence.structuralWeakness || !evidence.aliveStructure){
+    return original;
+  }
+  const saysWeakOrBroken = /(?:overall\s+)?structure (?:looks |is )?(?:weak|broken|damaged|deteriorating)|trend is weakening|failed structure/i.test(original);
+  const saysNoBounce = /no (?:signs? of )?(?:stabili[sz]ation|bounce)|no bounce(?: yet| confirmation)?|bounce (?:is )?not (?:present|there)/i.test(original);
+  if(evidence.bounceAttempt && saysNoBounce){
+    return evidence.unpriceable
+      ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
+      : 'Bounce attempt present, but confirmation is not strong enough yet.';
+  }
+  if(saysWeakOrBroken){
+    return evidence.unpriceable
+      ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
+      : 'Setup is not actionable yet. Wait for clearer stabilisation and a reliable entry/stop area.';
+  }
+  if(evidence.unpriceable && evidence.bounceAttempt && /no valid invalidation|not clear enough to price|cannot be priced|not priceable|no actionable plan/i.test(original)){
+    return 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.';
+  }
+  return original;
+}
+
 function provisionalPlanConfirmationCopy(setup){
   const item = setup && typeof setup === 'object' ? setup : {};
   const bounceState = String(item.bounce_state || item.bounceState || '').trim().toLowerCase();
@@ -15742,6 +15818,7 @@ function resolvePlanVisibility(setup){
   const weakStructure = structure === 'weakening' || structure === 'broken';
   const terminalAvoidEvidence = terminalAvoidEvidenceForReviewCopy(setup);
   const confirmationMessage = provisionalPlanConfirmationCopy(setup);
+  const semanticConfirmationMessage = sanitizeAliveWatchSemanticCopy(confirmationMessage, setup) || confirmationMessage;
 
   if(rawState === 'diminishing'){
     return {
@@ -15762,7 +15839,7 @@ function resolvePlanVisibility(setup){
       showPositionSize:false,
       showCapital:false,
       showRR:false,
-      diagnosticsMessage:sanitizeNonTerminalPlanCopy(confirmationMessage, setup),
+      diagnosticsMessage:sanitizeNonTerminalPlanCopy(semanticConfirmationMessage, setup),
       diagnosticsTone:'neutral'
     };
   }
@@ -15784,7 +15861,7 @@ function resolvePlanVisibility(setup){
         showPositionSize:false,
         showCapital:false,
         showRR:false,
-        diagnosticsMessage:sanitizeNonTerminalPlanCopy(confirmationMessage, setup),
+        diagnosticsMessage:sanitizeNonTerminalPlanCopy(semanticConfirmationMessage, setup),
         diagnosticsTone:'neutral'
       };
     }
@@ -15814,7 +15891,7 @@ function resolvePlanVisibility(setup){
     showPositionSize:false,
     showCapital:false,
     showRR:false,
-    diagnosticsMessage:sanitizeNonTerminalPlanCopy(confirmationMessage, setup),
+    diagnosticsMessage:sanitizeNonTerminalPlanCopy(semanticConfirmationMessage, setup),
     diagnosticsTone:'neutral'
   };
 }
@@ -15912,13 +15989,31 @@ function buildReviewSemanticStatus({
   const aliveStructure = structureEligibility === 'alive'
     || ['strong','intact','developing_clean'].includes(structureState);
   const staleWeakCopy = /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(rawBlocker);
-  let blocker = rawBlocker;
+  const copyContext = {
+    finalVerdict:verdict,
+    structureState,
+    structureEligibility,
+    setupLocationState,
+    priceabilityState,
+    bounceState,
+    stabilisationState,
+    viability:global.viability,
+    terminalAvoidApplied:global.terminal_avoid_applied,
+    rejected_by_viability_gate:global.rejected_by_viability_gate,
+    avoid_trigger_source:global.avoid_trigger_source,
+    explicit_invalidation_reason:global.explicit_invalidation_reason
+  };
+  let blocker = sanitizeAliveWatchSemanticCopy(rawBlocker, copyContext);
   if(terminalAvoid && ['broken','dead','failed'].includes(structureState)){
     blocker = rawBlocker || 'Structure is broken. No trade until price rebuilds from a clean base.';
   }else if(structuralWeakness){
     blocker = rawBlocker || 'Trend is weakening - no reliable stop level yet.';
   }else if(aliveStructure && staleWeakCopy){
-    blocker = 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
+    blocker = blocker && blocker !== rawBlocker
+      ? blocker
+      : 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
+  }else if(aliveStructure && ['attempt','early','developing'].includes(bounceState) && priceabilityState === 'unpriceable'){
+    blocker = blocker || 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.';
   }else if(aliveStructure && (setupLocationState === 'volatile' || priceabilityState === 'unpriceable')){
     blocker = rawBlocker && !staleWeakCopy
       ? rawBlocker

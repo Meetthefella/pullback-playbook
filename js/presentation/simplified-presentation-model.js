@@ -44,6 +44,7 @@
     const structureEligibility = String(state.structure_eligibility || state.structureEligibility || '').trim().toLowerCase();
     const setupLocationState = String(state.setup_location_state || state.setupLocationState || '').trim().toLowerCase();
     const priceabilityState = String(state.priceability_state || state.priceabilityState || '').trim().toLowerCase();
+    const bounceState = String(state.bounce_state || state.bounceState || '').trim().toLowerCase();
     const viabilityBranchId = String(state.viabilityBranchId || state.viability_branch_id || '').trim().toLowerCase();
     const aliveStructure = structureEligibility === 'alive'
       || ['strong','intact','developing_clean'].includes(structureState);
@@ -56,9 +57,22 @@
       && /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(text)
     ){
       if(setupLocationState === 'volatile' || priceabilityState === 'unpriceable'){
-        return 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
+        return ['attempt','early','developing'].includes(bounceState)
+          ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
+          : 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
       }
       return 'Setup is not actionable yet. Wait for clearer stabilisation and a reliable entry/stop area.';
+    }
+    if(
+      resolvedVerdict === 'watch'
+      && aliveStructure
+      && !structuralWeakness
+      && ['attempt','early','developing'].includes(bounceState)
+      && /no (?:signs? of )?(?:stabili[sz]ation|bounce)|no bounce(?: yet| confirmation)?|bounce (?:is )?not (?:present|there)/i.test(text)
+    ){
+      return priceabilityState === 'unpriceable' || setupLocationState === 'volatile'
+        ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
+        : 'Bounce attempt present, but confirmation is not strong enough yet.';
     }
     const setupScoreValue = state.setup_score ?? state.setupScore;
     const setupScore = Number.isFinite(Number(setupScoreValue)) ? Number(setupScoreValue) : null;
