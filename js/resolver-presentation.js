@@ -70,6 +70,21 @@
     const pullbackZone = String(options.pullbackZone || '').trim().toLowerCase();
     const planStatus = String(options.planStatus || '').trim().toLowerCase();
     const setupScore = Number.isFinite(Number(options.setupScore)) ? Number(options.setupScore) : null;
+    const resolvedRR = Number.isFinite(Number(options.resolvedRR)) ? Number(options.resolvedRR) : null;
+    const reclaimSignalCount = Number.isFinite(Number(options.reclaimSignalCount)) ? Number(options.reclaimSignalCount) : null;
+    const below50WithoutReclaim = options.below50WithoutReclaim === true;
+    const hasClearInvalidationLevel = options.hasClearInvalidationLevel === true;
+    const tradeabilityOk = options.tradeabilityOk === true;
+    const rrOk = options.rrOk === true;
+    const planValid = options.planValid === true;
+    const weakWatchDowngradeApplied = verdict === 'watch'
+      && setupScore !== null
+      && setupScore <= 2
+      && ['attempt','early','developing','none','unconfirmed',''].includes(bounceState)
+      && below50WithoutReclaim
+      && reclaimSignalCount === 0
+      && hasClearInvalidationLevel === false
+      && (priceabilityState === 'unpriceable' || !planValid || !tradeabilityOk || !rrOk || resolvedRR !== null && resolvedRR < 2);
     const aliveStructure = structureEligibility === 'alive'
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const constructiveWaiting = aliveStructure
@@ -97,6 +112,9 @@
       || viabilityBranchId.includes('failed')
       || viabilityBranchId.includes('weakening');
     if(!developingWatch && deteriorationEvidence){
+      return 'diminishing';
+    }
+    if(weakWatchDowngradeApplied){
       return 'diminishing';
     }
     if(structureEligibility === 'damaged' || structureState === 'weakening'){
@@ -208,6 +226,54 @@
     const stabilisationState = String(derivedStates && derivedStates.stabilisationState || '').trim().toLowerCase();
     const pullbackZone = String(derivedStates && derivedStates.pullbackZone || legacyVerdict && legacyVerdict.pullback_zone || '').trim().toLowerCase();
     const planStatus = String(resolvedContract && resolvedContract.planStatusKey || displayedPlan && displayedPlan.status || '').trim().toLowerCase();
+    const entryGateChecks = resolvedContract && resolvedContract.entry_gate_checks || {};
+    const nearEntryGateChecks = resolvedContract && resolvedContract.near_entry_gate_checks || {};
+    const viabilityInputs = legacyVerdict && (legacyVerdict.viabilityInputs || legacyVerdict.viability_inputs) || {};
+    const optionSetupScore = options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord);
+    const below50WithoutReclaim = nearEntryGateChecks.below_50_without_reclaim === true
+      || entryGateChecks.below_50_without_reclaim === true
+      || viabilityInputs.below50WithoutReclaim === true
+      || viabilityInputs.below_50_without_reclaim === true;
+    const reclaimSignalCount = Number.isFinite(Number(nearEntryGateChecks.reclaim_signal_count))
+      ? Number(nearEntryGateChecks.reclaim_signal_count)
+      : (Number.isFinite(Number(entryGateChecks.reclaim_signal_count))
+        ? Number(entryGateChecks.reclaim_signal_count)
+        : (Number.isFinite(Number(legacyVerdict && legacyVerdict.reclaimSignalCount))
+          ? Number(legacyVerdict.reclaimSignalCount)
+          : null));
+    const hasClearInvalidationLevel = nearEntryGateChecks.has_clear_invalidation_level === true
+      || entryGateChecks.has_clear_invalidation_level === true
+      || legacyVerdict && legacyVerdict.hasClearInvalidationLevel === true;
+    const legacyResolvedRR = Number.isFinite(Number(legacyVerdict && legacyVerdict.resolvedRR))
+      ? Number(legacyVerdict.resolvedRR)
+      : (Number.isFinite(Number(legacyVerdict && legacyVerdict.resolved_rr))
+        ? Number(legacyVerdict.resolved_rr)
+        : null);
+    const resolvedRR = Number.isFinite(Number(nearEntryGateChecks.resolved_rr))
+      ? Number(nearEntryGateChecks.resolved_rr)
+      : (Number.isFinite(Number(entryGateChecks.resolved_rr))
+        ? Number(entryGateChecks.resolved_rr)
+        : legacyResolvedRR);
+    const rrOk = nearEntryGateChecks.rr_priceable === true
+      || entryGateChecks.rr_ok === true
+      || viabilityInputs.rrOk === true;
+    const tradeabilityOk = nearEntryGateChecks.tradeability_ok === true
+      || entryGateChecks.tradeability_ok === true
+      || viabilityInputs.tradeabilityOk === true
+      || viabilityInputs.tradeabilityOK === true;
+    const planValid = nearEntryGateChecks.plan_ok === true
+      || entryGateChecks.plan_ok === true
+      || viabilityInputs.planValid === true;
+    const weakWatchDowngradeReasons = [];
+    const numericSetupScore = Number.isFinite(Number(optionSetupScore)) ? Number(optionSetupScore) : null;
+    if(numericSetupScore !== null && numericSetupScore <= 2) weakWatchDowngradeReasons.push('setup_score_below_watch_floor');
+    if(below50WithoutReclaim) weakWatchDowngradeReasons.push('below_50_without_reclaim');
+    if(reclaimSignalCount === 0) weakWatchDowngradeReasons.push('no_reclaim_signals');
+    if(hasClearInvalidationLevel === false) weakWatchDowngradeReasons.push('no_clear_invalidation_level');
+    if(priceabilityState === 'unpriceable') weakWatchDowngradeReasons.push('unpriceable');
+    if(!planValid) weakWatchDowngradeReasons.push('no_valid_plan');
+    if(!tradeabilityOk) weakWatchDowngradeReasons.push('tradeability_not_ready');
+    if(!rrOk || resolvedRR !== null && resolvedRR < 2) weakWatchDowngradeReasons.push('rr_not_usable');
     const hardStructureFailure = structureEligibility === 'broken' || structureState === 'broken';
     const weakOrWeakeningStructure = structureState === 'weakening' || structureState === 'weak';
     const weakeningLowPriorityRecovery = (
@@ -233,6 +299,26 @@
         || structureState === 'weakening'
         || viability === 'low_priority'
       );
+    const visualBucketBeforeWeakWatchDowngrade = visualBucketForCanonical(finalVerdict, {
+      structureEligibility,
+      structureState,
+      setupLocationState,
+      priceabilityState,
+      viability,
+      viabilityBranchId,
+      bounceState,
+      stabilisationState,
+      pullbackZone,
+      planStatus,
+      setupScore:optionSetupScore,
+      below50WithoutReclaim:false,
+      reclaimSignalCount,
+      hasClearInvalidationLevel,
+      resolvedRR,
+      rrOk,
+      tradeabilityOk,
+      planValid
+    }, deps);
     const visualBucket = visualBucketForCanonical(finalVerdict, {
       structureEligibility,
       structureState,
@@ -244,11 +330,24 @@
       stabilisationState,
       pullbackZone,
       planStatus,
-      setupScore:options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord)
+      setupScore:optionSetupScore,
+      below50WithoutReclaim,
+      reclaimSignalCount,
+      hasClearInvalidationLevel,
+      resolvedRR,
+      rrOk,
+      tradeabilityOk,
+      planValid
     }, deps);
+    const weakWatchDowngradeApplied = finalVerdict === 'watch'
+      && visualBucketBeforeWeakWatchDowngrade !== 'diminishing'
+      && visualBucket === 'diminishing'
+      && weakWatchDowngradeReasons.includes('setup_score_below_watch_floor')
+      && weakWatchDowngradeReasons.includes('below_50_without_reclaim')
+      && weakWatchDowngradeReasons.includes('no_reclaim_signals');
     let visual_tone = visualBucket;
     if(visual_tone === 'diminishing' && finalVerdict !== 'watch') visual_tone = finalVerdict === 'avoid' ? 'avoid' : 'monitor';
-    const score = clampScore(options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord));
+    const score = clampScore(optionSetupScore);
     const styleAttr = visualStyleForState(visual_tone === 'diminishing' ? 'watch' : visual_tone, score);
     const badge = deps.getBadge(renderedVerdict);
     const summaryOptions = {
@@ -261,7 +360,7 @@
       bounceState,
       planStatus,
       viabilityBranchId,
-      setupScore:options.setupScore != null ? options.setupScore : deps.setupScoreForRecord(safeRecord)
+      setupScore:optionSetupScore
     };
     const resolvedSummary = decisionSummaryForVerdict(renderedVerdict, summaryOptions, deps);
     const cardClass = cardClassForBucket(visualBucket);
@@ -318,6 +417,10 @@
       conflicting_legacy_state_detected:false,
       trackPresentationBucket:visualBucket,
       trackPresentationTone:visual_tone,
+      visualBucketBeforeWeakWatchDowngrade,
+      weakWatchDowngradeApplied,
+      weakWatchDowngradeReasons,
+      finalVisualBucket:visualBucket,
       previousVerdict,
       freshCanonicalVerdict:finalVerdict,
       freshVisualBucket:visualBucket,

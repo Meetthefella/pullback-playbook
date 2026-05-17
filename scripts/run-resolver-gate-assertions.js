@@ -1229,6 +1229,70 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('Missing plan must not reconcile unpriceable state to priceable.');
   }
 
+  const aaStyleWeakWatch = pipeline.resolveRecordState({
+    ticker:'AAX',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:62.53, ma20:64.88, ma50:65.22, ma200:49.32, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'developing_clean',
+      trendState:'developing_clean',
+      setupLocationState:'near_50ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_50ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'No valid invalidation level is available.',
+      reasonSummary:'No valid invalidation level is available.',
+      terminal:false,
+      baseVerdict:'watch',
+      entry_gate_checks:{
+        below_50_without_reclaim:true,
+        reclaim_signal_count:0,
+        has_clear_invalidation_level:false,
+        resolved_rr:null,
+        rr_ok:false,
+        tradeability_ok:false,
+        plan_ok:false
+      },
+      near_entry_gate_checks:{
+        below_50_without_reclaim:true,
+        reclaim_signal_count:0,
+        has_clear_invalidation_level:false,
+        resolved_rr:null,
+        rr_priceable:false,
+        tradeability_ok:false,
+        plan_ok:false
+      }
+    }, 2)
+  });
+  const aaDiagnostics = aaStyleWeakWatch.debug && aaStyleWeakWatch.debug.pipelineDiagnostics || {};
+  if(aaStyleWeakWatch.canonicalVerdict !== 'watch'){
+    throw new Error('AA-style failed-reclaim setup must remain canonical Watch, not terminal Avoid.');
+  }
+  if(aaStyleWeakWatch.visualBucket !== 'diminishing' || aaStyleWeakWatch.tone !== 'diminishing'){
+    throw new Error('AA-style failed-reclaim setup must render weak-watch/diminishing nuance outside Scan too.');
+  }
+  if(aaStyleWeakWatch.weakWatchDowngradeApplied !== true || aaDiagnostics.weakWatchDowngradeApplied !== true){
+    throw new Error('AA-style failed-reclaim setup must expose weak-watch downgrade diagnostics.');
+  }
+  if(!Array.isArray(aaStyleWeakWatch.weakWatchDowngradeReasons) || !aaStyleWeakWatch.weakWatchDowngradeReasons.includes('below_50_without_reclaim') || !aaStyleWeakWatch.weakWatchDowngradeReasons.includes('no_reclaim_signals')){
+    throw new Error('AA-style failed-reclaim diagnostics must include below-50/no-reclaim reasons.');
+  }
+  if(/needs confirmation before promotion/i.test(String(aaStyleWeakWatch.mainBlocker || ''))){
+    throw new Error('AA-style weak-watch output must not use clean Monitor promotion copy.');
+  }
+
   const invalidManualPlan = pipeline.resolveRecordState({
     ticker:'BADMANUAL',
     in_watchlist:true,

@@ -330,6 +330,10 @@
       terminalAvoidApplied:resolvedState.terminal_avoid_applied === true || resolvedState.terminalAvoidApplied === true,
       canonicalVerdict:result.canonicalVerdict || resolvedState.final_verdict || null,
       visualBucket:result.visualBucket || null,
+      visualBucketBeforeWeakWatchDowngrade:result.visualBucketBeforeWeakWatchDowngrade || null,
+      weakWatchDowngradeApplied:result.weakWatchDowngradeApplied === true,
+      weakWatchDowngradeReasons:Array.isArray(result.weakWatchDowngradeReasons) ? result.weakWatchDowngradeReasons.slice() : [],
+      finalVisualBucket:result.finalVisualBucket || result.visualBucket || null,
       mainBlocker:result.mainBlocker || resolvedState.main_blocker || resolvedState.reason || '',
       inputMutationSource:options.mutationSource || options.source || options.reason || options.renderSource || null
     };

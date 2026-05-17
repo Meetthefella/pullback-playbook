@@ -120,13 +120,19 @@
       .concat(nearReasons)
       .concat(entryReasons)
       .filter(Boolean);
-    const mainBlocker = normalizeMainBlockerCopy(firstText([
+    let mainBlocker = normalizeMainBlockerCopy(firstText([
       resolved.main_blocker,
       resolved.promotionBlockedReason,
       visual.reason,
       resolved.reason,
       blockers
     ]), resolved);
+    if(
+      visual.weakWatchDowngradeApplied === true
+      && /needs confirmation|no valid invalidation|bounce.*confirm|hold for entry|waiting for confirmation/i.test(mainBlocker)
+    ){
+      mainBlocker = 'Recent rebound failed - wait for stabilisation.';
+    }
 
     return {
       ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
@@ -141,6 +147,10 @@
       entryGatePass:resolved.entry_gate_pass === true,
       nearEntryGatePass:resolved.near_entry_gate_pass === true,
       blockers,
+      visualBucketBeforeWeakWatchDowngrade:visual.visualBucketBeforeWeakWatchDowngrade || '',
+      weakWatchDowngradeApplied:visual.weakWatchDowngradeApplied === true,
+      weakWatchDowngradeReasons:Array.isArray(visual.weakWatchDowngradeReasons) ? visual.weakWatchDowngradeReasons.slice() : [],
+      finalVisualBucket:visual.finalVisualBucket || visual.visualBucket || visual.presentationBucket || '',
       debug:{
         surface,
         source:'simplified-state-pipeline',
