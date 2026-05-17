@@ -77,17 +77,25 @@
     const tradeabilityOk = options.tradeabilityOk === true;
     const rrOk = options.rrOk === true;
     const planValid = options.planValid === true;
+    const aliveStructure = structureEligibility === 'alive'
+      || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const noReclaimEvidence = reclaimSignalCount === 0 || below50WithoutReclaim;
     const weakWatchDowngradeApplied = verdict === 'watch'
       && setupScore !== null
       && setupScore <= 2
-      && ['attempt','early','developing','none','unconfirmed',''].includes(bounceState)
-      && below50WithoutReclaim
-      && noReclaimEvidence
-      && hasClearInvalidationLevel === false
-      && (priceabilityState === 'unpriceable' || !planValid || !tradeabilityOk || !rrOk || resolvedRR !== null && resolvedRR < 2);
-    const aliveStructure = structureEligibility === 'alive'
-      || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
+      && aliveStructure
+      && priceabilityState === 'unpriceable'
+      && (
+        below50WithoutReclaim
+        || noReclaimEvidence
+        || planStatus === 'missing'
+        || !planValid
+        || !tradeabilityOk
+        || !rrOk
+        || hasClearInvalidationLevel === false
+        || (resolvedRR !== null && resolvedRR < 2)
+        || bounceState === 'attempt'
+      );
     const constructiveWaiting = aliveStructure
       && ['attempt','early','confirmed'].includes(bounceState)
       && priceabilityState !== 'unpriceable'
@@ -149,6 +157,40 @@
     if(safe === 'diminishing') return 'card--diminishing';
     if(safe === 'avoid') return 'card--avoid';
     return 'card--monitor';
+  }
+
+  function weakWatchDiminishingReasonForState(details = {}){
+    const tokens = [];
+    const priceabilityState = String(details.priceabilityState || '').trim().toLowerCase();
+    const numericSetupScore = Number.isFinite(Number(details.numericSetupScore))
+      ? Number(details.numericSetupScore)
+      : null;
+    const planStatus = String(details.planStatus || '').trim().toLowerCase();
+    const planValid = details.planValid === true;
+    const rrOk = details.rrOk === true;
+    const resolvedRR = Number.isFinite(Number(details.resolvedRR)) ? Number(details.resolvedRR) : null;
+    const hasClearInvalidationLevel = details.hasClearInvalidationLevel === true;
+    const below50WithoutReclaim = details.below50WithoutReclaim === true;
+    const bounceState = String(details.bounceState || '').trim().toLowerCase();
+    const promotionBlocked = details.promotionBlocked === true;
+
+    if(priceabilityState === 'unpriceable') tokens.push('unpriceable');
+    if(numericSetupScore !== null && numericSetupScore <= 2) tokens.push('low_score');
+
+    let primaryBlocker = '';
+    if(planStatus === 'missing' || !planValid) primaryBlocker = 'missing_plan';
+    else if(!rrOk || (resolvedRR !== null && resolvedRR < 2)) primaryBlocker = 'invalid_rr';
+    else if(hasClearInvalidationLevel === false) primaryBlocker = 'no_valid_invalidation';
+    else if(promotionBlocked) primaryBlocker = 'promotion_blocked';
+    if(primaryBlocker) tokens.push(primaryBlocker);
+
+    let secondaryBlocker = '';
+    if(below50WithoutReclaim) secondaryBlocker = 'below50_no_reclaim';
+    else if(bounceState === 'attempt') secondaryBlocker = 'bounce_attempt_only';
+    else if(promotionBlocked && primaryBlocker !== 'promotion_blocked') secondaryBlocker = 'promotion_blocked';
+    if(secondaryBlocker && secondaryBlocker !== primaryBlocker) tokens.push(secondaryBlocker);
+
+    return tokens.length ? tokens.join('_') : 'weak_watch_diminishing_guard';
   }
 
   function decisionSummaryForVerdict(finalVerdict, options = {}, deps = {}){
@@ -260,6 +302,7 @@
         : (Number.isFinite(Number(legacyVerdict && legacyVerdict.reclaimSignalCount))
           ? Number(legacyVerdict.reclaimSignalCount)
           : null));
+    const noReclaimEvidence = reclaimSignalCount === 0 || below50WithoutReclaim;
     const hasClearInvalidationLevel = nearEntryGateChecks.has_clear_invalidation_level === true
       || entryGateChecks.has_clear_invalidation_level === true
       || legacyVerdict && legacyVerdict.hasClearInvalidationLevel === true;
@@ -328,6 +371,7 @@
       && (
         below50WithoutReclaim
         || noReclaimEvidence
+        || bounceState === 'attempt'
         || !hasClearInvalidationLevel
         || planStatus === 'missing'
         || !planValid
@@ -336,7 +380,23 @@
         || (resolvedRR !== null && resolvedRR < 2)
       );
     const weakWatchDiminishingReason = weakWatchDiminishingApplied
-      ? 'unpriceable_low_score_missing_plan'
+      ? weakWatchDiminishingReasonForState({
+        priceabilityState,
+        numericSetupScore,
+        planStatus,
+        planValid,
+        rrOk,
+        resolvedRR,
+        hasClearInvalidationLevel,
+        below50WithoutReclaim,
+        bounceState,
+        promotionBlocked:resolvedContract && (
+          resolvedContract.presentationUpgradeBlocked === true
+          || resolvedContract.promotionBlockedBy
+          || resolvedContract.entry_gate_pass === false
+          || resolvedContract.near_entry_gate_pass === false
+        )
+      })
       : '';
     const visualBucketBeforeWeakWatchDowngrade = visualBucketForCanonical(finalVerdict, {
       structureEligibility,

@@ -27,6 +27,7 @@ runBrowserModule('js/scanner-view.js');
 runBrowserModule('js/scanner-results-support.js');
 
 const resolverCore = sandbox.window.ResolverCore;
+const resolverPresentation = sandbox.window.ResolverPresentation;
 if(!resolverCore || typeof resolverCore.runTradeReadinessGateAssertions !== 'function'){
   throw new Error('Resolver gate assertion harness is unavailable.');
 }
@@ -1662,8 +1663,141 @@ function runSimplifiedPipelineAssertions(){
   if(weakLowScoreSurfaces.some(result => result.canonicalVerdict !== 'watch' || result.visualBucket !== 'diminishing' || result.tone !== 'diminishing')){
     throw new Error('Alive near_50ma low-score unpriceable Watch must render as Diminishing across scan, track, and review.');
   }
-  if(weakLowScoreSurfaces.some(result => result.weakWatchDiminishingApplied !== true || !String(result.weakWatchDiminishingReason || '').length)){
-    throw new Error('Alive near_50ma low-score unpriceable Watch must propagate weak-watch diminishing diagnostics through the simplified pipeline.');
+  if(weakLowScoreSurfaces.some(result => result.weakWatchDiminishingApplied !== true || result.weakWatchDiminishingReason !== 'unpriceable_low_score_missing_plan_below50_no_reclaim')){
+    throw new Error('Alive near_50ma low-score unpriceable Watch must propagate the derived weak-watch diminishing reason through the simplified pipeline.');
+  }
+
+  const weakWatchReasonDeps = {
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'alive',
+        viability:'watchlist',
+        viabilityBranchId:'alive_watchlist',
+        setup_location_state:'near_50ma',
+        priceability_state:'unpriceable',
+        entry_gate_pass:false,
+        near_entry_gate_pass:false,
+        entry_gate_checks:{
+          below_50_without_reclaim:false,
+          has_clear_invalidation_level:false,
+          plan_ok:false,
+          tradeability_ok:false,
+          rr_ok:false,
+          rr_priceable:false,
+          resolved_rr:null
+        },
+        near_entry_gate_checks:{
+          below_50_without_reclaim:false,
+          has_clear_invalidation_level:false,
+          plan_ok:false,
+          tradeability_ok:false,
+          rr_ok:false,
+          rr_priceable:false,
+          resolved_rr:null
+        },
+        final_verdict:'watch',
+        main_blocker:'No valid invalidation level is available.'
+      };
+    },
+    getBadge:resolverCore.getBadge,
+    normalizeGlobalVerdictKey:resolverCore.normalizeGlobalVerdictKey,
+    normalizeVerdict:resolverCore.normalizeVerdict
+  };
+
+  const bounceAttemptOnlyVisual = resolverPresentation.resolveVisualState({
+    ticker:'ATMBR',
+    plan:{},
+    marketData:{price:66.53, ma20:64.88, ma50:65.22, ma200:49.32, currency:'USD'}
+  }, 'review', {
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'near_50ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_50ma'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'missing'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'missing',
+      entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:false,
+        plan_ok:false,
+        tradeability_ok:false,
+        rr_ok:false,
+        rr_priceable:false,
+        resolved_rr:null
+      },
+      near_entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:false,
+        plan_ok:false,
+        tradeability_ok:false,
+        rr_ok:false,
+        rr_priceable:false,
+        resolved_rr:null
+      }
+    },
+    setupScore:2
+  }, weakWatchReasonDeps);
+  if(bounceAttemptOnlyVisual.canonicalVerdict !== 'watch' || bounceAttemptOnlyVisual.visualBucket !== 'diminishing' || bounceAttemptOnlyVisual.tone !== 'diminishing'){
+    throw new Error('Bounce-attempt-only weak Watch must render as Diminishing.');
+  }
+  if(!String(bounceAttemptOnlyVisual.weakWatchDiminishingReason || '').includes('bounce_attempt_only') || /below50_no_reclaim/.test(bounceAttemptOnlyVisual.weakWatchDiminishingReason || '')){
+    throw new Error('Bounce-attempt-only weak Watch must use the bounce_attempt_only reason token without claiming below50_no_reclaim.');
+  }
+
+  const invalidRrVisual = resolverPresentation.resolveVisualState({
+    ticker:'INVRR',
+    plan:{entry:100, stop:97, firstTarget:106},
+    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'}
+  }, 'review', {
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'near_50ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'confirmed',
+      pullbackZone:'near_50ma'
+    },
+    effectivePlan:{entry:100, stop:97, firstTarget:106},
+    displayedPlan:{status:'valid'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'valid',
+      entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:true,
+        plan_ok:true,
+        tradeability_ok:true,
+        rr_ok:false,
+        rr_priceable:false,
+        resolved_rr:1.4
+      },
+      near_entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:true,
+        plan_ok:true,
+        tradeability_ok:true,
+        rr_ok:false,
+        rr_priceable:false,
+        resolved_rr:1.4
+      }
+    },
+    setupScore:2
+  }, weakWatchReasonDeps);
+  if(invalidRrVisual.canonicalVerdict !== 'watch' || invalidRrVisual.visualBucket !== 'diminishing' || invalidRrVisual.tone !== 'diminishing'){
+    throw new Error('Invalid-RR weak Watch must render as Diminishing.');
+  }
+  if(!String(invalidRrVisual.weakWatchDiminishingReason || '').includes('invalid_rr') || /below50_no_reclaim/.test(invalidRrVisual.weakWatchDiminishingReason || '')){
+    throw new Error('Invalid-RR weak Watch must include the invalid_rr reason token and must not claim below50_no_reclaim.');
   }
 
   const constructiveNoPlanNoBounceWatch = pipeline.resolveRecordState({
