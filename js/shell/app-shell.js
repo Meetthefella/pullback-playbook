@@ -278,7 +278,9 @@
         targetScrollY:0,
         reason:'first_review_focus'
       });
+      setSmoothScrollDisabled(true, 'review_initial_positioning');
       scrollWindowTo(0, 'auto', 'review_initial_positioning');
+      setTimeout(() => setSmoothScrollDisabled(false, 'review_initial_positioning_complete'), 250);
     }
 
     function restoreWorkspaceViewportAfterOpen(tab){
@@ -437,13 +439,17 @@
 
     function switchWorkspace(tab, options = {}){
       const nextTab = normalizeTab(tab);
+      const previousTab = normalizeTab(uiState.activeWorkspaceTab || '');
       traceScrollEvent('tab:switch:before', {
         caller:'switchWorkspace',
-        fromTab:normalizeTab(uiState.activeWorkspaceTab || ''),
+        fromTab:previousTab,
         toTab:nextTab,
         options
       });
       saveActiveWorkspaceScroll();
+      if(previousTab === 'review' && nextTab !== 'review'){
+        uiState.reviewInitialTopPositioned = false;
+      }
       blurFocusedElementForTab(nextTab);
       primeWorkspaceViewportBeforeOpen(nextTab);
       const appliedTab = applyWorkspace(nextTab);

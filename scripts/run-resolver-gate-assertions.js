@@ -897,6 +897,9 @@ function runEntryConditionsSummaryAssertions(){
   if(!/reviewInitialTopPositioned/.test(appShellSource) || !/if\(uiState\.reviewInitialTopPositioned === true\)[\s\S]{0,400}return/.test(appShellSource)){
     throw new Error('Review top positioning must run only once per session.');
   }
+  if(!/previousTab === 'review' && nextTab !== 'review'/.test(appShellSource) || !/review_initial_positioning_complete/.test(appShellSource)){
+    throw new Error('Review top positioning must reset between Review opens and avoid smooth-scroll animation.');
+  }
   if(!/suppressScrollMemory/.test(appShellSource) || !/track:scroll-save-suppressed/.test(appShellSource) || !/__ppSuppressScrollMemoryUntil/.test(appShellSource)){
     throw new Error('Programmatic scrolls must suppress Track scroll-memory overwrites.');
   }
