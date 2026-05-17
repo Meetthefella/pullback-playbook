@@ -6,10 +6,10 @@ const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.4.14';
+const APP_VERSION = 'v4.4.15';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.4.14',
+    version:'4.4.15',
     commit:'817dad5',
     branch:'main',
     builtAt:'2026-05-06T10:39Z'
@@ -1577,6 +1577,10 @@ uiState.reviewAiRuntime = uiState.reviewAiRuntime && typeof uiState.reviewAiRunt
     error:'',
     prompt:''
   };
+uiState.reviewAdvancedDebugSession = uiState.reviewAdvancedDebugSession === true;
+uiState.reviewAdvancedDebugTap = uiState.reviewAdvancedDebugTap && typeof uiState.reviewAdvancedDebugTap === 'object'
+  ? uiState.reviewAdvancedDebugTap
+  : {count:0, startedAt:0, restoreTimer:null};
 uiState.paperTradeStateByTicker = uiState.paperTradeStateByTicker && typeof uiState.paperTradeStateByTicker === 'object'
   ? uiState.paperTradeStateByTicker
   : {};
@@ -4751,6 +4755,7 @@ function renderWorkspaceSurface(tab, options = {}){
   if(targetTab === 'review'){
     renderCards();
     startupCoordinator.renderedTabs.review = true;
+    scheduleReviewWorkspaceScroll(options.scrollContext || 'review_tab_focus');
     return;
   }
   if(targetTab === 'track'){
@@ -5165,6 +5170,7 @@ function startApplication(){
   perfMark('pp_shell_render_start');
   appShell.init();
   bindWorkspaceAnchorBridge();
+  bindReviewAdvancedDebugGesture();
   perfMark('pp_shell_render_end');
   perfMeasure('pp_shell_render', 'pp_shell_render_start', 'pp_shell_render_end');
   startupCoordinator.shellRendered = true;
@@ -6610,6 +6616,7 @@ function addToWatchlist(tickerData){
 function removeFromWatchlist(ticker){
   const symbol = normalizeTicker(ticker);
   const record = getTickerRecord(symbol);
+  const trackUiSnapshot = activeWorkspaceTab() === 'track' ? captureTrackUiState() : null;
   if(record){
     record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
     record.watchlist.debug.watchlist_removed_by = 'explicit_remove';
@@ -6623,8 +6630,35 @@ function removeFromWatchlist(ticker){
     record.watchlist.status = '';
   }
   state.activeQueueManualTickers = uniqueTickers((state.activeQueueManualTickers || []).filter(tickerItem => normalizeTicker(tickerItem) !== symbol));
+  markWatchlistDirty([symbol], 'watchlist_remove');
+  uiState.watchlistPreparedModelCache = null;
+  uiState.watchlistRenderSignature = '';
   commitTickerState();
-  renderWatchlist();
+  if(activeWorkspaceTab() === 'track'){
+    const existingCard = findWatchlistCardNodeByTicker(symbol);
+    if(existingCard){
+      const section = existingCard.closest && existingCard.closest('.watchlistgroup[data-group-key]');
+      existingCard.remove();
+      if(section){
+        const countNode = section.querySelector('.watchlistgroup__count');
+        const remainingCards = section.querySelectorAll('[data-watchlist-ticker]').length;
+        if(countNode) countNode.textContent = `(${String(remainingCards)})`;
+        if(remainingCards === 0) section.remove();
+      }
+      const trackBox = $('watchlist');
+      const remainingVisibleCards = trackBox ? trackBox.querySelectorAll('[data-watchlist-ticker]').length : 0;
+      startupCoordinator.renderedTabs.track = true;
+      if(trackBox && remainingVisibleCards === 0){
+        renderWatchlist();
+      }else{
+        restoreTrackUiState(trackUiSnapshot);
+      }
+    }else{
+      renderWatchlist();
+    }
+  }else{
+    renderWatchlist();
+  }
   renderFocusQueue();
 }
 
@@ -8946,6 +8980,7 @@ async function renderWatchlistChunked(options = {}){
       box.innerHTML = showExpired
         ? '<div class="summary">No watchlist entries match this filter right now.</div>'
         : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+      if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
       return;
     }
     if(
@@ -9059,6 +9094,7 @@ function renderWatchlist(){
       box.innerHTML = showExpired
         ? '<div class="summary">No watchlist entries match this filter right now.</div>'
         : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+      if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
       return;
     }
     if(
@@ -15505,9 +15541,12 @@ function bindEntryConditionsHoldInteractions(root){
     const trigger = helper.querySelector('[data-hold-entry-helper]') || (cardMode ? helper : null);
     if(!trigger) return;
     const panelId = String(trigger.getAttribute('data-panel-id') || helper.getAttribute('data-panel-id') || '');
-    const panel = panelId
-      ? (document.getElementById(panelId) || helper.querySelector('.entry-conditions-panel'))
-      : helper.querySelector('.entry-conditions-panel');
+    const localPanel = helper.querySelector('.entry-conditions-panel');
+    const panel = cardMode
+      ? localPanel
+      : (panelId
+        ? (document.getElementById(panelId) || localPanel)
+        : localPanel);
     if(!panel){
       if(holdTicker) setWatchlistHoldTrace(holdTicker, 'hold_helper.bind_skipped_panel_not_found');
       return;
@@ -15931,6 +15970,23 @@ function nonPlanDiagnosticsSummaryMarkup(message, decisionSummary){
   return `<div class="summary">${escapeHtml(message)}</div>`;
 }
 
+function isAdvancedDebugVisible(){
+  return uiState.reviewAdvancedDebugSession === true
+    || isPerfDebugEnabled()
+    || debugFlagEnabled('DEBUG_REVIEW_WORKSPACE')
+    || debugFlagEnabled('DEBUG_ANALYSIS');
+}
+
+function syncAdvancedDebugVisibilityClass(){
+  if(typeof document === 'undefined' || !document.body) return;
+  document.body.classList.toggle('debug-advanced', isAdvancedDebugVisible());
+}
+
+function setAdvancedDebugVisible(enabled){
+  uiState.reviewAdvancedDebugSession = enabled === true;
+  syncAdvancedDebugVisibilityClass();
+}
+
 function ensureReviewAdvancedState(){
   if(!uiState.reviewAdvancedOpen || typeof uiState.reviewAdvancedOpen !== 'object'){
     uiState.reviewAdvancedOpen = {};
@@ -15948,6 +16004,76 @@ function setReviewAdvancedOpen(ticker, open){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
   ensureReviewAdvancedState()[symbol] = open === true;
+}
+
+function reviewAdvancedDebugPill(){
+  return $('marketSessionLedgerState') || $('liveProcessStatusText') || $('liveProcessStatusBanner');
+}
+
+function restoreReviewAdvancedDebugPill(){
+  const pill = reviewAdvancedDebugPill();
+  if(!pill || !pill.dataset) return;
+  const original = String(pill.dataset.reviewDebugOriginalText || '').trim();
+  if(original) pill.textContent = original;
+  delete pill.dataset.reviewDebugOriginalText;
+}
+
+function showReviewAdvancedDebugFeedback(message, options = {}){
+  const pill = reviewAdvancedDebugPill();
+  if(!pill) return;
+  if(pill.dataset && !pill.dataset.reviewDebugOriginalText){
+    pill.dataset.reviewDebugOriginalText = pill.textContent || '';
+  }
+  pill.textContent = message;
+  if(uiState.reviewAdvancedDebugTap && uiState.reviewAdvancedDebugTap.restoreTimer){
+    clearTimeout(uiState.reviewAdvancedDebugTap.restoreTimer);
+    uiState.reviewAdvancedDebugTap.restoreTimer = null;
+  }
+  if(options.persist === true) return;
+  uiState.reviewAdvancedDebugTap.restoreTimer = setTimeout(() => {
+    restoreReviewAdvancedDebugPill();
+    uiState.reviewAdvancedDebugTap.restoreTimer = null;
+  }, 2200);
+}
+
+function handleReviewAdvancedDebugTap(){
+  const now = Date.now();
+  const tap = uiState.reviewAdvancedDebugTap && typeof uiState.reviewAdvancedDebugTap === 'object'
+    ? uiState.reviewAdvancedDebugTap
+    : {count:0, startedAt:0, restoreTimer:null};
+  if(!Number.isFinite(Number(tap.startedAt)) || now - Number(tap.startedAt || 0) > 8000){
+    tap.count = 0;
+    tap.startedAt = now;
+  }
+  tap.count = Number(tap.count || 0) + 1;
+  uiState.reviewAdvancedDebugTap = tap;
+  if(tap.count === 4){
+    showReviewAdvancedDebugFeedback('2 more presses for advanced debug');
+    return;
+  }
+  if(tap.count === 5){
+    showReviewAdvancedDebugFeedback('1 more press for advanced debug');
+    return;
+  }
+  if(tap.count >= 6){
+    tap.count = 0;
+    tap.startedAt = 0;
+    setAdvancedDebugVisible(true);
+    const symbol = normalizeTicker(activeReviewTicker());
+    if(symbol) setReviewAdvancedOpen(symbol, true);
+    showReviewAdvancedDebugFeedback('Advanced debug enabled', {persist:true});
+    if(activeWorkspaceTab() === 'review') renderReviewWorkspace({source:'advanced_debug_unlocked'});
+  }
+}
+
+function bindReviewAdvancedDebugGesture(){
+  const targets = [$('marketSessionLedgerState')].filter(Boolean);
+  targets.forEach(target => {
+    if(target.dataset && target.dataset.reviewAdvancedDebugBound === 'true') return;
+    if(target.dataset) target.dataset.reviewAdvancedDebugBound = 'true';
+    target.addEventListener('click', handleReviewAdvancedDebugTap);
+  });
+  syncAdvancedDebugVisibilityClass();
 }
 
 function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract}){
@@ -23582,6 +23708,7 @@ async function submitPaperTradeFromReview(ticker){
 function bindReviewWorkspaceActions(record){
   const box = $('reviewWorkspace');
   if(!box) return;
+  syncAdvancedDebugVisibilityClass();
   const promptDetails = $('reviewPrompt');
   const responseDetails = $('reviewResponse');
   const advancedDetails = $('reviewAdvancedDetails');
@@ -23589,6 +23716,7 @@ function bindReviewWorkspaceActions(record){
   if(responseDetails) responseDetails.addEventListener('toggle', () => { uiState.responseOpen[record.ticker] = responseDetails.open; });
   if(advancedDetails){
     advancedDetails.addEventListener('toggle', () => {
+      if(!isAdvancedDebugVisible()) return;
       if(advancedDetails.open && !isReviewAdvancedOpen(record.ticker)){
         setReviewAdvancedOpen(record.ticker, true);
         renderReviewWorkspace({source:'advanced_open'});
@@ -25542,7 +25670,9 @@ function renderReviewWorkspace(options = {}){
   const aiDetailTraceMarkup = aiAnalysisSuppressedByChartMismatch
     ? `<div class="summary warntext">${escapeHtml(aiSuppressionText)}</div>`
     : renderAnalysisPanelFromRecord(record, {chartConsistencyTrace});
-  const advancedOpen = isReviewAdvancedOpen(record.ticker);
+  syncAdvancedDebugVisibilityClass();
+  const advancedDebugVisible = isAdvancedDebugVisible();
+  const advancedOpen = advancedDebugVisible && isReviewAdvancedOpen(record.ticker);
   const capitalSimulationControls = advancedOpen
     ? `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="capital-sim-50">Simulate 50%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-65">Simulate 65%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-85">Simulate 85%</button><button class="ghost compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>`
     : '';
@@ -25843,7 +25973,7 @@ function renderReviewWorkspace(options = {}){
         <div class="tiny review-ai-preview" id="reviewAiSummaryPreview">${escapeHtml(aiSummaryPreview)}</div>
         <div class="tiny review-ai-overflow-hint" id="reviewAiSummaryOverflowHint" hidden>Scroll for more</div>
       </details>
-      <details class="compact-details review-advanced-panel" id="reviewAdvancedDetails" ${advancedOpen ? 'open' : ''}>
+      <details class="compact-details review-advanced-panel advanced-debug-only" id="reviewAdvancedDetails" ${advancedOpen ? 'open' : ''}>
         <summary>Advanced details</summary>
         ${advancedOpen ? `<div class="review-diagnostics-stack">
           <div class="reviewsectionsubhead"><strong>Diagnostics & Trace</strong></div>
@@ -26075,15 +26205,45 @@ async function importLatestChart(ticker){
   }
 }
 
+function reviewWorkspaceScrollTarget(){
+  return document.querySelector('[data-workspace-card="review"]') || $('reviewSection') || $('reviewWorkspace');
+}
+
+function scheduleReviewWorkspaceScroll(context = 'review_focus', options = {}){
+  if(activeWorkspaceTab() !== 'review') return;
+  const runScroll = attempt => {
+    const scrollTarget = reviewWorkspaceScrollTarget();
+    if(!scrollTarget) return;
+    try{
+      scrollTarget.scrollIntoView({behavior:options.immediate === true ? 'auto' : 'smooth', block:'start'});
+    }catch(_error){
+      if(typeof window !== 'undefined'){
+        window.scrollTo({top:Math.max(0, scrollTarget.getBoundingClientRect().top + window.scrollY - 86), behavior:'auto'});
+      }
+    }
+    const symbol = normalizeTicker(activeReviewTicker());
+    if(symbol) setScannerCardClickTrace(symbol, `${context}.scrolled`, `${scrollTarget.id || 'review_card'} attempt=${attempt}`);
+  };
+  if(options.immediate === true){
+    runScroll('immediate');
+    return;
+  }
+  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => runScroll('raf')));
+    setTimeout(() => runScroll('timeout'), 100);
+    return;
+  }
+  setTimeout(() => runScroll('timeout'), 0);
+}
+
 function scrollReviewSectionIntoView(ticker, context = 'review_open', options = {}){
   const symbol = normalizeTicker(ticker);
   if(appShell && appShell.isEnabled && appShell.isEnabled()){
     setActiveWorkspaceTab('review', {focusTop:false});
     setScannerCardClickTrace(symbol, `${context}.workspace_tab`, 'review');
-    return;
   }
   const runScroll = attempt => {
-    const scrollTarget = $('reviewWorkspace') || $('reviewSection');
+    const scrollTarget = reviewWorkspaceScrollTarget();
     if(!scrollTarget){
       setScannerCardClickTrace(symbol, `${context}.scroll_missing`, `attempt=${attempt}`);
       return;

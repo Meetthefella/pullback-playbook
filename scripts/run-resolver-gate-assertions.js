@@ -853,8 +853,24 @@ function runReviewProjectionAssertions(){
 
 function runEntryConditionsSummaryAssertions(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const appShellSource = fs.readFileSync(path.join(root, 'js/shell/app-shell.js'), 'utf8');
   if(!/entryConditionsHoldBound/.test(appSource) || !/bindEntryConditionsHoldInteractions\(div\)/.test(appSource)){
     throw new Error('Watchlist long-press helper binding diagnostics must be wired to the active card renderer.');
+  }
+  if(!/cardMode\s*\?\s*localPanel/.test(appSource)){
+    throw new Error('Track card long-press binding must prefer the replacement card local panel over stale document panel ids.');
+  }
+  if(!/existingCard\.remove\(\)/.test(appSource) || !/watchlist_remove/.test(appSource)){
+    throw new Error('Track remove must immediately remove the visible card and invalidate watchlist render state.');
+  }
+  if(!/!\['track','review'\]\.includes\(appliedTab\)/.test(appShellSource)){
+    throw new Error('Track and Review tab focus must avoid forcing window scroll to top.');
+  }
+  if(!/scheduleReviewWorkspaceScroll/.test(appSource) || !/reviewWorkspaceScrollTarget/.test(appSource)){
+    throw new Error('Review focus must scroll to the Review panel instead of the page top.');
+  }
+  if(!/isAdvancedDebugVisible/.test(appSource) || !/reviewAdvancedDebugTap/.test(appSource)){
+    throw new Error('Review debug panels must be gated behind the advanced debug reveal path.');
   }
   const summarySandbox = {
     normalizeVerdict(value){

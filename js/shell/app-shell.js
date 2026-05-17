@@ -77,7 +77,8 @@
       blurFocusedElementForTab(nextTab);
       const appliedTab = applyWorkspace(nextTab);
       focusWorkspaceContainer(appliedTab, options);
-      if(options.focusTop !== false){
+      const shouldFocusTop = options.focusTop === true || (options.focusTop !== false && !['track','review'].includes(appliedTab));
+      if(shouldFocusTop){
         try{
           window.scrollTo({top:0, behavior:'auto'});
         }catch(error){}
