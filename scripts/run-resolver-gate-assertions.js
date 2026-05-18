@@ -2352,11 +2352,13 @@ function runAiContractAssertions(){
     'chartImageDimensionsLabel',
     'buildChartImageSourceTrace',
     'chartImageForAnalysis',
+    'clearReviewChartImageSources',
     'buildDeterministicChartVerification',
     'buildChartConsistencyTrace',
     'chartVerificationAiSuppression',
     'renderSuppressedAiAnalysisPanel',
     'renderChartConsistencyTrace',
+    'getReviewChartVerificationState',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});
@@ -2632,8 +2634,8 @@ function runAiContractAssertions(){
       visible_numeric_labels:[500]
     }
   );
-  if(finalUncertainSuppression.suppressed !== false || finalUncertainSuppression.reason || finalUncertainSuppression.message){
-    throw new Error('Partial chart context with matching ticker and price must not suppress normal AI commentary.');
+  if(finalUncertainSuppression.suppressed !== true || !/chart-native/i.test(String(finalUncertainSuppression.reason || ''))){
+    throw new Error('Ticker/price OCR without chart-native confirmation must stay suppressed.');
   }
   const contextMirroringTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -2663,6 +2665,192 @@ function runAiContractAssertions(){
   );
   if(independentFastPassTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || independentFastPassTrace.debug.fastPass.independentImageEvidence !== true){
     throw new Error('Independent ticker/timeframe/price evidence must allow clear_match_candidate and full verification.');
+  }
+  const exactMrnaTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'MRNA',
+      visible_timeframe:'1D',
+      visible_latest_price:49.04,
+      visible_ma20:48.15,
+      visible_ma50:47.30,
+      visible_ma200:43.10,
+      visible_numeric_labels:[49.04, 48.15, 47.3, 43.1],
+      extraction_method_used:'ocr',
+      ma20_visible:true,
+      ma50_visible:true,
+      ma200_visible:true
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(exactMrnaTrace.status !== 'verified_match' && exactMrnaTrace.status !== 'likely_match'){
+    throw new Error('Exact genuine MRNA chart with chart-native MA confirmation must verify.');
+  }
+  if(exactMrnaTrace.aiAnalysisSuppressed !== false || /uncertain/i.test(String(exactMrnaTrace.title || '')) || /not independently verified/i.test(String(exactMrnaTrace.suppressionReason || ''))){
+    throw new Error('Exact genuine MRNA chart must not be suppressed or shown as uncertain.');
+  }
+  const storedChartTrace = evidenceSandbox.getReviewChartVerificationState({
+    ticker:'MRNA',
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'},
+      chartVerificationLifecycle:{phase:'deterministic_ready', requestId:'analysis-1'},
+      chartVerificationTrace:{
+        ticker:'MRNA',
+        reviewTicker:'MRNA',
+        chartImageId:'chart-1',
+        imageId:'chart-1',
+        verificationRequestId:'analysis-1',
+        requestId:'analysis-1',
+        chartImageSource:evidenceSandbox.buildChartImageSourceTrace({
+          chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+          chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+          chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+          chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}
+        }),
+        trace:exactMrnaTrace
+      }
+    }
+  });
+  if(!storedChartTrace || storedChartTrace.trace.status !== 'verified_match'){
+    throw new Error('Stored deterministic chart trace must be readable before AI analysis completes.');
+  }
+  const staleTickerTrace = evidenceSandbox.getReviewChartVerificationState({
+    ticker:'DINO',
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'},
+      chartVerificationLifecycle:{phase:'deterministic_ready', requestId:'analysis-1'},
+      chartVerificationTrace:{
+        ticker:'MRNA',
+        reviewTicker:'MRNA',
+        chartImageId:'chart-1',
+        imageId:'chart-1',
+        verificationRequestId:'analysis-1',
+        requestId:'analysis-1',
+        chartImageSource:evidenceSandbox.buildChartImageSourceTrace({
+          chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+          chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+          chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+          chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}
+        }),
+        trace:exactMrnaTrace
+      }
+    }
+  });
+  if(staleTickerTrace !== null){
+    throw new Error('Stored chart trace must be rejected when the review ticker changes.');
+  }
+  const staleRequestTrace = evidenceSandbox.getReviewChartVerificationState({
+    ticker:'MRNA',
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'},
+      chartVerificationLifecycle:{phase:'deterministic_ready', requestId:'analysis-current'},
+      chartVerificationTrace:{
+        ticker:'MRNA',
+        reviewTicker:'MRNA',
+        chartImageId:'chart-1',
+        imageId:'chart-1',
+        verificationRequestId:'analysis-previous',
+        requestId:'analysis-previous',
+        chartImageSource:evidenceSandbox.buildChartImageSourceTrace({
+          chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+          chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+          chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+          chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}
+        }),
+        trace:exactMrnaTrace
+      }
+    }
+  });
+  if(staleRequestTrace !== null){
+    throw new Error('Stored chart trace must be rejected when the verification requestId changes.');
+  }
+  const staleSourceTrace = evidenceSandbox.getReviewChartVerificationState({
+    ticker:'MRNA',
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'},
+      chartVerificationLifecycle:{phase:'deterministic_ready', requestId:'analysis-1'},
+      chartVerificationTrace:{
+        ticker:'MRNA',
+        reviewTicker:'MRNA',
+        chartImageId:'chart-1',
+        imageId:'chart-1',
+        verificationRequestId:'analysis-1',
+        requestId:'analysis-1',
+        chartImageSource:{
+          sourceKind:'legacy_chartRef_fallback',
+          sourceField:'chartRef.dataUrl',
+          originalDimensions:'unknown',
+          previewDimensions:'unknown',
+          verificationSourceDimensions:'unknown',
+          limited:true
+        },
+        trace:exactMrnaTrace
+      }
+    }
+  });
+  if(staleSourceTrace !== null){
+    throw new Error('Stored chart trace must be rejected when the source fingerprint changes.');
+  }
+  const clearedReview = {
+    chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+    chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+    chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+    chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'},
+    chartVerificationLifecycle:{phase:'deterministic_ready', requestId:'analysis-1'},
+    chartVerificationTrace:{
+      ticker:'MRNA',
+      reviewTicker:'MRNA',
+      chartImageId:'chart-1',
+      imageId:'chart-1',
+      verificationRequestId:'analysis-1',
+      requestId:'analysis-1',
+      chartImageSource:evidenceSandbox.buildChartImageSourceTrace({
+        chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+        chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+        chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+        chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}
+      }),
+      trace:exactMrnaTrace
+    }
+  };
+  evidenceSandbox.clearReviewChartImageSources(clearedReview);
+  if(clearedReview.chartVerificationTrace !== null || clearedReview.chartVerificationLifecycle !== null || clearedReview.chartAvailable !== false){
+    throw new Error('Clearing chart sources must clear chart verification trace and lifecycle state.');
+  }
+  const contaminatedHeaderTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'MRNA',
+      visible_timeframe:'',
+      visible_latest_price:49.04,
+      visible_numeric_labels:[49.04],
+      extraction_method_used:'ocr',
+      ma20_visible:false,
+      ma50_visible:false,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(contaminatedHeaderTrace.status === 'likely_match' || contaminatedHeaderTrace.status === 'verified_match' || contaminatedHeaderTrace.aiAnalysisSuppressed === false){
+    throw new Error('Header/OCR-only evidence without chart-native confirmation must not upgrade to verified or likely_match.');
+  }
+  if(contaminatedHeaderTrace.status !== 'partial_context_unverified_chart' && contaminatedHeaderTrace.status !== 'uncertain_missing_context'){
+    throw new Error('Contaminated header evidence must stay in a non-verified chart state.');
+  }
+  if(!/chart-native/i.test(String(contaminatedHeaderTrace.suppressionReason || '')) || !/partially verified/i.test(String(contaminatedHeaderTrace.title || ''))){
+    throw new Error('Contaminated header evidence must explain that chart-native confirmation is missing.');
   }
   const mrnaPartialTimeframeTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -2765,8 +2953,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(indicatorMissingTrace.status !== 'indicator_missing'){
-    throw new Error('Hidden moving averages must produce indicator_missing deterministic verification.');
+  if(!['indicator_missing','partial_context_unverified_chart'].includes(indicatorMissingTrace.status)){
+    throw new Error('Hidden moving averages must stay non-verified even without chart-native confirmation.');
   }
   if(indicatorMissingTrace.indicatorStates.ma200_status !== 'missing'){
     throw new Error('200MA not visible at all must be reported as missing.');

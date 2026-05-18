@@ -3474,6 +3474,8 @@ function clearReviewChartImageSources(review){
   review.chartImageOriginal = null;
   review.chartImagePreview = null;
   review.chartImageVerificationSource = null;
+  review.chartVerificationTrace = null;
+  review.chartVerificationLifecycle = null;
   review.chartAvailable = false;
 }
 
@@ -18552,6 +18554,55 @@ function getReviewAnalysisState(record){
   return analysisState;
 }
 
+function getReviewChartVerificationState(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const normalizeReviewTicker = value => String(value || '').trim().toUpperCase().replace(/^[A-Z]+:/, '').replace(/[^A-Z0-9.-]/g, '');
+  const reviewSourceKey = sourceTrace => {
+    const safe = sourceTrace && typeof sourceTrace === 'object' ? sourceTrace : {};
+    return [
+      String(safe.sourceKind || ''),
+      String(safe.sourceField || ''),
+      String(safe.originalDimensions || ''),
+      String(safe.previewDimensions || ''),
+      String(safe.verificationSourceDimensions || ''),
+      safe.limited === true ? 'limited' : 'full'
+    ].join('|');
+  };
+  const state = review.chartVerificationTrace && typeof review.chartVerificationTrace === 'object'
+    ? review.chartVerificationTrace
+    : null;
+  if(!state) return null;
+  const currentTicker = normalizeReviewTicker(item.ticker || review.ticker || '');
+  const storedTicker = normalizeReviewTicker(state.reviewTicker || state.ticker || '');
+  if(currentTicker && storedTicker && currentTicker !== storedTicker){
+    return null;
+  }
+  const currentChartImageId = chartImageIdForReview(review);
+  const storedChartImageId = String(state.chartImageId || state.imageId || '');
+  if(currentChartImageId && storedChartImageId && currentChartImageId !== storedChartImageId){
+    return null;
+  }
+  const currentSourceTrace = buildChartImageSourceTrace(review);
+  const storedSourceTrace = state.chartImageSource && typeof state.chartImageSource === 'object'
+    ? state.chartImageSource
+    : null;
+  if(storedSourceTrace && currentSourceTrace){
+    if(reviewSourceKey(storedSourceTrace) !== reviewSourceKey(currentSourceTrace)){
+      return null;
+    }
+  }
+  const currentLifecycle = review.chartVerificationLifecycle && typeof review.chartVerificationLifecycle === 'object'
+    ? review.chartVerificationLifecycle
+    : null;
+  const storedRequestId = String(state.verificationRequestId || state.requestId || '');
+  const currentRequestId = String(currentLifecycle && currentLifecycle.requestId || '');
+  if(storedRequestId && currentRequestId && storedRequestId !== currentRequestId){
+    return null;
+  }
+  return state;
+}
+
 function reviewAnalysisUiStateForRecord(record){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
@@ -20885,6 +20936,7 @@ async function analyseSetup(ticker){
   const analysisRequestId = beginReviewAiAnalysis(ticker, prompt);
   const requestController = new AbortController();
   const requestChartImageId = chartImageIdForReview(record.review || {});
+  const requestChartImageSource = buildChartImageSourceTrace(record.review || {});
   uiState.analysisActiveRequest = {
     id:analysisRequestId,
     ticker,
@@ -20895,6 +20947,12 @@ async function analyseSetup(ticker){
   setAnalysisLoadingStage(ticker, 'Reading chart...');
   console.debug('[review-analysis] request_started', {ticker, requestId:analysisRequestId});
   logChartVerificationLifecycle('verification_started', {
+    reviewTicker:ticker,
+    verificationRequestId:analysisRequestId,
+    imageId:requestChartImageId,
+    startedAt:new Date().toISOString()
+  });
+  logChartVerificationLifecycle('ai_request_started', {
     reviewTicker:ticker,
     verificationRequestId:analysisRequestId,
     imageId:requestChartImageId,
@@ -20936,9 +20994,62 @@ async function analyseSetup(ticker){
     card.lastError = '';
     card.lastResponse = '';
     card.lastAnalysis = null;
+    const preRequestAnalysisState = getReviewAnalysisState(record);
     setReviewAnalysisState(record, {raw:'', normalized:null, error:''});
     uiState.responseOpen[ticker] = true;
+    const preAiSimplifiedState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+    const preAiTraceExists = record.review && record.review.chartVerificationTrace && typeof record.review.chartVerificationTrace === 'object'
+      ? record.review.chartVerificationTrace
+      : null;
+    const preAiChartTrace = preAiTraceExists && preAiTraceExists.trace && preAiTraceExists.chartImageId === requestChartImageId
+      ? preAiTraceExists.trace
+      : buildChartConsistencyTrace(record, preAiSimplifiedState, {
+        normalizedAnalysis:(preRequestAnalysisState && preRequestAnalysisState.normalizedAnalysis) || null,
+        derivedStates:analysisDerivedStatesFromRecord(record)
+      });
+    record.review.chartVerificationTrace = cloneData({
+      ticker:record.ticker,
+      reviewTicker:record.ticker,
+      chartImageId:requestChartImageId,
+      imageId:requestChartImageId,
+      verificationRequestId:analysisRequestId,
+      requestId:analysisRequestId,
+      chartImageSource:requestChartImageSource,
+      createdAt:new Date().toISOString(),
+      trace:preAiChartTrace
+    }, null);
+    record.review.chartVerificationLifecycle = {
+      phase:'deterministic_ready',
+      ticker:record.ticker,
+      reviewTicker:record.ticker,
+      chartImageId:requestChartImageId,
+      imageId:requestChartImageId,
+      requestId:analysisRequestId,
+      chartImageSource:requestChartImageSource,
+      updatedAt:new Date().toISOString()
+    };
+    logChartVerificationLifecycle('deterministic_started', {
+      reviewTicker:ticker,
+      verificationRequestId:analysisRequestId,
+      imageId:requestChartImageId,
+      hadStoredTrace:!!preAiTraceExists
+    });
+    logChartVerificationLifecycle('deterministic_ready', {
+      reviewTicker:ticker,
+      verificationRequestId:analysisRequestId,
+      imageId:requestChartImageId,
+      deterministicStatus:preAiChartTrace && preAiChartTrace.status || '',
+      aiAnalysisSuppressed:preAiChartTrace && preAiChartTrace.aiAnalysisSuppressed === true,
+      suppressionReason:preAiChartTrace && preAiChartTrace.suppressionReason || ''
+    });
     renderCards();
+    logChartVerificationLifecycle('deterministic_render_committed', {
+      reviewTicker:ticker,
+      verificationRequestId:analysisRequestId,
+      imageId:requestChartImageId,
+      renderedStatus:preAiChartTrace && preAiChartTrace.status || '',
+      renderedAt:new Date().toISOString()
+    });
     const endpoints = analysisEndpoints();
     if(!endpoints.length){
       card.lastError = 'AI analysis failed: add an AI endpoint URL first.';
@@ -21026,16 +21137,14 @@ async function analyseSetup(ticker){
       if(!data || !data.analysis || typeof data.analysis !== 'object'){
         throw new Error('The AI endpoint returned no analysis payload.');
       }
-      setScannerCardClickTrace(ticker, 'analyseSetup.success', 'analysis_received');
-      console.debug('[review-analysis] request_completed', {ticker, requestId:analysisRequestId});
-      logChartVerificationLifecycle('verification_completed', {
+      logChartVerificationLifecycle('ai_response_received', {
         reviewTicker:ticker,
         verificationRequestId:analysisRequestId,
         imageId:requestChartImageId,
-        extractedTicker:data.analysis && data.analysis.visible_ticker || '',
-        staleResponseRejected:false,
-        completedAt:new Date().toISOString()
+        receivedAt:new Date().toISOString()
       });
+      setScannerCardClickTrace(ticker, 'analyseSetup.success', 'analysis_received');
+      console.debug('[review-analysis] request_completed', {ticker, requestId:analysisRequestId});
       logAnalysisDebug('RAW_ANALYSIS_RESULT', data.analysis || null);
       logAnalysisDebug('PREVIOUS_TICKER_STATE', previousTickerState);
       const analysis = normalizeAnalysisResult(data.analysis, previousTickerState);
@@ -21050,6 +21159,41 @@ async function analyseSetup(ticker){
         card.stop = analysis.stop || '';
         card.target = analysis.first_target || '';
       }
+      const mergedChartTrace = buildChartConsistencyTrace(record, simplifiedReviewState, {
+        normalizedAnalysis:analysis,
+        derivedStates:analysisDerivedStatesFromRecord(record)
+      });
+      if(!record.review.chartVerificationLifecycle || record.review.chartVerificationLifecycle.requestId === analysisRequestId){
+        const mergedChartImageSource = buildChartImageSourceTrace(record.review || {});
+        record.review.chartVerificationTrace = cloneData({
+          ticker:record.ticker,
+          reviewTicker:record.ticker,
+          chartImageId:requestChartImageId,
+          imageId:requestChartImageId,
+          verificationRequestId:analysisRequestId,
+          requestId:analysisRequestId,
+          chartImageSource:mergedChartImageSource,
+          createdAt:new Date().toISOString(),
+          trace:mergedChartTrace
+        }, null);
+        record.review.chartVerificationLifecycle = {
+          phase:'merged',
+          ticker:record.ticker,
+          reviewTicker:record.ticker,
+          chartImageId:requestChartImageId,
+          imageId:requestChartImageId,
+          requestId:analysisRequestId,
+          chartImageSource:mergedChartImageSource,
+          updatedAt:new Date().toISOString()
+        };
+      }
+      logChartVerificationLifecycle('merged_render_committed', {
+        reviewTicker:ticker,
+        verificationRequestId:analysisRequestId,
+        imageId:requestChartImageId,
+        mergedStatus:mergedChartTrace.status || '',
+        renderedAt:new Date().toISOString()
+      });
       setReviewAnalysisState(record, {
         prompt,
         raw:card.lastResponse,
@@ -21104,6 +21248,14 @@ async function analyseSetup(ticker){
         force:true
       });
       completeReviewAiAnalysis(ticker, analysisRequestId);
+      logChartVerificationLifecycle('verification_completed', {
+        reviewTicker:ticker,
+        verificationRequestId:analysisRequestId,
+        imageId:requestChartImageId,
+        extractedTicker:data.analysis && data.analysis.visible_ticker || '',
+        staleResponseRejected:false,
+        completedAt:new Date().toISOString()
+      });
       commitTickerState();
       // renderCards() in outer finally re-renders the review workspace and syncs planner fields.
     }catch(err){
@@ -21181,6 +21333,19 @@ async function analyseSetup(ticker){
     }
     requestWatchlistRender({includeFocusQueue:true});
     renderCards();
+    if(ownsActiveRequest){
+      const finalAnalysisState = getReviewAnalysisState(getTickerRecord(ticker) || {});
+      const finalChartState = getReviewChartVerificationState(getTickerRecord(ticker) || {});
+      logChartVerificationLifecycle('final_merged_state_rendered', {
+        reviewTicker:ticker,
+        verificationRequestId:analysisRequestId,
+        imageId:requestChartImageId,
+        normalizedAnalysisExists:!!(finalAnalysisState && finalAnalysisState.normalizedAnalysis),
+        chartStateAvailable:!!finalChartState,
+        aiRuntimeStatus:getReviewAiRuntime().status || '',
+        renderedAt:new Date().toISOString()
+      });
+    }
   }
 }
 
@@ -24549,18 +24714,21 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     .length;
   const sourceIsImageDerived = value => /\b(image|ocr|vision|visible|chart|extracted|screen|screenshot)\b/.test(String(value || ''));
   const extractionMethodHasEvidence = !!(extractionMethodUsed && !/^none$/i.test(extractionMethodUsed));
+  const uiHeaderEvidenceSignals = [];
+  const chartNativeEvidenceSignals = [];
   const hasImageDerivedTicker = !!(visibleTicker && (sourceIsImageDerived(visibleTickerSource) || extractionMethodHasEvidence || visibleNumericLabelsCount > 0 || visibleMaValuesCount > 0 || maLineEvidenceCount > 0 || maVisibilityAssessedCount > 0));
   const hasImageDerivedPrice = !!(visiblePrice !== null && (sourceIsImageDerived(visiblePriceSource) || visibleNumericLabelsCount > 0 || visibleMaValuesCount > 0 || extractionMethodHasEvidence || maVisibilityAssessedCount > 0));
   const hasImageDerivedTimeframe = !!(visibleTimeframe && (sourceIsImageDerived(visibleTimeframeSource) || extractionMethodHasEvidence || maVisibilityAssessedCount > 0));
-  const evidenceSignals = [];
-  if(hasImageDerivedTicker) evidenceSignals.push('image_derived_ticker');
-  if(hasImageDerivedPrice) evidenceSignals.push('image_derived_price');
-  if(hasImageDerivedTimeframe) evidenceSignals.push('image_derived_timeframe');
-  if(visibleNumericLabelsCount > 0) evidenceSignals.push('visible_numeric_labels');
-  if(visibleMaValuesCount > 0 || maLineEvidenceCount > 0) evidenceSignals.push('ma_evidence');
-  if(maVisibilityAssessedCount > 0) evidenceSignals.push('ma_visibility_assessed');
-  if(extractionMethodHasEvidence) evidenceSignals.push('extraction_method');
-  const independentImageEvidence = evidenceSignals.length >= 2;
+  if(hasImageDerivedTicker) uiHeaderEvidenceSignals.push('image_derived_ticker');
+  if(hasImageDerivedPrice) uiHeaderEvidenceSignals.push('image_derived_price');
+  if(hasImageDerivedTimeframe) uiHeaderEvidenceSignals.push('image_derived_timeframe');
+  if(visibleNumericLabelsCount > 0) uiHeaderEvidenceSignals.push('visible_numeric_labels');
+  if(extractionMethodHasEvidence) uiHeaderEvidenceSignals.push('extraction_method');
+  if(safeAnalysis.ma20_visible === true || safeAnalysis.ma50_visible === true || safeAnalysis.ma200_visible === true || safeAnalysis.ma200_line_detected === true) chartNativeEvidenceSignals.push('indicator_confirmation');
+  if(visibleMaValuesCount > 0 || maLineEvidenceCount > 0) chartNativeEvidenceSignals.push('indicator_value_extraction');
+  const evidenceSignals = [...uiHeaderEvidenceSignals, ...chartNativeEvidenceSignals];
+  const independentImageEvidence = uiHeaderEvidenceSignals.length >= 2;
+  const chartNativeEvidencePresent = chartNativeEvidenceSignals.length > 0;
   const contextMirroringSuspected = !!(
     visibleTicker
     && expectedTicker
@@ -24649,6 +24817,9 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     independentImageEvidence,
     evidenceQuality:independentImageEvidence ? 'independent' : 'weak',
     evidenceSignals,
+    uiHeaderEvidenceSignals,
+    chartNativeEvidenceSignals,
+    chartNativeEvidencePresent,
     visibleNumericLabelsCount,
     maEvidenceCount:visibleMaValuesCount + maLineEvidenceCount + maVisibilityAssessedCount,
     hasImageDerivedTicker,
@@ -24746,6 +24917,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     .filter(item => ['verified','likely_match'].includes(item.status))
     .map(item => item.label);
   const allIndicatorsMatched = finalVerifiedLikeIndicators.length === 3;
+  const chartNativeEvidencePresent = indicatorStates.some(item => ['verified','likely_match','partial','inferred'].includes(item.status));
   const hasExtractedEvidence = !!(
     visibleTicker
     || visibleTimeframe
@@ -24823,11 +24995,20 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     if(ma20Ok === false) evidence.push(`20MA visible ${comparisonMa20}; trusted ${trustedMa20}.`);
     if(ma50Ok === false) evidence.push(`50MA visible ${comparisonMa50}; trusted ${trustedMa50}.`);
     if(ma200Ok === false) evidence.push(`200MA visible ${comparisonMa200}; trusted ${trustedMa200}.`);
+  }else if(fastPassClearMatch && visibleTicker === expectedTicker && visiblePrice !== null && priceOk !== false && !chartNativeEvidencePresent){
+    status = 'partial_context_unverified_chart';
+    severity = 'warning';
+    title = 'Chart partially verified';
+    summary = 'Ticker and price match trusted values, but chart-native indicator confirmation is missing or contradictory.';
+    if(toleranceConfig.staleDataPossible){
+      summary += ' Small differences can occur while the market is open because chart data may update faster than app data.';
+    }
+    evidence.push('No chart-native indicator confirmation was extracted from the uploaded image.');
   }else if(criticalMissing.length){
     status = 'uncertain_missing_context';
     title = 'Chart context uncertain';
     summary = 'The uploaded image does not show enough ticker/timeframe/price information for deterministic verification.';
-    if(fastPassClearMatch && visibleTicker === expectedTicker && visiblePrice !== null && priceOk !== false){
+    if(fastPassClearMatch && visibleTicker === expectedTicker && visiblePrice !== null && priceOk !== false && chartNativeEvidencePresent){
       status = 'likely_match';
       severity = 'info';
       title = 'Chart mostly verified';
@@ -24906,8 +25087,12 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     finalMissingIndicators:missingIndicators,
     summaryDerivedFromFinalState:true,
     mismatchSeverity:status === 'strong_mismatch' ? 'strong_mismatch' : priceMismatchSeverity,
-    aiAnalysisSuppressed:status === 'strong_mismatch',
-    suppressionReason:status === 'strong_mismatch' ? 'Strong chart mismatch detected; technical AI commentary may be unreliable.' : '',
+    aiAnalysisSuppressed:['strong_mismatch', 'partial_context_unverified_chart'].includes(status),
+    suppressionReason:status === 'strong_mismatch'
+      ? 'Strong chart mismatch detected; technical AI commentary may be unreliable.'
+      : (status === 'partial_context_unverified_chart'
+        ? 'Chart context was not independently verified by chart-native evidence; technical AI commentary may be unreliable.'
+        : ''),
     missingIndicators,
     partialIndicators,
     likelyMatchedIndicators,
@@ -25098,6 +25283,9 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       priceDeltaPercent:fastPass.priceDeltaPercent,
       evidenceQuality:fastPass.evidenceQuality,
       independentImageEvidence:fastPass.independentImageEvidence,
+      uiHeaderEvidenceSignals:fastPass.uiHeaderEvidenceSignals,
+      chartNativeEvidenceSignals:fastPass.chartNativeEvidenceSignals,
+      chartNativeEvidencePresent:fastPass.chartNativeEvidencePresent,
       evidenceSignals:fastPass.evidenceSignals,
       contextMirroringSuspected:fastPass.contextMirroringSuspected,
       clearMatchRejectedReason:fastPass.clearMatchRejectedReason,
@@ -25385,7 +25573,7 @@ function renderChartConsistencyTrace(trace){
   const inferredIndicatorsRaw = Array.isArray(safe.inferredIndicators) ? safe.inferredIndicators : [];
   const missingIndicatorsRaw = Array.isArray(safe.missingIndicators) ? safe.missingIndicators : [];
   const summaryLines = [];
-  if(['verified_match','likely_match','indicator_partial','indicator_incomplete','indicator_missing'].includes(String(safe.status || ''))){
+  if(['verified_match','likely_match','indicator_partial','indicator_incomplete','indicator_missing','partial_context_unverified_chart'].includes(String(safe.status || ''))){
     if(String(safe.status || '') !== 'indicator_missing' && facts && facts.visible_ticker && facts.visible_timeframe){
       summaryLines.push('Ticker and timeframe match.');
     }
@@ -25408,6 +25596,8 @@ function renderChartConsistencyTrace(trace){
       summaryLines.push('Values are within expected market tolerance.');
     }else if(['indicator_partial','indicator_incomplete','indicator_missing'].includes(String(safe.status || ''))){
       summaryLines.push('Some indicators could not be confirmed from the uploaded image.');
+    }else if(String(safe.status || '') === 'partial_context_unverified_chart'){
+      summaryLines.push('Ticker and price match, but chart-native confirmation is missing.');
     }
   }else if(String(safe.status || '') === 'strong_mismatch'){
     summaryLines.push(`The uploaded chart is unlikely to match ${(trusted && trusted.ticker) || 'the selected ticker'}.`);
@@ -26314,10 +26504,13 @@ function renderReviewWorkspace(options = {}){
   const calcNoteText = planUI.showPlan
     ? 'Enter planned entry, stop, and first target to calculate size.'
     : ((primaryPlanMessage && primaryPlanMessage === tradeStatusText.line1) ? '' : primaryPlanMessage);
-  const chartConsistencyTrace = buildChartConsistencyTrace(record, simplifiedState, {
-    normalizedAnalysis:analysisState.normalizedAnalysis,
-    derivedStates
-  });
+  const storedChartVerificationState = getReviewChartVerificationState(record);
+  const chartConsistencyTrace = storedChartVerificationState && storedChartVerificationState.trace
+    ? storedChartVerificationState.trace
+    : buildChartConsistencyTrace(record, simplifiedState, {
+      normalizedAnalysis:analysisState.normalizedAnalysis,
+      derivedStates
+    });
   if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info && chartConsistencyTrace.visible){
     console.info('[CHART_CONSISTENCY_TRACE]', {
       ticker:record.ticker,
@@ -26732,6 +26925,8 @@ function handleChartSelection(ticker, file){
         activeRequest.controller.abort('chart_replaced');
       }catch(_error){}
     }
+    record.review.chartVerificationTrace = null;
+    record.review.chartVerificationLifecycle = null;
     record.review.cardOpen = true;
     record.review.chartRef = {
       name:file.name,
