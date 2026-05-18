@@ -9021,11 +9021,6 @@ function restoreTrackUiState(snapshot = null){
     return;
   }
   if(typeof window.requestAnimationFrame === 'function'){
-    traceScrollEvent('delayed-scroll:scheduled', {
-      caller:'restoreTrackUiState',
-      label:'track:scroll-restore',
-      savedTrackScrollY:targetScrollY
-    });
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => restoreScroll(1)));
   }else{
     setTimeout(() => restoreScroll(1), 0);

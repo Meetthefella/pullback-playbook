@@ -20,7 +20,6 @@
     let pendingSuppressedTrackScrollSave = null;
     let lastTrackScrollTraceAt = 0;
     let lastSuppressedTrackScrollTraceAt = 0;
-    let postRestoreSnapApplied = false;
 
     function normalizeTab(value){
       const tab = String(value || '').trim().toLowerCase();
@@ -304,22 +303,11 @@
       uiState.trackRevealPending = pending === true;
       if(pending === true){
         document.body.setAttribute('data-pending-workspace', 'track');
-        traceScrollEvent('tab:visual-hold', {
-          caller:'setTrackRevealPending',
-          pendingTab:'track',
-          visibleSurface:uiState.visibleWorkspaceTab || normalizeTab(uiState.activeWorkspaceTab || ''),
-          reason
-        });
       }else{
         document.body.removeAttribute('data-pending-workspace');
         uiState.visibleWorkspaceTab = normalizeTab(uiState.activeWorkspaceTab || 'track');
         syncWorkspaceVisibility(uiState.activeWorkspaceTab || 'track', '');
         syncWorkspaceTabs(uiState.activeWorkspaceTab || 'track');
-        traceScrollEvent('tab:visual-swap-after-restore', {
-          caller:'setTrackRevealPending',
-          visibleTab:'track',
-          reason
-        });
       }
       traceScrollEvent(revealTraceLabelForReason(reason, pending === true), {
         caller:'setTrackRevealPending',
@@ -640,7 +628,6 @@
       const concealUntilRestored = restoreTarget > 24;
       const restoreRunId = (Number(uiState.trackRestoreRunId || 0) + 1);
       uiState.trackRestoreRunId = restoreRunId;
-      uiState.trackRevealCompleted = false;
       uiState.trackRestoreCompletionCommitted = false;
       uiState.trackRestoreInProgress = true;
       if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = true;
@@ -697,7 +684,6 @@
       const finalizeTrackRestore = (finalReason, details = {}) => {
         if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
         uiState.trackRestoreCompletionCommitted = true;
-        uiState.trackRevealCompleted = true;
         clearTimeout(revealFallback);
         const actualFinalScrollY = currentScrollY();
         const finalMetrics = trackRestoreLayoutMetrics(restoreTarget);
@@ -709,7 +695,6 @@
         if(typeof window !== 'undefined') window.__ppTrackRestoreInProgress = false;
         uiState.postTrackRestoreTarget = restoreTarget;
         uiState.postTrackRestoreGuardUntil = nowMs() + 500;
-        postRestoreSnapApplied = false;
         suppressScrollMemory('track_restore_post_guard', 650);
         setSmoothScrollDisabled(false, finalReason);
         if(concealUntilRestored) clearTrackRevealPending(finalReason);
@@ -785,12 +770,6 @@
       };
       const scheduleVerify = () => {
         if(typeof window === 'undefined') return;
-        traceScrollEvent('delayed-scroll:scheduled', {
-          caller:'scheduleTrackRestore',
-          label:'track:scroll-restore-verify',
-          restoreTarget,
-          reason
-        });
         setTimeout(() => {
           if(uiState.trackRestoreRunId !== restoreRunId || uiState.trackRestoreCompletionCommitted === true) return;
           if(normalizeTab(uiState.activeWorkspaceTab || '') !== 'track'){
@@ -870,12 +849,6 @@
           ...metrics
         });
         if(attempt === 1 && Math.abs(after - restoreTarget) > 24){
-          traceScrollEvent('delayed-scroll:scheduled', {
-            caller:'scheduleTrackRestore',
-            label:'track:scroll-restore-retry',
-            restoreTarget,
-            restoreActualAfter:after
-          });
           if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
             window.requestAnimationFrame(() => window.requestAnimationFrame(() => runRestore(2)));
           }else{
@@ -885,13 +858,6 @@
           scheduleVerify();
         }
       };
-      traceScrollEvent('delayed-scroll:scheduled', {
-        caller:'scheduleTrackRestore',
-        label:'track:scroll-restore',
-        restoreTarget,
-        reason,
-        duplicateRestoreSuppressed:options.immediate === true
-      });
       if(options.immediate === true){
         runRestore(1);
         return;
@@ -1028,7 +994,7 @@
       if(typeof history !== 'undefined' && 'scrollRestoration' in history){
         try{
           history.scrollRestoration = 'manual';
-          traceScrollEvent('scroll-driver:hash', {
+          traceScrollEvent('scroll-driver:history-scrollRestoration', {
             caller:'init',
             reason:'history_scroll_restoration_manual',
             restoreInProgress:uiState.trackRestoreInProgress === true,
@@ -1073,12 +1039,9 @@
                 delta:nextScrollY - restoreTarget,
                 elapsedSinceFinalize,
                 activeDriver:window.__ppRecentScrollAction || null,
-                snapBackApplied:postRestoreSnapApplied !== true
+                snapBackApplied:true
               });
-              if(postRestoreSnapApplied !== true){
-                postRestoreSnapApplied = true;
-                scrollWindowTo(restoreTarget, 'auto', 'track_restore_post_guard_snap');
-              }
+              scrollWindowTo(restoreTarget, 'auto', 'track_restore_post_guard_snap');
             }
           }
           if(window.PP_SCROLL_TRACE === true && ['track','review'].includes(normalizeTab(uiState.activeWorkspaceTab || '')) && Math.abs(delta) > 80 && (now - lastObservedScrollAt) <= 250){
