@@ -2021,6 +2021,10 @@ body.debug-advanced .advanced-debug-only{
   background:rgba(245,158,11,.12);
   color:rgba(255,214,146,.92);
 }
+.ai-summary-message--success{
+  background:rgba(96,165,250,.12);
+  color:rgba(191,219,254,.96);
+}
 .ai-summary-message--failed{
   background:rgba(245,158,11,.12);
   color:rgba(255,214,146,.96);
@@ -2296,6 +2300,30 @@ body.debug-advanced .advanced-debug-only{
 }
 .dropzone input[type=file]{display:none}
 .thumbwrap{display:flex;align-items:center;gap:10px;margin-top:10px}
+.chartthumbbutton{
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  text-align:left;
+  background:transparent;
+  border:0;
+  padding:0;
+  color:inherit;
+  cursor:pointer;
+}
+.chartthumbbutton .thumb{
+  width:88px;
+  max-width:88px;
+  height:88px;
+  flex:0 0 88px;
+  aspect-ratio:1 / 1;
+}
+.chartthumbbutton:focus-visible{
+  outline:2px solid rgba(78,222,163,.8);
+  outline-offset:3px;
+  border-radius:14px;
+}
 .thumb{
   width:88px;
   height:88px;
@@ -2800,6 +2828,72 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   font-size:.8rem;
 }
 .reviewchartpanel .thumb{width:100%;max-width:220px;height:auto;aspect-ratio:4/3}
+.review-chart-lightbox{
+  position:fixed;
+  inset:0;
+  z-index:1200;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(5,10,18,.88);
+  backdrop-filter:blur(6px);
+}
+.review-chart-lightbox[hidden]{display:none}
+.review-chart-lightbox__backdrop{
+  position:absolute;
+  inset:0;
+}
+.review-chart-lightbox__panel{
+  position:relative;
+  z-index:1;
+  width:min(96vw,1200px);
+  max-height:94vh;
+  margin:20px;
+  padding:16px;
+  border-radius:20px;
+  background:#0d1522;
+  box-shadow:0 24px 80px rgba(0,0,0,.5);
+  border:1px solid rgba(159,176,198,.12);
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.review-chart-lightbox__close{
+  align-self:flex-end;
+  background:rgba(16,24,42,.88);
+  color:var(--text-primary);
+  border:1px solid rgba(159,176,198,.14);
+  border-radius:999px;
+  padding:8px 12px;
+}
+.review-chart-lightbox__content{
+  overflow:auto;
+  display:flex;
+  justify-content:center;
+}
+.review-chart-lightbox__figure{
+  width:100%;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  align-items:center;
+}
+.review-chart-lightbox__image{
+  width:100%;
+  max-width:100%;
+  max-height:78vh;
+  object-fit:contain;
+  border-radius:16px;
+  background:#09101d;
+  box-shadow:inset 0 0 0 1px rgba(159,176,198,.09);
+}
+.review-chart-lightbox__caption{
+  width:100%;
+  max-width:1200px;
+}
+.review-chart-lightbox-open{
+  overflow:hidden;
+}
 .suggestionitem{
   display:flex;
   justify-content:space-between;
