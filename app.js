@@ -22925,6 +22925,72 @@ function openRankedResultInReview(ticker, options = {}){
   });
 }
 
+function resumeSavedReviewTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_RESUME_CLICK]', {
+      requestedTicker:symbol,
+      activeReviewTicker:activeReviewTicker() || '',
+      pendingReviewTicker:pendingReviewTicker() || ''
+    });
+  }
+  if(!symbol){
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[REVIEW_RESUME_LOAD_BLOCKED]', {
+        requestedTicker:'',
+        reason:'invalid_ticker'
+      });
+    }
+    return;
+  }
+  const record = getTickerRecord(symbol);
+  if(!record || normalizeTicker(record.ticker || '') !== symbol){
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[REVIEW_RESUME_RECORD_MISSING]', {
+        requestedTicker:symbol,
+        activeReviewTicker:activeReviewTicker() || '',
+        pendingReviewTicker:pendingReviewTicker() || '',
+        currentRecordTicker:record && record.ticker || ''
+      });
+      console.warn('[REVIEW_RESUME_LOAD_BLOCKED]', {
+        requestedTicker:symbol,
+        reason:'missing_saved_review_record'
+      });
+    }
+    uiState.reviewPendingLoadError = {
+      ticker:symbol,
+      reviewRequestToken:'',
+      message:`Saved review for ${symbol} is missing or unavailable. Remove it and reopen the ticker.`,
+      setAt:new Date().toISOString()
+    };
+    setLiveProcessStatus('error', uiState.reviewPendingLoadError.message, {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
+    renderReviewWorkspace({source:'review_resume_missing_record', requestedTicker:symbol});
+    return;
+  }
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_RESUME_RECORD_FOUND]', {
+      requestedTicker:symbol,
+      currentRecordTicker:record.ticker || '',
+      activeReviewTicker:activeReviewTicker() || '',
+      pendingReviewTicker:pendingReviewTicker() || ''
+    });
+    console.info('[REVIEW_RESUME_LOAD_STARTED]', {
+      requestedTicker:symbol,
+      activeReviewTicker:activeReviewTicker() || '',
+      pendingReviewTicker:pendingReviewTicker() || '',
+      reviewLoadToken:Number(uiState.reviewLoadToken || 0)
+    });
+  }
+  uiState.reviewPendingLoadError = null;
+  setActiveReviewTicker(symbol);
+  loadTickerIntoReview(symbol, {
+    includeInScannerUniverse:false,
+    recompute:false,
+    sourceContext:'review_resume',
+    forceNow:true
+  });
+}
+
 function reviewWatchlistTicker(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
@@ -26950,6 +27016,58 @@ function renderReviewWorkspace(options = {}){
   const ticker = activeReviewTicker();
   const pendingTicker = pendingReviewTicker();
   const statusText = String(uiState.liveProcessStatus && uiState.liveProcessStatus.message || '');
+  const pendingLoadError = uiState.reviewPendingLoadError && typeof uiState.reviewPendingLoadError === 'object'
+    ? uiState.reviewPendingLoadError
+    : null;
+  const pendingLoadErrorTicker = normalizeTicker(pendingLoadError && pendingLoadError.ticker || '');
+  const terminalErrorMatchesReview = !!pendingLoadError && !!pendingLoadErrorTicker && (
+    pendingLoadErrorTicker === requestedTickerForRender
+    || pendingLoadErrorTicker === ticker
+    || (!requestedTickerForRender && !ticker)
+  );
+  const renderTerminalReviewError = (reason) => {
+    const errorMessage = String(pendingLoadError && pendingLoadError.message || `Review could not load ${pendingLoadErrorTicker || requestedTickerForRender || ticker || ''}. Try again.`);
+    const errorTicker = pendingLoadErrorTicker || requestedTickerForRender || ticker || '';
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[REVIEW_ERROR_RENDER_ALLOWED]', {
+        reason,
+        requestedTicker:requestedTickerForRender || '',
+        activeTicker:ticker || '',
+        pendingTicker:pendingTicker || '',
+        pendingLoadErrorTicker,
+        statusText
+      });
+      console.info('[REVIEW_STALE_GUARD_BYPASSED_FOR_ERROR]', {
+        reason,
+        requestedTicker:requestedTickerForRender || '',
+        activeTicker:ticker || '',
+        pendingTicker:pendingTicker || '',
+        pendingLoadErrorTicker,
+        statusText
+      });
+    }
+    reviewTickerOwnershipTrace('render_terminal_error_allowed', {
+      requestedTicker:requestedTickerForRender || '',
+      renderedTicker:ticker || '',
+      currentReviewRecordTicker:errorTicker,
+      chartTicker:normalizeTicker((pendingLoadError && pendingLoadError.chartTicker) || ''),
+      statusText
+    });
+    traceReviewRenderBailout('terminal_review_error_rendered', {
+      requestedTicker:requestedTickerForRender || '',
+      renderedTicker:ticker || '',
+      pendingReviewTicker:pendingTicker || '',
+      pendingLoadErrorTicker,
+      reason,
+      statusText
+    });
+    box.innerHTML = `<div class="summary">Review could not load ${escapeHtml(errorTicker)}. Try again.</div><div class="tiny">${escapeHtml(errorMessage)}</div><div class="actions"><button class="secondary compactbutton" type="button" data-act="retry-review-load" data-ticker="${escapeHtml(errorTicker)}">Try again</button></div>`;
+    finishReviewRenderLog();
+  };
+  if(pendingLoadError && terminalErrorMatchesReview){
+    renderTerminalReviewError(String(pendingLoadError.reason || 'terminal_error'));
+    return;
+  }
   if(requestedTicker && ticker && ticker !== requestedTicker){
     const blockedRecord = getTickerRecord(requestedTicker) || null;
     reviewTickerOwnershipTrace('render_stale_record_blocked', {
@@ -26984,6 +27102,14 @@ function renderReviewWorkspace(options = {}){
       pendingReviewTicker:pendingTicker || '',
       statusText
     });
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[REVIEW_STALE_GUARD_BLOCK]', {
+        requestedTicker,
+        renderedTicker:ticker,
+        pendingReviewTicker:pendingTicker || '',
+        statusText
+      });
+    }
     box.innerHTML = `<div class="summary">Review pending: ${escapeHtml(requestedTicker)}</div><div class="tiny">Waiting for the requested review record to finish loading.</div>`;
     finishReviewRenderLog();
     return;
@@ -27022,6 +27148,14 @@ function renderReviewWorkspace(options = {}){
       pendingReviewTicker:pendingTicker,
       statusText
     });
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[REVIEW_STALE_GUARD_BLOCK]', {
+        requestedTicker:pendingTicker,
+        renderedTicker:ticker || '',
+        pendingReviewTicker:pendingTicker,
+        statusText
+      });
+    }
     box.innerHTML = `<div class="summary">Review pending: ${escapeHtml(pendingTicker)}</div><div class="tiny">Waiting for the requested review record to finish loading.</div>`;
     finishReviewRenderLog();
     return;
@@ -27034,7 +27168,7 @@ function renderReviewWorkspace(options = {}){
       });
       box.innerHTML = `<div class="summary">Resume a saved review or open a ranked result.</div><div class="actions">${savedReviewRecords.map(record => `<button class="secondary compactbutton" type="button" data-act="resume-review" data-ticker="${escapeHtml(record.ticker)}">${escapeHtml(record.ticker)}</button>`).join('')}</div>${(state.tickers || []).length ? '<a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>' : '<a class="helperbutton" href="#dailyInput">Go To Scan List</a>'}`;
       box.querySelectorAll('[data-act="resume-review"]').forEach(button => {
-        button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '', {includeInScannerUniverse:false});
+        button.onclick = () => resumeSavedReviewTicker(button.getAttribute('data-ticker') || '');
       });
       finishReviewRenderLog();
       return;
@@ -27077,9 +27211,6 @@ function renderReviewWorkspace(options = {}){
     finishReviewRenderLog();
     return;
   }
-  const pendingLoadError = uiState.reviewPendingLoadError && typeof uiState.reviewPendingLoadError === 'object'
-    ? uiState.reviewPendingLoadError
-    : null;
   if(pendingLoadError && normalizeTicker(pendingLoadError.ticker || '') === ticker){
     box.innerHTML = `<div class="summary">Review could not load ${escapeHtml(ticker)}. Try again.</div><div class="tiny">The requested review did not finish loading in time.</div><div class="actions"><button class="secondary compactbutton" type="button" data-act="retry-review-load" data-ticker="${escapeHtml(ticker)}">Try again</button></div>`;
     if(typeof console !== 'undefined' && console.info){
