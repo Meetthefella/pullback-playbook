@@ -8951,6 +8951,17 @@ function restoreTrackUiState(snapshot = null){
     applyTrackSectionExpandedState(section, nextExpanded);
   });
   if(activeWorkspaceTab() !== 'track') return;
+  if(typeof isTrackRestoreOrRevealPending === 'function' && isTrackRestoreOrRevealPending()){
+    if(typeof window !== 'undefined' && window.PP_SCROLL_TRACE === true){
+      traceScrollEvent('track:scroll-restore:legacy-skipped', {
+        caller:'restoreTrackUiState',
+        reason:'shell_track_restore_in_progress',
+        savedTrackScrollY:Number.isFinite(Number(window.__ppPendingTrackRestoreY)) ? Number(window.__ppPendingTrackRestoreY) : null,
+        trackRevealPending:document.body && document.body.classList.contains('track-restore-pending')
+      });
+    }
+    return;
+  }
   const pendingRestoreY = typeof window !== 'undefined' ? Number(window.__ppPendingTrackRestoreY) : Number.NaN;
   const usePendingRestore = Number.isFinite(pendingRestoreY);
   const targetScrollY = usePendingRestore ? pendingRestoreY : Number(snapshot.scrollY);
@@ -21266,7 +21277,10 @@ function chartVerificationAiSuppression(record, analysis, options = {}){
       message:'AI analysis limited. The chart could not be verified clearly enough, so technical analysis may be unreliable.'
     };
   }
-  const verification = buildDeterministicChartVerification(record, analysis);
+  const verification = buildDeterministicChartVerification(record, analysis, {
+    chartImageSource,
+    fastPass
+  });
   const hasChart = !!(chartImageSource && chartImageSource.sourceKind && chartImageSource.sourceKind !== 'none');
   const suppressForUncertainContext = verification && verification.status === 'uncertain_missing_context' && hasChart;
   if(verification && (verification.aiAnalysisSuppressed === true || suppressForUncertainContext)){
@@ -24659,10 +24673,13 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
   };
 }
 
-function buildDeterministicChartVerification(record = {}, analysis = null){
+function buildDeterministicChartVerification(record = {}, analysis = null, options = {}){
   const safeRecord = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : {};
   const marketData = safeRecord.marketData && typeof safeRecord.marketData === 'object' ? safeRecord.marketData : {};
+  const chartImageSource = options.chartImageSource && typeof options.chartImageSource === 'object'
+    ? options.chartImageSource
+    : buildChartImageSourceTrace(safeRecord.review || {});
   const expectedTicker = normaliseVisibleTicker(safeRecord.ticker || '');
   const visibleTicker = normaliseVisibleTicker(safeAnalysis.visible_ticker || '');
   const visibleTimeframe = String(safeAnalysis.visible_timeframe || '').trim();
@@ -24753,6 +24770,19 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
   if(!visibleTicker) missing.push('visible ticker');
   if(!visibleTimeframe) missing.push('visible timeframe');
   if(visiblePrice === null) missing.push('latest price');
+  const criticalMissing = missing.filter(field => field === 'visible ticker' || field === 'latest price');
+  const nonCriticalMissing = missing.filter(field => field === 'visible timeframe');
+  const suppliedFastPass = options.fastPass && typeof options.fastPass === 'object' ? options.fastPass : null;
+  const fastPass = suppliedFastPass || buildChartVerificationFastPass(safeRecord, safeAnalysis, chartImageSource);
+  const fastPassClearMatch = !!(
+    fastPass
+    && fastPass.fastStatus === 'clear_match_candidate'
+    && fastPass.independentImageEvidence === true
+    && fastPass.visibleTicker
+    && expectedTicker
+    && fastPass.visibleTicker === expectedTicker
+    && priceDetail.match === true
+  );
 
   const priceOk = priceDetail.match;
   const priceMismatchSeverity = chartVerificationPriceMismatchSeverity(priceDetail, visiblePrice, trustedPrice);
@@ -24798,10 +24828,29 @@ function buildDeterministicChartVerification(record = {}, analysis = null){
     if(ma20Ok === false) evidence.push(`20MA visible ${comparisonMa20}; trusted ${trustedMa20}.`);
     if(ma50Ok === false) evidence.push(`50MA visible ${comparisonMa50}; trusted ${trustedMa50}.`);
     if(ma200Ok === false) evidence.push(`200MA visible ${comparisonMa200}; trusted ${trustedMa200}.`);
-  }else if(missing.includes('visible ticker') || missing.includes('visible timeframe') || missing.includes('latest price')){
+  }else if(criticalMissing.length){
     status = 'uncertain_missing_context';
     title = 'Chart context uncertain';
     summary = 'The uploaded image does not show enough ticker/timeframe/price information for deterministic verification.';
+    if(fastPassClearMatch && visibleTicker === expectedTicker && visiblePrice !== null && priceOk !== false){
+      status = 'likely_match';
+      severity = 'info';
+      title = 'Chart mostly verified';
+      summary = 'Ticker and price match trusted values. Timeframe is missing or only partially visible.';
+      if(nonCriticalMissing.length || partialIndicators.length || inferredIndicators.length){
+        const partialPieces = [];
+        if(nonCriticalMissing.length) partialPieces.push('Timeframe is missing or only partially visible.');
+        if(partialIndicators.length || inferredIndicators.length){
+          partialPieces.push('Some indicator details are partial.');
+        }
+        if(partialPieces.length){
+          summary = `${summary} ${partialPieces.join(' ')}`;
+        }
+      }
+      if(toleranceConfig.staleDataPossible){
+        summary += ' Small differences can occur while the market is open because chart data may update faster than app data.';
+      }
+    }
   }else if(allIndicatorsMatched && priceOk !== false){
     status = likelyMatchedIndicators.length ? 'likely_match' : 'verified_match';
     severity = 'info';
@@ -25160,7 +25209,10 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
     };
   }
 
-  const deterministic = buildDeterministicChartVerification(safeRecord, analysis);
+    const deterministic = buildDeterministicChartVerification(safeRecord, analysis, {
+      chartImageSource,
+      fastPass
+    });
   if(deterministic.available){
     const chartContextIncomplete = deterministic.status === 'uncertain_missing_context';
     const chartSpecificFallbackEvidence = [];
@@ -25378,6 +25430,9 @@ function renderChartConsistencyTrace(trace){
     summaryLines.push('The uploaded chart may show a different ticker.');
   }else{
     summaryLines.push(safe.summary || 'The uploaded image does not show enough context to fully verify the chart.');
+  }
+  if(!summaryLines.length && safe.summary){
+    summaryLines.push(safe.summary);
   }
   const compactSummary = summaryLines.slice(0, 3).map(line => `<div>${escapeHtml(line)}</div>`).join('');
   const evidence = Array.isArray(safe.evidence) && safe.evidence.length

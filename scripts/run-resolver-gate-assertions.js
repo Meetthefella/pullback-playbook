@@ -2632,8 +2632,8 @@ function runAiContractAssertions(){
       visible_numeric_labels:[500]
     }
   );
-  if(finalUncertainSuppression.suppressed !== true || !/could not be verified clearly enough/i.test(finalUncertainSuppression.message)){
-    throw new Error('Final uncertain_missing_context chart verification must suppress normal AI commentary.');
+  if(finalUncertainSuppression.suppressed !== false || finalUncertainSuppression.reason || finalUncertainSuppression.message){
+    throw new Error('Partial chart context with matching ticker and price must not suppress normal AI commentary.');
   }
   const contextMirroringTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -2663,6 +2663,95 @@ function runAiContractAssertions(){
   );
   if(independentFastPassTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || independentFastPassTrace.debug.fastPass.independentImageEvidence !== true){
     throw new Error('Independent ticker/timeframe/price evidence must allow clear_match_candidate and full verification.');
+  }
+  const mrnaPartialTimeframeTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'MRNA',
+      visible_timeframe:'',
+      visible_latest_price:49.04,
+      visible_numeric_labels:[49.04, 48.15],
+      extraction_method_used:'ocr',
+      ma20_visible:true
+    }}} ,
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(mrnaPartialTimeframeTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || mrnaPartialTimeframeTrace.debug.fastPass.independentImageEvidence !== true){
+    throw new Error('MRNA-style independent ticker/price evidence with a missing timeframe must still reach clear_match_candidate.');
+  }
+  if(mrnaPartialTimeframeTrace.status === 'uncertain_missing_context' || /uncertain/i.test(String(mrnaPartialTimeframeTrace.title || '')) || mrnaPartialTimeframeTrace.aiAnalysisSuppressed !== false || /not independently verified/i.test(String(mrnaPartialTimeframeTrace.suppressionReason || ''))){
+    throw new Error('MRNA-style independent ticker/price evidence with a missing timeframe must render as verified/acceptable context without uncertain suppression.');
+  }
+  const mrnaToleranceDriftTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'MRNA',
+      visible_timeframe:'',
+      visible_latest_price:49.10,
+      visible_numeric_labels:[49.10, 48.15],
+      extraction_method_used:'ocr',
+      ma20_visible:true
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(mrnaToleranceDriftTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || mrnaToleranceDriftTrace.debug.fastPass.independentImageEvidence !== true || mrnaToleranceDriftTrace.status === 'uncertain_missing_context' || /uncertain/i.test(String(mrnaToleranceDriftTrace.title || '')) || mrnaToleranceDriftTrace.aiAnalysisSuppressed !== false || /not independently verified/i.test(String(mrnaToleranceDriftTrace.suppressionReason || ''))){
+    throw new Error('MRNA-style ticker/price evidence within tolerance must still render as verified/acceptable context without uncertain suppression.');
+  }
+  const mrnaPartialIndicatorTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'MRNA',
+      visible_timeframe:'',
+      visible_latest_price:49.04,
+      visible_numeric_labels:[49.04],
+      extraction_method_used:'ocr',
+      ma20_visible:true,
+      ma200_visible:true,
+      visible_ma20:48.15
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(mrnaPartialIndicatorTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || mrnaPartialIndicatorTrace.status === 'uncertain_missing_context' || /uncertain/i.test(String(mrnaPartialIndicatorTrace.title || '')) || mrnaPartialIndicatorTrace.aiAnalysisSuppressed !== false || /not independently verified/i.test(String(mrnaPartialIndicatorTrace.suppressionReason || ''))){
+    throw new Error('Missing timeframe plus a partial indicator detail must still verify when ticker and price are independently matched.');
+  }
+  const mrnaOutOfToleranceTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'MRNA',
+      visible_timeframe:'',
+      visible_latest_price:60.00,
+      visible_numeric_labels:[60.00],
+      extraction_method_used:'ocr'
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(mrnaOutOfToleranceTrace.status === 'likely_match' || mrnaOutOfToleranceTrace.aiAnalysisSuppressed === false || !/mismatch|uncertain/i.test(String(mrnaOutOfToleranceTrace.title || ''))){
+    throw new Error('Out-of-tolerance price drift must not upgrade to a verified/acceptable chart state.');
+  }
+  const mrnaMissingTickerTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_timeframe:'',
+      visible_latest_price:49.04,
+      visible_numeric_labels:[49.04],
+      extraction_method_used:'ocr'
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(mrnaMissingTickerTrace.status === 'likely_match' || mrnaMissingTickerTrace.aiAnalysisSuppressed === false || !/uncertain|missing/i.test(String(mrnaMissingTickerTrace.title || ''))){
+    throw new Error('Missing visible ticker must block the chart verification upgrade.');
+  }
+  const mrnaMissingPriceTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'MRNA',
+      visible_timeframe:'',
+      extraction_method_used:'ocr'
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(mrnaMissingPriceTrace.status === 'likely_match' || mrnaMissingPriceTrace.aiAnalysisSuppressed === false || !/uncertain|missing/i.test(String(mrnaMissingPriceTrace.title || ''))){
+    throw new Error('Missing visible price must block the chart verification upgrade.');
   }
   const indicatorMissingTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
