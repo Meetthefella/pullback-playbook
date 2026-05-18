@@ -3479,6 +3479,45 @@ function clearReviewChartImageSources(review){
   review.chartAvailable = false;
 }
 
+function confirmReviewChartMatchesCurrentTicker(ticker){
+  const symbol = normalizeTicker(ticker || '');
+  if(!symbol) return false;
+  const record = getTickerRecord(symbol);
+  if(!record || !record.review) return false;
+  const currentState = getReviewChartVerificationState(record);
+  if(!currentState) return false;
+  const currentTrace = currentState.trace && typeof currentState.trace === 'object'
+    ? currentState.trace
+    : currentState;
+  const currentStatus = String(currentTrace.status || '');
+  if(['ticker_mismatch','timeframe_mismatch','strong_mismatch','possible_mismatch','stale_state_detected'].includes(currentStatus)){
+    return false;
+  }
+  const currentImageId = chartImageIdForReview(record.review || {});
+  if(!currentImageId) return false;
+  record.review.chartVerificationTrace = cloneData({
+    ...currentState,
+    manualConfirmed:true,
+    manualConfirmedAt:new Date().toISOString(),
+    manualConfirmedTicker:symbol,
+    manualConfirmedImageId:currentImageId,
+    manualConfirmedBy:'user'
+  }, null);
+  record.review.chartVerificationLifecycle = {
+    ...(record.review.chartVerificationLifecycle || {}),
+    phase:'manually_verified',
+    ticker:symbol,
+    reviewTicker:symbol,
+    chartImageId:currentImageId,
+    imageId:currentImageId,
+    updatedAt:new Date().toISOString()
+  };
+  commitTickerState();
+  renderReviewWorkspace({source:'manual_chart_confirm'});
+  renderCards();
+  return true;
+}
+
 function appendLifecycleHistory(record, entry){
   if(!record || !entry) return;
   record.lifecycle.history = [
@@ -24468,6 +24507,8 @@ function bindReviewWorkspaceActions(record){
   if(importBtn) importBtn.onclick = () => { importLatestChart(record.ticker).catch(() => {}); };
   const openBtn = box.querySelector('[data-act="open-chart"]');
   if(openBtn) openBtn.onclick = () => openTickerChart(record.ticker);
+  const confirmChartBtn = box.querySelector('[data-act="confirm-chart-match"]');
+  if(confirmChartBtn) confirmChartBtn.onclick = () => { confirmReviewChartMatchesCurrentTicker(record.ticker); };
   const clearBtn = box.querySelector('[data-act="clear-chart"]');
   if(clearBtn){
     clearBtn.onclick = () => {
@@ -24770,12 +24811,20 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     summary = `The uploaded chart is unlikely to match ${expectedTicker}.`;
     earlyExit = true;
   }else if(visibleTimeframe && !isDailyTimeframe(visibleTimeframe)){
-    fastStatus = 'clear_mismatch';
-    status = 'timeframe_mismatch';
-    reason = 'Visible timeframe does not match the expected daily chart.';
-    title = 'Possible timeframe mismatch';
-    summary = 'The uploaded chart may not match the selected timeframe.';
-    earlyExit = true;
+    if((visibleTicker && expectedTicker && visibleTicker === expectedTicker) && visiblePrice !== null && independentImageEvidence){
+      fastStatus = 'timeframe_uncertain';
+      status = 'timeframe_uncertain';
+      reason = 'Visible timeframe is not clearly daily, but ticker and price do not contradict the selected review.';
+      title = 'Timeframe uncertain';
+      summary = 'The uploaded chart may use a different timeframe, but the ticker and price otherwise look consistent.';
+    }else{
+      fastStatus = 'clear_mismatch';
+      status = 'timeframe_mismatch';
+      reason = 'Visible timeframe does not match the expected daily chart.';
+      title = 'Possible timeframe mismatch';
+      summary = 'The uploaded chart may not match the selected timeframe.';
+      earlyExit = true;
+    }
   }else if(priceDeltaPercent !== null && priceDeltaPercent >= 0.15){
     fastStatus = 'clear_mismatch';
     status = 'strong_mismatch';
@@ -24972,10 +25021,19 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     summary = `Uploaded chart appears to show ${visibleTicker}, but this review is for ${expectedTicker}.`;
     evidence.push(summary);
   }else if(visibleTimeframe && !isDailyTimeframe(visibleTimeframe)){
-    status = 'timeframe_mismatch';
-    title = 'Timeframe mismatch';
-    summary = `Uploaded chart appears to use ${visibleTimeframe}, but this review expects a daily chart.`;
-    evidence.push(summary);
+    const tickerAndPriceMatch = visibleTicker === expectedTicker && visiblePrice !== null && priceOk !== false;
+    if(tickerAndPriceMatch){
+      status = 'partial_context_timeframe_uncertain';
+      severity = 'warning';
+      title = 'Timeframe uncertain';
+      summary = `Ticker and price match trusted values, but the visible timeframe (${visibleTimeframe}) could not be confirmed confidently.`;
+      evidence.push(`Visible timeframe ${visibleTimeframe} could not be confirmed confidently.`);
+    }else{
+      status = 'timeframe_mismatch';
+      title = 'Timeframe mismatch';
+      summary = `Uploaded chart appears to use ${visibleTimeframe}, but this review expects a daily chart.`;
+      evidence.push(summary);
+    }
   }else if(priceOk === false){
     status = priceMismatchSeverity === 'strong_mismatch'
       ? 'strong_mismatch'
@@ -24997,14 +25055,42 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     if(ma50Ok === false) evidence.push(`50MA visible ${comparisonMa50}; trusted ${trustedMa50}.`);
     if(ma200Ok === false) evidence.push(`200MA visible ${comparisonMa200}; trusted ${trustedMa200}.`);
   }else if(fastPassClearMatch && visibleTicker === expectedTicker && visiblePrice !== null && priceOk !== false && !chartNativeEvidencePresent){
-    status = 'partial_context_unverified_chart';
-    severity = 'warning';
-    title = 'Chart partially verified';
-    summary = 'Ticker and price match trusted values, but chart-native indicator confirmation is missing or contradictory.';
-    if(toleranceConfig.staleDataPossible){
-      summary += ' Small differences can occur while the market is open because chart data may update faster than app data.';
+    const aiChartMatch = analysis && String(analysis.chart_match_status || '').trim().toLowerCase() === 'match';
+    const aiChartWarning = analysis ? String(analysis.chart_match_warning || '').trim() : '';
+    const aiChartSupportsMatch = aiChartMatch && !/\b(mismatch|different|wrong|stale|unclear|uncertain|cannot verify|can't verify)\b/i.test(aiChartWarning);
+    if(aiChartSupportsMatch){
+      status = visibleTimeframe && !isDailyTimeframe(visibleTimeframe)
+        ? 'partial_context_timeframe_uncertain'
+        : 'ai_supported_match';
+      severity = 'info';
+      title = status === 'ai_supported_match' ? 'Chart supported by AI' : 'Timeframe uncertain';
+      summary = status === 'ai_supported_match'
+        ? 'Ticker and price match trusted values. AI analysis supports the chart match while chart-native confirmation remains limited.'
+        : `Ticker and price match trusted values, but the visible timeframe (${visibleTimeframe}) could not be confirmed confidently.`;
+      if(status === 'ai_supported_match' && (nonCriticalMissing.length || partialIndicators.length || inferredIndicators.length)){
+        const partialPieces = [];
+        if(nonCriticalMissing.length) partialPieces.push('Timeframe is missing or only partially visible.');
+        if(partialIndicators.length || inferredIndicators.length){
+          partialPieces.push('Some indicator details are partial.');
+        }
+        if(partialPieces.length){
+          summary = `${summary} ${partialPieces.join(' ')}`;
+        }
+      }
+      if(toleranceConfig.staleDataPossible){
+        summary += ' Small differences can occur while the market is open because chart data may update faster than app data.';
+      }
+      evidence.push('AI analysis supports the ticker/price match while chart-native confirmation remains limited.');
+    }else{
+      status = 'partial_context_unverified_chart';
+      severity = 'warning';
+      title = 'Chart partially verified';
+      summary = 'Ticker and price match trusted values, but chart-native indicator confirmation is missing or contradictory.';
+      if(toleranceConfig.staleDataPossible){
+        summary += ' Small differences can occur while the market is open because chart data may update faster than app data.';
+      }
+      evidence.push('No chart-native indicator confirmation was extracted from the uploaded image.');
     }
-    evidence.push('No chart-native indicator confirmation was extracted from the uploaded image.');
   }else if(criticalMissing.length){
     status = 'uncertain_missing_context';
     title = 'Chart context uncertain';
@@ -25075,6 +25161,29 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
   }
 
   extractionWarnings.forEach(item => evidence.push(item));
+  const manualConfirmation = safeRecord.review && typeof safeRecord.review === 'object'
+    ? safeRecord.review.chartVerificationTrace && typeof safeRecord.review.chartVerificationTrace === 'object'
+      ? safeRecord.review.chartVerificationTrace
+      : null
+    : null;
+  if(manualConfirmation && manualConfirmation.manualConfirmed === true){
+    const manualConfirmedTicker = normaliseVisibleTicker(manualConfirmation.manualConfirmedTicker || manualConfirmation.ticker || '');
+    const manualConfirmedImageId = String(manualConfirmation.manualConfirmedImageId || manualConfirmation.chartImageId || manualConfirmation.imageId || '');
+    const reviewImageIds = new Set([
+      chartImageSource && chartImageSource.imageId ? String(chartImageSource.imageId) : '',
+      chartImageIdForReview(safeRecord.review || {}),
+      safeRecord.review && safeRecord.review.chartImageOriginal && safeRecord.review.chartImageOriginal.imageId ? String(safeRecord.review.chartImageOriginal.imageId) : '',
+      safeRecord.review && safeRecord.review.chartRef && safeRecord.review.chartRef.imageId ? String(safeRecord.review.chartRef.imageId) : '',
+      safeRecord.review && safeRecord.review.chartImagePreview && safeRecord.review.chartImagePreview.imageId ? String(safeRecord.review.chartImagePreview.imageId) : ''
+    ].filter(Boolean));
+    if(manualConfirmedTicker && manualConfirmedTicker === expectedTicker && manualConfirmedImageId && reviewImageIds.has(manualConfirmedImageId) && !['ticker_mismatch','timeframe_mismatch','strong_mismatch','possible_mismatch','stale_state_detected'].includes(status)){
+      status = 'manually_verified';
+      severity = 'info';
+      title = 'Chart manually verified';
+      summary = 'You confirmed this chart matches the selected ticker for the current uploaded image.';
+      evidence.unshift('Manually confirmed by the user for the current chart image.');
+    }
+  }
   return {
     available:hasExtractedEvidence,
     status,
@@ -25088,7 +25197,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     finalMissingIndicators:missingIndicators,
     summaryDerivedFromFinalState:true,
     mismatchSeverity:status === 'strong_mismatch' ? 'strong_mismatch' : priceMismatchSeverity,
-    aiAnalysisSuppressed:['strong_mismatch', 'partial_context_unverified_chart'].includes(status),
+    aiAnalysisSuppressed:['strong_mismatch', 'partial_context_unverified_chart', 'pending_chart_native_verification'].includes(status),
     suppressionReason:status === 'strong_mismatch'
       ? 'Strong chart mismatch detected; technical AI commentary may be unreliable.'
       : (status === 'partial_context_unverified_chart'
@@ -25633,7 +25742,7 @@ function renderChartConsistencyTrace(trace){
   const inferredIndicatorsRaw = Array.isArray(safe.inferredIndicators) ? safe.inferredIndicators : [];
   const missingIndicatorsRaw = Array.isArray(safe.missingIndicators) ? safe.missingIndicators : [];
   const summaryLines = [];
-  if(['verified_match','likely_match','indicator_partial','indicator_incomplete','indicator_missing','partial_context_unverified_chart'].includes(String(safe.status || ''))){
+  if(['verified_match','likely_match','indicator_partial','indicator_incomplete','indicator_missing','partial_context_unverified_chart','ai_supported_match','manually_verified','partial_context_timeframe_uncertain'].includes(String(safe.status || ''))){
     if(String(safe.status || '') !== 'indicator_missing' && facts && facts.visible_ticker && facts.visible_timeframe){
       summaryLines.push('Ticker and timeframe match.');
     }
@@ -25654,6 +25763,12 @@ function renderChartConsistencyTrace(trace){
     }
     if(String(safe.status || '') === 'verified_match'){
       summaryLines.push('Values are within expected market tolerance.');
+    }else if(String(safe.status || '') === 'ai_supported_match'){
+      summaryLines.push('AI analysis supports the match, but chart-native confirmation is still limited.');
+    }else if(String(safe.status || '') === 'manually_verified'){
+      summaryLines.push('You manually confirmed this chart for the current image.');
+    }else if(String(safe.status || '') === 'partial_context_timeframe_uncertain'){
+      summaryLines.push('Ticker and price match, but the timeframe is uncertain.');
     }else if(['indicator_partial','indicator_incomplete','indicator_missing'].includes(String(safe.status || ''))){
       summaryLines.push('Some indicators could not be confirmed from the uploaded image.');
     }else if(String(safe.status || '') === 'partial_context_unverified_chart'){
@@ -25661,6 +25776,10 @@ function renderChartConsistencyTrace(trace){
     }
   }else if(String(safe.status || '') === 'pending_chart_native_verification'){
     summaryLines.push('Chart verification is pending chart-native confirmation.');
+  }else if(String(safe.status || '') === 'ai_supported_match'){
+    summaryLines.push('AI analysis supports the chart match, but chart-native confirmation is still limited.');
+  }else if(String(safe.status || '') === 'manually_verified'){
+    summaryLines.push('You manually confirmed this chart for the current image.');
   }else if(String(safe.status || '') === 'strong_mismatch'){
     summaryLines.push(`The uploaded chart is unlikely to match ${(trusted && trusted.ticker) || 'the selected ticker'}.`);
   }else if(String(safe.status || '') === 'possible_mismatch'){
@@ -25673,6 +25792,8 @@ function renderChartConsistencyTrace(trace){
     summaryLines.push('This can happen if chart data and app data are out of sync.');
   }else if(String(safe.status || '') === 'timeframe_mismatch'){
     summaryLines.push('The uploaded chart may not match the selected timeframe.');
+  }else if(String(safe.status || '') === 'partial_context_timeframe_uncertain'){
+    summaryLines.push('Ticker and price match, but the timeframe is uncertain.');
   }else if(String(safe.status || '') === 'ticker_mismatch'){
     summaryLines.push('The uploaded chart may show a different ticker.');
   }else{
@@ -26617,6 +26738,11 @@ function renderReviewWorkspace(options = {}){
     });
   }
   const chartConsistencyTraceMarkup = renderChartConsistencyTrace(chartConsistencyTrace);
+  const currentChartVerificationStatus = String(chartConsistencyTrace && chartConsistencyTrace.status || '');
+  const showChartManualConfirm = hasChartScreenshot && ['pending_chart_native_verification','partial_context_unverified_chart','partial_context_timeframe_uncertain','ai_supported_match'].includes(currentChartVerificationStatus);
+  const chartManualConfirmMarkup = showChartManualConfirm
+    ? `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record.ticker)}</button></div>`
+    : '';
   const aiAnalysisSuppressedByChartMismatch = chartConsistencyTrace.aiAnalysisSuppressed === true;
   const aiSuppressionText = 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
   const previewRef = (record.review.chartImagePreview && record.review.chartImagePreview.dataUrl)
@@ -26811,6 +26937,7 @@ function renderReviewWorkspace(options = {}){
         <input id="reviewChartFile" type="file" accept="image/png,image/jpeg,image/*" hidden />
         ${chartPreview}
         ${chartConsistencyTraceMarkup}
+        ${chartManualConfirmMarkup}
       </div>
     </div>
     <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(finalReviewVisualState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">

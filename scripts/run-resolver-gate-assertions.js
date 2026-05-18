@@ -2353,6 +2353,7 @@ function runAiContractAssertions(){
     'buildChartImageSourceTrace',
     'chartImageForAnalysis',
     'clearReviewChartImageSources',
+    'confirmReviewChartMatchesCurrentTicker',
     'buildDeterministicChartVerification',
     'buildChartConsistencyTrace',
     'chartVerificationAiSuppression',
@@ -2735,6 +2736,73 @@ function runAiContractAssertions(){
   }
   if(!/chart-native/i.test(String(preAiPendingTrace.suppressionReason || ''))){
     throw new Error('Pre-AI chart verification must explain that chart-native confirmation is pending.');
+  }
+  const aiSupportedMatchTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
+      visible_ticker:'MRNA',
+      visible_timeframe:'1D',
+      visible_latest_price:49.04,
+      visible_numeric_labels:[49.04],
+      extraction_method_used:'ocr',
+      chart_match_status:'match',
+      chart_match_warning:'',
+      ma20_visible:false,
+      ma50_visible:false,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(aiSupportedMatchTrace.status !== 'ai_supported_match' || aiSupportedMatchTrace.aiAnalysisSuppressed !== false || /uncertain/i.test(String(aiSupportedMatchTrace.title || ''))){
+    throw new Error('AI-supported ticker/price match must resolve out of pending without uncertain suppression.');
+  }
+  const timeframeUncertainTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
+      visible_ticker:'MRNA',
+      visible_timeframe:'monthly',
+      visible_latest_price:49.04,
+      visible_numeric_labels:[49.04],
+      extraction_method_used:'ocr',
+      chart_match_status:'match',
+      chart_match_warning:'',
+      ma20_visible:false,
+      ma50_visible:false,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(timeframeUncertainTrace.status !== 'partial_context_timeframe_uncertain' || timeframeUncertainTrace.aiAnalysisSuppressed !== false || !/timeframe/i.test(String(timeframeUncertainTrace.title || ''))){
+    throw new Error('Uncertain timeframe must be treated as partial context, not a hard mismatch.');
+  }
+  const manualConfirmRecord = {
+    ticker:'MRNA',
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'},
+      chartVerificationTrace:{
+        ticker:'MRNA',
+        reviewTicker:'MRNA',
+        chartImageId:'chart-1',
+        imageId:'chart-1',
+        chartImageSource:evidenceSandbox.buildChartImageSourceTrace({
+          chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+          chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+          chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+          chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}
+        }),
+        trace:aiSupportedMatchTrace,
+        manualConfirmed:true,
+        manualConfirmedTicker:'MRNA',
+        manualConfirmedImageId:'chart-1'
+      }
+    }
+  };
+  evidenceSandbox.clearReviewChartImageSources(manualConfirmRecord.review);
+  if(manualConfirmRecord.review.chartVerificationTrace !== null || manualConfirmRecord.review.chartVerificationLifecycle !== null){
+    throw new Error('Replacing/clearing chart sources must invalidate manual confirmation.');
   }
   const staleTickerTrace = evidenceSandbox.getReviewChartVerificationState({
     ticker:'DINO',
