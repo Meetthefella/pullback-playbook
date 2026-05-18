@@ -25501,6 +25501,36 @@ function renderReviewWorkspace(options = {}){
     className:simplifiedBadgeClass
   };
   const simplifiedActionLabel = String(simplifiedState.actionLabel || '').trim();
+  const reviewLegacyState = {
+    canonicalVerdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || '',
+    visualBucket:visualState.visualBucket || visualState.presentationBucket || globalVerdict.bucket || '',
+    tone:reviewVisualTone || visualState.tone || '',
+    badgeLabel:reviewBadgeLabel || visualState.badgeLabel || '',
+    mainBlocker:globalVerdict.main_blocker || globalVerdict.reason || visualState.reason || '',
+    planStatus:globalVerdict.plan_status || simplifiedState.planStatus || '',
+    entryGatePass:globalVerdict.entry_gate_pass,
+    nearEntryGatePass:globalVerdict.near_entry_gate_pass,
+    structureEligibility:globalVerdict.structure_eligibility || '',
+    structureState:globalVerdict.structure_state || derivedStates.structureState || '',
+    setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
+    priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
+    bounceState:globalVerdict.bounce_state || derivedStates.bounceState || ''
+  };
+  const reviewStateDivergence = collectStateDivergence(record, 'review.render', simplifiedState, reviewLegacyState, [
+    'canonicalVerdict',
+    'visualBucket',
+    'tone',
+    'badgeLabel',
+    'mainBlocker',
+    'planStatus',
+    'entryGatePass',
+    'nearEntryGatePass',
+    'structureEligibility',
+    'structureState',
+    'setupLocationState',
+    'priceabilityState',
+    'bounceState'
+  ]);
   if(typeof console !== 'undefined' && console.info){
     console.info('[SIMPLIFIED_REVIEW_STATE]', {
       ticker:simplifiedState.ticker || record.ticker,
@@ -26204,36 +26234,6 @@ function renderReviewWorkspace(options = {}){
   const capitalSimulationControls = advancedOpen
     ? `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="capital-sim-50">Simulate 50%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-65">Simulate 65%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-85">Simulate 85%</button><button class="ghost compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>`
     : '';
-  const reviewLegacyState = {
-    canonicalVerdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || '',
-    visualBucket:visualState.visualBucket || visualState.presentationBucket || globalVerdict.bucket || '',
-    tone:reviewVisualTone || visualState.tone || '',
-    badgeLabel:reviewBadgeLabel || visualState.badgeLabel || '',
-    mainBlocker:globalVerdict.main_blocker || globalVerdict.reason || visualState.reason || '',
-    planStatus:globalVerdict.plan_status || simplifiedState.planStatus || '',
-    entryGatePass:globalVerdict.entry_gate_pass,
-    nearEntryGatePass:globalVerdict.near_entry_gate_pass,
-    structureEligibility:globalVerdict.structure_eligibility || '',
-    structureState:globalVerdict.structure_state || derivedStates.structureState || '',
-    setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
-    priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
-    bounceState:globalVerdict.bounce_state || derivedStates.bounceState || ''
-  };
-  const reviewStateDivergence = collectStateDivergence(record, 'review.render', simplifiedState, reviewLegacyState, [
-    'canonicalVerdict',
-    'visualBucket',
-    'tone',
-    'badgeLabel',
-    'mainBlocker',
-    'planStatus',
-    'entryGatePass',
-    'nearEntryGatePass',
-    'structureEligibility',
-    'structureState',
-    'setupLocationState',
-    'priceabilityState',
-    'bounceState'
-  ]);
   const reviewDebugCompact = renderDebugSectionMarkup('State Health', [
     {label:'UI State Source', value:'simplified_state_pipeline'},
     {label:'ticker', value:record.ticker || '(none)'},
