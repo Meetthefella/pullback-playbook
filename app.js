@@ -26739,6 +26739,7 @@ function renderReviewWorkspace(options = {}){
   }
   const chartConsistencyTraceMarkup = renderChartConsistencyTrace(chartConsistencyTrace);
   const currentChartVerificationStatus = String(chartConsistencyTrace && chartConsistencyTrace.status || '');
+  const hasChartScreenshot = !!(record.review.chartRef && record.review.chartRef.dataUrl);
   const showChartManualConfirm = hasChartScreenshot && ['pending_chart_native_verification','partial_context_unverified_chart','partial_context_timeframe_uncertain','ai_supported_match'].includes(currentChartVerificationStatus);
   const chartManualConfirmMarkup = showChartManualConfirm
     ? `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record.ticker)}</button></div>`
@@ -26754,7 +26755,6 @@ function renderReviewWorkspace(options = {}){
   const chartGuidance = record.review.chartRef && record.review.chartRef.dataUrl
     ? ''
     : '<div class="summary" style="margin-bottom:12px"><strong>📸 Add screenshot for analysis</strong><div class="tiny" style="margin-top:6px">Open the live chart, capture a fresh screenshot, then import it to continue review.</div></div>';
-  const hasChartScreenshot = !!(record.review.chartRef && record.review.chartRef.dataUrl);
   const chartControlsFullMarkup = `<div class="workflowmenu workflowmenu-inline">
             <button class="secondary compactbutton" type="button" data-act="open-chart">Open Chart</button>
             <button class="secondary compactbutton" type="button" data-act="choose-chart">Choose Screenshot</button>
