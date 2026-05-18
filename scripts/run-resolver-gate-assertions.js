@@ -2697,6 +2697,10 @@ function runAiContractAssertions(){
   if(exactMrnaTrace.aiAnalysisSuppressed !== false || /uncertain/i.test(String(exactMrnaTrace.title || '')) || /not independently verified/i.test(String(exactMrnaTrace.suppressionReason || ''))){
     throw new Error('Exact genuine MRNA chart must not be suppressed or shown as uncertain.');
   }
+  const exactMrnaDecision = evidenceSandbox.chartVerificationUiDecision(exactMrnaTrace, 'MRNA');
+  if(exactMrnaDecision.key !== 'verified_match' || !/Chart appears to match MRNA/i.test(String(exactMrnaDecision.title || ''))){
+    throw new Error('Verified charts must map to the verified_match UI decision.');
+  }
   const storedChartTrace = evidenceSandbox.getReviewChartVerificationState({
     ticker:'MRNA',
     review:{
@@ -2737,6 +2741,10 @@ function runAiContractAssertions(){
   );
   if(['consistent','verified_match','likely_match'].includes(String(preAiPendingTrace.status || '')) || preAiPendingTrace.aiAnalysisSuppressed !== false){
     throw new Error('Pre-AI chart verification must remain a warning state before chart-native confirmation exists.');
+  }
+  const preAiPendingDecision = evidenceSandbox.chartVerificationUiDecision(preAiPendingTrace, 'MRNA');
+  if(preAiPendingDecision.key !== 'uncertain_match' || !/Verification incomplete/i.test(String(preAiPendingDecision.title || '')) || !/auto-read enough chart details/i.test(String(preAiPendingDecision.summary || ''))){
+    throw new Error('Pending chart verification must map to a softened uncertain_match decision.');
   }
   if(!['pending_chart_native_verification','partial_context_unverified_chart','uncertain_missing_context'].includes(String(preAiPendingTrace.status || ''))){
     throw new Error('Pre-AI chart verification must remain pending or partially verified until chart-native evidence exists.');
@@ -2964,6 +2972,10 @@ function runAiContractAssertions(){
   if(mrnaPartialTimeframeTrace.status === 'uncertain_missing_context' || /uncertain/i.test(String(mrnaPartialTimeframeTrace.title || '')) || mrnaPartialTimeframeTrace.aiAnalysisSuppressed !== false || String(mrnaPartialTimeframeTrace.suppressionReason || '') !== ''){
     throw new Error('MRNA-style independent ticker/price evidence with a missing timeframe must render as verified/acceptable context without uncertain suppression.');
   }
+  const mrnaPartialTimeframeDecision = evidenceSandbox.chartVerificationUiDecision(mrnaPartialTimeframeTrace, 'MRNA');
+  if(mrnaPartialTimeframeDecision.key !== 'uncertain_match' || !/Verification incomplete/i.test(String(mrnaPartialTimeframeDecision.title || ''))){
+    throw new Error('Missing-timeframe chart verification must remain an uncertain_match decision with softened wording.');
+  }
   const mrnaToleranceDriftTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'MRNA',
@@ -2978,6 +2990,10 @@ function runAiContractAssertions(){
   );
   if(mrnaToleranceDriftTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || mrnaToleranceDriftTrace.debug.fastPass.independentImageEvidence !== true || mrnaToleranceDriftTrace.status === 'uncertain_missing_context' || /uncertain/i.test(String(mrnaToleranceDriftTrace.title || '')) || mrnaToleranceDriftTrace.aiAnalysisSuppressed !== false || String(mrnaToleranceDriftTrace.suppressionReason || '') !== ''){
     throw new Error('MRNA-style ticker/price evidence within tolerance must still render as verified/acceptable context without uncertain suppression.');
+  }
+  const mrnaToleranceDriftDecision = evidenceSandbox.chartVerificationUiDecision(mrnaToleranceDriftTrace, 'MRNA');
+  if(mrnaToleranceDriftDecision.key !== 'uncertain_match' && mrnaToleranceDriftDecision.key !== 'verified_match'){
+    throw new Error('Within-tolerance chart verification must stay in a safe user-facing state.');
   }
   const mrnaPartialIndicatorTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -2995,6 +3011,10 @@ function runAiContractAssertions(){
   );
   if(mrnaPartialIndicatorTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || mrnaPartialIndicatorTrace.status === 'uncertain_missing_context' || /uncertain/i.test(String(mrnaPartialIndicatorTrace.title || '')) || mrnaPartialIndicatorTrace.aiAnalysisSuppressed !== false || String(mrnaPartialIndicatorTrace.suppressionReason || '') !== ''){
     throw new Error('Missing timeframe plus a partial indicator detail must still verify when ticker and price are independently matched.');
+  }
+  const mrnaPartialIndicatorDecision = evidenceSandbox.chartVerificationUiDecision(mrnaPartialIndicatorTrace, 'MRNA');
+  if(mrnaPartialIndicatorDecision.key !== 'uncertain_match' && mrnaPartialIndicatorDecision.key !== 'verified_match'){
+    throw new Error('Partial indicator detail should not create a mismatch-style UI decision.');
   }
   const mrnaOutOfToleranceTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -3034,6 +3054,14 @@ function runAiContractAssertions(){
   );
   if(mrnaMissingPriceTrace.status === 'likely_match' || mrnaMissingPriceTrace.aiAnalysisSuppressed !== false || !/uncertain|missing/i.test(String(mrnaMissingPriceTrace.title || ''))){
     throw new Error('Missing visible price must block the chart verification upgrade.');
+  }
+  const manualConfirmedDecision = evidenceSandbox.chartVerificationUiDecision({
+    status:'verified_match',
+    manualConfirmed:true,
+    chartUserConfirmed:true
+  }, 'MRNA');
+  if(manualConfirmedDecision.key !== 'user_confirmed_match' || !/confirmed manually/i.test(String(manualConfirmedDecision.title || ''))){
+    throw new Error('Manual confirmation must map to the user_confirmed_match UI decision.');
   }
   const indicatorMissingTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{

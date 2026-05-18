@@ -3501,6 +3501,7 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
   record.review.chartVerificationTrace = cloneData({
     ...currentState,
     manualConfirmed:true,
+    chartUserConfirmed:true,
     manualConfirmedAt:new Date().toISOString(),
     manualConfirmedTicker:symbol,
     manualConfirmedImageId:currentImageId,
@@ -3542,13 +3543,13 @@ function chartVerificationUiDecision(trace, ticker = ''){
   const status = String(safe.status || '').trim();
   const expectedTicker = normaliseVisibleTicker(ticker || (safe.trustedFacts && safe.trustedFacts.ticker) || (safe.debug && safe.debug.ticker) || '');
   const baseMatchTitle = expectedTicker ? `Chart appears to match ${expectedTicker}.` : 'Chart appears to match this review.';
-  const baseUncertainTitle = 'We could not confidently verify this chart.';
+  const baseUncertainTitle = 'Chart verification incomplete';
   const baseMismatchTitle = expectedTicker ? `Uploaded chart does not appear to match ${expectedTicker}.` : 'Uploaded chart does not appear to match this review.';
-  const manualConfirmed = safe.manualConfirmed === true || status === 'manually_verified';
+  const manualConfirmed = safe.manualConfirmed === true || safe.chartUserConfirmed === true || status === 'manually_verified';
   if(manualConfirmed){
     return {
-      key:'manually_confirmed',
-      title:expectedTicker ? `Chart manually confirmed for ${expectedTicker}.` : 'Chart manually confirmed.',
+      key:'user_confirmed_match',
+      title:expectedTicker ? `Chart confirmed manually for ${expectedTicker}.` : 'Chart confirmed manually.',
       summary:'You confirmed this chart for the current uploaded image.',
       detail:'This confirmation only applies to the current image and ticker.'
     };
@@ -3576,8 +3577,8 @@ function chartVerificationUiDecision(trace, ticker = ''){
   return {
     key:'uncertain_match',
     title:baseUncertainTitle,
-    summary:'We could not confidently verify this chart yet.',
-    detail:'Ticker or price may match, but chart verification is incomplete or timeframe context is uncertain.'
+    summary:'We could not auto-read enough chart details. Confirm manually if this is the correct chart.',
+    detail:'Technical details are available below for debugging or review.'
   };
 }
 
@@ -3585,7 +3586,7 @@ function chartDecisionClassName(decision){
   const key = String(decision && decision.key || '');
   if(key === 'verified_match') return 'ai-summary-message--success';
   if(key === 'chart_mismatch') return 'ai-summary-message--failed';
-  if(key === 'manually_confirmed') return 'ai-summary-message--success';
+  if(key === 'user_confirmed_match' || key === 'manually_confirmed') return 'ai-summary-message--success';
   return 'ai-summary-message--warning';
 }
 
@@ -25890,29 +25891,21 @@ function renderChartConsistencyTrace(trace){
   const inferredIndicatorsRaw = Array.isArray(safe.inferredIndicators) ? safe.inferredIndicators : [];
   const missingIndicatorsRaw = Array.isArray(safe.missingIndicators) ? safe.missingIndicators : [];
   const uiDecision = chartVerificationUiDecision(safe, trusted && trusted.ticker || facts && facts.visible_ticker || '');
-  const summaryLines = [uiDecision.title, uiDecision.summary];
-  if(uiDecision.detail){
-    summaryLines.push(uiDecision.detail);
-  }
+  const summaryText = uiDecision.summary || uiDecision.detail || safe.summary || '';
+  const headingText = uiDecision.title || 'Chart verification';
   if(debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
-    summaryLines.push(`Internal status: ${String(safe.status || 'unknown')}.`);
-    if(verifiedIndicators.length){
-      summaryLines.push(`Verified indicators: ${verifiedIndicators.join(', ')}.`);
-    }
-    if(partialIndicatorsRaw.length){
-      summaryLines.push(`Partial indicators: ${partialIndicatorsRaw.join(', ')}.`);
-    }
-    if(inferredIndicatorsRaw.length){
-      summaryLines.push(`Inferred indicators: ${inferredIndicatorsRaw.join(', ')}.`);
-    }
-    if(missingIndicatorsRaw.length){
-      summaryLines.push(`Missing indicators: ${missingIndicatorsRaw.join(', ')}.`);
-    }
+    console.log('[CHART_VERIFICATION_RENDER]', {
+      ticker:trusted && trusted.ticker || facts && facts.visible_ticker || safe.debug && safe.debug.ticker || '',
+      status:String(safe.status || 'unknown'),
+      renderCountForReviewPass:Number(uiState && uiState.reviewRenderPass || 0),
+      messageFields:{
+        title:uiDecision.title || '',
+        summary:uiDecision.summary || '',
+        detail:uiDecision.detail || ''
+      }
+    });
   }
-  if(!summaryLines.length && safe.summary){
-    summaryLines.push(safe.summary);
-  }
-  const compactSummary = summaryLines.slice(0, 3).map(line => `<div>${escapeHtml(line)}</div>`).join('');
+  const compactSummary = summaryText ? `<div>${escapeHtml(summaryText)}</div>` : '';
   const evidence = Array.isArray(safe.evidence) && safe.evidence.length
     ? `<ul class="tiny">${safe.evidence.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
     : '';
@@ -25945,7 +25938,7 @@ function renderChartConsistencyTrace(trace){
     : '';
   const className = chartDecisionClassName(uiDecision);
   const details = `${missing}${likelyMatchedIndicators}${partialIndicators}${inferredIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}`;
-  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(uiDecision.title || 'Chart verification')}</strong>${compactSummary}<details class="compact-details"><summary>Show details</summary>${details}</details></div>`;
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}<details class="compact-details"><summary>Show details</summary>${details}</details></div>`;
 }
 
 function renderReviewWorkspace(options = {}){
@@ -26851,11 +26844,14 @@ function renderReviewWorkspace(options = {}){
   const chartUiDecision = chartVerificationUiDecision(chartConsistencyTrace, record.ticker);
   const hasChartScreenshot = !!(record.review.chartRef && record.review.chartRef.dataUrl);
   const showChartManualActions = hasChartScreenshot && chartUiDecision.key !== 'chart_mismatch';
+  const chartManualConfirmationNote = chartUiDecision.key === 'user_confirmed_match'
+    ? `<div class="tiny goodtext" style="margin-top:6px">Chart confirmed manually for this review.</div>`
+    : '';
   const chartManualActionsMarkup = hasChartScreenshot
     ? `<div class="actions chart-verification-actions" style="margin-top:8px">
         ${showChartManualActions ? `<button class="primary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record.ticker)}</button>` : ''}
         <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">Reject and upload another chart</button>
-      </div>`
+      </div>${chartManualConfirmationNote}`
     : '';
   const aiAnalysisSuppressedByChartMismatch = chartUiDecision.key === 'chart_mismatch';
   const aiSuppressionText = 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
