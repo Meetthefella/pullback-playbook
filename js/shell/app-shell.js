@@ -849,6 +849,12 @@
           ...metrics
         });
         if(attempt === 1 && Math.abs(after - restoreTarget) > 24){
+          traceScrollEvent('delayed-scroll:scheduled', {
+            caller:'scheduleTrackRestore',
+            label:'track:scroll-restore-retry',
+            restoreTarget,
+            restoreActualAfter:after
+          });
           if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
             window.requestAnimationFrame(() => window.requestAnimationFrame(() => runRestore(2)));
           }else{
