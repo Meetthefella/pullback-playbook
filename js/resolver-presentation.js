@@ -130,6 +130,7 @@
       verdict,
       structureEligibility,
       structureState,
+      setupLocationState,
       priceabilityState,
       numericSetupScore:setupScore,
       planStatus,
@@ -166,6 +167,7 @@
     const structureState = String(details.structureState || '').trim().toLowerCase();
     const aliveStructure = structureEligibility === 'alive'
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
+    const setupLocationState = String(details.setupLocationState || '').trim().toLowerCase();
     const priceabilityState = String(details.priceabilityState || '').trim().toLowerCase();
     const priceabilityUnpriceable = priceabilityState === 'unpriceable';
     const numericSetupScore = Number.isFinite(Number(details.numericSetupScore))
@@ -182,24 +184,77 @@
     const noReclaimEvidence = reclaimSignalCount === 0 || below50WithoutReclaim;
     const bounceState = String(details.bounceState || '').trim().toLowerCase();
     const promotionBlocked = details.promotionBlocked === true;
+    const hardWeakTokens = new Set([
+      'below50_no_reclaim',
+      'no_reclaim_signals',
+      'invalid_rr',
+      'no_valid_invalidation',
+      'bounce_attempt_only',
+      'bounce_early',
+      'promotion_blocked'
+    ]);
+    const weakWatchTriggerMatches = [];
+    if(priceabilityUnpriceable) weakWatchTriggerMatches.push('unpriceable');
+    if(lowScore) weakWatchTriggerMatches.push('low_score');
+    if(planStatus === 'missing' || !planValid) weakWatchTriggerMatches.push('missing_plan');
+    if(!rrOk || (resolvedRR !== null && resolvedRR < 2)) weakWatchTriggerMatches.push('invalid_rr');
+    if(hasClearInvalidationLevel === false) weakWatchTriggerMatches.push('no_valid_invalidation');
+    if(below50WithoutReclaim) weakWatchTriggerMatches.push('below50_no_reclaim');
+    else if(noReclaimEvidence) weakWatchTriggerMatches.push('no_reclaim_signals');
+    if(bounceState === 'attempt') weakWatchTriggerMatches.push('bounce_attempt_only');
+    if(bounceState === 'early') weakWatchTriggerMatches.push('bounce_early');
+    if(promotionBlocked) weakWatchTriggerMatches.push('promotion_blocked');
 
     const triggerTokens = [];
     if(priceabilityUnpriceable) triggerTokens.push('unpriceable');
     if(lowScore) triggerTokens.push('low_score');
     if(planStatus === 'missing' || !planValid) triggerTokens.push('missing_plan');
-    else if(!rrOk || (resolvedRR !== null && resolvedRR < 2)) triggerTokens.push('invalid_rr');
-    else if(hasClearInvalidationLevel === false) triggerTokens.push('no_valid_invalidation');
-    else if(promotionBlocked) triggerTokens.push('promotion_blocked');
+    if(!rrOk || (resolvedRR !== null && resolvedRR < 2)) triggerTokens.push('invalid_rr');
+    if(hasClearInvalidationLevel === false) triggerTokens.push('no_valid_invalidation');
     if(below50WithoutReclaim) triggerTokens.push('below50_no_reclaim');
     else if(noReclaimEvidence) triggerTokens.push('no_reclaim_signals');
-    else if(bounceState === 'attempt') triggerTokens.push('bounce_attempt_only');
-    else if(promotionBlocked && !triggerTokens.includes('promotion_blocked')) triggerTokens.push('promotion_blocked');
+    if(bounceState === 'attempt') triggerTokens.push('bounce_attempt_only');
+    if(bounceState === 'early') triggerTokens.push('bounce_early');
+    if(promotionBlocked) triggerTokens.push('promotion_blocked');
 
+    const hasHardWeakToken = triggerTokens.some(token => hardWeakTokens.has(token));
+    const contextualWeakness = ['extended', 'volatile', 'off_level', 'unclear'].includes(setupLocationState)
+      || lowScore
+      || below50WithoutReclaim;
+    const hasMeaningfulWeakness = weakWatchTriggerMatches.length >= 2
+      || weakWatchTriggerMatches.includes('below50_no_reclaim')
+      || weakWatchTriggerMatches.includes('invalid_rr')
+      || weakWatchTriggerMatches.includes('bounce_attempt_only')
+      || weakWatchTriggerMatches.includes('bounce_early')
+      || weakWatchTriggerMatches.includes('promotion_blocked');
     const applied = verdictIsWatch
       && aliveStructure
       && priceabilityUnpriceable
-      && lowScore
-      && triggerTokens.length > 0;
+      && hasHardWeakToken
+      && contextualWeakness
+      && hasMeaningfulWeakness;
+    const reasonTokens = [];
+    if(priceabilityUnpriceable) reasonTokens.push('unpriceable');
+    if(lowScore) reasonTokens.push('low_score');
+    if(planStatus === 'missing' || !planValid) reasonTokens.push('missing_plan');
+    if(below50WithoutReclaim){
+      reasonTokens.push('below50_no_reclaim');
+    }else if(noReclaimEvidence){
+      reasonTokens.push('no_reclaim_signals');
+    }
+    if(bounceState === 'attempt'){
+      reasonTokens.push('bounce_attempt_only');
+    }else if(bounceState === 'early'){
+      reasonTokens.push('bounce_early');
+    }
+    if(!rrOk || (resolvedRR !== null && resolvedRR < 2)){
+      reasonTokens.push('invalid_rr');
+    }else if(hasClearInvalidationLevel === false){
+      reasonTokens.push('no_valid_invalidation');
+    }
+    if(promotionBlocked){
+      reasonTokens.push('promotion_blocked');
+    }
 
     return {
       verdictIsWatch,
@@ -222,7 +277,7 @@
       applied,
       evaluatedBeforeFinalMonitorFallback:true,
       returnPath:applied ? 'weak_watch_diminishing' : 'monitor_fallback',
-      reason:triggerTokens.length ? triggerTokens.join('_') : 'weak_watch_diminishing_guard'
+      reason:reasonTokens.length ? reasonTokens.join('_') : 'weak_watch_diminishing_guard'
     };
   }
 
@@ -403,6 +458,7 @@
       verdict:finalVerdict,
       structureEligibility,
       structureState,
+      setupLocationState,
       priceabilityState,
       numericSetupScore,
       planStatus,

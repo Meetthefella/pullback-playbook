@@ -1663,7 +1663,7 @@ function runSimplifiedPipelineAssertions(){
   if(weakLowScoreSurfaces.some(result => result.canonicalVerdict !== 'watch' || result.visualBucket !== 'diminishing' || result.tone !== 'diminishing')){
     throw new Error('Alive near_50ma low-score unpriceable Watch must render as Diminishing across scan, track, and review.');
   }
-  if(weakLowScoreSurfaces.some(result => result.weakWatchDiminishingApplied !== true || result.weakWatchDiminishingReason !== 'unpriceable_low_score_missing_plan_below50_no_reclaim')){
+  if(weakLowScoreSurfaces.some(result => result.weakWatchDiminishingApplied !== true || !String(result.weakWatchDiminishingReason || '').includes('unpriceable') || !String(result.weakWatchDiminishingReason || '').includes('low_score') || !String(result.weakWatchDiminishingReason || '').includes('missing_plan') || !String(result.weakWatchDiminishingReason || '').includes('below50_no_reclaim') || !String(result.weakWatchDiminishingReason || '').includes('invalid_rr'))){
     throw new Error('Alive near_50ma low-score unpriceable Watch must propagate the derived weak-watch diminishing reason through the simplified pipeline.');
   }
   if(weakLowScoreSurfaces.some(result => !result.weakWatchDiminishingTrace || result.weakWatchDiminishingTrace.applied !== true || result.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback !== true || !Array.isArray(result.weakWatchDiminishingTrace.triggerTokens))){
@@ -1671,6 +1671,82 @@ function runSimplifiedPipelineAssertions(){
   }
   if(weakLowScoreSurfaces.some(result => result.weakWatchDiminishingTrace.priceabilityState !== 'unpriceable' || result.weakWatchDiminishingTrace.priceabilityUnpriceable !== true || result.weakWatchDiminishingTrace.returnPath !== 'weak_watch_diminishing')){
     throw new Error('Alive near_50ma low-score unpriceable Watch must use the normalized unpriceable priceability source and the weak_watch_diminishing return path.');
+  }
+
+  const lngStyleWeakWatchRecord = {
+    ticker:'LNGX',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:52.1, ma20:54.8, ma50:56.4, ma200:45.2, currency:'USD'},
+    setup:{volumeRequired:false}
+  };
+  const lngStyleWeakWatchDeps = depsFor({
+    structureState:'intact',
+    trendState:'intact',
+    setupLocationState:'extended',
+    priceabilityState:'unpriceable',
+    stabilisationState:'early',
+    bounceState:'attempt',
+    pullbackZone:'extended',
+    volumeState:'normal'
+  }, {
+    finalVerdict:'Watch',
+    structuralState:'developing',
+    actionStateKey:'wait_for_confirmation',
+    planStatusKey:'missing',
+    tradeabilityVerdict:'Watch',
+    blockerReason:'Watch - strong trend, but no clean pullback entry yet.',
+    reasonSummary:'Watch - strong trend, but no clean pullback entry yet.',
+    terminal:false,
+    baseVerdict:'watch',
+    entry_gate_checks:{
+      below_50_without_reclaim:true,
+      has_clear_invalidation_level:false,
+      plan_ok:false,
+      tradeability_ok:false,
+      rr_ok:false,
+      rr_priceable:false,
+      resolved_rr:null,
+      reclaim_signal_count:0
+    },
+    near_entry_gate_checks:{
+      below_50_without_reclaim:true,
+      has_clear_invalidation_level:false,
+      plan_ok:false,
+      tradeability_ok:false,
+      rr_ok:false,
+      rr_priceable:false,
+      resolved_rr:null,
+      reclaim_signal_count:0
+    },
+    viabilityInputs:{
+      planValid:false,
+      tradeabilityOk:false,
+      rrOk:false,
+      below50WithoutReclaim:true
+    },
+    viability:'watchlist',
+    viabilityBranchId:'alive_watchlist'
+  }, 4);
+  const lngStyleWeakWatchSurfaces = ['scan', 'track', 'review'].map(surface => pipeline.resolveRecordState(
+    lngStyleWeakWatchRecord,
+    {
+      surface,
+      log:false,
+      deps:lngStyleWeakWatchDeps
+    }
+  ));
+  if(lngStyleWeakWatchSurfaces.some(result => result.canonicalVerdict !== 'watch' || result.visualBucket !== 'diminishing' || result.tone !== 'diminishing')){
+    throw new Error('LNG-style alive extended unpriceable Watch must render as Diminishing across scan, track, and review.');
+  }
+  if(lngStyleWeakWatchSurfaces.some(result => result.weakWatchDiminishingApplied !== true || !String(result.weakWatchDiminishingReason || '').includes('unpriceable') || !String(result.weakWatchDiminishingReason || '').includes('missing_plan') || !String(result.weakWatchDiminishingReason || '').includes('below50_no_reclaim'))){
+    throw new Error('LNG-style alive extended unpriceable Watch must apply the weak-watch diminishing guard with the expected reason tokens.');
+  }
+  if(lngStyleWeakWatchSurfaces.some(result => !result.mainBlocker || /strong trend, but no clean pullback entry yet/i.test(result.mainBlocker) || /price is too extended/i.test(result.mainBlocker))){
+    throw new Error('LNG-style alive extended unpriceable Watch must use reclaim / safe-entry diminishing copy, not constructive strong-trend copy.');
+  }
+  if(lngStyleWeakWatchSurfaces.some(result => !result.weakWatchDiminishingTrace || result.weakWatchDiminishingTrace.applied !== true || result.weakWatchDiminishingTrace.returnPath !== 'weak_watch_diminishing')){
+    throw new Error('LNG-style alive extended unpriceable Watch must commit the weak-watch diminishing trace before monitor fallback.');
   }
 
   const weakWatchReasonDeps = {
@@ -1764,6 +1840,59 @@ function runSimplifiedPipelineAssertions(){
   }
   if(bounceAttemptOnlyVisual.weakWatchDiminishingTrace.priceabilityState !== 'unpriceable' || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.priceabilityUnpriceable !== true || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.returnPath !== 'weak_watch_diminishing'){
     throw new Error('Bounce-attempt-only weak Watch must resolve normalized unpriceable priceability before final monitor fallback.');
+  }
+
+  const noReclaimSignalsVisual = resolverPresentation.resolveVisualState({
+    ticker:'NORECL',
+    plan:{entry:100, stop:97, firstTarget:106},
+    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'}
+  }, 'review', {
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'near_50ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_50ma'
+    },
+    effectivePlan:{entry:100, stop:97, firstTarget:106},
+    displayedPlan:{status:'valid'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'missing',
+      entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:true,
+        plan_ok:false,
+        tradeability_ok:true,
+        rr_ok:true,
+        rr_priceable:true,
+        resolved_rr:2.4,
+        reclaim_signal_count:0
+      },
+      near_entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:true,
+        plan_ok:false,
+        tradeability_ok:true,
+        rr_ok:true,
+        rr_priceable:true,
+        resolved_rr:2.4,
+        reclaim_signal_count:0
+      }
+    },
+    setupScore:2
+  }, weakWatchReasonDeps);
+  if(noReclaimSignalsVisual.canonicalVerdict !== 'watch' || noReclaimSignalsVisual.visualBucket !== 'diminishing' || noReclaimSignalsVisual.tone !== 'diminishing'){
+    throw new Error('No-reclaim-signals weak Watch must render as Diminishing.');
+  }
+  if(!String(noReclaimSignalsVisual.weakWatchDiminishingReason || '').includes('no_reclaim_signals') || /below50_no_reclaim/.test(noReclaimSignalsVisual.weakWatchDiminishingReason || '')){
+    throw new Error('No-reclaim-signals weak Watch must use the no_reclaim_signals reason token without claiming below50_no_reclaim.');
+  }
+  if(!noReclaimSignalsVisual.weakWatchDiminishingTrace || !Array.isArray(noReclaimSignalsVisual.weakWatchDiminishingTrace.triggerTokens) || !noReclaimSignalsVisual.weakWatchDiminishingTrace.triggerTokens.includes('no_reclaim_signals') || noReclaimSignalsVisual.weakWatchDiminishingTrace.returnPath !== 'weak_watch_diminishing'){
+    throw new Error('No-reclaim-signals weak Watch must expose the no_reclaim_signals trace token before final monitor fallback.');
   }
 
   const invalidRrVisual = resolverPresentation.resolveVisualState({

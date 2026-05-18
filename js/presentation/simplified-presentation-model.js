@@ -143,10 +143,10 @@
       blockers
     ]), resolved);
     if(
-      visual.weakWatchDowngradeApplied === true
-      && /needs confirmation|no valid invalidation|bounce.*confirm|hold for entry|waiting for confirmation/i.test(mainBlocker)
+      (visual.weakWatchDowngradeApplied === true || visual.weakWatchDiminishingApplied === true)
+      && /needs confirmation|no valid invalidation|bounce.*confirm|hold for entry|waiting for confirmation|strong trend|clean pullback|price is too extended|usable pullback setup/i.test(mainBlocker)
     ){
-      mainBlocker = 'Recent rebound failed - wait for stabilisation.';
+      mainBlocker = 'Rebound attempt is not confirmed - price remains below key reclaim levels and no safe entry structure is available yet.';
     }
 
     return {
