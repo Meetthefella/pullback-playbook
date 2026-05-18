@@ -3975,6 +3975,16 @@ function queueReviewQuickChartAnalysis(record, options = {}){
       originalDimensions:state.sourceTrace.originalDimensions || 'unknown',
       verificationDimensions:state.sourceTrace.verificationSourceDimensions || 'unknown'
     });
+    console.info('[QUICK_ANALYSIS_QUEUE_ENQUEUED]', {
+      ticker:item.ticker,
+      key:state.key,
+      imageId:state.imageId,
+      triggerSource,
+      triggerReason,
+      reviewRequestToken:String((uiState.pendingReviewRequest && uiState.pendingReviewRequest.reviewRequestToken) || ''),
+      activeReviewTicker:activeReviewTicker() || '',
+      pendingReviewTicker:pendingReviewTicker() || ''
+    });
   }
   queueAutoAnalysisForTicker(item.ticker);
   return reviewQuickChartAnalysisState(item, options);
@@ -19551,22 +19561,54 @@ function queueAutoAnalysisForTicker(ticker){
   }
   setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.scheduled', 'queued');
   window.setTimeout(() => {
+    const runtime = getReviewAiRuntime();
+    const dispatchContext = {
+      ticker:symbol,
+      activeReviewTicker:activeReviewTicker() || '',
+      pendingReviewTicker:pendingReviewTicker() || '',
+      analysisInFlight:!!uiState.loadingTicker || (runtime.status === 'running'),
+      reviewPending:!!pendingReviewTicker(),
+      hydrationIncomplete:startupCoordinator.trackedStateHydrationResolved !== true,
+      watchlistRefreshRunning:isLiveProcessBusyState(String(uiState.liveProcessStatus && uiState.liveProcessStatus.state || ''))
+        && ['refreshing_watchlist','waiting_for_refresh_before_scan'].includes(String(uiState.liveProcessStatus && uiState.liveProcessStatus.state || '')),
+      renderInFlight:uiState.trackRenderInFlight === true || window.__ppTrackRenderInFlight === true,
+      liveStatus:String(uiState.liveProcessStatus && uiState.liveProcessStatus.state || '')
+    };
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[QUICK_ANALYSIS_DISPATCH_TICK]', dispatchContext);
+    }
+    const liveRecord = getTickerRecord(symbol);
     if(activeReviewTicker() !== symbol){
       setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.skipped', 'inactive_review_ticker');
       if(typeof console !== 'undefined' && console.info){
         console.info('[QUICK_CHART_ANALYSIS_SKIPPED]', {
           ticker:symbol,
           reason:'inactive_review_ticker',
-          key:reviewQuickChartAnalysisKey(liveRecord)
+          key:reviewQuickChartAnalysisKey(liveRecord || {})
+        });
+        console.info('[QUICK_ANALYSIS_DISPATCH_SKIPPED]', {
+          ...dispatchContext,
+          reason:'inactive_review_ticker'
+        });
+        console.info('[QUICK_ANALYSIS_JOB_DROPPED]', {
+          ticker:symbol,
+          reason:'inactive_review_ticker'
         });
       }
       return;
     }
-    const liveRecord = getTickerRecord(symbol);
     if(!liveRecord){
       setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.skipped', 'record_missing');
       if(typeof console !== 'undefined' && console.info){
         console.info('[QUICK_CHART_ANALYSIS_SKIPPED]', {ticker:symbol, reason:'record_missing', key:''});
+        console.info('[QUICK_ANALYSIS_DISPATCH_SKIPPED]', {
+          ...dispatchContext,
+          reason:'record_missing'
+        });
+        console.info('[QUICK_ANALYSIS_JOB_DROPPED]', {
+          ticker:symbol,
+          reason:'record_missing'
+        });
       }
       return;
     }
@@ -19577,6 +19619,11 @@ function queueAutoAnalysisForTicker(ticker){
           ticker:symbol,
           reason:`loadingTicker=${uiState.loadingTicker}`,
           key:reviewQuickChartAnalysisKey(liveRecord)
+        });
+        console.info('[QUICK_ANALYSIS_DISPATCH_SKIPPED]', {
+          ...dispatchContext,
+          reason:'analysis_in_flight',
+          loadingTicker:normalizeTicker(uiState.loadingTicker || '')
         });
       }
       return;
@@ -19589,6 +19636,10 @@ function queueAutoAnalysisForTicker(ticker){
           ticker:symbol,
           reason:`analysis_state=${analysisUiState}`,
           key:reviewQuickChartAnalysisKey(liveRecord)
+        });
+        console.info('[QUICK_ANALYSIS_DISPATCH_SKIPPED]', {
+          ...dispatchContext,
+          reason:`analysis_state=${analysisUiState}`
         });
       }
       return;
@@ -19605,8 +19656,29 @@ function queueAutoAnalysisForTicker(ticker){
           reason:`quick_state=${currentQuickState.status || 'idle'}`,
           key:reviewQuickChartAnalysisKey(liveRecord)
         });
+        console.info('[QUICK_ANALYSIS_DISPATCH_SKIPPED]', {
+          ...dispatchContext,
+          reason:!currentQuickState.matchesCurrentKey ? 'stale_quick_state_key' : `quick_state=${currentQuickState.status || 'idle'}`,
+          quickStateStatus:String(currentQuickState.status || ''),
+          quickStateMatchesCurrentKey:currentQuickState.matchesCurrentKey === true
+        });
+        if(!currentQuickState.matchesCurrentKey){
+          console.info('[QUICK_ANALYSIS_JOB_DROPPED]', {
+            ticker:symbol,
+            reason:'stale_quick_state_key',
+            quickStateStatus:String(currentQuickState.status || '')
+          });
+        }
       }
       return;
+    }
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[QUICK_ANALYSIS_JOB_SELECTED]', {
+        ticker:symbol,
+        key:currentQuickState.key,
+        imageId:currentQuickState.imageId || '',
+        quickStateStatus:String(currentQuickState.status || '')
+      });
     }
     setScannerCardClickTrace(symbol, 'queueAutoAnalysisForTicker.run', 'analyseSetup');
     analyseSetup(symbol);
@@ -21872,6 +21944,12 @@ async function analyseSetup(ticker){
           originalDimensions:requestChartImageSource.originalDimensions || 'unknown',
           verificationDimensions:requestChartImageSource.verificationSourceDimensions || 'unknown'
         });
+        console.info('[QUICK_ANALYSIS_JOB_STARTED]', {
+          ticker:record.ticker,
+          requestId:analysisRequestId,
+          key:currentQuickChartState.key,
+          imageId:requestChartImageId
+        });
       }
     }
   }
@@ -22170,6 +22248,13 @@ async function analyseSetup(ticker){
             imageId:requestChartImageId,
             chartCommitted:true
           });
+          console.info('[QUICK_ANALYSIS_JOB_COMPLETED]', {
+            ticker:record.ticker,
+            requestId:analysisRequestId,
+            key:reviewQuickChartAnalysisKey(record),
+            status:String(mergedChartTrace && mergedChartTrace.status || ''),
+            imageId:requestChartImageId
+          });
         }
       }
       logChartVerificationLifecycle('merged_render_committed', {
@@ -22252,6 +22337,13 @@ async function analyseSetup(ticker){
         || /superseded/i.test(String(err && err.message || ''));
       if(supersededAbort){
         setScannerCardClickTrace(ticker, 'analyseSetup.aborted', `superseded request=${analysisRequestId}`);
+        if(typeof console !== 'undefined' && console.info){
+          console.info('[QUICK_ANALYSIS_JOB_DROPPED]', {
+            ticker,
+            requestId:analysisRequestId,
+            reason:'superseded_abort'
+          });
+        }
         return;
       }
       if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
@@ -22297,6 +22389,13 @@ async function analyseSetup(ticker){
             status:'failed',
             imageId:requestChartImageId,
             chartCommitted:false
+          });
+          console.info('[QUICK_ANALYSIS_JOB_DROPPED]', {
+            ticker:record.ticker,
+            requestId:analysisRequestId,
+            key:reviewQuickChartAnalysisKey(record),
+            reason:'analysis_failed',
+            imageId:requestChartImageId
           });
         }
       }
