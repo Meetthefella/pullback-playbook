@@ -26183,8 +26183,8 @@ function renderReviewWorkspace(options = {}){
       leftAccentColour:'reviewAccentClass',
       sectionBucket:'simplifiedState.visualBucket'
     },
-    divergenceDetected:trackStateDivergence.detected,
-    divergenceFields:trackStateDivergence.fields,
+    divergenceDetected:reviewStateDivergence.detected,
+    divergenceFields:reviewStateDivergence.fields,
     fromStoredFields:false,
     fromResolvedStateBundleCache:false,
     fromFreshResolverOutput:true,
