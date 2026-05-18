@@ -1868,6 +1868,81 @@ function setActiveReviewTicker(ticker){
   });
 }
 
+function restoreActiveReviewSelectionFromSavedReviews(context = 'startup_restore'){
+  const currentTicker = activeReviewTicker();
+  const savedReviewRecords = openCardTickerRecords();
+  if(typeof console !== 'undefined' && console.log){
+    console.log('[REVIEW_RESTORE_START]', {
+      context,
+      activeTicker:currentTicker || '',
+      savedReviewRecordsCount:savedReviewRecords.length
+    });
+  }
+  if(currentTicker && savedReviewRecords.some(record => normalizeTicker(record.ticker) === normalizeTicker(currentTicker))){
+    if(typeof console !== 'undefined' && console.log){
+      console.log('[REVIEW_RESTORE_SELECTED]', {
+        context,
+        activeTicker:currentTicker || '',
+        selectedTicker:currentTicker || '',
+        reason:'already_selected'
+      });
+    }
+    return currentTicker;
+  }
+  if(!savedReviewRecords.length){
+    if(typeof console !== 'undefined' && console.log){
+      console.log('[REVIEW_RESTORE_EMPTY_STATE]', {
+        context,
+        activeTicker:'',
+        savedReviewRecordsCount:0
+      });
+    }
+    setActiveReviewTicker('');
+    return '';
+  }
+  const sortedCandidates = savedReviewRecords.slice().sort((a, b) => {
+    const aTime = Date.parse(a.review && a.review.lastReviewedAt || a.meta && a.meta.updatedAt || a.meta && a.meta.createdAt || '') || 0;
+    const bTime = Date.parse(b.review && b.review.lastReviewedAt || b.meta && b.meta.updatedAt || b.meta && b.meta.createdAt || '') || 0;
+    return bTime - aTime
+      || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a)
+      || normalizeTicker(a.ticker).localeCompare(normalizeTicker(b.ticker));
+  });
+  sortedCandidates.forEach(record => {
+    if(typeof console !== 'undefined' && console.log){
+      console.log('[REVIEW_RESTORE_CANDIDATE]', {
+        context,
+        ticker:record.ticker || '',
+        lastReviewedAt:String(record.review && record.review.lastReviewedAt || ''),
+        cardOpen:record.review && record.review.cardOpen === true,
+        resultSortScore:resultSortScoreFromRecord(record)
+      });
+    }
+  });
+  const selected = sortedCandidates[0] || null;
+  if(selected && selected.ticker){
+    setActiveReviewTicker(selected.ticker);
+    if(typeof console !== 'undefined' && console.log){
+      console.log('[REVIEW_RESTORE_SELECTED]', {
+        context,
+        activeTicker:selected.ticker,
+        selectedTicker:selected.ticker,
+        reason:'most_recent_saved_review'
+      });
+    }
+    return selected.ticker;
+  }
+  if(typeof console !== 'undefined' && console.log){
+    console.log('[REVIEW_RESTORE_EMPTY_STATE]', {
+      context,
+      activeTicker:'',
+      savedReviewRecordsCount:savedReviewRecords.length,
+      reason:'no_valid_saved_review_candidate'
+    });
+  }
+  setActiveReviewTicker('');
+  return '';
+}
+
 function currentMaxLoss(){
   const accountSize = numericOrNull(state.accountSize);
   const riskPercent = normalizeRiskPercentInput(state.riskPercent, 1);
@@ -4742,6 +4817,7 @@ function loadState(){
   renderSavedScannerUniverseSnapshot();
   clearOcrReview();
   syncOcrReviewVisibility();
+  restoreActiveReviewSelectionFromSavedReviews('startup_local_restore');
   renderActiveWorkspaceSurface({reason:'startup_local_restore'});
   uiState.watchlistLiveRefreshPending = {};
   uiState.watchlistManualRefreshInProgress = {};
