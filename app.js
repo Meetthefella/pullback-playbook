@@ -1856,8 +1856,9 @@ function currentSetupType(){
 }
 
 function activeReviewTicker(){
-  const selected = normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
-  return selected || normalizeTicker(uiState.activeReviewTicker || '');
+  const stored = normalizeTicker(uiState.activeReviewTicker || '');
+  if(stored) return stored;
+  return normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
 }
 
 function setActiveReviewTicker(ticker){
