@@ -25343,9 +25343,37 @@ function renderReviewWorkspace(options = {}){
   uiState.reviewRenderPass = Number(uiState.reviewRenderPass || 0) + 1;
   const reviewRenderPass = Number(uiState.reviewRenderPass || 0);
   const reviewSeq = reviewRenderSeqForOptions(options);
-  if(!isCurrentReviewRender(reviewSeq)) return;
+  const traceReviewRenderBailout = (reason, details = {}) => {
+    if(typeof console === 'undefined' || !console.warn) return;
+    console.warn('[REVIEW_RENDER_BAILOUT]', {
+      reason,
+      activeTicker:activeReviewTicker() || '',
+      hasReviewRecord:!!activeReviewTicker(),
+      hasSimplifiedState:false,
+      hasPresentationModel:false,
+      ...details
+    });
+  };
+  if(typeof console !== 'undefined' && console.log){
+    console.log('[REVIEW_RENDER_START]', {
+      activeTicker:activeReviewTicker() || '',
+      hasReviewRecord:!!activeReviewTicker(),
+      hasSimplifiedState:false,
+      hasPresentationModel:false
+    });
+  }
+  if(!isCurrentReviewRender(reviewSeq)){
+    traceReviewRenderBailout('stale_review_render_seq', {
+      reviewSeq,
+      currentReviewRenderSeq:currentReviewRenderSeq()
+    });
+    return;
+  }
   const box = $('reviewWorkspace');
-  if(!box) return;
+  if(!box){
+    traceReviewRenderBailout('missing_review_workspace');
+    return;
+  }
   traceScrollEvent('review:render:before', {
     caller:'renderReviewWorkspace',
     reason:String(options.source || options.reason || 'direct'),
@@ -25386,6 +25414,9 @@ function renderReviewWorkspace(options = {}){
   if(!ticker){
     const savedReviewRecords = openCardTickerRecords();
     if(savedReviewRecords.length){
+      traceReviewRenderBailout('no_active_ticker_resume_saved_reviews', {
+        savedReviewRecordsCount:savedReviewRecords.length
+      });
       box.innerHTML = `<div class="summary">Resume a saved review or open a ranked result.</div><div class="actions">${savedReviewRecords.map(record => `<button class="secondary compactbutton" type="button" data-act="resume-review" data-ticker="${escapeHtml(record.ticker)}">${escapeHtml(record.ticker)}</button>`).join('')}</div>${(state.tickers || []).length ? '<a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>' : '<a class="helperbutton" href="#dailyInput">Go To Scan List</a>'}`;
       box.querySelectorAll('[data-act="resume-review"]').forEach(button => {
         button.onclick = () => openRankedResultInReview(button.getAttribute('data-ticker') || '', {includeInScannerUniverse:false});
@@ -25393,6 +25424,9 @@ function renderReviewWorkspace(options = {}){
       finishReviewRenderLog();
       return;
     }
+    traceReviewRenderBailout('no_active_ticker_empty_review_shell', {
+      watchlistCount:(state.tickers || []).length
+    });
     box.innerHTML = (state.tickers || []).length
       ? '<div class="summary">Open one ranked result to load it into the review workspace.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>'
       : '<div class="summary">Run a scan first, then open a shortlisted ticker here for focused review.</div><a class="helperbutton" href="#dailyInput">Go To Scan List</a>';
@@ -25501,6 +25535,17 @@ function renderReviewWorkspace(options = {}){
     className:simplifiedBadgeClass
   };
   const simplifiedActionLabel = String(simplifiedState.actionLabel || '').trim();
+  if(typeof console !== 'undefined' && console.log){
+    console.log('[REVIEW_SIMPLIFIED_STATE]', {
+      ticker:record.ticker,
+      canonicalVerdict:simplifiedCanonicalVerdict,
+      visualBucket:simplifiedVisualBucket,
+      tone:simplifiedTone,
+      structureState:simplifiedState.structureState || '',
+      structureEligibility:simplifiedState.structureEligibility || '',
+      hasPresentationModel:!!simplifiedState
+    });
+  }
   if(typeof console !== 'undefined' && console.info){
     console.info('[SIMPLIFIED_REVIEW_STATE]', {
       ticker:simplifiedState.ticker || record.ticker,
@@ -26311,6 +26356,14 @@ function renderReviewWorkspace(options = {}){
     `Volume ${String(derivedStates.volumeState || 'n/a')}`,
     `Market ${qualityAdjustments.weakRegimePenalty ? 'weak' : 'supportive'}`
   ].join(' | ');
+  if(typeof console !== 'undefined' && console.log){
+    console.log('[REVIEW_RENDER_COMMIT]', {
+      ticker:record.ticker,
+      renderedVerdict:reviewRenderedVerdict || resolvedReviewFinalVerdictKey || 'watch',
+      visualBucket:finalReviewVisualBucket
+    });
+  }
+  try{
   box.className = 'list reviewworkspace-shell';
   box.classList.remove(
     'card--entry',
@@ -26490,6 +26543,16 @@ function renderReviewWorkspace(options = {}){
   updateReviewAiSummaryOverflowHint();
   window.requestAnimationFrame(() => updateReviewAiSummaryOverflowHint());
   finishReviewRenderLog();
+  }catch(error){
+    if(typeof console !== 'undefined' && console.error){
+      console.error('[REVIEW_RENDER_EXCEPTION]', {
+        ticker:record && record.ticker || ticker || '',
+        message:error && error.message ? error.message : String(error),
+        stack:error && error.stack ? error.stack : ''
+      });
+    }
+    throw error;
+  }
 }
 
 function renderCards(){
