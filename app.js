@@ -9340,8 +9340,16 @@ function renderWatchlistCardElement(record, options = {}){
   div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(watchlistVisualState.badge.text || 'Watch')}</span>${watchlistScoreMarkup}<span class="tiny ${escapeHtml(priorityClass)}">${escapeHtml(priorityLabel)}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row"></div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}${compactPrimaryPlanHeadline ? `<div class="tiny watchlist-plan-meta">${escapeHtml(compactPrimaryPlanHeadline)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(diagnosticPlanBlocker)}</div><div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Log to Diary</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
   div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
   const cardProjectionSnapshot = {...clickedCardProjectionSnapshot};
-  div.querySelector('[data-act="review"]').onclick = () => {
-    reviewWatchlistTicker(entry.ticker, {sourceProjectionSnapshot:cardProjectionSnapshot});
+  div.querySelector('[data-act="review"]').onclick = event => {
+    reviewWatchlistTicker(entry.ticker, {
+      sourceProjectionSnapshot:cardProjectionSnapshot,
+      openTrigger:{
+        kind:'watchlist_review',
+        eventType:'click',
+        userInitiated:true,
+        isTrusted:event && event.isTrusted === true
+      }
+    });
   };
   div.querySelector('[data-act="save-diary"]').onclick = () => saveTradeFromCard(entry.ticker);
   const refreshButton = div.querySelector('[data-act="refresh-life"]');
@@ -10766,7 +10774,13 @@ function setLiveProcessStatus(stateKey, message, options = {}){
         loadTickerIntoReview(pending.ticker, {
           ...(pending.options || {}),
           forceNow:true,
-          reviewRequestToken:pending.reviewRequestToken || ((pending.options && pending.options.reviewRequestToken) || '')
+          reviewRequestToken:pending.reviewRequestToken || ((pending.options && pending.options.reviewRequestToken) || ''),
+          openTrigger:{
+            kind:'pending_review_replay',
+            eventType:'status_flush',
+            userInitiated:false,
+            isTrusted:null
+          }
         });
       };
       if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
@@ -22658,6 +22672,20 @@ function maybeInvalidateActiveReviewProjectionFromTrack(ticker, nextProjectionSn
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
+  const summarizeReviewOpenRequestStack = () => {
+    try{
+      const rawStack = String(new Error().stack || '');
+      if(!rawStack) return '';
+      return rawStack
+        .split('\n')
+        .slice(2, 8)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .join(' | ');
+    }catch(_error){
+      return '';
+    }
+  };
   const reviewRequestToken = String(options.reviewRequestToken || nextReviewRequestToken());
   const currentPending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
     ? uiState.pendingReviewRequest
@@ -22694,13 +22722,38 @@ function loadTickerIntoReview(ticker, options = {}){
     statusText:String(uiState.liveProcessStatus && uiState.liveProcessStatus.message || '')
   });
   if(typeof console !== 'undefined' && console.info){
+    const pendingError = uiState.reviewPendingLoadError && typeof uiState.reviewPendingLoadError === 'object'
+      ? uiState.reviewPendingLoadError
+      : null;
+    const previousTerminalErrorTicker = normalizeTicker(pendingError && pendingError.ticker || '');
+    const previousTerminalErrorToken = String(pendingError && pendingError.reviewRequestToken || '');
+    const queuedReviewTickerBefore = normalizeTicker(uiState.queuedReviewTicker || '');
+    const pendingBefore = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+      ? uiState.pendingReviewRequest
+      : null;
+    const openTrigger = options.openTrigger && typeof options.openTrigger === 'object'
+      ? options.openTrigger
+      : {};
     console.info('[REVIEW_OPEN_REQUEST]', {
       requestedTicker:symbol,
       activeReviewTicker:activeReviewTicker() || '',
       pendingReviewTicker:pendingReviewTicker() || '',
       reviewRequestToken,
       liveStatus:String(uiState.liveProcessStatus && uiState.liveProcessStatus.state || ''),
-      statusText:String(uiState.liveProcessStatus && uiState.liveProcessStatus.message || '')
+      statusText:String(uiState.liveProcessStatus && uiState.liveProcessStatus.message || ''),
+      source:String(options.sourceContext || ''),
+      triggerKind:String(openTrigger.kind || ''),
+      triggerEventType:String(openTrigger.eventType || ''),
+      triggerIsTrusted:openTrigger.isTrusted === true ? true : (openTrigger.isTrusted === false ? false : null),
+      userInitiated:openTrigger.userInitiated === true ? true : (openTrigger.userInitiated === false ? false : null),
+      retryButtonClicked:openTrigger.kind === 'retry_button',
+      previousTerminalErrorTicker,
+      previousTerminalErrorToken,
+      hadQueuedReviewTicker:!!queuedReviewTickerBefore,
+      queuedReviewTickerBefore,
+      pendingRequestTickerBefore:normalizeTicker(pendingBefore && pendingBefore.ticker || ''),
+      pendingRequestTokenBefore:String(pendingBefore && pendingBefore.reviewRequestToken || ''),
+      openRequestStack:summarizeReviewOpenRequestStack()
     });
   }
   const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
@@ -22934,6 +22987,24 @@ function loadTickerIntoReview(ticker, options = {}){
         }
         try{
           settleReviewOwnershipPromotion();
+          if(typeof console !== 'undefined' && console.info){
+            const renderStartPayload = {
+              ticker:symbol,
+              reviewRequestToken,
+              reviewLoadToken,
+              activeTicker:activeReviewTicker() || '',
+              pendingTicker:pendingReviewTicker() || '',
+              currentReviewRecordTicker:(getTickerRecord(symbol) || record).ticker || ''
+            };
+            if(requestSettled){
+              console.info('[REVIEW_RENDER_START_AFTER_PROMOTION]', renderStartPayload);
+            }else{
+              console.info('[REVIEW_RENDER_START_WITHOUT_PROMOTION]', {
+                ...renderStartPayload,
+                promoted:false
+              });
+            }
+          }
           loadCard(symbol, {
             touchLifecycle:options.recompute === true,
             recompute:options.recompute === true,
@@ -22984,22 +23055,15 @@ function loadTickerIntoReview(ticker, options = {}){
           }
           if(!requestSettled) settleReviewOwnershipPromotion();
           if(typeof console !== 'undefined' && console.info){
-            const renderAfterPromotionPayload = {
+            console.info('[REVIEW_RENDER_POST_PROMOTION_ATTEMPT]', {
               ticker:symbol,
               reviewRequestToken,
               reviewLoadToken,
               activeTicker:activeReviewTicker() || '',
               pendingTicker:pendingReviewTicker() || '',
-              currentReviewRecordTicker:(getTickerRecord(symbol) || record).ticker || ''
-            };
-            if(requestSettled){
-              console.info('[REVIEW_RENDER_AFTER_PROMOTION]', renderAfterPromotionPayload);
-            }else{
-              console.info('[REVIEW_RENDER_POST_PROMOTION_ATTEMPT]', {
-                ...renderAfterPromotionPayload,
-                promoted:false
-              });
-            }
+              currentReviewRecordTicker:(getTickerRecord(symbol) || record).ticker || '',
+              promoted:requestSettled
+            });
           }
           const openAfterSnapshot = reviewOpenMutationSnapshot(getTickerRecord(symbol) || record, 'review_open');
           logReviewOpenMutationTrace(symbol, 'loadTickerIntoReview.completeLoad.loadCard', openBeforeSnapshot, openAfterSnapshot);
@@ -23085,7 +23149,10 @@ function openRankedResultInReview(ticker, options = {}){
     includeInScannerUniverse:options.includeInScannerUniverse === true,
     recompute:options.recompute === true,
     sourceVerdict:options.sourceVerdict || '',
-    sourceContext:'scanner'
+    sourceContext:'scanner',
+    openTrigger:options.openTrigger && typeof options.openTrigger === 'object'
+      ? options.openTrigger
+      : null
   });
 }
 
@@ -23151,7 +23218,13 @@ function resumeSavedReviewTicker(ticker){
     includeInScannerUniverse:false,
     recompute:false,
     sourceContext:'review_resume',
-    forceNow:true
+    forceNow:true,
+    openTrigger:{
+      kind:'resume_saved_review',
+      eventType:'resume',
+      userInitiated:true,
+      isTrusted:null
+    }
   });
 }
 
@@ -23183,7 +23256,15 @@ function reviewWatchlistTicker(ticker, options = {}){
     sourceVerdict,
     sourceContext:'watchlist',
     reviewRequestToken,
-    sourceProjectionSnapshot
+    sourceProjectionSnapshot,
+    openTrigger:options.openTrigger && typeof options.openTrigger === 'object'
+      ? options.openTrigger
+      : {
+        kind:'watchlist_review',
+        eventType:'click',
+        userInitiated:true,
+        isTrusted:null
+      }
   });
 }
 
@@ -25791,11 +25872,17 @@ function bindReviewWorkspaceActions(record){
   const openBtn = box.querySelector('[data-act="open-chart"]');
   if(openBtn) openBtn.onclick = () => openTickerChart(record.ticker);
   const retryReviewLoadBtn = box.querySelector('[data-act="retry-review-load"]');
-  if(retryReviewLoadBtn) retryReviewLoadBtn.onclick = () => {
+  if(retryReviewLoadBtn) retryReviewLoadBtn.onclick = event => {
     uiState.reviewPendingLoadError = null;
     loadTickerIntoReview(record.ticker, {
       forceNow:true,
-      sourceContext:'review_pending_retry'
+      sourceContext:'review_pending_retry',
+      openTrigger:{
+        kind:'retry_button',
+        eventType:'click',
+        userInitiated:true,
+        isTrusted:event && event.isTrusted === true
+      }
     });
   };
   const confirmChartBtn = box.querySelector('[data-act="confirm-chart-match"]');
@@ -30281,7 +30368,7 @@ click('refreshLifecycleBtn', refreshSelectedTickerLifecycle);
 click('expireLifecycleBtn', expireSelectedTickerLifecycle);
 click('reactivateLifecycleBtn', reactivateSelectedTickerLifecycle);
 click('calcBtn', calculate);
-function attemptScanCardActivation(ticker, sourceVerdict){
+function attemptScanCardActivation(ticker, sourceVerdict, event = null){
   const menuState = currentScanCardMenuState(ticker);
   if(menuState.menuOpen){
     closeScanCardMenu();
@@ -30296,7 +30383,15 @@ function attemptScanCardActivation(ticker, sourceVerdict){
     setScannerCardClickTrace(ticker, 'results.click.watchlist_blocked', 'item already in watchlist');
     return false;
   }
-  openRankedResultInReview(ticker, {sourceVerdict});
+  openRankedResultInReview(ticker, {
+    sourceVerdict,
+    openTrigger:{
+      kind:'scanner_card',
+      eventType:event && event.type ? event.type : '',
+      userInitiated:true,
+      isTrusted:event && event.isTrusted === true
+    }
+  });
   return true;
 }
 
@@ -30324,7 +30419,7 @@ on('results', 'click', event => {
     renderScannerResults();
     return;
   }
-  if(!attemptScanCardActivation(ticker, sourceVerdict)){
+  if(!attemptScanCardActivation(ticker, sourceVerdict, event)){
     event.preventDefault();
     event.stopPropagation();
     return;
@@ -30347,7 +30442,15 @@ on('results', 'keydown', event => {
     renderScannerResults();
     return;
   }
-  openRankedResultInReview(ticker, {sourceVerdict});
+  openRankedResultInReview(ticker, {
+    sourceVerdict,
+    openTrigger:{
+      kind:'scanner_card_keyboard',
+      eventType:event.type || 'keydown',
+      userInitiated:true,
+      isTrusted:event && event.isTrusted === true
+    }
+  });
 });
 document.addEventListener('click', event => {
   if(event.target.closest('.card-overflow-menu') || event.target.closest('[data-act="overflow-toggle"]') || event.target.closest('.scan-card-secondary-panel')) return;
