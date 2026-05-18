@@ -22832,6 +22832,40 @@ function loadTickerIntoReview(ticker, options = {}){
               pendingTicker:pendingReviewTicker() || ''
             });
           }
+          if(typeof console !== 'undefined' && console.info){
+            console.info('[REVIEW_RECORD_READY]', {
+              ticker:symbol,
+              reviewRequestToken,
+              reviewLoadToken,
+              activeTicker:activeReviewTicker() || '',
+              pendingTicker:pendingReviewTicker() || '',
+              currentReviewRecordTicker:(getTickerRecord(symbol) || record).ticker || ''
+            });
+          }
+          setActiveReviewTicker(symbol);
+          if(typeof console !== 'undefined' && console.info){
+            console.info('[REVIEW_OWNERSHIP_PROMOTED]', {
+              ticker:symbol,
+              reviewRequestToken,
+              reviewLoadToken,
+              activeTicker:activeReviewTicker() || '',
+              pendingTicker:pendingReviewTicker() || '',
+              currentReviewRecordTicker:(getTickerRecord(symbol) || record).ticker || ''
+            });
+            console.info('[REVIEW_RENDER_AFTER_PROMOTION]', {
+              ticker:symbol,
+              reviewRequestToken,
+              reviewLoadToken,
+              activeTicker:activeReviewTicker() || '',
+              pendingTicker:pendingReviewTicker() || '',
+              currentReviewRecordTicker:(getTickerRecord(symbol) || record).ticker || ''
+            });
+          }
+          clearPendingReviewRequest({
+            reason:'completed',
+            requestedTicker:symbol,
+            reviewRequestToken
+          });
           const openAfterSnapshot = reviewOpenMutationSnapshot(getTickerRecord(symbol) || record, 'review_open');
           logReviewOpenMutationTrace(symbol, 'loadTickerIntoReview.completeLoad.loadCard', openBeforeSnapshot, openAfterSnapshot);
           if(allowReviewLoadingStatus && !(inWatchlist && sourceContext === 'scanner')){
@@ -22840,11 +22874,6 @@ function loadTickerIntoReview(ticker, options = {}){
           if(sourceContext === 'watchlist'){
             settleScannerSelectionStatusReviewPending(symbol, {failed:false, reviewRequestToken});
           }
-          clearPendingReviewRequest({
-            reason:'completed',
-            requestedTicker:symbol,
-            reviewRequestToken
-          });
           if(inWatchlist && sourceContext === 'scanner'){
             setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
             setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
