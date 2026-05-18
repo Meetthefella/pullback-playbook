@@ -1882,6 +1882,42 @@ function pendingReviewTicker(){
   );
 }
 
+function pendingReviewCandidate(){
+  return uiState.pendingReviewCandidate && typeof uiState.pendingReviewCandidate === 'object'
+    ? uiState.pendingReviewCandidate
+    : null;
+}
+
+function clearPendingReviewCandidate(options = {}){
+  const requestedTicker = normalizeTicker(options.requestedTicker || options.ticker || '');
+  const requestedToken = String(options.reviewRequestToken || '');
+  const candidate = pendingReviewCandidate();
+  if(!candidate) return false;
+  const candidateTicker = normalizeTicker(candidate.ticker || '');
+  const candidateToken = String(candidate.reviewRequestToken || '');
+  const tickerMatches = !requestedTicker || !candidateTicker || candidateTicker === requestedTicker;
+  const tokenMatches = !requestedToken || !candidateToken || candidateToken === requestedToken;
+  if(!(tickerMatches && tokenMatches)) return false;
+  uiState.pendingReviewCandidate = null;
+  return true;
+}
+
+function canPromoteRequestedReviewFromPending(requestedTicker, reviewRequestToken){
+  const symbol = normalizeTicker(requestedTicker || '');
+  const token = String(reviewRequestToken || '');
+  const pending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+    ? uiState.pendingReviewRequest
+    : null;
+  if(!symbol || !token || !pending) return {ok:false, reason:'missing_pending_or_token'};
+  const pendingTicker = normalizeTicker(pending.ticker || '');
+  const pendingToken = String(pending.reviewRequestToken || '');
+  if(pendingTicker !== symbol) return {ok:false, reason:'pending_ticker_mismatch'};
+  if(!pendingToken || pendingToken !== token) return {ok:false, reason:'pending_token_mismatch'};
+  if(pending.superseded) return {ok:false, reason:'pending_superseded'};
+  if(pending.failedAt) return {ok:false, reason:'pending_failed'};
+  return {ok:true, pending};
+}
+
 function reviewTickerOwnershipTrace(source, details = {}){
   if(typeof console === 'undefined' || !console.info) return;
   const requestedTicker = normalizeTicker(details.requestedTicker || details.ticker || pendingReviewTicker() || activeReviewTicker() || '');
@@ -1938,6 +1974,7 @@ function clearPendingReviewRequest(options = {}){
   );
   const hasPendingState = !!(currentPending || currentTicker || currentToken || uiState.pendingReviewTicker || uiState.queuedReviewTicker);
   if(!hasPendingState){
+    clearPendingReviewCandidate({requestedTicker, reviewRequestToken:requestedToken});
     return {cleared:false, reason:'no_pending_review_request'};
   }
   if(!(matchesPending || matchesTokenOnly || matchesTickerOnly)){
@@ -1999,6 +2036,7 @@ function clearPendingReviewRequest(options = {}){
   uiState.pendingReviewRequest = null;
   uiState.pendingReviewTicker = '';
   uiState.queuedReviewTicker = '';
+  clearPendingReviewCandidate({requestedTicker:requestedTicker || currentTicker, reviewRequestToken:requestedToken || currentToken});
   if(requestedTicker && requestedToken){
     if(reason === 'failed'){
       settleScannerSelectionStatusReviewPending(requestedTicker, {failed:true, reviewRequestToken:requestedToken});
@@ -10620,6 +10658,7 @@ function queuePendingReviewRequest(ticker, options = {}){
     return currentPending;
   }
   uiState.reviewPendingLoadError = null;
+  clearPendingReviewCandidate({requestedTicker:symbol});
   supersedePendingReviewRequest(symbol, nextOptions);
   if(typeof console !== 'undefined' && console.info){
     console.info('[REVIEW_PENDING_START]', {
@@ -22801,6 +22840,25 @@ function loadTickerIntoReview(ticker, options = {}){
       return;
     }
     const record = upsertTickerRecord(symbol);
+    uiState.pendingReviewCandidate = {
+      ticker:symbol,
+      reviewRequestToken,
+      currentReviewRecordTicker:normalizeTicker(record.ticker || ''),
+      chartTicker:normalizeTicker((record.review && record.review.chartRef && record.review.chartRef.ticker) || record.ticker || ''),
+      source:String(options.sourceContext || ''),
+      createdAt:new Date().toISOString()
+    };
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[REVIEW_PENDING_CANDIDATE_CREATED]', {
+        ticker:symbol,
+        reviewRequestToken,
+        currentReviewRecordTicker:uiState.pendingReviewCandidate.currentReviewRecordTicker || '',
+        chartTicker:uiState.pendingReviewCandidate.chartTicker || '',
+        source:uiState.pendingReviewCandidate.source || '',
+        activeTicker:activeReviewTicker() || '',
+        pendingTicker:pendingReviewTicker() || ''
+      });
+    }
     reviewTickerOwnershipTrace('review_record_selected', {
       requestedTicker:symbol,
       renderedTicker:symbol,
@@ -22875,16 +22933,10 @@ function loadTickerIntoReview(ticker, options = {}){
           : null;
         const pendingTokenNow = String(pendingNow && pendingNow.reviewRequestToken || '');
         const pendingTickerNow = normalizeTicker((pendingNow && pendingNow.ticker) || pendingReviewTicker() || '');
-        const pendingFailed = !!(pendingNow && pendingNow.failedAt);
-        const pendingSuperseded = !!(pendingNow && pendingNow.superseded);
+        const tokenValidation = canPromoteRequestedReviewFromPending(symbol, reviewRequestToken);
         const tokenStillCurrent = (
           reviewLoadToken === Number(uiState.reviewLoadToken || 0)
-          && !!pendingNow
-          && pendingTickerNow === symbol
-          && !!pendingTokenNow
-          && pendingTokenNow === reviewRequestToken
-          && !pendingFailed
-          && !pendingSuperseded
+          && tokenValidation.ok
         );
         const hasReviewRecord = !!liveRecord && !!currentReviewRecordTicker;
         const recordMatchesRequestedTicker = currentReviewRecordTicker === symbol;
@@ -22898,8 +22950,9 @@ function loadTickerIntoReview(ticker, options = {}){
               recordMatchesRequestedTicker,
               tokenStillCurrent,
               pendingExists:!!pendingNow,
-              pendingFailed,
-              pendingSuperseded,
+              pendingFailed:!!(pendingNow && pendingNow.failedAt),
+              pendingSuperseded:!!(pendingNow && pendingNow.superseded),
+              tokenValidationReason:tokenValidation.reason || '',
               reviewRequestToken,
               pendingToken:pendingTokenNow || '',
               reviewLoadToken,
@@ -22936,11 +22989,21 @@ function loadTickerIntoReview(ticker, options = {}){
           });
         }
         setActiveReviewTicker(symbol);
+        const candidate = pendingReviewCandidate();
         clearPendingReviewRequest({
           reason:'completed',
           requestedTicker:symbol,
           reviewRequestToken
         });
+        if(typeof console !== 'undefined' && console.info){
+          console.info('[REVIEW_PENDING_CANDIDATE_PROMOTED]', {
+            ticker:symbol,
+            reviewRequestToken,
+            candidateTicker:normalizeTicker(candidate && candidate.ticker || ''),
+            candidateToken:String(candidate && candidate.reviewRequestToken || ''),
+            activeTicker:activeReviewTicker() || ''
+          });
+        }
         requestSettled = true;
         clearReviewPendingTimeout();
         if(typeof console !== 'undefined' && console.info){
@@ -27264,7 +27327,7 @@ function renderReviewWorkspace(options = {}){
   };
   box.className = 'list reviewworkspace-shell';
   box.innerHTML = '';
-  const ticker = activeReviewTicker();
+  let ticker = activeReviewTicker();
   const pendingTicker = pendingReviewTicker();
   const statusText = String(uiState.liveProcessStatus && uiState.liveProcessStatus.message || '');
   const pendingLoadError = uiState.reviewPendingLoadError && typeof uiState.reviewPendingLoadError === 'object'
@@ -27318,6 +27381,70 @@ function renderReviewWorkspace(options = {}){
   if(pendingLoadError && terminalErrorMatchesReview){
     renderTerminalReviewError(String(pendingLoadError.reason || 'terminal_error'));
     return;
+  }
+  if(requestedTicker && ticker && ticker !== requestedTicker){
+    const blockedRecord = getTickerRecord(requestedTicker) || null;
+    const blockedRecordTicker = normalizeTicker(blockedRecord && blockedRecord.ticker || '');
+    const blockedChartTicker = blockedRecord ? normalizeTicker((blockedRecord.review && blockedRecord.review.chartRef && blockedRecord.review.chartRef.ticker) || blockedRecord.ticker || '') : '';
+    const pending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+      ? uiState.pendingReviewRequest
+      : null;
+    const pendingToken = String(pending && pending.reviewRequestToken || '');
+    const candidate = pendingReviewCandidate();
+    if(blockedRecord && blockedRecordTicker === requestedTicker && typeof console !== 'undefined' && console.info){
+      console.info('[REVIEW_RECORD_PRECOMMIT_VISIBLE]', {
+        requestedTicker,
+        renderedTicker:ticker,
+        currentReviewRecordTicker:blockedRecordTicker,
+        chartTicker:blockedChartTicker,
+        pendingReviewTicker:pendingTicker || '',
+        pendingToken,
+        candidateTicker:normalizeTicker(candidate && candidate.ticker || ''),
+        candidateToken:String(candidate && candidate.reviewRequestToken || ''),
+        statusText
+      });
+    }
+    const tokenValidation = canPromoteRequestedReviewFromPending(requestedTicker, pendingToken);
+    if(blockedRecord && blockedRecordTicker === requestedTicker && tokenValidation.ok){
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[REVIEW_OWNERSHIP_PROMOTION_START]', {
+          source:'render_precommit_token_safe',
+          requestedTicker,
+          currentReviewRecordTicker:blockedRecordTicker,
+          chartTicker:blockedChartTicker,
+          reviewRequestToken:pendingToken,
+          activeTicker:ticker || '',
+          pendingTicker:pendingTicker || ''
+        });
+      }
+      setActiveReviewTicker(requestedTicker);
+      const promotedCandidate = pendingReviewCandidate();
+      clearPendingReviewRequest({
+        reason:'completed',
+        requestedTicker,
+        reviewRequestToken:pendingToken
+      });
+      clearReviewPendingTimeout();
+      ticker = activeReviewTicker();
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[REVIEW_PENDING_CANDIDATE_PROMOTED]', {
+          source:'render_precommit_token_safe',
+          ticker:requestedTicker,
+          reviewRequestToken:pendingToken,
+          candidateTicker:normalizeTicker(promotedCandidate && promotedCandidate.ticker || ''),
+          candidateToken:String(promotedCandidate && promotedCandidate.reviewRequestToken || ''),
+          activeTicker:ticker || ''
+        });
+        console.info('[REVIEW_OWNERSHIP_PROMOTED]', {
+          source:'render_precommit_token_safe',
+          ticker:requestedTicker,
+          reviewRequestToken:pendingToken,
+          activeTicker:ticker || '',
+          pendingTicker:pendingReviewTicker() || '',
+          currentReviewRecordTicker:blockedRecordTicker
+        });
+      }
+    }
   }
   if(requestedTicker && ticker && ticker !== requestedTicker){
     const blockedRecord = getTickerRecord(requestedTicker) || null;
