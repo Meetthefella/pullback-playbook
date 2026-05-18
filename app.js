@@ -1868,6 +1868,214 @@ function setActiveReviewTicker(ticker){
   });
 }
 
+function pendingReviewTicker(){
+  const pending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+    ? uiState.pendingReviewRequest
+    : null;
+  return normalizeTicker(
+    (pending && pending.ticker)
+    || uiState.pendingReviewTicker
+    || uiState.queuedReviewTicker
+    || ''
+  );
+}
+
+function reviewTickerOwnershipTrace(source, details = {}){
+  if(typeof console === 'undefined' || !console.info) return;
+  const requestedTicker = normalizeTicker(details.requestedTicker || details.ticker || pendingReviewTicker() || activeReviewTicker() || '');
+  const renderedTicker = normalizeTicker(details.renderedTicker || '');
+  const currentReviewRecordTicker = normalizeTicker(details.currentReviewRecordTicker || '');
+  const chartTicker = normalizeTicker(details.chartTicker || '');
+  const statusText = String(details.statusText || (uiState.liveProcessStatus && uiState.liveProcessStatus.message) || '');
+  console.info('[REVIEW_TICKER_OWNERSHIP]', {
+    source,
+    activeReviewTicker:activeReviewTicker() || '',
+    pendingReviewTicker:pendingReviewTicker() || '',
+    queuedReviewTicker:pendingReviewTicker() || '',
+    requestedTicker,
+    renderedTicker,
+    currentReviewRecordTicker,
+    chartTicker,
+    statusText
+  });
+}
+
+function clearPendingReviewRequest(options = {}){
+  const requestedTicker = normalizeTicker(options.requestedTicker || options.ticker || '');
+  const requestedToken = String(options.reviewRequestToken || options.pendingReviewRequestToken || '');
+  const reason = String(options.reason || 'completed');
+  const currentPending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+    ? uiState.pendingReviewRequest
+    : null;
+  const currentTicker = normalizeTicker(
+    (currentPending && currentPending.ticker)
+    || uiState.pendingReviewTicker
+    || uiState.queuedReviewTicker
+    || ''
+  );
+  const currentToken = String(currentPending && currentPending.reviewRequestToken || '');
+  const matchesPending = !!(
+    currentTicker
+    && requestedTicker
+    && currentTicker === requestedTicker
+    && (!requestedToken || !currentToken || currentToken === requestedToken)
+  );
+  const matchesTokenOnly = !!(
+    !requestedTicker
+    && requestedToken
+    && currentToken
+    && currentToken === requestedToken
+  );
+  const matchesTickerOnly = !!(
+    !currentPending
+    && requestedTicker
+    && currentTicker
+    && currentTicker === requestedTicker
+    && requestedToken
+    && !currentToken
+  );
+  const hasPendingState = !!(currentPending || currentTicker || currentToken || uiState.pendingReviewTicker || uiState.queuedReviewTicker);
+  if(!hasPendingState){
+    return {cleared:false, reason:'no_pending_review_request'};
+  }
+  if(!(matchesPending || matchesTokenOnly || matchesTickerOnly)){
+    if(typeof console !== 'undefined' && console.info && ['completed','failed','stale'].includes(reason)){
+      console.info('[REVIEW_PENDING_STALE_FINALIZE_IGNORED]', {
+        reason,
+        oldTicker:requestedTicker || '',
+        oldToken:requestedToken || '',
+        activeTicker:activeReviewTicker() || '',
+        pendingTicker:currentTicker,
+        pendingToken:currentToken,
+        queuedTicker:uiState.queuedReviewTicker || ''
+      });
+    }
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[REVIEW_PENDING_STALE_IGNORED]', {
+        reason,
+        requestedTicker,
+        requestedToken,
+        activeTicker:activeReviewTicker() || '',
+        pendingTicker:currentTicker,
+        pendingToken:currentToken
+      });
+    }
+    return {cleared:false, reason:'stale_pending_request'};
+  }
+  if(typeof console !== 'undefined' && console.info){
+    console.info(reason === 'superseded' ? '[REVIEW_PENDING_SUPERSEDED]' : '[REVIEW_PENDING_CLEAR]', {
+      reason,
+      requestedTicker:requestedTicker || currentTicker,
+      requestedToken:requestedToken || currentToken,
+      activeTicker:activeReviewTicker() || '',
+      pendingTicker:currentTicker,
+      pendingToken:currentToken
+    });
+  }
+  const pendingReviewRequest = currentPending && typeof currentPending === 'object'
+    ? currentPending
+    : null;
+  if(pendingReviewRequest){
+    if(reason === 'failed'){
+      pendingReviewRequest.failedAt = new Date().toISOString();
+    }else if(reason === 'superseded'){
+      pendingReviewRequest.superseded = true;
+      pendingReviewRequest.supersededAt = new Date().toISOString();
+    }
+  }
+  uiState.pendingReviewRequest = null;
+  uiState.pendingReviewTicker = '';
+  uiState.queuedReviewTicker = '';
+  if(requestedTicker && requestedToken){
+    if(reason === 'failed'){
+      settleScannerSelectionStatusReviewPending(requestedTicker, {failed:true, reviewRequestToken:requestedToken});
+    }else if(reason === 'superseded'){
+      settleScannerSelectionStatusReviewPending(requestedTicker, {superseded:true, reviewRequestToken:requestedToken});
+    }else{
+      settleScannerSelectionStatusReviewPending(requestedTicker, {reviewRequestToken:requestedToken});
+    }
+  }
+  return {cleared:true, reason};
+}
+
+function supersedePendingReviewRequest(ticker, options = {}){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return {replaced:false, reason:'invalid_ticker'};
+  const nextOptions = options && typeof options === 'object' ? {...options} : {};
+  const reviewRequestToken = String(nextOptions.reviewRequestToken || nextReviewRequestToken());
+  nextOptions.reviewRequestToken = reviewRequestToken;
+  const previousPending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+    ? uiState.pendingReviewRequest
+    : null;
+  const previousTicker = normalizeTicker(
+    (previousPending && previousPending.ticker)
+    || uiState.pendingReviewTicker
+    || uiState.queuedReviewTicker
+    || ''
+  );
+  const previousToken = String(previousPending && previousPending.reviewRequestToken || '');
+  const hasPreviousPending = !!(previousPending || previousTicker || previousToken || uiState.pendingReviewTicker || uiState.queuedReviewTicker);
+  const isReplacement = !!(
+    hasPreviousPending
+    && (
+      previousTicker !== symbol
+      || previousToken !== reviewRequestToken
+      || String(uiState.pendingReviewTicker || '') !== symbol
+      || String(uiState.queuedReviewTicker || '') !== symbol
+    )
+  );
+  if(isReplacement && typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_PENDING_SUPERSEDE]', {
+      oldTicker:previousTicker,
+      newTicker:symbol,
+      oldToken:previousToken,
+      newToken:reviewRequestToken,
+      activeTicker:activeReviewTicker() || '',
+      queuedTicker:uiState.queuedReviewTicker || ''
+    });
+  }
+  if(isReplacement){
+    if(previousPending){
+      previousPending.superseded = true;
+      previousPending.supersededAt = new Date().toISOString();
+      releaseScannerSelectionStatusLockForSupersededRequest(previousPending);
+    }
+    const clearOptions = {
+      reason:'superseded',
+      requestedTicker:previousTicker
+    };
+    if(previousToken){
+      clearOptions.reviewRequestToken = previousToken;
+    }
+    clearPendingReviewRequest(clearOptions);
+  }
+  uiState.pendingReviewRequest = {
+    ticker:symbol,
+    options:nextOptions,
+    sourceContext:String(nextOptions.sourceContext || ''),
+    reviewRequestToken,
+    queuedAt:new Date().toISOString()
+  };
+  uiState.pendingReviewTicker = symbol;
+  uiState.queuedReviewTicker = symbol;
+  if(isReplacement && typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_PENDING_REPLACED]', {
+      oldTicker:previousTicker,
+      newTicker:symbol,
+      oldToken:previousToken,
+      newToken:reviewRequestToken,
+      activeTicker:activeReviewTicker() || '',
+      queuedTicker:uiState.queuedReviewTicker || ''
+    });
+  }
+  return {
+    replaced:isReplacement,
+    reason:isReplacement ? 'superseded' : 'queued',
+    reviewRequestToken,
+    ticker:symbol
+  };
+}
+
 function restoreActiveReviewSelectionFromSavedReviews(context = 'startup_restore'){
   const currentTicker = activeReviewTicker();
   const savedReviewRecords = openCardTickerRecords();
@@ -10272,19 +10480,12 @@ function queuePendingReviewRequest(ticker, options = {}){
   delete nextOptions.forceNow;
   const reviewRequestToken = String(nextOptions.reviewRequestToken || nextReviewRequestToken());
   nextOptions.reviewRequestToken = reviewRequestToken;
-  const previousPending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
-    ? uiState.pendingReviewRequest
-    : null;
-  if(previousPending && String(previousPending.reviewRequestToken || '') !== reviewRequestToken){
-    releaseScannerSelectionStatusLockForSupersededRequest(previousPending);
-  }
-  uiState.pendingReviewRequest = {
-    ticker:symbol,
-    options:nextOptions,
-    sourceContext:String(nextOptions.sourceContext || ''),
-    reviewRequestToken,
-    queuedAt:new Date().toISOString()
-  };
+  supersedePendingReviewRequest(symbol, nextOptions);
+  reviewTickerOwnershipTrace('queue_pending_review_request', {
+    requestedTicker:symbol,
+    renderedTicker:activeReviewTicker() || '',
+    statusText:'queued_pending_review_request'
+  });
   const liveStatus = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
     ? uiState.liveProcessStatus
     : {state:'action', message:'Working...'};
@@ -10298,6 +10499,9 @@ function queuePendingReviewRequest(ticker, options = {}){
 }
 
 function setLiveProcessStatus(stateKey, message, options = {}){
+  const previousStatus = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
+    ? uiState.liveProcessStatus
+    : null;
   const nextState = String(stateKey || 'idle');
   const nextJob = String(options.job || '');
   const pendingReview = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
@@ -10320,6 +10524,48 @@ function setLiveProcessStatus(stateKey, message, options = {}){
   if(liveProcessHideTimer){
     clearTimeout(liveProcessHideTimer);
     liveProcessHideTimer = null;
+  }
+  const previousRefreshBusy = !!(previousStatus && ['refreshing_watchlist','waiting_for_refresh_before_scan'].includes(String(previousStatus.state || '')));
+  const nextRefreshBusy = !!(['refreshing_watchlist','waiting_for_refresh_before_scan'].includes(nextState));
+  if(nextRefreshBusy){
+    const refreshLock = {
+      state:nextState,
+      job:nextJob,
+      message:nextMessage,
+      setAt:new Date().toISOString()
+    };
+    const previousLock = uiState.watchlistRefreshStatusLock && typeof uiState.watchlistRefreshStatusLock === 'object'
+      ? uiState.watchlistRefreshStatusLock
+      : null;
+    uiState.watchlistRefreshStatusLock = refreshLock;
+    const lockChanged = !previousLock
+      || String(previousLock.state || '') !== nextState
+      || String(previousLock.job || '') !== nextJob
+      || String(previousLock.message || '') !== nextMessage;
+    if(lockChanged && typeof console !== 'undefined' && console.info){
+      console.info('[WATCHLIST_REFRESH_STATUS_LOCK]', {
+        previousState:previousStatus && previousStatus.state || '',
+        previousMessage:previousStatus && previousStatus.message || '',
+        nextState,
+        nextJob,
+        nextMessage,
+        pendingReviewTicker:pendingReviewTicker() || ''
+      });
+    }
+  }else if(previousRefreshBusy){
+    const previousLock = uiState.watchlistRefreshStatusLock && typeof uiState.watchlistRefreshStatusLock === 'object'
+      ? uiState.watchlistRefreshStatusLock
+      : previousStatus;
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[WATCHLIST_REFRESH_STATUS_RELEASE]', {
+        previousState:previousLock && previousLock.state || '',
+        previousMessage:previousLock && previousLock.message || '',
+        releasedBy:nextState,
+        releasedAt:new Date().toISOString(),
+        pendingReviewTicker:pendingReviewTicker() || ''
+      });
+    }
+    delete uiState.watchlistRefreshStatusLock;
   }
   const banner = $('liveProcessStatusBanner');
   if(banner){
@@ -10347,18 +10593,39 @@ function setLiveProcessStatus(stateKey, message, options = {}){
   }
   if(!isLiveProcessBusyState(nextState) && uiState.pendingReviewRequest && options.deferPendingReviewFlush !== true){
     const pending = uiState.pendingReviewRequest;
-    uiState.pendingReviewRequest = null;
-    const runPendingReview = () => {
-      loadTickerIntoReview(pending.ticker, {
-        ...(pending.options || {}),
-        forceNow:true,
-        reviewRequestToken:pending.reviewRequestToken || ((pending.options && pending.options.reviewRequestToken) || '')
-      });
-    };
-    if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-      window.requestAnimationFrame(() => runPendingReview());
-    }else{
-      setTimeout(runPendingReview, 0);
+    if(!pending || !pending.flushedAt){
+      if(pending && typeof pending === 'object'){
+        pending.flushedAt = new Date().toISOString();
+      }
+      const runPendingReview = () => {
+        if(pending && pending.superseded){
+          reviewTickerOwnershipTrace('stale_pending_review_blocked', {
+            requestedTicker:pending.ticker || '',
+            renderedTicker:activeReviewTicker() || '',
+            statusText:'superseded_pending_review_request'
+          });
+          if(typeof console !== 'undefined' && console.warn){
+            console.warn('[REVIEW_STALE_RECORD_BLOCKED]', {
+              requestedTicker:pending.ticker || '',
+              renderedTicker:activeReviewTicker() || '',
+              pendingReviewTicker:pending.ticker || '',
+              statusText:'superseded_pending_review_request',
+              reason:'pending_review_request_superseded'
+            });
+          }
+          return;
+        }
+        loadTickerIntoReview(pending.ticker, {
+          ...(pending.options || {}),
+          forceNow:true,
+          reviewRequestToken:pending.reviewRequestToken || ((pending.options && pending.options.reviewRequestToken) || '')
+        });
+      };
+      if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+        window.requestAnimationFrame(() => runPendingReview());
+      }else{
+        setTimeout(runPendingReview, 0);
+      }
     }
   }
 }
@@ -21578,6 +21845,20 @@ async function analyseSetup(ticker){
         });
         return;
       }
+      const currentActiveReviewTicker = normalizeTicker(activeReviewTicker() || '');
+      if(currentActiveReviewTicker && currentActiveReviewTicker !== ticker){
+        setScannerCardClickTrace(ticker, 'analyseSetup.stale_review_ticker_ignored', `active=${currentActiveReviewTicker} request=${analysisRequestId}`);
+        logChartVerificationLifecycle('stale_response_rejected', {
+          reviewTicker:ticker,
+          verificationRequestId:analysisRequestId,
+          requestImageId:requestChartImageId,
+          currentImageId:currentChartImageId,
+          staleResponseRejected:true,
+          rejectionReason:'active_review_ticker_mismatch',
+          completedAt:new Date().toISOString()
+        });
+        return;
+      }
       if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
         setScannerCardClickTrace(ticker, 'analyseSetup.stale_apply_ignored', `request=${analysisRequestId}`);
         console.warn('[review-analysis] stale_response_ignored', {ticker, requestId:analysisRequestId});
@@ -22235,6 +22516,21 @@ function loadTickerIntoReview(ticker, options = {}){
   uiState.reviewLoadToken = Number(uiState.reviewLoadToken || 0) + 1;
   const reviewLoadToken = Number(uiState.reviewLoadToken || 0);
   setScannerCardClickTrace(symbol, 'loadTickerIntoReview.enter', `includeInScannerUniverse=${options.includeInScannerUniverse === true} recompute=${options.recompute === true}`);
+  reviewTickerOwnershipTrace('review_open_request', {
+    requestedTicker:symbol,
+    renderedTicker:activeReviewTicker() || '',
+    statusText:String(uiState.liveProcessStatus && uiState.liveProcessStatus.message || '')
+  });
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_OPEN_REQUEST]', {
+      requestedTicker:symbol,
+      activeReviewTicker:activeReviewTicker() || '',
+      pendingReviewTicker:pendingReviewTicker() || '',
+      reviewRequestToken,
+      liveStatus:String(uiState.liveProcessStatus && uiState.liveProcessStatus.state || ''),
+      statusText:String(uiState.liveProcessStatus && uiState.liveProcessStatus.message || '')
+    });
+  }
   const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
     ? String(uiState.liveProcessStatus.state || '')
     : '';
@@ -22243,19 +22539,41 @@ function loadTickerIntoReview(ticker, options = {}){
     setScannerCardClickTrace(symbol, 'loadTickerIntoReview.deferred', `busy=${currentLiveState || '(none)'}`);
     return;
   }
+  queuePendingReviewRequest(symbol, {...options, reviewRequestToken});
   const allowReviewLoadingStatus = !['running_scan','refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
   if(allowReviewLoadingStatus){
-    setLiveProcessStatus('action', `Review pending: ${symbol}`);
+    setLiveProcessStatus('action', `Review pending: ${symbol}`, {deferPendingReviewFlush:true});
   }
   const runReviewLoad = () => {
     if(reviewLoadToken !== Number(uiState.reviewLoadToken || 0)){
       if(String(options.sourceContext || '') === 'watchlist'){
         settleScannerSelectionStatusReviewPending(symbol, {superseded:true, reviewRequestToken});
       }
+      clearPendingReviewRequest({
+        reason:'stale',
+        requestedTicker:symbol,
+        reviewRequestToken
+      });
       setScannerCardClickTrace(symbol, 'loadTickerIntoReview.stale_run_skipped', `token=${reviewLoadToken}`);
       return;
     }
     const record = upsertTickerRecord(symbol);
+    reviewTickerOwnershipTrace('review_record_selected', {
+      requestedTicker:symbol,
+      renderedTicker:symbol,
+      currentReviewRecordTicker:record.ticker || '',
+      chartTicker:normalizeTicker((record.review && record.review.chartRef && record.review.chartRef.ticker) || record.ticker || ''),
+      statusText:'review record selected'
+    });
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[REVIEW_RECORD_SELECTED]', {
+        requestedTicker:symbol,
+        activeReviewTicker:activeReviewTicker() || '',
+        currentReviewRecordTicker:record.ticker || '',
+        chartTicker:normalizeTicker((record.review && record.review.chartRef && record.review.chartRef.ticker) || record.ticker || ''),
+        reviewRequestToken
+      });
+    }
     const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
     uiState.activeReviewSimplifiedStatePreview = {
       ticker:simplifiedState.ticker || symbol,
@@ -22305,11 +22623,27 @@ function loadTickerIntoReview(ticker, options = {}){
         `activeReviewTicker=${uiState.activeReviewTicker || '(none)'} scanner_refresh=${shouldRefreshScannerSurfaces ? 'yes' : 'no'}`
       );
       const completeLoad = () => {
-        if(!isCurrentReviewRender(reviewSeq)) return;
+        if(!isCurrentReviewRender(reviewSeq)){
+          if(sourceContext === 'watchlist'){
+            settleScannerSelectionStatusReviewPending(symbol, {superseded:true, reviewRequestToken});
+          }
+          clearPendingReviewRequest({
+            reason:'stale',
+            requestedTicker:symbol,
+            reviewRequestToken
+          });
+          setScannerCardClickTrace(symbol, 'loadTickerIntoReview.stale_complete_skipped', `reviewSeq=${reviewSeq}`);
+          return;
+        }
         if(reviewLoadToken !== Number(uiState.reviewLoadToken || 0)){
           if(sourceContext === 'watchlist'){
             settleScannerSelectionStatusReviewPending(symbol, {superseded:true, reviewRequestToken});
           }
+          clearPendingReviewRequest({
+            reason:'stale',
+            requestedTicker:symbol,
+            reviewRequestToken
+          });
           setScannerCardClickTrace(symbol, 'loadTickerIntoReview.stale_complete_skipped', `token=${reviewLoadToken}`);
           return;
         }
@@ -22329,6 +22663,11 @@ function loadTickerIntoReview(ticker, options = {}){
           if(sourceContext === 'watchlist'){
             settleScannerSelectionStatusReviewPending(symbol, {failed:false, reviewRequestToken});
           }
+          clearPendingReviewRequest({
+            reason:'completed',
+            requestedTicker:symbol,
+            reviewRequestToken
+          });
           if(inWatchlist && sourceContext === 'scanner'){
             setLiveProcessStatus('action', 'item already in watchlist', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
             setScannerCardClickTrace(symbol, 'loadTickerIntoReview.watchlist_status', 'item already in watchlist');
@@ -22338,6 +22677,11 @@ function loadTickerIntoReview(ticker, options = {}){
           if(sourceContext === 'watchlist'){
             settleScannerSelectionStatusReviewPending(symbol, {failed:true, reviewRequestToken});
           }
+          clearPendingReviewRequest({
+            reason:'failed',
+            requestedTicker:symbol,
+            reviewRequestToken
+          });
           if(allowReviewLoadingStatus){
             setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
           }
@@ -22349,6 +22693,11 @@ function loadTickerIntoReview(ticker, options = {}){
       if(sourceContext === 'watchlist'){
         settleScannerSelectionStatusReviewPending(symbol, {failed:true, reviewRequestToken});
       }
+      clearPendingReviewRequest({
+        reason:'failed',
+        requestedTicker:symbol,
+        reviewRequestToken
+      });
       if(allowReviewLoadingStatus){
         setLiveProcessStatus('error', 'Review load failed.', {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS});
       }
@@ -26296,11 +26645,14 @@ function renderReviewWorkspace(options = {}){
   uiState.reviewRenderPass = Number(uiState.reviewRenderPass || 0) + 1;
   const reviewRenderPass = Number(uiState.reviewRenderPass || 0);
   const reviewSeq = reviewRenderSeqForOptions(options);
+  const requestedTickerForRender = normalizeTicker(options.requestedTicker || options.ticker || pendingReviewTicker() || '');
   const traceReviewRenderBailout = (reason, details = {}) => {
     if(typeof console === 'undefined' || !console.warn) return;
     console.warn('[REVIEW_RENDER_BAILOUT]', {
       reason,
       activeTicker:activeReviewTicker() || '',
+      requestedTicker:requestedTickerForRender || '',
+      pendingReviewTicker:pendingReviewTicker() || '',
       hasReviewRecord:!!activeReviewTicker(),
       hasSimplifiedState:false,
       hasPresentationModel:false,
@@ -26310,6 +26662,8 @@ function renderReviewWorkspace(options = {}){
   if(typeof console !== 'undefined' && console.log){
     console.log('[REVIEW_RENDER_START]', {
       activeTicker:activeReviewTicker() || '',
+      requestedTicker:requestedTickerForRender || '',
+      pendingReviewTicker:pendingReviewTicker() || '',
       hasReviewRecord:!!activeReviewTicker(),
       hasSimplifiedState:false,
       hasPresentationModel:false
@@ -26330,10 +26684,11 @@ function renderReviewWorkspace(options = {}){
   traceScrollEvent('review:render:before', {
     caller:'renderReviewWorkspace',
     reason:String(options.source || options.reason || 'direct'),
-    ticker:activeReviewTicker() || ''
+    ticker:normalizeTicker(options.requestedTicker || options.ticker || pendingReviewTicker() || activeReviewTicker() || '')
   });
   perfMark('pp_review_workspace_render_start');
   const reviewRenderSource = String(options.source || options.reason || 'direct');
+  const requestedTicker = normalizeTicker(options.requestedTicker || options.ticker || pendingReviewTicker() || '');
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] render_review', {
       phase:'start',
@@ -26358,12 +26713,72 @@ function renderReviewWorkspace(options = {}){
     traceScrollEvent('review:render:after', {
       caller:'renderReviewWorkspace.finish',
       reason:reviewRenderSource,
-      ticker:activeReviewTicker() || ''
+      ticker:requestedTicker || activeReviewTicker() || ''
     });
   };
   box.className = 'list reviewworkspace-shell';
   box.innerHTML = '';
   const ticker = activeReviewTicker();
+  const pendingTicker = pendingReviewTicker();
+  const statusText = String(uiState.liveProcessStatus && uiState.liveProcessStatus.message || '');
+  if(requestedTicker && ticker && ticker !== requestedTicker){
+    const blockedRecord = getTickerRecord(requestedTicker) || null;
+    reviewTickerOwnershipTrace('render_stale_record_blocked', {
+      requestedTicker,
+      renderedTicker:ticker,
+      currentReviewRecordTicker:blockedRecord ? blockedRecord.ticker || '' : '',
+      chartTicker:blockedRecord ? normalizeTicker((blockedRecord.review && blockedRecord.review.chartRef && blockedRecord.review.chartRef.ticker) || blockedRecord.ticker || '') : '',
+      statusText
+    });
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[REVIEW_STALE_RECORD_BLOCKED]', {
+        requestedTicker,
+        renderedTicker:ticker,
+        currentReviewRecordTicker:blockedRecord ? blockedRecord.ticker || '' : '',
+        pendingReviewTicker:pendingTicker || '',
+        chartTicker:blockedRecord ? normalizeTicker((blockedRecord.review && blockedRecord.review.chartRef && blockedRecord.review.chartRef.ticker) || blockedRecord.ticker || '') : '',
+        statusText
+      });
+    }
+    traceReviewRenderBailout('stale_review_ticker_blocked', {
+      requestedTicker,
+      renderedTicker:ticker,
+      pendingReviewTicker:pendingTicker || '',
+      statusText
+    });
+    box.innerHTML = `<div class="summary">Review pending: ${escapeHtml(requestedTicker)}</div><div class="tiny">Waiting for the requested review record to finish loading.</div>`;
+    finishReviewRenderLog();
+    return;
+  }
+  if(pendingTicker && (!ticker || ticker !== pendingTicker)){
+    const blockedRecord = getTickerRecord(ticker) || null;
+    reviewTickerOwnershipTrace('render_stale_record_blocked', {
+      requestedTicker:pendingTicker,
+      renderedTicker:ticker || '',
+      currentReviewRecordTicker:blockedRecord ? blockedRecord.ticker || '' : '',
+      chartTicker:blockedRecord ? normalizeTicker((blockedRecord.review && blockedRecord.review.chartRef && blockedRecord.review.chartRef.ticker) || blockedRecord.ticker || '') : '',
+      statusText
+    });
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[REVIEW_STALE_RECORD_BLOCKED]', {
+        requestedTicker:pendingTicker,
+        renderedTicker:ticker || '',
+        currentReviewRecordTicker:blockedRecord ? blockedRecord.ticker || '' : '',
+        pendingReviewTicker:pendingTicker,
+        chartTicker:blockedRecord ? normalizeTicker((blockedRecord.review && blockedRecord.review.chartRef && blockedRecord.review.chartRef.ticker) || blockedRecord.ticker || '') : '',
+        statusText
+      });
+    }
+    traceReviewRenderBailout('pending_review_ticker_blocked', {
+      requestedTicker:pendingTicker,
+      renderedTicker:ticker || '',
+      pendingReviewTicker:pendingTicker,
+      statusText
+    });
+    box.innerHTML = `<div class="summary">Review pending: ${escapeHtml(pendingTicker)}</div><div class="tiny">Waiting for the requested review record to finish loading.</div>`;
+    finishReviewRenderLog();
+    return;
+  }
   if(!ticker){
     const savedReviewRecords = openCardTickerRecords();
     if(savedReviewRecords.length){
@@ -26387,6 +26802,34 @@ function renderReviewWorkspace(options = {}){
     return;
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
+  if(normalizeTicker(liveRecord.ticker || '') !== ticker){
+    reviewTickerOwnershipTrace('render_stale_record_blocked', {
+      requestedTicker:ticker,
+      renderedTicker:liveRecord.ticker || '',
+      currentReviewRecordTicker:liveRecord.ticker || '',
+      chartTicker:normalizeTicker((liveRecord.review && liveRecord.review.chartRef && liveRecord.review.chartRef.ticker) || liveRecord.ticker || ''),
+      statusText
+    });
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[REVIEW_STALE_RECORD_BLOCKED]', {
+        requestedTicker:ticker,
+        renderedTicker:liveRecord.ticker || '',
+        currentReviewRecordTicker:liveRecord.ticker || '',
+        pendingReviewTicker:pendingTicker || '',
+        chartTicker:normalizeTicker((liveRecord.review && liveRecord.review.chartRef && liveRecord.review.chartRef.ticker) || liveRecord.ticker || ''),
+        statusText
+      });
+    }
+    traceReviewRenderBailout('stale_review_record_ticker_mismatch', {
+      requestedTicker:ticker,
+      renderedTicker:liveRecord.ticker || '',
+      currentReviewRecordTicker:liveRecord.ticker || '',
+      statusText
+    });
+    box.innerHTML = `<div class="summary">Review pending: ${escapeHtml(ticker)}</div><div class="tiny">Waiting for the requested review record to finish loading.</div>`;
+    finishReviewRenderLog();
+    return;
+  }
   const readOnlyReviewOpen = options.skipWatchlistLifecycle === true && options.recompute !== true;
   const sourceProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
     && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
@@ -27239,6 +27682,23 @@ function renderReviewWorkspace(options = {}){
         summary:chartUiDecision.summary || '',
         detail:chartUiDecision.detail || ''
       }
+    });
+  }
+  reviewTickerOwnershipTrace('render_review_record', {
+    requestedTicker:requestedTicker || ticker,
+    renderedTicker:record.ticker || ticker,
+    currentReviewRecordTicker:record.ticker || '',
+    chartTicker:normalizeTicker((record.review && record.review.chartRef && record.review.chartRef.ticker) || record.ticker || ''),
+    statusText:chartUiDecision.summary || chartUiDecision.title || statusText
+  });
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_RENDER_RECORD]', {
+      requestedTicker:requestedTicker || ticker,
+      renderedTicker:record.ticker || ticker,
+      currentReviewRecordTicker:record.ticker || '',
+      pendingReviewTicker:pendingTicker || '',
+      chartTicker:normalizeTicker((record.review && record.review.chartRef && record.review.chartRef.ticker) || record.ticker || ''),
+      statusText:chartUiDecision.summary || chartUiDecision.title || statusText
     });
   }
   const aiAnalysisSuppressedByChartMismatch = chartUiDecision.key === 'chart_mismatch';
