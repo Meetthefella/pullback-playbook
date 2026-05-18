@@ -3455,6 +3455,17 @@ function chartImageForAnalysis(review = {}){
   const previewMeta = safe.chartImagePreview && typeof safe.chartImagePreview === 'object' ? safe.chartImagePreview : null;
   const previewDataUrl = previewMeta && typeof previewMeta.dataUrl === 'string' ? previewMeta.dataUrl : '';
   const dataUrl = originalDataUrl || previewDataUrl;
+  if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
+    console.info('[CHART_EXTRACTION_INPUT]', {
+      ticker:String(safe.ticker || '').trim(),
+      imageSource:sourceTrace.sourceKind || '',
+      hasOriginal:!!originalMeta,
+      hasPreview:!!previewMeta,
+      hasChartImageForAnalysis:!!dataUrl,
+      originalDimensions:sourceTrace.originalDimensions || 'unknown',
+      verificationDimensions:sourceTrace.verificationSourceDimensions || 'unknown'
+    });
+  }
   return {
     chartRef:dataUrl ? {
       name:String((originalMeta && originalMeta.name) || (chartRef && chartRef.name) || 'chart.png'),
@@ -20866,6 +20877,24 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   if(mismatchStatus === 'unclear' && mismatchWarning && !safeRisks.includes(mismatchWarning)) safeRisks.unshift(mismatchWarning);
   const inferredRisks = safeRisks.length ? [] : inferRisksFromAnalysisText(chartReadGuard.text, keyReasons);
   const finalRisks = safeRisks.length ? safeRisks : inferredRisks;
+  if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
+    const failureReason = !parsed.visible_ticker && !parsed.visible_timeframe && parsed.visible_latest_price == null
+      ? 'no_extractable_chart_facts'
+      : (!parsed.visible_ticker || parsed.visible_latest_price == null
+        ? 'partial_or_missing_critical_facts'
+        : (mismatchStatus === 'mismatch' ? 'legacy_mismatch_warning' : 'ok'));
+    console.info('[CHART_EXTRACTION_RESULT]', {
+      tickerExtracted:parsed.visible_ticker || '',
+      timeframeExtracted:parsed.visible_timeframe || '',
+      priceExtracted:parsed.visible_latest_price == null ? 'n/a' : parsed.visible_latest_price,
+      ma20Extracted:parsed.visible_ma20 == null ? 'n/a' : parsed.visible_ma20,
+      ma50Extracted:parsed.visible_ma50 == null ? 'n/a' : parsed.visible_ma50,
+      ma200Extracted:parsed.visible_ma200 == null ? 'n/a' : parsed.visible_ma200,
+      source:parsed.extraction_method_used || parsed.ma200_extraction_method_used || '',
+      confidence:parsed.extraction_confidence == null ? '' : parsed.extraction_confidence,
+      failureReason
+    });
+  }
   return {
     setup_type:parsed.setup_type || previousState.setupType || '',
     verdict:parsed.verdict,
@@ -21341,6 +21370,25 @@ async function analyseSetup(ticker){
       logAnalysisDebug('PREVIOUS_TICKER_STATE', previousTickerState);
       const analysis = normalizeAnalysisResult(data.analysis, previousTickerState);
       logAnalysisDebug('NORMALIZED_ANALYSIS_OBJECT', analysis);
+      if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
+        const extractedFacts = analysis || {};
+        console.info('[CHART_EXTRACTION_RESULT]', {
+          ticker:ticker,
+          tickerExtracted:extractedFacts.visible_ticker || '',
+          timeframeExtracted:extractedFacts.visible_timeframe || '',
+          priceExtracted:extractedFacts.visible_latest_price == null ? 'n/a' : extractedFacts.visible_latest_price,
+          ma20Extracted:extractedFacts.visible_ma20 == null ? 'n/a' : extractedFacts.visible_ma20,
+          ma50Extracted:extractedFacts.visible_ma50 == null ? 'n/a' : extractedFacts.visible_ma50,
+          ma200Extracted:extractedFacts.visible_ma200 == null ? 'n/a' : extractedFacts.visible_ma200,
+          source:extractedFacts.extraction_warnings && extractedFacts.extraction_warnings.length ? 'normalized_analysis' : 'ai_response',
+          confidence:extractedFacts.extraction_confidence == null ? '' : extractedFacts.extraction_confidence,
+          failureReason:!extractedFacts.visible_ticker && !extractedFacts.visible_timeframe && extractedFacts.visible_latest_price == null
+            ? 'no_extractable_chart_facts'
+            : (!extractedFacts.visible_ticker || extractedFacts.visible_latest_price == null
+              ? 'partial_or_missing_critical_facts'
+              : 'ok')
+        });
+      }
       card.lastResponse = JSON.stringify(data.analysis || {}, null, 2);
       card.lastAnalysis = analysis;
       card.lastError = '';
@@ -25941,6 +25989,27 @@ function renderChartConsistencyTrace(trace){
   return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}<details class="compact-details"><summary>Show details</summary>${details}</details></div>`;
 }
 
+function logReviewChartOverflowGuard(ticker = ''){
+  if(typeof document === 'undefined' || typeof window === 'undefined') return;
+  const workspace = document.getElementById('reviewWorkspace');
+  if(!workspace) return;
+  const scrollWidth = document.documentElement && Number.isFinite(document.documentElement.scrollWidth)
+    ? document.documentElement.scrollWidth
+    : 0;
+  const innerWidth = Number.isFinite(window.innerWidth) ? window.innerWidth : 0;
+  if(scrollWidth > innerWidth + 4){
+    const payload = {
+      ticker:String(ticker || '').trim(),
+      scrollWidth,
+      innerWidth,
+      overflowDelta:scrollWidth - innerWidth
+    };
+    if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && console.warn){
+      console.warn('[REVIEW_CHART_OVERFLOW]', payload);
+    }
+  }
+}
+
 function renderReviewWorkspace(options = {}){
   uiState.reviewRenderPass = Number(uiState.reviewRenderPass || 0) + 1;
   const reviewRenderPass = Number(uiState.reviewRenderPass || 0);
@@ -27159,6 +27228,9 @@ function renderReviewWorkspace(options = {}){
   calculate({persist:false});
   updateReviewAiSummaryOverflowHint();
   window.requestAnimationFrame(() => updateReviewAiSummaryOverflowHint());
+  if(typeof window !== 'undefined'){
+    window.requestAnimationFrame(() => logReviewChartOverflowGuard(record.ticker));
+  }
   finishReviewRenderLog();
   }catch(error){
     if(typeof console !== 'undefined' && console.error){

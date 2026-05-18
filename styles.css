@@ -1543,6 +1543,8 @@ button:hover:not([disabled]){transform:translateY(-1px)}
 .reviewchartpanel--compact{
   display:grid;
   gap:10px;
+  min-width:0;
+  width:100%;
 }
 .review-chart-controls{
   margin:0;
@@ -2817,6 +2819,8 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 }
 .reviewchartpanel .workflowmenu-inline{
   grid-template-columns:repeat(2,minmax(0,1fr));
+  min-width:0;
+  width:100%;
 }
 .reviewchartpanel .workflowmenu-inline button{
   min-width:0;
@@ -2827,7 +2831,78 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   line-height:1.15;
   font-size:.8rem;
 }
-.reviewchartpanel .thumb{width:100%;max-width:220px;height:auto;aspect-ratio:4/3}
+.reviewchartpanel .thumbwrap,
+.reviewchartpanel .chart-verification-actions,
+.reviewchartpanel .compact-details,
+.reviewchartpanel .review-chart-controls,
+.reviewchartpanel .review-chart-controls .workflowmenu,
+.reviewchartpanel .review-chart-controls .workflowmenu-inline{
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+.reviewchartpanel .thumbwrap{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  min-width:0;
+}
+.reviewchartpanel .thumbwrap > div{
+  min-width:0;
+  flex:1 1 0;
+}
+.reviewchartpanel .thumbwrap .tiny,
+.reviewchartpanel .chart-verification-actions,
+.reviewchartpanel .chart-verification-actions .compactbutton{
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.reviewchartpanel .thumb{
+  width:100%;
+  max-width:220px;
+  height:auto;
+  aspect-ratio:4/3;
+}
+.reviewchartpanel .chartthumbbutton{
+  min-width:0;
+  width:100%;
+  max-width:100%;
+}
+.reviewchartpanel .chartthumbbutton > div{
+  min-width:0;
+}
+.reviewchartpanel .chartthumbbutton .tiny{
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.reviewchartpanel .chart-verification-actions{
+  display:flex;
+  flex-wrap:wrap;
+}
+.reviewchartpanel .chart-verification-actions .compactbutton{
+  min-width:0;
+  max-width:100%;
+  flex:1 1 180px;
+}
+.reviewchartpanel .compact-details{
+  min-width:0;
+  overflow-wrap:anywhere;
+  max-width:100%;
+}
+.reviewchartpanel .compact-details > summary,
+.reviewchartpanel .compact-details > :not(summary),
+.reviewchartpanel .tiny,
+.reviewchartpanel .summary,
+.reviewchartpanel .mutebox,
+.reviewchartpanel .actions{
+  max-width:100%;
+  min-width:0;
+  box-sizing:border-box;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
 .review-chart-lightbox{
   position:fixed;
   inset:0;
@@ -3084,6 +3159,38 @@ details>summary::-webkit-details-marker{display:none}
     padding:8px 8px;
     font-size:.72rem;
     letter-spacing:0;
+  }
+  .reviewchartpanel .thumbwrap{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .reviewchartpanel .thumbwrap > div{
+    width:100%;
+  }
+  .reviewchartpanel .thumbwrap .thumb,
+  .reviewchartpanel .chartthumbbutton .thumb{
+    width:100%;
+    max-width:none;
+    flex:1 1 auto;
+  }
+  .reviewchartpanel .chartthumbbutton{
+    flex-direction:column;
+    align-items:flex-start;
+    width:100%;
+  }
+  .reviewchartpanel .chart-verification-actions{
+    flex-direction:column;
+  }
+  .reviewchartpanel .chart-verification-actions .compactbutton{
+    width:100%;
+    flex:1 1 auto;
+  }
+  .reviewchartpanel .compact-details,
+  .reviewchartpanel .chart-verification-actions,
+  .reviewchartpanel .thumbwrap,
+  .reviewchartpanel .thumbwrap > div{
+    max-width:100%;
+    min-width:0;
   }
   .resultactionsbar{flex-direction:column;align-items:stretch}
   .focusstrip{grid-auto-columns:minmax(170px,84vw)}

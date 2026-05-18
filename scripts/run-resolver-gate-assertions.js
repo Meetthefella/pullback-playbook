@@ -3268,6 +3268,9 @@ function runAiContractAssertions(){
   if(!sourceForAnalysis.chartRef || sourceForAnalysis.chartRef.dataUrl !== 'data:image/png;base64,source' || sourceForAnalysis.sourceTrace.sourceKind !== 'chartImageOriginal'){
     throw new Error('AI extraction must use the original source image, not the cropped preview image.');
   }
+  if(sourceForAnalysis.sourceTrace.originalAvailable !== true || sourceForAnalysis.sourceTrace.fallbackUsed !== false || sourceForAnalysis.sourceTrace.verificationUsesCroppedPreview !== false){
+    throw new Error('Chart extraction source trace must prefer the original image path when available.');
+  }
   const priceMismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
