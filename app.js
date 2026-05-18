@@ -25501,36 +25501,6 @@ function renderReviewWorkspace(options = {}){
     className:simplifiedBadgeClass
   };
   const simplifiedActionLabel = String(simplifiedState.actionLabel || '').trim();
-  const reviewLegacyState = {
-    canonicalVerdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || '',
-    visualBucket:visualState.visualBucket || visualState.presentationBucket || globalVerdict.bucket || '',
-    tone:reviewVisualTone || visualState.tone || '',
-    badgeLabel:reviewBadgeLabel || visualState.badgeLabel || '',
-    mainBlocker:globalVerdict.main_blocker || globalVerdict.reason || visualState.reason || '',
-    planStatus:globalVerdict.plan_status || simplifiedState.planStatus || '',
-    entryGatePass:globalVerdict.entry_gate_pass,
-    nearEntryGatePass:globalVerdict.near_entry_gate_pass,
-    structureEligibility:globalVerdict.structure_eligibility || '',
-    structureState:globalVerdict.structure_state || derivedStates.structureState || '',
-    setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
-    priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
-    bounceState:globalVerdict.bounce_state || derivedStates.bounceState || ''
-  };
-  const reviewStateDivergence = collectStateDivergence(record, 'review.render', simplifiedState, reviewLegacyState, [
-    'canonicalVerdict',
-    'visualBucket',
-    'tone',
-    'badgeLabel',
-    'mainBlocker',
-    'planStatus',
-    'entryGatePass',
-    'nearEntryGatePass',
-    'structureEligibility',
-    'structureState',
-    'setupLocationState',
-    'priceabilityState',
-    'bounceState'
-  ]);
   if(typeof console !== 'undefined' && console.info){
     console.info('[SIMPLIFIED_REVIEW_STATE]', {
       ticker:simplifiedState.ticker || record.ticker,
@@ -25915,6 +25885,36 @@ function renderReviewWorkspace(options = {}){
   const reviewConflictingToneClassesDetected = toneFamilies.card.size > 1 || toneFamilies.visual.size > 1 || toneFamilies.review.size > 1;
   const reviewScoreStyleApplied = 'suppressed_root_review_tone';
   const reviewPanelToneClass = `review-panel-tone-${reviewVisualTone}`;
+  const reviewLegacyState = {
+    canonicalVerdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || '',
+    visualBucket:visualState.visualBucket || visualState.presentationBucket || globalVerdict.bucket || '',
+    tone:reviewVisualTone || visualState.tone || '',
+    badgeLabel:visualState.badgeLabel || simplifiedState.badgeLabel || '',
+    mainBlocker:globalVerdict.main_blocker || globalVerdict.reason || visualState.reason || '',
+    planStatus:globalVerdict.plan_status || simplifiedState.planStatus || '',
+    entryGatePass:globalVerdict.entry_gate_pass,
+    nearEntryGatePass:globalVerdict.near_entry_gate_pass,
+    structureEligibility:globalVerdict.structure_eligibility || '',
+    structureState:globalVerdict.structure_state || derivedStates.structureState || '',
+    setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
+    priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
+    bounceState:globalVerdict.bounce_state || derivedStates.bounceState || ''
+  };
+  const reviewStateDivergence = collectStateDivergence(record, 'review.render', simplifiedState, reviewLegacyState, [
+    'canonicalVerdict',
+    'visualBucket',
+    'tone',
+    'badgeLabel',
+    'mainBlocker',
+    'planStatus',
+    'entryGatePass',
+    'nearEntryGatePass',
+    'structureEligibility',
+    'structureState',
+    'setupLocationState',
+    'priceabilityState',
+    'bounceState'
+  ]);
   if(typeof console !== 'undefined' && console.info){
     console.info('[REVIEW_STATE_SOURCE]', {
       ticker:record.ticker,
