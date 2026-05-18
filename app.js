@@ -25345,6 +25345,65 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       }
     };
   }
+  if(!analysis && hasChart){
+    const pendingStatus = fastPass.fastStatus === 'clear_match_candidate'
+      ? 'pending_chart_native_verification'
+      : (fastPass.hasFastFacts ? 'partial_context_unverified_chart' : 'pending_chart_native_verification');
+    const pendingSuppressionReason = pendingStatus === 'pending_chart_native_verification'
+      ? 'Chart-native confirmation has not been established yet; technical AI commentary may be unreliable.'
+      : 'Chart context was not independently verified by chart-native evidence; technical AI commentary may be unreliable.';
+    return {
+      visible:true,
+      status:pendingStatus,
+      severity:'warning',
+      title:pendingStatus === 'pending_chart_native_verification' ? 'Chart verification pending' : 'Chart partially verified',
+      summary:pendingStatus === 'pending_chart_native_verification'
+        ? 'Chart-native confirmation is still pending for the current upload.'
+        : 'Ticker and price are visible, but chart-native confirmation is still pending.',
+      evidence:pendingStatus === 'pending_chart_native_verification'
+        ? ['Chart-native confirmation has not been established yet.']
+        : ['Ticker/price context is visible, but chart-native confirmation is still pending.'],
+      missing:pendingStatus === 'pending_chart_native_verification'
+        ? ['chart-native confirmation']
+        : ['chart-native confirmation'],
+      initialMissingIndicators:[],
+      finalMissingIndicators:[],
+      summaryDerivedFromFinalState:true,
+      mismatchSeverity:'none',
+      aiAnalysisSuppressed:true,
+      suppressionReason:pendingSuppressionReason,
+      missingIndicators:[],
+      partialIndicators:[],
+      likelyMatchedIndicators:[],
+      inferredIndicators:[],
+      indicatorStates:{},
+      extractedFacts:{
+        visible_ticker:fastPass.visibleTicker,
+        visible_timeframe:fastPass.visibleTimeframe,
+        visible_latest_price:fastPass.visiblePrice
+      },
+      trustedFacts:{
+        ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
+        expected_timeframe:'1D',
+        latest_price:fastPass.trustedPrice
+      },
+      sources:['chart_verification_fast_pass'],
+      chartImageSource,
+      debug:{
+        ticker:String(safeRecord.ticker || '').trim(),
+        source:'chart_verification_fast_pass',
+        fastPass,
+        deterministicStatus:pendingStatus,
+        chartImageSource,
+        hasChart,
+        mismatchSeverity:'none',
+        aiAnalysisSuppressed:true,
+        suppressionReason:pendingSuppressionReason,
+        canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
+        visualBucket:simplifiedState && simplifiedState.visualBucket || ''
+      }
+    };
+  }
   if(fastPass.fastStatus === 'insufficient_context' && analysis && fastPass.hasFastFacts){
     return {
       visible:true,
@@ -25600,6 +25659,8 @@ function renderChartConsistencyTrace(trace){
     }else if(String(safe.status || '') === 'partial_context_unverified_chart'){
       summaryLines.push('Ticker and price match, but chart-native confirmation is missing.');
     }
+  }else if(String(safe.status || '') === 'pending_chart_native_verification'){
+    summaryLines.push('Chart verification is pending chart-native confirmation.');
   }else if(String(safe.status || '') === 'strong_mismatch'){
     summaryLines.push(`The uploaded chart is unlikely to match ${(trusted && trusted.ticker) || 'the selected ticker'}.`);
   }else if(String(safe.status || '') === 'possible_mismatch'){

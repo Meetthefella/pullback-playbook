@@ -2717,6 +2717,25 @@ function runAiContractAssertions(){
   if(!storedChartTrace || storedChartTrace.trace.status !== 'verified_match'){
     throw new Error('Stored deterministic chart trace must be readable before AI analysis completes.');
   }
+  const preAiPendingTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{
+      chartRef:{dataUrl:'data:image/png;base64,dino-chart', imageId:'chart-dino-1'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,dino-chart', imageId:'chart-dino-1', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,dino-chart', imageId:'chart-dino-1'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-dino-1'}
+    }},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(['consistent','verified_match','likely_match'].includes(String(preAiPendingTrace.status || '')) || preAiPendingTrace.aiAnalysisSuppressed !== true){
+    throw new Error('Pre-AI chart verification must not render as consistent or verified before chart-native confirmation exists.');
+  }
+  if(!['pending_chart_native_verification','partial_context_unverified_chart','uncertain_missing_context'].includes(String(preAiPendingTrace.status || ''))){
+    throw new Error('Pre-AI chart verification must remain pending or partially verified until chart-native evidence exists.');
+  }
+  if(!/chart-native/i.test(String(preAiPendingTrace.suppressionReason || ''))){
+    throw new Error('Pre-AI chart verification must explain that chart-native confirmation is pending.');
+  }
   const staleTickerTrace = evidenceSandbox.getReviewChartVerificationState({
     ticker:'DINO',
     review:{
