@@ -526,6 +526,9 @@
       allow_plan:['entry','near_entry'].includes(finalVerdict),
       allowWatchlist:['watch','near_entry','entry'].includes(finalVerdict),
       allow_watchlist:['watch','near_entry','entry'].includes(finalVerdict),
+      structureEligibility,
+      structureEligibilityNormalized:structureEligibility,
+      structureState:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase(),
       reason:(legacyVerdict && legacyVerdict.main_blocker) || resolvedSummary,
       reason_state:finalVerdict === 'avoid'
         ? (String(derivedStates && derivedStates.structureState || '').trim().toLowerCase() === 'broken' ? 'broken_structure' : 'invalidated')

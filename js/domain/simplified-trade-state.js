@@ -340,6 +340,7 @@
       previousMarketDataFingerprint:previous ? previous.marketDataFingerprint : null,
       previousPlanFingerprint:previous ? previous.planFingerprint : null,
       structureState:String(derivedStates.structureState || resolvedState.structure_state || resolvedState.structural_state || '').toLowerCase(),
+      structureEligibility:String(result.structureEligibility || resolvedState.structure_eligibility || resolvedState.structureEligibility || '').toLowerCase(),
       setupLocationState:String(derivedStates.setupLocationState || resolvedState.setup_location_state || '').toLowerCase(),
       priceabilityState:String(derivedStates.priceabilityState || resolvedState.priceability_state || '').toLowerCase(),
       priceabilityReconciledFromPlan:derivedStates.priceabilityReconciledFromPlan === true,

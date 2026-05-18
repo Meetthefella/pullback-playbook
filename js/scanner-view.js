@@ -115,7 +115,11 @@
 
   function scanPresentationForView(view, deps = {}){
     const item = view && view.item ? view.item : view || {};
-    const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object' ? view.simplifiedState : {};
+    const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object'
+      ? view.simplifiedState
+      : (typeof deps.resolveSimplifiedStateForSurface === 'function'
+        ? deps.resolveSimplifiedStateForSurface(item, 'scan', {log:false})
+        : {});
     const visualState = view && view.globalVerdict && typeof view.globalVerdict === 'object' ? view.globalVerdict : {};
     const derived = view && view.setupStates
       ? view.setupStates
@@ -505,21 +509,32 @@
 
   function resultReasonForView(view, deps = {}){
     const item = view.item;
-    const rrValue = deps.numericOrNull(view.actionableRrValue);
-    const estimatedRrValue = deps.numericOrNull(view.rrValue);
+    const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object'
+      ? view.simplifiedState
+      : (typeof deps.resolveSimplifiedStateForSurface === 'function'
+        ? deps.resolveSimplifiedStateForSurface(item, 'scan', {log:false})
+        : {});
+    const rrValue = deps.numericOrNull(simplified && simplified.debug && simplified.debug.resolvedState && simplified.debug.resolvedState.resolvedRR)
+      ?? deps.numericOrNull(view.actionableRrValue);
+    const estimatedRrValue = deps.numericOrNull(simplified && simplified.debug && simplified.debug.resolvedState && simplified.debug.resolvedState.resolvedRR)
+      ?? deps.numericOrNull(view.rrValue);
+    const mainBlocker = String(simplified.mainBlocker || view.mainBlocker || '').trim();
+    const planStatus = String(simplified.planStatus || view.planUiState.state || '').trim().toLowerCase();
+    const visualBucket = String(simplified.visualBucket || view.visualBucket || view.presentationBucket || '').trim().toLowerCase();
+    const canonicalVerdict = String(simplified.canonicalVerdict || view.finalVerdict || view.displayStage || '').trim().toLowerCase();
     const structureBadge = shortlistStructureBadgeForView(view, deps);
     const structureLabel = `${structureBadge.label} structure`;
-    if(Number.isFinite(item.marketData.price) && Number.isFinite(item.marketData.ma200) && item.marketData.price < item.marketData.ma200) return 'Trend broken';
-    if(Number.isFinite(item.marketData.ma50) && Number.isFinite(item.marketData.ma200) && item.marketData.ma50 < item.marketData.ma200) return 'Trend broken';
-    if(item.plan.firstTargetTooClose) return 'First target too close';
-    if(view.planUiState.state === 'unrealistic_rr') return 'Unrealistic reward:risk';
-    if(view.planUiState.state !== 'valid' && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) return 'Low estimated reward';
-    if(view.planUiState.state !== 'valid') return view.planUiState.state === 'needs_adjustment' ? 'Plan needs adjustment' : 'Plan invalid';
-    if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return 'Insufficient reward';
-    if(view.setupUiState.state === 'broken') return item.scan.pullbackType && /broken/i.test(item.scan.pullbackType) ? 'Trend broken' : (structureLabel || 'Not actionable');
-    if(view.setupUiState.state === 'entry' || view.displayStage === 'Near Entry'){
-      return `Near ${deps.escapeHtml(item.scan.scanType || '20MA')} with ${item.scan.pullbackStatus || 'acceptable structure'}`.replace(/&amp;/g, '&');
+    if(/broken/i.test(mainBlocker)) return mainBlocker;
+    if(visualBucket === 'diminishing' && canonicalVerdict === 'watch'){
+      return mainBlocker || 'Recent rebound failed - wait for stabilisation.';
     }
+    if(planStatus !== 'valid' && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) return mainBlocker || 'Low estimated reward';
+    if(planStatus !== 'valid') return mainBlocker || (planStatus === 'needs_adjustment' ? 'Plan needs adjustment' : 'Plan invalid');
+    if(Number.isFinite(rrValue) && rrValue < currentRrThreshold()) return mainBlocker || 'Insufficient reward';
+    if(simplified && simplified.entryGatePass === true && canonicalVerdict === 'entry'){
+      return simplified.actionLabel || `Near ${deps.escapeHtml(item.scan.scanType || '20MA')} with ${item.scan.pullbackStatus || 'acceptable structure'}`.replace(/&amp;/g, '&');
+    }
+    if(mainBlocker) return mainBlocker;
     return item.setup.reasons[0] || item.scan.summary || 'Needs review';
   }
 
@@ -530,10 +545,15 @@
 
   function resultSupportLineForView(view, deps = {}){
     const item = view.item;
-    const rrValue = deps.shouldShowActionableRR(view) ? deps.numericOrNull(view.actionableRrValue) : null;
+    const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object'
+      ? view.simplifiedState
+      : (typeof deps.resolveSimplifiedStateForSurface === 'function'
+        ? deps.resolveSimplifiedStateForSurface(item, 'scan', {log:false})
+        : {});
+    const rrValue = deps.shouldShowActionableRR(view) ? deps.numericOrNull(simplified && simplified.debug && simplified.debug.resolvedState && simplified.debug.resolvedState.resolvedRR) ?? deps.numericOrNull(view.actionableRrValue) : null;
     const convictionTier = view.convictionTier;
-    if(view.setupUiState.state === 'broken') return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
-    if(view.bucket === 'filtered' || view.finalClassification === 'filtered'){
+    if(String(simplified.mainBlocker || '').toLowerCase().includes('broken')) return item.meta.companyName || item.meta.exchange || 'Filtered from the main review queue.';
+    if(String(simplified.visualBucket || '').toLowerCase() === 'avoid' || view.bucket === 'filtered' || view.finalClassification === 'filtered'){
       const pieces = [
         convictionTier,
         item.setup.marketCaution ? 'Weak market' : '',
@@ -543,10 +563,11 @@
     }
     const pieces = [
       convictionTier,
-      view.planUiState.label,
+      simplified.planStatus && simplified.planStatus !== 'missing' ? (simplified.planStatus || view.planUiState.label) : view.planUiState.label,
       Number.isFinite(rrValue) ? `R:R ${rrValue.toFixed(2)}` : '',
       item.setup && item.setup.practicalSizeFlag === 'tiny_size' ? 'Tiny Size' : '',
       item.setup && item.setup.practicalSizeFlag === 'low_impact' ? 'Low Impact' : '',
+      (simplified.planStatus === 'missing' && simplified.mainBlocker) ? simplified.mainBlocker : '',
       view.affordability === 'heavy_capital' ? 'Heavy Capital' : '',
       view.affordability === 'not_affordable' ? 'Not Affordable' : '',
       view.displayedPlan.tradeability === 'too_expensive' ? 'Risk OK | Capital Heavy' : '',
@@ -562,6 +583,11 @@
 
   function shortlistStructureBadgeForView(view, deps = {}){
     const item = view && view.item ? view.item : {};
+    const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object'
+      ? view.simplifiedState
+      : (typeof deps.resolveSimplifiedStateForSurface === 'function'
+        ? deps.resolveSimplifiedStateForSurface(item, 'scan', {log:false})
+        : {});
     const derived = view && view.setupStates ? view.setupStates : deps.analysisDerivedStatesFromRecord(item);
     const trendState = String(derived.trendState || '').toLowerCase();
     const structureState = String(derived.structureState || '').toLowerCase();
@@ -570,6 +596,9 @@
       item,
       setupStates:derived
     }, deps));
+    if(String(simplified.visualBucket || '').toLowerCase() === 'diminishing'){
+      return {state:'developing', label:'Developing', className:'near'};
+    }
     const price = deps.numericOrNull(item.marketData && item.marketData.price);
     const ma50 = deps.numericOrNull(item.marketData && item.marketData.ma50);
     const ma200 = deps.numericOrNull(item.marketData && item.marketData.ma200);

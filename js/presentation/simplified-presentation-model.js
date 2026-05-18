@@ -114,6 +114,21 @@
     );
     const badge = visual.badge || resolved.badge || {};
     const action = resolved.action || {};
+    const resolvedRR = Number.isFinite(Number(
+      visual.resolvedRR
+      || visual.resolved_rr
+      || resolved.resolvedRR
+      || resolved.resolved_rr
+      || resolved.rr
+    ))
+      ? Number(
+        visual.resolvedRR
+        || visual.resolved_rr
+        || resolved.resolvedRR
+        || resolved.resolved_rr
+        || resolved.rr
+      )
+      : null;
     const entryReasons = Array.isArray(resolved.entry_gate_reasons) ? resolved.entry_gate_reasons.slice() : [];
     const nearReasons = Array.isArray(resolved.near_entry_gate_reasons) ? resolved.near_entry_gate_reasons.slice() : [];
     const blockers = []
@@ -144,8 +159,48 @@
       planVisible:plan.planVisible === true || String(plan.status || '').toLowerCase() === 'valid',
       planStatus:String(plan.status || 'missing').trim().toLowerCase() || 'missing',
       mainBlocker,
+      resolvedRR,
+      avoidTriggerSource:String(
+        visual.avoidTriggerSource
+        || visual.avoid_trigger_source
+        || resolved.avoidTriggerSource
+        || resolved.avoid_trigger_source
+        || resolved.dead_trigger_source
+        || ''
+      ).trim().toLowerCase(),
+      structureState:String(
+        visual.structureState
+        || visual.structure_state
+        || ''
+      ).trim().toLowerCase(),
+      structureEligibility:String(
+        visual.structureEligibility
+        || visual.structure_eligibility
+        || resolved.structureEligibility
+        || resolved.structure_eligibility
+        || ''
+      ).trim().toLowerCase(),
+      setupLocationState:String(
+        visual.setupLocationState
+        || visual.setup_location_state
+        || resolved.setup_location_state
+        || ''
+      ).trim().toLowerCase(),
+      priceabilityState:String(
+        visual.priceabilityState
+        || visual.priceability_state
+        || resolved.priceability_state
+        || ''
+      ).trim().toLowerCase(),
+      bounceState:String(
+        visual.bounceState
+        || visual.bounce_state
+        || resolved.bounce_state
+        || ''
+      ).trim().toLowerCase(),
       entryGatePass:resolved.entry_gate_pass === true,
       nearEntryGatePass:resolved.near_entry_gate_pass === true,
+      terminalAvoidApplied:resolved.terminal_avoid_applied === true || resolved.terminalAvoidApplied === true,
       blockers,
       visualBucketBeforeWeakWatchDowngrade:visual.visualBucketBeforeWeakWatchDowngrade || '',
       weakWatchDowngradeApplied:visual.weakWatchDowngradeApplied === true,
