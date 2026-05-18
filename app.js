@@ -21159,7 +21159,8 @@ async function analyseSetup(ticker){
         card.stop = analysis.stop || '';
         card.target = analysis.first_target || '';
       }
-      const mergedChartTrace = buildChartConsistencyTrace(record, simplifiedReviewState, {
+      const mergedSimplifiedReviewState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+      const mergedChartTrace = buildChartConsistencyTrace(record, mergedSimplifiedReviewState, {
         normalizedAnalysis:analysis,
         derivedStates:analysisDerivedStatesFromRecord(record)
       });
