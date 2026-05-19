@@ -22349,6 +22349,7 @@ async function analyseSetup(ticker){
       const shouldCommitMergedTrace = !currentChartVerificationLifecycle
         || currentChartVerificationLifecycleRequestId === analysisRequestId
         || currentChartVerificationLifecyclePhase === 'deterministic'
+        || currentChartVerificationLifecyclePhase === 'deterministic_ready'
         || currentChartVerificationLifecyclePhase === 'merged';
       if(shouldCommitMergedTrace){
         const mergedChartImageSource = buildChartImageSourceTrace(record.review || {});
@@ -26999,14 +27000,21 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
     if(sameRequestId && candidateRequestId && candidateRequestId !== sameRequestId) return false;
     return true;
   });
+  const mergedMatchingCandidates = matchingCandidates.filter(candidate =>
+    candidate.type === 'post_ai_merged'
+    || String(candidate.trace && candidate.trace.phase || '') === 'merged'
+    || ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'manually_verified', 'user_confirmed_match'].includes(String(candidate.trace && candidate.trace.status || ''))
+  );
   const nonPendingMatchingCandidates = matchingCandidates.filter(candidate => !candidate.isPendingTrace);
-  const chosen = (nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);
+  const chosen = (mergedMatchingCandidates[0] || nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);
   const reason = chosen
-    ? (chosen.label === 'stored_merged_trace'
+    ? (mergedMatchingCandidates[0] && chosen === mergedMatchingCandidates[0]
+      ? 'merged trace'
+      : (chosen.label === 'stored_merged_trace'
       ? 'stored merged trace'
       : (chosen.label === 'rebuilt_trace'
         ? 'rebuilt merged trace'
-        : (chosen.isPendingTrace ? 'pending trace' : 'stored trace')))
+        : (chosen.isPendingTrace ? 'pending trace' : 'stored trace'))))
     : 'no chart trace available';
   return {
     chartImageSource,
@@ -29056,6 +29064,10 @@ function renderReviewWorkspace(options = {}){
   const storedChartAssessorContext = hasVerifiableChart && record.review && record.review.chartVerificationContext && typeof record.review.chartVerificationContext === 'object'
     ? record.review.chartVerificationContext
     : null;
+  const chartAssessorRenderContext = storedChartAssessorContext
+    || (quickChartAnalysisStatus === 'committed' && analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+      ? analysisState.normalizedAnalysis
+      : null);
   let chartConsistencyTraceForDisplay = null;
   let chartUiDecision = null;
   let chartConsistencyTraceMarkup = '';
@@ -29064,11 +29076,11 @@ function renderReviewWorkspace(options = {}){
     const storedChartConsistencyTrace = storedChartVerificationState && storedChartVerificationState.trace
       ? storedChartVerificationState.trace
       : null;
-    const committedAssessorTrace = quickChartAnalysisStatus === 'committed' && storedChartAssessorContext && typeof storedChartAssessorContext === 'object' && Object.keys(storedChartAssessorContext).length
+    const committedAssessorTrace = quickChartAnalysisStatus === 'committed' && chartAssessorRenderContext && typeof chartAssessorRenderContext === 'object' && Object.keys(chartAssessorRenderContext).length
       ? buildChartConsistencyTrace(record, simplifiedState, {
-        normalizedAnalysis:chartAssessorInputToNormalizedAnalysis(storedChartAssessorContext, record.review || {}, {forceMatch:true}),
+        normalizedAnalysis:chartAssessorInputToNormalizedAnalysis(chartAssessorRenderContext, record.review || {}, {forceMatch:true}),
         derivedStates,
-        chartAssessorInput:storedChartAssessorContext
+        chartAssessorInput:chartAssessorRenderContext
       })
       : null;
     const shouldPreferMergedChartTrace = quickChartAnalysisStatus === 'committed'
@@ -29078,19 +29090,19 @@ function renderReviewWorkspace(options = {}){
       ? buildChartConsistencyTrace(record, simplifiedState, {
         normalizedAnalysis:storedChartAssessorContext || analysisState.normalizedAnalysis,
         derivedStates,
-        chartAssessorInput:storedChartAssessorContext
+        chartAssessorInput:chartAssessorRenderContext
       })
       : (storedChartConsistencyTrace || buildChartConsistencyTrace(record, simplifiedState, {
         normalizedAnalysis:storedChartAssessorContext || analysisState.normalizedAnalysis,
         derivedStates,
-        chartAssessorInput:storedChartAssessorContext
+        chartAssessorInput:chartAssessorRenderContext
       }));
     const selectedChartTrace = selectReviewChartTraceForRender(
       record,
       storedChartVerificationWrapper,
       chartConsistencyTrace,
       quickChartAnalysisStatus,
-      storedChartAssessorContext,
+      chartAssessorRenderContext,
       simplifiedState
     );
     chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTrace;
