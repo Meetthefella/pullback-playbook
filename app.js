@@ -4095,6 +4095,29 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
   return key === 'uncertain_match';
 }
 
+function renderChartWorkspaceStatusLineFromDecision(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false){
+  const key = String(decision && decision.key || '');
+  const title = String(decision && decision.title || '');
+  const summary = String(decision && decision.summary || decision && decision.detail || '');
+  const status = String(trace && trace.status || '');
+  if(!hasChartScreenshot){
+    return '<span class="warntext">No chart attached yet.</span>';
+  }
+  if(['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) || status === 'pending_chart_native_verification'){
+    return '<span class="warntext">Checking chart details...</span>';
+  }
+  if(key === 'verified_match' || key === 'user_confirmed_match'){
+    return `<span class="ok">${escapeHtml(title || 'Chart verified for this ticker.')}${summary ? ` ${escapeHtml(summary)}` : ''}</span>`;
+  }
+  if(key === 'chart_mismatch'){
+    return `<span class="badtext">${escapeHtml(title || 'Chart mismatch detected.')}${summary ? ` ${escapeHtml(summary)}` : ''}</span>`;
+  }
+  if(title || summary){
+    return `<span class="warntext">${escapeHtml(title || 'Chart review pending.')}${summary ? ` ${escapeHtml(summary)}` : ''}</span>`;
+  }
+  return '<span class="warntext">Chart saved on this device for this ticker. Checking chart details...</span>';
+}
+
 function renderQuickChartVerificationPending(record, quickState = {}){
   const item = normalizeTickerRecord(record);
   const status = String(quickState.status || 'queued');
@@ -29932,7 +29955,7 @@ function renderReviewWorkspace(options = {}){
             <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
             <div class="reviewactions reviewactions-secondary"><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button></div>
             ${reviewDebug}
-            <div class="statusline tiny" id="reviewWorkspaceStatus">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div>
+            <div class="statusline tiny" id="reviewWorkspaceStatus">${renderChartWorkspaceStatusLineFromDecision(chartUiDecision, chartConsistencyTraceForDisplay, quickChartAnalysisStatus, hasVerifiableChart)}</div>
           </details>
         </div>` : ''}
       </details>
@@ -30161,10 +30184,12 @@ function handleChartSelection(ticker, file){
     if(liveStatus){
       const currentChartState = getReviewChartVerificationState(getTickerRecord(ticker) || record);
       const currentChartDecision = currentChartState ? chartVerificationUiDecision(currentChartState.trace || currentChartState, ticker) : null;
-      const currentChartStatusKey = String(currentChartDecision && currentChartDecision.key || currentChartState && currentChartState.status || '');
-      liveStatus.innerHTML = currentChartStatusKey === 'verified_match'
-        ? '<span class="ok">Chart verified for this ticker.</span>'
-        : '<span class="ok">Chart saved on this device for this ticker. Checking chart details...</span>';
+      liveStatus.innerHTML = renderChartWorkspaceStatusLineFromDecision(
+        currentChartDecision || {},
+        currentChartState && (currentChartState.trace || currentChartState) || {},
+        currentChartState && currentChartState.quickChartAnalysisStatus || '',
+        true
+      );
     }
   };
   reader.onerror = () => {
