@@ -22452,6 +22452,7 @@ async function analyseSetup(ticker){
         completedAt:new Date().toISOString()
       });
       commitTickerState();
+      renderReviewWorkspace();
       // renderCards() in outer finally re-renders the review workspace and syncs planner fields.
     }catch(err){
       const activeMeta = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object' && uiState.analysisActiveRequest.id === analysisRequestId
@@ -28933,16 +28934,23 @@ function renderReviewWorkspace(options = {}){
       ? renderQuickChartVerificationPending(record, quickChartAnalysisState)
       : renderChartConsistencyTrace(chartConsistencyTraceForDisplay);
     chartUiDecision = chartVerificationUiDecision(chartConsistencyTraceForDisplay, record.ticker);
+    const chartActionState = chartUiDecision.key === 'verified_match' || chartUiDecision.key === 'user_confirmed_match'
+      ? 'verified'
+      : (chartUiDecision.key === 'chart_mismatch'
+        ? 'mismatch'
+        : 'uncertain');
     const hasChartScreenshot = hasVerifiableChart;
-    const showChartManualActions = hasChartScreenshot && chartUiDecision.key !== 'chart_mismatch';
+    const showChartManualActions = hasChartScreenshot && chartActionState === 'uncertain';
     const chartManualConfirmationNote = chartUiDecision.key === 'user_confirmed_match'
       ? `<div class="tiny goodtext" style="margin-top:6px">Chart confirmed manually for this review.</div>`
       : '';
     chartManualActionsMarkup = hasChartScreenshot
-      ? `<div class="actions chart-verification-actions" style="margin-top:8px">
-          ${showChartManualActions ? `<button class="primary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record.ticker)}</button>` : ''}
-          <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">Reject and upload another chart</button>
-        </div>${chartManualConfirmationNote}`
+      ? (showChartManualActions
+        ? `<div class="actions chart-verification-actions" style="margin-top:8px">
+            <button class="primary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record.ticker)}</button>
+            <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">Reject and upload another chart</button>
+          </div>${chartManualConfirmationNote}`
+        : '')
       : '';
     if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
       console.info('[REVIEW_CHART_VERIFICATION_RENDER]', {
@@ -28955,6 +28963,15 @@ function renderReviewWorkspace(options = {}){
           summary:chartUiDecision.summary || '',
           detail:chartUiDecision.detail || ''
         }
+      });
+      console.info('[CHART_UI_RENDER_STATE]', {
+        ticker:record.ticker,
+        renderedStatus:String(chartUiDecision.key || ''),
+        sourceTraceStatus:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''),
+        imageId:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.imageId || chartImageIdForReview(record.review || {}) || ''),
+        requestId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || ''),
+        usedMergedTrace:!!(storedChartVerificationState && storedChartVerificationState.phase === 'merged'),
+        usedPendingTrace:['queued', 'running'].includes(quickChartAnalysisStatus)
       });
     }
   }else{
@@ -28971,6 +28988,21 @@ function renderReviewWorkspace(options = {}){
         }
       });
     }
+  }
+  const chartRenderImageId = String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.imageId || chartImageIdForReview(record.review || {}) || '');
+  const chartRenderRequestId = String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || '');
+  const chartRenderUsedMergedTrace = !!(hasVerifiableChart && storedChartVerificationState && (storedChartVerificationState.phase === 'merged' || quickChartAnalysisStatus === 'committed'));
+  const chartRenderUsedPendingTrace = !!(hasVerifiableChart && ['queued', 'running'].includes(quickChartAnalysisStatus));
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_UI_RENDER_STATE]', {
+      ticker:record.ticker,
+      renderedStatus:String(chartUiDecision && chartUiDecision.key || ''),
+      sourceTraceStatus:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''),
+      imageId:chartRenderImageId,
+      requestId:chartRenderRequestId,
+      usedMergedTrace:chartRenderUsedMergedTrace,
+      usedPendingTrace:chartRenderUsedPendingTrace
+    });
   }
   const chartDecisionSummary = chartUiDecision && (chartUiDecision.summary || chartUiDecision.title)
     ? (chartUiDecision.summary || chartUiDecision.title)
