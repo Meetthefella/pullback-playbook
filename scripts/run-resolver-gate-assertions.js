@@ -2884,6 +2884,9 @@ function runAiContractAssertions(){
   if(!selectedChartTrace || selectedChartTrace.chosen.status !== 'consistent' || String(selectedChartTrace.chosen.requestId || selectedChartTrace.chosen.verificationRequestId || '') !== 'analysis-2-1779175719748'){
     throw new Error('Merged chart trace must win over pending trace for the same image and ticker.');
   }
+  if(!selectedChartTrace.chosenCandidate || selectedChartTrace.chosenCandidate.status !== 'consistent' || selectedChartTrace.chosenCandidate.type !== 'post_ai_merged'){
+    throw new Error('Merged chart trace selection must surface the merged candidate metadata.');
+  }
   const aiSupportedMatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
       visible_ticker:'MRNA',

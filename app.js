@@ -4040,7 +4040,7 @@ function chartVerificationUiDecision(trace, ticker = ''){
       detail:'This confirmation only applies to the current image and ticker.'
     };
   }
-  const verifiedStatuses = new Set(['verified_match', 'likely_match', 'ai_supported_match']);
+  const verifiedStatuses = new Set(['verified_match', 'likely_match', 'ai_supported_match', 'consistent']);
   const mismatchStatuses = new Set(['ticker_mismatch', 'timeframe_mismatch', 'strong_mismatch', 'possible_mismatch', 'stale_state_detected']);
   if(verifiedStatuses.has(status)){
     return {
@@ -26837,10 +26837,10 @@ function buildChartAssessorInput(record = {}, analysis = null, chartImageSource 
 
 function chartVerificationTracePriority(trace = {}){
   const status = String(trace && trace.status || '').trim();
+  if(['ticker_mismatch','timeframe_mismatch','strong_mismatch','possible_mismatch','stale_state_detected'].includes(status)) return 4;
   if(['verified_match','likely_match','ai_supported_match','consistent','manually_verified','user_confirmed_match'].includes(status)) return 3;
   if(['partial_context_timeframe_uncertain','partial_context_unverified_chart','indicator_partial','indicator_incomplete','uncertain_match'].includes(status)) return 2;
   if(['pending_chart_native_verification','uncertain_missing_context'].includes(status)) return 1;
-  if(['ticker_mismatch','timeframe_mismatch','strong_mismatch','possible_mismatch','stale_state_detected'].includes(status)) return 0;
   return 1;
 }
 
@@ -26870,13 +26870,15 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
   if(storedTrace){
     candidates.push({
       label:'stored_trace',
-      trace:annotateChartTraceForRender(storedTrace, storedState, {chartImageSource})
+      trace:annotateChartTraceForRender(storedTrace, storedState, {chartImageSource}),
+      type:String(storedState && storedState.phase || '') === 'merged' ? 'post_ai_merged' : 'deterministic_pending'
     });
   }
   if(storedState && storedState.phase === 'merged' && storedTrace){
     candidates.unshift({
       label:'stored_merged_trace',
-      trace:annotateChartTraceForRender(storedTrace, storedState, {chartImageSource})
+      trace:annotateChartTraceForRender(storedTrace, storedState, {chartImageSource}),
+      type:'post_ai_merged'
     });
   }
   if(derivedTrace && typeof derivedTrace === 'object'){
@@ -26890,7 +26892,10 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
         chartImageSource,
         chartAssessorInput:chartAssessorContext,
         phase:quickChartAnalysisStatus === 'committed' ? 'merged' : ''
-      }, {chartImageSource})
+      }, {chartImageSource}),
+      type:quickChartAnalysisStatus === 'committed'
+        ? 'committed_quick_analysis'
+        : 'deterministic_pending'
     });
   }
   const ranked = candidates.map(candidate => ({
@@ -26898,32 +26903,66 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
     priority:chartVerificationTracePriority(candidate.trace),
     hasRequestId:!!String(candidate.trace && (candidate.trace.verificationRequestId || candidate.trace.requestId) || ''),
     hasMergedPhase:String(candidate.trace && candidate.trace.phase || '') === 'merged',
-    imageId:String(candidate.trace && (candidate.trace.imageId || candidate.trace.chartImageId) || '')
+    imageId:String(candidate.trace && (candidate.trace.imageId || candidate.trace.chartImageId) || ''),
+    createdAt:String(candidate.trace && (candidate.trace.createdAt || candidate.trace.updatedAt) || ''),
+    isPendingTrace:['pending_chart_native_verification', 'uncertain_missing_context', 'partial_context_unverified_chart', 'partial_context_timeframe_uncertain', 'indicator_missing', 'indicator_incomplete', 'uncertain_match'].includes(String(candidate.trace && candidate.trace.status || ''))
   })).sort((a, b) => {
     if(a.priority !== b.priority) return b.priority - a.priority;
     if(a.hasMergedPhase !== b.hasMergedPhase) return (b.hasMergedPhase ? 1 : 0) - (a.hasMergedPhase ? 1 : 0);
     if(a.hasRequestId !== b.hasRequestId) return (b.hasRequestId ? 1 : 0) - (a.hasRequestId ? 1 : 0);
+    if(a.createdAt !== b.createdAt) return String(b.createdAt).localeCompare(String(a.createdAt));
     return 0;
   });
-  const chosen = ranked[0] || null;
+  const sameImageId = String(chartImageIdForReview(review) || '');
+  const sameRequestId = String(
+    (storedState && (storedState.verificationRequestId || storedState.requestId)) ||
+    (derivedTrace && (derivedTrace.verificationRequestId || derivedTrace.requestId)) ||
+    (chartAssessorContext && chartAssessorContext.verificationRequestId) ||
+    ''
+  );
+  const matchingCandidates = ranked.filter(candidate => {
+    const candidateImageId = String(candidate.imageId || '');
+    const candidateRequestId = String(candidate.trace && (candidate.trace.verificationRequestId || candidate.trace.requestId) || '');
+    if(sameImageId && candidateImageId && candidateImageId !== sameImageId) return false;
+    if(sameRequestId && candidateRequestId && candidateRequestId !== sameRequestId) return false;
+    return true;
+  });
+  const nonPendingMatchingCandidates = matchingCandidates.filter(candidate => !candidate.isPendingTrace);
+  const chosen = (nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);
   const reason = chosen
     ? (chosen.label === 'stored_merged_trace'
       ? 'stored merged trace'
       : (chosen.label === 'rebuilt_trace'
         ? 'rebuilt merged trace'
-        : 'stored trace'))
+        : (chosen.isPendingTrace ? 'pending trace' : 'stored trace')))
     : 'no chart trace available';
   return {
     chartImageSource,
     candidates:ranked.map(item => ({
       label:item.label,
+      type:item.type || '',
       status:String(item.trace && item.trace.status || ''),
       requestId:String(item.trace && (item.trace.verificationRequestId || item.trace.requestId) || ''),
       imageId:String(item.trace && (item.trace.imageId || item.trace.chartImageId) || ''),
-      priority:item.priority
+      priority:item.priority,
+      createdAt:item.createdAt || '',
+      phase:String(item.trace && item.trace.phase || ''),
+      sourceType:item.type || '',
+      isPendingTrace:item.isPendingTrace === true
     })),
     chosen:chosen ? chosen.trace : null,
-    reason
+    reason,
+    chosenCandidate:chosen ? {
+      label:chosen.label,
+      type:chosen.type || '',
+      status:String(chosen.trace && chosen.trace.status || ''),
+      requestId:String(chosen.trace && (chosen.trace.verificationRequestId || chosen.trace.requestId) || ''),
+      imageId:String(chosen.trace && (chosen.trace.imageId || chosen.trace.chartImageId) || ''),
+      priority:chosen.priority,
+      createdAt:chosen.createdAt || '',
+      phase:String(chosen.trace && chosen.trace.phase || ''),
+      isPendingTrace:chosen.isPendingTrace === true
+    } : null
   };
 }
 
@@ -29044,6 +29083,7 @@ function renderReviewWorkspace(options = {}){
         chosenRequestId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || ''),
         chosenImageId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId) || ''),
         chosenReason:selectedChartTrace.reason || '',
+        chosenCandidate:selectedChartTrace.chosenCandidate || null,
         usedMergedTrace:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.phase || '') === 'merged'
           || String(storedChartVerificationState && storedChartVerificationState.phase || '') === 'merged'
           || quickChartAnalysisStatus === 'committed',
