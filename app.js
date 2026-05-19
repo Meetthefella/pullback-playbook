@@ -26885,6 +26885,28 @@ function annotateChartTraceForRender(trace = {}, state = {}, extras = {}){
 function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}, options = {}){
   const safe = input && typeof input === 'object' ? input : {};
   const forceMatch = options && typeof options === 'object' && options.forceMatch === true;
+  const alreadyNormalized = Object.prototype.hasOwnProperty.call(safe, 'visible_ticker')
+    || Object.prototype.hasOwnProperty.call(safe, 'visible_timeframe')
+    || Object.prototype.hasOwnProperty.call(safe, 'visible_latest_price')
+    || Object.prototype.hasOwnProperty.call(safe, 'visible_ma20')
+    || Object.prototype.hasOwnProperty.call(safe, 'visible_ma50')
+    || Object.prototype.hasOwnProperty.call(safe, 'visible_ma200');
+  if(alreadyNormalized){
+    return {
+      visible_ticker:String(safe.visible_ticker || '').trim(),
+      visible_timeframe:String(safe.visible_timeframe || '').trim(),
+      visible_latest_price:chartVerificationNumberOrNull(safe.visible_latest_price),
+      visible_ma20:chartVerificationNumberOrNull(safe.visible_ma20),
+      visible_ma50:chartVerificationNumberOrNull(safe.visible_ma50),
+      visible_ma200:chartVerificationNumberOrNull(safe.visible_ma200),
+      chart_match_status:String(safe.chart_match_status || (safe.aiSupportedMatch === true ? 'match' : '')).trim().toLowerCase() || (forceMatch ? 'match' : ''),
+      chart_match_warning:String(safe.chart_match_warning || '').trim(),
+      uncertainty_notes:chartConsistencyArray(safe.uncertainty_notes || safe.uncertaintyNotes),
+      __chartImageId:String(safe.__chartImageId || safe.chartImageId || chartImageIdForReview(review) || ''),
+      __analysisRequestId:String(safe.__analysisRequestId || safe.verificationRequestId || safe.requestId || ''),
+      __chartImageSource:safe.__chartImageSource || safe.chartImageSource || buildChartImageSourceTrace(review)
+    };
+  }
   const chartMatchStatus = String(safe.chartMatchStatus || (safe.aiSupportedMatch === true ? 'match' : '')).trim().toLowerCase();
   return {
     visible_ticker:String(safe.extractedTicker || '').trim(),
@@ -27022,12 +27044,19 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
       label:item.label,
       type:item.type || '',
       status:String(item.trace && item.trace.status || ''),
+      mergedStatus:String(item.trace && (item.trace.mergedStatus || item.trace.status) || ''),
+      renderedStatus:String(item.trace && (item.trace.renderedStatus || item.trace.status) || ''),
       requestId:String(item.trace && (item.trace.verificationRequestId || item.trace.requestId) || ''),
       imageId:String(item.trace && (item.trace.imageId || item.trace.chartImageId) || ''),
       priority:item.priority,
       createdAt:item.createdAt || '',
+      updatedAt:String(item.trace && item.trace.updatedAt || item.trace.createdAt || ''),
       phase:String(item.trace && item.trace.phase || ''),
+      source:String(item.trace && item.trace.source || item.trace && item.trace.sourceType || item.type || ''),
+      event:String(item.trace && item.trace.event || ''),
       sourceType:item.type || '',
+      hasNormalizedAnalysis:!!(item.trace && (item.trace.normalizedAnalysis || item.trace.chartAssessorInput)),
+      hasMergedAnalysis:String(item.trace && item.trace.phase || '') === 'merged' || item.type === 'post_ai_merged',
       isPendingTrace:item.isPendingTrace === true
     })),
     chosen:chosen ? chosen.trace : null,
@@ -27036,11 +27065,18 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
       label:chosen.label,
       type:chosen.type || '',
       status:String(chosen.trace && chosen.trace.status || ''),
+      mergedStatus:String(chosen.trace && (chosen.trace.mergedStatus || chosen.trace.status) || ''),
+      renderedStatus:String(chosen.trace && (chosen.trace.renderedStatus || chosen.trace.status) || ''),
       requestId:String(chosen.trace && (chosen.trace.verificationRequestId || chosen.trace.requestId) || ''),
       imageId:String(chosen.trace && (chosen.trace.imageId || chosen.trace.chartImageId) || ''),
       priority:chosen.priority,
       createdAt:chosen.createdAt || '',
+      updatedAt:String(chosen.trace && chosen.trace.updatedAt || chosen.trace.createdAt || ''),
       phase:String(chosen.trace && chosen.trace.phase || ''),
+      source:String(chosen.trace && chosen.trace.source || chosen.trace && chosen.trace.sourceType || chosen.type || ''),
+      event:String(chosen.trace && chosen.trace.event || ''),
+      hasNormalizedAnalysis:!!(chosen.trace && (chosen.trace.normalizedAnalysis || chosen.trace.chartAssessorInput)),
+      hasMergedAnalysis:String(chosen.trace && chosen.trace.phase || '') === 'merged' || chosen.type === 'post_ai_merged',
       isPendingTrace:chosen.isPendingTrace === true
     } : null
   };
@@ -29183,6 +29219,39 @@ function renderReviewWorkspace(options = {}){
           || String(storedChartVerificationState && storedChartVerificationState.phase || '') === 'merged'
           || quickChartAnalysisStatus === 'committed',
         usedPendingTrace:['queued', 'running'].includes(quickChartAnalysisStatus) || String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || '') === 'pending_chart_native_verification'
+      });
+      console.info('[CHART_TRACE_SELECTION_DEEP]', {
+        ticker:record.ticker,
+        candidateTraces:selectedChartTrace.candidates.map(candidate => ({
+          label:candidate.label,
+          type:candidate.type,
+          status:candidate.status,
+          mergedStatus:String(candidate.mergedStatus || candidate.status || ''),
+          renderedStatus:String(candidate.renderedStatus || candidate.status || ''),
+          requestId:candidate.requestId,
+          verificationRequestId:String(candidate.verificationRequestId || candidate.requestId || ''),
+          imageId:candidate.imageId,
+          source:String(candidate.source || candidate.sourceType || ''),
+          event:String(candidate.event || ''),
+          updatedAt:String(candidate.updatedAt || ''),
+          createdAt:String(candidate.createdAt || ''),
+          hasNormalizedAnalysis:!!candidate.hasNormalizedAnalysis,
+          hasMergedAnalysis:!!candidate.hasMergedAnalysis
+        })),
+        chosenTrace:chartConsistencyTraceForDisplay ? {
+          status:String(chartConsistencyTraceForDisplay.status || ''),
+          mergedStatus:String(chartConsistencyTraceForDisplay.mergedStatus || chartConsistencyTraceForDisplay.status || ''),
+          renderedStatus:String(chartConsistencyTraceForDisplay.renderedStatus || chartUiDecision.key || ''),
+          requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || ''),
+          verificationRequestId:String(chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId || ''),
+          imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || ''),
+          source:String(chartConsistencyTraceForDisplay.source || chartConsistencyTraceForDisplay.sourceType || ''),
+          event:String(chartConsistencyTraceForDisplay.event || ''),
+          updatedAt:String(chartConsistencyTraceForDisplay.updatedAt || ''),
+          createdAt:String(chartConsistencyTraceForDisplay.createdAt || ''),
+          hasNormalizedAnalysis:!!(chartConsistencyTraceForDisplay.normalizedAnalysis || chartConsistencyTraceForDisplay.chartAssessorInput),
+          hasMergedAnalysis:String(chartConsistencyTraceForDisplay.phase || '') === 'merged'
+        } : null
       });
     }
     const chartActionState = chartUiDecision.key === 'verified_match' || chartUiDecision.key === 'user_confirmed_match'

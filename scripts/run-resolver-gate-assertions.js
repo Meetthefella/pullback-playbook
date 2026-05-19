@@ -2833,6 +2833,10 @@ function runAiContractAssertions(){
   if(nvdaAssessorInput.extractedTicker !== 'NVDA' || nvdaAssessorInput.reviewTicker !== 'NVDA' || nvdaAssessorInput.verificationRequestId !== 'analysis-1' || nvdaAssessorInput.chartImageId !== 'chart-1'){
     throw new Error('Chart assessor input must carry the current ticker/image/request identity.');
   }
+  const nvdaNormalizedFallback = evidenceSandbox.chartAssessorInputToNormalizedAnalysis(nvdaAssessorInput, {ticker:'NVDA', review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'}, chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}}}, {forceMatch:true});
+  if(nvdaNormalizedFallback.visible_ticker !== 'NVDA' || nvdaNormalizedFallback.visible_timeframe !== '1D' || nvdaNormalizedFallback.chart_match_status !== 'match'){
+    throw new Error('Normalized chart assessor input must round-trip already normalized analysis into a committed chart context.');
+  }
   const nvdaAssessorResult = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:480.5, ma20:472.1, ma50:463.4, ma200:410.2}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'}, chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}, chartVerificationContext:nvdaAssessorInput, normalizedAnalysis:nvdaAssessorInput}},
     {canonicalVerdict:'watch', visualBucket:'monitor'},
