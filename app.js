@@ -28757,12 +28757,21 @@ function renderReviewWorkspace(options = {}){
   let chartConsistencyTraceMarkup = '';
   let chartManualActionsMarkup = '';
   if(hasVerifiableChart){
-    const chartConsistencyTrace = storedChartVerificationState && storedChartVerificationState.trace
+    const storedChartConsistencyTrace = storedChartVerificationState && storedChartVerificationState.trace
       ? storedChartVerificationState.trace
-      : buildChartConsistencyTrace(record, simplifiedState, {
+      : null;
+    const shouldPreferMergedChartTrace = quickChartAnalysisStatus === 'committed'
+      && storedChartConsistencyTrace
+      && ['pending_chart_native_verification', 'partial_context_unverified_chart', 'uncertain_missing_context', 'indicator_missing', 'indicator_incomplete'].includes(String(storedChartConsistencyTrace.status || ''));
+    const chartConsistencyTrace = shouldPreferMergedChartTrace
+      ? buildChartConsistencyTrace(record, simplifiedState, {
         normalizedAnalysis:analysisState.normalizedAnalysis,
         derivedStates
-      });
+      })
+      : (storedChartConsistencyTrace || buildChartConsistencyTrace(record, simplifiedState, {
+        normalizedAnalysis:analysisState.normalizedAnalysis,
+        derivedStates
+      }));
     chartConsistencyTraceForDisplay = chartConsistencyTrace;
     if(quickChartAnalysisStatus === 'failed' && chartConsistencyTraceForDisplay && ['pending_chart_native_verification', 'uncertain_missing_context'].includes(String(chartConsistencyTraceForDisplay.status || ''))){
       chartConsistencyTraceForDisplay = {

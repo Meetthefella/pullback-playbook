@@ -2798,6 +2798,10 @@ function runAiContractAssertions(){
   if(aiSupportedMatchTrace.status !== 'ai_supported_match' || aiSupportedMatchTrace.aiAnalysisSuppressed !== false || /uncertain/i.test(String(aiSupportedMatchTrace.title || ''))){
     throw new Error('AI-supported ticker/price match must resolve out of pending without uncertain suppression.');
   }
+  const aiSupportedMatchDecision = evidenceSandbox.chartVerificationUiDecision(aiSupportedMatchTrace, 'MRNA');
+  if(aiSupportedMatchDecision.key !== 'verified_match' || !/Chart appears to match MRNA/i.test(String(aiSupportedMatchDecision.title || '')) || !/AI supports the chart match/i.test(String(aiSupportedMatchDecision.detail || ''))){
+    throw new Error('AI-supported match must render as a verified-style Review banner.');
+  }
   const timeframeUncertainTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
       visible_ticker:'MRNA',
