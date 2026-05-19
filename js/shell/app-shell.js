@@ -56,6 +56,21 @@
       console.log('[SCROLL_TRACE]', payload);
     }
 
+    function trackScrollTraceContext(extra = {}){
+      const activeWorkspace = normalizeTab(uiState.activeWorkspaceTab || '');
+      const liveState = String(uiState.liveProcessStatus && uiState.liveProcessStatus.state || '');
+      return {
+        ...extra,
+        activeWorkspace,
+        renderPass:String(uiState.watchlistRenderSignature || uiState.trackRestoreRunId || ''),
+        isInitialTrackFocus:uiState.trackInitialFocusConsumed !== true && activeWorkspace === 'track',
+        bucketsHydrating:startupCoordinator.trackNeedsHydratedRender === true || startupCoordinator.trackDeferredRenderSkipped === true,
+        watchlistRefreshRunning:['refreshing_watchlist','waiting_for_refresh_before_scan'].includes(liveState),
+        userHasScrolledSinceFocus:uiState.trackUserHasScrolledSinceFocus === true,
+        timestamp:new Date().toISOString()
+      };
+    }
+
     function trackTimingDebugEnabled(){
       try{
         if(typeof window !== 'undefined' && window.PP_DEBUG_TRACK_TIMING === true) return true;
@@ -392,6 +407,17 @@
       lastKnownScrollByTab.track = newSavedTrackScrollY;
       uiState.pendingTrackRestoreY = null;
       if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
+      traceScrollEvent('TRACK_SCROLL_SAVE_CALLED', {
+        caller:'commitTrackScrollMemory',
+        source:traceLabel,
+        ...trackScrollTraceContext({
+          scrollYBefore:Number.isFinite(oldSavedTrackScrollY) ? oldSavedTrackScrollY : null,
+          scrollYAfter:newSavedTrackScrollY
+        }),
+        oldSavedTrackScrollY:Number.isFinite(oldSavedTrackScrollY) ? oldSavedTrackScrollY : null,
+        newSavedTrackScrollY,
+        saveAcceptedReason:'active_visible_track_user_scroll'
+      });
       traceScrollEvent(traceLabel, {
         caller:'commitTrackScrollMemory',
         oldSavedTrackScrollY:Number.isFinite(oldSavedTrackScrollY) ? oldSavedTrackScrollY : null,
@@ -437,6 +463,15 @@
       uiState.pendingTrackRestoreY = null;
       if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
       pendingTrackScrollSave = {scrollY:nextY};
+      traceScrollEvent('TRACK_SCROLL_SAVE_CALLED', {
+        caller:'queueTrackScrollMemorySave',
+        source:'queueTrackScrollMemorySave',
+        ...trackScrollTraceContext({
+          scrollYBefore:currentScrollY(),
+          scrollYAfter:nextY
+        }),
+        attemptedScrollY:nextY
+      });
       const now = nowMs();
       if(!trackScrollSaveRaf && typeof window !== 'undefined' && (now - lastTrackScrollTraceAt) >= 125){
         lastTrackScrollTraceAt = now;
@@ -460,6 +495,18 @@
       const {suppressed, suppressionReason} = scrollSaveSuppressionState();
       if(suppressed){
         if(options.extendSuppression !== false) extendActiveScrollSuppression(`${suppressionReason}_settling`, 350);
+        traceScrollEvent('TRACK_SCROLL_SUPPRESSED', {
+          caller:'saveActiveWorkspaceScroll',
+          source:'saveActiveWorkspaceScroll',
+          ...trackScrollTraceContext({
+            scrollYBefore:currentScrollY(),
+            scrollYAfter:currentScrollY()
+          }),
+          reason:suppressionReason,
+          active,
+          attemptedScrollY:currentScrollY(),
+          savedTrackScrollY:Number.isFinite(Number(uiState.trackScrollY)) ? Number(uiState.trackScrollY) : null
+        });
         traceScrollEvent('track:scroll-save-suppressed', {
           caller:'saveActiveWorkspaceScroll',
           reason:suppressionReason,
@@ -471,6 +518,19 @@
       }
       if(active === 'track'){
         if(!isWorkspaceVisiblyActive('track')){
+          traceScrollEvent('TRACK_SCROLL_SUPPRESSED', {
+            caller:'saveActiveWorkspaceScroll',
+            source:'saveActiveWorkspaceScroll',
+            ...trackScrollTraceContext({
+              scrollYBefore:currentScrollY(),
+              scrollYAfter:currentScrollY()
+            }),
+            reason:'blocked_not_active_visible_track',
+            active,
+            bodyActiveTab:String(document.body && document.body.getAttribute('data-active-workspace') || ''),
+            attemptedScrollY:currentScrollY(),
+            savedTrackScrollY:Number.isFinite(Number(uiState.trackScrollY)) ? Number(uiState.trackScrollY) : null
+          });
           traceScrollEvent('track:scroll-save-suppressed', {
             caller:'saveActiveWorkspaceScroll',
             reason:'blocked_not_active_visible_track',
@@ -487,6 +547,17 @@
         lastKnownScrollByTab.track = newSavedTrackScrollY;
         uiState.pendingTrackRestoreY = null;
         if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = undefined;
+        traceScrollEvent('TRACK_SCROLL_SAVE_CALLED', {
+          caller:'saveActiveWorkspaceScroll',
+          source:'saveActiveWorkspaceScroll',
+          ...trackScrollTraceContext({
+            scrollYBefore:oldSavedTrackScrollY,
+            scrollYAfter:newSavedTrackScrollY
+          }),
+          oldSavedTrackScrollY:Number.isFinite(oldSavedTrackScrollY) ? oldSavedTrackScrollY : null,
+          newSavedTrackScrollY,
+          saveAcceptedReason:'active_visible_track_user_scroll'
+        });
         traceScrollEvent(options.traceLabel || 'track:scroll-save-final', {
           caller:'saveActiveWorkspaceScroll',
           oldSavedTrackScrollY:Number.isFinite(oldSavedTrackScrollY) ? oldSavedTrackScrollY : null,
@@ -959,6 +1030,8 @@
         uiState.reviewInitialTopPositioned = false;
       }
       if(nextTab === 'track'){
+        uiState.trackInitialFocusConsumed = false;
+        uiState.trackUserHasScrolledSinceFocus = false;
         const restoreTarget = Number.isFinite(Number(lastKnownScrollByTab.track))
           ? Number(lastKnownScrollByTab.track)
           : Number(uiState.trackScrollY);
@@ -1028,6 +1101,7 @@
           const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
           const nextScrollY = currentScrollY();
           const delta = nextScrollY - lastObservedScrollY;
+          const recentActionLabel = String(window.__ppRecentScrollAction && window.__ppRecentScrollAction.label || '');
           if(isTrackRestorePending()){
             const restoreTarget = activeTrackRestoreTarget();
             if(Number.isFinite(restoreTarget) && Math.abs(nextScrollY - restoreTarget) > 24){
@@ -1058,6 +1132,15 @@
               });
               scrollWindowTo(restoreTarget, 'auto', 'track_restore_post_guard_snap');
             }
+          }
+          if(
+            normalizeTab(uiState.activeWorkspaceTab || '') === 'track'
+            && Math.abs(delta) > 0
+            && !isTrackRestorePending()
+            && !uiState.trackRestoreInProgress
+            && !/track_restore|workspace_top|review_initial_positioning/i.test(recentActionLabel)
+          ){
+            uiState.trackUserHasScrolledSinceFocus = true;
           }
           if(window.PP_SCROLL_TRACE === true && ['track','review'].includes(normalizeTab(uiState.activeWorkspaceTab || '')) && Math.abs(delta) > 80 && (now - lastObservedScrollAt) <= 250){
             traceScrollEvent('scroll:observed-jump', {

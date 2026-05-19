@@ -9674,6 +9674,21 @@ function captureTrackUiState(){
     scrollY:resolvedScrollY,
     expandedState:readTrackSectionState()
   };
+  if(typeof window !== 'undefined' && window.PP_SCROLL_TRACE === true){
+    traceScrollEvent('TRACK_SCROLL_SAVE_CALLED', {
+      caller:'captureTrackUiState',
+      source:'captureTrackUiState',
+      activeWorkspace:activeWorkspaceTab(),
+      renderPass:String(uiState.watchlistRenderSignature || uiState.trackRestoreRunId || ''),
+      isInitialTrackFocus:uiState.trackInitialFocusConsumed !== true && activeWorkspaceTab() === 'track',
+      bucketsHydrating:startupCoordinator.trackNeedsHydratedRender === true || startupCoordinator.trackDeferredRenderSkipped === true,
+      watchlistRefreshRunning:['refreshing_watchlist','waiting_for_refresh_before_scan'].includes(String(uiState.liveProcessStatus && uiState.liveProcessStatus.state || '')),
+      userHasScrolledSinceFocus:uiState.trackUserHasScrolledSinceFocus === true,
+      scrollYBefore:Number(window.scrollY || window.pageYOffset || 0),
+      scrollYAfter:state.scrollY,
+      timestamp:new Date().toISOString()
+    });
+  }
   traceScrollEvent('track:scroll-save', {
     caller:'captureTrackUiState',
     savedTrackScrollY:state.scrollY,
@@ -9696,12 +9711,9 @@ function captureTrackUiState(){
 function shouldRestoreTrackScrollForSource(source = ''){
   const normalized = String(source || '').trim().toLowerCase();
   if(!normalized) return true;
-  if(normalized.startsWith('startup_')) return false;
-  if(normalized.startsWith('startup_watchlist_')) return false;
-  if(normalized === 'watchlist_refresh') return false;
-  if(normalized === 'track_pull_refresh') return false;
-  if(normalized === 'startup_restore') return false;
-  return true;
+  if(normalized.includes('track_tab_activation')) return true;
+  if(normalized.includes('manual_track_restore')) return true;
+  return false;
 }
 
 function restoreTrackUiState(snapshot = null, options = {}){
@@ -9738,11 +9750,37 @@ function restoreTrackUiState(snapshot = null, options = {}){
       caller,
       source,
       restoreScroll:shouldRestoreScroll,
+      activeWorkspace:activeWorkspaceTab(),
+      renderPass:String(uiState.watchlistRenderSignature || uiState.trackRestoreRunId || ''),
+      isInitialTrackFocus:uiState.trackInitialFocusConsumed !== true && activeWorkspaceTab() === 'track',
+      bucketsHydrating:startupCoordinator.trackNeedsHydratedRender === true || startupCoordinator.trackDeferredRenderSkipped === true,
+      watchlistRefreshRunning:['refreshing_watchlist','waiting_for_refresh_before_scan'].includes(String(uiState.liveProcessStatus && uiState.liveProcessStatus.state || '')),
+      userHasScrolledSinceFocus:uiState.trackUserHasScrolledSinceFocus === true,
       savedTrackScrollY:Number.isFinite(Number(window.__ppPendingTrackRestoreY)) ? Number(window.__ppPendingTrackRestoreY) : Number(snapshot.scrollY),
-      trackRevealPending:document.body && document.body.classList.contains('track-restore-pending')
+      scrollYBefore:Number(window.scrollY || window.pageYOffset || 0),
+      scrollYAfter:Number(window.scrollY || window.pageYOffset || 0),
+      trackRevealPending:document.body && document.body.classList.contains('track-restore-pending'),
+      timestamp:new Date().toISOString()
     });
   }
-  if(!shouldRestoreScroll) return;
+  if(!shouldRestoreScroll){
+    if(typeof window !== 'undefined' && window.PP_SCROLL_TRACE === true){
+      traceScrollEvent('TRACK_SCROLL_SUPPRESSED', {
+        caller,
+        source,
+        reason:'passive_restore_blocked',
+        activeWorkspace:activeWorkspaceTab(),
+        isInitialTrackFocus:false,
+        bucketsHydrating:startupCoordinator.trackNeedsHydratedRender === true || startupCoordinator.trackDeferredRenderSkipped === true,
+        watchlistRefreshRunning:['refreshing_watchlist','waiting_for_refresh_before_scan'].includes(String(uiState.liveProcessStatus && uiState.liveProcessStatus.state || '')),
+        userHasScrolledSinceFocus:uiState.trackUserHasScrolledSinceFocus === true,
+        scrollYBefore:Number(window.scrollY || window.pageYOffset || 0),
+        scrollYAfter:Number(window.scrollY || window.pageYOffset || 0),
+        timestamp:new Date().toISOString()
+      });
+    }
+    return;
+  }
   const pendingRestoreY = typeof window !== 'undefined' ? Number(window.__ppPendingTrackRestoreY) : Number.NaN;
   const usePendingRestore = Number.isFinite(pendingRestoreY);
   const targetScrollY = usePendingRestore ? pendingRestoreY : Number(snapshot.scrollY);
@@ -10171,6 +10209,7 @@ async function renderWatchlistChunked(options = {}){
       box.innerHTML = showExpired
         ? '<div class="summary">No watchlist entries match this filter right now.</div>'
         : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+      uiState.trackInitialFocusConsumed = true;
       if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
         caller:'renderWatchlistChunked',
         source,
@@ -10255,6 +10294,7 @@ async function renderWatchlistChunked(options = {}){
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
     clearWatchlistDirtyForRecords(records);
+    uiState.trackInitialFocusConsumed = true;
     if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
       caller:'renderWatchlistChunked',
       source,
@@ -10294,10 +10334,11 @@ function renderWatchlist(){
       box.innerHTML = showExpired
         ? '<div class="summary">No watchlist entries match this filter right now.</div>'
         : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
+      uiState.trackInitialFocusConsumed = true;
       if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
         caller:'renderWatchlist',
         source:'watchlist_render',
-        restoreScroll
+        restoreScroll:false
       });
       return;
     }
@@ -10313,10 +10354,11 @@ function renderWatchlist(){
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
     clearWatchlistDirtyForRecords(records);
+    uiState.trackInitialFocusConsumed = true;
     if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
       caller:'renderWatchlist',
       source:'watchlist_render',
-      restoreScroll
+      restoreScroll:false
     });
   }catch(error){
     renderError = error;
@@ -24952,10 +24994,18 @@ async function refreshTrackOnly(options = {}){
         if(!hasWatchlistDirtyRecords()){
           startupCoordinator.trackNeedsFullRender = false;
         }
-        restoreTrackUiState(trackUiSnapshot);
+        restoreTrackUiState(trackUiSnapshot, {
+          caller:'refreshTrackOnly',
+          source,
+          restoreScroll:false
+        });
       }
     }else if(wasTrackActive){
-      restoreTrackUiState(trackUiSnapshot);
+      restoreTrackUiState(trackUiSnapshot, {
+        caller:'refreshTrackOnly',
+        source,
+        restoreScroll:false
+      });
     }
     const attempted = Number(refreshSummary && refreshSummary.attempted || 0);
     const refreshedCount = Number(refreshSummary && refreshSummary.refreshed || 0);
