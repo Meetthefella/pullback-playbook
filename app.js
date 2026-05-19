@@ -4562,10 +4562,11 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   record.review.chartVerificationCommittedTrace = cloneData(
     card.chartVerificationCommittedTrace
     || record.review.chartVerificationCommittedTrace
-    || card.chartVerificationTrace
     || null,
     null
   );
+  record.review.chartVerificationLifecycle = cloneData(card.chartVerificationLifecycle || record.review.chartVerificationLifecycle, null);
+  record.review.chartVerificationContext = cloneData(card.chartVerificationContext || record.review.chartVerificationContext, null);
   record.review.lastReviewedAt = String(card.updatedAt || record.review.lastReviewedAt || '');
   record.review.lastPrompt = String(card.lastPrompt || record.review.lastPrompt || '');
   record.review.lastError = String(card.lastError || record.review.lastError || '');
@@ -4696,6 +4697,8 @@ function tickerRecordToLegacyCard(record){
     chartImageVerificationSource:cloneData(item.review.chartImageVerificationSource, null),
     chartVerificationTrace:cloneData(item.review.chartVerificationTrace, null),
     chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
+    chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
+    chartVerificationContext:cloneData(item.review.chartVerificationContext, null),
     lastPrompt:item.review.lastPrompt || '',
     lastResponse:item.review.aiAnalysisRaw || '',
     lastError:item.review.lastError || '',
