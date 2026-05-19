@@ -2373,6 +2373,7 @@ function runAiContractAssertions(){
     'chartVerificationAiSuppression',
     'renderSuppressedAiAnalysisPanel',
     'renderChartConsistencyTrace',
+    'chartVerificationShouldShowManualActions',
     'getReviewChartVerificationState',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
@@ -2797,6 +2798,9 @@ function runAiContractAssertions(){
   if(preAiPendingDecision.key !== 'uncertain_match' || !/Verification incomplete/i.test(String(preAiPendingDecision.title || '')) || !/auto-read enough chart details/i.test(String(preAiPendingDecision.summary || ''))){
     throw new Error('Pending chart verification must map to a softened uncertain_match decision.');
   }
+  if(evidenceSandbox.chartVerificationShouldShowManualActions(preAiPendingDecision, preAiPendingTrace, 'running', true) !== false){
+    throw new Error('Pending chart verification must not require manual confirmation before deterministic analysis completes.');
+  }
   if(!['pending_chart_native_verification','partial_context_unverified_chart','uncertain_missing_context'].includes(String(preAiPendingTrace.status || ''))){
     throw new Error('Pre-AI chart verification must remain pending or partially verified until chart-native evidence exists.');
   }
@@ -2909,6 +2913,9 @@ function runAiContractAssertions(){
   const aiSupportedMatchDecision = evidenceSandbox.chartVerificationUiDecision(aiSupportedMatchTrace, 'MRNA');
   if(aiSupportedMatchDecision.key !== 'verified_match' || !/Chart appears to match MRNA/i.test(String(aiSupportedMatchDecision.title || '')) || !/AI supports the chart match/i.test(String(aiSupportedMatchDecision.detail || ''))){
     throw new Error('AI-supported match must render as a verified-style Review banner.');
+  }
+  if(evidenceSandbox.chartVerificationShouldShowManualActions(aiSupportedMatchDecision, aiSupportedMatchTrace, 'committed', true) !== false){
+    throw new Error('AI-supported verified chart states must not show manual confirmation controls.');
   }
   const timeframeUncertainTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{

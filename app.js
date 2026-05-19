@@ -4076,6 +4076,16 @@ function chartDecisionClassName(decision){
   return 'ai-summary-message--warning';
 }
 
+function chartVerificationShouldShowManualActions(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false){
+  if(!hasChartScreenshot) return false;
+  const key = String(decision && decision.key || '');
+  const status = String(trace && trace.status || '');
+  if(['verified_match', 'user_confirmed_match', 'chart_mismatch'].includes(key)) return false;
+  if(['queued', 'running'].includes(String(quickChartAnalysisStatus || ''))) return false;
+  if(status === 'pending_chart_native_verification') return false;
+  return key === 'uncertain_match';
+}
+
 function renderQuickChartVerificationPending(record, quickState = {}){
   const item = normalizeTickerRecord(record);
   const status = String(quickState.status || 'queued');
@@ -29096,7 +29106,7 @@ function renderReviewWorkspace(options = {}){
         ? 'mismatch'
         : 'uncertain');
     const hasChartScreenshot = hasVerifiableChart;
-    const showChartManualActions = hasChartScreenshot && chartActionState === 'uncertain';
+    const showChartManualActions = chartVerificationShouldShowManualActions(chartUiDecision, chartConsistencyTraceForDisplay, quickChartAnalysisStatus, hasChartScreenshot);
     const chartManualConfirmationNote = chartUiDecision.key === 'user_confirmed_match'
       ? `<div class="tiny goodtext" style="margin-top:6px">Chart confirmed manually for this review.</div>`
       : '';
