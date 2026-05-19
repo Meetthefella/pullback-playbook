@@ -2348,6 +2348,8 @@ function runAiContractAssertions(){
     'chartVerificationProximityMatches',
     'chartVerificationPriceMismatchSeverity',
     'buildChartVerificationFastPass',
+    'buildPreAiChartVerificationTrace',
+    'buildChartAssessorInput',
     'chartImageDimensionsFromRef',
     'chartImageDimensionsLabel',
     'buildChartImageSourceTrace',
@@ -2738,6 +2740,25 @@ function runAiContractAssertions(){
   if(noChartReviewState !== null){
     throw new Error('No-chart review records must not expose a chart verification trace.');
   }
+  const localPreAiSource = evidenceSandbox.buildChartImageSourceTrace({
+    chartRef:{dataUrl:'data:image/png;base64,pre-ai-nvda', imageId:'chart-pre-ai-nvda'},
+    chartImageOriginal:{dataUrl:'data:image/png;base64,pre-ai-nvda', imageId:'chart-pre-ai-nvda', dataUrlField:'chartRef.dataUrl'},
+    chartImagePreview:{dataUrl:'data:image/png;base64,pre-ai-nvda', imageId:'chart-pre-ai-nvda'},
+    chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-pre-ai-nvda'}
+  });
+  const localPreAiFastPass = evidenceSandbox.buildPreAiChartVerificationTrace({
+    ticker:'NVDA',
+    marketData:{price:480.5, ma20:472.1, ma50:463.4, ma200:410.2},
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,pre-ai-nvda', imageId:'chart-pre-ai-nvda'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,pre-ai-nvda', imageId:'chart-pre-ai-nvda', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,pre-ai-nvda', imageId:'chart-pre-ai-nvda'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-pre-ai-nvda'}
+    }
+  }, localPreAiSource);
+  if(!localPreAiFastPass || localPreAiFastPass.status !== 'pending_chart_native_verification' || localPreAiFastPass.aiAnalysisSuppressed !== false || /verified/i.test(String(localPreAiFastPass.title || ''))){
+    throw new Error('Pre-AI chart verification must begin as a lightweight pending fast pass before AI analysis completes.');
+  }
   evidenceSandbox.uiState = {
     activeReviewTicker:'MRNA',
     activeReviewAddsToScannerUniverse:false,
@@ -2778,6 +2799,39 @@ function runAiContractAssertions(){
   }
   if(preAiPendingTrace.aiAnalysisSuppressed !== false || String(preAiPendingTrace.suppressionReason || '') !== ''){
     throw new Error('Pre-AI chart verification must remain a warning state, not a suppression.');
+  }
+  const nvdaAssessorInput = evidenceSandbox.buildChartAssessorInput(
+    {ticker:'NVDA', review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'}, chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}}},
+    {
+      __chartImageId:'chart-1',
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:480.5,
+      visible_ma20:472.1,
+      visible_ma50:463.4,
+      visible_ma200:410.2,
+      chart_match_status:'match',
+      chart_match_warning:'',
+      uncertainty_notes:[]
+    },
+    evidenceSandbox.buildChartImageSourceTrace({
+      chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}
+    }),
+    'analysis-1'
+  );
+  if(nvdaAssessorInput.extractedTicker !== 'NVDA' || nvdaAssessorInput.reviewTicker !== 'NVDA' || nvdaAssessorInput.verificationRequestId !== 'analysis-1' || nvdaAssessorInput.chartImageId !== 'chart-1'){
+    throw new Error('Chart assessor input must carry the current ticker/image/request identity.');
+  }
+  const nvdaAssessorResult = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:480.5, ma20:472.1, ma50:463.4, ma200:410.2}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'}, chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}, chartVerificationContext:nvdaAssessorInput, normalizedAnalysis:nvdaAssessorInput}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}, normalizedAnalysis:nvdaAssessorInput, chartAssessorInput:nvdaAssessorInput}
+  );
+  if(['pending_chart_native_verification','partial_context_unverified_chart','uncertain_missing_context'].includes(String(nvdaAssessorResult.status || ''))){
+    throw new Error('A post-AI chart assessor result must not remain pending when the current ticker/image/request context is provided.');
   }
   const aiSupportedMatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
