@@ -2947,6 +2947,10 @@ function runAiContractAssertions(){
   if(aiSupportedMatchDecision.key !== 'verified_match' || !/Chart appears to match MRNA/i.test(String(aiSupportedMatchDecision.title || '')) || !/AI supports the chart match/i.test(String(aiSupportedMatchDecision.detail || ''))){
     throw new Error('AI-supported match must render as a verified-style Review banner.');
   }
+  const aiSupportedMatchRender = evidenceSandbox.renderChartConsistencyTrace(aiSupportedMatchTrace);
+  if(!/Chart appears to match MRNA/i.test(String(aiSupportedMatchRender || '')) || /Checking chart details/i.test(String(aiSupportedMatchRender || '')) || /verification pending/i.test(String(aiSupportedMatchRender || ''))){
+    throw new Error('Verified chart render must not fall back to pending copy.');
+  }
   if(evidenceSandbox.chartVerificationShouldShowManualActions(aiSupportedMatchDecision, aiSupportedMatchTrace, 'committed', true) !== false){
     throw new Error('AI-supported verified chart states must not show manual confirmation controls.');
   }

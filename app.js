@@ -28122,6 +28122,7 @@ function renderChartConsistencyTrace(trace){
   const uiDecision = chartVerificationUiDecision(safe, trusted && trusted.ticker || facts && facts.visible_ticker || '');
   const summaryText = uiDecision.summary || uiDecision.detail || safe.summary || '';
   const headingText = uiDecision.title || 'Chart verification';
+  const verifiedState = ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'user_confirmed_match'].includes(String(uiDecision.key || ''));
   if(debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
     console.log('[CHART_VERIFICATION_RENDER]', {
       ticker:trusted && trusted.ticker || facts && facts.visible_ticker || safe.debug && safe.debug.ticker || '',
@@ -28133,6 +28134,36 @@ function renderChartConsistencyTrace(trace){
         detail:uiDecision.detail || ''
       }
     });
+  }
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_UI_BINDING]', {
+      renderedStatus:String(uiDecision.key || ''),
+      visibleTitle:headingText || '',
+      visibleBody:summaryText || '',
+      sourceTraceStatus:String(safe.status || ''),
+      cardVariant:verifiedState ? 'verified' : 'pending_or_warning',
+      renderPass:Number(uiState && uiState.reviewRenderPass || 0)
+    });
+  }
+  if(verifiedState){
+    const evidence = Array.isArray(safe.evidence) && safe.evidence.length
+      ? `<ul class="tiny">${safe.evidence.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+      : '';
+    const compactSummary = summaryText ? `<div>${escapeHtml(summaryText)}</div>` : '';
+    const extracted = facts
+      ? `<div class="tiny">Extracted: ticker ${escapeHtml(facts.visible_ticker || 'n/a')} | timeframe ${escapeHtml(facts.visible_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(facts.visible_latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20 ?? facts.mapped_ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50 ?? facts.mapped_ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200 ?? facts.mapped_ma200))}</div>`
+      : '';
+    const trustedFacts = trusted
+      ? `<div class="tiny">Trusted: ticker ${escapeHtml(trusted.ticker || 'n/a')} | timeframe ${escapeHtml(trusted.expected_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(trusted.latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(trusted.ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(trusted.ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(trusted.ma200))}</div>`
+      : '';
+    const imageSource = safe.chartImageSource && typeof safe.chartImageSource === 'object'
+      ? `<div class="tiny">Image source: ${escapeHtml(safe.chartImageSource.sourceKind || 'unknown')} | original ${escapeHtml(safe.chartImageSource.originalDimensions || 'unknown')} | preview ${escapeHtml(safe.chartImageSource.previewDimensions || 'unknown')} | verification ${escapeHtml(safe.chartImageSource.verificationSourceDimensions || 'unknown')}${safe.chartImageSource.limited ? ' | limited: original unavailable' : ''}</div>`
+      : '';
+    const sources = Array.isArray(safe.sources) && safe.sources.length
+      ? `<div class="tiny">Sources: ${escapeHtml(safe.sources.join(', '))}</div>`
+      : '';
+    const details = `${extracted}${trustedFacts}${imageSource}${sources}${evidence}`;
+    return `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(uiDecision))}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}${uiDecision.detail ? `<div class="tiny">${escapeHtml(uiDecision.detail)}</div>` : ''}${details ? `<details class="compact-details"><summary>Show details</summary>${details}</details>` : ''}</div>`;
   }
   const compactSummary = summaryText ? `<div>${escapeHtml(summaryText)}</div>` : '';
   const evidence = Array.isArray(safe.evidence) && safe.evidence.length
