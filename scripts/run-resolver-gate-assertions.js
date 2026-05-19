@@ -2350,6 +2350,9 @@ function runAiContractAssertions(){
     'buildChartVerificationFastPass',
     'buildPreAiChartVerificationTrace',
     'buildChartAssessorInput',
+    'chartVerificationTracePriority',
+    'annotateChartTraceForRender',
+    'selectReviewChartTraceForRender',
     'chartImageDimensionsFromRef',
     'chartImageDimensionsLabel',
     'buildChartImageSourceTrace',
@@ -2832,6 +2835,54 @@ function runAiContractAssertions(){
   );
   if(['pending_chart_native_verification','partial_context_unverified_chart','uncertain_missing_context'].includes(String(nvdaAssessorResult.status || ''))){
     throw new Error('A post-AI chart assessor result must not remain pending when the current ticker/image/request context is provided.');
+  }
+  const pendingChartTrace = {
+    status:'pending_chart_native_verification',
+    reviewTicker:'NVDA',
+    ticker:'NVDA',
+    imageId:'img_6b5b752a_189834',
+    chartImageId:'img_6b5b752a_189834',
+    requestId:'',
+    verificationRequestId:'',
+    chartImageSource:evidenceSandbox.buildChartImageSourceTrace({
+      chartRef:{dataUrl:'data:image/png;base64,pending-chart', imageId:'img_6b5b752a_189834'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,pending-chart', imageId:'img_6b5b752a_189834', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,pending-chart', imageId:'img_6b5b752a_189834'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'img_6b5b752a_189834'}
+    }),
+    title:'Checking chart details',
+    summary:'Chart image attached. Checking chart details.'
+  };
+  const mergedChartTrace = {
+    status:'consistent',
+    reviewTicker:'NVDA',
+    ticker:'NVDA',
+    imageId:'img_6b5b752a_189834',
+    chartImageId:'img_6b5b752a_189834',
+    requestId:'analysis-2-1779175719748',
+    verificationRequestId:'analysis-2-1779175719748',
+    chartImageSource:evidenceSandbox.buildChartImageSourceTrace({
+      chartRef:{dataUrl:'data:image/png;base64,merged-chart', imageId:'img_6b5b752a_189834'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,merged-chart', imageId:'img_6b5b752a_189834', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,merged-chart', imageId:'img_6b5b752a_189834'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'img_6b5b752a_189834'}
+    }),
+    title:'Chart verified',
+    summary:'Ticker, price, and chart evidence are consistent enough to continue.',
+    phase:'merged'
+  };
+  const selectedChartTrace = evidenceSandbox.selectReviewChartTraceForRender({
+    ticker:'NVDA',
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,merged-chart', imageId:'img_6b5b752a_189834'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,merged-chart', imageId:'img_6b5b752a_189834', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,merged-chart', imageId:'img_6b5b752a_189834'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'img_6b5b752a_189834'},
+      chartVerificationTrace:{phase:'merged', requestId:'analysis-2-1779175719748', verificationRequestId:'analysis-2-1779175719748', chartImageId:'img_6b5b752a_189834', imageId:'img_6b5b752a_189834', trace:mergedChartTrace}
+    }
+  }, {phase:'merged', requestId:'analysis-2-1779175719748', verificationRequestId:'analysis-2-1779175719748', chartImageId:'img_6b5b752a_189834', imageId:'img_6b5b752a_189834', trace:mergedChartTrace}, pendingChartTrace, 'committed', nvdaAssessorInput);
+  if(!selectedChartTrace || selectedChartTrace.chosen.status !== 'consistent' || String(selectedChartTrace.chosen.requestId || selectedChartTrace.chosen.verificationRequestId || '') !== 'analysis-2-1779175719748'){
+    throw new Error('Merged chart trace must win over pending trace for the same image and ticker.');
   }
   const aiSupportedMatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{

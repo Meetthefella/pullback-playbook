@@ -26835,6 +26835,98 @@ function buildChartAssessorInput(record = {}, analysis = null, chartImageSource 
   };
 }
 
+function chartVerificationTracePriority(trace = {}){
+  const status = String(trace && trace.status || '').trim();
+  if(['verified_match','likely_match','ai_supported_match','consistent','manually_verified','user_confirmed_match'].includes(status)) return 3;
+  if(['partial_context_timeframe_uncertain','partial_context_unverified_chart','indicator_partial','indicator_incomplete','uncertain_match'].includes(status)) return 2;
+  if(['pending_chart_native_verification','uncertain_missing_context'].includes(status)) return 1;
+  if(['ticker_mismatch','timeframe_mismatch','strong_mismatch','possible_mismatch','stale_state_detected'].includes(status)) return 0;
+  return 1;
+}
+
+function annotateChartTraceForRender(trace = {}, state = {}, extras = {}){
+  const safeTrace = trace && typeof trace === 'object' ? trace : {};
+  const safeState = state && typeof state === 'object' ? state : {};
+  const safeExtras = extras && typeof extras === 'object' ? extras : {};
+  return {
+    ...safeTrace,
+    chartImageId:String(safeState.chartImageId || safeState.imageId || safeTrace.chartImageId || safeTrace.imageId || safeExtras.chartImageId || safeExtras.imageId || ''),
+    imageId:String(safeState.imageId || safeState.chartImageId || safeTrace.imageId || safeTrace.chartImageId || safeExtras.imageId || safeExtras.chartImageId || ''),
+    verificationRequestId:String(safeState.verificationRequestId || safeState.requestId || safeTrace.verificationRequestId || safeTrace.requestId || safeExtras.verificationRequestId || safeExtras.requestId || ''),
+    requestId:String(safeState.requestId || safeState.verificationRequestId || safeTrace.requestId || safeTrace.verificationRequestId || safeExtras.requestId || safeExtras.verificationRequestId || ''),
+    chartImageSource:safeState.chartImageSource || safeTrace.chartImageSource || safeExtras.chartImageSource || null,
+    phase:String(safeState.phase || safeExtras.phase || ''),
+    chartAssessorInput:safeState.chartAssessorInput || safeTrace.chartAssessorInput || safeExtras.chartAssessorInput || null
+  };
+}
+
+function selectReviewChartTraceForRender(record = {}, storedChartVerificationState = null, derivedTrace = null, quickChartAnalysisStatus = '', chartAssessorContext = null){
+  const item = record && typeof record === 'object' ? record : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const chartImageSource = buildChartImageSourceTrace(review);
+  const candidates = [];
+  const storedState = storedChartVerificationState && typeof storedChartVerificationState === 'object' ? storedChartVerificationState : null;
+  const storedTrace = storedState && storedState.trace && typeof storedState.trace === 'object' ? storedState.trace : null;
+  if(storedTrace){
+    candidates.push({
+      label:'stored_trace',
+      trace:annotateChartTraceForRender(storedTrace, storedState, {chartImageSource})
+    });
+  }
+  if(storedState && storedState.phase === 'merged' && storedTrace){
+    candidates.unshift({
+      label:'stored_merged_trace',
+      trace:annotateChartTraceForRender(storedTrace, storedState, {chartImageSource})
+    });
+  }
+  if(derivedTrace && typeof derivedTrace === 'object'){
+    candidates.push({
+      label:'rebuilt_trace',
+      trace:annotateChartTraceForRender(derivedTrace, {
+        chartImageId:storedState && storedState.chartImageId || storedState && storedState.imageId || chartImageIdForReview(review),
+        imageId:storedState && storedState.imageId || storedState && storedState.chartImageId || chartImageIdForReview(review),
+        verificationRequestId:storedState && storedState.verificationRequestId || storedState && storedState.requestId || '',
+        requestId:storedState && storedState.requestId || storedState && storedState.verificationRequestId || '',
+        chartImageSource,
+        chartAssessorInput:chartAssessorContext,
+        phase:quickChartAnalysisStatus === 'committed' ? 'merged' : ''
+      }, {chartImageSource})
+    });
+  }
+  const ranked = candidates.map(candidate => ({
+    ...candidate,
+    priority:chartVerificationTracePriority(candidate.trace),
+    hasRequestId:!!String(candidate.trace && (candidate.trace.verificationRequestId || candidate.trace.requestId) || ''),
+    hasMergedPhase:String(candidate.trace && candidate.trace.phase || '') === 'merged',
+    imageId:String(candidate.trace && (candidate.trace.imageId || candidate.trace.chartImageId) || '')
+  })).sort((a, b) => {
+    if(a.priority !== b.priority) return b.priority - a.priority;
+    if(a.hasMergedPhase !== b.hasMergedPhase) return (b.hasMergedPhase ? 1 : 0) - (a.hasMergedPhase ? 1 : 0);
+    if(a.hasRequestId !== b.hasRequestId) return (b.hasRequestId ? 1 : 0) - (a.hasRequestId ? 1 : 0);
+    return 0;
+  });
+  const chosen = ranked[0] || null;
+  const reason = chosen
+    ? (chosen.label === 'stored_merged_trace'
+      ? 'stored merged trace'
+      : (chosen.label === 'rebuilt_trace'
+        ? 'rebuilt merged trace'
+        : 'stored trace'))
+    : 'no chart trace available';
+  return {
+    chartImageSource,
+    candidates:ranked.map(item => ({
+      label:item.label,
+      status:String(item.trace && item.trace.status || ''),
+      requestId:String(item.trace && (item.trace.verificationRequestId || item.trace.requestId) || ''),
+      imageId:String(item.trace && (item.trace.imageId || item.trace.chartImageId) || ''),
+      priority:item.priority
+    })),
+    chosen:chosen ? chosen.trace : null,
+    reason
+  };
+}
+
 function buildDeterministicChartVerification(record = {}, analysis = null, options = {}){
   const safeRecord = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : {};
@@ -28872,7 +28964,14 @@ function renderReviewWorkspace(options = {}){
         derivedStates,
         chartAssessorInput:storedChartAssessorContext
       }));
-    chartConsistencyTraceForDisplay = chartConsistencyTrace;
+    const selectedChartTrace = selectReviewChartTraceForRender(
+      record,
+      storedChartVerificationState,
+      chartConsistencyTrace,
+      quickChartAnalysisStatus,
+      storedChartAssessorContext
+    );
+    chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTrace;
     if(quickChartAnalysisStatus === 'failed' && chartConsistencyTraceForDisplay && ['pending_chart_native_verification', 'uncertain_missing_context'].includes(String(chartConsistencyTraceForDisplay.status || ''))){
       chartConsistencyTraceForDisplay = {
         ...chartConsistencyTraceForDisplay,
@@ -28934,6 +29033,20 @@ function renderReviewWorkspace(options = {}){
       ? renderQuickChartVerificationPending(record, quickChartAnalysisState)
       : renderChartConsistencyTrace(chartConsistencyTraceForDisplay);
     chartUiDecision = chartVerificationUiDecision(chartConsistencyTraceForDisplay, record.ticker);
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_TRACE_SELECTION]', {
+        ticker:record.ticker,
+        candidateTraces:selectedChartTrace.candidates,
+        chosenStatus:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''),
+        chosenRequestId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || ''),
+        chosenImageId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId) || ''),
+        chosenReason:selectedChartTrace.reason || '',
+        usedMergedTrace:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.phase || '') === 'merged'
+          || String(storedChartVerificationState && storedChartVerificationState.phase || '') === 'merged'
+          || quickChartAnalysisStatus === 'committed',
+        usedPendingTrace:['queued', 'running'].includes(quickChartAnalysisStatus) || String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || '') === 'pending_chart_native_verification'
+      });
+    }
     const chartActionState = chartUiDecision.key === 'verified_match' || chartUiDecision.key === 'user_confirmed_match'
       ? 'verified'
       : (chartUiDecision.key === 'chart_mismatch'
