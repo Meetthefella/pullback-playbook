@@ -3811,6 +3811,7 @@ function clearReviewChartImageSources(review){
   review.chartImagePreview = null;
   review.chartImageVerificationSource = null;
   review.chartVerificationTrace = null;
+  review.chartVerificationCommittedTrace = null;
   review.chartVerificationLifecycle = null;
   review.chartVerificationContext = null;
   review.quickChartAnalysis = null;
@@ -22367,7 +22368,7 @@ async function analyseSetup(ticker){
           source:'quickChartAnalysis',
           event:'quick_analysis_committed'
         }, null);
-        record.review.chartVerificationTrace = cloneData({
+        const committedChartVerificationState = cloneData({
           ticker:record.ticker,
           reviewTicker:record.ticker,
           chartImageId:requestChartImageId,
@@ -22386,6 +22387,8 @@ async function analyseSetup(ticker){
           source:'quickChartAnalysis',
           event:'quick_analysis_committed'
         }, null);
+        record.review.chartVerificationCommittedTrace = cloneData(committedChartVerificationState, null);
+        record.review.chartVerificationTrace = cloneData(committedChartVerificationState, null);
         record.review.chartVerificationLifecycle = {
           phase:'merged',
           ticker:record.ticker,
@@ -22402,8 +22405,8 @@ async function analyseSetup(ticker){
             requestId:analysisRequestId,
             imageId:requestChartImageId,
             writtenStatus:String(committedMergedChartTrace && committedMergedChartTrace.status || ''),
-            writtenStoreName:'record.review.chartVerificationTrace',
-            selectorCanReadSameStore:!!(record.review && record.review.chartVerificationTrace && record.review.chartVerificationTrace.trace && record.review.chartVerificationTrace.trace.status === 'consistent')
+            writtenStoreName:'record.review.chartVerificationCommittedTrace',
+            selectorCanReadSameStore:!!(record.review && record.review.chartVerificationCommittedTrace && record.review.chartVerificationCommittedTrace.trace && record.review.chartVerificationCommittedTrace.trace.status === 'consistent')
           });
         }
       }
@@ -26969,6 +26972,18 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
   const currentLifecyclePhase = String(currentLifecycleState && currentLifecycleState.phase || '').trim();
   const storedState = storedChartVerificationState && typeof storedChartVerificationState === 'object' ? storedChartVerificationState : null;
   const storedTrace = storedState && storedState.trace && typeof storedState.trace === 'object' ? storedState.trace : null;
+  const committedState = review.chartVerificationCommittedTrace && typeof review.chartVerificationCommittedTrace === 'object'
+    ? review.chartVerificationCommittedTrace
+    : null;
+  const committedTrace = committedState && committedState.trace && typeof committedState.trace === 'object'
+    ? committedState.trace
+    : null;
+  const committedPhase = String(
+    (committedState && committedState.phase) ||
+    (committedState && committedState.lifecyclePhase) ||
+    (committedTrace && committedTrace.phase) ||
+    ''
+  ).trim();
   const storedPhase = String(
     (storedState && storedState.phase) ||
     (storedState && storedState.lifecyclePhase) ||
@@ -26976,6 +26991,13 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
     (storedTrace && storedTrace.phase) ||
     ''
   ).trim();
+  if(committedTrace){
+    candidates.push({
+      label:'committed_trace',
+      trace:annotateChartTraceForRender(committedTrace, committedState, {chartImageSource}),
+      type:committedPhase === 'merged' ? 'post_ai_merged' : 'committed_quick_analysis'
+    });
+  }
   if(storedTrace){
     candidates.push({
       label:'stored_trace',

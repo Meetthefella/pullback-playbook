@@ -2896,6 +2896,20 @@ function runAiContractAssertions(){
   if(!selectedChartTrace.chosenCandidate || selectedChartTrace.chosenCandidate.status !== 'consistent' || selectedChartTrace.chosenCandidate.type !== 'post_ai_merged'){
     throw new Error('Merged chart trace selection must surface the merged candidate metadata.');
   }
+  const committedChartTrace = evidenceSandbox.selectReviewChartTraceForRender({
+    ticker:'NVDA',
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,merged-chart', imageId:'img_6b5b752a_189834'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,merged-chart', imageId:'img_6b5b752a_189834', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,merged-chart', imageId:'img_6b5b752a_189834'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'img_6b5b752a_189834'},
+      chartVerificationTrace:{phase:'deterministic', requestId:'analysis-2-1779175719748', verificationRequestId:'analysis-2-1779175719748', chartImageId:'img_6b5b752a_189834', imageId:'img_6b5b752a_189834', trace:pendingChartTrace},
+      chartVerificationCommittedTrace:{phase:'merged', requestId:'analysis-2-1779175719748', verificationRequestId:'analysis-2-1779175719748', chartImageId:'img_6b5b752a_189834', imageId:'img_6b5b752a_189834', trace:mergedChartTrace}
+    }
+  }, {phase:'deterministic', requestId:'analysis-2-1779175719748', verificationRequestId:'analysis-2-1779175719748', chartImageId:'img_6b5b752a_189834', imageId:'img_6b5b752a_189834', trace:pendingChartTrace}, pendingChartTrace, 'committed', nvdaAssessorInput);
+  if(!committedChartTrace || committedChartTrace.chosen.status !== 'consistent' || committedChartTrace.chosenCandidate.type !== 'post_ai_merged'){
+    throw new Error('Committed chart trace store must win over deterministic pending trace for the same lineage.');
+  }
   const aiSupportedMatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
       visible_ticker:'MRNA',
@@ -2967,7 +2981,7 @@ function runAiContractAssertions(){
     }
   };
   evidenceSandbox.clearReviewChartImageSources(manualConfirmRecord.review);
-  if(manualConfirmRecord.review.chartVerificationTrace !== null || manualConfirmRecord.review.chartVerificationLifecycle !== null){
+  if(manualConfirmRecord.review.chartVerificationTrace !== null || manualConfirmRecord.review.chartVerificationCommittedTrace !== null || manualConfirmRecord.review.chartVerificationLifecycle !== null){
     throw new Error('Replacing/clearing chart sources must invalidate manual confirmation.');
   }
   const staleTickerTrace = evidenceSandbox.getReviewChartVerificationState({
