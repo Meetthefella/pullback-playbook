@@ -2248,6 +2248,30 @@ function runAiContractAssertions(){
   if(!/aiObservation|rawOpinion|final_verdict:''|ai_observation_only:true/i.test(normalizeSource)){
     throw new Error('AI ingestion must quarantine legacy verdict-like fields as non-authoritative observation data.');
   }
+  const panelStateSource = extractFunctionSource(appSource, 'chartVerificationPanelState');
+  const panelStateSandbox = {};
+  vm.createContext(panelStateSandbox);
+  vm.runInContext(panelStateSource, panelStateSandbox, {filename:'app.js#chartVerificationPanelState'});
+  const verifiedPanel = panelStateSandbox.chartVerificationPanelState(
+    {key:'verified_match', title:'Chart verified', summary:'AI confirms the match.'},
+    {status:'pending_chart_native_verification'},
+    'queued',
+    true,
+    {type:'deterministic_pending'}
+  );
+  if(verifiedPanel.panelVariant !== 'verified' || verifiedPanel.visibleTitle !== 'Chart verified'){
+    throw new Error('Verified chart panels must outrank queued quick-analysis placeholders.');
+  }
+  const pendingPanel = panelStateSandbox.chartVerificationPanelState(
+    {key:'uncertain_match', title:'Verification incomplete', summary:'We could not auto-read enough chart details.'},
+    {status:'pending_chart_native_verification'},
+    'queued',
+    true,
+    {type:'deterministic_pending'}
+  );
+  if(pendingPanel.panelVariant !== 'pending' || pendingPanel.visibleTitle !== 'Checking chart details'){
+    throw new Error('Queued quick-analysis panels must still render the pending placeholder.');
+  }
   const normalizeSandbox = {
     cloneData(value, fallback){
       if(value === undefined || value === null) return fallback;

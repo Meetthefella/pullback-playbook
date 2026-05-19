@@ -4095,27 +4095,68 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
   return key === 'uncertain_match';
 }
 
-function renderChartWorkspaceStatusLineFromDecision(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false){
+function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false, selectedTrace = null){
   const key = String(decision && decision.key || '');
   const title = String(decision && decision.title || '');
   const summary = String(decision && decision.summary || decision && decision.detail || '');
   const status = String(trace && trace.status || '');
-  if(!hasChartScreenshot){
+  const normalizedQuickStatus = String(quickChartAnalysisStatus || '');
+  const selectedType = String(selectedTrace && (selectedTrace.type || selectedTrace.sourceType || '') || '');
+  const selectedPhase = String(selectedTrace && selectedTrace.phase || '');
+  const hasVerifiedTrace = ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'user_confirmed_match'].includes(key)
+    || ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'user_confirmed_match'].includes(status)
+    || selectedPhase === 'merged'
+    || selectedType === 'post_ai_merged';
+  const shouldShowPending = hasChartScreenshot
+    && ['queued', 'running'].includes(normalizedQuickStatus)
+    && !hasVerifiedTrace;
+  let panelVariant = 'no_chart';
+  let visibleTitle = 'No chart attached yet.';
+  let visibleBody = '';
+  if(hasChartScreenshot){
+    if(shouldShowPending){
+      panelVariant = 'pending';
+      visibleTitle = 'Checking chart details';
+      visibleBody = 'We are checking the uploaded chart now. This usually resolves within a moment.';
+    }else if(hasVerifiedTrace || key === 'verified_match' || key === 'user_confirmed_match'){
+      panelVariant = 'verified';
+      visibleTitle = title || 'Chart verified for this ticker.';
+      visibleBody = summary || '';
+    }else if(key === 'chart_mismatch'){
+      panelVariant = 'mismatch';
+      visibleTitle = title || 'Chart mismatch detected.';
+      visibleBody = summary || '';
+    }else{
+      panelVariant = 'review';
+      visibleTitle = title || 'Chart review pending.';
+      visibleBody = summary || 'Chart saved on this device for this ticker.';
+    }
+  }
+  return {
+    panelVariant,
+    panelSource: selectedType || String(trace && trace.source || trace && trace.sourceType || '') || (normalizedQuickStatus || 'direct'),
+    visibleTitle,
+    visibleBody,
+    hasVerifiedTrace,
+    shouldShowPending
+  };
+}
+
+function renderChartWorkspaceStatusLineFromDecision(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false, selectedTrace = null){
+  const panelState = chartVerificationPanelState(decision, trace, quickChartAnalysisStatus, hasChartScreenshot, selectedTrace);
+  if(panelState.panelVariant === 'no_chart'){
     return '<span class="warntext">No chart attached yet.</span>';
   }
-  if(['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) || status === 'pending_chart_native_verification'){
+  if(panelState.panelVariant === 'pending'){
     return '<span class="warntext">Checking chart details...</span>';
   }
-  if(key === 'verified_match' || key === 'user_confirmed_match'){
-    return `<span class="ok">${escapeHtml(title || 'Chart verified for this ticker.')}${summary ? ` ${escapeHtml(summary)}` : ''}</span>`;
+  if(panelState.panelVariant === 'verified'){
+    return `<span class="ok">${escapeHtml(panelState.visibleTitle || 'Chart verified for this ticker.')}${panelState.visibleBody ? ` ${escapeHtml(panelState.visibleBody)}` : ''}</span>`;
   }
-  if(key === 'chart_mismatch'){
-    return `<span class="badtext">${escapeHtml(title || 'Chart mismatch detected.')}${summary ? ` ${escapeHtml(summary)}` : ''}</span>`;
+  if(panelState.panelVariant === 'mismatch'){
+    return `<span class="badtext">${escapeHtml(panelState.visibleTitle || 'Chart mismatch detected.')}${panelState.visibleBody ? ` ${escapeHtml(panelState.visibleBody)}` : ''}</span>`;
   }
-  if(title || summary){
-    return `<span class="warntext">${escapeHtml(title || 'Chart review pending.')}${summary ? ` ${escapeHtml(summary)}` : ''}</span>`;
-  }
-  return '<span class="warntext">Chart saved on this device for this ticker. Checking chart details...</span>';
+  return `<span class="warntext">${escapeHtml(panelState.visibleTitle || 'Chart review pending.')}${panelState.visibleBody ? ` ${escapeHtml(panelState.visibleBody)}` : ''}</span>`;
 }
 
 function renderQuickChartVerificationPending(record, quickState = {}){
@@ -29533,10 +29574,28 @@ function renderReviewWorkspace(options = {}){
         ...chartSourceTrace
       });
     }
-    chartConsistencyTraceMarkup = ['queued', 'running'].includes(quickChartAnalysisStatus)
+    chartUiDecision = chartVerificationUiDecision(chartConsistencyTraceForDisplay, record.ticker);
+    const chartPanelState = chartVerificationPanelState(
+      chartUiDecision,
+      chartConsistencyTraceForDisplay,
+      quickChartAnalysisStatus,
+      hasVerifiableChart,
+      selectedChartTrace.chosenCandidate || chartConsistencyTraceForDisplay
+    );
+    chartConsistencyTraceMarkup = chartPanelState.panelVariant === 'pending'
       ? renderQuickChartVerificationPending(record, quickChartAnalysisState)
       : renderChartConsistencyTrace(chartConsistencyTraceForDisplay);
-    chartUiDecision = chartVerificationUiDecision(chartConsistencyTraceForDisplay, record.ticker);
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_PANEL_RENDER]', {
+        ticker:record.ticker,
+        renderedStatus:String(chartUiDecision.key || ''),
+        panelVariant:chartPanelState.panelVariant,
+        panelSource:chartPanelState.panelSource,
+        visibleTitle:chartPanelState.visibleTitle,
+        visibleBody:chartPanelState.visibleBody,
+        renderPass:reviewRenderPass
+      });
+    }
     if(typeof console !== 'undefined' && console.info){
       console.info('[CHART_TRACE_SELECTION]', {
         ticker:record.ticker,
