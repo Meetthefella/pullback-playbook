@@ -4051,6 +4051,7 @@ function chartVerificationUiDecision(trace, ticker = ''){
   }
   const verifiedStatuses = new Set(['verified_match', 'likely_match', 'ai_supported_match', 'consistent']);
   const mismatchStatuses = new Set(['ticker_mismatch', 'timeframe_mismatch', 'strong_mismatch', 'possible_mismatch', 'stale_state_detected']);
+  const untrustedStatuses = new Set(['untrusted_context_mirror', 'chart_verification_untrusted']);
   if(verifiedStatuses.has(status)){
     return {
       key:'verified_match',
@@ -4067,6 +4068,14 @@ function chartVerificationUiDecision(trace, ticker = ''){
       title:baseMismatchTitle,
       summary:'The uploaded chart does not look consistent with this review.',
       detail:'Replace the chart before continuing if the image is not the intended ticker.'
+    };
+  }
+  if(untrustedStatuses.has(status)){
+    return {
+      key:'uncertain_match',
+      title:'Chart verification incomplete',
+      summary:'The uploaded chart may be mirroring the review context without independent image evidence. Confirm manually before treating it as verified.',
+      detail:'Independent chart evidence is required before this upload can be accepted.'
     };
   }
   return {
@@ -4095,6 +4104,10 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
   return key === 'uncertain_match';
 }
 
+function chartVerificationIsVerifiedStatus(status = ''){
+  return ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'manually_verified', 'user_confirmed_match'].includes(String(status || ''));
+}
+
 function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false, selectedTrace = null){
   const key = String(decision && decision.key || '');
   const title = String(decision && decision.title || '');
@@ -4103,8 +4116,8 @@ function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisSta
   const normalizedQuickStatus = String(quickChartAnalysisStatus || '');
   const selectedType = String(selectedTrace && (selectedTrace.type || selectedTrace.sourceType || '') || '');
   const selectedPhase = String(selectedTrace && selectedTrace.phase || '');
-  const hasVerifiedTrace = ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'user_confirmed_match'].includes(key)
-    || ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'user_confirmed_match'].includes(status)
+  const hasVerifiedTrace = chartVerificationIsVerifiedStatus(key)
+    || chartVerificationIsVerifiedStatus(status)
     || selectedPhase === 'merged'
     || selectedType === 'post_ai_merged';
   const shouldShowPending = hasChartScreenshot
@@ -22765,7 +22778,7 @@ function renderAnalysisPanel(card){
     const chartReadDisplay = finalDisplayedAnalysisChartRead(card, analysis);
     const deterministicVerification = buildDeterministicChartVerification(card, analysis);
     const allowLegacyAiChartMatch = !deterministicVerification.available
-      || ['uncertain_missing_context','indicator_missing'].includes(deterministicVerification.status);
+      || !chartVerificationIsVerifiedStatus(deterministicVerification.status);
     // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
     const chartMismatch = allowLegacyAiChartMatch && analysis.chart_match_status === 'mismatch';
     const chartUnclear = allowLegacyAiChartMatch && analysis.chart_match_status === 'unclear';
@@ -22906,7 +22919,7 @@ function renderAnalysisPanelFromRecord(record, options = {}){
     const advisory = analysisAdvisoryContextForRecord(item, analysis);
     const deterministicVerification = buildDeterministicChartVerification(item, analysis);
     const allowLegacyAiChartMatch = !deterministicVerification.available
-      || ['uncertain_missing_context','indicator_missing'].includes(deterministicVerification.status);
+      || !chartVerificationIsVerifiedStatus(deterministicVerification.status);
     // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
     const chartMismatch = allowLegacyAiChartMatch && analysis.chart_match_status === 'mismatch';
     const chartUnclear = allowLegacyAiChartMatch && analysis.chart_match_status === 'unclear';
@@ -26828,6 +26841,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
   let earlyExit = false;
   let staleStateRejected = false;
   let clearMatchRejectedReason = '';
+  const fastPassEvidence = [];
 
   if(currentImageId && analysisImageId && currentImageId !== analysisImageId){
     fastStatus = 'stale_state_detected';
@@ -26843,6 +26857,10 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     reason = 'Visible ticker does not match selected ticker.';
     title = 'Chart mismatch detected';
     summary = `The uploaded chart is unlikely to match ${expectedTicker}.`;
+    fastPassEvidence.push(`Extracted ticker ${visibleTicker} does not match expected ${expectedTicker}.`);
+    if(currentImageId){
+      fastPassEvidence.push(`Mismatch detected from chart image ${currentImageId}.`);
+    }
     earlyExit = true;
   }else if(visibleTimeframe && !isDailyTimeframe(visibleTimeframe)){
     if((visibleTicker && expectedTicker && visibleTicker === expectedTicker) && visiblePrice !== null && independentImageEvidence){
@@ -26857,6 +26875,10 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
       reason = 'Visible timeframe does not match the expected daily chart.';
       title = 'Possible timeframe mismatch';
       summary = 'The uploaded chart may not match the selected timeframe.';
+      fastPassEvidence.push(`Visible timeframe ${visibleTimeframe} does not match the expected daily chart.`);
+      if(currentImageId){
+        fastPassEvidence.push(`Mismatch detected from chart image ${currentImageId}.`);
+      }
       earlyExit = true;
     }
   }else if(priceDeltaPercent !== null && priceDeltaPercent >= 0.15){
@@ -26865,6 +26887,23 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     reason = 'Visible price is far from trusted price.';
     title = 'Chart mismatch detected';
     summary = `The uploaded chart is unlikely to match ${expectedTicker || 'the selected ticker'}.`;
+    fastPassEvidence.push(`Extracted price ${chartVerificationDisplayValue(visiblePrice)} is far from trusted price ${chartVerificationDisplayValue(trustedPrice)}.`);
+    fastPassEvidence.push(`Price delta ${Number.isFinite(priceDeltaPercent) ? `${(priceDeltaPercent * 100).toFixed(1)}%` : 'n/a'}.`);
+    if(currentImageId){
+      fastPassEvidence.push(`Mismatch detected from chart image ${currentImageId}.`);
+    }
+    earlyExit = true;
+  }else if(contextMirroringSuspected){
+    fastStatus = 'untrusted_context_mirror';
+    status = 'untrusted_context_mirror';
+    reason = 'Extracted chart facts appear to mirror the selected review context without independent image evidence.';
+    title = 'Chart context needs confirmation';
+    summary = 'The uploaded chart may be echoing the app context rather than independently verified image evidence.';
+    fastPassEvidence.push(`Extracted ticker ${visibleTicker} matches expected ${expectedTicker}, but independent image evidence is weak.`);
+    if(visiblePrice !== null && trustedPrice !== null){
+      fastPassEvidence.push(`Extracted price ${chartVerificationDisplayValue(visiblePrice)} matches trusted price ${chartVerificationDisplayValue(trustedPrice)} without independent chart evidence.`);
+    }
+    fastPassEvidence.push('Manual confirmation is required before treating this upload as verified.');
     earlyExit = true;
   }else if((visibleTicker || visibleTimeframe || visiblePrice !== null) && independentImageEvidence){
     fastStatus = 'clear_match_candidate';
@@ -26875,6 +26914,9 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
       ? 'Extracted ticker/price match app context but lack independent image evidence.'
       : 'Fast facts exist but are not independently supported by image evidence.';
     reason = clearMatchRejectedReason;
+    if(contextMirroringSuspected){
+      fastPassEvidence.push('Extracted ticker and price mirror the selected review context without independent image evidence.');
+    }
   }
   const aiAnalysisSuppressed = ['stale_state_detected','clear_mismatch'].includes(fastStatus)
     || (fastStatus === 'insufficient_context' && hasFastFacts);
@@ -26919,7 +26961,8 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     deepVerificationQueued:!earlyExit && fastStatus !== 'stale_state_detected',
     staleStateRejected,
     aiAnalysisSuppressed,
-    suppressionReason
+    suppressionReason,
+    evidence:[...new Set(fastPassEvidence)].slice(0, 5)
   };
 }
 
@@ -27662,6 +27705,56 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
       evidence.unshift('Manually confirmed by the user for the current chart image.');
     }
   }
+
+  if(fastPass.fastStatus === 'untrusted_context_mirror'){
+    return {
+      visible:true,
+      status:'untrusted_context_mirror',
+      severity:'warning',
+      title:'Chart context needs confirmation',
+      summary:'The uploaded chart may be echoing the app context rather than independently verified image evidence.',
+      evidence:[...new Set((fastPass.evidence || []).concat([
+        'Independent image evidence is weak, so this upload must be manually confirmed.',
+      ]))].slice(0, 5),
+      missing:['independent image evidence'],
+      initialMissingIndicators:[],
+      finalMissingIndicators:[],
+      summaryDerivedFromFinalState:true,
+      mismatchSeverity:'none',
+      aiAnalysisSuppressed:false,
+      suppressionReason:'',
+      missingIndicators:[],
+      partialIndicators:[],
+      likelyMatchedIndicators:[],
+      inferredIndicators:[],
+      indicatorStates:{},
+      extractedFacts:{
+        visible_ticker:fastPass.visibleTicker,
+        visible_timeframe:fastPass.visibleTimeframe,
+        visible_latest_price:fastPass.visiblePrice
+      },
+      trustedFacts:{
+        ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
+        expected_timeframe:'1D',
+        latest_price:fastPass.trustedPrice
+      },
+      sources:['chart_verification_fast_pass'],
+      chartImageSource,
+      debug:{
+        ticker:String(safeRecord.ticker || '').trim(),
+        source:'chart_verification_fast_pass',
+        fastPass,
+        deterministicStatus:'untrusted_context_mirror',
+        chartImageSource,
+        hasChart,
+        mismatchSeverity:'none',
+        aiAnalysisSuppressed:false,
+        suppressionReason:'',
+        canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
+        visualBucket:simplifiedState && simplifiedState.visualBucket || ''
+      }
+    };
+  }
   return {
     available:hasExtractedEvidence,
     status,
@@ -27867,7 +27960,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       severity:'warning',
       title:fastPass.title,
       summary:fastPass.summary,
-      evidence:[],
+      evidence:[...new Set((fastPass.evidence || []).concat(fastPass.reason ? [fastPass.reason] : []))].slice(0, 5),
       missing:[],
       initialMissingIndicators:[],
       finalMissingIndicators:[],
@@ -28194,6 +28287,20 @@ function renderChartConsistencyTrace(trace){
   const summaryText = uiDecision.summary || uiDecision.detail || safe.summary || '';
   const headingText = uiDecision.title || 'Chart verification';
   const verifiedState = ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'user_confirmed_match'].includes(String(uiDecision.key || ''));
+  const comparisonLine = facts || trusted
+    ? `<div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([
+      facts && facts.visible_ticker ? facts.visible_ticker : 'n/a',
+      facts && facts.visible_timeframe ? facts.visible_timeframe : 'n/a',
+      chartVerificationDisplayValue(facts && facts.visible_latest_price)
+    ].join(' | '))} <strong>Expected:</strong> ${escapeHtml([
+      trusted && trusted.ticker ? trusted.ticker : 'n/a',
+      trusted && trusted.expected_timeframe ? trusted.expected_timeframe : 'n/a',
+      chartVerificationDisplayValue(trusted && trusted.latest_price)
+    ].join(' | '))}</div>`
+    : '';
+  const maComparisonLine = facts && trusted
+    ? `<div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20 ?? facts.mapped_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50 ?? facts.mapped_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200 ?? facts.mapped_ma200))}</div>`
+    : '';
   if(debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
     console.log('[CHART_VERIFICATION_RENDER]', {
       ticker:trusted && trusted.ticker || facts && facts.visible_ticker || safe.debug && safe.debug.ticker || '',
@@ -28234,7 +28341,7 @@ function renderChartConsistencyTrace(trace){
       ? `<div class="tiny">Sources: ${escapeHtml(safe.sources.join(', '))}</div>`
       : '';
     const details = `${extracted}${trustedFacts}${imageSource}${sources}${evidence}`;
-    return `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(uiDecision))}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}${uiDecision.detail ? `<div class="tiny">${escapeHtml(uiDecision.detail)}</div>` : ''}${details ? `<details class="compact-details"><summary>Show details</summary>${details}</details>` : ''}</div>`;
+    return `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(uiDecision))}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}${comparisonLine}${maComparisonLine}${uiDecision.detail ? `<div class="tiny">${escapeHtml(uiDecision.detail)}</div>` : ''}${details ? `<details class="compact-details"><summary>Show details</summary>${details}</details>` : ''}</div>`;
   }
   const compactSummary = summaryText ? `<div>${escapeHtml(summaryText)}</div>` : '';
   const evidence = Array.isArray(safe.evidence) && safe.evidence.length
@@ -28268,8 +28375,11 @@ function renderChartConsistencyTrace(trace){
     ? `<div class="tiny">Image source: ${escapeHtml(safe.chartImageSource.sourceKind || 'unknown')} | original ${escapeHtml(safe.chartImageSource.originalDimensions || 'unknown')} | preview ${escapeHtml(safe.chartImageSource.previewDimensions || 'unknown')} | verification ${escapeHtml(safe.chartImageSource.verificationSourceDimensions || 'unknown')}${safe.chartImageSource.limited ? ' | limited: original unavailable' : ''}</div>`
     : '';
   const className = chartDecisionClassName(uiDecision);
+  const visibleEvidence = ['chart_mismatch','possible_mismatch','strong_mismatch','ticker_mismatch','timeframe_mismatch','stale_state_detected'].includes(String(safe.status || '')) && Array.isArray(safe.evidence) && safe.evidence.length
+    ? `<div class="tiny badtext">${escapeHtml(`Evidence: ${safe.evidence.join(' | ')}`)}</div>`
+    : '';
   const details = `${missing}${likelyMatchedIndicators}${partialIndicators}${inferredIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}`;
-  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}<details class="compact-details"><summary>Show details</summary>${details}</details></div>`;
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}${comparisonLine}${maComparisonLine}${visibleEvidence}<details class="compact-details"><summary>Show details</summary>${details}</details></div>`;
 }
 
 function logReviewChartOverflowGuard(ticker = ''){

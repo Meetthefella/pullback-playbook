@@ -2248,9 +2248,13 @@ function runAiContractAssertions(){
   if(!/aiObservation|rawOpinion|final_verdict:''|ai_observation_only:true/i.test(normalizeSource)){
     throw new Error('AI ingestion must quarantine legacy verdict-like fields as non-authoritative observation data.');
   }
+  const verifiedStatusSource = extractFunctionSource(appSource, 'chartVerificationIsVerifiedStatus');
+  const chartDecisionClassNameSource = extractFunctionSource(appSource, 'chartDecisionClassName');
   const panelStateSource = extractFunctionSource(appSource, 'chartVerificationPanelState');
   const panelStateSandbox = {};
   vm.createContext(panelStateSandbox);
+  vm.runInContext(verifiedStatusSource, panelStateSandbox, {filename:'app.js#chartVerificationIsVerifiedStatus'});
+  vm.runInContext(chartDecisionClassNameSource, panelStateSandbox, {filename:'app.js#chartDecisionClassName'});
   vm.runInContext(panelStateSource, panelStateSandbox, {filename:'app.js#chartVerificationPanelState'});
   const verifiedPanel = panelStateSandbox.chartVerificationPanelState(
     {key:'verified_match', title:'Chart verified', summary:'AI confirms the match.'},
@@ -2271,6 +2275,118 @@ function runAiContractAssertions(){
   );
   if(pendingPanel.panelVariant !== 'pending' || pendingPanel.visibleTitle !== 'Checking chart details'){
     throw new Error('Queued quick-analysis panels must still render the pending placeholder.');
+  }
+  const chartUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
+  const chartFastPassSource = extractFunctionSource(appSource, 'buildChartVerificationFastPass');
+  const chartRenderSource = extractFunctionSource(appSource, 'renderChartConsistencyTrace');
+  const chartSandbox = {
+    normaliseVisibleTicker(value){ return String(value || '').trim().toUpperCase(); },
+    chartVerificationNumberOrNull(value){
+      if(value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    chartVerificationNumericLabels(){ return []; },
+    isDailyTimeframe(value){ return String(value || '').trim().toUpperCase() === '1D'; },
+    chartImageIdForReview(review){
+      const item = review && typeof review === 'object' ? review : {};
+      return String((item.chartRef && item.chartRef.imageId) || (item.chartImageOriginal && item.chartImageOriginal.imageId) || (item.chartImagePreview && item.chartImagePreview.imageId) || '');
+    },
+    chartVerificationDisplayValue(value){
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric.toFixed(2) : 'n/a';
+    },
+    escapeHtml(value){ return String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); },
+    debugFlagEnabled(){ return false; },
+    uiState:{ reviewRenderPass:1 }
+  };
+  vm.createContext(chartSandbox);
+  vm.runInContext(chartUiDecisionSource, chartSandbox, {filename:'app.js#chartVerificationUiDecision'});
+  vm.runInContext(chartDecisionClassNameSource, chartSandbox, {filename:'app.js#chartDecisionClassName'});
+  vm.runInContext(chartFastPassSource, chartSandbox, {filename:'app.js#buildChartVerificationFastPass'});
+  vm.runInContext(chartRenderSource, chartSandbox, {filename:'app.js#renderChartConsistencyTrace'});
+  const mirroredFastPass = chartSandbox.buildChartVerificationFastPass({
+    ticker:'DINO',
+    marketData:{price:70.30}
+  }, {
+    visible_ticker:'DINO',
+    visible_timeframe:'1D',
+    visible_latest_price:70.30
+  }, {
+    imageId:'img-1',
+    originalAvailable:true
+  });
+  if(mirroredFastPass.status !== 'untrusted_context_mirror' || mirroredFastPass.earlyExit !== true || !Array.isArray(mirroredFastPass.evidence) || !mirroredFastPass.evidence.some(item => /independent image evidence/i.test(item))){
+    throw new Error('Context-mirrored chart reads must remain unverified and require manual confirmation.');
+  }
+  const mismatchFastPass = chartSandbox.buildChartVerificationFastPass({
+    ticker:'DINO',
+    marketData:{price:70.30}
+  }, {
+    visible_ticker:'ETR',
+    visible_timeframe:'1D',
+    visible_latest_price:88.12
+  }, {
+    imageId:'img-2',
+    originalAvailable:true
+  });
+  if(mismatchFastPass.status !== 'ticker_mismatch' || !mismatchFastPass.evidence.some(item => /mismatch/i.test(item) || /ticker/i.test(item))){
+    throw new Error('Visible ticker mismatches must return a hard chart mismatch with evidence.');
+  }
+  const priceMismatchFastPass = chartSandbox.buildChartVerificationFastPass({
+    ticker:'DINO',
+    marketData:{price:70.30}
+  }, {
+    visible_timeframe:'1D',
+    visible_latest_price:95.00
+  }, {
+    imageId:'img-3',
+    originalAvailable:true
+  });
+  if(priceMismatchFastPass.status !== 'strong_mismatch' || !priceMismatchFastPass.evidence.some(item => /Price delta/i.test(item))){
+    throw new Error('Missing ticker plus far-off price must still produce a strong mismatch with evidence.');
+  }
+  const verifiedPanelHtml = chartSandbox.renderChartConsistencyTrace({
+    visible:true,
+    status:'verified_match',
+    summary:'Chart and scanner data are consistent.',
+    title:'Chart verified',
+    extractedFacts:{
+      visible_ticker:'DINO',
+      visible_timeframe:'1D',
+      visible_latest_price:70.3,
+      visible_ma20:67.43,
+      visible_ma50:62.37,
+      visible_ma200:53.89
+    },
+    trustedFacts:{
+      ticker:'DINO',
+      expected_timeframe:'1D',
+      latest_price:70.3,
+      ma20:67.43,
+      ma50:62.37,
+      ma200:53.89
+    },
+    evidence:['Ticker, price, and indicators align.'],
+    sources:['deterministic_chart_verification'],
+    chartImageSource:{sourceKind:'chartImageOriginal', originalDimensions:'1920x1080', previewDimensions:'480x270', verificationSourceDimensions:'1920x1080'}
+  });
+  if(!/Read from chart:/i.test(verifiedPanelHtml) || !/Expected:/i.test(verifiedPanelHtml) || !/20MA 67\.43/i.test(verifiedPanelHtml)){
+    throw new Error('Verified chart traces must show key extracted/trusted facts inline.');
+  }
+  const mismatchPanelHtml = chartSandbox.renderChartConsistencyTrace({
+    visible:true,
+    status:'ticker_mismatch',
+    summary:'Uploaded chart appears to show ETR, but this review is for DINO.',
+    title:'Ticker mismatch',
+    evidence:['Uploaded chart appears to show ETR, but this review is for DINO.'],
+    extractedFacts:{visible_ticker:'ETR', visible_timeframe:'1D', visible_latest_price:88.12},
+    trustedFacts:{ticker:'DINO', expected_timeframe:'1D', latest_price:70.3},
+    sources:['deterministic_chart_verification'],
+    chartImageSource:{sourceKind:'chartImageOriginal', originalDimensions:'1920x1080', previewDimensions:'480x270', verificationSourceDimensions:'1920x1080'}
+  });
+  if(!/Evidence:/i.test(mismatchPanelHtml) || !/ETR/i.test(mismatchPanelHtml) || !/DINO/i.test(mismatchPanelHtml)){
+    throw new Error('Mismatch chart traces must expose explanatory evidence inline.');
   }
   const normalizeSandbox = {
     cloneData(value, fallback){
@@ -2689,8 +2805,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(contextMirroringTrace.debug.fastPass.fastStatus !== 'insufficient_context' || contextMirroringTrace.debug.fastPass.contextMirroringSuspected !== true || contextMirroringTrace.aiAnalysisSuppressed !== false){
-    throw new Error('Ticker/price matching app context without independent image evidence must stay a warning, not a hard suppression.');
+  if(contextMirroringTrace.debug.fastPass.fastStatus !== 'untrusted_context_mirror' || contextMirroringTrace.debug.fastPass.contextMirroringSuspected !== true || contextMirroringTrace.status !== 'untrusted_context_mirror'){
+    throw new Error('Ticker/price matching app context without independent image evidence must be marked untrusted.');
   }
   const independentFastPassTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
