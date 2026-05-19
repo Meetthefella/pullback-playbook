@@ -22115,6 +22115,7 @@ async function analyseSetup(ticker){
       imageId:requestChartImageId,
       verificationRequestId:analysisRequestId,
       requestId:analysisRequestId,
+      phase:'deterministic',
       chartImageSource:requestChartImageSource,
       createdAt:new Date().toISOString(),
       trace:preAiChartTrace
@@ -22349,6 +22350,7 @@ async function analyseSetup(ticker){
           imageId:requestChartImageId,
           verificationRequestId:analysisRequestId,
           requestId:analysisRequestId,
+          phase:'merged',
           chartImageSource:mergedChartImageSource,
           chartAssessorInput,
           createdAt:new Date().toISOString(),
@@ -26898,14 +26900,21 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
   const candidates = [];
   const storedState = storedChartVerificationState && typeof storedChartVerificationState === 'object' ? storedChartVerificationState : null;
   const storedTrace = storedState && storedState.trace && typeof storedState.trace === 'object' ? storedState.trace : null;
+  const storedPhase = String(
+    (storedState && storedState.phase) ||
+    (storedState && storedState.lifecyclePhase) ||
+    (storedState && storedState.chartVerificationLifecycle && storedState.chartVerificationLifecycle.phase) ||
+    (storedTrace && storedTrace.phase) ||
+    ''
+  ).trim();
   if(storedTrace){
     candidates.push({
       label:'stored_trace',
       trace:annotateChartTraceForRender(storedTrace, storedState, {chartImageSource}),
-      type:String(storedState && storedState.phase || '') === 'merged' ? 'post_ai_merged' : 'deterministic_pending'
+      type:storedPhase === 'merged' ? 'post_ai_merged' : 'deterministic_pending'
     });
   }
-  if(storedState && storedState.phase === 'merged' && storedTrace){
+  if(storedPhase === 'merged' && storedTrace){
     candidates.unshift({
       label:'stored_merged_trace',
       trace:annotateChartTraceForRender(storedTrace, storedState, {chartImageSource}),
@@ -26922,7 +26931,7 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
         requestId:storedState && storedState.requestId || storedState && storedState.verificationRequestId || '',
         chartImageSource,
         chartAssessorInput:chartAssessorContext,
-        phase:quickChartAnalysisStatus === 'committed' ? 'merged' : ''
+        phase:quickChartAnalysisStatus === 'committed' ? 'merged' : 'deterministic'
       }, {chartImageSource}),
       type:quickChartAnalysisStatus === 'committed'
         ? 'committed_quick_analysis'
