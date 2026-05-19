@@ -1115,6 +1115,14 @@ function runStartupWatchlistRefreshCoordinator(options = {}){
     return Promise.resolve(null);
   }
   if(requireTrackVisible && !isTrackActive){
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[WATCHLIST_REFRESH_CANCELLED]', {
+        source,
+        trigger,
+        reason:'track_hidden',
+        activeTab:activeWorkspaceTab()
+      });
+    }
     return Promise.resolve({mode:'lightweight', skipped:true, reason:'track_hidden'});
   }
   const currentState = String(startupCoordinator.startupWatchlistRefreshState || 'idle');
@@ -6062,12 +6070,26 @@ function scheduleDeferredStartupHydration(){
       trigger:'scheduled',
       requireTrackVisible:true
     }).then(summary => {
-      if(!summary || !summary.attempted) return;
+      const attempted = Number(summary && summary.attempted || 0);
+      const refreshed = Number(summary && summary.refreshed || 0);
+      const failed = Number(summary && summary.failed || 0);
+      if(!summary || !attempted){
+        setLiveProcessStatus('idle', 'Idle.');
+        if(typeof console !== 'undefined' && console.info){
+          console.info('[WATCHLIST_REFRESH_STATUS_RELEASE_SKIPPED]', {
+            reason:'no_summary_or_zero_attempts',
+            source:'startup_watchlist_refresh',
+            mode,
+            activeTab:activeWorkspaceTab()
+          });
+        }
+        return;
+      }
       const message = summary.failed
-        ? `Startup refresh checked ${summary.refreshed}/${summary.attempted} watchlist ticker${summary.attempted === 1 ? '' : 's'} from live data.`
-        : `Startup refresh checked ${summary.refreshed} watchlist ticker${summary.refreshed === 1 ? '' : 's'} from live data.`;
+        ? `Startup refresh checked ${refreshed}/${attempted} watchlist ticker${attempted === 1 ? '' : 's'} from live data.`
+        : `Startup refresh checked ${refreshed} watchlist ticker${refreshed === 1 ? '' : 's'} from live data.`;
       setStatus('scannerSelectionStatus', `<span class="${summary.failed ? 'warntext' : 'ok'}">${escapeHtml(message)}</span>`);
-      if(summary.failed && summary.refreshed === 0){
+      if(failed > 0 && refreshed === 0){
         setLiveProcessStatus('error', 'Refresh failed.');
       }else{
         setLiveProcessStatus('idle', 'Idle.');
@@ -9671,9 +9693,23 @@ function captureTrackUiState(){
   return state;
 }
 
-function restoreTrackUiState(snapshot = null){
+function shouldRestoreTrackScrollForSource(source = ''){
+  const normalized = String(source || '').trim().toLowerCase();
+  if(!normalized) return true;
+  if(normalized.startsWith('startup_')) return false;
+  if(normalized.startsWith('startup_watchlist_')) return false;
+  if(normalized === 'watchlist_refresh') return false;
+  if(normalized === 'track_pull_refresh') return false;
+  if(normalized === 'startup_restore') return false;
+  return true;
+}
+
+function restoreTrackUiState(snapshot = null, options = {}){
   const trackWorkspace = document.querySelector('[data-workspace-card="track"]');
   if(!trackWorkspace || !snapshot || typeof snapshot !== 'object') return;
+  const caller = String(options.caller || 'restoreTrackUiState');
+  const source = String(options.source || '');
+  const shouldRestoreScroll = options.restoreScroll !== false;
   persistTrackSectionState(normalizeTrackSectionState(snapshot.expandedState || {}));
   const watchlistList = $('watchlistList');
   if(!watchlistList) return;
@@ -9688,7 +9724,8 @@ function restoreTrackUiState(snapshot = null){
   if(typeof isTrackRestoreOrRevealPending === 'function' && isTrackRestoreOrRevealPending()){
     if(typeof window !== 'undefined' && window.PP_SCROLL_TRACE === true){
       traceScrollEvent('track:scroll-restore:legacy-skipped', {
-        caller:'restoreTrackUiState',
+        caller,
+        source,
         reason:'shell_track_restore_in_progress',
         savedTrackScrollY:Number.isFinite(Number(window.__ppPendingTrackRestoreY)) ? Number(window.__ppPendingTrackRestoreY) : null,
         trackRevealPending:document.body && document.body.classList.contains('track-restore-pending')
@@ -9696,6 +9733,16 @@ function restoreTrackUiState(snapshot = null){
     }
     return;
   }
+  if(typeof window !== 'undefined' && window.PP_SCROLL_TRACE === true){
+    traceScrollEvent('TRACK_SCROLL_RESTORE_CALLED', {
+      caller,
+      source,
+      restoreScroll:shouldRestoreScroll,
+      savedTrackScrollY:Number.isFinite(Number(window.__ppPendingTrackRestoreY)) ? Number(window.__ppPendingTrackRestoreY) : Number(snapshot.scrollY),
+      trackRevealPending:document.body && document.body.classList.contains('track-restore-pending')
+    });
+  }
+  if(!shouldRestoreScroll) return;
   const pendingRestoreY = typeof window !== 'undefined' ? Number(window.__ppPendingTrackRestoreY) : Number.NaN;
   const usePendingRestore = Number.isFinite(pendingRestoreY);
   const targetScrollY = usePendingRestore ? pendingRestoreY : Number(snapshot.scrollY);
@@ -9708,7 +9755,8 @@ function restoreTrackUiState(snapshot = null){
     if(activeWorkspaceTab() !== 'track') return;
     if(usePendingRestore) setLocalSmoothDisabled(true);
     traceScrollEvent('track:scroll-restore:before', {
-      caller:'restoreTrackUiState',
+      caller,
+      source,
       savedTrackScrollY:targetScrollY,
       restoreTarget:targetScrollY,
       restoreActualBefore:Number(window.scrollY || window.pageYOffset || 0),
@@ -9726,7 +9774,8 @@ function restoreTrackUiState(snapshot = null){
     }
     const restoreActualAfter = Number(window.scrollY || window.pageYOffset || 0);
     traceScrollEvent('track:scroll-restore:after', {
-      caller:'restoreTrackUiState',
+      caller,
+      source,
       savedTrackScrollY:targetScrollY,
       restoreTarget:targetScrollY,
       restoreActualAfter,
@@ -10087,6 +10136,7 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
 
 async function renderWatchlistChunked(options = {}){
   const source = String(options.source || 'watchlist_refresh');
+  const restoreScroll = options.restoreScroll !== false && shouldRestoreTrackScrollForSource(source);
   if(shouldSkipHiddenWatchlistRender(source)){
     if(source === 'watchlist_add' || source === 'review_add_watchlist_hidden'){
       if(PP_PERF_DEBUG){
@@ -10121,7 +10171,11 @@ async function renderWatchlistChunked(options = {}){
       box.innerHTML = showExpired
         ? '<div class="summary">No watchlist entries match this filter right now.</div>'
         : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
-      if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
+      if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
+        caller:'renderWatchlistChunked',
+        source,
+        restoreScroll
+      });
       return;
     }
     if(
@@ -10201,7 +10255,11 @@ async function renderWatchlistChunked(options = {}){
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
     clearWatchlistDirtyForRecords(records);
-    if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
+    if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
+      caller:'renderWatchlistChunked',
+      source,
+      restoreScroll
+    });
   }catch(error){
     renderError = error;
     throw error;
@@ -10223,6 +10281,7 @@ function renderWatchlist(){
   try{
     const preserveUiState = activeWorkspaceTab() === 'track';
     const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
+    const restoreScroll = shouldRestoreTrackScrollForSource('watchlist_render');
     const passCache = createWatchlistProjectionPassCache();
     const model = prepareWatchlistRenderModel('watchlist_render', {passCache});
     const {box, showExpired, records, renderSignature} = model;
@@ -10235,7 +10294,11 @@ function renderWatchlist(){
       box.innerHTML = showExpired
         ? '<div class="summary">No watchlist entries match this filter right now.</div>'
         : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
-      if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
+      if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
+        caller:'renderWatchlist',
+        source:'watchlist_render',
+        restoreScroll
+      });
       return;
     }
     if(
@@ -10250,7 +10313,11 @@ function renderWatchlist(){
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
     clearWatchlistDirtyForRecords(records);
-    if(preserveUiState) restoreTrackUiState(trackUiSnapshot);
+    if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
+      caller:'renderWatchlist',
+      source:'watchlist_render',
+      restoreScroll
+    });
   }catch(error){
     renderError = error;
     throw error;
@@ -10776,6 +10843,18 @@ function setLiveProcessStatus(stateKey, message, options = {}){
       });
     }
     delete uiState.watchlistRefreshStatusLock;
+  }else if(uiState.watchlistRefreshStatusLock && typeof uiState.watchlistRefreshStatusLock === 'object'){
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[WATCHLIST_REFRESH_STATUS_RELEASE_SKIPPED]', {
+        reason:'not_prev_refresh_busy',
+        previousState:previousStatus && previousStatus.state || '',
+        previousMessage:previousStatus && previousStatus.message || '',
+        nextState,
+        nextJob,
+        nextMessage,
+        pendingReviewTicker:pendingReviewTicker() || ''
+      });
+    }
   }
   const banner = $('liveProcessStatusBanner');
   if(banner){
@@ -24252,6 +24331,15 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
   if(!suppressLiveStatus){
     setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
   }
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[WATCHLIST_REFRESH_START]', {
+      ticker:symbol,
+      source,
+      suppressLiveStatus,
+      activeTicker:activeReviewTicker() || '',
+      pendingReviewTicker:pendingReviewTicker() || ''
+    });
+  }
   if(options.clearReviewOverride !== false && activeReviewTicker() === symbol) uiState.activeReviewVerdictOverride = '';
   if(options.markPending) setWatchlistLiveRefreshPending(symbol, true);
   try{
@@ -24295,6 +24383,14 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       || /aborted/i.test(errorMessage)
     );
     if(abortLikeError){
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[WATCHLIST_REFRESH_CANCELLED]', {
+          ticker:symbol,
+          source,
+          errorName,
+          errorMessage
+        });
+      }
       if(PP_PERF_DEBUG){
         console.debug('[TrackRefreshSkippedTrace]', {
           scope:'refreshWatchlistRecordFromSourceOfTruth',
@@ -24336,6 +24432,14 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
     }
     if(!suppressLiveStatus){
       setLiveProcessStatus('error', 'Refresh failed.');
+    }
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[WATCHLIST_REFRESH_FAIL]', {
+        ticker:symbol,
+        source,
+        errorName,
+        errorMessage
+      });
     }
     const refreshed = refreshTrackedTickerState(symbol, {
       source:'track',
@@ -24388,6 +24492,14 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
       ...startupDebugRenderState()
     });
   }
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[WATCHLIST_REFRESH_START]', {
+      source,
+      mode,
+      activeTab:activeWorkspaceTab(),
+      recordCount:lightweightWatchlistRecordCount()
+    });
+  }
   const finishWatchlistRefreshLog = (summary, extra = {}) => {
     perfMark('pp_watchlist_refresh_end');
     const watchlistRefreshEntry = perfMeasure('pp_watchlist_refresh', 'pp_watchlist_refresh_start', 'pp_watchlist_refresh_end');
@@ -24423,7 +24535,19 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     beforePrefilterHashes[ticker] = trackCardPrefilterHash(record);
     beforeRecordSnapshots[ticker] = snapshotTickerRecordForDiff(record);
   });
-  if(!tickers.length) return finishWatchlistRefreshLog({source, attempted:0, refreshed:0, failed:0, results:[]});
+  if(!tickers.length){
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[WATCHLIST_REFRESH_COMPLETE]', {
+        source,
+        mode,
+        attempted:0,
+        refreshed:0,
+        failed:0,
+        skipped:0
+      });
+    }
+    return finishWatchlistRefreshLog({source, attempted:0, refreshed:0, failed:0, results:[]});
+  }
   setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
   const markPending = options.markPending !== false && source === 'startup_restore';
   if(markPending) setWatchlistLiveRefreshPending(tickers, true);
@@ -24675,6 +24799,16 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     setLiveProcessStatus('error', 'Refresh failed.');
   }else{
     setLiveProcessStatus('idle', 'Idle.');
+  }
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[WATCHLIST_REFRESH_COMPLETE]', {
+      source,
+      mode,
+      attempted:summary.attempted,
+      refreshed:summary.refreshed,
+      failed:summary.failed,
+      skipped:results.filter(result => result && result.skipped === true).length
+    });
   }
   return finishWatchlistRefreshLog(summary);
 }

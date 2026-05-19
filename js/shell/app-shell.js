@@ -503,6 +503,15 @@
     function scrollWindowTo(top, behavior = 'auto', reason = 'programmatic_scroll'){
       if(typeof window === 'undefined') return;
       const targetTop = Math.max(0, Math.round(top));
+      if(targetTop === 0){
+        traceScrollEvent('TRACK_SCROLL_RESET_CALLED', {
+          caller:'scrollWindowTo',
+          reason,
+          targetTop,
+          behavior,
+          activeTab:normalizeTab(activeWorkspaceTab())
+        });
+      }
       if(isTrackRestorePending() && !isProgrammaticTrackRestoreAllowed(reason)){
         traceScrollEvent('scroll-driver:restore-blocked', {
           caller:'scrollWindowTo',
