@@ -273,9 +273,7 @@
   function reviewChartImageId(review){
     const safe = review && typeof review === 'object' ? review : {};
     return String(
-      safe.imageId
-      || safe.chartImageId
-      || (safe.chartVerificationCommittedTrace && (safe.chartVerificationCommittedTrace.imageId || safe.chartVerificationCommittedTrace.chartImageId))
+      (safe.chartVerificationCommittedTrace && (safe.chartVerificationCommittedTrace.imageId || safe.chartVerificationCommittedTrace.chartImageId))
       || (safe.chartVerificationTrace && (safe.chartVerificationTrace.imageId || safe.chartVerificationTrace.chartImageId))
       || (safe.chartImageVerificationSource && safe.chartImageVerificationSource.imageId)
       || (safe.chartImageOriginal && safe.chartImageOriginal.imageId)
