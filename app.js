@@ -22346,13 +22346,27 @@ async function analyseSetup(ticker){
         : null;
       const currentChartVerificationLifecycleRequestId = String(currentChartVerificationLifecycle && currentChartVerificationLifecycle.requestId || '');
       const currentChartVerificationLifecyclePhase = String(currentChartVerificationLifecycle && currentChartVerificationLifecycle.phase || '');
-      const shouldCommitMergedTrace = !currentChartVerificationLifecycle
-        || currentChartVerificationLifecycleRequestId === analysisRequestId
-        || currentChartVerificationLifecyclePhase === 'deterministic'
-        || currentChartVerificationLifecyclePhase === 'deterministic_ready'
-        || currentChartVerificationLifecyclePhase === 'merged';
+      const shouldCommitMergedTrace = !!(
+        requestChartImageId &&
+        currentChartImageId &&
+        requestChartImageId === currentChartImageId &&
+        currentActiveReviewTicker === ticker &&
+        uiState.analysisActiveRequest &&
+        uiState.analysisActiveRequest.id === analysisRequestId
+      );
       if(shouldCommitMergedTrace){
         const mergedChartImageSource = buildChartImageSourceTrace(record.review || {});
+        const committedMergedChartTrace = cloneData({
+          ...mergedChartTrace,
+          status:String(mergedChartTrace && mergedChartTrace.status || ''),
+          mergedStatus:String(mergedChartTrace && mergedChartTrace.status || ''),
+          renderedStatus:String(mergedChartTrace && mergedChartTrace.status || ''),
+          normalizedAnalysis:analysis,
+          mergedAnalysis:mergedChartTrace,
+          chartAssessorInput,
+          source:'quickChartAnalysis',
+          event:'quick_analysis_committed'
+        }, null);
         record.review.chartVerificationTrace = cloneData({
           ticker:record.ticker,
           reviewTicker:record.ticker,
@@ -22364,7 +22378,13 @@ async function analyseSetup(ticker){
           chartImageSource:mergedChartImageSource,
           chartAssessorInput,
           createdAt:new Date().toISOString(),
-          trace:mergedChartTrace
+          trace:committedMergedChartTrace,
+          normalizedAnalysis:analysis,
+          mergedAnalysis:mergedChartTrace,
+          renderedStatus:String(mergedChartTrace && mergedChartTrace.status || ''),
+          mergedStatus:String(mergedChartTrace && mergedChartTrace.status || ''),
+          source:'quickChartAnalysis',
+          event:'quick_analysis_committed'
         }, null);
         record.review.chartVerificationLifecycle = {
           phase:'merged',
@@ -22376,6 +22396,16 @@ async function analyseSetup(ticker){
           chartImageSource:mergedChartImageSource,
           updatedAt:new Date().toISOString()
         };
+        if(typeof console !== 'undefined' && console.info){
+          console.info('[CHART_TRACE_WRITEBACK]', {
+            ticker:record.ticker,
+            requestId:analysisRequestId,
+            imageId:requestChartImageId,
+            writtenStatus:String(committedMergedChartTrace && committedMergedChartTrace.status || ''),
+            writtenStoreName:'record.review.chartVerificationTrace',
+            selectorCanReadSameStore:!!(record.review && record.review.chartVerificationTrace && record.review.chartVerificationTrace.trace && record.review.chartVerificationTrace.trace.status === 'consistent')
+          });
+        }
       }
       if(record.review && record.review.quickChartAnalysis && typeof record.review.quickChartAnalysis === 'object'){
         record.review.quickChartAnalysis = {
