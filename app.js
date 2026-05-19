@@ -19502,6 +19502,19 @@ function completeReviewAiAnalysis(ticker, requestId){
   runtime.completedAt = Date.now();
   runtime.error = '';
   uiState.loadingTicker = '';
+  const pendingError = uiState.reviewPendingLoadError && typeof uiState.reviewPendingLoadError === 'object'
+    ? uiState.reviewPendingLoadError
+    : null;
+  if(pendingError && normalizeTicker(pendingError.ticker || '') === symbol){
+    uiState.reviewPendingLoadError = null;
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[REVIEW_PENDING_LOAD_ERROR_CLEARED]', {
+        ticker:symbol,
+        requestId,
+        reason:'analysis_success'
+      });
+    }
+  }
   return true;
 }
 
