@@ -28931,6 +28931,9 @@ function renderReviewWorkspace(options = {}){
     : ((primaryPlanMessage && primaryPlanMessage === tradeStatusText.line1) ? '' : primaryPlanMessage);
   const chartSourceTrace = buildChartImageSourceTrace(record.review || {});
   const hasVerifiableChart = chartSourceTrace.originalAvailable === true;
+  const storedChartVerificationWrapper = hasVerifiableChart && record.review && record.review.chartVerificationTrace && typeof record.review.chartVerificationTrace === 'object'
+    ? record.review.chartVerificationTrace
+    : null;
   const storedChartVerificationState = hasVerifiableChart ? getReviewChartVerificationState(record) : null;
   const quickChartAnalysisState = hasVerifiableChart ? queueReviewQuickChartAnalysis(record, {
     source:reviewRenderSource,
@@ -28966,7 +28969,7 @@ function renderReviewWorkspace(options = {}){
       }));
     const selectedChartTrace = selectReviewChartTraceForRender(
       record,
-      storedChartVerificationState,
+      storedChartVerificationWrapper,
       chartConsistencyTrace,
       quickChartAnalysisStatus,
       storedChartAssessorContext
