@@ -19495,9 +19495,12 @@ function getReviewChartVerificationState(record){
       safe.limited === true ? 'limited' : 'full'
     ].join('|');
   };
-  const state = review.chartVerificationTrace && typeof review.chartVerificationTrace === 'object'
-    ? review.chartVerificationTrace
+  const committedState = review.chartVerificationCommittedTrace && typeof review.chartVerificationCommittedTrace === 'object'
+    ? review.chartVerificationCommittedTrace
     : null;
+  const state = committedState || (review.chartVerificationTrace && typeof review.chartVerificationTrace === 'object'
+    ? review.chartVerificationTrace
+    : null);
   if(!state) return null;
   const currentTicker = normalizeReviewTicker(item.ticker || review.ticker || '');
   const storedTicker = normalizeReviewTicker(state.reviewTicker || state.ticker || '');
@@ -29218,8 +29221,15 @@ function renderReviewWorkspace(options = {}){
     : ((primaryPlanMessage && primaryPlanMessage === tradeStatusText.line1) ? '' : primaryPlanMessage);
   const chartSourceTrace = buildChartImageSourceTrace(record.review || {});
   const hasVerifiableChart = chartSourceTrace.originalAvailable === true;
-  const storedChartVerificationWrapper = hasVerifiableChart && record.review && record.review.chartVerificationTrace && typeof record.review.chartVerificationTrace === 'object'
-    ? record.review.chartVerificationTrace
+  const storedChartVerificationWrapper = hasVerifiableChart && record.review
+    ? (
+      (record.review.chartVerificationCommittedTrace && typeof record.review.chartVerificationCommittedTrace === 'object'
+        ? record.review.chartVerificationCommittedTrace
+        : null)
+      || (record.review.chartVerificationTrace && typeof record.review.chartVerificationTrace === 'object'
+        ? record.review.chartVerificationTrace
+        : null)
+    )
     : null;
   const storedChartVerificationState = hasVerifiableChart ? getReviewChartVerificationState(record) : null;
   const quickChartAnalysisState = hasVerifiableChart ? queueReviewQuickChartAnalysis(record, {
