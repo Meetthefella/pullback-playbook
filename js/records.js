@@ -360,6 +360,19 @@
 
     const normalized = record && typeof record === 'object' ? record : {};
     const base = createBaseTickerRecord(normalizeTicker(normalized.ticker));
+    const reviewObjectIdentityId = value => {
+      if(!value || typeof value !== 'object' || typeof WeakMap !== 'function') return '';
+      if(!normalizeTickerRecord._reviewObjectIdentityRegistry){
+        normalizeTickerRecord._reviewObjectIdentityRegistry = new WeakMap();
+        normalizeTickerRecord._reviewObjectIdentityCounter = 0;
+      }
+      const registry = normalizeTickerRecord._reviewObjectIdentityRegistry;
+      if(!registry.has(value)){
+        normalizeTickerRecord._reviewObjectIdentityCounter += 1;
+        registry.set(value, `review_obj_${normalizeTickerRecord._reviewObjectIdentityCounter}`);
+      }
+      return registry.get(value) || '';
+    };
     const merged = {
       ...base,
       ...normalized,
@@ -380,11 +393,23 @@
     const previousChartTrace = previousReview.chartVerificationTrace && typeof previousReview.chartVerificationTrace === 'object'
       ? previousReview.chartVerificationTrace
       : null;
+    const previousLifecycle = previousReview.chartVerificationLifecycle && typeof previousReview.chartVerificationLifecycle === 'object'
+      ? previousReview.chartVerificationLifecycle
+      : null;
+    const previousContext = previousReview.chartVerificationContext && typeof previousReview.chartVerificationContext === 'object'
+      ? previousReview.chartVerificationContext
+      : null;
     const baseCommittedTrace = base.review.chartVerificationCommittedTrace && typeof base.review.chartVerificationCommittedTrace === 'object'
       ? base.review.chartVerificationCommittedTrace
       : null;
     const baseChartTrace = base.review.chartVerificationTrace && typeof base.review.chartVerificationTrace === 'object'
       ? base.review.chartVerificationTrace
+      : null;
+    const baseLifecycle = base.review.chartVerificationLifecycle && typeof base.review.chartVerificationLifecycle === 'object'
+      ? base.review.chartVerificationLifecycle
+      : null;
+    const baseContext = base.review.chartVerificationContext && typeof base.review.chartVerificationContext === 'object'
+      ? base.review.chartVerificationContext
       : null;
     const currentReviewImageId = reviewChartImageId(previousReview || base.review || merged.review || {});
     const previousCommittedImageId = reviewChartImageId(previousCommittedTrace || {});
@@ -405,6 +430,24 @@
       || merged.review.chartVerificationCommittedTrace
       || baseChartTrace
       || null;
+    merged.review.chartVerificationLifecycle = previousLifecycle || baseLifecycle || merged.review.chartVerificationLifecycle || null;
+    merged.review.chartVerificationContext = previousContext || baseContext || merged.review.chartVerificationContext || null;
+    if((global.PP_DEBUG_CHART_TRACE === true || global.PP_FORCE_CHART_TRACE === true) && (previousCommittedTrace || baseCommittedTrace || previousChartTrace || baseChartTrace || previousLifecycle || baseLifecycle || previousContext || baseContext)){
+      console.info('[CHART_TRACE_PERSISTENCE_AUDIT]', {
+        ticker:String(merged.ticker || ''),
+        sourceReviewObjectId:reviewObjectIdentityId(previousReview || null),
+        destinationReviewObjectId:reviewObjectIdentityId(merged.review),
+        hadCommittedTrace:!!(previousCommittedTrace || baseCommittedTrace),
+        preservedCommittedTrace:!!(merged.review.chartVerificationCommittedTrace),
+        preservedLifecycle:!!(merged.review.chartVerificationLifecycle),
+        preservedContext:!!(merged.review.chartVerificationContext),
+        previousCommittedStatus:String(previousCommittedTrace && (previousCommittedTrace.status || previousCommittedTrace.mergedStatus) || ''),
+        nextCommittedStatus:String(merged.review.chartVerificationCommittedTrace && (merged.review.chartVerificationCommittedTrace.status || merged.review.chartVerificationCommittedTrace.mergedStatus) || ''),
+        droppedDuring:!!((previousCommittedTrace || baseCommittedTrace) && !merged.review.chartVerificationCommittedTrace),
+        propertyKeysBefore:Object.keys(previousReview || {}).sort(),
+        propertyKeysAfter:Object.keys(merged.review || {}).sort()
+      });
+    }
     if((preservePreviousCommittedTrace || preserveBaseCommittedTrace || previousChartTrace || baseChartTrace) && typeof console !== 'undefined' && console.info && (global.PP_DEBUG_CHART_TRACE === true || global.PP_FORCE_CHART_TRACE === true)){
       console.info('[REVIEW_OBJECT_REBUILD]', {
         previousReviewObjectId:reviewObjectIdentityId(previousReview || null),

@@ -2528,7 +2528,11 @@ function buildRecordsLitePersistedState(sourceState){
           lastReviewedAt:item.review.lastReviewedAt,
           manualReview:item.review.manualReview && typeof item.review.manualReview === 'object' ? cloneData(item.review.manualReview, null) : null,
           cardOpen:!!item.review.cardOpen,
-          source:item.review.source
+          source:item.review.source,
+          chartVerificationTrace:cloneData(item.review.chartVerificationTrace, null),
+          chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
+          chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
+          chartVerificationContext:cloneData(item.review.chartVerificationContext, null)
         },
         plan:{
           hasValidPlan:item.plan.hasValidPlan,
@@ -2607,7 +2611,11 @@ function buildLitePersistedState(sourceState){
           aiAnalysisRaw:'',
           normalizedAnalysis:null,
           lastPrompt:'',
-          lastError:''
+          lastError:'',
+          chartVerificationTrace:cloneData(item.review.chartVerificationTrace, null),
+          chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
+          chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
+          chartVerificationContext:cloneData(item.review.chartVerificationContext, null)
         }
       }];
     })
