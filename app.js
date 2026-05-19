@@ -27015,7 +27015,13 @@ function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}, options
 
 function selectReviewChartTraceForRender(record = {}, storedChartVerificationState = null, derivedTrace = null, quickChartAnalysisStatus = '', chartAssessorContext = null, simplifiedState = {}){
   const item = record && typeof record === 'object' ? record : {};
-  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const canonicalRecord = typeof getTickerRecord === 'function'
+    ? getTickerRecord(item.ticker || '')
+    : null;
+  const canonicalReview = canonicalRecord && canonicalRecord.review && typeof canonicalRecord.review === 'object'
+    ? canonicalRecord.review
+    : null;
+  const review = canonicalReview || (item.review && typeof item.review === 'object' ? item.review : {});
   const reviewObjectIdentityId = value => {
     if(!value || typeof value !== 'object' || typeof WeakMap !== 'function') return '';
     if(!selectReviewChartTraceForRender._reviewObjectIdentityRegistry){
@@ -27037,6 +27043,7 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
       ticker:String(item.ticker || '').trim(),
       hasReview:!!item.review,
       reviewObjectId:reviewObjectIdentityId(review),
+      canonicalReviewObjectId:reviewObjectIdentityId(canonicalReview),
       committedTrace:review.chartVerificationCommittedTrace || null,
       committedTraceStatus:review.chartVerificationCommittedTrace && review.chartVerificationCommittedTrace.status || '',
       committedTraceMergedStatus:review.chartVerificationCommittedTrace && review.chartVerificationCommittedTrace.mergedStatus || '',
@@ -28656,9 +28663,14 @@ function renderReviewWorkspace(options = {}){
   }
   if(canonicalPlanSynced) commitTickerState();
   const record = normalizeTickerRecord(refreshedRecord);
-  const liveCommittedChartVerificationTrace = liveRecord && liveRecord.review && typeof liveRecord.review === 'object'
-    && liveRecord.review.chartVerificationCommittedTrace && typeof liveRecord.review.chartVerificationCommittedTrace === 'object'
-    ? liveRecord.review.chartVerificationCommittedTrace
+  const canonicalLiveRecord = getTickerRecord(ticker) || liveRecord || record;
+  const canonicalLiveReview = canonicalLiveRecord && canonicalLiveRecord.review && typeof canonicalLiveRecord.review === 'object'
+    ? canonicalLiveRecord.review
+    : null;
+  const liveCommittedChartVerificationTrace = canonicalLiveReview
+    && canonicalLiveReview.chartVerificationCommittedTrace
+    && typeof canonicalLiveReview.chartVerificationCommittedTrace === 'object'
+    ? canonicalLiveReview.chartVerificationCommittedTrace
     : null;
   const reviewObjectIdentityId = value => {
     if(!value || typeof value !== 'object' || typeof WeakMap !== 'function') return '';
@@ -28676,9 +28688,9 @@ function renderReviewWorkspace(options = {}){
   if(typeof console !== 'undefined' && console.info && debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
     console.info('[REVIEW_RENDER_REVIEW_OBJECT_SNAPSHOT]', {
       ticker:record.ticker,
-      liveReviewObjectId:reviewObjectIdentityId(liveRecord && liveRecord.review),
+      liveReviewObjectId:reviewObjectIdentityId(canonicalLiveReview),
       renderReviewObjectId:reviewObjectIdentityId(record.review),
-      liveCommittedTrace:!!(liveRecord && liveRecord.review && liveRecord.review.chartVerificationCommittedTrace),
+      liveCommittedTrace:!!(canonicalLiveReview && canonicalLiveReview.chartVerificationCommittedTrace),
       renderCommittedTraceBefore:!!(record.review && record.review.chartVerificationCommittedTrace),
       liveTraceCommittedStatus:String(liveCommittedChartVerificationTrace && liveCommittedChartVerificationTrace.trace && liveCommittedChartVerificationTrace.trace.status || liveCommittedChartVerificationTrace && liveCommittedChartVerificationTrace.status || ''),
       renderTraceCommittedStatusBefore:String(record.review && record.review.chartVerificationCommittedTrace && (record.review.chartVerificationCommittedTrace.trace && record.review.chartVerificationCommittedTrace.trace.status || record.review.chartVerificationCommittedTrace.status || ''))
@@ -28688,10 +28700,12 @@ function renderReviewWorkspace(options = {}){
     const committedRenderTrace = cloneData(liveCommittedChartVerificationTrace, null);
     record.review.chartVerificationCommittedTrace = committedRenderTrace;
     record.review.chartVerificationTrace = committedRenderTrace;
+    record.review.chartVerificationLifecycle = cloneData(canonicalLiveReview && canonicalLiveReview.chartVerificationLifecycle || record.review.chartVerificationLifecycle, null);
+    record.review.manualReview = cloneData(canonicalLiveReview && canonicalLiveReview.manualReview || record.review.manualReview, null);
     if(typeof console !== 'undefined' && console.info && debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
       console.info('[REVIEW_RENDER_REVIEW_OBJECT_SYNC]', {
         ticker:record.ticker,
-        liveReviewObjectId:reviewObjectIdentityId(liveRecord && liveRecord.review),
+        liveReviewObjectId:reviewObjectIdentityId(canonicalLiveReview),
         renderReviewObjectId:reviewObjectIdentityId(record.review),
         committedTraceStatus:String(committedRenderTrace && committedRenderTrace.trace && committedRenderTrace.trace.status || committedRenderTrace && committedRenderTrace.status || ''),
         committedTraceMergedStatus:String(committedRenderTrace && (committedRenderTrace.mergedStatus || committedRenderTrace.trace && committedRenderTrace.trace.mergedStatus || ''))
@@ -29587,6 +29601,15 @@ function renderReviewWorkspace(options = {}){
         usedMergedTrace:!!(storedChartVerificationState && storedChartVerificationState.phase === 'merged'),
         usedPendingTrace:['queued', 'running'].includes(quickChartAnalysisStatus)
       });
+      console.info('[CHART_UI_VISIBLE_COPY]', {
+        ticker:record.ticker,
+        renderedStatus:String(chartUiDecision.key || ''),
+        renderedTitle:String(chartUiDecision.title || ''),
+        renderedBody:String(chartUiDecision.summary || chartUiDecision.detail || ''),
+        renderedCTA:showChartManualActions ? 'manual_confirm' : (chartUiDecision.key === 'verified_match' ? 'verified_only' : 'none'),
+        sourceTraceStatus:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''),
+        reviewObjectId:reviewObjectIdentityId(record.review)
+      });
     }
   }else{
     if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
@@ -30135,7 +30158,14 @@ function handleChartSelection(ticker, file){
       });
     }
     const liveStatus = $('reviewWorkspaceStatus') || $(`cardStatus-${ticker}`);
-    if(liveStatus) liveStatus.innerHTML = '<span class="ok">Chart saved on this device for this ticker. Checking chart details...</span>';
+    if(liveStatus){
+      const currentChartState = getReviewChartVerificationState(getTickerRecord(ticker) || record);
+      const currentChartDecision = currentChartState ? chartVerificationUiDecision(currentChartState.trace || currentChartState, ticker) : null;
+      const currentChartStatusKey = String(currentChartDecision && currentChartDecision.key || currentChartState && currentChartState.status || '');
+      liveStatus.innerHTML = currentChartStatusKey === 'verified_match'
+        ? '<span class="ok">Chart verified for this ticker.</span>'
+        : '<span class="ok">Chart saved on this device for this ticker. Checking chart details...</span>';
+    }
   };
   reader.onerror = () => {
     if(statusBox) statusBox.innerHTML = '<span class="badtext">Could not read that chart file.</span>';
