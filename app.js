@@ -10648,18 +10648,16 @@ function queuePendingReviewRequest(ticker, options = {}){
   if(!symbol) return;
   const nextOptions = options && typeof options === 'object' ? {...options} : {};
   delete nextOptions.forceNow;
-  const reviewRequestToken = String(nextOptions.reviewRequestToken || nextReviewRequestToken());
-  nextOptions.reviewRequestToken = reviewRequestToken;
   const currentPending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
     ? uiState.pendingReviewRequest
     : null;
   const currentPendingTicker = normalizeTicker(currentPending && currentPending.ticker || '');
   const currentPendingToken = String(currentPending && currentPending.reviewRequestToken || '');
-  if(currentPending && !currentPending.superseded && currentPendingTicker === symbol && currentPendingToken === reviewRequestToken){
+  if(currentPending && !currentPending.superseded && currentPendingTicker === symbol){
     if(typeof console !== 'undefined' && console.info){
       console.info('[REVIEW_PENDING_DUPLICATE_SUPPRESSED]', {
         ticker:symbol,
-        reviewRequestToken,
+        reviewRequestToken:currentPendingToken,
         activeTicker:activeReviewTicker() || '',
         pendingTicker:pendingReviewTicker() || '',
         queuedTicker:uiState.queuedReviewTicker || ''
@@ -10672,6 +10670,8 @@ function queuePendingReviewRequest(ticker, options = {}){
     });
     return currentPending;
   }
+  const reviewRequestToken = String(nextOptions.reviewRequestToken || nextReviewRequestToken());
+  nextOptions.reviewRequestToken = reviewRequestToken;
   uiState.reviewPendingLoadError = null;
   clearPendingReviewCandidate({requestedTicker:symbol});
   supersedePendingReviewRequest(symbol, nextOptions);
@@ -22842,17 +22842,16 @@ function loadTickerIntoReview(ticker, options = {}){
       return '';
     }
   };
-  const reviewRequestToken = String(options.reviewRequestToken || nextReviewRequestToken());
   const currentPending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
     ? uiState.pendingReviewRequest
     : null;
   const currentPendingTicker = normalizeTicker(currentPending && currentPending.ticker || '');
   const currentPendingToken = String(currentPending && currentPending.reviewRequestToken || '');
-  if(currentPending && !currentPending.superseded && currentPendingTicker === symbol && currentPendingToken === reviewRequestToken){
+  if(currentPending && !currentPending.superseded && currentPendingTicker === symbol){
     if(typeof console !== 'undefined' && console.info){
       console.info('[REVIEW_PENDING_DUPLICATE_SUPPRESSED]', {
         requestedTicker:symbol,
-        reviewRequestToken,
+        reviewRequestToken:currentPendingToken,
         loadStarted:currentPending.loadStarted === true,
         source:String(options.sourceContext || ''),
         activeTicker:activeReviewTicker() || '',
@@ -22867,6 +22866,7 @@ function loadTickerIntoReview(ticker, options = {}){
     });
     return;
   }
+  const reviewRequestToken = String(options.reviewRequestToken || nextReviewRequestToken());
   setActiveWorkspaceTab('review', {focusTop:false});
   const reviewSeq = nextReviewRenderSeq();
   uiState.reviewLoadToken = Number(uiState.reviewLoadToken || 0) + 1;
@@ -22892,6 +22892,11 @@ function loadTickerIntoReview(ticker, options = {}){
       : {};
     console.info('[REVIEW_OPEN_REQUEST]', {
       requestedTicker:symbol,
+      source:String(options.sourceContext || ''),
+      isUserInitiated:openTrigger.userInitiated === true ? true : (openTrigger.userInitiated === false ? false : null),
+      fromRetryButton:openTrigger.kind === 'retry_button',
+      existingPendingTicker:currentPendingTicker || '',
+      existingPendingToken:currentPendingToken || '',
       activeReviewTicker:activeReviewTicker() || '',
       pendingReviewTicker:pendingReviewTicker() || '',
       reviewRequestToken,
