@@ -2351,6 +2351,7 @@ function runAiContractAssertions(){
     'chartImageDimensionsFromRef',
     'chartImageDimensionsLabel',
     'buildChartImageSourceTrace',
+    'hasVerifiableReviewChartSource',
     'chartImageForAnalysis',
     'clearReviewChartImageSources',
     'confirmReviewChartMatchesCurrentTicker',
@@ -2728,6 +2729,13 @@ function runAiContractAssertions(){
   });
   if(!storedChartTrace || storedChartTrace.trace.status !== 'verified_match'){
     throw new Error('Stored deterministic chart trace must be readable before AI analysis completes.');
+  }
+  const noChartReviewState = evidenceSandbox.getReviewChartVerificationState({
+    ticker:'MRNA',
+    review:{}
+  });
+  if(noChartReviewState !== null){
+    throw new Error('No-chart review records must not expose a chart verification trace.');
   }
   const preAiPendingTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{
