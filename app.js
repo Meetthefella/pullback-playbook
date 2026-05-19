@@ -22341,7 +22341,16 @@ async function analyseSetup(ticker){
           suppressionReason:mergedChartTrace.suppressionReason || ''
         });
       }
-      if(!record.review.chartVerificationLifecycle || record.review.chartVerificationLifecycle.requestId === analysisRequestId){
+      const currentChartVerificationLifecycle = record.review.chartVerificationLifecycle && typeof record.review.chartVerificationLifecycle === 'object'
+        ? record.review.chartVerificationLifecycle
+        : null;
+      const currentChartVerificationLifecycleRequestId = String(currentChartVerificationLifecycle && currentChartVerificationLifecycle.requestId || '');
+      const currentChartVerificationLifecyclePhase = String(currentChartVerificationLifecycle && currentChartVerificationLifecycle.phase || '');
+      const shouldCommitMergedTrace = !currentChartVerificationLifecycle
+        || currentChartVerificationLifecycleRequestId === analysisRequestId
+        || currentChartVerificationLifecyclePhase === 'deterministic'
+        || currentChartVerificationLifecyclePhase === 'merged';
+      if(shouldCommitMergedTrace){
         const mergedChartImageSource = buildChartImageSourceTrace(record.review || {});
         record.review.chartVerificationTrace = cloneData({
           ticker:record.ticker,
