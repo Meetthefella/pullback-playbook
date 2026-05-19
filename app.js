@@ -28562,7 +28562,9 @@ function renderReviewWorkspace(options = {}){
     ? liveRecord.review.chartVerificationCommittedTrace
     : null;
   if(liveCommittedChartVerificationTrace){
-    record.review.chartVerificationCommittedTrace = cloneData(liveCommittedChartVerificationTrace, null);
+    const committedRenderTrace = cloneData(liveCommittedChartVerificationTrace, null);
+    record.review.chartVerificationCommittedTrace = committedRenderTrace;
+    record.review.chartVerificationTrace = committedRenderTrace;
   }
   const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {
     renderPass:reviewRenderPass,
