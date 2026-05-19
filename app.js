@@ -26930,6 +26930,9 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
   const chartImageSource = buildChartImageSourceTrace(review);
   const currentSimplifiedState = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const candidates = [];
+  const quickAnalysisState = review.quickChartAnalysis && typeof review.quickChartAnalysis === 'object'
+    ? review.quickChartAnalysis
+    : null;
   const storedState = storedChartVerificationState && typeof storedChartVerificationState === 'object' ? storedChartVerificationState : null;
   const storedTrace = storedState && storedState.trace && typeof storedState.trace === 'object' ? storedState.trace : null;
   const storedPhase = String(
@@ -26990,6 +26993,43 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
           phase:'merged'
         }, {chartImageSource}),
         type:'post_ai_merged'
+      });
+    }
+  }
+  if(quickAnalysisState && String(quickAnalysisState.status || '') === 'committed'){
+    const quickAnalysisRequestId = String(quickAnalysisState.requestId || quickAnalysisState.verificationRequestId || '');
+    const quickAnalysisResultStatus = String(quickAnalysisState.resultStatus || quickAnalysisState.status || '');
+    const quickAnalysisNormalized = review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object'
+      ? review.normalizedAnalysis
+      : (chartAssessorContext && typeof chartAssessorContext === 'object' && Object.keys(chartAssessorContext).length
+        ? chartAssessorInputToNormalizedAnalysis(chartAssessorContext, review, {forceMatch:true})
+        : null);
+    const quickAnalysisTrace = quickAnalysisNormalized
+      ? buildChartConsistencyTrace(item, currentSimplifiedState, {
+        normalizedAnalysis:quickAnalysisNormalized,
+        derivedStates:analysisDerivedStatesFromRecord(item),
+        chartAssessorInput:chartAssessorContext || quickAnalysisNormalized
+      })
+      : null;
+    if(quickAnalysisTrace && typeof quickAnalysisTrace === 'object'){
+      candidates.push({
+        label:'committed_quick_analysis_state',
+        trace:annotateChartTraceForRender(quickAnalysisTrace, {
+          chartImageId:storedState && storedState.chartImageId || storedState && storedState.imageId || chartImageIdForReview(review) || quickAnalysisState.chartImageId || '',
+          imageId:storedState && storedState.imageId || storedState && storedState.chartImageId || chartImageIdForReview(review) || quickAnalysisState.chartImageId || '',
+          verificationRequestId:storedState && storedState.verificationRequestId || storedState && storedState.requestId || quickAnalysisRequestId || '',
+          requestId:storedState && storedState.requestId || storedState && storedState.verificationRequestId || quickAnalysisRequestId || '',
+          chartImageSource,
+          chartAssessorInput:chartAssessorContext || quickAnalysisNormalized,
+          phase:'merged',
+          source:'quickChartAnalysis',
+          event:'quick_analysis_committed'
+        }, {chartImageSource}),
+        type:'post_ai_merged',
+        source:'quickChartAnalysis',
+        event:'quick_analysis_committed',
+        renderedStatus:quickAnalysisResultStatus,
+        mergedStatus:quickAnalysisResultStatus
       });
     }
   }
