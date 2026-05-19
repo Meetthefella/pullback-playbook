@@ -2362,6 +2362,7 @@ function runAiContractAssertions(){
     'ensureReviewChartLightboxShell',
     'closeReviewChartLightbox',
     'openReviewChartLightbox',
+    'clearStartupReviewSessionState',
     'buildDeterministicChartVerification',
     'buildChartConsistencyTrace',
     'chartVerificationAiSuppression',
@@ -2736,6 +2737,24 @@ function runAiContractAssertions(){
   });
   if(noChartReviewState !== null){
     throw new Error('No-chart review records must not expose a chart verification trace.');
+  }
+  evidenceSandbox.uiState = {
+    activeReviewTicker:'MRNA',
+    activeReviewAddsToScannerUniverse:false,
+    activeReviewVerdictOverride:'watch',
+    pendingReviewRequest:{ticker:'MRNA', reviewRequestToken:'review-1'},
+    pendingReviewTicker:'MRNA',
+    queuedReviewTicker:'MRNA',
+    pendingReviewCandidate:{ticker:'MRNA', reviewRequestToken:'review-1'},
+    reviewPendingLoadError:{ticker:'MRNA', reviewRequestToken:'review-1'},
+    reviewLoadToken:17
+  };
+  evidenceSandbox.$ = () => null;
+  evidenceSandbox.activeReviewTicker = () => 'MRNA';
+  evidenceSandbox.pendingReviewTicker = () => 'MRNA';
+  evidenceSandbox.clearStartupReviewSessionState('startup_local_restore');
+  if(evidenceSandbox.uiState.activeReviewTicker !== '' || evidenceSandbox.uiState.pendingReviewRequest !== null || evidenceSandbox.uiState.pendingReviewTicker !== '' || evidenceSandbox.uiState.queuedReviewTicker !== '' || evidenceSandbox.uiState.pendingReviewCandidate !== null || evidenceSandbox.uiState.reviewPendingLoadError !== null || evidenceSandbox.uiState.reviewLoadToken !== 0 || evidenceSandbox.uiState.activeReviewVerdictOverride !== '' || evidenceSandbox.uiState.activeReviewAddsToScannerUniverse !== true){
+    throw new Error('Startup Review session clear must remove active review ownership and pending review residue without touching other saved state.');
   }
   const preAiPendingTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{

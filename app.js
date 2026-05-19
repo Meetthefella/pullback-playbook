@@ -2231,79 +2231,34 @@ function supersedePendingReviewRequest(ticker, options = {}){
   };
 }
 
-function restoreActiveReviewSelectionFromSavedReviews(context = 'startup_restore'){
-  const currentTicker = activeReviewTicker();
-  const savedReviewRecords = openCardTickerRecords();
-  if(typeof console !== 'undefined' && console.log){
-    console.log('[REVIEW_RESTORE_START]', {
+function clearStartupReviewSessionState(context = 'startup_local_restore'){
+  const previousActiveTicker = activeReviewTicker();
+  const previousPendingTicker = pendingReviewTicker();
+  const previousPendingRequest = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+    ? uiState.pendingReviewRequest
+    : null;
+  const previousLoadError = uiState.reviewPendingLoadError && typeof uiState.reviewPendingLoadError === 'object'
+    ? uiState.reviewPendingLoadError
+    : null;
+  uiState.activeReviewTicker = '';
+  uiState.activeReviewAddsToScannerUniverse = true;
+  uiState.activeReviewVerdictOverride = '';
+  uiState.pendingReviewRequest = null;
+  uiState.pendingReviewTicker = '';
+  uiState.queuedReviewTicker = '';
+  uiState.pendingReviewCandidate = null;
+  uiState.reviewPendingLoadError = null;
+  uiState.reviewLoadToken = 0;
+  if($('selectedTicker')) $('selectedTicker').value = '';
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_SESSION_CLEAR]', {
       context,
-      activeTicker:currentTicker || '',
-      savedReviewRecordsCount:savedReviewRecords.length
+      activeReviewTicker:previousActiveTicker || '',
+      pendingReviewTicker:previousPendingTicker || '',
+      queuedReviewTicker:String(previousPendingRequest && previousPendingRequest.ticker || ''),
+      pendingLoadErrorTicker:String(previousLoadError && previousLoadError.ticker || '')
     });
   }
-  if(currentTicker && savedReviewRecords.some(record => normalizeTicker(record.ticker) === normalizeTicker(currentTicker))){
-    if(typeof console !== 'undefined' && console.log){
-      console.log('[REVIEW_RESTORE_SELECTED]', {
-        context,
-        activeTicker:currentTicker || '',
-        selectedTicker:currentTicker || '',
-        reason:'already_selected'
-      });
-    }
-    return currentTicker;
-  }
-  if(!savedReviewRecords.length){
-    if(typeof console !== 'undefined' && console.log){
-      console.log('[REVIEW_RESTORE_EMPTY_STATE]', {
-        context,
-        activeTicker:'',
-        savedReviewRecordsCount:0
-      });
-    }
-    setActiveReviewTicker('');
-    return '';
-  }
-  const sortedCandidates = savedReviewRecords.slice().sort((a, b) => {
-    const aTime = Date.parse(a.review && a.review.lastReviewedAt || a.meta && a.meta.updatedAt || a.meta && a.meta.createdAt || '') || 0;
-    const bTime = Date.parse(b.review && b.review.lastReviewedAt || b.meta && b.meta.updatedAt || b.meta && b.meta.createdAt || '') || 0;
-    return bTime - aTime
-      || resultSortScoreFromRecord(b) - resultSortScoreFromRecord(a)
-      || normalizeTicker(a.ticker).localeCompare(normalizeTicker(b.ticker));
-  });
-  sortedCandidates.forEach(record => {
-    if(typeof console !== 'undefined' && console.log){
-      console.log('[REVIEW_RESTORE_CANDIDATE]', {
-        context,
-        ticker:record.ticker || '',
-        lastReviewedAt:String(record.review && record.review.lastReviewedAt || ''),
-        cardOpen:record.review && record.review.cardOpen === true,
-        resultSortScore:resultSortScoreFromRecord(record)
-      });
-    }
-  });
-  const selected = sortedCandidates[0] || null;
-  if(selected && selected.ticker){
-    setActiveReviewTicker(selected.ticker);
-    if(typeof console !== 'undefined' && console.log){
-      console.log('[REVIEW_RESTORE_SELECTED]', {
-        context,
-        activeTicker:selected.ticker,
-        selectedTicker:selected.ticker,
-        reason:'most_recent_saved_review'
-      });
-    }
-    return selected.ticker;
-  }
-  if(typeof console !== 'undefined' && console.log){
-    console.log('[REVIEW_RESTORE_EMPTY_STATE]', {
-      context,
-      activeTicker:'',
-      savedReviewRecordsCount:savedReviewRecords.length,
-      reason:'no_valid_saved_review_candidate'
-    });
-  }
-  setActiveReviewTicker('');
-  return '';
 }
 
 function currentMaxLoss(){
@@ -5551,7 +5506,7 @@ function loadState(){
   renderSavedScannerUniverseSnapshot();
   clearOcrReview();
   syncOcrReviewVisibility();
-  restoreActiveReviewSelectionFromSavedReviews('startup_local_restore');
+  clearStartupReviewSessionState('startup_local_restore');
   renderActiveWorkspaceSurface({reason:'startup_local_restore'});
   uiState.watchlistLiveRefreshPending = {};
   uiState.watchlistManualRefreshInProgress = {};
