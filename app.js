@@ -26933,6 +26933,10 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
   const quickAnalysisState = review.quickChartAnalysis && typeof review.quickChartAnalysis === 'object'
     ? review.quickChartAnalysis
     : null;
+  const currentLifecycleState = review.chartVerificationLifecycle && typeof review.chartVerificationLifecycle === 'object'
+    ? review.chartVerificationLifecycle
+    : null;
+  const currentLifecyclePhase = String(currentLifecycleState && currentLifecycleState.phase || '').trim();
   const storedState = storedChartVerificationState && typeof storedChartVerificationState === 'object' ? storedChartVerificationState : null;
   const storedTrace = storedState && storedState.trace && typeof storedState.trace === 'object' ? storedState.trace : null;
   const storedPhase = String(
@@ -27030,6 +27034,42 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
         event:'quick_analysis_committed',
         renderedStatus:quickAnalysisResultStatus,
         mergedStatus:quickAnalysisResultStatus
+      });
+    }
+  }
+  if(currentLifecyclePhase === 'merged'){
+    const lifecycleNormalized = review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object'
+      ? review.normalizedAnalysis
+      : (chartAssessorContext && typeof chartAssessorContext === 'object' && Object.keys(chartAssessorContext).length
+        ? chartAssessorInputToNormalizedAnalysis(chartAssessorContext, review, {forceMatch:true})
+        : null);
+    const lifecycleTrace = lifecycleNormalized
+      ? buildChartConsistencyTrace(item, currentSimplifiedState, {
+        normalizedAnalysis:lifecycleNormalized,
+        derivedStates:analysisDerivedStatesFromRecord(item),
+        chartAssessorInput:chartAssessorContext || lifecycleNormalized
+      })
+      : null;
+    if(lifecycleTrace && typeof lifecycleTrace === 'object'){
+      candidates.push({
+        label:'lifecycle_merged_trace',
+        trace:annotateChartTraceForRender(lifecycleTrace, {
+          chartImageId:currentLifecycleState.chartImageId || currentLifecycleState.imageId || chartImageIdForReview(review) || '',
+          imageId:currentLifecycleState.imageId || currentLifecycleState.chartImageId || chartImageIdForReview(review) || '',
+          verificationRequestId:currentLifecycleState.requestId || currentLifecycleState.verificationRequestId || quickAnalysisState.requestId || '',
+          requestId:currentLifecycleState.requestId || currentLifecycleState.verificationRequestId || quickAnalysisState.requestId || '',
+          chartImageSource,
+          chartAssessorInput:chartAssessorContext || lifecycleNormalized,
+          phase:'merged',
+          source:'chartVerificationLifecycle',
+          event:'merged'
+        }, {chartImageSource}),
+        type:'post_ai_merged',
+        source:'chartVerificationLifecycle',
+        event:'merged',
+        renderedStatus:String(lifecycleTrace.status || ''),
+        mergedStatus:String(lifecycleTrace.status || ''),
+        hasMergedAnalysis:true
       });
     }
   }
