@@ -26963,12 +26963,27 @@ function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}, options
 function selectReviewChartTraceForRender(record = {}, storedChartVerificationState = null, derivedTrace = null, quickChartAnalysisStatus = '', chartAssessorContext = null, simplifiedState = {}){
   const item = record && typeof record === 'object' ? record : {};
   const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const reviewObjectIdentityId = value => {
+    if(!value || typeof value !== 'object' || typeof WeakMap !== 'function') return '';
+    if(!selectReviewChartTraceForRender._reviewObjectIdentityRegistry){
+      selectReviewChartTraceForRender._reviewObjectIdentityRegistry = new WeakMap();
+      selectReviewChartTraceForRender._reviewObjectIdentityCounter = 0;
+    }
+    const registry = selectReviewChartTraceForRender._reviewObjectIdentityRegistry;
+    if(!registry) return '';
+    if(!registry.has(value)){
+      selectReviewChartTraceForRender._reviewObjectIdentityCounter += 1;
+      registry.set(value, `review_obj_${selectReviewChartTraceForRender._reviewObjectIdentityCounter}`);
+    }
+    return registry.get(value) || '';
+  };
   const chartImageSource = buildChartImageSourceTrace(review);
   const currentSimplifiedState = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   if(typeof console !== 'undefined' && console.info){
     console.info('[CHART_TRACE_STORE_SNAPSHOT]', {
       ticker:String(item.ticker || '').trim(),
       hasReview:!!item.review,
+      reviewObjectId:reviewObjectIdentityId(review),
       committedTrace:review.chartVerificationCommittedTrace || null,
       committedTraceStatus:review.chartVerificationCommittedTrace && review.chartVerificationCommittedTrace.status || '',
       committedTraceMergedStatus:review.chartVerificationCommittedTrace && review.chartVerificationCommittedTrace.mergedStatus || '',
@@ -28561,10 +28576,43 @@ function renderReviewWorkspace(options = {}){
     && liveRecord.review.chartVerificationCommittedTrace && typeof liveRecord.review.chartVerificationCommittedTrace === 'object'
     ? liveRecord.review.chartVerificationCommittedTrace
     : null;
+  const reviewObjectIdentityId = value => {
+    if(!value || typeof value !== 'object' || typeof WeakMap !== 'function') return '';
+    if(!renderReviewWorkspace._reviewObjectIdentityRegistry){
+      renderReviewWorkspace._reviewObjectIdentityRegistry = new WeakMap();
+      renderReviewWorkspace._reviewObjectIdentityCounter = 0;
+    }
+    const registry = renderReviewWorkspace._reviewObjectIdentityRegistry;
+    if(!registry.has(value)){
+      renderReviewWorkspace._reviewObjectIdentityCounter += 1;
+      registry.set(value, `review_obj_${renderReviewWorkspace._reviewObjectIdentityCounter}`);
+    }
+    return registry.get(value) || '';
+  };
+  if(typeof console !== 'undefined' && console.info && debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
+    console.info('[REVIEW_RENDER_REVIEW_OBJECT_SNAPSHOT]', {
+      ticker:record.ticker,
+      liveReviewObjectId:reviewObjectIdentityId(liveRecord && liveRecord.review),
+      renderReviewObjectId:reviewObjectIdentityId(record.review),
+      liveCommittedTrace:!!(liveRecord && liveRecord.review && liveRecord.review.chartVerificationCommittedTrace),
+      renderCommittedTraceBefore:!!(record.review && record.review.chartVerificationCommittedTrace),
+      liveTraceCommittedStatus:String(liveCommittedChartVerificationTrace && liveCommittedChartVerificationTrace.trace && liveCommittedChartVerificationTrace.trace.status || liveCommittedChartVerificationTrace && liveCommittedChartVerificationTrace.status || ''),
+      renderTraceCommittedStatusBefore:String(record.review && record.review.chartVerificationCommittedTrace && (record.review.chartVerificationCommittedTrace.trace && record.review.chartVerificationCommittedTrace.trace.status || record.review.chartVerificationCommittedTrace.status || ''))
+    });
+  }
   if(liveCommittedChartVerificationTrace){
     const committedRenderTrace = cloneData(liveCommittedChartVerificationTrace, null);
     record.review.chartVerificationCommittedTrace = committedRenderTrace;
     record.review.chartVerificationTrace = committedRenderTrace;
+    if(typeof console !== 'undefined' && console.info && debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
+      console.info('[REVIEW_RENDER_REVIEW_OBJECT_SYNC]', {
+        ticker:record.ticker,
+        liveReviewObjectId:reviewObjectIdentityId(liveRecord && liveRecord.review),
+        renderReviewObjectId:reviewObjectIdentityId(record.review),
+        committedTraceStatus:String(committedRenderTrace && committedRenderTrace.trace && committedRenderTrace.trace.status || committedRenderTrace && committedRenderTrace.status || ''),
+        committedTraceMergedStatus:String(committedRenderTrace && (committedRenderTrace.mergedStatus || committedRenderTrace.trace && committedRenderTrace.trace.mergedStatus || ''))
+      });
+    }
   }
   const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {
     renderPass:reviewRenderPass,

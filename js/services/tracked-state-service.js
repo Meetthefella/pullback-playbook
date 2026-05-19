@@ -372,7 +372,39 @@
           const incomingUpdatedAt = String(incoming.meta && incoming.meta.updatedAt || '');
           const localUpdatedAt = String(local && local.meta && local.meta.updatedAt || '');
           if(!local || !localUpdatedAt || (incomingUpdatedAt && incomingUpdatedAt >= localUpdatedAt)){
-            deps.state.tickerRecords[symbol] = deps.normalizeTickerRecord({...incoming, ticker:symbol});
+            const localReview = local && local.review && typeof local.review === 'object' ? local.review : null;
+            const incomingReview = incoming.review && typeof incoming.review === 'object' ? incoming.review : {};
+            const preservedCommittedTrace = incomingReview.chartVerificationCommittedTrace && typeof incomingReview.chartVerificationCommittedTrace === 'object'
+              ? incomingReview.chartVerificationCommittedTrace
+              : (localReview && localReview.chartVerificationCommittedTrace && typeof localReview.chartVerificationCommittedTrace === 'object'
+                ? localReview.chartVerificationCommittedTrace
+                : null);
+            const preservedChartTrace = incomingReview.chartVerificationTrace && typeof incomingReview.chartVerificationTrace === 'object'
+              ? incomingReview.chartVerificationTrace
+              : (preservedCommittedTrace
+                || (localReview && localReview.chartVerificationTrace && typeof localReview.chartVerificationTrace === 'object'
+                  ? localReview.chartVerificationTrace
+                  : null));
+            const mergedIncoming = {
+              ...incoming,
+              ticker:symbol,
+              review:{
+                ...incomingReview,
+                ...(preservedCommittedTrace ? {chartVerificationCommittedTrace:preservedCommittedTrace} : {}),
+                ...(preservedChartTrace ? {chartVerificationTrace:preservedChartTrace} : {})
+              }
+            };
+            if(typeof console !== 'undefined' && console.info && deps.debugFlagEnabled && deps.debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
+              console.info('[CHART_TRACE_HYDRATION_MERGE]', {
+                ticker:symbol,
+                requestId:String(mergedIncoming.review && mergedIncoming.review.chartVerificationCommittedTrace && (mergedIncoming.review.chartVerificationCommittedTrace.requestId || mergedIncoming.review.chartVerificationCommittedTrace.verificationRequestId) || ''),
+                imageId:String(mergedIncoming.review && mergedIncoming.review.chartVerificationCommittedTrace && (mergedIncoming.review.chartVerificationCommittedTrace.imageId || mergedIncoming.review.chartVerificationCommittedTrace.chartImageId) || ''),
+                writtenStatus:String(mergedIncoming.review && mergedIncoming.review.chartVerificationCommittedTrace && (mergedIncoming.review.chartVerificationCommittedTrace.status || mergedIncoming.review.chartVerificationCommittedTrace.mergedStatus || '') || ''),
+                writtenStoreName:'tracked_state_pull_merge',
+                selectorCanReadSameStore:!!(mergedIncoming.review && mergedIncoming.review.chartVerificationCommittedTrace)
+              });
+            }
+            deps.state.tickerRecords[symbol] = deps.normalizeTickerRecord(mergedIncoming);
             changed = true;
           }
         });
