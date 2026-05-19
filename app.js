@@ -3928,9 +3928,14 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
 
 function queueReviewQuickChartAnalysis(record, options = {}){
   const item = normalizeTickerRecord(record);
-  const review = item.review && typeof item.review === 'object' ? item.review : null;
-  if(!review) return null;
-  const state = reviewQuickChartAnalysisState(item, options);
+  const symbol = normalizeTicker(item.ticker || '');
+  const liveRecord = symbol ? (getTickerRecord(symbol) || upsertTickerRecord(symbol)) : null;
+  const liveItem = liveRecord ? normalizeTickerRecord(liveRecord) : item;
+  const review = liveRecord && liveRecord.review && typeof liveRecord.review === 'object'
+    ? liveRecord.review
+    : null;
+  if(!review) return reviewQuickChartAnalysisState(liveItem, options);
+  const state = reviewQuickChartAnalysisState(liveRecord || liveItem, options);
   const triggerSource = String(options.source || 'review_render');
   const triggerReason = String(options.triggerReason || state.currentVerificationStatus || 'chart_verification_pending');
   if(!state.hasChart){
@@ -3953,8 +3958,8 @@ function queueReviewQuickChartAnalysis(record, options = {}){
   review.quickChartAnalysis = {
     ...(state.stored && state.matchesCurrentKey ? state.stored : {}),
     key:state.key,
-    ticker:item.ticker,
-    reviewTicker:item.ticker,
+    ticker:liveItem.ticker || item.ticker,
+    reviewTicker:liveItem.ticker || item.ticker,
     chartImageId:state.imageId,
     chartImageSource:state.sourceTrace,
     requestId:String(state.stored && state.stored.requestId || ''),
@@ -3986,8 +3991,8 @@ function queueReviewQuickChartAnalysis(record, options = {}){
       pendingReviewTicker:pendingReviewTicker() || ''
     });
   }
-  queueAutoAnalysisForTicker(item.ticker);
-  return reviewQuickChartAnalysisState(item, options);
+  queueAutoAnalysisForTicker(liveItem.ticker || item.ticker);
+  return reviewQuickChartAnalysisState(liveRecord || liveItem, options);
 }
 
 function confirmReviewChartMatchesCurrentTicker(ticker){
