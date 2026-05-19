@@ -4558,6 +4558,14 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   };
   record.review.aiAnalysisRaw = String(card.lastResponse || record.review.aiAnalysisRaw || '');
   record.review.normalizedAnalysis = cloneData(card.lastAnalysis || record.review.normalizedAnalysis, null);
+  record.review.chartVerificationTrace = cloneData(card.chartVerificationTrace || record.review.chartVerificationTrace, null);
+  record.review.chartVerificationCommittedTrace = cloneData(
+    card.chartVerificationCommittedTrace
+    || record.review.chartVerificationCommittedTrace
+    || card.chartVerificationTrace
+    || null,
+    null
+  );
   record.review.lastReviewedAt = String(card.updatedAt || record.review.lastReviewedAt || '');
   record.review.lastPrompt = String(card.lastPrompt || record.review.lastPrompt || '');
   record.review.lastError = String(card.lastError || record.review.lastError || '');
@@ -4686,6 +4694,8 @@ function tickerRecordToLegacyCard(record){
     chartImageOriginal:cloneData(item.review.chartImageOriginal, null),
     chartImagePreview:cloneData(item.review.chartImagePreview, null),
     chartImageVerificationSource:cloneData(item.review.chartImageVerificationSource, null),
+    chartVerificationTrace:cloneData(item.review.chartVerificationTrace, null),
+    chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
     lastPrompt:item.review.lastPrompt || '',
     lastResponse:item.review.aiAnalysisRaw || '',
     lastError:item.review.lastError || '',
