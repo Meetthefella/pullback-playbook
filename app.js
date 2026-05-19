@@ -26870,6 +26870,24 @@ function annotateChartTraceForRender(trace = {}, state = {}, extras = {}){
   };
 }
 
+function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}){
+  const safe = input && typeof input === 'object' ? input : {};
+  return {
+    visible_ticker:String(safe.extractedTicker || '').trim(),
+    visible_timeframe:String(safe.extractedTimeframe || '').trim(),
+    visible_latest_price:chartVerificationNumberOrNull(safe.extractedPrice),
+    visible_ma20:chartVerificationNumberOrNull(safe.extractedMa20),
+    visible_ma50:chartVerificationNumberOrNull(safe.extractedMa50),
+    visible_ma200:chartVerificationNumberOrNull(safe.extractedMa200),
+    chart_match_status:String(safe.chartMatchStatus || (safe.aiSupportedMatch === true ? 'match' : '')).trim(),
+    chart_match_warning:String(safe.chartMatchWarning || '').trim(),
+    uncertainty_notes:chartConsistencyArray(safe.uncertaintyNotes),
+    __chartImageId:String(safe.chartImageId || chartImageIdForReview(review) || ''),
+    __analysisRequestId:String(safe.verificationRequestId || safe.requestId || ''),
+    __chartImageSource:safe.chartImageSource || buildChartImageSourceTrace(review)
+  };
+}
+
 function selectReviewChartTraceForRender(record = {}, storedChartVerificationState = null, derivedTrace = null, quickChartAnalysisStatus = '', chartAssessorContext = null, simplifiedState = {}){
   const item = record && typeof record === 'object' ? record : {};
   const review = item.review && typeof item.review === 'object' ? item.review : {};
@@ -26910,8 +26928,9 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
     });
   }
   if(chartAssessorContext && typeof chartAssessorContext === 'object' && Object.keys(chartAssessorContext).length){
+    const assessorNormalizedAnalysis = chartAssessorInputToNormalizedAnalysis(chartAssessorContext, review);
     const assessorTrace = buildChartConsistencyTrace(item, currentSimplifiedState, {
-      normalizedAnalysis:chartAssessorContext,
+      normalizedAnalysis:assessorNormalizedAnalysis,
       derivedStates:analysisDerivedStatesFromRecord(item),
       chartAssessorInput:chartAssessorContext
     });
@@ -29025,6 +29044,13 @@ function renderReviewWorkspace(options = {}){
     const storedChartConsistencyTrace = storedChartVerificationState && storedChartVerificationState.trace
       ? storedChartVerificationState.trace
       : null;
+    const committedAssessorTrace = quickChartAnalysisStatus === 'committed' && storedChartAssessorContext && typeof storedChartAssessorContext === 'object' && Object.keys(storedChartAssessorContext).length
+      ? buildChartConsistencyTrace(record, simplifiedState, {
+        normalizedAnalysis:chartAssessorInputToNormalizedAnalysis(storedChartAssessorContext, record.review || {}),
+        derivedStates,
+        chartAssessorInput:storedChartAssessorContext
+      })
+      : null;
     const shouldPreferMergedChartTrace = quickChartAnalysisStatus === 'committed'
       && storedChartConsistencyTrace
       && ['pending_chart_native_verification', 'partial_context_unverified_chart', 'uncertain_missing_context', 'indicator_missing', 'indicator_incomplete'].includes(String(storedChartConsistencyTrace.status || ''));
@@ -29048,6 +29074,9 @@ function renderReviewWorkspace(options = {}){
       simplifiedState
     );
     chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTrace;
+    if(committedAssessorTrace && !['pending_chart_native_verification', 'uncertain_missing_context', 'partial_context_unverified_chart', 'partial_context_timeframe_uncertain', 'indicator_missing', 'indicator_incomplete', 'uncertain_match'].includes(String(committedAssessorTrace.status || ''))){
+      chartConsistencyTraceForDisplay = committedAssessorTrace;
+    }
     if(quickChartAnalysisStatus === 'failed' && chartConsistencyTraceForDisplay && ['pending_chart_native_verification', 'uncertain_missing_context'].includes(String(chartConsistencyTraceForDisplay.status || ''))){
       chartConsistencyTraceForDisplay = {
         ...chartConsistencyTraceForDisplay,

@@ -2352,6 +2352,7 @@ function runAiContractAssertions(){
     'buildChartAssessorInput',
     'chartVerificationTracePriority',
     'annotateChartTraceForRender',
+    'chartAssessorInputToNormalizedAnalysis',
     'selectReviewChartTraceForRender',
     'chartImageDimensionsFromRef',
     'chartImageDimensionsLabel',
