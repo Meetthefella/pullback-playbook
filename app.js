@@ -22371,6 +22371,10 @@ async function analyseSetup(ticker){
         : null;
       const currentChartVerificationLifecycleRequestId = String(currentChartVerificationLifecycle && currentChartVerificationLifecycle.requestId || '');
       const currentChartVerificationLifecyclePhase = String(currentChartVerificationLifecycle && currentChartVerificationLifecycle.phase || '');
+      const canonicalReviewRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
+      const canonicalReview = canonicalReviewRecord && canonicalReviewRecord.review && typeof canonicalReviewRecord.review === 'object'
+        ? canonicalReviewRecord.review
+        : null;
       const shouldCommitMergedTrace = !!(
         requestChartImageId &&
         currentChartImageId &&
@@ -22379,7 +22383,7 @@ async function analyseSetup(ticker){
         uiState.analysisActiveRequest &&
         uiState.analysisActiveRequest.id === analysisRequestId
       );
-      if(shouldCommitMergedTrace){
+      if(shouldCommitMergedTrace && canonicalReview){
         const mergedChartImageSource = buildChartImageSourceTrace(record.review || {});
         const committedMergedChartTrace = cloneData({
           ...mergedChartTrace,
@@ -22411,6 +22415,18 @@ async function analyseSetup(ticker){
           source:'quickChartAnalysis',
           event:'quick_analysis_committed'
         }, null);
+        canonicalReview.chartVerificationCommittedTrace = cloneData(committedChartVerificationState, null);
+        canonicalReview.chartVerificationTrace = cloneData(committedChartVerificationState, null);
+        canonicalReview.chartVerificationLifecycle = {
+          phase:'merged',
+          ticker:record.ticker,
+          reviewTicker:record.ticker,
+          chartImageId:requestChartImageId,
+          imageId:requestChartImageId,
+          requestId:analysisRequestId,
+          chartImageSource:mergedChartImageSource,
+          updatedAt:new Date().toISOString()
+        };
         record.review.chartVerificationCommittedTrace = cloneData(committedChartVerificationState, null);
         record.review.chartVerificationTrace = cloneData(committedChartVerificationState, null);
         record.review.chartVerificationLifecycle = {
@@ -22423,6 +22439,14 @@ async function analyseSetup(ticker){
           chartImageSource:mergedChartImageSource,
           updatedAt:new Date().toISOString()
         };
+        const canonicalReadbackRecord = getTickerRecord(ticker) || canonicalReviewRecord;
+        const canonicalReadbackReview = canonicalReadbackRecord && canonicalReadbackRecord.review && typeof canonicalReadbackRecord.review === 'object'
+          ? canonicalReadbackRecord.review
+          : null;
+        const canonicalReadbackCommittedTrace = canonicalReadbackReview && canonicalReadbackReview.chartVerificationCommittedTrace
+          && typeof canonicalReadbackReview.chartVerificationCommittedTrace === 'object'
+          ? canonicalReadbackReview.chartVerificationCommittedTrace
+          : null;
         if(typeof console !== 'undefined' && console.info){
           console.info('[CHART_TRACE_WRITEBACK]', {
             ticker:record.ticker,
@@ -22430,7 +22454,15 @@ async function analyseSetup(ticker){
             imageId:requestChartImageId,
             writtenStatus:String(committedMergedChartTrace && committedMergedChartTrace.status || ''),
             writtenStoreName:'record.review.chartVerificationCommittedTrace',
-            selectorCanReadSameStore:!!(record.review && record.review.chartVerificationCommittedTrace && record.review.chartVerificationCommittedTrace.trace && record.review.chartVerificationCommittedTrace.trace.status === 'consistent')
+            selectorCanReadSameStore:!!(canonicalReadbackCommittedTrace && (canonicalReadbackCommittedTrace.trace && canonicalReadbackCommittedTrace.trace.status || canonicalReadbackCommittedTrace.status || ''))
+          });
+          console.info('[CHART_TRACE_CANONICAL_READBACK]', {
+            ticker:record.ticker,
+            requestId:analysisRequestId,
+            imageId:requestChartImageId,
+            committedTraceStatus:String(canonicalReadbackCommittedTrace && (canonicalReadbackCommittedTrace.trace && canonicalReadbackCommittedTrace.trace.status || canonicalReadbackCommittedTrace.status || '') || ''),
+            sameObjectAsRenderSource:canonicalReadbackReview === canonicalReview,
+            activeReviewTicker:activeReviewTicker() || ''
           });
         }
       }
