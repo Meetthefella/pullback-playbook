@@ -26965,6 +26965,17 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
   const review = item.review && typeof item.review === 'object' ? item.review : {};
   const chartImageSource = buildChartImageSourceTrace(review);
   const currentSimplifiedState = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_TRACE_STORE_SNAPSHOT]', {
+      ticker:String(item.ticker || '').trim(),
+      hasReview:!!item.review,
+      committedTrace:review.chartVerificationCommittedTrace || null,
+      committedTraceStatus:review.chartVerificationCommittedTrace && review.chartVerificationCommittedTrace.status || '',
+      committedTraceMergedStatus:review.chartVerificationCommittedTrace && review.chartVerificationCommittedTrace.mergedStatus || '',
+      committedTraceImageId:review.chartVerificationCommittedTrace && (review.chartVerificationCommittedTrace.imageId || review.chartVerificationCommittedTrace.chartImageId) || '',
+      committedTraceRequestId:review.chartVerificationCommittedTrace && (review.chartVerificationCommittedTrace.requestId || review.chartVerificationCommittedTrace.verificationRequestId) || ''
+    });
+  }
   const candidates = [];
   const quickAnalysisState = review.quickChartAnalysis && typeof review.quickChartAnalysis === 'object'
     ? review.quickChartAnalysis
@@ -28546,6 +28557,13 @@ function renderReviewWorkspace(options = {}){
   }
   if(canonicalPlanSynced) commitTickerState();
   const record = normalizeTickerRecord(refreshedRecord);
+  const liveCommittedChartVerificationTrace = liveRecord && liveRecord.review && typeof liveRecord.review === 'object'
+    && liveRecord.review.chartVerificationCommittedTrace && typeof liveRecord.review.chartVerificationCommittedTrace === 'object'
+    ? liveRecord.review.chartVerificationCommittedTrace
+    : null;
+  if(liveCommittedChartVerificationTrace){
+    record.review.chartVerificationCommittedTrace = cloneData(liveCommittedChartVerificationTrace, null);
+  }
   const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {
     renderPass:reviewRenderPass,
     source:reviewRenderSource,
