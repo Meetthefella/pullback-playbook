@@ -26870,8 +26870,10 @@ function annotateChartTraceForRender(trace = {}, state = {}, extras = {}){
   };
 }
 
-function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}){
+function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}, options = {}){
   const safe = input && typeof input === 'object' ? input : {};
+  const forceMatch = options && typeof options === 'object' && options.forceMatch === true;
+  const chartMatchStatus = String(safe.chartMatchStatus || (safe.aiSupportedMatch === true ? 'match' : '')).trim().toLowerCase();
   return {
     visible_ticker:String(safe.extractedTicker || '').trim(),
     visible_timeframe:String(safe.extractedTimeframe || '').trim(),
@@ -26879,7 +26881,7 @@ function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}){
     visible_ma20:chartVerificationNumberOrNull(safe.extractedMa20),
     visible_ma50:chartVerificationNumberOrNull(safe.extractedMa50),
     visible_ma200:chartVerificationNumberOrNull(safe.extractedMa200),
-    chart_match_status:String(safe.chartMatchStatus || (safe.aiSupportedMatch === true ? 'match' : '')).trim(),
+    chart_match_status:chartMatchStatus || (forceMatch ? 'match' : ''),
     chart_match_warning:String(safe.chartMatchWarning || '').trim(),
     uncertainty_notes:chartConsistencyArray(safe.uncertaintyNotes),
     __chartImageId:String(safe.chartImageId || chartImageIdForReview(review) || ''),
@@ -26928,7 +26930,7 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
     });
   }
   if(chartAssessorContext && typeof chartAssessorContext === 'object' && Object.keys(chartAssessorContext).length){
-    const assessorNormalizedAnalysis = chartAssessorInputToNormalizedAnalysis(chartAssessorContext, review);
+    const assessorNormalizedAnalysis = chartAssessorInputToNormalizedAnalysis(chartAssessorContext, review, {forceMatch:quickChartAnalysisStatus === 'committed'});
     const assessorTrace = buildChartConsistencyTrace(item, currentSimplifiedState, {
       normalizedAnalysis:assessorNormalizedAnalysis,
       derivedStates:analysisDerivedStatesFromRecord(item),
@@ -29046,7 +29048,7 @@ function renderReviewWorkspace(options = {}){
       : null;
     const committedAssessorTrace = quickChartAnalysisStatus === 'committed' && storedChartAssessorContext && typeof storedChartAssessorContext === 'object' && Object.keys(storedChartAssessorContext).length
       ? buildChartConsistencyTrace(record, simplifiedState, {
-        normalizedAnalysis:chartAssessorInputToNormalizedAnalysis(storedChartAssessorContext, record.review || {}),
+        normalizedAnalysis:chartAssessorInputToNormalizedAnalysis(storedChartAssessorContext, record.review || {}, {forceMatch:true}),
         derivedStates,
         chartAssessorInput:storedChartAssessorContext
       })
