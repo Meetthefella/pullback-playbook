@@ -4049,10 +4049,15 @@ function chartVerificationUiDecision(trace, ticker = ''){
       detail:'This confirmation only applies to the current image and ticker.'
     };
   }
-  const verifiedStatuses = new Set(['verified_match', 'likely_match', 'ai_supported_match', 'consistent']);
+  const explicitChartRegionProvenance = !!(
+    safe.chartRegionProvenance === true
+    || (safe.debug && safe.debug.fastPass && safe.debug.fastPass.trustedChartRegionConfirmation === true)
+    || (safe.debug && safe.debug.fastPass && safe.debug.fastPass.chartNativeEvidencePresent === true)
+  );
+  const verifiedStatuses = new Set(['verified_match', 'likely_match', 'consistent']);
   const mismatchStatuses = new Set(['ticker_mismatch', 'timeframe_mismatch', 'strong_mismatch', 'possible_mismatch', 'stale_state_detected']);
   const untrustedStatuses = new Set(['untrusted_context_mirror', 'chart_verification_untrusted']);
-  if(verifiedStatuses.has(status)){
+  if(verifiedStatuses.has(status) || (status === 'ai_supported_match' && explicitChartRegionProvenance)){
     return {
       key:'verified_match',
       title:baseMatchTitle,
@@ -4074,8 +4079,8 @@ function chartVerificationUiDecision(trace, ticker = ''){
     return {
       key:'uncertain_match',
       title:'Chart verification incomplete',
-      summary:'The uploaded chart may be mirroring the review context without independent image evidence. Confirm manually before treating it as verified.',
-      detail:'Independent chart evidence is required before this upload can be accepted.'
+      summary:'Could not independently verify this chart. Please inspect the image or upload a clearer chart.',
+      detail:'Independent chart-region evidence is required before this upload can be accepted.'
     };
   }
   return {
@@ -4105,7 +4110,16 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
 }
 
 function chartVerificationIsVerifiedStatus(status = ''){
-  return ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'manually_verified', 'user_confirmed_match'].includes(String(status || ''));
+  return ['verified_match', 'likely_match', 'consistent', 'manually_verified', 'user_confirmed_match'].includes(String(status || ''));
+}
+
+function chartVerificationHasExplicitRegionProvenance(trace = {}){
+  const safe = trace && typeof trace === 'object' ? trace : {};
+  return !!(
+    safe.chartRegionProvenance === true
+    || (safe.debug && safe.debug.fastPass && safe.debug.fastPass.trustedChartRegionConfirmation === true)
+    || (safe.debug && safe.debug.fastPass && safe.debug.fastPass.chartNativeEvidencePresent === true)
+  );
 }
 
 function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false, selectedTrace = null){
@@ -4116,8 +4130,11 @@ function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisSta
   const normalizedQuickStatus = String(quickChartAnalysisStatus || '');
   const selectedType = String(selectedTrace && (selectedTrace.type || selectedTrace.sourceType || '') || '');
   const selectedPhase = String(selectedTrace && selectedTrace.phase || '');
+  const explicitChartRegionProvenance = chartVerificationHasExplicitRegionProvenance(trace);
   const hasVerifiedTrace = chartVerificationIsVerifiedStatus(key)
     || chartVerificationIsVerifiedStatus(status)
+    || (String(key || '') === 'ai_supported_match' && explicitChartRegionProvenance)
+    || (String(status || '') === 'ai_supported_match' && explicitChartRegionProvenance)
     || selectedPhase === 'merged'
     || selectedType === 'post_ai_merged';
   const shouldShowPending = hasChartScreenshot
@@ -22777,8 +22794,15 @@ function renderAnalysisPanel(card){
     }
     const chartReadDisplay = finalDisplayedAnalysisChartRead(card, analysis);
     const deterministicVerification = buildDeterministicChartVerification(card, analysis);
-    const allowLegacyAiChartMatch = !deterministicVerification.available
-      || !chartVerificationIsVerifiedStatus(deterministicVerification.status);
+    const deterministicIndependentlyVerified = deterministicVerification.available
+      && (
+        chartVerificationIsVerifiedStatus(deterministicVerification.status)
+        || (String(deterministicVerification.status || '') === 'ai_supported_match' && chartVerificationHasExplicitRegionProvenance(deterministicVerification))
+      )
+      && deterministicVerification.debug
+      && deterministicVerification.debug.fastPass
+      && deterministicVerification.debug.fastPass.independentImageEvidence === true;
+    const allowLegacyAiChartMatch = !deterministicIndependentlyVerified;
     // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
     const chartMismatch = allowLegacyAiChartMatch && analysis.chart_match_status === 'mismatch';
     const chartUnclear = allowLegacyAiChartMatch && analysis.chart_match_status === 'unclear';
@@ -22918,8 +22942,15 @@ function renderAnalysisPanelFromRecord(record, options = {}){
     const chartReadDisplay = finalDisplayedAnalysisChartRead(item, analysis);
     const advisory = analysisAdvisoryContextForRecord(item, analysis);
     const deterministicVerification = buildDeterministicChartVerification(item, analysis);
-    const allowLegacyAiChartMatch = !deterministicVerification.available
-      || !chartVerificationIsVerifiedStatus(deterministicVerification.status);
+    const deterministicIndependentlyVerified = deterministicVerification.available
+      && (
+        chartVerificationIsVerifiedStatus(deterministicVerification.status)
+        || (String(deterministicVerification.status || '') === 'ai_supported_match' && chartVerificationHasExplicitRegionProvenance(deterministicVerification))
+      )
+      && deterministicVerification.debug
+      && deterministicVerification.debug.fastPass
+      && deterministicVerification.debug.fastPass.independentImageEvidence === true;
+    const allowLegacyAiChartMatch = !deterministicIndependentlyVerified;
     // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
     const chartMismatch = allowLegacyAiChartMatch && analysis.chart_match_status === 'mismatch';
     const chartUnclear = allowLegacyAiChartMatch && analysis.chart_match_status === 'unclear';
@@ -26816,8 +26847,14 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
   if(safeAnalysis.ma20_visible === true || safeAnalysis.ma50_visible === true || safeAnalysis.ma200_visible === true || safeAnalysis.ma200_line_detected === true) chartNativeEvidenceSignals.push('indicator_confirmation');
   if(visibleMaValuesCount > 0 || maLineEvidenceCount > 0) chartNativeEvidenceSignals.push('indicator_value_extraction');
   const evidenceSignals = [...uiHeaderEvidenceSignals, ...chartNativeEvidenceSignals];
-  const independentImageEvidence = uiHeaderEvidenceSignals.length >= 2;
   const chartNativeEvidencePresent = chartNativeEvidenceSignals.length > 0;
+  const trustedChartRegionConfirmation = !!(
+    String(safeAnalysis.chart_region_confirmation_source || '').trim()
+    && /\b(image|ocr|vision|chart|screen|screenshot|region)\b/i.test(String(safeAnalysis.chart_region_confirmation_source || ''))
+    && String(safeAnalysis.chart_match_status || '').trim().toLowerCase() === 'match'
+    && String(safeAnalysis.chart_region_confirmation || '').trim()
+  );
+  const independentImageEvidence = chartNativeEvidencePresent || trustedChartRegionConfirmation;
   const contextMirroringSuspected = !!(
     visibleTicker
     && expectedTicker
@@ -26825,7 +26862,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     && visiblePrice !== null
     && trustedPrice !== null
     && Math.abs(visiblePrice - trustedPrice) < 0.0001
-    && !independentImageEvidence
+    && !chartNativeEvidencePresent
   );
   const currentImageId = chartImageSource && chartImageSource.imageId ? String(chartImageSource.imageId) : chartImageIdForReview(safeRecord.review || {});
   const analysisImageId = safeAnalysis.__chartImageId ? String(safeAnalysis.__chartImageId) : '';
@@ -26842,6 +26879,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
   let staleStateRejected = false;
   let clearMatchRejectedReason = '';
   const fastPassEvidence = [];
+  let finalMismatchDecision = 'none';
 
   if(currentImageId && analysisImageId && currentImageId !== analysisImageId){
     fastStatus = 'stale_state_detected';
@@ -26861,6 +26899,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     if(currentImageId){
       fastPassEvidence.push(`Mismatch detected from chart image ${currentImageId}.`);
     }
+    finalMismatchDecision = 'hard_mismatch';
     earlyExit = true;
   }else if(visibleTimeframe && !isDailyTimeframe(visibleTimeframe)){
     if((visibleTicker && expectedTicker && visibleTicker === expectedTicker) && visiblePrice !== null && independentImageEvidence){
@@ -26879,6 +26918,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
       if(currentImageId){
         fastPassEvidence.push(`Mismatch detected from chart image ${currentImageId}.`);
       }
+      finalMismatchDecision = 'hard_mismatch';
       earlyExit = true;
     }
   }else if(priceDeltaPercent !== null && priceDeltaPercent >= 0.15){
@@ -26892,18 +26932,25 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     if(currentImageId){
       fastPassEvidence.push(`Mismatch detected from chart image ${currentImageId}.`);
     }
+    finalMismatchDecision = 'hard_mismatch';
     earlyExit = true;
-  }else if(contextMirroringSuspected){
-    fastStatus = 'untrusted_context_mirror';
-    status = 'untrusted_context_mirror';
-    reason = 'Extracted chart facts appear to mirror the selected review context without independent image evidence.';
-    title = 'Chart context needs confirmation';
-    summary = 'The uploaded chart may be echoing the app context rather than independently verified image evidence.';
+  }else if(contextMirroringSuspected || ((visibleTicker || visiblePrice !== null) && !chartNativeEvidencePresent)){
+    fastStatus = contextMirroringSuspected ? 'untrusted_context_mirror' : 'chart_verification_untrusted';
+    status = fastStatus;
+    reason = contextMirroringSuspected
+      ? 'Extracted chart facts appear to mirror the selected review context without chart-native evidence.'
+      : 'Ticker and price were read, but no chart-native evidence was extracted from the chart region.';
+    title = 'Chart verification incomplete';
+    summary = 'Could not independently verify this chart. Please inspect the image or upload a clearer chart.';
     fastPassEvidence.push(`Extracted ticker ${visibleTicker} matches expected ${expectedTicker}, but independent image evidence is weak.`);
     if(visiblePrice !== null && trustedPrice !== null){
-      fastPassEvidence.push(`Extracted price ${chartVerificationDisplayValue(visiblePrice)} matches trusted price ${chartVerificationDisplayValue(trustedPrice)} without independent chart evidence.`);
+      fastPassEvidence.push(`Extracted price ${chartVerificationDisplayValue(visiblePrice)} matches trusted price ${chartVerificationDisplayValue(trustedPrice)} without chart-native evidence.`);
+    }
+    if(!chartNativeEvidencePresent){
+      fastPassEvidence.push('No chart-native evidence was extracted from the chart region.');
     }
     fastPassEvidence.push('Manual confirmation is required before treating this upload as verified.');
+    finalMismatchDecision = 'manual_required';
     earlyExit = true;
   }else if((visibleTicker || visibleTimeframe || visiblePrice !== null) && independentImageEvidence){
     fastStatus = 'clear_match_candidate';
@@ -26917,6 +26964,21 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     if(contextMirroringSuspected){
       fastPassEvidence.push('Extracted ticker and price mirror the selected review context without independent image evidence.');
     }
+  }
+  if(typeof console !== 'undefined' && console.info && debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
+    console.info('[CHART_MISMATCH_DECISION]', {
+      expectedTicker,
+      visibleTicker,
+      visiblePrice,
+      trustedPrice,
+      priceDeltaPercent,
+      independentImageEvidence,
+      chartNativeEvidencePresent,
+      contextMirroringSuspected,
+      aiChartMatchStatus:String(safeAnalysis.chart_match_status || '').trim().toLowerCase(),
+      finalMismatchDecision,
+      reason
+    });
   }
   const aiAnalysisSuppressed = ['stale_state_detected','clear_mismatch'].includes(fastStatus)
     || (fastStatus === 'insufficient_context' && hasFastFacts);
@@ -26946,6 +27008,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     uiHeaderEvidenceSignals,
     chartNativeEvidenceSignals,
     chartNativeEvidencePresent,
+    trustedChartRegionConfirmation,
     visibleNumericLabelsCount,
     maEvidenceCount:visibleMaValuesCount + maLineEvidenceCount + maVisibilityAssessedCount,
     hasImageDerivedTicker,
@@ -26955,6 +27018,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     clearMatchRejectedReason,
     trustedPrice,
     priceDeltaPercent,
+    finalMismatchDecision,
     imageId:currentImageId,
     analysisImageId,
     earlyExit,
@@ -27055,8 +27119,10 @@ function buildChartAssessorInput(record = {}, analysis = null, chartImageSource 
 
 function chartVerificationTracePriority(trace = {}){
   const status = String(trace && trace.status || '').trim();
+  const explicitChartRegionProvenance = chartVerificationHasExplicitRegionProvenance(trace);
   if(['ticker_mismatch','timeframe_mismatch','strong_mismatch','possible_mismatch','stale_state_detected'].includes(status)) return 4;
-  if(['verified_match','likely_match','ai_supported_match','consistent','manually_verified','user_confirmed_match'].includes(status)) return 3;
+  if(['verified_match','likely_match','consistent','manually_verified','user_confirmed_match'].includes(status)) return 3;
+  if(status === 'ai_supported_match') return explicitChartRegionProvenance ? 3 : 2;
   if(['partial_context_timeframe_uncertain','partial_context_unverified_chart','indicator_partial','indicator_incomplete','uncertain_match'].includes(status)) return 2;
   if(['pending_chart_native_verification','uncertain_missing_context'].includes(status)) return 1;
   return 1;
@@ -27353,7 +27419,8 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
   const mergedMatchingCandidates = matchingCandidates.filter(candidate =>
     candidate.type === 'post_ai_merged'
     || String(candidate.trace && candidate.trace.phase || '') === 'merged'
-    || ['verified_match', 'likely_match', 'ai_supported_match', 'consistent', 'manually_verified', 'user_confirmed_match'].includes(String(candidate.trace && candidate.trace.status || ''))
+    || ['verified_match', 'likely_match', 'consistent', 'manually_verified', 'user_confirmed_match'].includes(String(candidate.trace && candidate.trace.status || ''))
+    || (String(candidate.trace && candidate.trace.status || '') === 'ai_supported_match' && chartVerificationHasExplicitRegionProvenance(candidate.trace))
   );
   const nonPendingMatchingCandidates = matchingCandidates.filter(candidate => !candidate.isPendingTrace);
   const chosen = (mergedMatchingCandidates[0] || nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);
@@ -27417,6 +27484,7 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
   const chartImageSource = options.chartImageSource && typeof options.chartImageSource === 'object'
     ? options.chartImageSource
     : buildChartImageSourceTrace(safeRecord.review || {});
+  const hasChart = chartImageSource && chartImageSource.sourceKind && chartImageSource.sourceKind !== 'none';
   const expectedTicker = normaliseVisibleTicker(safeRecord.ticker || '');
   const visibleTicker = normaliseVisibleTicker(safeAnalysis.visible_ticker || '');
   const visibleTimeframe = String(safeAnalysis.visible_timeframe || '').trim();
@@ -27576,41 +27644,13 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     if(ma50Ok === false) evidence.push(`50MA visible ${comparisonMa50}; trusted ${trustedMa50}.`);
     if(ma200Ok === false) evidence.push(`200MA visible ${comparisonMa200}; trusted ${trustedMa200}.`);
   }else if(fastPassClearMatch && visibleTicker === expectedTicker && visiblePrice !== null && priceOk !== false && !chartNativeEvidencePresent){
-    const aiChartMatch = analysis && String(analysis.chart_match_status || '').trim().toLowerCase() === 'match';
-    const aiChartWarning = analysis ? String(analysis.chart_match_warning || '').trim() : '';
-    const aiChartSupportsMatch = aiChartMatch && !/\b(mismatch|different|wrong|stale|unclear|uncertain|cannot verify|can't verify)\b/i.test(aiChartWarning);
-    if(aiChartSupportsMatch){
-      status = visibleTimeframe && !isDailyTimeframe(visibleTimeframe)
-        ? 'partial_context_timeframe_uncertain'
-        : 'ai_supported_match';
-      severity = 'info';
-      title = status === 'ai_supported_match' ? 'Chart supported by AI' : 'Timeframe uncertain';
-      summary = status === 'ai_supported_match'
-        ? 'Ticker and price match trusted values. AI analysis supports the chart match while chart-native confirmation remains limited.'
-        : `Ticker and price match trusted values, but the visible timeframe (${visibleTimeframe}) could not be confirmed confidently.`;
-      if(status === 'ai_supported_match' && (nonCriticalMissing.length || partialIndicators.length || inferredIndicators.length)){
-        const partialPieces = [];
-        if(nonCriticalMissing.length) partialPieces.push('Timeframe is missing or only partially visible.');
-        if(partialIndicators.length || inferredIndicators.length){
-          partialPieces.push('Some indicator details are partial.');
-        }
-        if(partialPieces.length){
-          summary = `${summary} ${partialPieces.join(' ')}`;
-        }
-      }
-      if(toleranceConfig.staleDataPossible){
-        summary += ' Small differences can occur while the market is open because chart data may update faster than app data.';
-      }
-      evidence.push('AI analysis supports the ticker/price match while chart-native confirmation remains limited.');
-    }else{
-      status = 'partial_context_unverified_chart';
-      severity = 'warning';
-      title = 'Chart partially verified';
-      summary = 'Ticker and price match trusted values, but chart-native indicator confirmation is missing or contradictory.';
-      if(toleranceConfig.staleDataPossible){
-        summary += ' Small differences can occur while the market is open because chart data may update faster than app data.';
-      }
-      evidence.push('No chart-native indicator confirmation was extracted from the uploaded image.');
+    status = 'chart_verification_untrusted';
+    severity = 'warning';
+    title = 'Chart verification incomplete';
+    summary = 'Could not independently verify this chart. Please inspect the image or upload a clearer chart.';
+    evidence.push('Ticker and price match trusted values, but no chart-native evidence was extracted from the chart region.');
+    if(analysis && String(analysis.chart_match_status || '').trim().toLowerCase() === 'match'){
+      evidence.push('AI chart-match support was ignored because chart-native evidence is still missing.');
     }
   }else if(criticalMissing.length){
     status = 'uncertain_missing_context';
@@ -27706,17 +27746,17 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     }
   }
 
-  if(fastPass.fastStatus === 'untrusted_context_mirror'){
+  if(['untrusted_context_mirror','chart_verification_untrusted'].includes(fastPass.fastStatus)){
     return {
       visible:true,
-      status:'untrusted_context_mirror',
+      status:fastPass.fastStatus,
       severity:'warning',
-      title:'Chart context needs confirmation',
-      summary:'The uploaded chart may be echoing the app context rather than independently verified image evidence.',
+      title:'Chart verification incomplete',
+      summary:'Could not independently verify this chart. Please inspect the image or upload a clearer chart.',
       evidence:[...new Set((fastPass.evidence || []).concat([
-        'Independent image evidence is weak, so this upload must be manually confirmed.',
+        'Independent chart-region evidence is still missing, so this upload must be manually confirmed.',
       ]))].slice(0, 5),
-      missing:['independent image evidence'],
+      missing:['independent chart evidence'],
       initialMissingIndicators:[],
       finalMissingIndicators:[],
       summaryDerivedFromFinalState:true,
@@ -27750,8 +27790,8 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
         mismatchSeverity:'none',
         aiAnalysisSuppressed:false,
         suppressionReason:'',
-        canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
-        visualBucket:simplifiedState && simplifiedState.visualBucket || ''
+        canonicalVerdict:'',
+        visualBucket:''
       }
     };
   }
