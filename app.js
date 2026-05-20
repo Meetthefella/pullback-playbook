@@ -9,10 +9,7 @@ const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
 const APP_VERSION = 'v4.4.17';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.4.17',
-    commit:'320d70a',
-    branch:'main',
-    builtAt:'2026-05-20T09:35Z'
+    version:'4.4.17'
   };
 }
 const defaultAiEndpoint = '/api/analyse-setup';
@@ -22433,8 +22430,9 @@ async function analyseSetup(ticker){
         card.target = analysis.first_target || '';
       }
       const mergedSimplifiedReviewState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+      const mergedNormalizedAnalysis = chartAssessorInputToNormalizedAnalysis(chartAssessorInput, record.review || {}, {forceMatch:false});
       const mergedChartTrace = buildChartConsistencyTrace(record, mergedSimplifiedReviewState, {
-        normalizedAnalysis:chartAssessorInput,
+        normalizedAnalysis:mergedNormalizedAnalysis,
         derivedStates:analysisDerivedStatesFromRecord(record),
         chartAssessorInput
       });

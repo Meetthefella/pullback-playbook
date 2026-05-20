@@ -3803,6 +3803,26 @@ function runAiContractAssertions(){
   if(headerOnlyDeterministicTrace.status !== 'chart_verification_untrusted' && headerOnlyDeterministicTrace.status !== 'untrusted_context_mirror'){
     throw new Error('AI match plus header-only OCR must not upgrade a chart to verified without chart-native evidence.');
   }
+  const rawAssessorNormalized = evidenceSandbox.chartAssessorInputToNormalizedAnalysis({
+    ticker:'NVDA',
+    reviewTicker:'NVDA',
+    verificationRequestId:'analysis-test',
+    chartImageId:'img-test',
+    extractedTicker:'NVDA',
+    extractedTimeframe:'1D',
+    extractedPrice:220.61,
+    chartMatchStatus:'match',
+    chartMatchWarning:'',
+    aiSupportedMatch:true
+  }, {chartRef:{imageId:'img-test'}}, {forceMatch:false});
+  const rawAssessorTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:220.61}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'img-test'}}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {normalizedAnalysis:rawAssessorNormalized}
+  );
+  if(!['chart_verification_untrusted','untrusted_context_mirror'].includes(rawAssessorTrace.status)){
+    throw new Error('Raw chart assessor payloads must stay untrusted after normalization when chart-native evidence is absent.');
+  }
   const legacyFallbackTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       chart_match_status:'mismatch',
