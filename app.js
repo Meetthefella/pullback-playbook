@@ -4100,10 +4100,20 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
   if(!hasChartScreenshot) return false;
   const key = String(decision && decision.key || '');
   const status = String(trace && trace.status || '');
+  const explicitChartRegionProvenance = chartVerificationHasExplicitRegionProvenance(trace);
+  const hasVerifiedTrace = chartVerificationIsVerifiedStatus(key)
+    || chartVerificationIsVerifiedStatus(status)
+    || (String(key || '') === 'ai_supported_match' && explicitChartRegionProvenance)
+    || (String(status || '') === 'ai_supported_match' && explicitChartRegionProvenance);
+  const hasResolvedTrace = hasVerifiedTrace
+    || ['untrusted_context_mirror', 'chart_verification_untrusted', 'chart_mismatch'].includes(status)
+    || key === 'chart_mismatch';
   if(['verified_match', 'user_confirmed_match'].includes(key)) return false;
-  if(['queued', 'running'].includes(String(quickChartAnalysisStatus || ''))) return false;
+  if(['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) && !hasResolvedTrace) return false;
   if(status === 'pending_chart_native_verification') return false;
-  return key === 'uncertain_match' || key === 'chart_mismatch';
+  return key === 'uncertain_match'
+    || key === 'chart_mismatch'
+    || ['untrusted_context_mirror', 'chart_verification_untrusted'].includes(status);
 }
 
 function chartVerificationIsVerifiedStatus(status = ''){
@@ -29918,8 +29928,13 @@ function renderReviewWorkspace(options = {}){
       statusText:chartDecisionSummary
     });
   }
-  const aiAnalysisSuppressedByChartMismatch = !!(chartUiDecision && chartUiDecision.key === 'chart_mismatch');
-  const aiSuppressionText = 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
+  const aiAnalysisSuppressedByChartMismatch = !!(
+    (chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.aiAnalysisSuppressed === true)
+    || (chartUiDecision && chartUiDecision.key === 'chart_mismatch')
+    || ['chart_mismatch', 'untrusted_context_mirror', 'chart_verification_untrusted'].includes(String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''))
+  );
+  const aiSuppressionText = String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.suppressionReason || '')
+    || 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
   const previewRef = (record.review.chartImagePreview && record.review.chartImagePreview.dataUrl)
     ? record.review.chartImagePreview
     : record.review.chartRef;

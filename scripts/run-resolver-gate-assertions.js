@@ -2257,6 +2257,7 @@ function runAiContractAssertions(){
   vm.runInContext(verifiedStatusSource, panelStateSandbox, {filename:'app.js#chartVerificationIsVerifiedStatus'});
   vm.runInContext(explicitProvenanceSource, panelStateSandbox, {filename:'app.js#chartVerificationHasExplicitRegionProvenance'});
   vm.runInContext(chartDecisionClassNameSource, panelStateSandbox, {filename:'app.js#chartDecisionClassName'});
+  vm.runInContext('this.chartVerificationIsVerifiedStatus = chartVerificationIsVerifiedStatus; this.chartVerificationHasExplicitRegionProvenance = chartVerificationHasExplicitRegionProvenance;', panelStateSandbox);
   vm.runInContext(panelStateSource, panelStateSandbox, {filename:'app.js#chartVerificationPanelState'});
   const verifiedPanel = panelStateSandbox.chartVerificationPanelState(
     {key:'verified_match', title:'Chart verified', summary:'AI confirms the match.'},
@@ -2287,6 +2288,11 @@ function runAiContractAssertions(){
   );
   if(untrustedPanel.panelVariant !== 'untrusted' || untrustedPanel.visibleTitle !== 'Chart verification incomplete'){
     throw new Error('Untrusted merged chart panels must not render as verified.');
+  }
+  const manualActionsSource = extractFunctionSource(appSource, 'chartVerificationShouldShowManualActions');
+  if(!manualActionsSource.includes("['untrusted_context_mirror', 'chart_verification_untrusted'].includes(status)")
+    || !manualActionsSource.includes("['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) && !hasResolvedTrace")){
+    throw new Error('Manual chart override logic must keep resolved untrusted states visible after quick-analysis completion.');
   }
   const chartUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   const chartFastPassSource = extractFunctionSource(appSource, 'buildChartVerificationFastPass');
@@ -2560,6 +2566,8 @@ function runAiContractAssertions(){
     'chartVerificationAiSuppression',
     'renderSuppressedAiAnalysisPanel',
     'renderChartConsistencyTrace',
+    'chartVerificationIsVerifiedStatus',
+    'chartVerificationHasExplicitRegionProvenance',
     'chartVerificationShouldShowManualActions',
     'getReviewChartVerificationState',
     'analysisDerivedStatesFromRecord'
