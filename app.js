@@ -3985,11 +3985,17 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
     ...currentState,
     manualConfirmed:true,
     chartUserConfirmed:true,
+    status:'manually_verified',
+    mergedStatus:'manually_verified',
+    renderedStatus:'manually_verified',
+    aiAnalysisSuppressed:false,
+    suppressionReason:'',
     manualConfirmedAt:new Date().toISOString(),
     manualConfirmedTicker:symbol,
     manualConfirmedImageId:currentImageId,
     manualConfirmedBy:'user'
   }, null);
+  record.review.chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);
   record.review.chartVerificationLifecycle = {
     ...(record.review.chartVerificationLifecycle || {}),
     phase:'manually_verified',
@@ -4011,6 +4017,7 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
   commitTickerState();
   renderReviewWorkspace({source:'manual_chart_confirm'});
   renderCards();
+  analyseSetup(symbol).catch(() => {});
   return true;
 }
 
@@ -4100,12 +4107,14 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
   if(!hasChartScreenshot) return false;
   const key = String(decision && decision.key || '');
   const status = String(trace && trace.status || '');
+  const aiAnalysisSuppressed = !!(trace && trace.aiAnalysisSuppressed === true);
   const explicitChartRegionProvenance = chartVerificationHasExplicitRegionProvenance(trace);
   const hasVerifiedTrace = chartVerificationIsVerifiedStatus(key)
     || chartVerificationIsVerifiedStatus(status)
     || (String(key || '') === 'ai_supported_match' && explicitChartRegionProvenance)
     || (String(status || '') === 'ai_supported_match' && explicitChartRegionProvenance);
   const hasResolvedTrace = hasVerifiedTrace
+    || aiAnalysisSuppressed
     || ['untrusted_context_mirror', 'chart_verification_untrusted', 'chart_mismatch'].includes(status)
     || key === 'chart_mismatch';
   if(['verified_match', 'user_confirmed_match'].includes(key)) return false;
@@ -4113,6 +4122,7 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
   if(status === 'pending_chart_native_verification') return false;
   return key === 'uncertain_match'
     || key === 'chart_mismatch'
+    || aiAnalysisSuppressed
     || ['untrusted_context_mirror', 'chart_verification_untrusted'].includes(status);
 }
 

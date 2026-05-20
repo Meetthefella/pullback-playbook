@@ -2291,8 +2291,16 @@ function runAiContractAssertions(){
   }
   const manualActionsSource = extractFunctionSource(appSource, 'chartVerificationShouldShowManualActions');
   if(!manualActionsSource.includes("['untrusted_context_mirror', 'chart_verification_untrusted'].includes(status)")
+    || !manualActionsSource.includes("aiAnalysisSuppressed")
     || !manualActionsSource.includes("['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) && !hasResolvedTrace")){
     throw new Error('Manual chart override logic must keep resolved untrusted states visible after quick-analysis completion.');
+  }
+  const manualConfirmSource = extractFunctionSource(appSource, 'confirmReviewChartMatchesCurrentTicker');
+  if(!manualConfirmSource.includes('chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);')
+    || !manualConfirmSource.includes("aiAnalysisSuppressed:false")
+    || !manualConfirmSource.includes("suppressionReason:''")
+    || !manualConfirmSource.includes('analyseSetup(symbol).catch(() => {});')){
+    throw new Error('Manual chart confirmation must commit the verified trace and trigger a fresh AI analysis run.');
   }
   const chartUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   const chartFastPassSource = extractFunctionSource(appSource, 'buildChartVerificationFastPass');
