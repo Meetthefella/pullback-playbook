@@ -2278,6 +2278,16 @@ function runAiContractAssertions(){
   if(pendingPanel.panelVariant !== 'pending' || pendingPanel.visibleTitle !== 'Checking chart details'){
     throw new Error('Queued quick-analysis panels must still render the pending placeholder.');
   }
+  const untrustedPanel = panelStateSandbox.chartVerificationPanelState(
+    {key:'uncertain_match', title:'Chart verification incomplete', summary:'Could not independently verify this chart. Please inspect the image or upload a clearer chart.'},
+    {status:'untrusted_context_mirror'},
+    'running',
+    true,
+    {type:'post_ai_merged', phase:'merged'}
+  );
+  if(untrustedPanel.panelVariant !== 'untrusted' || untrustedPanel.visibleTitle !== 'Chart verification incomplete'){
+    throw new Error('Untrusted merged chart panels must not render as verified.');
+  }
   const chartUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   const chartFastPassSource = extractFunctionSource(appSource, 'buildChartVerificationFastPass');
   const explicitProvenanceFnSource = extractFunctionSource(appSource, 'chartVerificationHasExplicitRegionProvenance');

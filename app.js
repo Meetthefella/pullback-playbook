@@ -4131,12 +4131,17 @@ function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisSta
   const hasVerifiedTrace = chartVerificationIsVerifiedStatus(key)
     || chartVerificationIsVerifiedStatus(status)
     || (String(key || '') === 'ai_supported_match' && explicitChartRegionProvenance)
-    || (String(status || '') === 'ai_supported_match' && explicitChartRegionProvenance)
+    || (String(status || '') === 'ai_supported_match' && explicitChartRegionProvenance);
+  const hasUntrustedTrace = ['untrusted_context_mirror', 'chart_verification_untrusted'].includes(status);
+  const hasResolvedTrace = hasVerifiedTrace
+    || hasUntrustedTrace
+    || key === 'chart_mismatch'
+    || status === 'chart_mismatch'
     || selectedPhase === 'merged'
     || selectedType === 'post_ai_merged';
   const shouldShowPending = hasChartScreenshot
     && ['queued', 'running'].includes(normalizedQuickStatus)
-    && !hasVerifiedTrace;
+    && !hasResolvedTrace;
   let panelVariant = 'no_chart';
   let visibleTitle = 'No chart attached yet.';
   let visibleBody = '';
@@ -4145,6 +4150,10 @@ function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisSta
       panelVariant = 'pending';
       visibleTitle = 'Checking chart details';
       visibleBody = 'We are checking the uploaded chart now. This usually resolves within a moment.';
+    }else if(hasUntrustedTrace){
+      panelVariant = 'untrusted';
+      visibleTitle = title || 'Chart verification incomplete';
+      visibleBody = summary || 'Could not independently verify this chart. Please inspect the image or upload a clearer chart.';
     }else if(hasVerifiedTrace || key === 'verified_match' || key === 'user_confirmed_match'){
       panelVariant = 'verified';
       visibleTitle = title || 'Chart verified for this ticker.';
