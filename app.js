@@ -4103,10 +4103,10 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
   if(!hasChartScreenshot) return false;
   const key = String(decision && decision.key || '');
   const status = String(trace && trace.status || '');
-  if(['verified_match', 'user_confirmed_match', 'chart_mismatch'].includes(key)) return false;
+  if(['verified_match', 'user_confirmed_match'].includes(key)) return false;
   if(['queued', 'running'].includes(String(quickChartAnalysisStatus || ''))) return false;
   if(status === 'pending_chart_native_verification') return false;
-  return key === 'uncertain_match';
+  return key === 'uncertain_match' || key === 'chart_mismatch';
 }
 
 function chartVerificationIsVerifiedStatus(status = ''){
@@ -22872,6 +22872,13 @@ function chartVerificationAiSuppression(record, analysis, options = {}){
       message:'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
     };
   }
+  if(fastPass.earlyExit && ['chart_verification_untrusted','untrusted_context_mirror'].includes(fastPass.status)){
+    return {
+      suppressed:true,
+      reason:'Chart could not be independently verified from the image, so technical AI commentary may be unreliable.',
+      message:'AI analysis limited. The chart could not be independently verified, so technical analysis may be unreliable.'
+    };
+  }
   if(fastPass.fastStatus === 'stale_state_detected' || (fastPass.fastStatus === 'insufficient_context' && fastPass.hasFastFacts)){
     return {
       suppressed:true,
@@ -22885,11 +22892,19 @@ function chartVerificationAiSuppression(record, analysis, options = {}){
   });
   const hasChart = !!(chartImageSource && chartImageSource.sourceKind && chartImageSource.sourceKind !== 'none');
   const suppressForMismatch = verification && verification.status === 'possible_mismatch';
+  const suppressForUntrusted = verification && ['chart_verification_untrusted','untrusted_context_mirror'].includes(String(verification.status || ''));
   if(verification && (verification.aiAnalysisSuppressed === true || suppressForMismatch)){
     return {
       suppressed:true,
       reason:verification.suppressionReason || 'Chart may not match the selected ticker; technical AI commentary may be unreliable.',
       message:'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
+    };
+  }
+  if(suppressForUntrusted){
+    return {
+      suppressed:true,
+      reason:'Chart could not be independently verified from the image, so technical AI commentary may be unreliable.',
+      message:'AI analysis limited. The chart could not be independently verified, so technical analysis may be unreliable.'
     };
   }
   return {
@@ -27761,8 +27776,8 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
       finalMissingIndicators:[],
       summaryDerivedFromFinalState:true,
       mismatchSeverity:'none',
-      aiAnalysisSuppressed:false,
-      suppressionReason:'',
+      aiAnalysisSuppressed:true,
+      suppressionReason:'Chart could not be independently verified from the image, so technical AI commentary may be unreliable.',
       missingIndicators:[],
       partialIndicators:[],
       likelyMatchedIndicators:[],
@@ -27993,7 +28008,10 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
 
   const fastPass = buildChartVerificationFastPass(safeRecord, analysis, chartImageSource);
   if(fastPass.earlyExit && fastPass.status !== 'stale_state_detected'){
-    const suppressed = ['ticker_mismatch','timeframe_mismatch','strong_mismatch'].includes(fastPass.status);
+    const suppressed = ['ticker_mismatch','timeframe_mismatch','strong_mismatch','chart_verification_untrusted','untrusted_context_mirror'].includes(fastPass.status);
+    const suppressionReason = ['chart_verification_untrusted','untrusted_context_mirror'].includes(fastPass.status)
+      ? 'Chart could not be independently verified from the image, so technical AI commentary may be unreliable.'
+      : 'Fast chart verification found a clear mismatch; technical AI commentary may be unreliable.';
     return {
       visible:true,
       status:fastPass.status,
@@ -28007,7 +28025,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       summaryDerivedFromFinalState:true,
       mismatchSeverity:fastPass.status === 'strong_mismatch' ? 'strong_mismatch' : 'possible_mismatch',
       aiAnalysisSuppressed:suppressed,
-      suppressionReason:suppressed ? 'Fast chart verification found a clear mismatch; technical AI commentary may be unreliable.' : '',
+      suppressionReason:suppressed ? suppressionReason : '',
       missingIndicators:[],
       partialIndicators:[],
       likelyMatchedIndicators:[],
@@ -28034,7 +28052,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         hasChart,
         mismatchSeverity:fastPass.status === 'strong_mismatch' ? 'strong_mismatch' : 'possible_mismatch',
         aiAnalysisSuppressed:suppressed,
-        suppressionReason:suppressed ? 'Fast chart verification found a clear mismatch; technical AI commentary may be unreliable.' : '',
+        suppressionReason:suppressed ? suppressionReason : '',
         canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
         visualBucket:simplifiedState && simplifiedState.visualBucket || ''
       }
