@@ -29944,7 +29944,7 @@ function renderReviewWorkspace(options = {}){
     const hasChartScreenshot = hasVerifiableChart;
     const showChartManualActions = chartVerificationShouldShowManualActions(chartUiDecision, chartConsistencyTraceForDisplay, quickChartAnalysisStatus, hasChartScreenshot);
     const chartManualConfirmationNote = chartUiDecision.key === 'user_confirmed_match'
-      ? `<div class="tiny goodtext" style="margin-top:6px">Chart confirmed manually for this review.</div>`
+      ? `<div class="tiny goodtext" style="margin-top:6px">Chart manually confirmed by user.</div>`
       : '';
     chartManualActionsMarkup = hasChartScreenshot
       ? (showChartManualActions

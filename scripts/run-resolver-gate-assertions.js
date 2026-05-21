@@ -3188,6 +3188,14 @@ function runAiContractAssertions(){
   if(mismatchManualDecision.key !== 'chart_mismatch' || evidenceSandbox.chartVerificationShouldShowManualActions(mismatchManualDecision, {status:'ticker_mismatch'}, 'committed', true) !== true){
     throw new Error('Chart mismatch states must keep Replace chart and Confirm chart actions visible.');
   }
+  const userConfirmedDecision = evidenceSandbox.chartVerificationUiDecision({
+    status:'manually_verified',
+    manualConfirmed:true,
+    chartUserConfirmed:true
+  }, 'LIN');
+  if(userConfirmedDecision.key !== 'user_confirmed_match' || evidenceSandbox.chartVerificationShouldShowManualActions(userConfirmedDecision, {status:'manually_verified', manualConfirmed:true, chartUserConfirmed:true}, 'committed', true) !== false){
+    throw new Error('User-confirmed charts must hide confirm/reject controls.');
+  }
   const aiSupportedWithRegionTrace = {
     ...aiSupportedMatchTrace,
     status:'ai_supported_match',
