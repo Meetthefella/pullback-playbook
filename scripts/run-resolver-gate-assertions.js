@@ -2572,6 +2572,7 @@ function runAiContractAssertions(){
     'buildDeterministicChartVerification',
     'buildChartConsistencyTrace',
     'chartVerificationAiSuppression',
+    'chartAiSummaryRenderGuard',
     'renderSuppressedAiAnalysisPanel',
     'renderChartConsistencyTrace',
     'chartVerificationIsVerifiedStatus',
@@ -3162,6 +3163,22 @@ function runAiContractAssertions(){
   }
   if(evidenceSandbox.chartVerificationShouldShowManualActions(aiSupportedMatchDecision, aiSupportedMatchTrace, 'committed', true) !== false){
     throw new Error('Likely-match chart states should not require manual confirmation controls.');
+  }
+  const staleSummaryGuard = evidenceSandbox.chartAiSummaryRenderGuard(
+    {ticker:'NVDA', review:{chartRef:{imageId:'img-new'}}},
+    {analysisChartImageId:'img-old', analysisRequestId:'analysis-old'},
+    {status:'untrusted_context_mirror', imageId:'img-new', verificationRequestId:'analysis-new', requestId:'analysis-new'}
+  );
+  if(staleSummaryGuard.allowedToRender !== false || staleSummaryGuard.reason !== 'image_mismatch'){
+    throw new Error('Stale AI summaries from a previous chart image must be blocked from rendering.');
+  }
+  const acceptedSummaryGuard = evidenceSandbox.chartAiSummaryRenderGuard(
+    {ticker:'PSX', review:{chartRef:{imageId:'img-psx'}}},
+    {analysisChartImageId:'img-psx', analysisRequestId:'analysis-psx'},
+    {status:'likely_match', imageId:'img-psx', verificationRequestId:'analysis-psx', requestId:'analysis-psx'}
+  );
+  if(acceptedSummaryGuard.allowedToRender !== true){
+    throw new Error('Current-image likely_match analysis must be allowed to render.');
   }
   const mismatchManualDecision = evidenceSandbox.chartVerificationUiDecision({
     status:'ticker_mismatch',

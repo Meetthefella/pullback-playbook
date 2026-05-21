@@ -4143,6 +4143,7 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
     || ['untrusted_context_mirror', 'chart_verification_untrusted', 'chart_mismatch'].includes(status)
     || key === 'chart_mismatch';
   if(['verified_match', 'user_confirmed_match'].includes(key)) return false;
+  if(key === 'likely_match' || status === 'likely_match') return false;
   if(key === 'source_checking' || status === 'source_checking') return false;
   if(['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) && !hasResolvedTrace) return false;
   if(status === 'pending_chart_native_verification') return false;
@@ -19564,14 +19565,18 @@ function setReviewAnalysisState(record, nextState = {}){
   if(!record) return;
   const current = record.review && record.review.analysisState && typeof record.review.analysisState === 'object'
     ? record.review.analysisState
-    : {raw:'', normalized:null, prompt:'', error:'', reviewedAt:'', chartImageId:''};
+    : {raw:'', normalized:null, prompt:'', error:'', reviewedAt:'', chartImageId:'', requestId:''};
   const currentChartImageId = chartImageIdForReview(record.review || {});
   const nextChartImageId = nextState.chartImageId === undefined ? currentChartImageId : String(nextState.chartImageId || '');
+  const nextRequestId = nextState.requestId === undefined ? String(current.requestId || '') : String(nextState.requestId || '');
   const nextNormalized = nextState.normalized === undefined
     ? current.normalized
     : cloneData(nextState.normalized, null);
   if(nextState.normalized !== undefined && nextNormalized && typeof nextNormalized === 'object' && nextChartImageId){
     nextNormalized.__chartImageId = nextChartImageId;
+  }
+  if(nextState.normalized !== undefined && nextNormalized && typeof nextNormalized === 'object' && nextRequestId){
+    nextNormalized.__analysisRequestId = nextRequestId;
   }
   const merged = {
     raw: nextState.raw == null ? current.raw : String(nextState.raw || ''),
@@ -19579,7 +19584,8 @@ function setReviewAnalysisState(record, nextState = {}){
     prompt: nextState.prompt == null ? current.prompt : String(nextState.prompt || ''),
     error: nextState.error == null ? current.error : String(nextState.error || ''),
     reviewedAt: nextState.reviewedAt == null ? current.reviewedAt : String(nextState.reviewedAt || ''),
-    chartImageId: nextChartImageId
+    chartImageId: nextChartImageId,
+    requestId: nextRequestId
   };
   record.review.analysisState = merged;
   record.review.aiAnalysisRaw = merged.raw;
@@ -19588,7 +19594,7 @@ function setReviewAnalysisState(record, nextState = {}){
   record.review.lastError = merged.error;
   record.review.lastReviewedAt = merged.reviewedAt;
   uiState.reviewAnalysisCache = uiState.reviewAnalysisCache && typeof uiState.reviewAnalysisCache === 'object' ? uiState.reviewAnalysisCache : {};
-  uiState.reviewAnalysisCache[record.ticker] = cloneData(merged, {raw:'', normalized:null, prompt:'', error:'', reviewedAt:''});
+  uiState.reviewAnalysisCache[record.ticker] = cloneData(merged, {raw:'', normalized:null, prompt:'', error:'', reviewedAt:'', chartImageId:'', requestId:''});
 }
 
 function getReviewAnalysisState(record){
@@ -19603,12 +19609,20 @@ function getReviewAnalysisState(record){
   const sourceState = hasPersistedAnalysisPayload ? baseState : (cachedState || baseState);
   const currentChartImageId = chartImageIdForReview(item.review || {});
   const normalizedSource = sourceState.normalized || item.review.normalizedAnalysis || null;
+  const sourceChartImageId = String(sourceState.chartImageId || '');
+  const sourceRequestId = String(sourceState.requestId || '');
   const normalizedImageId = normalizedSource && typeof normalizedSource === 'object'
-    ? String(normalizedSource.__chartImageId || sourceState.chartImageId || '')
+    ? String(normalizedSource.__chartImageId || sourceChartImageId || '')
     : '';
+  const normalizedRequestId = normalizedSource && typeof normalizedSource === 'object'
+    ? String(normalizedSource.__analysisRequestId || sourceRequestId || '')
+    : sourceRequestId;
   const normalizedStaleForChart = !!(currentChartImageId && normalizedSource && normalizedImageId && normalizedImageId !== currentChartImageId);
   const normalizedAnalysis = normalizedSource && !normalizedStaleForChart ? cloneData(normalizedSource, null) : null;
-  const rawAnalysis = normalizedStaleForChart ? '' : String(sourceState.raw || item.review.aiAnalysisRaw || (normalizedAnalysis ? JSON.stringify(sourceState.normalized || {}, null, 2) : ''));
+  const rawSourceStaleForChart = !!(currentChartImageId && sourceChartImageId && sourceChartImageId !== currentChartImageId);
+  const rawAnalysis = (normalizedStaleForChart || rawSourceStaleForChart)
+    ? ''
+    : String(sourceState.raw || item.review.aiAnalysisRaw || (normalizedAnalysis ? JSON.stringify(sourceState.normalized || {}, null, 2) : ''));
   const promptPreview = String(sourceState.prompt || item.review.lastPrompt || '');
   const error = String(sourceState.error || item.review.lastError || '');
   const analysisState = {
@@ -19618,9 +19632,10 @@ function getReviewAnalysisState(record){
     error,
     reviewedAt: String(sourceState.reviewedAt || item.review.lastReviewedAt || ''),
     hasSavedAnalysis: !!(normalizedAnalysis || rawAnalysis),
-    staleForChart:normalizedStaleForChart,
+    staleForChart:normalizedStaleForChart || rawSourceStaleForChart,
     chartImageId:currentChartImageId,
-    analysisChartImageId:normalizedImageId
+    analysisChartImageId:normalizedImageId || sourceChartImageId,
+    analysisRequestId:normalizedRequestId
   };
   if(normalizedStaleForChart){
     logChartVerificationLifecycle('stale_analysis_ignored', {
@@ -22657,7 +22672,8 @@ async function analyseSetup(ticker){
         normalized:analysis,
         error:'',
         reviewedAt:card.updatedAt,
-        chartImageId:requestChartImageId
+        chartImageId:requestChartImageId,
+        requestId:analysisRequestId
       });
       record.review.cardOpen = true;
       record.meta.marketStatus = state.marketStatus;
@@ -22971,6 +22987,53 @@ function chartVerificationAiSuppression(record, analysis, options = {}){
   };
 }
 
+function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null){
+  const item = record && typeof record === 'object' ? record : {};
+  const safeState = analysisState && typeof analysisState === 'object' ? analysisState : {};
+  const safeTrace = chartTrace && typeof chartTrace === 'object' ? chartTrace : null;
+  const currentImageId = chartImageIdForReview(item.review || {});
+  const currentRequestId = String(safeTrace && (safeTrace.verificationRequestId || safeTrace.requestId) || '');
+  const summaryImageId = String(safeState.analysisChartImageId || safeState.chartImageId || '');
+  const summaryRequestId = String(safeState.analysisRequestId || '');
+  const verificationStatus = String(safeTrace && safeTrace.status || '');
+  let allowedToRender = true;
+  let reason = 'accepted_current_analysis';
+  if(!currentImageId){
+    allowedToRender = false;
+    reason = 'no_current_chart';
+  }else if(summaryImageId && summaryImageId !== currentImageId){
+    allowedToRender = false;
+    reason = 'image_mismatch';
+  }else if(currentRequestId && summaryRequestId && currentRequestId !== summaryRequestId){
+    allowedToRender = false;
+    reason = 'request_mismatch';
+  }else if(['chart_mismatch','untrusted_context_mirror','chart_verification_untrusted','uncertain_missing_context'].includes(verificationStatus)){
+    allowedToRender = false;
+    reason = 'verification_not_accepted';
+  }
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_AI_SUMMARY_GUARD]', {
+      ticker:item.ticker || '',
+      currentImageId,
+      summaryImageId,
+      currentRequestId,
+      summaryRequestId,
+      verificationStatus,
+      allowedToRender,
+      reason
+    });
+  }
+  return {
+    currentImageId,
+    summaryImageId,
+    currentRequestId,
+    summaryRequestId,
+    verificationStatus,
+    allowedToRender,
+    reason
+  };
+}
+
 function renderSuppressedAiAnalysisPanel(suppression, rawResponse, options = {}){
   const safe = suppression && typeof suppression === 'object' ? suppression : {};
   const message = String(safe.message || 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.').replace(/^AI analysis limited\.\s*/, '');
@@ -22984,6 +23047,7 @@ function renderSuppressedAiAnalysisPanel(suppression, rawResponse, options = {})
 function renderAnalysisPanelFromRecord(record, options = {}){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
+  const summaryGuard = chartAiSummaryRenderGuard(item, analysisState, options.chartConsistencyTrace || null);
   const runtime = getReviewAiRuntime();
   const analysisRunning = runtime.status === 'running' && normalizeTicker(runtime.ticker || '') === item.ticker;
   const analysisRunningStage = getAnalysisLoadingStage(item.ticker) || 'AI analysis in progress';
@@ -23002,6 +23066,9 @@ function renderAnalysisPanelFromRecord(record, options = {}){
   });
   if(analysisState.error){
     return `<div class="responsegrid"><div class="summary tiny ai-summary-message ai-summary-message--failed">${escapeHtml(analysisState.error)}</div>${analysisState.rawAnalysis ? `<details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details>` : ''}</div>`;
+  }
+  if(!summaryGuard.allowedToRender){
+    return '<div class="tiny">No AI analysis saved yet.</div>';
   }
   if(analysisState.normalizedAnalysis){
     const analysis = analysisState.normalizedAnalysis;
@@ -29971,10 +30038,11 @@ function renderReviewWorkspace(options = {}){
   const aiAnalysisSuppressedByChartMismatch = !!(
     (chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.aiAnalysisSuppressed === true)
     || (chartUiDecision && chartUiDecision.key === 'chart_mismatch')
-    || ['chart_mismatch', 'untrusted_context_mirror', 'chart_verification_untrusted'].includes(String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''))
+    || ['chart_mismatch', 'untrusted_context_mirror', 'chart_verification_untrusted', 'uncertain_missing_context'].includes(String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''))
   );
   const aiSuppressionText = String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.suppressionReason || '')
     || 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
+  const aiSummaryGuard = chartAiSummaryRenderGuard(record, analysisState, chartConsistencyTraceForDisplay);
   const previewRef = (record.review.chartImagePreview && record.review.chartImagePreview.dataUrl)
     ? record.review.chartImagePreview
     : record.review.chartRef;
@@ -29994,6 +30062,7 @@ function renderReviewWorkspace(options = {}){
     ? `<details class="compact-details review-chart-controls"><summary>Change chart</summary>${chartControlsFullMarkup}</details>`
     : chartControlsFullMarkup;
   const aiSummaryPreview = (() => {
+    if(!aiSummaryGuard.allowedToRender) return 'No AI analysis saved yet.';
     if(aiAnalysisSuppressedByChartMismatch) return aiSuppressionText;
     if(analysisState.error) return `AI analysis failed: ${analysisState.error}`;
     if(analysisUiState === 'running') return `🤖 ${analysisLoadingStage}`;
@@ -30347,8 +30416,11 @@ function handleChartSelection(ticker, file){
       }catch(_error){}
     }
     record.review.chartVerificationTrace = null;
+    record.review.chartVerificationCommittedTrace = null;
     record.review.chartVerificationLifecycle = null;
     record.review.chartVerificationContext = null;
+    record.review.aiAnalysisRaw = '';
+    record.review.normalizedAnalysis = null;
     record.review.cardOpen = true;
     record.review.chartRef = {
       name:file.name,
