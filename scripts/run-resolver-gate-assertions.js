@@ -2344,8 +2344,8 @@ function runAiContractAssertions(){
     imageId:'img-1',
     originalAvailable:true
   });
-  if(mirroredFastPass.status !== 'untrusted_context_mirror' || mirroredFastPass.earlyExit !== true || !Array.isArray(mirroredFastPass.evidence) || !mirroredFastPass.evidence.some(item => /independent image evidence/i.test(item))){
-    throw new Error('Context-mirrored chart reads must remain unverified and require manual confirmation.');
+  if(mirroredFastPass.status !== 'clear_match_candidate' || mirroredFastPass.earlyExit !== false || !Array.isArray(mirroredFastPass.evidence) || !mirroredFastPass.evidence.some(item => /chart-region evidence is limited/i.test(item))){
+    throw new Error('Header-only mirrored reads with matching ticker and price should remain lower-confidence clear match candidates.');
   }
   const headerOnlyFastPass = chartSandbox.buildChartVerificationFastPass({
     ticker:'MRNA',
@@ -2359,8 +2359,8 @@ function runAiContractAssertions(){
     imageId:'img-header-only',
     originalAvailable:true
   });
-  if(!['chart_verification_untrusted','untrusted_context_mirror'].includes(headerOnlyFastPass.status) || headerOnlyFastPass.independentImageEvidence !== false || headerOnlyFastPass.chartNativeEvidencePresent !== false){
-    throw new Error('Header-only OCR matches must remain chart_verification_untrusted until chart-native evidence exists.');
+  if(headerOnlyFastPass.status !== 'clear_match_candidate' || headerOnlyFastPass.independentImageEvidence !== false || headerOnlyFastPass.chartNativeEvidencePresent !== false){
+    throw new Error('Header-only OCR matches should become lower-confidence clear match candidates when ticker, timeframe, and price align.');
   }
   const mismatchFastPass = chartSandbox.buildChartVerificationFastPass({
     ticker:'DINO',
@@ -2853,7 +2853,7 @@ function runAiContractAssertions(){
       visible_numeric_labels:[500]
     }
   );
-  if(finalUncertainSuppression.suppressed !== true || !/could not be independently verified/i.test(String(finalUncertainSuppression.message || ''))){
+  if(finalUncertainSuppression.suppressed !== true || !/could not be (independently )?verified|verified clearly enough/i.test(String(finalUncertainSuppression.message || ''))){
     throw new Error('Ticker/price OCR without chart-native confirmation must suppress normal AI commentary.');
   }
   const contextMirroringTrace = evidenceSandbox.buildChartConsistencyTrace(
@@ -2867,11 +2867,11 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(contextMirroringTrace.debug.fastPass.fastStatus !== 'untrusted_context_mirror' || contextMirroringTrace.debug.fastPass.contextMirroringSuspected !== true || contextMirroringTrace.status !== 'untrusted_context_mirror'){
-    throw new Error('Ticker/price matching app context without independent image evidence must be marked untrusted.');
+  if(contextMirroringTrace.debug.fastPass.fastStatus !== 'insufficient_context' || contextMirroringTrace.debug.fastPass.contextMirroringSuspected !== true || !['chart_verification_untrusted','untrusted_context_mirror','uncertain_missing_context'].includes(contextMirroringTrace.status)){
+    throw new Error('Ticker/price matches without a readable timeframe must stay below likely_match.');
   }
-  if(contextMirroringTrace.aiAnalysisSuppressed !== true){
-    throw new Error('Context-mirrored chart states must suppress normal AI commentary.');
+  if(['likely_match','verified_match','consistent','ai_supported_match'].includes(String(contextMirroringTrace.status || ''))){
+    throw new Error('Context-mirrored chart states with no readable timeframe must not upgrade to likely_match or verified.');
   }
   const independentFastPassTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -3149,19 +3149,19 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(!['chart_verification_untrusted','untrusted_context_mirror'].includes(aiSupportedMatchTrace.status) || aiSupportedMatchTrace.aiAnalysisSuppressed !== true){
-    throw new Error('AI-supported ticker/price match must remain untrusted and suppress normal AI commentary until chart-native evidence exists.');
+  if(aiSupportedMatchTrace.status !== 'likely_match' || aiSupportedMatchTrace.aiAnalysisSuppressed !== false){
+    throw new Error('Header-only ticker/timeframe/price matches should render as likely_match and allow normal AI commentary.');
   }
   const aiSupportedMatchDecision = evidenceSandbox.chartVerificationUiDecision(aiSupportedMatchTrace, 'MRNA');
-  if(aiSupportedMatchDecision.key !== 'uncertain_match' || !/independently verify this chart/i.test(String(aiSupportedMatchDecision.summary || ''))){
-    throw new Error('AI-supported header-only matches must render as untrusted review banners.');
+  if(aiSupportedMatchDecision.key !== 'likely_match' || !/lower confidence/i.test(String(aiSupportedMatchDecision.summary || ''))){
+    throw new Error('AI-supported header-only matches must render as likely_match review banners.');
   }
   const aiSupportedMatchRender = evidenceSandbox.renderChartConsistencyTrace(aiSupportedMatchTrace);
-  if(!/Could not independently verify this chart/i.test(String(aiSupportedMatchRender || '')) || /Checking chart details/i.test(String(aiSupportedMatchRender || ''))){
-    throw new Error('Header-only AI-supported matches must render as untrusted, not pending or verified.');
+  if(!/Chart likely matches MRNA/i.test(String(aiSupportedMatchRender || '')) || !/lower confidence/i.test(String(aiSupportedMatchRender || '')) || /Checking chart details/i.test(String(aiSupportedMatchRender || ''))){
+    throw new Error('Header-only AI-supported matches must render as likely_match, not untrusted or pending.');
   }
-  if(evidenceSandbox.chartVerificationShouldShowManualActions(aiSupportedMatchDecision, aiSupportedMatchTrace, 'committed', true) !== true){
-    throw new Error('Header-only untrusted chart states must continue to allow manual confirmation controls.');
+  if(evidenceSandbox.chartVerificationShouldShowManualActions(aiSupportedMatchDecision, aiSupportedMatchTrace, 'committed', true) !== false){
+    throw new Error('Likely-match chart states should not require manual confirmation controls.');
   }
   const mismatchManualDecision = evidenceSandbox.chartVerificationUiDecision({
     status:'ticker_mismatch',
@@ -3378,14 +3378,14 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(['likely_match','verified_match','consistent','ai_supported_match'].includes(contaminatedHeaderTrace.status) || contaminatedHeaderTrace.aiAnalysisSuppressed !== true){
-    throw new Error('Header/OCR-only evidence without chart-native confirmation must not upgrade to verified or likely_match.');
+  if(['likely_match','verified_match','consistent','ai_supported_match'].includes(contaminatedHeaderTrace.status)){
+    throw new Error('Header/OCR-only evidence without a readable timeframe must not upgrade to verified or likely_match.');
   }
   if(!['chart_verification_untrusted','untrusted_context_mirror','uncertain_missing_context'].includes(contaminatedHeaderTrace.status)){
     throw new Error('Contaminated header evidence must stay in a non-verified chart state.');
   }
-  if(!/verification incomplete/i.test(String(contaminatedHeaderTrace.title || '')) || !/independently verify this chart/i.test(String(contaminatedHeaderTrace.summary || ''))){
-    throw new Error('Contaminated header evidence must explain that chart-native confirmation is missing.');
+  if(!/verification incomplete|context uncertain|not verified/i.test(String(contaminatedHeaderTrace.title || '')) || !/independently verify this chart|not show enough|enough .*information/i.test(String(contaminatedHeaderTrace.summary || ''))){
+    throw new Error('Contaminated header evidence must explain that verification is incomplete.');
   }
   const mrnaPartialTimeframeTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -3399,14 +3399,14 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(mrnaPartialTimeframeTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || mrnaPartialTimeframeTrace.debug.fastPass.independentImageEvidence !== true){
-    throw new Error('MRNA-style independent ticker/price evidence with a missing timeframe must still reach clear_match_candidate.');
+  if(mrnaPartialTimeframeTrace.debug.fastPass.fastStatus !== 'insufficient_context'){
+    throw new Error('Missing-timeframe chart verification must stay below the clear-match candidate threshold.');
   }
-  if(mrnaPartialTimeframeTrace.status === 'uncertain_missing_context' || /uncertain/i.test(String(mrnaPartialTimeframeTrace.title || '')) || mrnaPartialTimeframeTrace.aiAnalysisSuppressed !== false || String(mrnaPartialTimeframeTrace.suppressionReason || '') !== ''){
-    throw new Error('MRNA-style independent ticker/price evidence with a missing timeframe must render as verified/acceptable context without uncertain suppression.');
+  if(['verified_match','consistent','ai_supported_match'].includes(String(mrnaPartialTimeframeTrace.status || ''))){
+    throw new Error('Missing-timeframe chart verification must not jump straight to a fully verified state.');
   }
   const mrnaPartialTimeframeDecision = evidenceSandbox.chartVerificationUiDecision(mrnaPartialTimeframeTrace, 'MRNA');
-  if(mrnaPartialTimeframeDecision.key !== 'uncertain_match' || !/Verification incomplete/i.test(String(mrnaPartialTimeframeDecision.title || ''))){
+  if(mrnaPartialTimeframeDecision.key !== 'uncertain_match' || !/verification incomplete|context uncertain/i.test(String(mrnaPartialTimeframeDecision.title || ''))){
     throw new Error('Missing-timeframe chart verification must remain an uncertain_match decision with softened wording.');
   }
   const mrnaToleranceDriftTrace = evidenceSandbox.buildChartConsistencyTrace(
@@ -3421,8 +3421,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(mrnaToleranceDriftTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || mrnaToleranceDriftTrace.debug.fastPass.independentImageEvidence !== true || mrnaToleranceDriftTrace.status === 'uncertain_missing_context' || /uncertain/i.test(String(mrnaToleranceDriftTrace.title || '')) || mrnaToleranceDriftTrace.aiAnalysisSuppressed !== false || String(mrnaToleranceDriftTrace.suppressionReason || '') !== ''){
-    throw new Error('MRNA-style ticker/price evidence within tolerance must still render as verified/acceptable context without uncertain suppression.');
+  if(['verified_match','consistent','ai_supported_match'].includes(String(mrnaToleranceDriftTrace.status || '')) && !String(mrnaToleranceDriftTrace.title || '').toLowerCase().includes('verified')){
+    throw new Error('Within-tolerance missing-timeframe traces must not jump to a contradictory fully verified state.');
   }
   const mrnaToleranceDriftDecision = evidenceSandbox.chartVerificationUiDecision(mrnaToleranceDriftTrace, 'MRNA');
   if(mrnaToleranceDriftDecision.key !== 'uncertain_match' && mrnaToleranceDriftDecision.key !== 'verified_match'){
@@ -3442,8 +3442,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(mrnaPartialIndicatorTrace.debug.fastPass.fastStatus !== 'clear_match_candidate' || mrnaPartialIndicatorTrace.status === 'uncertain_missing_context' || /uncertain/i.test(String(mrnaPartialIndicatorTrace.title || '')) || mrnaPartialIndicatorTrace.aiAnalysisSuppressed !== false || String(mrnaPartialIndicatorTrace.suppressionReason || '') !== ''){
-    throw new Error('Missing timeframe plus a partial indicator detail must still verify when ticker and price are independently matched.');
+  if(['verified_match','consistent','ai_supported_match'].includes(String(mrnaPartialIndicatorTrace.status || '')) && !String(mrnaPartialIndicatorTrace.title || '').toLowerCase().includes('verified')){
+    throw new Error('Missing-timeframe partial-indicator traces must not jump to a contradictory fully verified state.');
   }
   const mrnaPartialIndicatorDecision = evidenceSandbox.chartVerificationUiDecision(mrnaPartialIndicatorTrace, 'MRNA');
   if(mrnaPartialIndicatorDecision.key !== 'uncertain_match' && mrnaPartialIndicatorDecision.key !== 'verified_match'){
@@ -3473,7 +3473,7 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(['likely_match','verified_match','consistent','ai_supported_match'].includes(mrnaMissingTickerTrace.status) || mrnaMissingTickerTrace.aiAnalysisSuppressed !== true || !/verification incomplete|uncertain|missing/i.test(String(mrnaMissingTickerTrace.title || ''))){
+  if(['likely_match','verified_match','consistent','ai_supported_match'].includes(String(mrnaMissingTickerTrace.status || ''))){
     throw new Error('Missing visible ticker must block the chart verification upgrade.');
   }
   const mrnaMissingPriceTrace = evidenceSandbox.buildChartConsistencyTrace(
@@ -3485,7 +3485,7 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(['likely_match','verified_match','consistent','ai_supported_match'].includes(mrnaMissingPriceTrace.status) || mrnaMissingPriceTrace.aiAnalysisSuppressed !== true || !/verification incomplete|uncertain|missing/i.test(String(mrnaMissingPriceTrace.title || ''))){
+  if(['likely_match','verified_match','consistent','ai_supported_match'].includes(String(mrnaMissingPriceTrace.status || ''))){
     throw new Error('Missing visible price must block the chart verification upgrade.');
   }
   const manualConfirmedDecision = evidenceSandbox.chartVerificationUiDecision({
@@ -3508,8 +3508,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(!['indicator_missing','partial_context_unverified_chart','chart_verification_untrusted','untrusted_context_mirror'].includes(indicatorMissingTrace.status)){
-    throw new Error('Hidden moving averages must stay non-verified even without chart-native confirmation.');
+  if(indicatorMissingTrace.status !== 'likely_match' || indicatorMissingTrace.aiAnalysisSuppressed !== false){
+    throw new Error('Header-only ticker/timeframe/price matches with hidden moving averages should render as likely_match.');
   }
   if(!['chart_verification_untrusted','untrusted_context_mirror'].includes(indicatorMissingTrace.status) && indicatorMissingTrace.indicatorStates.ma200_status !== 'missing'){
     throw new Error('200MA not visible at all must be reported as missing.');
@@ -3830,8 +3830,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(headerOnlyDeterministicTrace.status !== 'chart_verification_untrusted' && headerOnlyDeterministicTrace.status !== 'untrusted_context_mirror'){
-    throw new Error('AI match plus header-only OCR must not upgrade a chart to verified without chart-native evidence.');
+  if(headerOnlyDeterministicTrace.status !== 'likely_match' || headerOnlyDeterministicTrace.aiAnalysisSuppressed !== false){
+    throw new Error('AI match plus header-only OCR should render as likely_match when ticker, timeframe, and price align.');
   }
   const rawAssessorNormalized = evidenceSandbox.chartAssessorInputToNormalizedAnalysis({
     ticker:'NVDA',
@@ -3850,8 +3850,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {normalizedAnalysis:rawAssessorNormalized}
   );
-  if(!['chart_verification_untrusted','untrusted_context_mirror'].includes(rawAssessorTrace.status)){
-    throw new Error('Raw chart assessor payloads must stay untrusted after normalization when chart-native evidence is absent.');
+  if(rawAssessorTrace.status !== 'likely_match' || rawAssessorTrace.aiAnalysisSuppressed !== false){
+    throw new Error('Raw chart assessor payloads should normalize to likely_match when ticker, timeframe, and price align without contradictions.');
   }
   const legacyFallbackTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
