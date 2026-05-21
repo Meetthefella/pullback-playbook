@@ -2269,15 +2269,15 @@ function runAiContractAssertions(){
   if(verifiedPanel.panelVariant !== 'verified' || verifiedPanel.visibleTitle !== 'Chart verified'){
     throw new Error('Verified chart panels must outrank queued quick-analysis placeholders.');
   }
-  const pendingPanel = panelStateSandbox.chartVerificationPanelState(
-    {key:'uncertain_match', title:'Verification incomplete', summary:'We could not auto-read enough chart details.'},
-    {status:'pending_chart_native_verification'},
+  const immediateUncertainPanel = panelStateSandbox.chartVerificationPanelState(
+    {key:'source_checking', title:'Chart uploaded - checking details', summary:'Chart source is valid. AI chart extraction is running.'},
+    {status:'source_checking'},
     'queued',
     true,
     {type:'deterministic_pending'}
   );
-  if(pendingPanel.panelVariant !== 'pending' || pendingPanel.visibleTitle !== 'Checking chart details'){
-    throw new Error('Queued quick-analysis panels must still render the pending placeholder.');
+  if(immediateUncertainPanel.panelVariant !== 'review' || immediateUncertainPanel.visibleTitle !== 'Chart uploaded - checking details'){
+    throw new Error('Immediate source-checking states must outrank queued quick-analysis placeholders.');
   }
   const untrustedPanel = panelStateSandbox.chartVerificationPanelState(
     {key:'uncertain_match', title:'Chart verification incomplete', summary:'Could not independently verify this chart. Please inspect the image or upload a clearer chart.'},
@@ -2966,8 +2966,12 @@ function runAiContractAssertions(){
       chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-pre-ai-nvda'}
     }
   }, localPreAiSource);
-  if(!localPreAiFastPass || localPreAiFastPass.status !== 'pending_chart_native_verification' || localPreAiFastPass.aiAnalysisSuppressed !== false || /verified/i.test(String(localPreAiFastPass.title || ''))){
-    throw new Error('Pre-AI chart verification must begin as a lightweight pending fast pass before AI analysis completes.');
+  if(!localPreAiFastPass
+    || String(localPreAiFastPass.status || '') !== 'source_checking'
+    || localPreAiFastPass.aiAnalysisSuppressed !== false
+    || /verified/i.test(String(localPreAiFastPass.title || ''))
+    || /match/i.test(String(localPreAiFastPass.title || ''))){
+    throw new Error('Pre-AI chart verification must remain a source-integrity-only state before extracted chart facts exist.');
   }
   evidenceSandbox.uiState = {
     activeReviewTicker:'MRNA',
@@ -3001,14 +3005,14 @@ function runAiContractAssertions(){
     throw new Error('Pre-AI chart verification must remain a warning state before chart-native confirmation exists.');
   }
   const preAiPendingDecision = evidenceSandbox.chartVerificationUiDecision(preAiPendingTrace, 'MRNA');
-  if(preAiPendingDecision.key !== 'uncertain_match' || !/Verification incomplete/i.test(String(preAiPendingDecision.title || '')) || !/auto-read enough chart details/i.test(String(preAiPendingDecision.summary || ''))){
-    throw new Error('Pending chart verification must map to a softened uncertain_match decision.');
+  if(preAiPendingDecision.key !== 'source_checking' || !/Chart uploaded - checking details/i.test(String(preAiPendingDecision.title || '')) || !/AI chart extraction is running/i.test(String(preAiPendingDecision.summary || ''))){
+    throw new Error('Pre-AI chart verification must map to a source-checking decision before extracted chart facts exist.');
   }
   if(evidenceSandbox.chartVerificationShouldShowManualActions(preAiPendingDecision, preAiPendingTrace, 'running', true) !== false){
     throw new Error('Pending chart verification must not require manual confirmation before deterministic analysis completes.');
   }
-  if(!['pending_chart_native_verification','partial_context_unverified_chart','uncertain_missing_context'].includes(String(preAiPendingTrace.status || ''))){
-    throw new Error('Pre-AI chart verification must remain pending or partially verified until chart-native evidence exists.');
+  if(String(preAiPendingTrace.status || '') !== 'source_checking'){
+    throw new Error('Pre-AI chart verification must remain in source_checking until extracted chart facts exist.');
   }
   if(preAiPendingTrace.aiAnalysisSuppressed !== false || String(preAiPendingTrace.suppressionReason || '') !== ''){
     throw new Error('Pre-AI chart verification must remain a warning state, not a suppression.');

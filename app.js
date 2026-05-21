@@ -3859,6 +3859,7 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
     : null;
   const chartVerificationStatus = String((chartVerificationTrace && chartVerificationTrace.status) || storedChartVerificationState && storedChartVerificationState.status || '').trim();
   const pendingStatuses = new Set([
+    'source_checking',
     'pending_chart_native_verification',
     'uncertain_missing_context',
     'partial_context_unverified_chart',
@@ -3908,6 +3909,7 @@ function queueReviewQuickChartAnalysis(record, options = {}){
   const state = reviewQuickChartAnalysisState(liveRecord || liveItem, options);
   const triggerSource = String(options.source || 'review_render');
   const triggerReason = String(options.triggerReason || state.currentVerificationStatus || 'chart_verification_pending');
+  const bypassQueue = options.bypassQueue === true;
   if(!state.hasChart){
     return state;
   }
@@ -3939,6 +3941,22 @@ function queueReviewQuickChartAnalysis(record, options = {}){
     queuedAt:new Date().toISOString(),
     updatedAt:new Date().toISOString()
   };
+  if(bypassQueue){
+    review.quickChartAnalysis.status = 'running';
+    review.quickChartAnalysis.startedAt = new Date().toISOString();
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[FAST_PASS_QUEUE_BYPASSED]', {
+        ticker:item.ticker,
+        key:state.key,
+        imageId:state.imageId,
+        triggerSource,
+        triggerReason
+      });
+    }
+    commitTickerState();
+    analyseSetup(liveItem.ticker || item.ticker).catch(() => {});
+    return reviewQuickChartAnalysisState(liveRecord || liveItem, options);
+  }
   if(typeof console !== 'undefined' && console.info){
     console.info('[QUICK_CHART_ANALYSIS_TRIGGER]', {
       ticker:item.ticker,
@@ -4061,6 +4079,14 @@ function chartVerificationUiDecision(trace, ticker = ''){
   const verifiedStatuses = new Set(['verified_match', 'likely_match', 'consistent']);
   const mismatchStatuses = new Set(['ticker_mismatch', 'timeframe_mismatch', 'strong_mismatch', 'possible_mismatch', 'stale_state_detected']);
   const untrustedStatuses = new Set(['untrusted_context_mirror', 'chart_verification_untrusted']);
+  if(status === 'source_checking'){
+    return {
+      key:'source_checking',
+      title:'Chart uploaded - checking details',
+      summary:'Chart source is valid. AI chart extraction is running.',
+      detail:'This upload has a valid image source, but no ticker/price/timeframe facts have been extracted yet.'
+    };
+  }
   if(verifiedStatuses.has(status) || (status === 'ai_supported_match' && explicitChartRegionProvenance)){
     return {
       key:'verified_match',
@@ -4118,6 +4144,7 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
     || ['untrusted_context_mirror', 'chart_verification_untrusted', 'chart_mismatch'].includes(status)
     || key === 'chart_mismatch';
   if(['verified_match', 'user_confirmed_match'].includes(key)) return false;
+  if(key === 'source_checking' || status === 'source_checking') return false;
   if(['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) && !hasResolvedTrace) return false;
   if(status === 'pending_chart_native_verification') return false;
   return key === 'uncertain_match'
@@ -4148,12 +4175,16 @@ function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisSta
   const selectedType = String(selectedTrace && (selectedTrace.type || selectedTrace.sourceType || '') || '');
   const selectedPhase = String(selectedTrace && selectedTrace.phase || '');
   const explicitChartRegionProvenance = chartVerificationHasExplicitRegionProvenance(trace);
+  const hasImmediateDecisionTrace = key === 'source_checking'
+    || key === 'uncertain_match'
+    || ['source_checking', 'uncertain_missing_context', 'partial_context_unverified_chart', 'partial_context_timeframe_uncertain', 'indicator_missing', 'indicator_incomplete', 'uncertain_match'].includes(status);
   const hasVerifiedTrace = chartVerificationIsVerifiedStatus(key)
     || chartVerificationIsVerifiedStatus(status)
     || (String(key || '') === 'ai_supported_match' && explicitChartRegionProvenance)
     || (String(status || '') === 'ai_supported_match' && explicitChartRegionProvenance);
   const hasUntrustedTrace = ['untrusted_context_mirror', 'chart_verification_untrusted'].includes(status);
   const hasResolvedTrace = hasVerifiedTrace
+    || hasImmediateDecisionTrace
     || hasUntrustedTrace
     || key === 'chart_mismatch'
     || status === 'chart_mismatch'
@@ -27090,12 +27121,15 @@ function buildPreAiChartVerificationTrace(record = {}, chartImageSource = null){
   );
   return {
     visible:true,
-    status:'pending_chart_native_verification',
+    status:'source_checking',
     severity:'warning',
-    title:'Checking chart details',
-    summary:'Chart image attached. Checking chart details.',
-    evidence:['Chart image attached. Checking chart details.'],
-    missing:['chart-native confirmation'],
+    title:'Chart uploaded - checking details',
+    summary:'Chart source is valid. AI chart extraction is running.',
+    evidence:[
+      `Uploaded image ${currentImageId} is available for ${expectedTicker || 'the current ticker'}.`,
+      'No extracted chart facts are available yet.'
+    ],
+    missing:['extracted chart facts'],
     initialMissingIndicators:[],
     finalMissingIndicators:[],
     summaryDerivedFromFinalState:true,
@@ -27120,11 +27154,9 @@ function buildPreAiChartVerificationTrace(record = {}, chartImageSource = null){
       source:'chart_pre_ai_fast_pass',
       chartImageSource:source,
       hasChart:true,
-      mismatchSeverity:'none',
+      sourceIntegrityValid:true,
       aiAnalysisSuppressed:false,
       suppressionReason:'',
-      canonicalVerdict:'',
-      visualBucket:'',
       expectedTicker
     }
   };
@@ -28086,23 +28118,14 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
     };
   }
   if(!analysis && hasChart){
-    const pendingStatus = fastPass.fastStatus === 'clear_match_candidate'
-      ? 'pending_chart_native_verification'
-      : (fastPass.hasFastFacts ? 'partial_context_unverified_chart' : 'pending_chart_native_verification');
     return {
       visible:true,
-      status:pendingStatus,
+      status:'source_checking',
       severity:'warning',
-      title:pendingStatus === 'pending_chart_native_verification' ? 'Chart verification pending' : 'Chart partially verified',
-      summary:pendingStatus === 'pending_chart_native_verification'
-        ? 'Chart-native confirmation is still pending for the current upload.'
-        : 'Ticker and price are visible, but chart-native confirmation is still pending.',
-      evidence:pendingStatus === 'pending_chart_native_verification'
-        ? ['Chart-native confirmation has not been established yet.']
-        : ['Ticker/price context is visible, but chart-native confirmation is still pending.'],
-      missing:pendingStatus === 'pending_chart_native_verification'
-        ? ['chart-native confirmation']
-        : ['chart-native confirmation'],
+      title:'Chart uploaded - checking details',
+      summary:'Chart source is valid. AI chart extraction is running.',
+      evidence:['No extracted chart facts are available yet.'],
+      missing:['extracted chart facts'],
       initialMissingIndicators:[],
       finalMissingIndicators:[],
       summaryDerivedFromFinalState:true,
@@ -28130,7 +28153,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         ticker:String(safeRecord.ticker || '').trim(),
         source:'chart_verification_fast_pass',
         fastPass,
-        deterministicStatus:pendingStatus,
+        deterministicStatus:'source_checking',
         chartImageSource,
         hasChart,
         mismatchSeverity:'none',
@@ -30368,6 +30391,13 @@ function handleChartSelection(ticker, file){
     record.review.importedFromScreenshot = true;
     const preAiChartTrace = buildPreAiChartVerificationTrace(record, buildChartImageSourceTrace(record.review));
     if(preAiChartTrace){
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[FAST_PASS_IMMEDIATE_START]', {
+          ticker:record.ticker,
+          imageId,
+          chartImageSource:buildChartImageSourceTrace(record.review)
+        });
+      }
       const preAiVerificationRequestId = String(activeRequest && activeRequest.id || '');
       record.review.chartVerificationTrace = cloneData({
         ticker:record.ticker,
@@ -30391,7 +30421,7 @@ function handleChartSelection(ticker, file){
         updatedAt:new Date().toISOString()
       };
       if(typeof console !== 'undefined' && console.info){
-        console.info('[CHART_PRE_AI_FAST_PASS]', {
+        console.info('[FAST_PASS_IMMEDIATE_RESULT]', {
           ticker:record.ticker,
           imageId,
           verificationRequestId:preAiVerificationRequestId,
@@ -30423,6 +30453,15 @@ function handleChartSelection(ticker, file){
       uploadedAt
     });
     commitTickerState();
+    if(preAiChartTrace){
+      queueReviewQuickChartAnalysis(record, {
+        source:'chart_upload',
+        triggerReason:preAiChartTrace.status || 'chart_verification_pending',
+        analysisState:getReviewAnalysisState(record),
+        storedChartVerificationState:getReviewChartVerificationState(record),
+        bypassQueue:true
+      });
+    }
     if(typeof console !== 'undefined' && console.info){
       console.info('[CHART_IMAGE_SOURCE]', {
         ticker:record.ticker,
