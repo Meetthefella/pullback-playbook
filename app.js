@@ -26953,6 +26953,8 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : {};
   const marketData = safeRecord.marketData && typeof safeRecord.marketData === 'object' ? safeRecord.marketData : {};
   const expectedTicker = normaliseVisibleTicker(safeRecord.ticker || '');
+  const trustedTicker = expectedTicker;
+  const trustedTimeframe = '1D';
   const visibleTicker = normaliseVisibleTicker(safeAnalysis.visible_ticker || '');
   const visibleTimeframe = String(safeAnalysis.visible_timeframe || '').trim();
   const visiblePrice = chartVerificationNumberOrNull(safeAnalysis.visible_latest_price);
@@ -27019,6 +27021,20 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
   let clearMatchRejectedReason = '';
   const fastPassEvidence = [];
   let finalMismatchDecision = 'none';
+
+  if(typeof console !== 'undefined' && console.info && debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
+    console.info('[CHART_EVIDENCE_SOURCE]', {
+      extractedTicker:visibleTicker,
+      extractedPrice:visiblePrice,
+      extractedTimeframe:visibleTimeframe,
+      trustedTicker,
+      trustedPrice,
+      trustedTimeframe,
+      usedFallbackTicker:false,
+      usedFallbackPrice:false,
+      usedFallbackTimeframe:false
+    });
+  }
 
   if(currentImageId && analysisImageId && currentImageId !== analysisImageId){
     fastStatus = 'stale_state_detected';
