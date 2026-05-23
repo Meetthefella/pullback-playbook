@@ -2290,9 +2290,10 @@ function runAiContractAssertions(){
     throw new Error('Untrusted merged chart panels must not render as verified.');
   }
   const manualActionsSource = extractFunctionSource(appSource, 'chartVerificationShouldShowManualActions');
-  if(!manualActionsSource.includes("['untrusted_context_mirror', 'chart_verification_untrusted'].includes(status)")
+  if(!manualActionsSource.includes("manualEligibleStatuses")
+    || !manualActionsSource.includes("timeframeMissingButExpected")
     || !manualActionsSource.includes("aiAnalysisSuppressed")
-    || !manualActionsSource.includes("['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) && !hasResolvedTrace")){
+    || !manualActionsSource.includes("['queued', 'running'].includes(normalizedQuickStatus) && !hasResolvedTrace")){
     throw new Error('Manual chart override logic must keep resolved untrusted states visible after quick-analysis completion.');
   }
   const manualConfirmSource = extractFunctionSource(appSource, 'confirmReviewChartMatchesCurrentTicker');
@@ -3187,6 +3188,27 @@ function runAiContractAssertions(){
   }, 'LIN');
   if(mismatchManualDecision.key !== 'chart_mismatch' || evidenceSandbox.chartVerificationShouldShowManualActions(mismatchManualDecision, {status:'ticker_mismatch'}, 'committed', true) !== true){
     throw new Error('Chart mismatch states must keep Replace chart and Confirm chart actions visible.');
+  }
+  const incompleteManualDecision = evidenceSandbox.chartVerificationUiDecision({
+    status:'uncertain_missing_context',
+    trustedFacts:{ticker:'LIN', expected_timeframe:'1D', latest_price:506.07},
+    extractedFacts:{visible_ticker:'LIN', visible_timeframe:'', visible_latest_price:506.07}
+  }, 'LIN');
+  if(incompleteManualDecision.key !== 'uncertain_match' || evidenceSandbox.chartVerificationShouldShowManualActions(
+    incompleteManualDecision,
+    {
+      status:'uncertain_missing_context',
+      trustedFacts:{ticker:'LIN', expected_timeframe:'1D', latest_price:506.07},
+      extractedFacts:{visible_ticker:'LIN', visible_timeframe:'', visible_latest_price:506.07}
+    },
+    'committed',
+    true
+  ) !== true){
+    throw new Error('Incomplete chart verification with missing timeframe must keep manual confirmation controls visible.');
+  }
+  const sourceCheckingDecision = evidenceSandbox.chartVerificationUiDecision({status:'source_checking'}, 'LIN');
+  if(evidenceSandbox.chartVerificationShouldShowManualActions(sourceCheckingDecision, {status:'source_checking'}, 'running', true) !== false){
+    throw new Error('Source-checking states must hide manual actions while extraction is still running.');
   }
   const userConfirmedDecision = evidenceSandbox.chartVerificationUiDecision({
     status:'manually_verified',
@@ -4143,6 +4165,121 @@ function runPlanSemanticsAssertions(){
   }
 }
 
+function runTrackPresentationAuthorityAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const authoritySandbox = {
+    console,
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid','monitor'].includes(safe)) return safe === 'monitor' ? 'watch' : safe;
+      return 'watch';
+    },
+    normalizeVisualBucketForPairing(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(['entry','near_entry','diminishing','avoid'].includes(safe)) return safe;
+      return 'monitor';
+    },
+    globalVerdictLabel(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    }
+  };
+  vm.createContext(authoritySandbox);
+  [
+    'resolvePresentationTone',
+    'terminalAvoidEvidenceForReviewCopy',
+    'provisionalPlanConfirmationCopy',
+    'sanitizeNonTerminalPlanCopy',
+    'resolveTrackCardVisibleModel'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), authoritySandbox, {filename:`app.js#${functionName}`});
+  });
+  const model = authoritySandbox.resolveTrackCardVisibleModel({
+    ticker:'LIN'
+  }, {
+    canonicalVerdict:'near_entry',
+    visualBucket:'monitor',
+    tone:'monitor',
+    badgeLabel:'Near Entry',
+    planVisible:false,
+    planStatus:'valid',
+    mainBlocker:'Low-priority watch - needs structure repair.',
+    debug:{
+      resolvedState:{
+        viability:'low_priority',
+        hasProvisionalPriceablePlan:true
+      },
+      derivedStates:{
+        structureState:'strong',
+        structureEligibility:'alive',
+        bounceState:'attempt',
+        volumeState:'weak'
+      }
+    }
+  });
+  if(model.canonicalVerdict !== 'near_entry' || model.visibleBucket !== 'near_entry' || model.tone !== 'near_entry' || model.badgeLabel !== 'Near Entry'){
+    throw new Error('Track visible model must promote canonical near_entry to Near Entry tone and badge even when internal visualBucket is monitor.');
+  }
+  if(!/lower priority because volume is weak/i.test(String(model.headline || ''))){
+    throw new Error('Track visible model must explain lower-priority weak volume without contradicting Near Entry.');
+  }
+  if(!/Provisional plan exists - waiting for confirmation/i.test(String(model.planSummary || ''))){
+    throw new Error('Track visible model must explicitly say a provisional plan exists for weak-volume Near Entry states.');
+  }
+  if(/needs structure repair/i.test(String(model.headline || '')) || /monitor/i.test(String(model.headline || ''))){
+    throw new Error('Track visible model must not expose stale structure-repair or Monitor contradiction for alive strong Near Entry setups.');
+  }
+  const nonVolumeLowPriorityModel = authoritySandbox.resolveTrackCardVisibleModel({
+    ticker:'LIN'
+  }, {
+    canonicalVerdict:'near_entry',
+    visualBucket:'monitor',
+    tone:'monitor',
+    badgeLabel:'Near Entry',
+    planVisible:false,
+    planStatus:'valid',
+    mainBlocker:'Low-priority watch - needs structure repair.',
+    debug:{
+      resolvedState:{
+        viability:'low_priority',
+        viabilityBranchReason:'Confirmation quality is still developing.',
+        hasPriceablePlan:true
+      },
+      derivedStates:{
+        structureState:'strong',
+        structureEligibility:'alive',
+        bounceState:'attempt',
+        volumeState:'normal'
+      }
+    }
+  });
+  if(/volume is weak/i.test(String(nonVolumeLowPriorityModel.headline || ''))){
+    throw new Error('Track visible model must not blame low-priority Near Entry states on weak volume unless volume is actually weak.');
+  }
+  if(!/lower priority|confirmation/i.test(String(nonVolumeLowPriorityModel.headline || ''))){
+    throw new Error('Track visible model must use neutral confirmation/priority wording for non-volume low-priority Near Entry states.');
+  }
+  if(/needs structure repair/i.test(String(nonVolumeLowPriorityModel.headline || '')) || /monitor/i.test(String(nonVolumeLowPriorityModel.headline || ''))){
+    throw new Error('Track visible model must not expose stale structure-repair or Monitor wording for non-volume low-priority Near Entry states.');
+  }
+  if(!/Valid plan calculations exist, but the trade is not actionable yet/i.test(String(nonVolumeLowPriorityModel.planSummary || ''))){
+    throw new Error('Track visible model must explicitly say valid plan calculations exist when planStatus is valid but planVisible is false.');
+  }
+  if(!/provisional plan|valid plan calculations exist|waiting for confirmation/i.test(String(model.planSummary || ''))){
+    throw new Error('Track visible model must describe valid provisional plans as pending confirmation, not missing.');
+  }
+  if(!/const trackVisibleModel = resolveTrackCardVisibleModel\(record, simplifiedState\);/.test(appSource)
+    || !/decision_summary:String\(trackVisibleModel\.headline/.test(appSource)
+    || !/trackVisibleModel\.planSummary/.test(appSource)){
+    throw new Error('Track card render must source visible state from resolveTrackCardVisibleModel rather than layered legacy fields.');
+  }
+}
+
+runTrackPresentationAuthorityAssertions();
 runPlanSemanticsAssertions();
 
 console.log(`Resolver gate assertions passed (${results.length} cases).`);
@@ -4150,4 +4287,5 @@ console.log('Review projection invariant assertions passed.');
 console.log('Watchlist long-press summary assertions passed.');
 console.log('Simplified state pipeline assertions passed.');
 console.log('AI chart-coach contract assertions passed.');
+console.log('Track presentation authority assertions passed.');
 console.log('Plan source semantics assertions passed.');

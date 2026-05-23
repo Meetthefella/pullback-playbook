@@ -4132,25 +4132,63 @@ function chartVerificationShouldShowManualActions(decision, trace = {}, quickCha
   if(!hasChartScreenshot) return false;
   const key = String(decision && decision.key || '');
   const status = String(trace && trace.status || '');
+  const normalizedQuickStatus = String(quickChartAnalysisStatus || '');
   const aiAnalysisSuppressed = !!(trace && trace.aiAnalysisSuppressed === true);
   const explicitChartRegionProvenance = chartVerificationHasExplicitRegionProvenance(trace);
+  const visibleTimeframe = String(
+    (trace && trace.extractedFacts && trace.extractedFacts.visible_timeframe)
+    || (trace && trace.visible_timeframe)
+    || (trace && trace.extractedTimeframe)
+    || ''
+  ).trim();
+  const trustedTimeframe = String(
+    (trace && trace.trustedFacts && trace.trustedFacts.expected_timeframe)
+    || ''
+  ).trim();
+  const timeframeMissingButExpected = !!(
+    trustedTimeframe
+    && !/^n\/?a$/i.test(trustedTimeframe)
+    && (!visibleTimeframe || /^n\/?a$/i.test(visibleTimeframe))
+  );
   const hasVerifiedTrace = chartVerificationIsVerifiedStatus(key)
     || chartVerificationIsVerifiedStatus(status)
     || (String(key || '') === 'ai_supported_match' && explicitChartRegionProvenance)
     || (String(status || '') === 'ai_supported_match' && explicitChartRegionProvenance);
+  const manualEligibleStatuses = new Set([
+    'chart_mismatch',
+    'ticker_mismatch',
+    'timeframe_mismatch',
+    'timeframe_uncertain',
+    'strong_mismatch',
+    'possible_mismatch',
+    'minor_drift',
+    'indicator_value_mismatch',
+    'indicator_missing',
+    'indicator_incomplete',
+    'indicator_partial',
+    'partial_context_timeframe_uncertain',
+    'partial_context_unverified_chart',
+    'uncertain_missing_context',
+    'uncertain_match',
+    'chart_verification_untrusted',
+    'untrusted_context_mirror'
+  ]);
+  const manualRequestedByStatus = manualEligibleStatuses.has(status);
+  const manualRequestedByDecision = key === 'uncertain_match' || key === 'chart_mismatch';
   const hasResolvedTrace = hasVerifiedTrace
     || aiAnalysisSuppressed
-    || ['untrusted_context_mirror', 'chart_verification_untrusted', 'chart_mismatch'].includes(status)
+    || manualRequestedByStatus
     || key === 'chart_mismatch';
   if(['verified_match', 'user_confirmed_match'].includes(key)) return false;
   if(key === 'likely_match' || status === 'likely_match') return false;
-  if(key === 'source_checking' || status === 'source_checking') return false;
-  if(['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) && !hasResolvedTrace) return false;
+  if((key === 'source_checking' || status === 'source_checking') && ['queued', 'running'].includes(normalizedQuickStatus)) return false;
+  if(['queued', 'running'].includes(normalizedQuickStatus) && !hasResolvedTrace) return false;
   if(status === 'pending_chart_native_verification') return false;
-  return key === 'uncertain_match'
-    || key === 'chart_mismatch'
-    || aiAnalysisSuppressed
-    || ['untrusted_context_mirror', 'chart_verification_untrusted'].includes(status);
+  if(key === 'source_checking' || status === 'source_checking') return true;
+  return manualRequestedByDecision
+    || manualRequestedByStatus
+    || timeframeMissingButExpected
+    || aiAnalysisSuppressed;
 }
 
 function chartVerificationIsVerifiedStatus(status = ''){
@@ -9336,6 +9374,7 @@ function renderWatchlistCardElement(record, options = {}){
     ? simplifiedState.debug.resolvedState
     : null;
   const canonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  const trackVisibleModel = resolveTrackCardVisibleModel(record, simplifiedState);
   const trackPresentation = resolveTrackPresentationModel(record, globalVerdict || resolveGlobalVerdict(record), lifecycleSnapshot, priority);
   const trackStateDivergence = collectStateDivergence(record, 'track.render', simplifiedState, trackPresentation, [
     'canonicalVerdict',
@@ -9347,8 +9386,8 @@ function renderWatchlistCardElement(record, options = {}){
     'entryGatePass',
     'nearEntryGatePass'
   ]);
-  const visualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || simplifiedState.presentationBucket || trackPresentation.presentationBucket || 'monitor');
-  const tone = String(simplifiedState.tone || trackPresentation.presentationTone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const visualBucket = normalizeVisualBucketForPairing(trackVisibleModel.visibleBucket || simplifiedState.visualBucket || simplifiedState.presentationBucket || trackPresentation.presentationBucket || 'monitor');
+  const tone = String(trackVisibleModel.tone || simplifiedState.tone || trackPresentation.presentationTone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
   const badgeClass = simplifiedVisualBadgeClass(visualBucket);
   const cardClass = simplifiedVisualCardClass(visualBucket);
   const visualStateKey = canonicalVerdict === 'entry'
@@ -9375,10 +9414,10 @@ function renderWatchlistCardElement(record, options = {}){
     toneClass:className,
     styleAttr:'',
     badge:{
-      text:String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch'),
+      text:String(trackVisibleModel.badgeLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch'),
       className:badgeClass
     },
-    decision_summary:String(trackAuthoritativeState.mainBlocker || trackAuthoritativeState.actionLabel || '').trim(),
+    decision_summary:String(trackVisibleModel.headline || trackAuthoritativeState.mainBlocker || trackAuthoritativeState.actionLabel || '').trim(),
     watchlist_presentation_source:'simplified_state_pipeline',
     simplifiedTrackCard:true
   };
@@ -9402,6 +9441,11 @@ function renderWatchlistCardElement(record, options = {}){
       tone:simplifiedState.tone,
       badgeLabel:simplifiedState.badgeLabel,
       mainBlocker:simplifiedState.mainBlocker,
+      visibleBucket:trackVisibleModel.visibleBucket,
+      visibleTone:trackVisibleModel.tone,
+      visibleBadgeLabel:trackVisibleModel.badgeLabel,
+      visibleHeadline:trackVisibleModel.headline,
+      planSummary:trackVisibleModel.planSummary,
       trackPresentationBucket:trackPresentation.presentationBucket,
       weakWatchDowngradeApplied:simplifiedState.weakWatchDowngradeApplied === true,
       weakWatchDowngradeReasonCount:Array.isArray(simplifiedState.weakWatchDowngradeReasons) ? simplifiedState.weakWatchDowngradeReasons.length : 0
@@ -9462,12 +9506,12 @@ function renderWatchlistCardElement(record, options = {}){
   const liveRefreshNote = liveRefreshPending
     ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
     : '';
-  const decisionSummary = watchlistVisualState.decision_summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || trackPresentation.presentationReason || '';
+  const decisionSummary = watchlistVisualState.decision_summary || trackVisibleModel.headline || simplifiedState.mainBlocker || simplifiedState.actionLabel || '';
   const refreshButtonLabel = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
   const refreshButtonDisabled = manualRefreshBusy ? ' disabled' : '';
-  const diagnosticPlanBlocker = simplifiedState.planVisible
+  const diagnosticPlanBlocker = trackVisibleModel.planVisible
     ? (simplifiedState.planStatus || 'valid')
-    : (simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.');
+    : (trackVisibleModel.planSummary || simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.');
   const isActionableSoonState = canonicalVerdict === 'near_entry' || visualBucket === 'diminishing';
   const compactPrimaryPlanHeadline = isActionableSoonState
     && diagnosticPlanBlocker
@@ -9508,8 +9552,8 @@ function renderWatchlistCardElement(record, options = {}){
     renderedBucket,
     presentationBucket,
     tone,
-    badgeLabel:simplifiedState.badgeLabel || '',
-    mainBlocker:simplifiedState.mainBlocker || '',
+    badgeLabel:trackVisibleModel.badgeLabel || simplifiedState.badgeLabel || '',
+    mainBlocker:trackVisibleModel.headline || simplifiedState.mainBlocker || '',
     primaryBlockerSource:globalVerdict && globalVerdict.primary_blocker_source || '',
     renderSource,
     sourceOfTruthVisualBucket:renderedBucket,
@@ -9535,12 +9579,12 @@ function renderWatchlistCardElement(record, options = {}){
     hardTerminalAvoid:false,
     explicitInvalidationReason:globalVerdict && globalVerdict.explicit_invalidation_reason || '',
     sourceFields:{
-      badge:'simplifiedState.badgeLabel',
-      headlineCopy:'simplifiedState.mainBlocker/actionLabel',
+      badge:'resolveTrackCardVisibleModel.badgeLabel',
+      headlineCopy:'resolveTrackCardVisibleModel.headline',
       actionGuidance:'simplifiedState.actionLabel',
-      shellColour:'simplifiedState.visualBucket/tone',
-      leftAccentColour:'simplifiedState.visualBucket/tone',
-      sectionBucket:'simplifiedState.visualBucket'
+      shellColour:'resolveTrackCardVisibleModel.visibleBucket/tone',
+      leftAccentColour:'resolveTrackCardVisibleModel.visibleBucket/tone',
+      sectionBucket:'resolveTrackCardVisibleModel.visibleBucket'
     },
     fromStoredFields:false,
     fromResolvedStateBundleCache:false,
@@ -16212,6 +16256,109 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     legacyBucketRemapped:legacyBucketResolution.remapped === true,
     bucketRemapReason:legacyBucketResolution.reason || '',
     visualTone
+  };
+}
+
+function resolveTrackCardVisibleModel(record, simplifiedState = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  const debug = simplified.debug && typeof simplified.debug === 'object' ? simplified.debug : {};
+  const resolved = debug.resolvedState && typeof debug.resolvedState === 'object' ? debug.resolvedState : {};
+  const derived = debug.derivedStates && typeof debug.derivedStates === 'object' ? debug.derivedStates : {};
+  const canonicalVerdict = normalizeGlobalVerdictKey(simplified.canonicalVerdict || 'watch');
+  const internalVisualBucket = normalizeVisualBucketForPairing(simplified.visualBucket || simplified.presentationBucket || 'monitor');
+  const structureState = String(derived.structureState || simplified.structureState || '').trim().toLowerCase();
+  const structureEligibility = String(derived.structureEligibility || simplified.structureEligibility || resolved.structure_eligibility || resolved.structureEligibility || '').trim().toLowerCase();
+  const bounceState = String(derived.bounceState || simplified.bounceState || resolved.bounce_state || '').trim().toLowerCase();
+  const volumeState = String(derived.volumeState || simplified.volumeState || resolved.volume_state || '').trim().toLowerCase();
+  const viability = String(resolved.viability || '').trim().toLowerCase();
+  const baseSummary = String(simplified.mainBlocker || simplified.actionLabel || '').trim();
+  const hasProvisionalPlan = resolved.hasProvisionalPriceablePlan === true || resolved.has_provisional_priceable_plan === true;
+  const hasPriceablePlan = resolved.hasPriceablePlan === true || resolved.has_priceable_plan === true;
+  const validPlan = String(simplified.planStatus || '').trim().toLowerCase() === 'valid';
+  const planVisible = simplified.planVisible === true;
+  const aliveStructure = structureEligibility === 'alive' || ['strong','intact','developing_clean'].includes(structureState);
+  const strongStructure = ['strong','intact','developing_clean'].includes(structureState);
+  const bounceAttempt = ['attempt','early','developing'].includes(bounceState);
+  const weakVolume = ['weak','light','low','below_average'].includes(volumeState);
+  const lowerPriority = viability === 'low_priority' || weakVolume;
+  const rawLowPriorityReason = String(
+    resolved.viabilityBranchReason
+    || resolved.viability_branch_reason
+    || resolved.viability_reason
+    || ''
+  ).trim();
+  const specificLowPriorityReason = rawLowPriorityReason
+    && !/needs structure repair/i.test(rawLowPriorityReason)
+    && !( !weakVolume && /volume/i.test(rawLowPriorityReason))
+      ? rawLowPriorityReason.replace(/\.*\s*$/, '')
+      : '';
+  const visibleBucket = canonicalVerdict === 'entry'
+    ? 'entry'
+    : (canonicalVerdict === 'near_entry'
+      ? 'near_entry'
+      : (canonicalVerdict === 'avoid'
+        ? 'avoid'
+        : (internalVisualBucket === 'diminishing' ? 'diminishing' : 'monitor')));
+  const visibleToneMeta = resolvePresentationTone({
+    presentationBucket:visibleBucket,
+    finalVerdict:canonicalVerdict,
+    structureState
+  });
+  const setupContext = {
+    ...resolved,
+    ...derived,
+    hasProvisionalPriceablePlan:hasProvisionalPlan,
+    has_provisional_priceable_plan:hasProvisionalPlan,
+    hasPriceablePlan:hasPriceablePlan || validPlan,
+    has_priceable_plan:hasPriceablePlan || validPlan,
+    nearEntryGatePass:simplified.nearEntryGatePass === true || resolved.near_entry_gate_pass === true,
+    near_entry_gate_pass:simplified.nearEntryGatePass === true || resolved.near_entry_gate_pass === true,
+    bounceState,
+    bounce_state:bounceState,
+    structureEligibility,
+    structure_eligibility:structureEligibility
+  };
+
+  let headline = baseSummary;
+  if(canonicalVerdict === 'near_entry'){
+    if(weakVolume){
+      headline = 'Near Entry - lower priority because volume is weak.';
+    }else if(viability === 'low_priority'){
+      headline = specificLowPriorityReason
+        ? `Near Entry - lower priority. ${specificLowPriorityReason}.`
+        : 'Near Entry - lower priority until confirmation improves.';
+    }else if(!headline || /monitor/i.test(headline)){
+      headline = 'Near Entry - waiting for confirmation.';
+    }
+  }else if(aliveStructure && strongStructure && bounceAttempt && weakVolume){
+    headline = 'Setup is structurally alive, but volume is weak so priority is reduced.';
+  }else if(aliveStructure && strongStructure && bounceAttempt && /needs structure repair/i.test(headline)){
+    headline = weakVolume
+      ? 'Setup is structurally alive, but volume is weak so priority is reduced.'
+      : 'Setup is structurally alive, but confirmation is still pending.';
+  }
+
+  let planSummary = '';
+  if(!planVisible && (validPlan || hasPriceablePlan || hasProvisionalPlan)){
+    planSummary = hasProvisionalPlan
+      ? 'Provisional plan exists - waiting for confirmation.'
+      : 'Valid plan calculations exist, but the trade is not actionable yet.';
+  }else if(!planVisible){
+    planSummary = sanitizeNonTerminalPlanCopy(baseSummary, setupContext);
+  }
+
+  return {
+    canonicalVerdict,
+    visibleBucket,
+    tone:String(visibleToneMeta.presentationTone || visibleBucket || 'monitor').trim().toLowerCase(),
+    badgeLabel:visibleToneMeta.badgeLabel || simplified.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch',
+    headline:String(headline || '').trim(),
+    planSummary:String(planSummary || '').trim(),
+    lowerPriority,
+    planVisible,
+    planStatus:String(simplified.planStatus || '').trim().toLowerCase(),
+    internalVisualBucket
   };
 }
 
