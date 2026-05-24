@@ -4476,6 +4476,12 @@ function runTrackPresentationAuthorityAssertions(){
   if(/Final Verdict Rendered|Canonical Final Verdict|Track Visual Bucket|Scan Visual Bucket|Presentation Reason/.test(appSource)){
     throw new Error('Watchlist debug output must not print redundant flat Track state aliases.');
   }
+  if(!/if\(!showExpired\)\{\s*purgeExpiredWatchlistEntries\(\);/s.test(appSource)){
+    throw new Error('Show Expired watchlist filter must not purge expired entries before rendering.');
+  }
+  if(!/if\(startupCoordinator\.renderedTabs\.track && !forceFullRender\)\{\s*requestWatchlistRender\(\{\s*source:'track_tab_activation',\s*includeFocusQueue:true/s.test(appSource)){
+    throw new Error('Track focus should request a Track render refresh instead of silently returning on cached state.');
+  }
 }
 
 runTrackPresentationAuthorityAssertions();

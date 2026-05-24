@@ -6033,7 +6033,13 @@ function handleWorkspaceTabChange(tab){
       || startupCoordinator.pendingWatchlistPatchFallback === true
       || versionStale
     );
-    if(startupCoordinator.renderedTabs.track && !forceFullRender) return;
+    if(startupCoordinator.renderedTabs.track && !forceFullRender){
+      requestWatchlistRender({
+        source:'track_tab_activation',
+        includeFocusQueue:true
+      });
+      return;
+    }
     if(forceFullRender && PP_PERF_DEBUG){
       console.debug('[PP_PERF] track_open_forced_full_render_dirty', {
         watchlistDirty,
@@ -10263,7 +10269,9 @@ function prepareWatchlistRenderModel(source = 'watchlist_render', options = {}){
     let stepStart = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     syncWatchlistLifecycleBeforeRender('auto_recompute');
     stepStart = markStep('syncLifecycle', stepStart);
-    purgeExpiredWatchlistEntries();
+    if(!showExpired){
+      purgeExpiredWatchlistEntries();
+    }
     stepStart = markStep('purgeExpired', stepStart);
     let gatingChanged = false;
     watchlistTickerRecords().forEach(record => {
