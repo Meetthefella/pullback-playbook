@@ -8719,96 +8719,62 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
     near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true
   });
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Final Decision', [
-    {label:'App Version', value:APP_VERSION},
-    {label:'UI State Source', value:globalVisual.ui_state_source || 'n/a'},
-    {label:'Watchlist Presentation Source', value:globalVisual.watchlist_presentation_source || 'n/a'},
-    {label:'Final Verdict Rendered', value:globalVisual.final_verdict_rendered || globalVisual.finalVerdict || 'n/a'},
-    {label:'Bucket Rendered', value:visualBucketLabel(globalVisual.bucket_rendered || globalVisual.bucket || 'monitor')},
-    {label:'Dead Guard Applied', value:globalVisual.dead_guard_applied ? 'true' : 'false'},
-    {label:'Dead Trigger Source', value:globalVisual.dead_trigger_source || '(none)'},
-    {label:'Explicit Invalidation Reason', value:globalVisual.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)'},
-    {label:'Structure->Label Source', value:globalVisual.structure_to_label_mapping_source || globalVerdict.structure_to_label_mapping_source || '(none)'},
-    {label:'Lifecycle Drop Reason', value:globalVisual.lifecycle_drop_reason || globalVerdict.lifecycle_drop_reason || '(none)'},
-    {label:'Avoid Allowed By Structure Guard', value:(typeof globalVisual.avoid_allowed_by_structure_consistency_guard === 'boolean'
-      ? (globalVisual.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')
-      : (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false'))},
-    {label:'Conflicting Legacy State Detected', value:globalVisual.conflicting_legacy_state_detected ? 'true' : 'false'},
-    {label:'Final Verdict', value:globalVerdict.final_verdict || 'n/a'},
-    {label:'Canonical Final Verdict', value:globalVisual.canonicalFinalVerdict || '(none)'},
-    {label:'canonicalVerdict', value:'Trading decision state'},
-    {label:'canonicalVerdict Value', value:globalVisual.canonicalVerdict || globalVisual.finalVerdict || globalVisual.final_verdict || globalVerdict.final_verdict || 'n/a'},
-    {label:'Tone', value:globalVerdict.tone || 'n/a'},
-    {label:'Bucket', value:visualBucketLabel(
-      lifecycleSnapshot.bucket || globalVerdict.bucket || 'monitor',
-      globalVerdict.final_verdict || globalVerdict.finalVerdict || ''
-    )},
-    {label:'Viability', value:globalVerdict.viability || '(none)'},
-    {label:'visualBucket', value:'Presentation / lifecycle tone'},
-    {label:'Visual Bucket', value:visualBucketLabel(globalVisual.presentationBucket || 'monitor')},
-    {label:'visualBucketReason', value:visualBucketReason(
-      globalVisual.canonicalVerdict || globalVisual.finalVerdict || globalVisual.final_verdict || globalVerdict.final_verdict || '',
-      globalVisual.presentationBucket || globalVisual.visualBucket || globalVisual.bucket || 'monitor',
-      {
-        terminalAvoidApplied:globalVerdict.terminal_avoid_applied === true || globalVisual.terminal_avoid_applied === true,
-        hardTerminalAvoid:globalVisual.hardTerminalAvoid === true,
-        lifecycleState:lifecycleSnapshot.state,
-        viability:globalVerdict.viability || '',
-        structureState:globalVerdict.structure_state || derivedStates.structureState || '',
-        setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
-        priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
-        bounce:derivedStates.bounceState || ''
-      }
-    )},
-    {label:'Track Visual Bucket', value:visualBucketLabel(globalVisual.trackPresentationBucket || globalVisual.presentationBucket || 'monitor')},
-    {label:'Scan Visual Bucket', value:visualBucketLabel(globalVisual.scanPresentationBucket || 'monitor')},
-    {label:'Scan/Track Mismatch Detected', value:globalVisual.scanTrackMismatchDetected ? 'true' : 'false'},
-    {label:'Presentation Tone', value:globalVisual.presentationTone || '(none)'},
-    {label:'Presentation Badge', value:globalVisual.presentationBadge || '(none)'},
-    {label:'Badge Label', value:globalVisual.badgeLabel || globalVisual.presentationBadge || '(none)'},
-    {label:'Card Class', value:globalVisual.cardClass || globalVisual.className || globalVisual.toneClass || '(none)'},
-    {label:'Badge Class', value:globalVisual.badgeClass || (globalVisual.badge && globalVisual.badge.className) || '(none)'},
-    ...(simplifiedTrackDebugSource ? [] : [
-      {label:'Legacy Bucket Input', value:globalVisual.legacyBucketInput || '(none)'},
-      {label:'Legacy Bucket Remapped', value:globalVisual.legacyBucketRemapped ? 'true' : 'false'},
-      {label:'Remap Reason', value:globalVisual.bucketRemapReason || '(none)'}
-    ]),
-    {label:'Presentation Reason', value:globalVisual.presentationReason || '(none)'},
-    {label:'Terminal Avoid Reason', value:globalVisual.terminalAvoidReason || '(none)'},
-    {label:'Diminishing Reason', value:globalVisual.diminishingReason || '(none)'},
-    {label:'Structure Eligibility', value:globalVisual.structureEligibility || globalVerdict.structure_eligibility || '(none)'},
-    {label:'Active Track Eligible', value:globalVisual.activeTrackEligible ? 'true' : 'false'},
-    {label:'Diminishing Track Eligible', value:globalVisual.diminishingTrackEligible ? 'true' : 'false'},
-    {label:'Failed Reclaim Track Evidence', value:globalVisual.failedReclaimTrackEvidence ? 'true' : 'false'},
-    {label:'Avoid Track Eligible', value:globalVisual.avoidTrackEligible ? 'true' : 'false'},
-    {label:'Priority Score', value:Number.isFinite(globalVisual.priorityScore) ? String(globalVisual.priorityScore) : String(priority.score)},
-    {label:'Priority Sort Value', value:Number.isFinite(globalVisual.prioritySortValue) ? String(globalVisual.prioritySortValue) : String(priority.score)},
-    {label:'Entry Hold Bound', value:globalVisual.entryConditionsHoldBound === true ? 'true' : 'false'},
-    {label:'Current Resolver Verdict', value:globalVisual.currentResolverVerdict || '(none)'},
-    {label:'Stored Lifecycle State', value:globalVisual.storedLifecycleState || '(none)'},
-    {label:'Previous Lifecycle State', value:globalVisual.previousLifecycleState || '(none)'},
-    ...(simplifiedTrackDebugSource ? [] : [
-      {label:'Stale Avoid Suppressed', value:globalVisual.staleAvoidSuppressed ? 'true' : 'false'},
-      {label:'Stale Reject Suppressed', value:globalVisual.staleRejectSuppressed ? 'true' : 'false'}
-    ]),
-    {label:'Structural Alive At Refresh', value:typeof globalVisual.structuralAliveAtRefresh === 'boolean' ? (globalVisual.structuralAliveAtRefresh ? 'true' : 'false') : '(none)'},
-    {label:'Avoid Allowed By Structure Guard', value:typeof globalVisual.avoidAllowedByStructureGuard === 'boolean' ? (globalVisual.avoidAllowedByStructureGuard ? 'true' : 'false') : '(none)'},
-    {label:'Explicit Invalidation Reason (Effective)', value:globalVisual.explicitInvalidationReason || '(none)'},
-    {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || 'n/a'},
-    {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
-    {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
-    {label:'Tracked', value:globalVerdict.tracked ? 'true' : 'false'},
-    {label:'Downgrade Applied', value:globalVerdict.downgrade_applied ? 'true' : 'false'},
-    {label:'Downgrade Reason', value:globalVerdict.downgrade_reason || 'n/a'},
-    {label:'Refresh Demote Attempted', value:lifecycleSnapshot.refresh_demote_attempted || 'false'},
-    {label:'Refresh Demote Reason', value:lifecycleSnapshot.refresh_demote_reason || '(none)'},
-    {label:'Structural Alive At Refresh', value:lifecycleSnapshot.structural_alive_at_refresh || 'n/a'},
-    {label:'Avoid Allowed By Structure Gate', value:lifecycleSnapshot.avoid_allowed_by_structure_gate || 'n/a'},
-    {label:'Explicit Invalidation Reason', value:lifecycleSnapshot.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)'},
-    {label:'Lifecycle Drop Reason', value:lifecycleSnapshot.lifecycle_drop_reason || globalVerdict.lifecycle_drop_reason || '(none)'},
-    {label:'Avoid Allowed By Structure Consistency Guard', value:lifecycleSnapshot.avoid_allowed_by_structure_consistency_guard || (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')},
-    {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
-    {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
+  const trackDebug = globalVisual.trackDebug && typeof globalVisual.trackDebug === 'object' ? globalVisual.trackDebug : {};
+  const visibleModel = trackDebug.visibleModel && typeof trackDebug.visibleModel === 'object' ? trackDebug.visibleModel : {};
+  const resolverTrace = trackDebug.resolverTrace && typeof trackDebug.resolverTrace === 'object' ? trackDebug.resolverTrace : {};
+  const planTrace = trackDebug.planTrace && typeof trackDebug.planTrace === 'object' ? trackDebug.planTrace : {};
+  const gateTrace = trackDebug.gateTrace && typeof trackDebug.gateTrace === 'object' ? trackDebug.gateTrace : {};
+  const lifecycleTrace = trackDebug.lifecycleTrace && typeof trackDebug.lifecycleTrace === 'object' ? trackDebug.lifecycleTrace : {};
+  const staleViabilityBranchReason = /needs structure repair/i.test(String(resolverTrace.viabilityBranchReason || ''))
+    && resolverTrace.structureEligibility === 'alive'
+    && ['strong','intact'].includes(String(resolverTrace.structureState || '').toLowerCase());
+  const safeViabilityBranchReason = staleViabilityBranchReason
+    ? 'Low-priority watch - confirmation still required. (stale branch reason suppressed)'
+    : String(resolverTrace.viabilityBranchReason || '(none)');
+  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Track Debug | visibleModel', [
+    {label:'canonicalVerdict', value:visibleModel.canonicalVerdict || '(none)'},
+    {label:'visibleBucket', value:visualBucketLabel(visibleModel.visibleBucket || 'monitor', visibleModel.canonicalVerdict || '')},
+    {label:'tone', value:visibleModel.tone || '(none)'},
+    {label:'badgeLabel', value:visibleModel.badgeLabel || '(none)'},
+    {label:'headline', value:visibleModel.headline || '(none)'},
+    {label:'primaryReason', value:visibleModel.primaryReason || '(none)'},
+    {label:'planSummary', value:visibleModel.planSummary || '(none)'}
+  ])}${renderDebugSectionMarkup('Track Debug | resolverTrace', [
+    {label:'baseResolverVerdict', value:resolverTrace.baseResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || 'n/a'},
+    {label:'viability', value:resolverTrace.viability || '(none)'},
+    {label:'viabilityBranchId', value:resolverTrace.viabilityBranchId || '(none)'},
+    {label:'viabilityBranchReason', value:safeViabilityBranchReason},
+    {label:'structureEligibility', value:resolverTrace.structureEligibility || '(none)'},
+    {label:'structureState', value:resolverTrace.structureState || '(none)'},
+    {label:'bounceState', value:resolverTrace.bounceState || '(none)'},
+    {label:'volumeState', value:resolverTrace.volumeState || '(none)'},
+    {label:'priceabilityState', value:resolverTrace.priceabilityState || '(none)'}
+  ])}${renderDebugSectionMarkup('Track Debug | planTrace', [
+    {label:'planVisible', value:planTrace.planVisible === true ? 'true' : 'false'},
+    {label:'planStatus', value:planTrace.planStatus || '(none)'},
+    {label:'hasPriceablePlan', value:planTrace.hasPriceablePlan === true ? 'true' : (planTrace.hasPriceablePlan === false ? 'false' : '(none)')},
+    {label:'hasProvisionalPriceablePlan', value:planTrace.hasProvisionalPriceablePlan === true ? 'true' : (planTrace.hasProvisionalPriceablePlan === false ? 'false' : '(none)')},
+    {label:'hasClearInvalidationLevel', value:planTrace.hasClearInvalidationLevel === true ? 'true' : (planTrace.hasClearInvalidationLevel === false ? 'false' : '(none)')},
+    {label:'unpriceableBlockReason', value:planTrace.unpriceableBlockReason || '(none)'},
+    {label:'resolvedEntry', value:Number.isFinite(planTrace.resolvedEntry) ? String(planTrace.resolvedEntry) : '(none)'},
+    {label:'resolvedStop', value:Number.isFinite(planTrace.resolvedStop) ? String(planTrace.resolvedStop) : '(none)'},
+    {label:'resolvedTarget', value:Number.isFinite(planTrace.resolvedTarget) ? String(planTrace.resolvedTarget) : '(none)'},
+    {label:'resolvedRR', value:Number.isFinite(planTrace.resolvedRR) ? String(planTrace.resolvedRR) : '(none)'}
+  ])}${renderDebugSectionMarkup('Track Debug | gateTrace', [
+    {label:'entryGatePass', value:gateTrace.entryGatePass === true ? 'true' : 'false'},
+    {label:'nearEntryGatePass', value:gateTrace.nearEntryGatePass === true ? 'true' : 'false'},
+    {label:'entryGateReasons', value:Array.isArray(gateTrace.entryGateReasons) && gateTrace.entryGateReasons.length ? gateTrace.entryGateReasons.join(' | ') : '(none)'},
+    {label:'nearEntryGateReasons', value:Array.isArray(gateTrace.nearEntryGateReasons) && gateTrace.nearEntryGateReasons.length ? gateTrace.nearEntryGateReasons.join(' | ') : '(none)'}
+  ])}${renderDebugSectionMarkup('Track Debug | lifecycleTrace', [
+    {label:'previousState', value:lifecycleTrace.previousState || '(none)'},
+    {label:'currentState', value:lifecycleTrace.currentState || lifecycleSnapshot.state || '(none)'},
+    {label:'transition', value:lifecycleTrace.transition || ((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))},
+    {label:'changeType', value:lifecycleTrace.changeType || debug.changeType || 'unchanged'},
+    {label:'downgradeApplied', value:lifecycleTrace.downgradeApplied === true ? 'true' : (lifecycleTrace.downgradeApplied === false ? 'false' : 'false')},
+    {label:'downgradeReason', value:lifecycleTrace.downgradeReason || '(none)'},
+    {label:'refreshDemoteAttempted', value:lifecycleTrace.refreshDemoteAttempted || 'false'},
+    {label:'refreshDemoteReason', value:lifecycleTrace.refreshDemoteReason || '(none)'},
+    {label:'structuralAliveAtRefresh', value:lifecycleTrace.structuralAliveAtRefresh || 'n/a'}
   ])}${renderDebugSectionMarkup('Base Assessment', [
     {label:'Base Verdict', value:globalVerdict.base_verdict || 'n/a'},
     {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : 'n/a'},
@@ -8829,10 +8795,6 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Plan Status', value:debugPlanUI.showPlan ? (resolved.planStatusLabel || 'n/a') : (debugPlanUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.')},
     {label:'Plan Visible', value:debugPlanUI.showPlan ? 'true' : 'false'},
     {label:'RR Confidence', value:resolved.rrConfidenceLabel || 'n/a'},
-    {label:'Viability Branch ID', value:globalVerdict.viabilityBranchId || '(none)'},
-    {label:'Viability Branch Label', value:globalVerdict.viabilityBranchLabel || '(none)'},
-    {label:'Viability Branch Reason', value:globalVerdict.viabilityBranchReason || '(none)'},
-    {label:'Viability Inputs', value:JSON.stringify(globalVerdict.viabilityInputs || {}) || '(none)'},
     {label:'Capital Fit', value:capitalComfort.label || 'n/a'},
     {label:'Capital Usage', value:capitalUsageDebugText(displayedPlan)},
     {label:'Next Possible', value:debug.nextPossibleState || resolved.nextPossibleState || 'n/a'}
@@ -8888,7 +8850,6 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Control', value:qualityAdjustments.controlQuality || 'n/a'},
     {label:'Main Blocker', value:debug.mainBlocker || resolved.blockerReason || 'n/a'}
   ])}<div class="watchlist-debug-block tiny"><strong>Watchlist Hold Trace</strong><div data-watchlist-hold-trace="${escapeHtml(item.ticker)}">${escapeHtml(debug.holdTrace || '(none)')}</div><div data-watchlist-hold-trace-history="${escapeHtml(item.ticker)}">${escapeHtml(holdTraceHistory.length ? holdTraceHistory.join(' || ') : '(none)')}</div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-grid tiny"><div><strong>Final display state</strong><div>${escapeHtml(lifecycleSnapshot.label || lifecycleSnapshot.state || 'n/a')}</div></div><div><strong>Previous</strong><div>${escapeHtml(debug.previousState || '(none)')}</div></div><div><strong>Bucket</strong><div>${escapeHtml(lifecycleSnapshot.bucket || 'n/a')}</div></div><div><strong>Priority</strong><div>${escapeHtml(String(priority.score))}</div></div><div><strong>Age</strong><div>${escapeHtml(String(Math.max(age, 0)))} trading days</div></div><div><strong>Expiry</strong><div>${escapeHtml(item.watchlist.expiryAt || 'Not set')}</div></div><div><strong>Evaluated</strong><div>${escapeHtml(formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a')}</div></div><div><strong>Trigger</strong><div>${escapeHtml(debug.lastSource || 'n/a')}</div></div><div><strong>Fresh inputs</strong><div>${escapeHtml(debug.hadFreshInputs ? 'Yes' : 'No')}</div></div><div><strong>Transition</strong><div>${escapeHtml((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))}</div></div><div><strong>Change type</strong><div>${escapeHtml(debug.changeType || 'unchanged')}</div></div><div><strong>Raw resolver verdict</strong><div>${escapeHtml(rrResolution.rawResolverVerdict || rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Remap reason</strong><div>${escapeHtml(rrResolution.remapReason || 'n/a')}</div></div><div><strong>Reason</strong><div>${escapeHtml(debug.reason || lifecycleSnapshot.reason || 'n/a')}</div></div><div><strong>Structure</strong><div>${escapeHtml(String(derivedStates.structureState || 'n/a'))}</div></div><div><strong>Bounce</strong><div>${escapeHtml(String(derivedStates.bounceState || 'n/a'))}</div></div><div><strong>Volume</strong><div>${escapeHtml(String(derivedStates.volumeState || 'n/a'))}</div></div><div><strong>Market regime</strong><div>${escapeHtml(qualityAdjustments.weakRegimePenalty ? 'Weak market' : 'Supportive')}</div></div><div><strong>Control</strong><div>${escapeHtml(qualityAdjustments.controlQuality || 'n/a')}</div></div><div><strong>Plan</strong><div>${escapeHtml(getPlanUiState(item, {displayedPlan}).label || 'n/a')}</div></div><div><strong>RR confidence</strong><div>${escapeHtml(rrResolution.rr_label || 'n/a')}</div></div><div><strong>Capital fit</strong><div>${escapeHtml(capitalComfort.label || 'n/a')}</div></div><div><strong>Tradeability</strong><div>${escapeHtml(rrResolution.status || displayStageForRecord(item) || 'n/a')}</div></div><div><strong>Next possible</strong><div>${escapeHtml(debug.nextPossibleState || 'n/a')}</div></div><div><strong>Main blocker</strong><div>${escapeHtml(debug.mainBlocker || 'n/a')}</div></div></div>${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
 }
 
 function stopWatchlistLifecycleAutomation(){
@@ -9420,6 +9381,63 @@ function renderWatchlistCardElement(record, options = {}){
     decision_summary:String(trackVisibleModel.headline || '').trim(),
     watchlist_presentation_source:'simplified_state_pipeline',
     simplifiedTrackCard:true
+  };
+  const rawViabilityBranchReason = String(globalVerdict && globalVerdict.viabilityBranchReason || '').trim();
+  const staleTrackViabilityBranchReason = /needs structure repair/i.test(rawViabilityBranchReason)
+    && ['alive'].includes(String(derivedStates.structureEligibility || globalVerdict && globalVerdict.structure_eligibility || '').trim().toLowerCase())
+    && ['strong','intact'].includes(String(derivedStates.structureState || '').trim().toLowerCase());
+  watchlistVisualState.trackDebug = {
+    visibleModel:{
+      canonicalVerdict:trackVisibleModel.canonicalVerdict,
+      visibleBucket:trackVisibleModel.visibleBucket,
+      tone:trackVisibleModel.tone,
+      badgeLabel:trackVisibleModel.badgeLabel,
+      headline:trackVisibleModel.headline,
+      primaryReason:trackVisibleModel.primaryReason,
+      planSummary:trackVisibleModel.planSummary
+    },
+    resolverTrace:{
+      baseResolverVerdict:rrResolution.rawResolverVerdict || rrResolution.status || '',
+      viability:globalVerdict && globalVerdict.viability || '',
+      viabilityBranchId:globalVerdict && globalVerdict.viabilityBranchId || '',
+      viabilityBranchReason:staleTrackViabilityBranchReason
+        ? 'Low-priority watch - confirmation still required.'
+        : rawViabilityBranchReason,
+      structureEligibility:String(derivedStates.structureEligibility || globalVerdict && globalVerdict.structure_eligibility || ''),
+      structureState:String(derivedStates.structureState || ''),
+      bounceState:String(derivedStates.bounceState || ''),
+      volumeState:String(derivedStates.volumeState || ''),
+      priceabilityState:String(derivedStates.priceabilityState || '')
+    },
+    planTrace:{
+      planVisible:trackVisibleModel.planVisible === true,
+      planStatus:trackVisibleModel.planStatus || '',
+      hasPriceablePlan:globalVerdict && globalVerdict.hasPriceablePlan === true,
+      hasProvisionalPriceablePlan:globalVerdict && globalVerdict.hasProvisionalPriceablePlan === true,
+      hasClearInvalidationLevel:globalVerdict && globalVerdict.hasClearInvalidationLevel,
+      unpriceableBlockReason:globalVerdict && globalVerdict.unpriceableBlockReason || '',
+      resolvedEntry:globalVerdict && globalVerdict.resolvedPlanEntry,
+      resolvedStop:globalVerdict && globalVerdict.resolvedPlanStop,
+      resolvedTarget:globalVerdict && globalVerdict.resolvedPlanTarget,
+      resolvedRR:globalVerdict && (globalVerdict.resolvedRR ?? globalVerdict.resolved_rr)
+    },
+    gateTrace:{
+      entryGatePass:globalVerdict && globalVerdict.entry_gate_pass === true,
+      nearEntryGatePass:globalVerdict && globalVerdict.near_entry_gate_pass === true,
+      entryGateReasons:globalVerdict && globalVerdict.entry_gate_reasons || [],
+      nearEntryGateReasons:globalVerdict && globalVerdict.near_entry_gate_reasons || []
+    },
+    lifecycleTrace:{
+      previousState:debug.previousState || '',
+      currentState:debug.currentState || lifecycleSnapshot.state || '',
+      transition:(debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'),
+      changeType:debug.changeType || 'unchanged',
+      downgradeApplied:globalVerdict && globalVerdict.downgrade_applied === true,
+      downgradeReason:globalVerdict && globalVerdict.downgrade_reason || '',
+      refreshDemoteAttempted:lifecycleSnapshot.refresh_demote_attempted || 'false',
+      refreshDemoteReason:lifecycleSnapshot.refresh_demote_reason || '',
+      structuralAliveAtRefresh:lifecycleSnapshot.structural_alive_at_refresh || ''
+    }
   };
   const resolvedContract = {
     finalVerdict:globalVerdictLabel(canonicalVerdict),
@@ -16233,7 +16251,6 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     badgeLabel:presentationBadge,
     cardClass:presentationCardClass,
     presentationBadgeClass,
-    presentationReason,
     priorityScore:resolvedPriority,
     activeTrackEligible,
     diminishingTrackEligible,
@@ -16679,8 +16696,7 @@ function reconcileWatchlistPresentation({
     const simpleVerdict = normalizeGlobalVerdictKey(simplified.canonicalVerdict || simplified.finalVerdict || simplified.final_verdict || 'watch');
     const simpleBadgeClass = simplifiedVisualBadgeClass(simpleBucket);
     const simpleCardClass = simplifiedVisualCardClass(simpleBucket);
-    const simpleReason = String(simplified.mainBlocker || simplified.actionLabel || simplified.decision_summary || '').trim();
-    const simpleSummary = String(simplified.mainBlocker || simplified.actionLabel || '').trim();
+    const simpleSummary = String(simplified.decision_summary || simplified.mainBlocker || simplified.actionLabel || '').trim();
     return {
       ...base,
       state:simpleVerdict === 'avoid' ? 'avoid' : (simpleVerdict || base.state || 'watch'),
@@ -16697,16 +16713,13 @@ function reconcileWatchlistPresentation({
       toneClass:`visual-state-card visual-state-${simpleVerdict === 'entry' ? 'entry' : (simpleVerdict === 'near_entry' ? 'near_entry' : (simpleVerdict === 'avoid' ? 'avoid' : 'watch'))} visual-tone-${simpleTone} ${simpleCardClass}`,
       visual_tone:simpleTone,
       decision_summary:simpleSummary || base.decision_summary,
-      reason:simpleReason || base.reason,
       watchlist_presentation_source:'simplified_state_pipeline',
-      canonicalFinalVerdict:simpleVerdict || base.finalVerdict || 'watch',
       presentationBucket:simpleBucket,
       trackPresentationBucket:simpleBucket,
       scanPresentationBucket:scanPresentationBucket,
       scanTrackMismatchDetected:simplified && simplified.visualBucket ? normalizeVisualBucketForPairing(scanPresentationBucket || '') !== simpleBucket : scanTrackMismatchDetected,
       presentationTone:simpleTone,
       presentationBadge:String(simplified.badgeLabel || base.presentationBadge || globalVerdictLabel(simpleVerdict || 'watch') || 'Watch'),
-      presentationReason:simpleReason || base.presentationReason,
       badgeLabel:String(simplified.badgeLabel || base.badgeLabel || globalVerdictLabel(simpleVerdict || 'watch') || 'Watch'),
       cardClass:simpleCardClass,
       badgeClass:simpleBadgeClass,
@@ -16759,13 +16772,11 @@ function reconcileWatchlistPresentation({
       trackPresentationBucket:'avoid',
       scanPresentationBucket,
       scanTrackMismatchDetected,
-      canonicalFinalVerdict:'avoid',
       presentationTone:strictTone.presentationTone,
       presentationBadge:strictTone.badgeLabel,
       badgeLabel:strictTone.badgeLabel,
       cardClass:strictTone.cardClass,
       badgeClass:strictTone.badgeClass,
-      presentationReason:'Avoid - setup no longer viable.',
       priorityScore:presentation.priorityScore,
       activeTrackEligible:false,
       diminishingTrackEligible:false,
@@ -16810,17 +16821,14 @@ function reconcileWatchlistPresentation({
     className:mappedToneClass,
     toneClass:mappedToneClass,
     visual_tone:mappedVisualTone,
-    decision_summary:presentation.presentationReason || base.decision_summary,
-    reason:presentation.presentationReason || base.reason,
+    decision_summary:base.decision_summary,
     watchlist_presentation_source:base.watchlist_presentation_source || 'presentation_model',
-    canonicalFinalVerdict:presentation.canonicalFinalVerdict || presentation.finalVerdict || base.finalVerdict || 'watch',
     presentationBucket:presentation.presentationBucket,
     trackPresentationBucket:presentation.presentationBucket,
     scanPresentationBucket,
     scanTrackMismatchDetected,
     presentationTone:presentation.presentationTone,
     presentationBadge:presentation.presentationBadge,
-    presentationReason:presentation.presentationReason,
     badgeLabel:presentation.badgeLabel,
     cardClass:presentation.cardClass,
     badgeClass:presentation.presentationBadgeClass,

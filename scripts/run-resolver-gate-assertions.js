@@ -4467,6 +4467,15 @@ function runTrackPresentationAuthorityAssertions(){
     || !/sameVisibleCopy\(trackVisibleModel\.primaryReason, decisionSummary\)/.test(appSource)){
     throw new Error('Track card render must source visible state from resolveTrackCardVisibleModel rather than layered legacy fields.');
   }
+  if(/decision_summary:presentation\.presentationReason/.test(appSource) || /reason:presentation\.presentationReason/.test(appSource)){
+    throw new Error('Legacy presentationReason must not feed non-debug visible Track render paths.');
+  }
+  if(!/trackDebug\s*=\s*\{/.test(appSource) || !/visibleModel:\s*\{/.test(appSource) || !/resolverTrace:\s*\{/.test(appSource) || !/planTrace:\s*\{/.test(appSource) || !/gateTrace:\s*\{/.test(appSource) || !/lifecycleTrace:\s*\{/.test(appSource)){
+    throw new Error('Track debug output must use one namespaced trackDebug structure.');
+  }
+  if(/Final Verdict Rendered|Canonical Final Verdict|Track Visual Bucket|Scan Visual Bucket|Presentation Reason/.test(appSource)){
+    throw new Error('Watchlist debug output must not print redundant flat Track state aliases.');
+  }
 }
 
 runTrackPresentationAuthorityAssertions();
