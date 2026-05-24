@@ -9373,8 +9373,8 @@ function renderWatchlistCardElement(record, options = {}){
   const globalVerdict = simplifiedState.debug && simplifiedState.debug.resolvedState
     ? simplifiedState.debug.resolvedState
     : null;
-  const canonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
   const trackVisibleModel = resolveTrackCardVisibleModel(record, simplifiedState);
+  const canonicalVerdict = normalizeGlobalVerdictKey(trackVisibleModel.canonicalVerdict || 'watch');
   const trackPresentation = resolveTrackPresentationModel(record, globalVerdict || resolveGlobalVerdict(record), lifecycleSnapshot, priority);
   const trackStateDivergence = collectStateDivergence(record, 'track.render', simplifiedState, trackPresentation, [
     'canonicalVerdict',
@@ -9386,8 +9386,8 @@ function renderWatchlistCardElement(record, options = {}){
     'entryGatePass',
     'nearEntryGatePass'
   ]);
-  const visualBucket = normalizeVisualBucketForPairing(trackVisibleModel.visibleBucket || simplifiedState.visualBucket || simplifiedState.presentationBucket || trackPresentation.presentationBucket || 'monitor');
-  const tone = String(trackVisibleModel.tone || simplifiedState.tone || trackPresentation.presentationTone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const visualBucket = normalizeVisualBucketForPairing(trackVisibleModel.visibleBucket || 'monitor');
+  const tone = String(trackVisibleModel.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
   const badgeClass = simplifiedVisualBadgeClass(visualBucket);
   const cardClass = simplifiedVisualCardClass(visualBucket);
   const visualStateKey = canonicalVerdict === 'entry'
@@ -9414,10 +9414,10 @@ function renderWatchlistCardElement(record, options = {}){
     toneClass:className,
     styleAttr:'',
     badge:{
-      text:String(trackVisibleModel.badgeLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch'),
+      text:String(trackVisibleModel.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch'),
       className:badgeClass
     },
-    decision_summary:String(trackVisibleModel.headline || trackAuthoritativeState.mainBlocker || trackAuthoritativeState.actionLabel || '').trim(),
+    decision_summary:String(trackVisibleModel.headline || '').trim(),
     watchlist_presentation_source:'simplified_state_pipeline',
     simplifiedTrackCard:true
   };
@@ -9445,6 +9445,8 @@ function renderWatchlistCardElement(record, options = {}){
       visibleTone:trackVisibleModel.tone,
       visibleBadgeLabel:trackVisibleModel.badgeLabel,
       visibleHeadline:trackVisibleModel.headline,
+      visiblePrimaryReason:trackVisibleModel.primaryReason,
+      visibleNextAction:trackVisibleModel.nextAction,
       planSummary:trackVisibleModel.planSummary,
       trackPresentationBucket:trackPresentation.presentationBucket,
       weakWatchDowngradeApplied:simplifiedState.weakWatchDowngradeApplied === true,
@@ -9506,18 +9508,14 @@ function renderWatchlistCardElement(record, options = {}){
   const liveRefreshNote = liveRefreshPending
     ? '<div class="tiny watchlist-card__refresh">Refreshing from live data. Saved setup score is provisional.</div>'
     : '';
-  const decisionSummary = watchlistVisualState.decision_summary || trackVisibleModel.headline || simplifiedState.mainBlocker || simplifiedState.actionLabel || '';
+  const decisionSummary = String(trackVisibleModel.headline || '').trim();
   const refreshButtonLabel = manualRefreshBusy ? 'Refreshing...' : 'Refresh';
   const refreshButtonDisabled = manualRefreshBusy ? ' disabled' : '';
-  const diagnosticPlanBlocker = trackVisibleModel.planVisible
-    ? (simplifiedState.planStatus || 'valid')
-    : (trackVisibleModel.planSummary || simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.');
-  const isActionableSoonState = canonicalVerdict === 'near_entry' || visualBucket === 'diminishing';
-  const compactPrimaryPlanHeadline = isActionableSoonState
-    && diagnosticPlanBlocker
-    && diagnosticPlanBlocker !== decisionSummary
-    ? diagnosticPlanBlocker
-    : '';
+  const diagnosticPlanBlocker = String(trackVisibleModel.planSummary || (trackVisibleModel.planVisible ? 'Trade plan available.' : 'No actionable trade plan yet.')).trim();
+  const compactPrimaryPlanHeadline = sameVisibleCopy(trackVisibleModel.primaryReason, decisionSummary)
+    ? ''
+    : String(trackVisibleModel.primaryReason || '').trim();
+  const compactNextAction = String(trackVisibleModel.nextAction || '').trim();
   const resolvedSectionKey = parentSectionKey || watchlistState || visualBucket || '';
   const renderedBucket = visualBucket;
   const clickedCardProjectionSnapshot = {
@@ -9531,7 +9529,7 @@ function renderWatchlistCardElement(record, options = {}){
     sectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
     resolvedSectionKey:String(resolvedSectionKey || '').trim().toLowerCase(),
     decisionSummary:String(decisionSummary || '').trim(),
-    actionGuidance:String(simplifiedState.actionLabel || '').trim(),
+    actionGuidance:String(compactNextAction || '').trim(),
     sourceOfTruthVisualBucket:renderedBucket,
     usedProjectionBundle,
     recomputedDuringRender,
@@ -9552,8 +9550,8 @@ function renderWatchlistCardElement(record, options = {}){
     renderedBucket,
     presentationBucket,
     tone,
-    badgeLabel:trackVisibleModel.badgeLabel || simplifiedState.badgeLabel || '',
-    mainBlocker:trackVisibleModel.headline || simplifiedState.mainBlocker || '',
+    badgeLabel:trackVisibleModel.badgeLabel || '',
+    mainBlocker:trackVisibleModel.mainBlocker || '',
     primaryBlockerSource:globalVerdict && globalVerdict.primary_blocker_source || '',
     renderSource,
     sourceOfTruthVisualBucket:renderedBucket,
@@ -9581,7 +9579,8 @@ function renderWatchlistCardElement(record, options = {}){
     sourceFields:{
       badge:'resolveTrackCardVisibleModel.badgeLabel',
       headlineCopy:'resolveTrackCardVisibleModel.headline',
-      actionGuidance:'simplifiedState.actionLabel',
+      primaryReason:'resolveTrackCardVisibleModel.primaryReason',
+      actionGuidance:'resolveTrackCardVisibleModel.nextAction',
       shellColour:'resolveTrackCardVisibleModel.visibleBucket/tone',
       leftAccentColour:'resolveTrackCardVisibleModel.visibleBucket/tone',
       sectionBucket:'resolveTrackCardVisibleModel.visibleBucket'
@@ -9595,7 +9594,7 @@ function renderWatchlistCardElement(record, options = {}){
   div.dataset.visualTone = tone;
   div.dataset.visualState = visualStateKey;
   div.dataset.watchlistTicker = entry.ticker;
-  div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(watchlistVisualState.badge.text || 'Watch')}</span>${watchlistScoreMarkup}<span class="tiny ${escapeHtml(priorityClass)}">${escapeHtml(priorityLabel)}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row"></div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}${compactPrimaryPlanHeadline ? `<div class="tiny watchlist-plan-meta">${escapeHtml(compactPrimaryPlanHeadline)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(diagnosticPlanBlocker)}</div><div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Log to Diary</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
+  div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(watchlistVisualState.badge.text || 'Watch')}</span>${watchlistScoreMarkup}<span class="tiny ${escapeHtml(priorityClass)}">${escapeHtml(priorityLabel)}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row"></div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}${compactPrimaryPlanHeadline ? `<div class="tiny watchlist-plan-meta">${escapeHtml(compactPrimaryPlanHeadline)}</div>` : ''}${compactNextAction ? `<div class="tiny watchlist-plan-meta">${escapeHtml(compactNextAction)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(diagnosticPlanBlocker)}</div><div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Log to Diary</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
   div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
   const cardProjectionSnapshot = {...clickedCardProjectionSnapshot};
   div.querySelector('[data-act="review"]').onclick = event => {
@@ -16269,10 +16268,13 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
   const internalVisualBucket = normalizeVisualBucketForPairing(simplified.visualBucket || simplified.presentationBucket || 'monitor');
   const structureState = String(derived.structureState || simplified.structureState || '').trim().toLowerCase();
   const structureEligibility = String(derived.structureEligibility || simplified.structureEligibility || resolved.structure_eligibility || resolved.structureEligibility || '').trim().toLowerCase();
+  const setupLocationState = String(derived.setupLocationState || simplified.setupLocationState || resolved.setup_location_state || '').trim().toLowerCase();
+  const pullbackZone = String(derived.pullbackZone || simplified.pullbackZone || resolved.pullback_zone || '').trim().toLowerCase();
   const bounceState = String(derived.bounceState || simplified.bounceState || resolved.bounce_state || '').trim().toLowerCase();
   const volumeState = String(derived.volumeState || simplified.volumeState || resolved.volume_state || '').trim().toLowerCase();
   const viability = String(resolved.viability || '').trim().toLowerCase();
-  const baseSummary = String(simplified.mainBlocker || simplified.actionLabel || '').trim();
+  const mainBlocker = String(simplified.mainBlocker || '').trim();
+  const baseSummary = mainBlocker || String(simplified.actionLabel || '').trim();
   const hasProvisionalPlan = resolved.hasProvisionalPriceablePlan === true || resolved.has_provisional_priceable_plan === true;
   const hasPriceablePlan = resolved.hasPriceablePlan === true || resolved.has_priceable_plan === true;
   const validPlan = String(simplified.planStatus || '').trim().toLowerCase() === 'valid';
@@ -16282,6 +16284,16 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
   const bounceAttempt = ['attempt','early','developing'].includes(bounceState);
   const weakVolume = ['weak','light','low','below_average'].includes(volumeState);
   const lowerPriority = viability === 'low_priority' || weakVolume;
+  const nearMovingAverage = ['near_20ma','near_50ma','between_20_50ma'].includes(pullbackZone)
+    || ['supportive','support_band','pullback_zone'].includes(setupLocationState);
+  const hasClearInvalidationLevel = resolved.hasClearInvalidationLevel === true
+    || (resolved.near_entry_gate_checks && resolved.near_entry_gate_checks.has_clear_invalidation_level === true)
+    || (resolved.entry_gate_checks && resolved.entry_gate_checks.has_clear_invalidation_level === true);
+  const invalidationExplicitlyMissing = resolved.hasClearInvalidationLevel === false
+    || (resolved.near_entry_gate_checks && resolved.near_entry_gate_checks.has_clear_invalidation_level === false)
+    || (resolved.entry_gate_checks && resolved.entry_gate_checks.has_clear_invalidation_level === false)
+    || /no valid invalidation level is available/i.test(baseSummary)
+    || /no reliable stop/i.test(baseSummary);
   const rawLowPriorityReason = String(
     resolved.viabilityBranchReason
     || resolved.viability_branch_reason
@@ -16320,7 +16332,18 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
     structure_eligibility:structureEligibility
   };
 
-  let headline = baseSummary;
+  const fallbackHeadline = () => {
+    if(canonicalVerdict === 'entry') return 'Entry Ready';
+    if(canonicalVerdict === 'near_entry') return 'Near Entry';
+    if(canonicalVerdict === 'avoid') return 'Avoid';
+    if(canonicalVerdict === 'watch' && (internalVisualBucket === 'monitor' || internalVisualBucket === 'diminishing')) return 'Developing Watch';
+    if(canonicalVerdict === 'watch') return 'Watch';
+    return 'Review setup';
+  };
+
+  let headline = '';
+  let primaryReason = '';
+  let nextAction = '';
   if(canonicalVerdict === 'near_entry'){
     if(weakVolume){
       headline = 'Near Entry - lower priority because volume is weak.';
@@ -16331,12 +16354,96 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
     }else if(!headline || /monitor/i.test(headline)){
       headline = 'Near Entry - waiting for confirmation.';
     }
+    primaryReason = weakVolume
+      ? 'Volume is weak, so the setup stays lower priority until follow-through improves.'
+      : (specificLowPriorityReason || 'Confirmation is not strong enough yet to treat this as actionable.');
+    nextAction = 'Wait for confirmation before treating the setup as actionable.';
   }else if(aliveStructure && strongStructure && bounceAttempt && weakVolume){
     headline = 'Setup is structurally alive, but volume is weak so priority is reduced.';
+    primaryReason = 'The setup is still alive, but weak volume lowers conviction.';
+    nextAction = 'Wait for stronger confirmation before acting.';
   }else if(aliveStructure && strongStructure && bounceAttempt && /needs structure repair/i.test(headline)){
     headline = weakVolume
       ? 'Setup is structurally alive, but volume is weak so priority is reduced.'
       : 'Setup is structurally alive, but confirmation is still pending.';
+  }
+
+  if(!headline){
+    headline = baseSummary;
+  }
+
+  if(
+    canonicalVerdict === 'watch'
+    && internalVisualBucket === 'monitor'
+    && aliveStructure
+    && strongStructure
+    && bounceAttempt
+    && nearMovingAverage
+    && invalidationExplicitlyMissing
+    && !hasPriceablePlan
+    && !hasProvisionalPlan
+  ){
+    headline = 'Developing Watch';
+    primaryReason = 'Bounce is forming, but there is not yet a clear invalidation level for a reliable trade plan.';
+    nextAction = 'Wait for stronger confirmation and a clearer support level.';
+  }else if(
+    canonicalVerdict === 'watch'
+    && internalVisualBucket === 'monitor'
+    && aliveStructure
+    && strongStructure
+    && invalidationExplicitlyMissing
+    && !primaryReason
+  ){
+    primaryReason = 'There is not yet a clear invalidation level for a reliable trade plan.';
+    nextAction = 'Wait for a clearer support level before treating the setup as actionable.';
+  }else if(!primaryReason){
+    primaryReason = headline;
+  }
+
+  if(
+    canonicalVerdict === 'watch'
+    && /conditions are not strong enough for active focus/i.test(primaryReason)
+    && invalidationExplicitlyMissing
+  ){
+    primaryReason = 'There is not yet a clear invalidation level for a reliable trade plan.';
+    nextAction = 'Wait for stronger confirmation and a clearer support level.';
+  }
+
+  if(
+    canonicalVerdict === 'watch'
+    && !nextAction
+    && primaryReason
+    && /clear invalidation level|reliable trade plan/i.test(primaryReason)
+  ){
+    nextAction = 'Wait for stronger confirmation and a clearer support level.';
+  }
+
+  if(aliveStructure && strongStructure){
+    headline = headline.replace(/needs structure repair/ig, 'confirmation is still pending');
+    primaryReason = primaryReason.replace(/needs structure repair/ig, 'confirmation is still pending');
+    nextAction = nextAction.replace(/needs structure repair/ig, 'confirmation is still pending');
+  }
+  if(!weakVolume){
+    headline = headline.replace(/\s*because volume is weak\.?/ig, '').trim() || headline;
+    primaryReason = primaryReason.replace(/\s*because volume is weak\.?/ig, '').trim() || primaryReason;
+    nextAction = nextAction.replace(/\s*because volume is weak\.?/ig, '').trim() || nextAction;
+  }
+
+  headline = String(headline || '').trim();
+  primaryReason = String(primaryReason || '').trim();
+  nextAction = String(nextAction || '').trim();
+
+  if(!headline){
+    const headlineCandidate = baseSummary && !sameVisibleCopy(baseSummary, primaryReason)
+      ? baseSummary
+      : '';
+    headline = String(headlineCandidate || fallbackHeadline()).trim();
+  }
+  if(sameVisibleCopy(primaryReason, headline)){
+    primaryReason = '';
+  }
+  if(sameVisibleCopy(nextAction, headline) || sameVisibleCopy(nextAction, primaryReason)){
+    nextAction = '';
   }
 
   let planSummary = '';
@@ -16348,16 +16455,32 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
     planSummary = sanitizeNonTerminalPlanCopy(baseSummary, setupContext);
   }
 
+  if(aliveStructure && strongStructure){
+    planSummary = planSummary.replace(/needs structure repair/ig, 'confirmation is still pending');
+  }
+  if(!weakVolume){
+    planSummary = planSummary.replace(/\s*because volume is weak\.?/ig, '').trim() || planSummary;
+  }
+  planSummary = String(planSummary || '').trim();
+  if(planVisible && !planSummary){
+    planSummary = 'Trade plan available.';
+  }else if(!planVisible && !planSummary){
+    planSummary = 'No actionable trade plan yet.';
+  }
+
   return {
     canonicalVerdict,
+    planVisible,
+    planStatus:String(simplified.planStatus || '').trim().toLowerCase(),
+    mainBlocker,
     visibleBucket,
     tone:String(visibleToneMeta.presentationTone || visibleBucket || 'monitor').trim().toLowerCase(),
     badgeLabel:visibleToneMeta.badgeLabel || simplified.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch',
-    headline:String(headline || '').trim(),
-    planSummary:String(planSummary || '').trim(),
+    headline,
+    primaryReason,
+    nextAction,
+    planSummary,
     lowerPriority,
-    planVisible,
-    planStatus:String(simplified.planStatus || '').trim().toLowerCase(),
     internalVisualBucket
   };
 }
@@ -17738,9 +17861,15 @@ function normalizeUiCopy(text){
   return String(text || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+function sameVisibleCopy(a, b){
+  const left = normalizeUiCopy(a);
+  const right = normalizeUiCopy(b);
+  return !!left && left === right;
+}
+
 function isDuplicatedStatusCopy(message, decisionSummary){
   if(!message || !decisionSummary) return false;
-  return normalizeUiCopy(message) === normalizeUiCopy(decisionSummary);
+  return sameVisibleCopy(message, decisionSummary);
 }
 
 function nonPlanCalcNoteText(message, decisionSummary, setup){

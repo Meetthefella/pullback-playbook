@@ -4190,8 +4190,11 @@ function runTrackPresentationAuthorityAssertions(){
   };
   vm.createContext(authoritySandbox);
   [
+    'normalizeUiCopy',
+    'sameVisibleCopy',
     'resolvePresentationTone',
     'terminalAvoidEvidenceForReviewCopy',
+    'terminalAvoidCopyPattern',
     'provisionalPlanConfirmationCopy',
     'sanitizeNonTerminalPlanCopy',
     'resolveTrackCardVisibleModel'
@@ -4272,9 +4275,196 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/provisional plan|valid plan calculations exist|waiting for confirmation/i.test(String(model.planSummary || ''))){
     throw new Error('Track visible model must describe valid provisional plans as pending confirmation, not missing.');
   }
+  const developingWatchModel = authoritySandbox.resolveTrackCardVisibleModel({
+    ticker:'ADI'
+  }, {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    badgeLabel:'Watch',
+    planVisible:false,
+    planStatus:'missing',
+    mainBlocker:'Conditions are not strong enough for active focus.',
+    debug:{
+      resolvedState:{
+        hasClearInvalidationLevel:false,
+        hasPriceablePlan:false
+      },
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        bounceState:'attempt',
+        volumeState:'supportive',
+        pullbackZone:'near_20ma'
+      }
+    }
+  });
+  if(developingWatchModel.canonicalVerdict !== 'watch' || developingWatchModel.visibleBucket !== 'monitor' || developingWatchModel.tone !== 'monitor'){
+    throw new Error('Developing watch model must preserve watch/monitor final state.');
+  }
+  if(!/^Developing Watch$/i.test(String(developingWatchModel.headline || ''))){
+    throw new Error('Alive monitor/watch setups with forming bounce and no invalidation must render the Developing Watch headline.');
+  }
+  if(!/bounce is forming/i.test(String(developingWatchModel.primaryReason || '')) || !/clear invalidation level|reliable trade plan/i.test(String(developingWatchModel.primaryReason || ''))){
+    throw new Error('Developing watch model must explain bounce forming and missing invalidation support level.');
+  }
+  if(!/wait for stronger confirmation and a clearer support level/i.test(String(developingWatchModel.nextAction || ''))){
+    throw new Error('Developing watch model must provide the clearer-support next action.');
+  }
+  if(/needs structure repair/i.test(String(developingWatchModel.headline || '')) || /needs structure repair/i.test(String(developingWatchModel.primaryReason || '')) || /volume is weak/i.test(String(developingWatchModel.primaryReason || '')) || /conditions are not strong enough for active focus/i.test(String(developingWatchModel.primaryReason || ''))){
+    throw new Error('Developing watch model must not expose stale structure-repair, weak-volume, or generic conditions-not-strong-enough copy.');
+  }
+  const weakVolumeWatchModel = authoritySandbox.resolveTrackCardVisibleModel({
+    ticker:'AMZN'
+  }, {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    badgeLabel:'Watch',
+    planVisible:false,
+    planStatus:'missing',
+    mainBlocker:'Conditions are not strong enough for active focus.',
+    debug:{
+      resolvedState:{
+        hasClearInvalidationLevel:false,
+        hasPriceablePlan:false
+      },
+      derivedStates:{
+        structureState:'strong',
+        structureEligibility:'alive',
+        bounceState:'attempt',
+        volumeState:'weak',
+        pullbackZone:'near_50ma'
+      }
+    }
+  });
+  if(!/clear invalidation level|reliable trade plan/i.test(String(weakVolumeWatchModel.primaryReason || ''))){
+    throw new Error('Weak-volume watch model must still keep missing invalidation as the primary blocker when that is the true constraint.');
+  }
+  if(/volume is weak/i.test(String(weakVolumeWatchModel.primaryReason || ''))){
+    throw new Error('Weak volume may be secondary caution, but it must not replace the primary blocker when no invalidation level exists.');
+  }
+  const refreshTraceModel = authoritySandbox.resolveTrackCardVisibleModel({
+    ticker:'NFLX'
+  }, {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    badgeLabel:'Watch',
+    planVisible:false,
+    planStatus:'missing',
+    mainBlocker:'Bounce is forming.',
+    debug:{
+      previousState:'near_entry',
+      transition:'near_entry -> watch',
+      downgradeApplied:true,
+      downgradeReason:'bounce_confirmation_lost',
+      resolvedState:{},
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        bounceState:'attempt',
+        volumeState:'supportive'
+      }
+    }
+  });
+  if(/near_entry|downgrade|transition|previousState/i.test([refreshTraceModel.headline, refreshTraceModel.primaryReason, refreshTraceModel.planSummary, refreshTraceModel.nextAction].join(' '))){
+    throw new Error('Track visible model must explain only the final state, not refresh transition trace.');
+  }
+  const sparseWatchModel = authoritySandbox.resolveTrackCardVisibleModel({
+    ticker:'QQQ'
+  }, {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    badgeLabel:'Watch',
+    planVisible:false,
+    planStatus:'missing',
+    mainBlocker:'',
+    actionLabel:'',
+    debug:{
+      resolvedState:{},
+      derivedStates:{}
+    }
+  });
+  if(!String(sparseWatchModel.headline || '').trim()){
+    throw new Error('Track visible model must always provide a non-empty headline.');
+  }
+  if(authoritySandbox.sameVisibleCopy(sparseWatchModel.headline, sparseWatchModel.primaryReason)){
+    throw new Error('Sparse watch model must not duplicate headline and primaryReason.');
+  }
+  const duplicateSuppressionModel = authoritySandbox.resolveTrackCardVisibleModel({
+    ticker:'META'
+  }, {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    badgeLabel:'Watch',
+    planVisible:false,
+    planStatus:'missing',
+    mainBlocker:'Conditions are not strong enough for active focus.',
+    debug:{
+      resolvedState:{},
+      derivedStates:{
+        structureState:'unknown',
+        structureEligibility:'',
+        bounceState:'',
+        volumeState:'normal'
+      }
+    }
+  });
+  if(authoritySandbox.sameVisibleCopy(duplicateSuppressionModel.headline, duplicateSuppressionModel.primaryReason)){
+    throw new Error('Track visible model must suppress duplicate primaryReason when it normalizes equal to headline.');
+  }
+  const visiblePlanFallbackModel = authoritySandbox.resolveTrackCardVisibleModel({
+    ticker:'SHOP'
+  }, {
+    canonicalVerdict:'near_entry',
+    visualBucket:'near_entry',
+    tone:'near_entry',
+    badgeLabel:'Near Entry',
+    planVisible:true,
+    planStatus:'valid',
+    mainBlocker:'',
+    debug:{
+      resolvedState:{},
+      derivedStates:{
+        structureState:'strong',
+        structureEligibility:'alive',
+        bounceState:'confirmed',
+        volumeState:'supportive'
+      }
+    }
+  });
+  if(!/^Trade plan available\.$/i.test(String(visiblePlanFallbackModel.planSummary || ''))){
+    throw new Error('Track visible model must never leak raw planStatus in visible plan copy when plan is visible.');
+  }
+  const hiddenPlanFallbackModel = authoritySandbox.resolveTrackCardVisibleModel({
+    ticker:'CRM'
+  }, {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    tone:'monitor',
+    badgeLabel:'Watch',
+    planVisible:false,
+    planStatus:'missing',
+    mainBlocker:'',
+    debug:{
+      resolvedState:{},
+      derivedStates:{}
+    }
+  });
+  if(!/No actionable trade plan yet|waiting for confirmation|not actionable yet|plan needs confirmation|Bounce is not clear enough to price yet/i.test(String(hiddenPlanFallbackModel.planSummary || '')) || /^missing$/i.test(String(hiddenPlanFallbackModel.planSummary || ''))){
+    throw new Error('Track visible model must provide friendly hidden-plan copy when no plan summary exists, and must not leak raw plan status.');
+  }
   if(!/const trackVisibleModel = resolveTrackCardVisibleModel\(record, simplifiedState\);/.test(appSource)
     || !/decision_summary:String\(trackVisibleModel\.headline/.test(appSource)
-    || !/trackVisibleModel\.planSummary/.test(appSource)){
+    || !/const visualBucket = normalizeVisualBucketForPairing\(trackVisibleModel\.visibleBucket \|\| 'monitor'\);/.test(appSource)
+    || !/const tone = String\(trackVisibleModel\.tone \|\| visualBucket \|\| 'monitor'\)/.test(appSource)
+    || !/trackVisibleModel\.planSummary/.test(appSource)
+    || !/trackVisibleModel\.primaryReason/.test(appSource)
+    || !/trackVisibleModel\.nextAction/.test(appSource)
+    || !/sameVisibleCopy\(trackVisibleModel\.primaryReason, decisionSummary\)/.test(appSource)){
     throw new Error('Track card render must source visible state from resolveTrackCardVisibleModel rather than layered legacy fields.');
   }
 }
