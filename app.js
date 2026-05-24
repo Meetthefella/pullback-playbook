@@ -10349,7 +10349,11 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
       logTrackSectionRender(group.key, true, sortedGroupRecords.length, 0, 'watchlist_render_sync');
     }
     if(collapsible){
-      header.addEventListener('click', () => {
+      header.addEventListener('click', event => {
+        if(event){
+          event.preventDefault();
+          event.stopPropagation();
+        }
         const isExpanded = section.classList.contains('is-expanded');
         const nextExpanded = !isExpanded;
         setTrackSectionExpanded(group.key, nextExpanded);
@@ -10451,7 +10455,11 @@ async function renderWatchlistChunked(options = {}){
     const fragment = document.createDocumentFragment();
     sectionMeta.forEach(meta => {
       if(meta.collapsible){
-        meta.header.addEventListener('click', () => {
+        meta.header.addEventListener('click', event => {
+          if(event){
+            event.preventDefault();
+            event.stopPropagation();
+          }
           const isExpanded = meta.section.classList.contains('is-expanded');
           const nextExpanded = !isExpanded;
           setTrackSectionExpanded(meta.groupKey, nextExpanded);
@@ -10466,7 +10474,22 @@ async function renderWatchlistChunked(options = {}){
               meta.rendered = true;
               meta.section.dataset.rendered = '1';
               logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}_expand`);
-            }).catch(() => {});
+            }).catch(error => {
+              console.warn('[TrackSectionExpandFallback]', {
+                sectionKey:meta.groupKey,
+                source:`${source}_${meta.groupKey}_expand`,
+                error:error && error.message ? String(error.message) : 'unknown_error'
+              });
+              meta.body.innerHTML = '';
+              renderWatchlistSectionCardsSync(meta.records, meta.body, {
+                passCache:modelPassCache,
+                parentSectionKey:meta.groupKey,
+                source:`${source}_${meta.groupKey}_expand_fallback`
+              });
+              meta.rendered = true;
+              meta.section.dataset.rendered = '1';
+              logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}_expand_fallback`);
+            });
           }else{
             logTrackSectionRender(meta.groupKey, !nextExpanded, meta.records.length, nextExpanded ? meta.body.children.length : 0, `${source}_${meta.groupKey}_toggle`);
           }
@@ -10481,12 +10504,26 @@ async function renderWatchlistChunked(options = {}){
     for(let sectionIndex = 0; sectionIndex < sectionMeta.length; sectionIndex += 1){
       const meta = sectionMeta[sectionIndex];
       if(!meta.expanded) continue;
-      await renderWatchlistSectionCardsChunked(meta.records, meta.body, {
-        batchSize,
-        source:`${source}_${meta.groupKey}`,
-        passCache:modelPassCache,
-        parentSectionKey:meta.groupKey
-      });
+      try{
+        await renderWatchlistSectionCardsChunked(meta.records, meta.body, {
+          batchSize,
+          source:`${source}_${meta.groupKey}`,
+          passCache:modelPassCache,
+          parentSectionKey:meta.groupKey
+        });
+      }catch(error){
+        console.warn('[TrackSectionInitialRenderFallback]', {
+          sectionKey:meta.groupKey,
+          source:`${source}_${meta.groupKey}`,
+          error:error && error.message ? String(error.message) : 'unknown_error'
+        });
+        meta.body.innerHTML = '';
+        renderWatchlistSectionCardsSync(meta.records, meta.body, {
+          passCache:modelPassCache,
+          parentSectionKey:meta.groupKey,
+          source:`${source}_${meta.groupKey}_fallback`
+        });
+      }
       meta.rendered = true;
       meta.section.dataset.rendered = '1';
       logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}`);
