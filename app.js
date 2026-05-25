@@ -8588,6 +8588,11 @@ function maybeRunTrackFocusWatchlistRefresh(options = {}){
     const unchangedCount = Math.max(0, attempted - changedCount);
     console.info('[TRACK_FOCUS_REFRESH_DONE]', {
       source,
+      ok:result && result.ok === true,
+      skipped:result && result.skipped === true,
+      reason:String(result && result.reason || ''),
+      error:String(result && result.error || ''),
+      hasSummary:!!summary,
       changedCount,
       unchangedCount,
       durationMs:Number((endedAt - startedAt).toFixed(1)),
@@ -8596,11 +8601,16 @@ function maybeRunTrackFocusWatchlistRefresh(options = {}){
   }).catch(error => {
     console.info('[TRACK_FOCUS_REFRESH_DONE]', {
       source,
+      ok:false,
+      skipped:false,
+      reason:'promise_rejected',
+      error:error && error.message ? String(error.message) : 'unknown_error',
+      hasSummary:false,
       changedCount:0,
       unchangedCount:0,
       durationMs:null,
       renderTriggered:false,
-      error:error && error.message ? String(error.message) : 'unknown_error'
+      completion:'rejected'
     });
   });
   return {
@@ -26303,6 +26313,19 @@ async function refreshTrackOnly(options = {}){
     const refreshedCount = Number(refreshSummary && refreshSummary.refreshed || 0);
     const failedCount = Number(refreshSummary && refreshSummary.failed || 0);
     const interruptionCause = interruptionCauseCodeForStage(interruptionStage);
+    if(source === 'track_focus_refresh'){
+      console.info('[TRACK_FOCUS_REFRESH_INTERNAL_ERROR]', {
+        source,
+        interruptionStage,
+        interruptionCause,
+        attempted,
+        refreshedCount,
+        failedCount,
+        backendPullFailed,
+        riskRecalcFailed,
+        error:error && error.message ? String(error.message) : 'unknown_error'
+      });
+    }
     if(PP_PERF_DEBUG){
       console.warn('[TrackRefreshFailureTrace]', {
         scope:'refreshTrackOnly.catch',

@@ -4734,6 +4734,12 @@ function runTrackPresentationAuthorityAssertions(){
     || !/\[TRACK_FOCUS_REFRESH_SKIP\]/.test(appSource)){
     throw new Error('Track focus refresh diagnostics must be present during this audit pass.');
   }
+  if(!/console\.info\('\[TRACK_FOCUS_REFRESH_DONE\]', \{\s*source,\s*ok:result && result\.ok === true,\s*skipped:result && result\.skipped === true,\s*reason:String\(result && result\.reason \|\| ''\),\s*error:String\(result && result\.error \|\| ''\),\s*hasSummary:!!summary/s.test(appSource)){
+    throw new Error('Track focus refresh completion diagnostics must expose the result shape during this audit pass.');
+  }
+  if(!/\[TRACK_FOCUS_REFRESH_INTERNAL_ERROR\]/.test(appSource)){
+    throw new Error('Track focus refresh should log a focused internal error diagnostic if refreshTrackOnly fails.');
+  }
   if(!/refreshTrackOnly\(\{\s*source:'track_focus_refresh',\s*force:false,\s*clearReviewOverride:false\s*\}\)/s.test(appSource)){
     throw new Error('Track focus refresh should use the guarded track refresh path without clearing active review overrides.');
   }
