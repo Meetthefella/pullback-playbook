@@ -2536,6 +2536,10 @@ function runAiContractAssertions(){
     throw new Error('Manual chart confirmation must commit the verified trace and trigger a fresh AI analysis run.');
   }
   const chartUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
+  const chartRelevantMaRequirementSource = extractFunctionSource(appSource, 'getStrategyRelevantMaRequirement');
+  const chartCoreIdentityMatchSource = extractFunctionSource(appSource, 'chartVerificationHasCoreIdentityMatch');
+  const chartPrimaryIndicatorSupportSource = extractFunctionSource(appSource, 'chartVerificationHasPrimaryIndicatorSupport');
+  const chartSupportsPartialSource = extractFunctionSource(appSource, 'chartVerificationSupportsNonBlockingIndicatorPartial');
   const chartFastPassSource = extractFunctionSource(appSource, 'buildChartVerificationFastPass');
   const explicitProvenanceFnSource = extractFunctionSource(appSource, 'chartVerificationHasExplicitRegionProvenance');
   const chartRenderSource = extractFunctionSource(appSource, 'renderChartConsistencyTrace');
@@ -2561,6 +2565,10 @@ function runAiContractAssertions(){
     uiState:{ reviewRenderPass:1 }
   };
   vm.createContext(chartSandbox);
+  vm.runInContext(chartRelevantMaRequirementSource, chartSandbox, {filename:'app.js#getStrategyRelevantMaRequirement'});
+  vm.runInContext(chartCoreIdentityMatchSource, chartSandbox, {filename:'app.js#chartVerificationHasCoreIdentityMatch'});
+  vm.runInContext(chartPrimaryIndicatorSupportSource, chartSandbox, {filename:'app.js#chartVerificationHasPrimaryIndicatorSupport'});
+  vm.runInContext(chartSupportsPartialSource, chartSandbox, {filename:'app.js#chartVerificationSupportsNonBlockingIndicatorPartial'});
   vm.runInContext(chartUiDecisionSource, chartSandbox, {filename:'app.js#chartVerificationUiDecision'});
   vm.runInContext(explicitProvenanceFnSource, chartSandbox, {filename:'app.js#chartVerificationHasExplicitRegionProvenance'});
   vm.runInContext(chartDecisionClassNameSource, chartSandbox, {filename:'app.js#chartDecisionClassName'});
@@ -2796,6 +2804,10 @@ function runAiContractAssertions(){
     'confirmReviewChartMatchesCurrentTicker',
     'rejectReviewChartAndUploadAnother',
     'debugFlagEnabled',
+    'getStrategyRelevantMaRequirement',
+    'chartVerificationHasCoreIdentityMatch',
+    'chartVerificationHasPrimaryIndicatorSupport',
+    'chartVerificationSupportsNonBlockingIndicatorPartial',
     'chartVerificationUiDecision',
     'chartDecisionClassName',
     'ensureReviewChartLightboxShell',
@@ -3808,18 +3820,119 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(partialIndicatorTrace.status !== 'indicator_partial' || partialIndicatorTrace.indicatorStates.ma200_status !== 'partial' || !partialIndicatorTrace.partialIndicators.includes('200MA')){
-    throw new Error('200MA line visible but value missing must be partial, not missing.');
+  if(partialIndicatorTrace.status !== 'partial_indicator_visibility' || partialIndicatorTrace.indicatorStates.ma200_status !== 'partial' || !partialIndicatorTrace.partialIndicators.includes('200MA')){
+    throw new Error('200MA line visible but value missing must become a non-blocking partial-indicator verification state.');
   }
-  if(!/Partial indicator visibility/.test(partialIndicatorTrace.title) || /Indicators missing/.test(partialIndicatorTrace.title)){
-    throw new Error('Partial MA visibility must use partial wording, not missing-indicator wording.');
+  if(!/Chart mostly verified/.test(partialIndicatorTrace.title) || !/Some indicators were not clearly readable/i.test(partialIndicatorTrace.summary || '')){
+    throw new Error('Partial MA visibility must use the non-blocking mostly-verified wording.');
+  }
+  const partialIndicatorDecision = evidenceSandbox.chartVerificationUiDecision(partialIndicatorTrace, 'NVDA');
+  if(partialIndicatorDecision.key !== 'partial_indicator_visibility'){
+    throw new Error('Non-blocking partial-indicator traces must map to the partial_indicator_visibility UI decision.');
+  }
+  if(evidenceSandbox.chartVerificationShouldShowManualActions(partialIndicatorDecision, partialIndicatorTrace, 'committed', true) !== false){
+    throw new Error('Partial indicator visibility must hide manual chart confirmation controls.');
   }
   const partialIndicatorMarkup = evidenceSandbox.renderChartConsistencyTrace(partialIndicatorTrace);
-  if(!/20 207\.25/.test(partialIndicatorMarkup) || !/50 191\.18/.test(partialIndicatorMarkup) || !/200 n\/a/.test(partialIndicatorMarkup) || !/200 185\.44/.test(partialIndicatorMarkup)){
+  if(!/Chart mostly verified/i.test(partialIndicatorMarkup) || !/20 207\.25/.test(partialIndicatorMarkup) || !/50 191\.18/.test(partialIndicatorMarkup) || !/200 n\/a/.test(partialIndicatorMarkup) || !/200 185\.44/.test(partialIndicatorMarkup)){
     throw new Error('Chart verification display values must be formatted to 2 decimals and null as n/a.');
   }
   if(!/Show details/.test(partialIndicatorMarkup) || !/Extracted:/.test(partialIndicatorMarkup) || !/Trusted:/.test(partialIndicatorMarkup)){
     throw new Error('Chart verification panel must show a compact user-facing summary with diagnostics behind details.');
+  }
+  const near20MissingPrimaryTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:225.83,
+      visible_ma20:null,
+      visible_ma50:191.18,
+      visible_ma200:null,
+      ma20_visible:false,
+      ma50_visible:true,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(near20MissingPrimaryTrace.status === 'partial_indicator_visibility'){
+    throw new Error('near_20ma setups must not become partial_indicator_visibility when 20MA is missing even if 50MA matches.');
+  }
+  const near20MissingPrimaryDecision = evidenceSandbox.chartVerificationUiDecision(near20MissingPrimaryTrace, 'NVDA');
+  if(evidenceSandbox.chartVerificationShouldShowManualActions(near20MissingPrimaryDecision, near20MissingPrimaryTrace, 'committed', true) !== true){
+    throw new Error('near_20ma setups with missing 20MA must keep manual confirmation controls visible.');
+  }
+  const near20MatchedPrimaryTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:225.83,
+      visible_ma20:207.25,
+      visible_ma50:null,
+      visible_ma200:null,
+      ma20_visible:true,
+      ma50_visible:false,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(near20MatchedPrimaryTrace.status !== 'partial_indicator_visibility'){
+    throw new Error('near_20ma setups with matching 20MA and missing secondary indicators must allow partial_indicator_visibility.');
+  }
+  const near50MissingPrimaryTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:225.83,
+      visible_ma20:207.25,
+      visible_ma50:null,
+      visible_ma200:null,
+      ma20_visible:true,
+      ma50_visible:false,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_50ma'}}
+  );
+  if(near50MissingPrimaryTrace.status === 'partial_indicator_visibility'){
+    throw new Error('near_50ma setups must not become partial_indicator_visibility when 50MA is missing even if 20MA matches.');
+  }
+  const near50MatchedPrimaryTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:225.83,
+      visible_ma20:null,
+      visible_ma50:191.18,
+      visible_ma200:null,
+      ma20_visible:false,
+      ma50_visible:true,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_50ma'}}
+  );
+  if(near50MatchedPrimaryTrace.status !== 'partial_indicator_visibility'){
+    throw new Error('near_50ma setups with matching 50MA and missing secondary indicators must allow partial_indicator_visibility.');
+  }
+  const unknownSetupFallbackTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:225.83,
+      visible_ma20:null,
+      visible_ma50:191.18,
+      visible_ma200:null,
+      ma20_visible:false,
+      ma50_visible:true,
+      ma200_visible:false
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'unknown'}}
+  );
+  if(unknownSetupFallbackTrace.status !== 'partial_indicator_visibility'){
+    throw new Error('Unknown setup-MA context may fall back to either 20MA or 50MA support for partial_indicator_visibility.');
   }
   const inferredIndicatorTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
