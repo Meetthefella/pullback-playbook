@@ -11287,17 +11287,6 @@ function setLiveProcessStatus(stateKey, message, options = {}){
         pending.flushedAt = new Date().toISOString();
       }
       const runPendingReview = () => {
-        const pendingTickerBefore = normalizeTicker(pending && pending.ticker || '');
-        const refreshedRecord = pendingTickerBefore ? getTickerRecord(pendingTickerBefore) : null;
-        if(typeof console !== 'undefined' && console.info){
-          console.info('[REVIEW_PENDING_RELEASE_RETRY]', {
-            pendingTickerBefore,
-            refreshedRecordExists:!!refreshedRecord,
-            retrySource:'watchlist_refresh_release',
-            activeTickerBefore:activeReviewTicker() || '',
-            queuedTickerBefore:String(uiState.queuedReviewTicker || '')
-          });
-        }
         if(pending && pending.superseded){
           reviewTickerOwnershipTrace('stale_pending_review_blocked', {
             requestedTicker:pending.ticker || '',
@@ -11315,10 +11304,12 @@ function setLiveProcessStatus(stateKey, message, options = {}){
           }
           return;
         }
+        if(pending && pending.loadStarted === true){
+          return;
+        }
         loadTickerIntoReview(pending.ticker, {
           ...(pending.options || {}),
           forceNow:true,
-          resumePending:true,
           reviewRequestToken:pending.reviewRequestToken || ((pending.options && pending.options.reviewRequestToken) || ''),
           openTrigger:{
             kind:'pending_review_replay',
@@ -11327,14 +11318,6 @@ function setLiveProcessStatus(stateKey, message, options = {}){
             isTrusted:null
           }
         });
-        if(typeof console !== 'undefined' && console.info){
-          console.info('[REVIEW_PENDING_RELEASE_RETRY_RESULT]', {
-            pendingTickerBefore,
-            finalRenderedTicker:activeReviewTicker() || '',
-            pendingTickerCleared:!pendingReviewTicker(),
-            currentPendingTicker:pendingReviewTicker() || ''
-          });
-        }
       };
       if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
         window.requestAnimationFrame(() => runPendingReview());
@@ -24090,7 +24073,6 @@ function maybeInvalidateActiveReviewProjectionFromTrack(ticker, nextProjectionSn
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
-  const resumePending = options.resumePending === true;
   const summarizeReviewOpenRequestStack = () => {
     try{
       const rawStack = String(new Error().stack || '');
@@ -24111,19 +24093,6 @@ function loadTickerIntoReview(ticker, options = {}){
   const currentPendingTicker = normalizeTicker(currentPending && currentPending.ticker || '');
   const currentPendingToken = String(currentPending && currentPending.reviewRequestToken || '');
   if(currentPending && !currentPending.superseded && currentPendingTicker === symbol){
-    const requestedResumeToken = String(options.reviewRequestToken || '');
-    const samePendingResume = resumePending && requestedResumeToken && currentPendingToken && requestedResumeToken === currentPendingToken;
-    if(samePendingResume){
-      if(typeof console !== 'undefined' && console.info){
-        console.info('[REVIEW_PENDING_RESUME]', {
-          requestedTicker:symbol,
-          reviewRequestToken:requestedResumeToken,
-          activeTicker:activeReviewTicker() || '',
-          pendingTicker:pendingReviewTicker() || '',
-          queuedTicker:uiState.queuedReviewTicker || ''
-        });
-      }
-    }else{
     if(typeof console !== 'undefined' && console.info){
       console.info('[REVIEW_PENDING_DUPLICATE_SUPPRESSED]', {
         requestedTicker:symbol,
@@ -24141,7 +24110,6 @@ function loadTickerIntoReview(ticker, options = {}){
       statusText:'duplicate_pending_review_request'
     });
     return;
-    }
   }
   const reviewRequestToken = String(options.reviewRequestToken || nextReviewRequestToken());
   setActiveWorkspaceTab('review', {focusTop:false});

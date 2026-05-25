@@ -4748,16 +4748,11 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/function trackCardRenderSignatureSnapshot\(record\)\{\s*const item = normalizeTickerRecord\(record \|\| \{\}\);\s*const passCache = null;[\s\S]*const simplifiedState = resolveSimplifiedStateForWatchlistPresentation\(item, \{\s*surface:'track',\s*source:'track_card_render_signature_snapshot',\s*reason:'trackCardRenderSignatureSnapshot',\s*passCache\s*\}\);/s.test(appSource)){
     throw new Error('Track card render signature snapshot must initialize simplifiedState before using it during watchlist refresh diffing.');
   }
-  if(!/\[REVIEW_PENDING_RELEASE_RETRY\]/.test(appSource)
-    || !/\[REVIEW_PENDING_RELEASE_RETRY_RESULT\]/.test(appSource)
-    || !/\[REVIEW_PENDING_RESUME\]/.test(appSource)){
-    throw new Error('Review pending handoff diagnostics must be present during this release-handoff audit.');
+  if(!/if\(pending && pending\.loadStarted === true\)\{\s*return;\s*\}/s.test(appSource)){
+    throw new Error('Watchlist refresh release should skip replay when the pending review load has already started.');
   }
-  if(!/loadTickerIntoReview\(pending\.ticker, \{\s*\.\.\.\(pending\.options \|\| \{\}\),\s*forceNow:true,\s*resumePending:true,/s.test(appSource)){
-    throw new Error('Watchlist refresh release should resume the queued review request explicitly.');
-  }
-  if(!/const samePendingResume = resumePending && requestedResumeToken && currentPendingToken && requestedResumeToken === currentPendingToken;/.test(appSource)){
-    throw new Error('Review duplicate suppression must allow explicit resume of the same pending request token.');
+  if(!/loadTickerIntoReview\(pending\.ticker, \{\s*\.\.\.\(pending\.options \|\| \{\}\),\s*forceNow:true,\s*reviewRequestToken:pending\.reviewRequestToken/s.test(appSource)){
+    throw new Error('Watchlist refresh release should replay the pending review request only when it has not already started.');
   }
 }
 
