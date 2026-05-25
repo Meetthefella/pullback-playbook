@@ -5895,14 +5895,8 @@ function renderWorkspaceSurface(tab, options = {}){
       measureTrackRender(trackRenderKind, safeReason, () => {
       perfMark('pp_watchlist_render_start');
       if(firstUserOpen){
-        renderWatchlistChunked({
-          source:'track_first_open_fast',
-          batchSize:WATCHLIST_RENDER_BATCH_SIZE,
-          model:prepareWatchlistRenderModel('track_first_open_fast', {
-            lightweight:true
-          })
-        }).catch(() => {});
-        scheduleAfterFirstTrackPaint(() => renderFocusQueue());
+        renderWatchlist();
+        renderFocusQueue();
       }else{
         renderWatchlist();
         renderFocusQueue();

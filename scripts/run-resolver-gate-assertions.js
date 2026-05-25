@@ -4482,6 +4482,9 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/if\(startupCoordinator\.renderedTabs\.track && !forceFullRender\)\{\s*requestWatchlistRender\(\{\s*source:'track_tab_activation',\s*includeFocusQueue:true/s.test(appSource)){
     throw new Error('Track focus should request a Track render refresh instead of silently returning on cached state.');
   }
+  if(!/if\(firstUserOpen\)\{\s*renderWatchlist\(\);\s*renderFocusQueue\(\);/s.test(appSource)){
+    throw new Error('First Track focus should use a synchronous watchlist render so the active bucket is populated immediately.');
+  }
 }
 
 runTrackPresentationAuthorityAssertions();
