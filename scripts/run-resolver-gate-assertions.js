@@ -4488,6 +4488,9 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/\[TRACK_BUCKET_TOGGLE\]/.test(appSource) || !/\[TRACK_SHOW_EXPIRED_TOGGLE\]/.test(appSource) || !/\[TRACK_RENDER_BUCKETS\]/.test(appSource)){
     throw new Error('Track bucket investigation logs must be present during this diagnostic pass.');
   }
+  if(!/function renderWatchlistCardElement\(record, options = \{\}\)\{\s*const entry = tickerRecordToWatchlistEntry\(record\);\s*if\(!entry\) return null;\s*const debug = record && record\.watchlist && record\.watchlist\.debug && typeof record\.watchlist\.debug === 'object'\s*\?\s*record\.watchlist\.debug\s*:\s*\{\};/s.test(appSource)){
+    throw new Error('Track watchlist card render must guard missing debug state and must not reference an undefined debug object.');
+  }
 }
 
 runTrackPresentationAuthorityAssertions();

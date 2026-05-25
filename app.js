@@ -9269,6 +9269,9 @@ function setWatchlistCardRefreshButtonState(ticker, busy = false){
 function renderWatchlistCardElement(record, options = {}){
   const entry = tickerRecordToWatchlistEntry(record);
   if(!entry) return null;
+  const debug = record && record.watchlist && record.watchlist.debug && typeof record.watchlist.debug === 'object'
+    ? record.watchlist.debug
+    : {};
   const view = options.precomputedView && typeof options.precomputedView === 'object'
     ? options.precomputedView
     : buildFinalSetupView(record);
