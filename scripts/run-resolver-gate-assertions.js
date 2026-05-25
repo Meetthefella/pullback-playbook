@@ -4482,8 +4482,11 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/if\(startupCoordinator\.renderedTabs\.track && !forceFullRender\)\{\s*requestWatchlistRender\(\{\s*source:'track_tab_activation',\s*includeFocusQueue:true/s.test(appSource)){
     throw new Error('Track focus should request a Track render refresh instead of silently returning on cached state.');
   }
-  if(!/if\(firstUserOpen\)\{\s*renderWatchlist\(\);\s*renderFocusQueue\(\);/s.test(appSource)){
+  if(!/if\(firstUserOpen\)\{\s*renderWatchlist\(\{\s*source:'track_first_open_sync',\s*allowCachedReturn:false/s.test(appSource)){
     throw new Error('First Track focus should use a synchronous watchlist render so the active bucket is populated immediately.');
+  }
+  if(!/\[TRACK_BUCKET_TOGGLE\]/.test(appSource) || !/\[TRACK_SHOW_EXPIRED_TOGGLE\]/.test(appSource) || !/\[TRACK_RENDER_BUCKETS\]/.test(appSource)){
+    throw new Error('Track bucket investigation logs must be present during this diagnostic pass.');
   }
 }
 

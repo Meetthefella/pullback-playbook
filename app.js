@@ -5895,10 +5895,16 @@ function renderWorkspaceSurface(tab, options = {}){
       measureTrackRender(trackRenderKind, safeReason, () => {
       perfMark('pp_watchlist_render_start');
       if(firstUserOpen){
-        renderWatchlist();
+        renderWatchlist({
+          source:'track_first_open_sync',
+          allowCachedReturn:false
+        });
         renderFocusQueue();
       }else{
-        renderWatchlist();
+        renderWatchlist({
+          source:safeReason,
+          allowCachedReturn:true
+        });
         renderFocusQueue();
       }
       perfMark('pp_watchlist_render_end');
@@ -6030,7 +6036,8 @@ function handleWorkspaceTabChange(tab){
     if(startupCoordinator.renderedTabs.track && !forceFullRender){
       requestWatchlistRender({
         source:'track_tab_activation',
-        includeFocusQueue:true
+        includeFocusQueue:true,
+        allowCachedReturn:false
       });
       return;
     }
@@ -9751,6 +9758,29 @@ function persistTrackSectionState(nextState){
   safeStorageSet(trackSectionStateKey, normalized);
 }
 
+function trackBucketCountsForRecords(records = [], passCache = null){
+  const counts = {active:0, diminishing:0, avoid_dead:0};
+  (Array.isArray(records) ? records : []).forEach(record => {
+    const bucket = watchlistPresentationBucketForRecord(record, {passCache});
+    const groupKey = watchlistRenderGroupForBucket(bucket);
+    counts[groupKey] = Number(counts[groupKey] || 0) + 1;
+  });
+  return counts;
+}
+
+function logTrackRenderBuckets(source, sections = []){
+  if(typeof console === 'undefined' || typeof console.info !== 'function') return;
+  console.info('[TRACK_RENDER_BUCKETS]', {
+    source:String(source || 'watchlist_render'),
+    buckets:(Array.isArray(sections) ? sections : []).map(section => ({
+      bucket:String(section.bucket || section.groupKey || ''),
+      count:Number(section.count || 0),
+      expanded:section.expanded === true,
+      renderedCardCount:Number(section.renderedCardCount || 0)
+    }))
+  });
+}
+
 function isTrackSectionCollapsible(sectionKey){
   return sectionKey === 'diminishing' || sectionKey === 'avoid_dead';
 }
@@ -10331,6 +10361,7 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
     if(grouped[groupKey]) grouped[groupKey].push(record);
   });
   const fragment = document.createDocumentFragment();
+  const renderBucketTrace = [];
   groups.forEach(group => {
     const groupRecords = grouped[group.key] || [];
     if(!groupRecords.length) return;
@@ -10358,6 +10389,11 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
         }
         const isExpanded = section.classList.contains('is-expanded');
         const nextExpanded = !isExpanded;
+        console.info('[TRACK_BUCKET_TOGGLE]', {
+          bucket:group.key,
+          previousExpandedState:isExpanded === true,
+          nextExpandedState:nextExpanded === true
+        });
         setTrackSectionExpanded(group.key, nextExpanded);
         applyTrackSectionExpandedState(section, nextExpanded);
         if(nextExpanded && section.dataset.rendered !== '1'){
@@ -10373,14 +10409,22 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
         }
       });
     }
+    renderBucketTrace.push({
+      bucket:group.key,
+      count:sortedGroupRecords.length,
+      expanded:expanded === true,
+      renderedCardCount:body.children.length
+    });
     fragment.appendChild(section);
   });
+  logTrackRenderBuckets('watchlist_render_sync', renderBucketTrace);
   return fragment;
 }
 
 async function renderWatchlistChunked(options = {}){
   const source = String(options.source || 'watchlist_refresh');
   const restoreScroll = options.restoreScroll !== false && shouldRestoreTrackScrollForSource(source);
+  const allowCachedReturn = options.allowCachedReturn !== false;
   if(shouldSkipHiddenWatchlistRender(source)){
     if(source === 'watchlist_add' || source === 'review_add_watchlist_hidden'){
       if(PP_PERF_DEBUG){
@@ -10424,6 +10468,8 @@ async function renderWatchlistChunked(options = {}){
       return;
     }
     if(
+      allowCachedReturn
+      &&
       uiState.watchlistRenderSignature === renderSignature
       && box.dataset.watchlistSignature === renderSignature
       && box.childElementCount > 0
@@ -10464,6 +10510,11 @@ async function renderWatchlistChunked(options = {}){
           }
           const isExpanded = meta.section.classList.contains('is-expanded');
           const nextExpanded = !isExpanded;
+          console.info('[TRACK_BUCKET_TOGGLE]', {
+            bucket:meta.groupKey,
+            previousExpandedState:isExpanded === true,
+            nextExpandedState:nextExpanded === true
+          });
           setTrackSectionExpanded(meta.groupKey, nextExpanded);
           applyTrackSectionExpandedState(meta.section, nextExpanded);
           if(nextExpanded && !meta.rendered){
@@ -10530,6 +10581,12 @@ async function renderWatchlistChunked(options = {}){
       meta.section.dataset.rendered = '1';
       logTrackSectionRender(meta.groupKey, false, meta.records.length, meta.body.children.length, `${source}_${meta.groupKey}`);
     }
+    logTrackRenderBuckets(source, sectionMeta.map(meta => ({
+      bucket:meta.groupKey,
+      count:meta.records.length,
+      expanded:meta.section.classList.contains('is-expanded'),
+      renderedCardCount:meta.body.children.length
+    })));
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
     clearWatchlistDirtyForRecords(records);
@@ -10553,16 +10610,18 @@ async function renderWatchlistChunked(options = {}){
   }
 }
 
-function renderWatchlist(){
-  if(shouldSkipHiddenWatchlistRender('watchlist_render')) return;
-  const finishTrackRender = startTrackRenderCycle('watchlist_render');
+function renderWatchlist(options = {}){
+  const source = String(options.source || 'watchlist_render');
+  const allowCachedReturn = options.allowCachedReturn !== false;
+  if(shouldSkipHiddenWatchlistRender(source)) return;
+  const finishTrackRender = startTrackRenderCycle(source);
   let renderError = null;
   try{
     const preserveUiState = activeWorkspaceTab() === 'track';
     const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
-    const restoreScroll = shouldRestoreTrackScrollForSource('watchlist_render');
+    const restoreScroll = shouldRestoreTrackScrollForSource(source);
     const passCache = createWatchlistProjectionPassCache();
-    const model = prepareWatchlistRenderModel('watchlist_render', {passCache});
+    const model = prepareWatchlistRenderModel(source, {passCache});
     const {box, showExpired, records, renderSignature} = model;
     const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
     if(!box) return;
@@ -10576,12 +10635,14 @@ function renderWatchlist(){
       uiState.trackInitialFocusConsumed = true;
       if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
         caller:'renderWatchlist',
-        source:'watchlist_render',
+        source,
         restoreScroll:false
       });
       return;
     }
     if(
+      allowCachedReturn
+      &&
       uiState.watchlistRenderSignature === renderSignature
       && box.dataset.watchlistSignature === renderSignature
       && box.childElementCount > 0
@@ -10595,10 +10656,10 @@ function renderWatchlist(){
     clearWatchlistDirtyForRecords(records);
     uiState.trackInitialFocusConsumed = true;
     if(preserveUiState) restoreTrackUiState(trackUiSnapshot, {
-      caller:'renderWatchlist',
-      source:'watchlist_render',
-      restoreScroll:false
-    });
+        caller:'renderWatchlist',
+        source,
+        restoreScroll:false
+      });
   }catch(error){
     renderError = error;
     throw error;
@@ -10606,7 +10667,7 @@ function renderWatchlist(){
     finishTrackRender();
     if(renderError && PP_PERF_DEBUG){
       console.debug('[PP_PERF] track_render_cycle_finished_after_error', {
-        source:'watchlist_render',
+        source,
         error:renderError && renderError.message ? String(renderError.message) : 'unknown_error'
       });
     }
@@ -10634,6 +10695,7 @@ function shouldSkipHiddenWatchlistRender(source = 'watchlist_render'){
 function requestWatchlistRender(options = {}){
   const source = String(options.source || 'request_watchlist_render');
   const includeFocusQueue = options.includeFocusQueue === true;
+  const allowCachedReturn = options.allowCachedReturn !== false;
   if(shouldSkipHiddenWatchlistRender(source)){
     watchlistRenderNeedsFocusQueue = false;
     return;
@@ -10646,7 +10708,10 @@ function requestWatchlistRender(options = {}){
     const renderFocus = watchlistRenderNeedsFocusQueue;
     watchlistRenderNeedsFocusQueue = false;
     if(shouldSkipHiddenWatchlistRender(`${source}_flush`)) return;
-    renderWatchlist();
+    renderWatchlist({
+      source,
+      allowCachedReturn
+    });
     if(renderFocus) renderFocusQueue();
   };
   if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
@@ -32619,8 +32684,24 @@ on('tickerInput', 'input', () => {
   renderFinalUniversePreview();
 });
 on('showExpiredWatchlist', 'change', () => {
+  const checked = $('showExpiredWatchlist') ? !!$('showExpiredWatchlist').checked : false;
+  const recordsBefore = watchlistTickerRecords({passCache:null});
+  state.showExpiredWatchlist = checked;
   saveState();
-  renderWatchlist();
+  const model = prepareWatchlistRenderModel('track_show_expired_toggle', {
+    passCache:createWatchlistProjectionPassCache(),
+    allowCache:false
+  });
+  console.info('[TRACK_SHOW_EXPIRED_TOGGLE]', {
+    checked,
+    recordsBeforeFilter:Array.isArray(recordsBefore) ? recordsBefore.length : 0,
+    recordsAfterFilter:Array.isArray(model.records) ? model.records.length : 0,
+    bucketCounts:trackBucketCountsForRecords(model.records || [], model.passCache || null)
+  });
+  renderWatchlist({
+    source:'track_show_expired_toggle',
+    allowCachedReturn:false
+  });
 });
 on('universeMode', 'change', () => {
   saveState();
