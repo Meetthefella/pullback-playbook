@@ -2535,6 +2535,105 @@ function runAiContractAssertions(){
     || !manualConfirmSource.includes('analyseSetup(symbol).catch(() => {});')){
     throw new Error('Manual chart confirmation must commit the verified trace and trigger a fresh AI analysis run.');
   }
+  const handleChartSelectionSource = extractFunctionSource(appSource, 'handleChartSelection');
+  if(!handleChartSelectionSource.includes("setActiveReviewTicker(symbol);")
+    || !handleChartSelectionSource.includes("const matchingActiveRequest = activeRequest && normalizeTicker(activeRequest.ticker || '') === normalizeTicker(record.ticker || '')")
+    || !handleChartSelectionSource.includes("renderReviewWorkspace({source:'chart_upload', requestedTicker:symbol || record.ticker});")){
+    throw new Error('Second chart uploads must rebind Review ownership to the upload ticker and avoid inheriting another ticker request context.');
+  }
+  const chartAiSummaryGuardSource = extractFunctionSource(appSource, 'chartAiSummaryRenderGuard');
+  if(!chartAiSummaryGuardSource.includes("reason = 'quick_running'")
+    || !chartAiSummaryGuardSource.includes("quickStatus === 'running'")){
+    throw new Error('AI summary guard must block current rendering while quick chart analysis is still running for the same chart.');
+  }
+  const aiCommitGateSource = extractFunctionSource(appSource, 'canCommitAiSummaryForChart');
+  if(!aiCommitGateSource.includes("['committed', 'failed', 'timeout'].includes")
+    || !aiCommitGateSource.includes('requestedImageId === quickImageId')
+    || !aiCommitGateSource.includes('requestedRequestId === quickRequestId')){
+    throw new Error('AI summary commit gate must require terminal quick status for the same ticker/image/request context.');
+  }
+  const pendingAiStageSource = extractFunctionSource(appSource, 'stagePendingAiSummaryForChart');
+  if(!pendingAiStageSource.includes('setPendingChartAiSummary(item, stagedPayload);')
+    || !pendingAiStageSource.includes('[AI_SUMMARY_COMMIT_BLOCKED_QUICK_RUNNING]')){
+    throw new Error('Blocked AI summary commits must stage a pending payload instead of only logging.');
+  }
+  const flushPendingAiSource = extractFunctionSource(appSource, 'flushPendingAiSummaryForChart');
+  if(!flushPendingAiSource.includes("reason:'pending_context_stale'")
+    || !flushPendingAiSource.includes('canCommitAiSummaryForChart({')
+    || !flushPendingAiSource.includes('applyCommittedAiSummaryForChart(item, pending)')){
+    throw new Error('Pending AI summaries must flush only for the same chart context and reject stale uploads.');
+  }
+  const chartTraceSelectorSource = extractFunctionSource(appSource, 'selectReviewChartTraceForRender');
+  if(!chartTraceSelectorSource.includes('CHART_RENDER_BLOCKED_QUICK_RUNNING')
+    || !chartTraceSelectorSource.includes('const mergedCandidatesAllowed = quickRunningForCurrentChart ? [] : mergedMatchingCandidates;')){
+    throw new Error('Chart trace selection must block merged/post-AI traces while quick verification is still running.');
+  }
+  const appAnalyseSetupSource = extractFunctionSource(appSource, 'analyseSetup');
+  if(appAnalyseSetupSource.indexOf('[QUICK_CHART_ANALYSIS_COMMITTED]') === -1
+    || appAnalyseSetupSource.indexOf('[AI_SUMMARY_READY]') === -1
+    || appAnalyseSetupSource.indexOf('[QUICK_CHART_ANALYSIS_COMMITTED]') > appAnalyseSetupSource.indexOf('const aiSummaryCommitPayload = {')
+    || !appAnalyseSetupSource.includes("status:'committed'")
+    || !appAnalyseSetupSource.includes("stagePendingAiSummaryForChart(record, aiSummaryCommitPayload, 'quick_running')")
+    || !appAnalyseSetupSource.includes("applyCommittedAiSummaryForChart(record, aiSummaryCommitPayload)")
+    || !appAnalyseSetupSource.includes("flushPendingAiSummaryForChart(record, {source:'analyse_setup_failed'})")){
+    throw new Error('AI summary commit must remain sequenced after quick chart analysis commit in the analysis path.');
+  }
+  const aiGateSandbox = {
+    normalizeTicker(value){ return String(value || '').trim().toUpperCase(); }
+  };
+  vm.createContext(aiGateSandbox);
+  vm.runInContext(aiCommitGateSource, aiGateSandbox, {filename:'app.js#canCommitAiSummaryForChart'});
+  const gateBlocked = aiGateSandbox.canCommitAiSummaryForChart({
+    record:{
+      ticker:'NVDA',
+      review:{
+        quickChartAnalysis:{
+          ticker:'NVDA',
+          chartImageId:'img-1',
+          requestId:'req-1',
+          status:'running'
+        }
+      }
+    },
+    ticker:'NVDA',
+    imageId:'img-1',
+    requestId:'req-1'
+  });
+  const gateAllowed = aiGateSandbox.canCommitAiSummaryForChart({
+    record:{
+      ticker:'NVDA',
+      review:{
+        quickChartAnalysis:{
+          ticker:'NVDA',
+          chartImageId:'img-1',
+          requestId:'req-1',
+          status:'committed'
+        }
+      }
+    },
+    ticker:'NVDA',
+    imageId:'img-1',
+    requestId:'req-1'
+  });
+  const gateRejectedStale = aiGateSandbox.canCommitAiSummaryForChart({
+    record:{
+      ticker:'LIN',
+      review:{
+        quickChartAnalysis:{
+          ticker:'LIN',
+          chartImageId:'img-2',
+          requestId:'req-2',
+          status:'committed'
+        }
+      }
+    },
+    ticker:'NVDA',
+    imageId:'img-1',
+    requestId:'req-1'
+  });
+  if(gateBlocked !== false || gateAllowed !== true || gateRejectedStale !== false){
+    throw new Error('AI summary commit gate must block running quick analyses and stale chart contexts.');
+  }
   const chartUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   const chartRelevantMaRequirementSource = extractFunctionSource(appSource, 'getStrategyRelevantMaRequirement');
   const chartCoreIdentityMatchSource = extractFunctionSource(appSource, 'chartVerificationHasCoreIdentityMatch');
@@ -2725,6 +2824,9 @@ function runAiContractAssertions(){
     throw new Error('AI verdict fields must not participate in canonical/display verdict selection.');
   }
   const evidenceSandbox = {
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
     numericOrNull(value){
       if(value === null || value === undefined) return null;
       if(typeof value === 'string' && value.trim() === '') return null;
@@ -3419,11 +3521,19 @@ function runAiContractAssertions(){
   }
   const acceptedSummaryGuard = evidenceSandbox.chartAiSummaryRenderGuard(
     {ticker:'PSX', review:{chartRef:{imageId:'img-psx'}}},
-    {analysisChartImageId:'img-psx', analysisRequestId:'analysis-psx'},
+    {ticker:'PSX', analysisChartImageId:'img-psx', analysisRequestId:'analysis-psx'},
     {status:'likely_match', imageId:'img-psx', verificationRequestId:'analysis-psx', requestId:'analysis-psx'}
   );
   if(acceptedSummaryGuard.allowedToRender !== true){
     throw new Error('Current-image likely_match analysis must be allowed to render.');
+  }
+  const staleTickerSummaryGuard = evidenceSandbox.chartAiSummaryRenderGuard(
+    {ticker:'LIN', review:{chartRef:{imageId:'img-lin'}}},
+    {ticker:'NVDA', analysisChartImageId:'img-lin', analysisRequestId:'analysis-lin'},
+    {status:'likely_match', imageId:'img-lin', verificationRequestId:'analysis-lin', requestId:'analysis-lin'}
+  );
+  if(staleTickerSummaryGuard.allowedToRender !== false || staleTickerSummaryGuard.reason !== 'ticker_mismatch'){
+    throw new Error('AI summaries from a previous ticker must be blocked even when imageId/requestId happen to match.');
   }
   const mismatchManualDecision = evidenceSandbox.chartVerificationUiDecision({
     status:'ticker_mismatch',
