@@ -1262,6 +1262,9 @@ function runSharedNarrativeConsistencyAssertions(){
     || !/buildEntryConditionsSummary[\s\S]*buildSharedSetupNarrative/.test(appSource)){
     throw new Error('Scan, Review, and Track long-press surfaces must consume the shared narrative builder.');
   }
+  if(/const decisionSummary = String\(reviewSemanticStatus\.primaryReason[\s\S]{0,120}const reviewSemanticStatus = buildReviewSemanticStatus\(/.test(appSource)){
+    throw new Error('Review semantic status must be initialized before any decisionSummary reads to avoid a TDZ runtime error.');
+  }
 }
 
 runSharedNarrativeConsistencyAssertions();

@@ -31636,7 +31636,6 @@ function syncPlanDisplayMeta(options = {}){
     trackPresentationBucket:normalizeVisualBucketForPairing(metaSimplifiedState.visualBucket || 'monitor'),
     trackPresentationTone:String(metaSimplifiedState.tone || metaSimplifiedState.visualBucket || 'monitor').trim().toLowerCase()
   };
-  const decisionSummary = String(reviewSemanticStatus.primaryReason || metaSimplifiedState.mainBlocker || metaSimplifiedState.actionLabel || '').trim();
   const reviewTradeStatusVerdict = {
     ...visualState,
     structure_state:visualState.structure_state || globalVerdict.structure_state,
@@ -31665,6 +31664,7 @@ function syncPlanDisplayMeta(options = {}){
     displayedPlan,
     planRealism
   });
+  const decisionSummary = String(reviewSemanticStatus.primaryReason || metaSimplifiedState.mainBlocker || metaSimplifiedState.actionLabel || '').trim();
   const planUI = {
     showPlan:reviewSemanticStatus.showPlanFields === true,
     showRR:reviewSemanticStatus.showPlanMetrics === true,
