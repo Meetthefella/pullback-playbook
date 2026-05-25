@@ -9115,6 +9115,7 @@ function watchlistRecordRenderSignature(record, pendingMap = {}, manualRefreshMa
 
 function trackCardRenderSignatureSnapshot(record){
   const item = normalizeTickerRecord(record || {});
+  const passCache = null;
   const lifecycle = watchlistLifecycleSnapshot(item);
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const displayedPlan = applySetupConfirmationPlanGate(item, deriveCurrentPlanState(
@@ -9140,6 +9141,12 @@ function trackCardRenderSignatureSnapshot(record){
     displayedPlan,
     qualityAdjustments,
     rrResolution
+  });
+  const simplifiedState = resolveSimplifiedStateForWatchlistPresentation(item, {
+    surface:'track',
+    source:'track_card_render_signature_snapshot',
+    reason:'trackCardRenderSignatureSnapshot',
+    passCache
   });
   const visualState = resolveVisualState(item, 'watchlist', {
     resolvedContract,

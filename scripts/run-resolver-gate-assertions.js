@@ -4755,6 +4755,9 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/function renderWatchlistCardElement\(record, options = \{\}\)\{\s*const entry = tickerRecordToWatchlistEntry\(record\);\s*if\(!entry\) return null;\s*const debug = record && record\.watchlist && record\.watchlist\.debug && typeof record\.watchlist\.debug === 'object'\s*\?\s*record\.watchlist\.debug\s*:\s*\{\};/s.test(appSource)){
     throw new Error('Track watchlist card render must guard missing debug state and must not reference an undefined debug object.');
   }
+  if(!/function trackCardRenderSignatureSnapshot\(record\)\{\s*const item = normalizeTickerRecord\(record \|\| \{\}\);\s*const passCache = null;[\s\S]*const simplifiedState = resolveSimplifiedStateForWatchlistPresentation\(item, \{\s*surface:'track',\s*source:'track_card_render_signature_snapshot',\s*reason:'trackCardRenderSignatureSnapshot',\s*passCache\s*\}\);/s.test(appSource)){
+    throw new Error('Track card render signature snapshot must initialize simplifiedState before using it during watchlist refresh diffing.');
+  }
 }
 
 runTrackPresentationAuthorityAssertions();
