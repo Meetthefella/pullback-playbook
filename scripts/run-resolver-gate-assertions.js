@@ -4727,18 +4727,8 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const lifecycleRefresh = maybeRunTrackFocusLifecycleRefresh\(\{source:'track_focus'\}\);\s*const focusRefresh = maybeRunTrackFocusWatchlistRefresh\(\{source:'track_focus'\}\);/s.test(appSource)){
     throw new Error('Track focus should evaluate the guarded focus-refresh path alongside lifecycle refresh.');
   }
-  if(!/function maybeRunTrackFocusWatchlistRefresh\(options = \{\}\)\{/.test(appSource)
-    || !/\[TRACK_FOCUS_REFRESH_CHECK\]/.test(appSource)
-    || !/\[TRACK_FOCUS_REFRESH_START\]/.test(appSource)
-    || !/\[TRACK_FOCUS_REFRESH_DONE\]/.test(appSource)
-    || !/\[TRACK_FOCUS_REFRESH_SKIP\]/.test(appSource)){
-    throw new Error('Track focus refresh diagnostics must be present during this audit pass.');
-  }
-  if(!/console\.info\('\[TRACK_FOCUS_REFRESH_DONE\]', \{\s*source,\s*ok:result && result\.ok === true,\s*skipped:result && result\.skipped === true,\s*reason:String\(result && result\.reason \|\| ''\),\s*error:String\(result && result\.error \|\| ''\),\s*hasSummary:!!summary/s.test(appSource)){
-    throw new Error('Track focus refresh completion diagnostics must expose the result shape during this audit pass.');
-  }
-  if(!/\[TRACK_FOCUS_REFRESH_INTERNAL_ERROR\]/.test(appSource)){
-    throw new Error('Track focus refresh should log a focused internal error diagnostic if refreshTrackOnly fails.');
+  if(!/function maybeRunTrackFocusWatchlistRefresh\(options = \{\}\)\{/.test(appSource)){
+    throw new Error('Track focus should retain the guarded focus-refresh helper.');
   }
   if(!/refreshTrackOnly\(\{\s*source:'track_focus_refresh',\s*force:false,\s*clearReviewOverride:false\s*\}\)/s.test(appSource)){
     throw new Error('Track focus refresh should use the guarded track refresh path without clearing active review overrides.');
@@ -4757,6 +4747,17 @@ function runTrackPresentationAuthorityAssertions(){
   }
   if(!/function trackCardRenderSignatureSnapshot\(record\)\{\s*const item = normalizeTickerRecord\(record \|\| \{\}\);\s*const passCache = null;[\s\S]*const simplifiedState = resolveSimplifiedStateForWatchlistPresentation\(item, \{\s*surface:'track',\s*source:'track_card_render_signature_snapshot',\s*reason:'trackCardRenderSignatureSnapshot',\s*passCache\s*\}\);/s.test(appSource)){
     throw new Error('Track card render signature snapshot must initialize simplifiedState before using it during watchlist refresh diffing.');
+  }
+  if(!/\[REVIEW_PENDING_RELEASE_RETRY\]/.test(appSource)
+    || !/\[REVIEW_PENDING_RELEASE_RETRY_RESULT\]/.test(appSource)
+    || !/\[REVIEW_PENDING_RESUME\]/.test(appSource)){
+    throw new Error('Review pending handoff diagnostics must be present during this release-handoff audit.');
+  }
+  if(!/loadTickerIntoReview\(pending\.ticker, \{\s*\.\.\.\(pending\.options \|\| \{\}\),\s*forceNow:true,\s*resumePending:true,/s.test(appSource)){
+    throw new Error('Watchlist refresh release should resume the queued review request explicitly.');
+  }
+  if(!/const samePendingResume = resumePending && requestedResumeToken && currentPendingToken && requestedResumeToken === currentPendingToken;/.test(appSource)){
+    throw new Error('Review duplicate suppression must allow explicit resume of the same pending request token.');
   }
 }
 

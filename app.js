@@ -8542,77 +8542,18 @@ function maybeRunTrackFocusWatchlistRefresh(options = {}){
   else if(startupRefreshDeferred) skipReason = 'startup_refresh_deferred';
   else if(!watchlistStale) skipReason = 'fresh';
   else decision = 'run';
-  console.info('[TRACK_FOCUS_REFRESH_CHECK]', {
-    source,
-    activeTab,
-    recordCount,
-    watchlistDirty,
-    watchlistStale,
-    lastRefreshAt:String(trackRefreshRuntime.lastFinishedAt || trackRefreshRuntime.lastStartedAt || ''),
-    cooldownRemaining,
-    refreshInFlight,
-    startupRestoreComplete,
-    decision,
-    skipReason
-  });
   if(decision !== 'run'){
-    console.info('[TRACK_FOCUS_REFRESH_SKIP]', {
-      source,
-      reason:skipReason || 'unknown'
-    });
     return {
       ran:false,
       skipped:true,
       reason:skipReason || 'unknown'
     };
   }
-  console.info('[TRACK_FOCUS_REFRESH_START]', {
-    source,
-    mode:'incremental',
-    recordCount
-  });
-  const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function'
-    ? performance.now()
-    : Date.now();
   refreshTrackOnly({
     source:'track_focus_refresh',
     force:false,
     clearReviewOverride:false
-  }).then(result => {
-    const endedAt = typeof performance !== 'undefined' && typeof performance.now === 'function'
-      ? performance.now()
-      : Date.now();
-    const summary = result && result.summary ? result.summary : null;
-    const changedCount = Number(summary && summary.changedTickersCount || 0);
-    const attempted = Number(summary && summary.attempted || 0);
-    const unchangedCount = Math.max(0, attempted - changedCount);
-    console.info('[TRACK_FOCUS_REFRESH_DONE]', {
-      source,
-      ok:result && result.ok === true,
-      skipped:result && result.skipped === true,
-      reason:String(result && result.reason || ''),
-      error:String(result && result.error || ''),
-      hasSummary:!!summary,
-      changedCount,
-      unchangedCount,
-      durationMs:Number((endedAt - startedAt).toFixed(1)),
-      renderTriggered:activeWorkspaceTab() === 'track' && changedCount > 0
-    });
-  }).catch(error => {
-    console.info('[TRACK_FOCUS_REFRESH_DONE]', {
-      source,
-      ok:false,
-      skipped:false,
-      reason:'promise_rejected',
-      error:error && error.message ? String(error.message) : 'unknown_error',
-      hasSummary:false,
-      changedCount:0,
-      unchangedCount:0,
-      durationMs:null,
-      renderTriggered:false,
-      completion:'rejected'
-    });
-  });
+  }).catch(() => {});
   return {
     ran:true,
     skipped:false,
@@ -11346,6 +11287,17 @@ function setLiveProcessStatus(stateKey, message, options = {}){
         pending.flushedAt = new Date().toISOString();
       }
       const runPendingReview = () => {
+        const pendingTickerBefore = normalizeTicker(pending && pending.ticker || '');
+        const refreshedRecord = pendingTickerBefore ? getTickerRecord(pendingTickerBefore) : null;
+        if(typeof console !== 'undefined' && console.info){
+          console.info('[REVIEW_PENDING_RELEASE_RETRY]', {
+            pendingTickerBefore,
+            refreshedRecordExists:!!refreshedRecord,
+            retrySource:'watchlist_refresh_release',
+            activeTickerBefore:activeReviewTicker() || '',
+            queuedTickerBefore:String(uiState.queuedReviewTicker || '')
+          });
+        }
         if(pending && pending.superseded){
           reviewTickerOwnershipTrace('stale_pending_review_blocked', {
             requestedTicker:pending.ticker || '',
@@ -11366,6 +11318,7 @@ function setLiveProcessStatus(stateKey, message, options = {}){
         loadTickerIntoReview(pending.ticker, {
           ...(pending.options || {}),
           forceNow:true,
+          resumePending:true,
           reviewRequestToken:pending.reviewRequestToken || ((pending.options && pending.options.reviewRequestToken) || ''),
           openTrigger:{
             kind:'pending_review_replay',
@@ -11374,6 +11327,14 @@ function setLiveProcessStatus(stateKey, message, options = {}){
             isTrusted:null
           }
         });
+        if(typeof console !== 'undefined' && console.info){
+          console.info('[REVIEW_PENDING_RELEASE_RETRY_RESULT]', {
+            pendingTickerBefore,
+            finalRenderedTicker:activeReviewTicker() || '',
+            pendingTickerCleared:!pendingReviewTicker(),
+            currentPendingTicker:pendingReviewTicker() || ''
+          });
+        }
       };
       if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
         window.requestAnimationFrame(() => runPendingReview());
@@ -24129,6 +24090,7 @@ function maybeInvalidateActiveReviewProjectionFromTrack(ticker, nextProjectionSn
 function loadTickerIntoReview(ticker, options = {}){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return;
+  const resumePending = options.resumePending === true;
   const summarizeReviewOpenRequestStack = () => {
     try{
       const rawStack = String(new Error().stack || '');
@@ -24149,6 +24111,19 @@ function loadTickerIntoReview(ticker, options = {}){
   const currentPendingTicker = normalizeTicker(currentPending && currentPending.ticker || '');
   const currentPendingToken = String(currentPending && currentPending.reviewRequestToken || '');
   if(currentPending && !currentPending.superseded && currentPendingTicker === symbol){
+    const requestedResumeToken = String(options.reviewRequestToken || '');
+    const samePendingResume = resumePending && requestedResumeToken && currentPendingToken && requestedResumeToken === currentPendingToken;
+    if(samePendingResume){
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[REVIEW_PENDING_RESUME]', {
+          requestedTicker:symbol,
+          reviewRequestToken:requestedResumeToken,
+          activeTicker:activeReviewTicker() || '',
+          pendingTicker:pendingReviewTicker() || '',
+          queuedTicker:uiState.queuedReviewTicker || ''
+        });
+      }
+    }else{
     if(typeof console !== 'undefined' && console.info){
       console.info('[REVIEW_PENDING_DUPLICATE_SUPPRESSED]', {
         requestedTicker:symbol,
@@ -24166,6 +24141,7 @@ function loadTickerIntoReview(ticker, options = {}){
       statusText:'duplicate_pending_review_request'
     });
     return;
+    }
   }
   const reviewRequestToken = String(options.reviewRequestToken || nextReviewRequestToken());
   setActiveWorkspaceTab('review', {focusTop:false});
@@ -26320,19 +26296,6 @@ async function refreshTrackOnly(options = {}){
     const refreshedCount = Number(refreshSummary && refreshSummary.refreshed || 0);
     const failedCount = Number(refreshSummary && refreshSummary.failed || 0);
     const interruptionCause = interruptionCauseCodeForStage(interruptionStage);
-    if(source === 'track_focus_refresh'){
-      console.info('[TRACK_FOCUS_REFRESH_INTERNAL_ERROR]', {
-        source,
-        interruptionStage,
-        interruptionCause,
-        attempted,
-        refreshedCount,
-        failedCount,
-        backendPullFailed,
-        riskRecalcFailed,
-        error:error && error.message ? String(error.message) : 'unknown_error'
-      });
-    }
     if(PP_PERF_DEBUG){
       console.warn('[TrackRefreshFailureTrace]', {
         scope:'refreshTrackOnly.catch',
