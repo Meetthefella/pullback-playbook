@@ -4730,11 +4730,32 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/function maybeRunTrackFocusWatchlistRefresh\(options = \{\}\)\{/.test(appSource)){
     throw new Error('Track focus should retain the guarded focus-refresh helper.');
   }
+  if(!/function trackRefreshFreshnessTimestamp\(\)\{/.test(appSource)
+    || !/function trackRefreshFreshnessAgeMs\(now = Date\.now\(\)\)\{/.test(appSource)
+    || !/function markTrackRefreshFreshness\(source, summary = null\)\{/.test(appSource)){
+    throw new Error('Track focus refresh should use dedicated freshness helpers for stale-decision control.');
+  }
+  if(!/return String\(trackRefreshRuntime\.lastSuccessfulTrackFocusRefreshAt \|\| ''\)\.trim\(\);/.test(appSource)){
+    throw new Error('Track focus TTL decisions must use the dedicated Track-focus freshness timestamp only.');
+  }
   if(!/refreshTrackOnly\(\{\s*source:'track_focus_refresh',\s*force:false,\s*clearReviewOverride:false\s*\}\)/s.test(appSource)){
     throw new Error('Track focus refresh should use the guarded track refresh path without clearing active review overrides.');
   }
+  if(!/else if\(!watchlistDirty && freshWithinTtl\) skipReason = 'fresh_within_ttl';/.test(appSource)
+    || !/\[TRACK_FOCUS_REFRESH_CHECK\]/.test(appSource)
+    || !/\[TRACK_FOCUS_REFRESH_SKIPPED\]/.test(appSource)
+    || !/\[TRACK_FOCUS_REFRESH_START\]/.test(appSource)
+    || !/\[TRACK_FOCUS_REFRESH_DONE\]/.test(appSource)){
+    throw new Error('Track focus refresh should log the TTL-based skip/run decision during this audit pass.');
+  }
   if(!/refreshSummary = await refreshWatchlistRecordsFromSourceOfTruth\(\{\s*source,\s*trackOnly:true,\s*mode:'incremental',\s*force:options\.force === true,\s*render:false,\s*persist:true,\s*clearReviewOverride:options\.clearReviewOverride\s*\}\)/s.test(appSource)){
     throw new Error('Track refresh should pass through clearReviewOverride so focus refresh does not mutate Review state unexpectedly.');
+  }
+  if(!/const committedCount = results\.filter\(result => result && result\.ok === true && result\.skipped !== true\)\.length;/.test(appSource)
+    || !/if\(attempted <= 0 \|\| committedCount !== attempted \|\| skippedCount > 0 \|\| failed > 0\) return false;/.test(appSource)
+    || !/summary\.freshnessAdvanced = freshnessAdvanced;/.test(appSource)
+    || !/freshnessAdvanced:refreshSummary && refreshSummary\.freshnessAdvanced === true/.test(appSource)){
+    throw new Error('Successful watchlist refreshes must advance and expose the freshness marker.');
   }
   if(!/if\(firstUserOpen\)\{\s*renderWatchlist\(\{\s*source:'track_first_open_sync',\s*allowCachedReturn:false/s.test(appSource)){
     throw new Error('First Track focus should use a synchronous watchlist render so the active bucket is populated immediately.');

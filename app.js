@@ -150,7 +150,9 @@ const trackRefreshRuntime = {
   queued:false,
   lastReason:'',
   lastStartedAt:'',
-  lastFinishedAt:''
+  lastFinishedAt:'',
+  lastSuccessfulAt:'',
+  lastSuccessfulTrackFocusRefreshAt:''
 };
 const deferredStartupQueue = [];
 let deferredStartupQueueRunning = false;
@@ -8526,12 +8528,16 @@ function maybeRunTrackFocusWatchlistRefresh(options = {}){
   const recordCount = lightweightWatchlistRecordCount();
   const watchlistDirty = hasWatchlistDirtyRecords();
   const watchlistStale = watchlistRecordsAreStale();
+  const lifecycleInputsStale = !watchlistTickerRecords().every(hasFreshLifecycleInputs);
   const refreshInFlight = trackRefreshRuntime.inFlight === true;
   const startupRestoreComplete = startupCoordinator.trackedStateHydrationResolved === true;
   const startupRefreshInFlight = !!startupCoordinator.startupWatchlistRefreshPromise;
   const startupRefreshDeferred = startupCoordinator.startupWatchlistRefreshDeferred === true;
   const now = Date.now();
   const cooldownRemaining = Math.max(0, Number(startupCoordinator.nextAllowedStartupTrackRefreshAt || 0) - now);
+  const freshnessAgeMs = trackRefreshFreshnessAgeMs(now);
+  const freshWithinTtl = Number.isFinite(freshnessAgeMs) && freshnessAgeMs < WATCHLIST_STALE_AGE_MS;
+  const lastSuccessfulTrackFocusRefreshAt = String(trackRefreshRuntime.lastSuccessfulTrackFocusRefreshAt || '');
   let decision = 'skip';
   let skipReason = '';
   if(activeTab !== 'track') skipReason = 'track_not_active';
@@ -8540,15 +8546,49 @@ function maybeRunTrackFocusWatchlistRefresh(options = {}){
   else if(refreshInFlight) skipReason = 'refresh_in_flight';
   else if(startupRefreshInFlight) skipReason = 'startup_refresh_in_flight';
   else if(startupRefreshDeferred) skipReason = 'startup_refresh_deferred';
-  else if(!watchlistStale) skipReason = 'fresh';
+  else if(!watchlistDirty && freshWithinTtl) skipReason = 'fresh_within_ttl';
+  else if(!watchlistDirty && !watchlistStale) skipReason = 'fresh_by_record_timestamps';
   else decision = 'run';
+  console.info('[TRACK_FOCUS_REFRESH_CHECK]', {
+    source,
+    activeTab,
+    recordCount,
+    watchlistDirty,
+    watchlistStale,
+    lifecycleInputsStale,
+    staleAgeMs:Number.isFinite(freshnessAgeMs) ? freshnessAgeMs : null,
+    staleTtlMs:WATCHLIST_STALE_AGE_MS,
+    lastSuccessfulTrackFocusRefreshAt,
+    lastSuccessfulRefreshAt:String(trackRefreshRuntime.lastSuccessfulAt || ''),
+    cooldownRemaining,
+    refreshInFlight,
+    startupRestoreComplete,
+    decision,
+    skipReason
+  });
   if(decision !== 'run'){
+    console.info('[TRACK_FOCUS_REFRESH_SKIPPED]', {
+      source,
+      reason:skipReason || 'unknown',
+      staleAgeMs:Number.isFinite(freshnessAgeMs) ? freshnessAgeMs : null,
+      staleTtlMs:WATCHLIST_STALE_AGE_MS,
+      lastSuccessfulTrackFocusRefreshAt,
+      watchlistDirty,
+      watchlistStale
+    });
     return {
       ran:false,
       skipped:true,
       reason:skipReason || 'unknown'
     };
   }
+  console.info('[TRACK_FOCUS_REFRESH_START]', {
+    source,
+    mode:'incremental',
+    recordCount,
+    staleAgeMs:Number.isFinite(freshnessAgeMs) ? freshnessAgeMs : null,
+    staleTtlMs:WATCHLIST_STALE_AGE_MS
+  });
   refreshTrackOnly({
     source:'track_focus_refresh',
     force:false,
@@ -9998,6 +10038,33 @@ function shouldRestoreTrackScrollForSource(source = ''){
   if(normalized.includes('track_tab_activation')) return true;
   if(normalized.includes('manual_track_restore')) return true;
   return false;
+}
+
+function trackRefreshFreshnessTimestamp(){
+  return String(trackRefreshRuntime.lastSuccessfulTrackFocusRefreshAt || '').trim();
+}
+
+function trackRefreshFreshnessAgeMs(now = Date.now()){
+  const freshnessTs = trackRefreshFreshnessTimestamp();
+  const freshnessMs = Date.parse(freshnessTs);
+  if(!Number.isFinite(freshnessMs)) return null;
+  return Math.max(0, now - freshnessMs);
+}
+
+function markTrackRefreshFreshness(source, summary = null){
+  const safeSource = String(source || '').trim().toLowerCase();
+  const attempted = Number(summary && summary.attempted || 0);
+  const failed = Number(summary && summary.failed || 0);
+  const results = Array.isArray(summary && summary.results) ? summary.results : [];
+  const committedCount = results.filter(result => result && result.ok === true && result.skipped !== true).length;
+  const skippedCount = results.filter(result => result && result.skipped === true).length;
+  if(attempted <= 0 || committedCount !== attempted || skippedCount > 0 || failed > 0) return false;
+  const stampedAt = new Date().toISOString();
+  trackRefreshRuntime.lastSuccessfulAt = stampedAt;
+  if(safeSource === 'track_focus_refresh'){
+    trackRefreshRuntime.lastSuccessfulTrackFocusRefreshAt = stampedAt;
+  }
+  return true;
 }
 
 function restoreTrackUiState(snapshot = null, options = {}){
@@ -26021,10 +26088,14 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
     attempted:tickers.length,
     refreshed:results.filter(result => result.ok).length,
     failed:results.filter(result => !result.ok).length,
+    committed:results.filter(result => result && result.ok === true && result.skipped !== true).length,
+    skippedCount:results.filter(result => result && result.skipped === true).length,
     changedTickersCount:changedTickers.length,
     changedTickers:[...changedTickers],
     results
   };
+  const freshnessAdvanced = markTrackRefreshFreshness(source, summary);
+  summary.freshnessAdvanced = freshnessAdvanced;
   if(summary.failed && summary.refreshed === 0){
     setLiveProcessStatus('error', 'Refresh failed.');
   }else{
@@ -26037,7 +26108,11 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
       attempted:summary.attempted,
       refreshed:summary.refreshed,
       failed:summary.failed,
-      skipped:results.filter(result => result && result.skipped === true).length
+      committed:summary.committed,
+      skipped:summary.skippedCount,
+      freshnessAdvanced,
+      lastSuccessfulTrackFocusRefreshAt:String(trackRefreshRuntime.lastSuccessfulTrackFocusRefreshAt || ''),
+      lastSuccessfulRefreshAt:String(trackRefreshRuntime.lastSuccessfulAt || '')
     });
   }
   return finishWatchlistRefreshLog(summary);
@@ -26255,6 +26330,18 @@ async function refreshTrackOnly(options = {}){
         riskRecalcFailed ? 'Watchlist updated (risk recalc deferred).' : 'Watchlist plans updated.',
         {autoIdleMs:LIVE_PROCESS_IDLE_FADE_MS}
       );
+    }
+    if(source === 'track_focus_refresh'){
+      const focusFreshnessAgeMs = trackRefreshFreshnessAgeMs();
+      console.info('[TRACK_FOCUS_REFRESH_DONE]', {
+        source,
+        staleAgeMs:Number.isFinite(focusFreshnessAgeMs) ? focusFreshnessAgeMs : null,
+        staleTtlMs:WATCHLIST_STALE_AGE_MS,
+        lastSuccessfulTrackFocusRefreshAt:String(trackRefreshRuntime.lastSuccessfulTrackFocusRefreshAt || ''),
+        freshnessAdvanced:refreshSummary && refreshSummary.freshnessAdvanced === true,
+        skippedNoChangedInputs:noChangedInputs === true,
+        renderTriggered:noChangedInputs !== true
+      });
     }
     refreshOk = true;
     return {ok:true, source, riskRecalcFailed, backendPullFailed, summary:refreshSummary, skippedNoChangedInputs:noChangedInputs === true};
