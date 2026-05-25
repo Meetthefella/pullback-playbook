@@ -12351,10 +12351,20 @@ function renderCompactResultCardFromView(view){
     displayStage:globalVerdictLabel(canonicalVerdict),
     finalVerdict:globalVerdictLabel(canonicalVerdict)
   };
+  const sharedNarrative = buildSharedSetupNarrative({
+    simplifiedState,
+    resolvedState:simplifiedState.debug && simplifiedState.debug.resolvedState,
+    derivedStates:setupStates,
+    globalVerdict:scanLegacyState
+  });
   const secondaryUiMarkup = renderScanCardSecondaryUi(renderView);
   const companyLine = [item && item.meta && item.meta.companyName || '', item && item.meta && item.meta.exchange || ''].filter(Boolean).join(' | ');
   const technicalSummary = scanCardTechnicalSummaryForView(view);
-  const decisionSummary = String(scanPresentation.summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || '').trim()
+  const decisionSummary = String(
+    sharedNarrative.stateLabel && !sameVisibleCopy(sharedNarrative.stateLabel, scanPresentation.badgeLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict) || '')
+      ? `${sharedNarrative.stateLabel} - ${sharedNarrative.primaryReason || scanPresentation.summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || ''}`
+      : (sharedNarrative.primaryReason || scanPresentation.summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || '')
+  ).trim()
     || compactReasonLineForView(view, 3)
     || scanCardPrimaryActionLabel(view);
   if(typeof console !== 'undefined' && console.info){
@@ -16382,12 +16392,303 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   };
 }
 
+function buildSharedSetupNarrative({
+  simplifiedState,
+  resolvedState,
+  derivedStates,
+  globalVerdict,
+  displayedPlan
+} = {}){
+  const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  const resolved = resolvedState && typeof resolvedState === 'object'
+    ? resolvedState
+    : (globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {});
+  const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const canonicalVerdict = normalizeGlobalVerdictKey(
+    simplified.canonicalVerdict
+    || resolved.final_verdict
+    || resolved.finalVerdict
+    || 'watch'
+  );
+  const visualBucket = normalizeVisualBucketForPairing(
+    simplified.visualBucket
+    || simplified.presentationBucket
+    || resolved.visualBucket
+    || resolved.presentationBucket
+    || 'monitor'
+  );
+  const structureState = String(
+    derived.structureState
+    || simplified.structureState
+    || resolved.structure_state
+    || resolved.structureState
+    || ''
+  ).trim().toLowerCase();
+  const structureEligibility = String(
+    derived.structureEligibility
+    || simplified.structureEligibility
+    || resolved.structure_eligibility
+    || resolved.structureEligibility
+    || ''
+  ).trim().toLowerCase();
+  const setupLocationState = String(
+    derived.setupLocationState
+    || simplified.setupLocationState
+    || resolved.setup_location_state
+    || ''
+  ).trim().toLowerCase();
+  const pullbackZone = String(
+    derived.pullbackZone
+    || simplified.pullbackZone
+    || resolved.pullback_zone
+    || ''
+  ).trim().toLowerCase();
+  const bounceState = String(
+    derived.bounceState
+    || simplified.bounceState
+    || resolved.bounce_state
+    || ''
+  ).trim().toLowerCase();
+  const volumeState = String(
+    derived.volumeState
+    || simplified.volumeState
+    || resolved.volume_state
+    || ''
+  ).trim().toLowerCase();
+  const priceabilityState = String(
+    derived.priceabilityState
+    || simplified.priceabilityState
+    || resolved.priceability_state
+    || ''
+  ).trim().toLowerCase();
+  const viability = String(resolved.viability || '').trim().toLowerCase();
+  const mainBlocker = String(simplified.mainBlocker || resolved.main_blocker || resolved.reason || '').trim();
+  const planStatus = String(simplified.planStatus || resolved.plan_status || '').trim().toLowerCase();
+  const planVisible = simplified.planVisible === true;
+  const hasPriceablePlan = resolved.hasPriceablePlan === true || resolved.has_priceable_plan === true;
+  const hasProvisionalPlan = resolved.hasProvisionalPriceablePlan === true || resolved.has_provisional_priceable_plan === true;
+  const validPlan = planStatus === 'valid'
+    || !!(displayedPlan && typeof displayedPlan === 'object' && String(displayedPlan.status || '').trim().toLowerCase() === 'valid');
+  const aliveStructure = structureEligibility === 'alive' || ['strong','intact','developing_clean'].includes(structureState);
+  const strongStructure = ['strong','intact','developing_clean'].includes(structureState);
+  const bounceAttempt = ['attempt','early','developing'].includes(bounceState);
+  const weakVolume = ['weak','light','low','below_average'].includes(volumeState);
+  const monitorTone = ['monitor','watch','monitor_watch'].includes(visualBucket);
+  const diminishingTone = visualBucket === 'diminishing';
+  const nearMovingAverage = ['near_20ma','near_50ma','between_20_50ma'].includes(pullbackZone)
+    || ['supportive','support_band','pullback_zone'].includes(setupLocationState);
+  const hasClearInvalidationLevel = resolved.hasClearInvalidationLevel === true
+    || (resolved.near_entry_gate_checks && resolved.near_entry_gate_checks.has_clear_invalidation_level === true)
+    || (resolved.entry_gate_checks && resolved.entry_gate_checks.has_clear_invalidation_level === true);
+  const invalidationExplicitlyMissing = resolved.hasClearInvalidationLevel === false
+    || (resolved.near_entry_gate_checks && resolved.near_entry_gate_checks.has_clear_invalidation_level === false)
+    || (resolved.entry_gate_checks && resolved.entry_gate_checks.has_clear_invalidation_level === false)
+    || /no valid invalidation level is available/i.test(mainBlocker)
+    || /no reliable stop/i.test(mainBlocker);
+  const stateLabelFallback = (() => {
+    if(canonicalVerdict === 'entry') return 'Entry Ready';
+    if(canonicalVerdict === 'near_entry') return 'Near Entry';
+    if(canonicalVerdict === 'avoid') return 'Avoid';
+    if(canonicalVerdict === 'watch' && visualBucket === 'monitor') return 'Developing Watch';
+    if(canonicalVerdict === 'watch') return 'Watch';
+    return 'Review setup';
+  })();
+  const evidence = [];
+  const cautions = [];
+  const promotionRequirements = [];
+  const pushUnique = (list, value) => {
+    const text = String(value || '').trim();
+    if(!text || list.includes(text)) return;
+    list.push(text);
+  };
+  const movingAverageEvidence = (() => {
+    if(pullbackZone === 'near_20ma') return 'Price remains near the 20MA.';
+    if(pullbackZone === 'near_50ma') return 'Price remains near the 50MA.';
+    if(pullbackZone === 'between_20_50ma' || nearMovingAverage) return 'Price remains near moving-average support.';
+    return '';
+  })();
+  let stateLabel = stateLabelFallback;
+  let primaryReason = '';
+  let blocker = '';
+  let nextAction = '';
+
+  if(
+    canonicalVerdict === 'watch'
+    && visualBucket === 'monitor'
+    && aliveStructure
+    && strongStructure
+    && bounceAttempt
+    && invalidationExplicitlyMissing
+    && !hasPriceablePlan
+    && !hasProvisionalPlan
+  ){
+    stateLabel = 'Developing Watch';
+    primaryReason = 'The bounce is still taking shape, so a safe entry point cannot be identified yet.';
+    blocker = 'There is not a clear support level for managing risk yet.';
+    nextAction = 'Wait for a stronger bounce and a clearer area of support before considering an entry.';
+    pushUnique(evidence, movingAverageEvidence);
+    pushUnique(evidence, 'The rebound is still developing.');
+    pushUnique(evidence, 'Trade remains unpriceable.');
+    if(weakVolume) pushUnique(cautions, 'Weak volume reduces confidence in the rebound.');
+    [
+      'Stronger bounce confirmation',
+      'Clearer support level beneath price',
+      'Reliable stop-loss location',
+      'Better evidence that buyers are defending the area'
+    ].forEach(line => pushUnique(promotionRequirements, line));
+  }else if(canonicalVerdict === 'near_entry'){
+    stateLabel = 'Near Entry';
+    if(weakVolume){
+      primaryReason = 'The setup is close, but weak volume reduces confidence in the rebound.';
+      blocker = 'Buyers still need to show stronger follow-through.';
+      pushUnique(cautions, 'Weak volume reduces confidence in the rebound.');
+    }else if(viability === 'low_priority'){
+      const lowPriorityReason = String(
+        resolved.viabilityBranchReason
+        || resolved.viability_branch_reason
+        || resolved.viability_reason
+        || ''
+      ).trim();
+      primaryReason = 'The setup is close, but confirmation still needs to improve.';
+      blocker = /volume/i.test(lowPriorityReason)
+        ? 'Buyers still need to show stronger follow-through.'
+        : (lowPriorityReason || 'Buyers still need to show stronger control of the rebound.');
+    }else{
+      primaryReason = 'The setup is close, but the bounce still needs confirmation.';
+      blocker = 'A reliable trigger has not formed yet.';
+    }
+    nextAction = 'Wait for stronger confirmation before considering an entry.';
+    pushUnique(evidence, movingAverageEvidence);
+    pushUnique(evidence, bounceAttempt ? 'The rebound is still developing.' : 'The setup is close to confirmation.');
+    [
+      'Stronger bounce confirmation',
+      'A cleaner higher low beneath price',
+      'Better evidence that buyers are defending the area'
+    ].forEach(line => pushUnique(promotionRequirements, line));
+  }else if(canonicalVerdict === 'avoid'){
+    stateLabel = 'Avoid';
+    if(['broken','failed'].includes(structureState) || structureEligibility === 'broken'){
+      primaryReason = 'The setup has broken down, so buyers are no longer in control.';
+      blocker = 'Support has failed and risk can no longer be managed cleanly.';
+      nextAction = 'Leave it alone until a new base forms.';
+    }else{
+      primaryReason = 'The setup is not strong enough to treat as actionable right now.';
+      blocker = 'Price action still lacks the stability needed for a controlled trade.';
+      nextAction = 'Wait for the setup to rebuild before reviewing it again.';
+    }
+  }else if(canonicalVerdict === 'entry'){
+    stateLabel = 'Entry Ready';
+    primaryReason = 'Buyers are in control and the setup is ready to act on.';
+    nextAction = 'Execute only if the trigger remains valid.';
+  }else if(canonicalVerdict === 'watch' && diminishingTone){
+    stateLabel = 'Diminishing Watch';
+    primaryReason = 'The setup is losing quality, so wait for the chart to stabilise before considering an entry.';
+    blocker = (/needs structure repair/i.test(mainBlocker) && aliveStructure && strongStructure)
+      ? 'The pullback is no longer developing cleanly.'
+      : (mainBlocker || 'The pullback is no longer developing cleanly.');
+    nextAction = 'Wait for the setup to repair or remove it from active focus.';
+    pushUnique(evidence, movingAverageEvidence);
+    if(bounceAttempt) pushUnique(evidence, 'The rebound is failing to strengthen cleanly.');
+    if(weakVolume) pushUnique(cautions, 'Weak volume reduces confidence in the rebound.');
+  }else{
+    stateLabel = monitorTone ? 'Developing Watch' : stateLabelFallback;
+    if(monitorTone && aliveStructure && strongStructure && bounceAttempt){
+      primaryReason = 'Buyers are starting to step in, but the move is not convincing yet.';
+      blocker = invalidationExplicitlyMissing
+        ? 'There is not a clear support level for managing risk yet.'
+        : 'The bounce still needs stronger confirmation.';
+      nextAction = invalidationExplicitlyMissing
+        ? 'Wait for a stronger bounce and a clearer area of support before considering an entry.'
+        : 'Wait for stronger confirmation before considering an entry.';
+      pushUnique(evidence, movingAverageEvidence);
+      pushUnique(evidence, 'The rebound is still developing.');
+      if(priceabilityState === 'unpriceable' || !planVisible){
+        pushUnique(evidence, 'Trade remains unpriceable.');
+      }
+      [
+        'Stronger bounce confirmation',
+        'A clearer support level beneath price',
+        'A reliable stop-loss location'
+      ].forEach(line => pushUnique(promotionRequirements, line));
+    }else if(monitorTone && aliveStructure && strongStructure){
+      primaryReason = 'Buyers have not stepped in clearly enough yet, so the bounce still needs to form.';
+      blocker = 'There is not a reliable rebound from support yet.';
+      nextAction = 'Wait for buyers to show a clearer bounce before considering an entry.';
+      pushUnique(evidence, movingAverageEvidence);
+      pushUnique(evidence, 'Trade remains unpriceable.');
+      [
+        'A clear bounce from support',
+        'A more reliable low beneath price',
+        'Evidence that buyers are starting to defend the area'
+      ].forEach(line => pushUnique(promotionRequirements, line));
+    }else{
+      primaryReason = 'The setup is not ready yet.';
+      blocker = invalidationExplicitlyMissing
+        ? 'There is not a clear support level for managing risk yet.'
+        : 'The chart still needs clearer evidence before an entry can be considered.';
+      nextAction = 'Wait for the chart to provide a cleaner entry structure.';
+    }
+    if(weakVolume) pushUnique(cautions, 'Weak volume reduces confidence in the rebound.');
+  }
+
+  if(aliveStructure && strongStructure){
+    const scrubStructureRepair = value => String(value || '').replace(/needs structure repair/ig, 'confirmation still needs to improve').trim();
+    stateLabel = scrubStructureRepair(stateLabel);
+    primaryReason = scrubStructureRepair(primaryReason);
+    blocker = scrubStructureRepair(blocker);
+    nextAction = scrubStructureRepair(nextAction);
+  }
+  if(!weakVolume){
+    const scrubWeakVolume = value => String(value || '').replace(/\s*because volume is weak\.?/ig, '').trim();
+    stateLabel = scrubWeakVolume(stateLabel);
+    primaryReason = scrubWeakVolume(primaryReason);
+    blocker = scrubWeakVolume(blocker);
+    nextAction = scrubWeakVolume(nextAction);
+  }
+
+  if(!primaryReason){
+    primaryReason = mainBlocker || 'The setup is not ready yet.';
+  }
+  if(!blocker && canonicalVerdict !== 'entry'){
+    blocker = primaryReason;
+  }
+  if(!nextAction && canonicalVerdict !== 'entry'){
+    nextAction = 'Wait for clearer confirmation before considering an entry.';
+  }
+  if(sameVisibleCopy(blocker, primaryReason)){
+    blocker = '';
+  }
+  if(sameVisibleCopy(nextAction, primaryReason) || sameVisibleCopy(nextAction, blocker)){
+    nextAction = '';
+  }
+  if(!evidence.length && movingAverageEvidence){
+    pushUnique(evidence, movingAverageEvidence);
+  }
+
+  return {
+    canonicalVerdict,
+    visualBucket,
+    stateLabel:String(stateLabel || stateLabelFallback).trim(),
+    primaryReason:String(primaryReason || '').trim(),
+    blocker:String(blocker || '').trim(),
+    nextAction:String(nextAction || '').trim(),
+    evidence,
+    cautions,
+    promotionRequirements
+  };
+}
+
 function resolveTrackCardVisibleModel(record, simplifiedState = {}){
   const item = record && typeof record === 'object' ? record : {};
   const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const debug = simplified.debug && typeof simplified.debug === 'object' ? simplified.debug : {};
   const resolved = debug.resolvedState && typeof debug.resolvedState === 'object' ? debug.resolvedState : {};
   const derived = debug.derivedStates && typeof debug.derivedStates === 'object' ? debug.derivedStates : {};
+  const sharedNarrative = buildSharedSetupNarrative({
+    simplifiedState:simplified,
+    resolvedState:resolved,
+    derivedStates:derived
+  });
   const canonicalVerdict = normalizeGlobalVerdictKey(simplified.canonicalVerdict || 'watch');
   const internalVisualBucket = normalizeVisualBucketForPairing(simplified.visualBucket || simplified.presentationBucket || 'monitor');
   const structureState = String(derived.structureState || simplified.structureState || '').trim().toLowerCase();
@@ -16456,90 +16757,25 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
     structure_eligibility:structureEligibility
   };
 
-  const fallbackHeadline = () => {
-    if(canonicalVerdict === 'entry') return 'Entry Ready';
-    if(canonicalVerdict === 'near_entry') return 'Near Entry';
-    if(canonicalVerdict === 'avoid') return 'Avoid';
-    if(canonicalVerdict === 'watch' && (internalVisualBucket === 'monitor' || internalVisualBucket === 'diminishing')) return 'Developing Watch';
-    if(canonicalVerdict === 'watch') return 'Watch';
-    return 'Review setup';
-  };
-
-  let headline = '';
-  let primaryReason = '';
-  let nextAction = '';
+  let headline = String(sharedNarrative.stateLabel || '').trim();
+  let primaryReason = String(sharedNarrative.primaryReason || '').trim();
+  let nextAction = String(sharedNarrative.nextAction || '').trim();
   if(canonicalVerdict === 'near_entry'){
-    if(weakVolume){
-      headline = 'Near Entry - lower priority because volume is weak.';
-    }else if(viability === 'low_priority'){
-      headline = specificLowPriorityReason
-        ? `Near Entry - lower priority. ${specificLowPriorityReason}.`
-        : 'Near Entry - lower priority until confirmation improves.';
-    }else if(!headline || /monitor/i.test(headline)){
-      headline = 'Near Entry - waiting for confirmation.';
+    if(!headline) headline = 'Near Entry';
+    if(!primaryReason){
+      primaryReason = weakVolume
+        ? 'The setup is close, but weak volume reduces confidence in the rebound.'
+        : (specificLowPriorityReason || 'The setup is close, but confirmation still needs to improve.');
     }
-    primaryReason = weakVolume
-      ? 'Volume is weak, so the setup stays lower priority until follow-through improves.'
-      : (specificLowPriorityReason || 'Confirmation is not strong enough yet to treat this as actionable.');
-    nextAction = 'Wait for confirmation before treating the setup as actionable.';
+    if(!nextAction){
+      nextAction = 'Wait for stronger confirmation before considering an entry.';
+    }
   }else if(aliveStructure && strongStructure && bounceAttempt && weakVolume){
-    headline = 'Setup is structurally alive, but volume is weak so priority is reduced.';
-    primaryReason = 'The setup is still alive, but weak volume lowers conviction.';
-    nextAction = 'Wait for stronger confirmation before acting.';
+    headline = headline || 'Watch';
+    primaryReason = primaryReason || 'Weak volume reduces confidence in the rebound.';
+    nextAction = nextAction || 'Wait for stronger confirmation before considering an entry.';
   }else if(aliveStructure && strongStructure && bounceAttempt && /needs structure repair/i.test(headline)){
-    headline = weakVolume
-      ? 'Setup is structurally alive, but volume is weak so priority is reduced.'
-      : 'Setup is structurally alive, but confirmation is still pending.';
-  }
-
-  if(!headline){
-    headline = baseSummary;
-  }
-
-  if(
-    canonicalVerdict === 'watch'
-    && internalVisualBucket === 'monitor'
-    && aliveStructure
-    && strongStructure
-    && bounceAttempt
-    && nearMovingAverage
-    && invalidationExplicitlyMissing
-    && !hasPriceablePlan
-    && !hasProvisionalPlan
-  ){
-    headline = 'Developing Watch';
-    primaryReason = 'Bounce is forming, but there is not yet a clear invalidation level for a reliable trade plan.';
-    nextAction = 'Wait for stronger confirmation and a clearer support level.';
-  }else if(
-    canonicalVerdict === 'watch'
-    && internalVisualBucket === 'monitor'
-    && aliveStructure
-    && strongStructure
-    && invalidationExplicitlyMissing
-    && !primaryReason
-  ){
-    primaryReason = 'There is not yet a clear invalidation level for a reliable trade plan.';
-    nextAction = 'Wait for a clearer support level before treating the setup as actionable.';
-  }else if(!primaryReason){
-    primaryReason = headline;
-  }
-
-  if(
-    canonicalVerdict === 'watch'
-    && /conditions are not strong enough for active focus/i.test(primaryReason)
-    && invalidationExplicitlyMissing
-  ){
-    primaryReason = 'There is not yet a clear invalidation level for a reliable trade plan.';
-    nextAction = 'Wait for stronger confirmation and a clearer support level.';
-  }
-
-  if(
-    canonicalVerdict === 'watch'
-    && !nextAction
-    && primaryReason
-    && /clear invalidation level|reliable trade plan/i.test(primaryReason)
-  ){
-    nextAction = 'Wait for stronger confirmation and a clearer support level.';
+    headline = headline || 'Watch';
   }
 
   if(aliveStructure && strongStructure){
@@ -16558,10 +16794,7 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
   nextAction = String(nextAction || '').trim();
 
   if(!headline){
-    const headlineCandidate = baseSummary && !sameVisibleCopy(baseSummary, primaryReason)
-      ? baseSummary
-      : '';
-    headline = String(headlineCandidate || fallbackHeadline()).trim();
+    headline = String(sharedNarrative.stateLabel || baseSummary || '').trim();
   }
   if(sameVisibleCopy(primaryReason, headline)){
     primaryReason = '';
@@ -16576,7 +16809,8 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
       ? 'Provisional plan exists - waiting for confirmation.'
       : 'Valid plan calculations exist, but the trade is not actionable yet.';
   }else if(!planVisible){
-    planSummary = sanitizeNonTerminalPlanCopy(baseSummary, setupContext);
+    planSummary = String(sharedNarrative.nextAction || sharedNarrative.blocker || '').trim()
+      || sanitizeNonTerminalPlanCopy(baseSummary, setupContext);
   }
 
   if(aliveStructure && strongStructure){
@@ -17228,6 +17462,19 @@ function buildEntryConditionsSummary({
     rrConfidence,
     entryChecks
   });
+  const sharedNarrative = buildSharedSetupNarrative({
+    simplifiedState:{
+      canonicalVerdict:verdict,
+      visualBucket:presentation,
+      planStatus,
+      planVisible:false,
+      mainBlocker:String((globalVerdict && (globalVerdict.main_blocker || globalVerdict.reason)) || (resolvedContract && (resolvedContract.blockerReason || resolvedContract.reasonSummary)) || '').trim()
+    },
+    resolvedState:globalVerdict,
+    derivedStates,
+    displayedPlan
+  });
+  const asSentence = value => String(value || '').trim().replace(/[.]+$/,'');
 
   if(['avoid'].includes(verdict)){
     const structureBroken = ['broken','invalid','dead','failed'].includes(structureState)
@@ -17335,19 +17582,16 @@ function buildEntryConditionsSummary({
       show:true,
       ready:false,
       ticker:normalizeTicker(ticker || ''),
-      header:'\uD83C\uDFAF Near Entry - Stabilising near support',
-      primary:'Awaiting confirmation',
-      definitionLine:'Almost ready - waiting for confirmation',
+      header:sharedNarrative.stateLabel || '\uD83C\uDFAF Near Entry',
+      primary:sharedNarrative.primaryReason || 'Awaiting confirmation',
+      definitionLine:sharedNarrative.blocker || 'Almost ready - waiting for confirmation',
       wording_tone:'healthy_pullback',
       pattern_label:'Awaiting confirmation',
-      pattern_explanation:'Almost ready - waiting for confirmation',
-      secondary:[
-        'Bounce not yet confirmed',
-        'Entry trigger not validated'
-      ],
-      triggerLine,
-      futureStateLine:'Upgrades to: \uD83D\uDE80 Entry.',
-      footer:`${triggerLine} Upgrades to: \uD83D\uDE80 Entry.`,
+      pattern_explanation:sharedNarrative.blocker || 'Almost ready - waiting for confirmation',
+      secondary:(sharedNarrative.promotionRequirements || []).slice(0, 3),
+      triggerLine:`Why is it not tradable yet? ${asSentence(sharedNarrative.blocker || 'The bounce still needs confirmation')}.`,
+      futureStateLine:`What would improve the setup? ${asSentence(sharedNarrative.nextAction || 'Wait for stronger confirmation before considering an entry')}.`,
+      footer:sharedNarrative.nextAction || triggerLine,
       suppressPlanBlockerInHeadline:true
     };
   }
@@ -17437,20 +17681,31 @@ function buildEntryConditionsSummary({
   const normalizedHeader = (structuralState === 'developing' || structureState === 'developing_loose')
     ? '\uD83C\uDF31 Developing - Still forming'
     : (verdict === 'near_entry' ? '\uD83C\uDFAF Near Entry - Stabilising near support' : '\uD83D\uDFE1 Monitor - Still forming');
+  const renderedHeader = String(sharedNarrative.stateLabel || normalizedHeader || '').trim();
+  const narrativeSecondary = []
+    .concat((sharedNarrative.promotionRequirements || []).slice(0, 3))
+    .concat((sharedNarrative.evidence || []).slice(0, 2))
+    .concat((sharedNarrative.cautions || []).slice(0, 1))
+    .filter((line, index, list) => {
+      const text = String(line || '').trim();
+      if(!text) return false;
+      return list.findIndex(other => sameVisibleCopy(other, text)) === index;
+    })
+    .slice(0, 3);
 
   return {
     show:true,
     ready:false,
     ticker:normalizeTicker(ticker || ''),
-    header:normalizedHeader,
-    primary:`${pattern.label} - ${pattern.explanation}`,
+    header:renderedHeader,
+    primary:sharedNarrative.primaryReason || `${pattern.label} - ${pattern.explanation}`,
     wording_tone:pattern.wordingTone || 'developing_pullback',
     pattern_label:pattern.label,
-    pattern_explanation:pattern.explanation,
-    secondary,
-    triggerLine,
-    futureStateLine,
-    footer
+    pattern_explanation:sharedNarrative.blocker || pattern.explanation,
+    secondary:narrativeSecondary.length ? narrativeSecondary : secondary,
+    triggerLine:`Why is it not tradable yet? ${asSentence(sharedNarrative.blocker || triggerCondition)}.`,
+    futureStateLine:`What would improve the setup? ${asSentence(sharedNarrative.nextAction || futureStateLine)}.`,
+    footer:sharedNarrative.nextAction || footer
   };
 }
 
@@ -18169,6 +18424,12 @@ function buildReviewSemanticStatus({
   const aliveStructure = structureEligibility === 'alive'
     || ['strong','intact','developing_clean'].includes(structureState);
   const staleWeakCopy = /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(rawBlocker);
+  const sharedNarrative = buildSharedSetupNarrative({
+    simplifiedState:simplified,
+    resolvedState:global,
+    derivedStates:derived,
+    displayedPlan:plan
+  });
   const copyContext = {
     finalVerdict:verdict,
     structureState,
@@ -18183,7 +18444,7 @@ function buildReviewSemanticStatus({
     avoid_trigger_source:global.avoid_trigger_source,
     explicit_invalidation_reason:global.explicit_invalidation_reason
   };
-  let blocker = sanitizeAliveWatchSemanticCopy(rawBlocker, copyContext);
+  let blocker = String(sharedNarrative.blocker || '').trim();
   if(terminalAvoid && ['broken','dead','failed'].includes(structureState)){
     blocker = rawBlocker || 'Structure is broken. No trade until price rebuilds from a clean base.';
   }else if(structuralWeakness){
@@ -18216,14 +18477,24 @@ function buildReviewSemanticStatus({
   }else if(planFieldsPresent && !planMathValid){
     tradeStatus = {line1:'Plan needs work.', line2:'No actionable trade yet.'};
   }else{
-    tradeStatus = {line1:'No actionable trade yet.', line2:'Entry, stop, and target cannot be priced reliably yet.'};
+    tradeStatus = {line1:'Trade remains unpriceable.', line2:blocker || 'A safe entry point cannot be identified yet.'};
   }
   const rrDisplay = actionable && Number.isFinite(rrValue)
     ? `${rrValue.toFixed(2)}R`
     : (draftPlan ? 'No actionable trade yet.' : 'No actionable plan yet.');
   return {
+    stateLabel:String(sharedNarrative.stateLabel || globalVerdictLabel(verdict)).trim(),
+    primaryReason:String(sharedNarrative.primaryReason || blocker).trim(),
     blocker,
-    setupSummary:blocker,
+    setupSummary:[sharedNarrative.primaryReason, blocker].filter((line, index, list) => {
+      const text = String(line || '').trim();
+      if(!text) return false;
+      return list.findIndex(other => sameVisibleCopy(other, text)) === index;
+    }).join(' '),
+    evidence:Array.isArray(sharedNarrative.evidence) ? sharedNarrative.evidence.slice() : [],
+    cautions:Array.isArray(sharedNarrative.cautions) ? sharedNarrative.cautions.slice() : [],
+    promotionRequirements:Array.isArray(sharedNarrative.promotionRequirements) ? sharedNarrative.promotionRequirements.slice() : [],
+    nextAction:String(sharedNarrative.nextAction || '').trim(),
     tradeStatus,
     planActionable:actionable,
     draftPlan,
@@ -18273,7 +18544,11 @@ function reviewSetupQualitySummary(checks, result, context = {}){
     },
     planRealism:null
   });
-  return semantic.setupSummary || buildSummary(checks, result && result.status, context);
+  const semanticEvidence = []
+    .concat(Array.isArray(semantic.evidence) ? semantic.evidence : [])
+    .concat(Array.isArray(semantic.cautions) ? semantic.cautions : [])
+    .filter(Boolean);
+  return semanticEvidence.join(' ') || semantic.setupSummary || buildSummary(checks, result && result.status, context);
 }
 
 function normalizeExitMode(exitMode){
@@ -29787,7 +30062,7 @@ function renderReviewWorkspace(options = {}){
     displayedPlan,
     planRealism
   });
-  const decisionSummary = reviewLifecycleBias.decisionSummary || visualState.decision_summary;
+  const decisionSummary = String(reviewSemanticStatus.primaryReason || reviewLifecycleBias.decisionSummary || visualState.decision_summary || '').trim();
   const resolvedFinalVerdictKey = normalizeGlobalVerdictKey(
     simplifiedCanonicalVerdict || 'watch'
   );
@@ -30074,15 +30349,15 @@ function renderReviewWorkspace(options = {}){
     fromFreshResolverOutput:true,
     finalReviewVisualBucket
   });
-  const reviewAction = {label:simplifiedActionLabel || 'Review setup inputs'};
-  const reviewNextActionLabel = String(simplifiedActionLabel || '').trim() || 'Review setup inputs';
+  const reviewAction = {label:reviewSemanticStatus.nextAction || simplifiedActionLabel || 'Review setup inputs'};
+  const reviewNextActionLabel = String(reviewSemanticStatus.nextAction || simplifiedActionLabel || '').trim() || 'Review setup inputs';
   const reviewBadgeLabel = effectiveReviewBadge.text;
   const planUI = {
     showPlan:reviewSemanticStatus.showPlanFields === true,
     showRR:reviewSemanticStatus.showPlanMetrics === true,
     showCapital:reviewSemanticStatus.showCapital === true,
     showPositionSize:reviewSemanticStatus.showCapital === true,
-    diagnosticsMessage:String(reviewSemanticStatus.blocker || simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.').trim()
+    diagnosticsMessage:String(reviewSemanticStatus.blocker || reviewSemanticStatus.primaryReason || simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.').trim()
   };
   const tradeStatusText = reviewSemanticStatus.tradeStatus || {line1:planUI.diagnosticsMessage || 'No actionable trade yet.', line2:''};
   const modifierMarkup = '';
@@ -31361,7 +31636,7 @@ function syncPlanDisplayMeta(options = {}){
     trackPresentationBucket:normalizeVisualBucketForPairing(metaSimplifiedState.visualBucket || 'monitor'),
     trackPresentationTone:String(metaSimplifiedState.tone || metaSimplifiedState.visualBucket || 'monitor').trim().toLowerCase()
   };
-  const decisionSummary = String(metaSimplifiedState.mainBlocker || metaSimplifiedState.actionLabel || '').trim();
+  const decisionSummary = String(reviewSemanticStatus.primaryReason || metaSimplifiedState.mainBlocker || metaSimplifiedState.actionLabel || '').trim();
   const reviewTradeStatusVerdict = {
     ...visualState,
     structure_state:visualState.structure_state || globalVerdict.structure_state,
@@ -31395,7 +31670,7 @@ function syncPlanDisplayMeta(options = {}){
     showRR:reviewSemanticStatus.showPlanMetrics === true,
     showCapital:reviewSemanticStatus.showCapital === true,
     showPositionSize:reviewSemanticStatus.showCapital === true,
-    diagnosticsMessage:String(reviewSemanticStatus.blocker || metaSimplifiedState.mainBlocker || metaSimplifiedState.planStatus || 'No actionable plan yet.').trim()
+    diagnosticsMessage:String(reviewSemanticStatus.blocker || reviewSemanticStatus.primaryReason || metaSimplifiedState.mainBlocker || metaSimplifiedState.planStatus || 'No actionable plan yet.').trim()
   };
   if(planStateBox) planStateBox.value = planUiState.label;
   const planQuality = planQualityForRr(displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null);
@@ -31599,7 +31874,7 @@ function calculate(options = {}){
     displayedPlan,
     setupScore:setupScoreForRecord(activeRecord)
   }) : {finalVerdict:'watch'};
-  const plannerDecisionSummary = String(plannerSimplifiedState.mainBlocker || plannerSimplifiedState.actionLabel || '').trim();
+  const plannerDecisionSummary = String(plannerSemanticStatus.primaryReason || plannerSimplifiedState.mainBlocker || plannerSimplifiedState.actionLabel || '').trim();
   const plannerTradeStatusVerdict = {
     ...plannerVisualState,
     ...globalVerdict,
@@ -31619,7 +31894,7 @@ function calculate(options = {}){
     showRR:plannerSemanticStatus.showPlanMetrics === true,
     showCapital:plannerSemanticStatus.showCapital === true,
     showPositionSize:plannerSemanticStatus.showCapital === true,
-    diagnosticsMessage:String(plannerSemanticStatus.blocker || plannerSimplifiedState.mainBlocker || plannerSimplifiedState.planStatus || 'No actionable plan yet.').trim()
+    diagnosticsMessage:String(plannerSemanticStatus.blocker || plannerSemanticStatus.primaryReason || plannerSimplifiedState.mainBlocker || plannerSimplifiedState.planStatus || 'No actionable plan yet.').trim()
   };
   $('rewardPerShareBox').textContent = Number.isFinite(displayedPlan.rewardPerShare) ? displayedPlan.rewardPerShare.toFixed(2) : '-';
   const riskFitLabel = riskStatusLabel(displayedPlan.status === 'valid' ? displayedPlan.riskFit.risk_status : (displayedPlan.status === 'invalid' ? 'invalid_plan' : 'plan_missing'));

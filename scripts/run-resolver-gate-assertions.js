@@ -311,6 +311,9 @@ function runReviewProjectionAssertions(){
     currentRrThreshold(){
       return 2;
     },
+    sameVisibleCopy(a, b){
+      return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    },
     verdictPresentationLabelForKey(value){
       return String(value || '').trim();
     },
@@ -323,6 +326,7 @@ function runReviewProjectionAssertions(){
     'terminalAvoidEvidenceForReviewCopy',
     'reviewCopyEvidence',
     'sanitizeAliveWatchSemanticCopy',
+    'buildSharedSetupNarrative',
     'provisionalPlanConfirmationCopy',
     'terminalAvoidCopyPattern',
     'sanitizeNonTerminalPlanCopy',
@@ -733,13 +737,14 @@ function runReviewProjectionAssertions(){
     planRealism:{}
   });
   const tgtStyleText = [
+    tgtStyleAliveWatchSemantic.primaryReason,
     tgtStyleAliveWatchSemantic.blocker,
     tgtStyleAliveWatchSemantic.tradeStatus && tgtStyleAliveWatchSemantic.tradeStatus.line1,
     tgtStyleAliveWatchSemantic.tradeStatus && tgtStyleAliveWatchSemantic.tradeStatus.line2,
     tgtStyleAliveWatchSemantic.rrDisplay
   ].join(' | ');
-  if(!/broader uptrend is still intact|bounce attempt|not stable enough|price reliably|No actionable trade yet/i.test(tgtStyleText)){
-    throw new Error('TGT-style alive Watch copy must frame the setup as intact trend + unconfirmed bounce + not priceable yet.');
+  if(!/bounce is still taking shape|buyers are starting to step in/i.test(tgtStyleText) || !/clear support level for managing risk|Trade remains unpriceable|No actionable trade yet/i.test(tgtStyleText)){
+    throw new Error('TGT-style alive Watch copy must frame the setup as a developing bounce with missing support/risk structure and no trade yet.');
   }
   if(/structure (?:looks )?(?:weak|broken)|no signs of stabilisation|no bounce yet|no signs.*bounce/i.test(tgtStyleText)){
     throw new Error('TGT-style alive Watch copy must not imply weak/broken structure or absent bounce.');
@@ -938,6 +943,20 @@ function runEntryConditionsSummaryAssertions(){
     throw new Error('Review advanced debug reveal must be delegated from the Review watchlist status button.');
   }
   const summarySandbox = {
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid'].includes(safe)) return safe;
+      return 'watch';
+    },
+    normalizeVisualBucketForPairing(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(['entry','near_entry','monitor','diminishing','avoid'].includes(safe)) return safe;
+      return 'monitor';
+    },
+    sameVisibleCopy(a, b){
+      return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    },
     normalizeVerdict(value){
       const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
       if(safe === 'near_entry' || safe === 'nearentry') return 'near_entry';
@@ -950,6 +969,7 @@ function runEntryConditionsSummaryAssertions(){
   };
   vm.createContext(summarySandbox);
   [
+    'buildSharedSetupNarrative',
     'resolveSetupPatternUi',
     'entryTriggerConditionForSummary',
     'nextUpgradeStateForSummary',
@@ -974,7 +994,7 @@ function runEntryConditionsSummaryAssertions(){
     displayedPlan:{}
   });
   const healthyText = [healthyMissingPlan.header, healthyMissingPlan.primary, healthyMissingPlan.definitionLine, healthyMissingPlan.footer, healthyMissingPlan.secondary && healthyMissingPlan.secondary.join(' ')].join(' ');
-  if(!healthyMissingPlan.show || !/waiting for bounce|needs confirmation|alive|stepping back in/i.test(healthyText)){
+  if(!healthyMissingPlan.show || !/bounce still needs to form|reliable rebound from support|clearer bounce/i.test(healthyText)){
     throw new Error('Healthy missing-plan/no-bounce Watch long-press summary must describe confirmation, not deterioration.');
   }
   if(/weak pullback|weakening|damaged|deteriorating|losing quality/i.test(healthyText)){
@@ -995,7 +1015,7 @@ function runEntryConditionsSummaryAssertions(){
     displayedPlan:{}
   });
   const missingPlanText = [missingPlanOnly.primary, missingPlanOnly.footer].join(' ');
-  if(!/plan pending|cleaner entry and stop|no actionable plan/i.test(missingPlanText)){
+  if(!/stronger confirmation|developing watch|clearer support|considering an entry/i.test(missingPlanText)){
     throw new Error('Missing plan alone must produce plan-pending long-press wording.');
   }
   if(/diminishing|weakening|deteriorating|damaged/i.test(missingPlanText)){
@@ -1039,6 +1059,212 @@ function runEntryConditionsSummaryAssertions(){
 
 runReviewProjectionAssertions();
 runEntryConditionsSummaryAssertions();
+
+function runSharedNarrativeConsistencyAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const narrativeSandbox = {
+    console,
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid'].includes(safe)) return safe;
+      return 'watch';
+    },
+    normalizeVisualBucketForPairing(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(['entry','near_entry','monitor','diminishing','avoid'].includes(safe)) return safe;
+      return 'monitor';
+    },
+    normalizeVerdict(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid','dead','monitor','developing'].includes(safe)) return safe;
+      return safe || 'watch';
+    },
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
+    sameVisibleCopy(a, b){
+      return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    },
+    currentRrThreshold(){
+      return 2;
+    },
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    globalVerdictLabel(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    }
+  };
+  vm.createContext(narrativeSandbox);
+  [
+    'normalizeUiCopy',
+    'resolvePresentationTone',
+    'terminalAvoidEvidenceForReviewCopy',
+    'terminalAvoidCopyPattern',
+    'sanitizeAliveWatchSemanticCopy',
+    'provisionalPlanConfirmationCopy',
+    'sanitizeNonTerminalPlanCopy',
+    'buildSharedSetupNarrative',
+    'resolveTrackCardVisibleModel',
+    'buildReviewSemanticStatus',
+    'resolveSetupPatternUi',
+    'entryTriggerConditionForSummary',
+    'nextUpgradeStateForSummary',
+    'nextUpgradeStateForSummaryLabel',
+    'buildEntryConditionsSummary'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), narrativeSandbox, {filename:`app.js#${functionName}`});
+  });
+
+  const sharedInput = {
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      visualBucket:'monitor',
+      planStatus:'missing',
+      planVisible:false,
+      mainBlocker:'Conditions are not strong enough for active focus.'
+    },
+    resolvedState:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      structure_state:'strong',
+      bounce_state:'attempt',
+      priceability_state:'unpriceable',
+      hasClearInvalidationLevel:false
+    },
+    derivedStates:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      volumeState:'supportive',
+      pullbackZone:'near_20ma',
+      priceabilityState:'unpriceable'
+    },
+    displayedPlan:{status:'missing'}
+  };
+  const narrative = narrativeSandbox.buildSharedSetupNarrative(sharedInput);
+  if(narrative.stateLabel !== 'Developing Watch'){
+    throw new Error('Shared narrative must label the developing-watch state consistently.');
+  }
+  if(!/bounce is still taking shape/i.test(String(narrative.primaryReason || ''))){
+    throw new Error('Shared narrative must explain that the bounce is still taking shape.');
+  }
+  if(!/support level for managing risk/i.test(String(narrative.blocker || ''))){
+    throw new Error('Shared narrative must explain the missing support/risk level.');
+  }
+  if(!/stronger bounce.*clearer area of support/i.test(String(narrative.nextAction || ''))){
+    throw new Error('Shared narrative must explain the next step in plain-English chart terms.');
+  }
+  if((narrative.promotionRequirements || []).join(' ').match(/needs structure repair/i)){
+    throw new Error('Shared narrative must not emit structure-repair language for alive/strong setups.');
+  }
+
+  const trackModel = narrativeSandbox.resolveTrackCardVisibleModel({ticker:'ADI'}, {
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    badgeLabel:'Watch',
+    planVisible:false,
+    planStatus:'missing',
+    mainBlocker:'Conditions are not strong enough for active focus.',
+    debug:{
+      resolvedState:sharedInput.resolvedState,
+      derivedStates:sharedInput.derivedStates
+    }
+  });
+  if(trackModel.headline !== narrative.stateLabel || !/bounce is still taking shape/i.test(String(trackModel.primaryReason || ''))){
+    throw new Error('Track card narrative must align with the shared developing-watch narrative.');
+  }
+  if(!/stronger bounce and a clearer area of support/i.test(String(trackModel.planSummary || '')) || /conditions are not strong enough for active focus/i.test(String(trackModel.planSummary || ''))){
+    throw new Error('Track More plan summary must prefer the shared next action over legacy generic blocker copy.');
+  }
+
+  const reviewModel = narrativeSandbox.buildReviewSemanticStatus({
+    simplifiedState:sharedInput.simplifiedState,
+    globalVerdict:sharedInput.resolvedState,
+    derivedStates:sharedInput.derivedStates,
+    displayedPlan:sharedInput.displayedPlan,
+    planRealism:{}
+  });
+  if(reviewModel.stateLabel !== narrative.stateLabel || !/support level for managing risk/i.test(String(reviewModel.blocker || ''))){
+    throw new Error('Review narrative must align with the shared developing-watch narrative.');
+  }
+
+  const holdModel = narrativeSandbox.buildEntryConditionsSummary({
+    ticker:'ADI',
+    finalVerdict:'watch',
+    presentationState:'monitor',
+    resolvedContract:{planStatusKey:'missing', structuralState:'developing', rrConfidenceLabel:'invalid'},
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      structure_state:'strong',
+      bounce_state:'attempt',
+      priceability_state:'unpriceable',
+      hasClearInvalidationLevel:false,
+      entry_gate_checks:{structure_ok:true, bounce_ok:false, plan_ok:false, pullback_ok:true, rr_ok:false}
+    },
+    derivedStates:sharedInput.derivedStates,
+    displayedPlan:{}
+  });
+  const holdText = [holdModel.primary, holdModel.pattern_explanation, holdModel.triggerLine, holdModel.futureStateLine, (holdModel.secondary || []).join(' ')].join(' ');
+  if(!/bounce is still taking shape/i.test(holdText) || !/support level for managing risk/i.test(holdText) || !/stronger bounce|buyers are defending/i.test(holdText)){
+    throw new Error('Track long-press narrative must stay consistent with the shared developing-watch narrative while remaining more detailed.');
+  }
+  if(/\.\./.test(holdText)){
+    throw new Error('Track long-press narrative must not emit doubled punctuation.');
+  }
+
+  const diminishingNarrative = narrativeSandbox.buildSharedSetupNarrative({
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      visualBucket:'diminishing',
+      planStatus:'missing',
+      planVisible:false,
+      mainBlocker:'Trend is weakening - no reliable stop level yet.'
+    },
+    resolvedState:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      structure_state:'intact',
+      bounce_state:'attempt',
+      priceability_state:'unpriceable',
+      viability:'low_priority'
+    },
+    derivedStates:{
+      structureState:'intact',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      volumeState:'supportive',
+      pullbackZone:'near_20ma',
+      priceabilityState:'unpriceable'
+    },
+    displayedPlan:{status:'missing'}
+  });
+  if(/Developing Watch/i.test(String(diminishingNarrative.stateLabel || '')) || !/Diminishing/i.test(String(diminishingNarrative.stateLabel || ''))){
+    throw new Error('Diminishing watch narrative must not be flattened into Developing Watch.');
+  }
+  if(/bounce is still taking shape|buyers are starting to step in/i.test(String(diminishingNarrative.primaryReason || ''))){
+    throw new Error('Diminishing watch narrative must preserve weaker severity instead of using the healthy bounce-forming narrative.');
+  }
+
+  if(!/const sharedNarrative = buildSharedSetupNarrative\(/.test(appSource)
+    || !/decisionSummary = String\(\s*sharedNarrative\.stateLabel/.test(appSource)
+    || !/buildReviewSemanticStatus[\s\S]*buildSharedSetupNarrative/.test(appSource)
+    || !/buildEntryConditionsSummary[\s\S]*buildSharedSetupNarrative/.test(appSource)){
+    throw new Error('Scan, Review, and Track long-press surfaces must consume the shared narrative builder.');
+  }
+}
+
+runSharedNarrativeConsistencyAssertions();
 
 function runSimplifiedPipelineAssertions(){
   const pipeline = sandbox.window.SimplifiedTradeState;
@@ -4193,6 +4419,7 @@ function runTrackPresentationAuthorityAssertions(){
     'normalizeUiCopy',
     'sameVisibleCopy',
     'resolvePresentationTone',
+    'buildSharedSetupNarrative',
     'terminalAvoidEvidenceForReviewCopy',
     'terminalAvoidCopyPattern',
     'provisionalPlanConfirmationCopy',
@@ -4227,8 +4454,11 @@ function runTrackPresentationAuthorityAssertions(){
   if(model.canonicalVerdict !== 'near_entry' || model.visibleBucket !== 'near_entry' || model.tone !== 'near_entry' || model.badgeLabel !== 'Near Entry'){
     throw new Error('Track visible model must promote canonical near_entry to Near Entry tone and badge even when internal visualBucket is monitor.');
   }
-  if(!/lower priority because volume is weak/i.test(String(model.headline || ''))){
-    throw new Error('Track visible model must explain lower-priority weak volume without contradicting Near Entry.');
+  if(!/^Near Entry$/i.test(String(model.headline || ''))){
+    throw new Error('Track visible model must keep the Near Entry state label as the visible headline.');
+  }
+  if(!/weak volume reduces confidence/i.test(String(model.primaryReason || ''))){
+    throw new Error('Track visible model must explain weak-volume lower priority as the reason, not as a conflicting state label.');
   }
   if(!/Provisional plan exists - waiting for confirmation/i.test(String(model.planSummary || ''))){
     throw new Error('Track visible model must explicitly say a provisional plan exists for weak-volume Near Entry states.');
@@ -4263,8 +4493,11 @@ function runTrackPresentationAuthorityAssertions(){
   if(/volume is weak/i.test(String(nonVolumeLowPriorityModel.headline || ''))){
     throw new Error('Track visible model must not blame low-priority Near Entry states on weak volume unless volume is actually weak.');
   }
-  if(!/lower priority|confirmation/i.test(String(nonVolumeLowPriorityModel.headline || ''))){
-    throw new Error('Track visible model must use neutral confirmation/priority wording for non-volume low-priority Near Entry states.');
+  if(!/^Near Entry$/i.test(String(nonVolumeLowPriorityModel.headline || ''))){
+    throw new Error('Track visible model must keep the Near Entry label for non-volume low-priority states.');
+  }
+  if(!/confirmation|control of the rebound/i.test(String(nonVolumeLowPriorityModel.primaryReason || ''))){
+    throw new Error('Track visible model must use neutral confirmation wording for non-volume low-priority Near Entry states.');
   }
   if(/needs structure repair/i.test(String(nonVolumeLowPriorityModel.headline || '')) || /monitor/i.test(String(nonVolumeLowPriorityModel.headline || ''))){
     throw new Error('Track visible model must not expose stale structure-repair or Monitor wording for non-volume low-priority Near Entry states.');
@@ -4305,10 +4538,13 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/^Developing Watch$/i.test(String(developingWatchModel.headline || ''))){
     throw new Error('Alive monitor/watch setups with forming bounce and no invalidation must render the Developing Watch headline.');
   }
-  if(!/bounce is forming/i.test(String(developingWatchModel.primaryReason || '')) || !/clear invalidation level|reliable trade plan/i.test(String(developingWatchModel.primaryReason || ''))){
-    throw new Error('Developing watch model must explain bounce forming and missing invalidation support level.');
+  if(!/bounce is still taking shape|buyers are starting to step in/i.test(String(developingWatchModel.primaryReason || ''))){
+    throw new Error('Developing watch model must explain that the bounce is still taking shape.');
   }
-  if(!/wait for stronger confirmation and a clearer support level/i.test(String(developingWatchModel.nextAction || ''))){
+  if(!/clear support level for managing risk/i.test(String(developingWatchModel.planSummary || '')) && !/clearer area of support/i.test(String(developingWatchModel.nextAction || ''))){
+    throw new Error('Developing watch model must explain the missing support/risk context.');
+  }
+  if(!/wait for a stronger bounce and a clearer area of support/i.test(String(developingWatchModel.nextAction || ''))){
     throw new Error('Developing watch model must provide the clearer-support next action.');
   }
   if(/needs structure repair/i.test(String(developingWatchModel.headline || '')) || /needs structure repair/i.test(String(developingWatchModel.primaryReason || '')) || /volume is weak/i.test(String(developingWatchModel.primaryReason || '')) || /conditions are not strong enough for active focus/i.test(String(developingWatchModel.primaryReason || ''))){
@@ -4338,8 +4574,8 @@ function runTrackPresentationAuthorityAssertions(){
       }
     }
   });
-  if(!/clear invalidation level|reliable trade plan/i.test(String(weakVolumeWatchModel.primaryReason || ''))){
-    throw new Error('Weak-volume watch model must still keep missing invalidation as the primary blocker when that is the true constraint.');
+  if(!/bounce is still taking shape|buyers are starting to step in/i.test(String(weakVolumeWatchModel.primaryReason || ''))){
+    throw new Error('Weak-volume watch model must still keep the developing-bounce narrative as the primary reason.');
   }
   if(/volume is weak/i.test(String(weakVolumeWatchModel.primaryReason || ''))){
     throw new Error('Weak volume may be secondary caution, but it must not replace the primary blocker when no invalidation level exists.');
@@ -4454,7 +4690,7 @@ function runTrackPresentationAuthorityAssertions(){
       derivedStates:{}
     }
   });
-  if(!/No actionable trade plan yet|waiting for confirmation|not actionable yet|plan needs confirmation|Bounce is not clear enough to price yet/i.test(String(hiddenPlanFallbackModel.planSummary || '')) || /^missing$/i.test(String(hiddenPlanFallbackModel.planSummary || ''))){
+  if(!/No actionable trade plan yet|waiting for confirmation|not actionable yet|plan needs confirmation|Bounce is not clear enough to price yet|Wait for the chart to provide a cleaner entry structure/i.test(String(hiddenPlanFallbackModel.planSummary || '')) || /^missing$/i.test(String(hiddenPlanFallbackModel.planSummary || ''))){
     throw new Error('Track visible model must provide friendly hidden-plan copy when no plan summary exists, and must not leak raw plan status.');
   }
   if(!/const trackVisibleModel = resolveTrackCardVisibleModel\(record, simplifiedState\);/.test(appSource)
