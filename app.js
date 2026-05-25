@@ -31874,7 +31874,6 @@ function calculate(options = {}){
     displayedPlan,
     setupScore:setupScoreForRecord(activeRecord)
   }) : {finalVerdict:'watch'};
-  const plannerDecisionSummary = String(plannerSemanticStatus.primaryReason || plannerSimplifiedState.mainBlocker || plannerSimplifiedState.actionLabel || '').trim();
   const plannerTradeStatusVerdict = {
     ...plannerVisualState,
     ...globalVerdict,
@@ -31889,6 +31888,7 @@ function calculate(options = {}){
     displayedPlan,
     planRealism
   });
+  const plannerDecisionSummary = String(plannerSemanticStatus.primaryReason || plannerSimplifiedState.mainBlocker || plannerSimplifiedState.actionLabel || '').trim();
   const planUI = {
     showPlan:plannerSemanticStatus.showPlanFields === true,
     showRR:plannerSemanticStatus.showPlanMetrics === true,

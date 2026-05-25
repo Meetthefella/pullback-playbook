@@ -1265,6 +1265,9 @@ function runSharedNarrativeConsistencyAssertions(){
   if(/const decisionSummary = String\(reviewSemanticStatus\.primaryReason[\s\S]{0,120}const reviewSemanticStatus = buildReviewSemanticStatus\(/.test(appSource)){
     throw new Error('Review semantic status must be initialized before any decisionSummary reads to avoid a TDZ runtime error.');
   }
+  if(/const plannerDecisionSummary = String\(plannerSemanticStatus\.primaryReason[\s\S]{0,120}const plannerSemanticStatus = buildReviewSemanticStatus\(/.test(appSource)){
+    throw new Error('Planner semantic status must be initialized before any plannerDecisionSummary reads to avoid a TDZ runtime error.');
+  }
 }
 
 runSharedNarrativeConsistencyAssertions();
