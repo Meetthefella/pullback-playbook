@@ -6007,6 +6007,7 @@ function handleWorkspaceTabChange(tab){
   const nextTab = String(tab || '').toLowerCase();
   if(nextTab === 'track'){
     const lifecycleRefresh = maybeRunTrackFocusLifecycleRefresh({source:'track_focus'});
+    const focusRefresh = maybeRunTrackFocusWatchlistRefresh({source:'track_focus'});
     if(PP_PERF_DEBUG){
       console.debug('[PP_PERF] track_focus_lifecycle_refresh', {
         ran:lifecycleRefresh.ran === true,
@@ -6015,7 +6016,9 @@ function handleWorkspaceTabChange(tab){
         inFlight:uiState.watchlistLifecycleRunning === true,
         lastRunAt:String(uiState.watchlistLifecycleLastRunAt || ''),
         watchlistDirty:hasWatchlistDirtyRecords(),
-        activeTab:activeWorkspaceTab()
+        activeTab:activeWorkspaceTab(),
+        focusRefreshRan:focusRefresh && focusRefresh.ran === true,
+        focusRefreshReason:String(focusRefresh && focusRefresh.reason || '')
       });
     }
     const watchlistDirty = hasWatchlistDirtyRecords();
@@ -8515,6 +8518,96 @@ function maybeRunTrackFocusLifecycleRefresh(options = {}){
     });
   });
   return {ran:true, changed, reason:'executed'};
+}
+
+function maybeRunTrackFocusWatchlistRefresh(options = {}){
+  const source = String(options.source || 'track_focus');
+  const activeTab = activeWorkspaceTab();
+  const recordCount = lightweightWatchlistRecordCount();
+  const watchlistDirty = hasWatchlistDirtyRecords();
+  const watchlistStale = watchlistRecordsAreStale();
+  const refreshInFlight = trackRefreshRuntime.inFlight === true;
+  const startupRestoreComplete = startupCoordinator.trackedStateHydrationResolved === true;
+  const startupRefreshInFlight = !!startupCoordinator.startupWatchlistRefreshPromise;
+  const startupRefreshDeferred = startupCoordinator.startupWatchlistRefreshDeferred === true;
+  const now = Date.now();
+  const cooldownRemaining = Math.max(0, Number(startupCoordinator.nextAllowedStartupTrackRefreshAt || 0) - now);
+  let decision = 'skip';
+  let skipReason = '';
+  if(activeTab !== 'track') skipReason = 'track_not_active';
+  else if(!startupRestoreComplete) skipReason = 'startup_restore_incomplete';
+  else if(recordCount <= 0) skipReason = 'empty_watchlist';
+  else if(refreshInFlight) skipReason = 'refresh_in_flight';
+  else if(startupRefreshInFlight) skipReason = 'startup_refresh_in_flight';
+  else if(startupRefreshDeferred) skipReason = 'startup_refresh_deferred';
+  else if(!watchlistStale) skipReason = 'fresh';
+  else decision = 'run';
+  console.info('[TRACK_FOCUS_REFRESH_CHECK]', {
+    source,
+    activeTab,
+    recordCount,
+    watchlistDirty,
+    watchlistStale,
+    lastRefreshAt:String(trackRefreshRuntime.lastFinishedAt || trackRefreshRuntime.lastStartedAt || ''),
+    cooldownRemaining,
+    refreshInFlight,
+    startupRestoreComplete,
+    decision,
+    skipReason
+  });
+  if(decision !== 'run'){
+    console.info('[TRACK_FOCUS_REFRESH_SKIP]', {
+      source,
+      reason:skipReason || 'unknown'
+    });
+    return {
+      ran:false,
+      skipped:true,
+      reason:skipReason || 'unknown'
+    };
+  }
+  console.info('[TRACK_FOCUS_REFRESH_START]', {
+    source,
+    mode:'incremental',
+    recordCount
+  });
+  const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+  refreshTrackOnly({
+    source:'track_focus_refresh',
+    force:false,
+    clearReviewOverride:false
+  }).then(result => {
+    const endedAt = typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+    const summary = result && result.summary ? result.summary : null;
+    const changedCount = Number(summary && summary.changedTickersCount || 0);
+    const attempted = Number(summary && summary.attempted || 0);
+    const unchangedCount = Math.max(0, attempted - changedCount);
+    console.info('[TRACK_FOCUS_REFRESH_DONE]', {
+      source,
+      changedCount,
+      unchangedCount,
+      durationMs:Number((endedAt - startedAt).toFixed(1)),
+      renderTriggered:activeWorkspaceTab() === 'track' && changedCount > 0
+    });
+  }).catch(error => {
+    console.info('[TRACK_FOCUS_REFRESH_DONE]', {
+      source,
+      changedCount:0,
+      unchangedCount:0,
+      durationMs:null,
+      renderTriggered:false,
+      error:error && error.message ? String(error.message) : 'unknown_error'
+    });
+  });
+  return {
+    ran:true,
+    skipped:false,
+    reason:'started'
+  };
 }
 
 function appendWatchlistDebugEvent(record, event){
@@ -26070,7 +26163,8 @@ async function refreshTrackOnly(options = {}){
       mode:'incremental',
       force:options.force === true,
       render:false,
-      persist:true
+      persist:true,
+      clearReviewOverride:options.clearReviewOverride
     });
     interruptionStage = '';
     const changedTickersCount = Number(refreshSummary && refreshSummary.changedTickersCount || 0);

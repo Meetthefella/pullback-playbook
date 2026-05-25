@@ -4724,6 +4724,22 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/if\(startupCoordinator\.renderedTabs\.track && !forceFullRender\)\{\s*requestWatchlistRender\(\{\s*source:'track_tab_activation',\s*includeFocusQueue:true/s.test(appSource)){
     throw new Error('Track focus should request a Track render refresh instead of silently returning on cached state.');
   }
+  if(!/const lifecycleRefresh = maybeRunTrackFocusLifecycleRefresh\(\{source:'track_focus'\}\);\s*const focusRefresh = maybeRunTrackFocusWatchlistRefresh\(\{source:'track_focus'\}\);/s.test(appSource)){
+    throw new Error('Track focus should evaluate the guarded focus-refresh path alongside lifecycle refresh.');
+  }
+  if(!/function maybeRunTrackFocusWatchlistRefresh\(options = \{\}\)\{/.test(appSource)
+    || !/\[TRACK_FOCUS_REFRESH_CHECK\]/.test(appSource)
+    || !/\[TRACK_FOCUS_REFRESH_START\]/.test(appSource)
+    || !/\[TRACK_FOCUS_REFRESH_DONE\]/.test(appSource)
+    || !/\[TRACK_FOCUS_REFRESH_SKIP\]/.test(appSource)){
+    throw new Error('Track focus refresh diagnostics must be present during this audit pass.');
+  }
+  if(!/refreshTrackOnly\(\{\s*source:'track_focus_refresh',\s*force:false,\s*clearReviewOverride:false\s*\}\)/s.test(appSource)){
+    throw new Error('Track focus refresh should use the guarded track refresh path without clearing active review overrides.');
+  }
+  if(!/refreshSummary = await refreshWatchlistRecordsFromSourceOfTruth\(\{\s*source,\s*trackOnly:true,\s*mode:'incremental',\s*force:options\.force === true,\s*render:false,\s*persist:true,\s*clearReviewOverride:options\.clearReviewOverride\s*\}\)/s.test(appSource)){
+    throw new Error('Track refresh should pass through clearReviewOverride so focus refresh does not mutate Review state unexpectedly.');
+  }
   if(!/if\(firstUserOpen\)\{\s*renderWatchlist\(\{\s*source:'track_first_open_sync',\s*allowCachedReturn:false/s.test(appSource)){
     throw new Error('First Track focus should use a synchronous watchlist render so the active bucket is populated immediately.');
   }
