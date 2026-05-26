@@ -3844,6 +3844,48 @@ function reviewDisplayedChartContext(review = {}){
   };
 }
 
+function currentReviewChartContext(record = {}, review = null){
+  const item = record && typeof record === 'object' ? record : {};
+  const safeReview = review && typeof review === 'object'
+    ? review
+    : (item.review && typeof item.review === 'object' ? item.review : {});
+  const attachmentContext = safeReview.chartAttachmentContext && typeof safeReview.chartAttachmentContext === 'object'
+    ? safeReview.chartAttachmentContext
+    : null;
+  const quick = safeReview.quickChartAnalysis && typeof safeReview.quickChartAnalysis === 'object'
+    ? safeReview.quickChartAnalysis
+    : null;
+  const lifecycle = safeReview.chartVerificationLifecycle && typeof safeReview.chartVerificationLifecycle === 'object'
+    ? safeReview.chartVerificationLifecycle
+    : null;
+  const runtime = getReviewAiRuntime();
+  const ticker = normalizeTicker(item.ticker || safeReview.ticker || attachmentContext && attachmentContext.expectedTicker || quick && quick.ticker || lifecycle && lifecycle.ticker || '');
+  const imageId = String(
+    chartImageIdForReview(safeReview)
+    || attachmentContext && attachmentContext.imageId
+    || quick && quick.chartImageId
+    || lifecycle && (lifecycle.imageId || lifecycle.chartImageId)
+    || ''
+  );
+  let requestId = String(
+    attachmentContext && attachmentContext.requestId
+    || quick && (quick.requestId || quick.verificationRequestId)
+    || lifecycle && (lifecycle.requestId || lifecycle.verificationRequestId)
+    || ''
+  );
+  if(!requestId && runtime && normalizeTicker(runtime.ticker || '') === ticker){
+    const runtimeImageId = String(runtime.chartImageId || '');
+    if(!imageId || !runtimeImageId || runtimeImageId === imageId){
+      requestId = String(runtime.requestId || '');
+    }
+  }
+  return {
+    ticker,
+    imageId,
+    requestId
+  };
+}
+
 function maybeLogQuickChartAnalysisContextIncomplete(record, state = null, source = ''){
   const item = record && typeof record === 'object' ? record : {};
   const quick = state && typeof state === 'object'
@@ -21066,11 +21108,9 @@ function getReviewChartVerificationState(record){
       return null;
     }
   }
-  const currentLifecycle = review.chartVerificationLifecycle && typeof review.chartVerificationLifecycle === 'object'
-    ? review.chartVerificationLifecycle
-    : null;
+  const currentContext = currentReviewChartContext(item, review);
   const storedRequestId = String(state.verificationRequestId || state.requestId || '');
-  const currentRequestId = String(currentLifecycle && currentLifecycle.requestId || '');
+  const currentRequestId = String(currentContext.requestId || '');
   if(storedRequestId && currentRequestId && storedRequestId !== currentRequestId){
     return null;
   }
@@ -28863,6 +28903,34 @@ function annotateChartTraceForRender(trace = {}, state = {}, extras = {}){
   };
 }
 
+function inheritChartTraceRequestIdForCurrentContext(trace = {}, currentContext = {}, meta = {}){
+  const safeTrace = trace && typeof trace === 'object' ? trace : {};
+  const currentTicker = normalizeTicker(currentContext && currentContext.ticker || '');
+  const currentImageId = String(currentContext && currentContext.imageId || '');
+  const inheritedRequestId = String(currentContext && currentContext.requestId || '');
+  const traceTicker = normalizeTicker(safeTrace.reviewTicker || safeTrace.ticker || '');
+  const traceImageId = String(safeTrace.imageId || safeTrace.chartImageId || '');
+  const previousTraceRequestId = String(safeTrace.verificationRequestId || safeTrace.requestId || '');
+  if(!inheritedRequestId || previousTraceRequestId) return safeTrace;
+  if(currentTicker && traceTicker && currentTicker !== traceTicker) return safeTrace;
+  if(currentImageId && traceImageId && currentImageId !== traceImageId) return safeTrace;
+  const nextTrace = {
+    ...safeTrace,
+    verificationRequestId:inheritedRequestId,
+    requestId:inheritedRequestId
+  };
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_TRACE_REQUEST_ID_INHERITED]', {
+      ticker:currentTicker || traceTicker,
+      imageId:currentImageId || traceImageId,
+      inheritedRequestId,
+      traceSource:String(meta.traceSource || safeTrace.source || safeTrace.sourceType || ''),
+      previousTraceRequestId
+    });
+  }
+  return nextTrace;
+}
+
 function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}, options = {}){
   const safe = input && typeof input === 'object' ? input : {};
   const forceMatch = options && typeof options === 'object' && options.forceMatch === true;
@@ -28950,6 +29018,7 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
   const currentLifecycleState = review.chartVerificationLifecycle && typeof review.chartVerificationLifecycle === 'object'
     ? review.chartVerificationLifecycle
     : null;
+  const currentChartContext = currentReviewChartContext(item, review);
   const currentLifecyclePhase = String(currentLifecycleState && currentLifecycleState.phase || '').trim();
   const storedState = storedChartVerificationState && typeof storedChartVerificationState === 'object' ? storedChartVerificationState : null;
   const storedTrace = storedState && storedState.trace && typeof storedState.trace === 'object' ? storedState.trace : null;
@@ -29106,28 +29175,27 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
       });
     }
   }
-  const ranked = candidates.map(candidate => ({
-    ...candidate,
-    priority:chartVerificationTracePriority(candidate.trace),
-    hasRequestId:!!String(candidate.trace && (candidate.trace.verificationRequestId || candidate.trace.requestId) || ''),
-    hasMergedPhase:String(candidate.trace && candidate.trace.phase || '') === 'merged',
-    imageId:String(candidate.trace && (candidate.trace.imageId || candidate.trace.chartImageId) || ''),
-    createdAt:String(candidate.trace && (candidate.trace.createdAt || candidate.trace.updatedAt) || ''),
-    isPendingTrace:['pending_chart_native_verification', 'uncertain_missing_context', 'partial_context_unverified_chart', 'partial_context_timeframe_uncertain', 'indicator_missing', 'indicator_incomplete', 'uncertain_match'].includes(String(candidate.trace && candidate.trace.status || ''))
-  })).sort((a, b) => {
+  const ranked = candidates.map(candidate => {
+    const inheritedTrace = inheritChartTraceRequestIdForCurrentContext(candidate.trace, currentChartContext, {traceSource:candidate.label || candidate.type || ''});
+    return {
+      ...candidate,
+      trace:inheritedTrace,
+      priority:chartVerificationTracePriority(inheritedTrace),
+      hasRequestId:!!String(inheritedTrace && (inheritedTrace.verificationRequestId || inheritedTrace.requestId) || ''),
+      hasMergedPhase:String(inheritedTrace && inheritedTrace.phase || '') === 'merged',
+      imageId:String(inheritedTrace && (inheritedTrace.imageId || inheritedTrace.chartImageId) || ''),
+      createdAt:String(inheritedTrace && (inheritedTrace.createdAt || inheritedTrace.updatedAt) || ''),
+      isPendingTrace:['pending_chart_native_verification', 'uncertain_missing_context', 'partial_context_unverified_chart', 'partial_context_timeframe_uncertain', 'indicator_missing', 'indicator_incomplete', 'uncertain_match'].includes(String(inheritedTrace && inheritedTrace.status || ''))
+    };
+  }).sort((a, b) => {
     if(a.priority !== b.priority) return b.priority - a.priority;
     if(a.hasMergedPhase !== b.hasMergedPhase) return (b.hasMergedPhase ? 1 : 0) - (a.hasMergedPhase ? 1 : 0);
     if(a.hasRequestId !== b.hasRequestId) return (b.hasRequestId ? 1 : 0) - (a.hasRequestId ? 1 : 0);
     if(a.createdAt !== b.createdAt) return String(b.createdAt).localeCompare(String(a.createdAt));
     return 0;
   });
-  const sameImageId = String(chartImageIdForReview(review) || '');
-  const sameRequestId = String(
-    (storedState && (storedState.verificationRequestId || storedState.requestId)) ||
-    (derivedTrace && (derivedTrace.verificationRequestId || derivedTrace.requestId)) ||
-    (chartAssessorContext && chartAssessorContext.verificationRequestId) ||
-    ''
-  );
+  const sameImageId = String(currentChartContext.imageId || '');
+  const sameRequestId = String(currentChartContext.requestId || '');
   const matchingCandidates = ranked.filter(candidate => {
     const candidateImageId = String(candidate.imageId || '');
     const candidateRequestId = String(candidate.trace && (candidate.trace.verificationRequestId || candidate.trace.requestId) || '');
@@ -31433,6 +31501,7 @@ function renderReviewWorkspace(options = {}){
     : ((primaryPlanMessage && primaryPlanMessage === tradeStatusText.line1) ? '' : primaryPlanMessage);
   const chartSourceTrace = buildChartImageSourceTrace(record.review || {});
   const displayedChartContext = reviewDisplayedChartContext(record.review || {});
+  const activeChartContext = currentReviewChartContext(record, record.review || {});
   const hasVerifiableChart = chartSourceTrace.originalAvailable === true;
   const storedChartVerificationWrapper = hasVerifiableChart && record.review
     ? (
@@ -31505,7 +31574,7 @@ function renderReviewWorkspace(options = {}){
     const renderContextSnapshot = {
       reviewTicker:normalizeTicker(record.ticker || ''),
       imageId:String(chartImageIdForReview(record.review || {}) || ''),
-      requestId:String(record.review && record.review.chartAttachmentContext && record.review.chartAttachmentContext.requestId || quickChartAnalysisState && quickChartAnalysisState.requestId || ''),
+      requestId:String(activeChartContext.requestId || ''),
       filename:String(displayedChartContext.filename || ''),
       chartImageSource:String(chartSourceTrace.sourceKind || ''),
       verificationImageId,

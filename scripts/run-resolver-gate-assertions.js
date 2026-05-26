@@ -2551,9 +2551,23 @@ function runAiContractAssertions(){
     throw new Error('Chart lightbox must render attachment-bound ticker metadata and log mismatches.');
   }
   const displayedChartContextSource = extractFunctionSource(appSource, 'reviewDisplayedChartContext');
+  const currentChartContextSource = extractFunctionSource(appSource, 'currentReviewChartContext');
+  const inheritTraceRequestIdSource = extractFunctionSource(appSource, 'inheritChartTraceRequestIdForCurrentContext');
   if(!displayedChartContextSource.includes('imageId:String(previewRef && previewRef.imageId || chartImageIdForReview(safe) || \'\')')
     || !displayedChartContextSource.includes('filename:String(previewRef && previewRef.name || attachmentContext && attachmentContext.name || safe.chartRef && safe.chartRef.name || \'\')')){
     throw new Error('Displayed chart context must be derived from the same attachment object used by the renderer.');
+  }
+  if(!currentChartContextSource.includes('attachmentContext && attachmentContext.requestId')
+    || !currentChartContextSource.includes('quick && (quick.requestId || quick.verificationRequestId)')
+    || !currentChartContextSource.includes('lifecycle && (lifecycle.requestId || lifecycle.verificationRequestId)')
+    || !currentChartContextSource.includes("requestId = String(runtime.requestId || '');")){
+    throw new Error('Current chart context must unify request ownership from attachment, quick, lifecycle, and runtime state.');
+  }
+  if(!inheritTraceRequestIdSource.includes('[CHART_TRACE_REQUEST_ID_INHERITED]')
+    || !inheritTraceRequestIdSource.includes('!inheritedRequestId || previousTraceRequestId')
+    || !inheritTraceRequestIdSource.includes('verificationRequestId:inheritedRequestId')
+    || !inheritTraceRequestIdSource.includes('requestId:inheritedRequestId')){
+    throw new Error('Pending deterministic traces must inherit request ids only from matching current chart context.');
   }
   const beginReviewAiSource = extractFunctionSource(appSource, 'beginReviewAiAnalysis');
   const completeReviewAiSource = extractFunctionSource(appSource, 'completeReviewAiAnalysis');
@@ -2592,7 +2606,8 @@ function runAiContractAssertions(){
   }
   const chartTraceSelectorSource = extractFunctionSource(appSource, 'selectReviewChartTraceForRender');
   if(!chartTraceSelectorSource.includes('CHART_RENDER_BLOCKED_QUICK_RUNNING')
-    || !chartTraceSelectorSource.includes('const mergedCandidatesAllowed = quickRunningForCurrentChart ? [] : mergedMatchingCandidates;')){
+    || !chartTraceSelectorSource.includes('const mergedCandidatesAllowed = quickRunningForCurrentChart ? [] : mergedMatchingCandidates;')
+    || !chartTraceSelectorSource.includes('inheritChartTraceRequestIdForCurrentContext(candidate.trace, currentChartContext')){
     throw new Error('Chart trace selection must block merged/post-AI traces while quick verification is still running.');
   }
   const queueQuickSource = extractFunctionSource(appSource, 'queueReviewQuickChartAnalysis');
@@ -3067,6 +3082,8 @@ function runAiContractAssertions(){
     'chartVerificationHasExplicitRegionProvenance',
     'chartVerificationTracePriority',
     'annotateChartTraceForRender',
+    'currentReviewChartContext',
+    'inheritChartTraceRequestIdForCurrentContext',
     'chartAssessorInputToNormalizedAnalysis',
     'selectReviewChartTraceForRender',
     'chartImageDimensionsFromRef',
@@ -3103,6 +3120,12 @@ function runAiContractAssertions(){
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});
   });
+  evidenceSandbox.getReviewAiRuntime = function getReviewAiRuntime(){
+    if(!evidenceSandbox.uiState.reviewAiRuntime || typeof evidenceSandbox.uiState.reviewAiRuntime !== 'object'){
+      evidenceSandbox.uiState.reviewAiRuntime = {};
+    }
+    return evidenceSandbox.uiState.reviewAiRuntime;
+  };
   const directDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
     review:{
       normalizedAnalysis:{
@@ -3653,6 +3676,62 @@ function runAiContractAssertions(){
   });
   if(!committedPreferredState || committedPreferredState.trace.status !== 'consistent' || committedPreferredState.phase !== 'merged'){
     throw new Error('Committed chart state must be preferred over the pending stored wrapper.');
+  }
+  const inheritedPendingTrace = evidenceSandbox.selectReviewChartTraceForRender({
+    ticker:'NVDA',
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,pending-chart', imageId:'img_pending_nvda'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,pending-chart', imageId:'img_pending_nvda', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,pending-chart', imageId:'img_pending_nvda'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'img_pending_nvda'},
+      chartAttachmentContext:{expectedTicker:'NVDA', imageId:'img_pending_nvda', requestId:'analysis-pending-1', name:'nvda.png'},
+      chartVerificationTrace:{
+        phase:'deterministic',
+        requestId:'',
+        verificationRequestId:'',
+        chartImageId:'img_pending_nvda',
+        imageId:'img_pending_nvda',
+        trace:{
+          status:'source_checking',
+          reviewTicker:'NVDA',
+          ticker:'NVDA',
+          chartImageId:'img_pending_nvda',
+          imageId:'img_pending_nvda',
+          requestId:'',
+          verificationRequestId:'',
+          title:'Chart uploaded - checking details',
+          summary:'Chart source is valid. AI chart extraction is running.'
+        }
+      },
+      chartVerificationLifecycle:{
+        phase:'deterministic_ready',
+        chartImageId:'img_pending_nvda',
+        imageId:'img_pending_nvda',
+        requestId:'analysis-pending-1'
+      }
+    }
+  }, {
+    phase:'deterministic',
+    requestId:'',
+    verificationRequestId:'',
+    chartImageId:'img_pending_nvda',
+    imageId:'img_pending_nvda',
+    trace:{
+      status:'source_checking',
+      reviewTicker:'NVDA',
+      ticker:'NVDA',
+      chartImageId:'img_pending_nvda',
+      imageId:'img_pending_nvda',
+      requestId:'',
+      verificationRequestId:'',
+      title:'Chart uploaded - checking details',
+      summary:'Chart source is valid. AI chart extraction is running.'
+    }
+  }, null, 'queued', null);
+  if(!inheritedPendingTrace
+    || !inheritedPendingTrace.chosen
+    || String(inheritedPendingTrace.chosen.requestId || inheritedPendingTrace.chosen.verificationRequestId || '') !== 'analysis-pending-1'){
+    throw new Error('Pending source-checking chart traces must inherit request ids from the current chart context when image/ticker match.');
   }
   const aiSupportedMatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
