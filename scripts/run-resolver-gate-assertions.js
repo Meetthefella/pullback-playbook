@@ -2532,7 +2532,7 @@ function runAiContractAssertions(){
   if(!manualConfirmSource.includes('chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);')
     || !manualConfirmSource.includes("aiAnalysisSuppressed:false")
     || !manualConfirmSource.includes("suppressionReason:''")
-    || !manualConfirmSource.includes('analyseSetup(symbol).catch(() => {});')){
+    || !manualConfirmSource.includes("analyseSetup(symbol, {source:'manual_chart_confirm'}).catch(() => {});")){
     throw new Error('Manual chart confirmation must commit the verified trace and trigger a fresh AI analysis run.');
   }
   const handleChartSelectionSource = extractFunctionSource(appSource, 'handleChartSelection');
@@ -2540,6 +2540,15 @@ function runAiContractAssertions(){
     || !handleChartSelectionSource.includes("const matchingActiveRequest = activeRequest && normalizeTicker(activeRequest.ticker || '') === normalizeTicker(record.ticker || '')")
     || !handleChartSelectionSource.includes("renderReviewWorkspace({source:'chart_upload', requestedTicker:symbol || record.ticker});")){
     throw new Error('Second chart uploads must rebind Review ownership to the upload ticker and avoid inheriting another ticker request context.');
+  }
+  const beginReviewAiSource = extractFunctionSource(appSource, 'beginReviewAiAnalysis');
+  const completeReviewAiSource = extractFunctionSource(appSource, 'completeReviewAiAnalysis');
+  const failReviewAiSource = extractFunctionSource(appSource, 'failReviewAiAnalysis');
+  if(!beginReviewAiSource.includes("runtime.source = String(options.source || '');")
+    || !beginReviewAiSource.includes("runtime.chartImageId = String(options.chartImageId || '');")
+    || !completeReviewAiSource.includes('runtime.lastCompletedRequestId = runtime.requestId;')
+    || !failReviewAiSource.includes('runtime.lastCompletedRequestId = runtime.requestId;')){
+    throw new Error('Review AI runtime must retain request source and image ownership metadata for duplicate-upload audits.');
   }
   const chartAiSummaryGuardSource = extractFunctionSource(appSource, 'chartAiSummaryRenderGuard');
   if(!chartAiSummaryGuardSource.includes("reason = 'quick_running'")
@@ -2569,14 +2578,44 @@ function runAiContractAssertions(){
     throw new Error('Chart trace selection must block merged/post-AI traces while quick verification is still running.');
   }
   const appAnalyseSetupSource = extractFunctionSource(appSource, 'analyseSetup');
+  const getReviewAnalysisStateSource = extractFunctionSource(appSource, 'getReviewAnalysisState');
+  const successfulSameContextSource = extractFunctionSource(appSource, 'hasSuccessfulCompletedAnalysisForCurrentChartContext');
+  const quickCommittedContextSource = extractFunctionSource(appSource, 'quickAnalysisCommittedForCurrentChartContext');
   if(appAnalyseSetupSource.indexOf('[QUICK_CHART_ANALYSIS_COMMITTED]') === -1
     || appAnalyseSetupSource.indexOf('[AI_SUMMARY_READY]') === -1
+    || !appAnalyseSetupSource.includes("const analysisSource = String(options.source || 'unknown');")
+    || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_START]')
+    || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_SKIPPED_DUPLICATE_IMAGE]')
+    || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_NOT_DEDUPED_REQUEST_MISMATCH]')
+    || !appAnalyseSetupSource.includes('autoAnalysisSource && requestChartImageId && quickAlreadyCommittedForCurrentContext && analysisAlreadyCommittedForCurrentContext')
     || appAnalyseSetupSource.indexOf('[QUICK_CHART_ANALYSIS_COMMITTED]') > appAnalyseSetupSource.indexOf('const aiSummaryCommitPayload = {')
     || !appAnalyseSetupSource.includes("status:'committed'")
     || !appAnalyseSetupSource.includes("stagePendingAiSummaryForChart(record, aiSummaryCommitPayload, 'quick_running')")
     || !appAnalyseSetupSource.includes("applyCommittedAiSummaryForChart(record, aiSummaryCommitPayload)")
     || !appAnalyseSetupSource.includes("flushPendingAiSummaryForChart(record, {source:'analyse_setup_failed'})")){
     throw new Error('AI summary commit must remain sequenced after quick chart analysis commit in the analysis path.');
+  }
+  if(!getReviewAnalysisStateSource.includes("analysisStatus = String(")
+    || !getReviewAnalysisStateSource.includes("? 'failed'")
+    || !getReviewAnalysisStateSource.includes("? 'committed'")
+    || !getReviewAnalysisStateSource.includes(": (rawAnalysis ? 'raw_only' : 'idle')")){
+    throw new Error('Review analysis state must distinguish committed analysis from failed and raw-only payloads.');
+  }
+  if(!successfulSameContextSource.includes('state.analysisStatus === \'committed\'')
+    || !successfulSameContextSource.includes('String(state.analysisRequestId || \'\') === requestedRequestId')
+    || !successfulSameContextSource.includes('normalizeTicker(state.ticker || item.ticker || \'\') === requestedTicker')
+    || !successfulSameContextSource.includes('!pending')){
+    throw new Error('Same-image dedupe must require full committed chart context, including request id.');
+  }
+  if(!quickCommittedContextSource.includes('String(quick.requestId || \'\') === requestedRequestId')
+    || !quickCommittedContextSource.includes('String(quick.status || \'\') === \'committed\'')){
+    throw new Error('Quick-analysis dedupe must require committed quick status for the same request id.');
+  }
+  if(!appSource.includes("analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});")
+    || !appSource.includes("analyseSetup(symbol, {source:'review_render_queue'});")
+    || !appSource.includes("analyseSetup(record.ticker, {source:'manual_button'});")
+    || !appSource.includes("analyseSetup(symbol, {source:'manual_chart_confirm'}).catch(() => {});")){
+    throw new Error('Analyse Setup callers must pass explicit request sources for duplicate-request audits.');
   }
   const aiGateSandbox = {
     normalizeTicker(value){ return String(value || '').trim().toUpperCase(); }
@@ -2633,6 +2672,81 @@ function runAiContractAssertions(){
   });
   if(gateBlocked !== false || gateAllowed !== true || gateRejectedStale !== false){
     throw new Error('AI summary commit gate must block running quick analyses and stale chart contexts.');
+  }
+  const sameImageDedupeSandbox = {
+    getReviewAnalysisState(record){ return record.__analysisState; },
+    getPendingChartAiSummary(record){ return record.__pending || null; },
+    normalizeTicker(value){ return String(value || '').trim().toUpperCase(); }
+  };
+  vm.createContext(sameImageDedupeSandbox);
+  vm.runInContext(successfulSameContextSource, sameImageDedupeSandbox, {filename:'app.js#hasSuccessfulCompletedAnalysisForCurrentChartContext'});
+  vm.runInContext(quickCommittedContextSource, sameImageDedupeSandbox, {filename:'app.js#quickAnalysisCommittedForCurrentChartContext'});
+  const dedupeSuccess = sameImageDedupeSandbox.hasSuccessfulCompletedAnalysisForCurrentChartContext({
+    __analysisState:{
+      normalizedAnalysis:{ verdict:'Watch' },
+      analysisStatus:'committed',
+      ticker:'NVDA',
+      analysisChartImageId:'img-1',
+      chartImageId:'img-1',
+      analysisRequestId:'req-1',
+      error:''
+    }
+  }, {ticker:'NVDA', imageId:'img-1', requestId:'req-1'});
+  const dedupeFailed = sameImageDedupeSandbox.hasSuccessfulCompletedAnalysisForCurrentChartContext({
+    __analysisState:{
+      normalizedAnalysis:null,
+      analysisStatus:'failed',
+      ticker:'NVDA',
+      analysisChartImageId:'img-1',
+      chartImageId:'img-1',
+      analysisRequestId:'req-1',
+      error:'AI failed'
+    }
+  }, {ticker:'NVDA', imageId:'img-1', requestId:'req-1'});
+  const dedupeRawOnly = sameImageDedupeSandbox.hasSuccessfulCompletedAnalysisForCurrentChartContext({
+    __analysisState:{
+      normalizedAnalysis:null,
+      analysisStatus:'raw_only',
+      ticker:'NVDA',
+      analysisChartImageId:'img-1',
+      chartImageId:'img-1',
+      analysisRequestId:'req-1',
+      error:''
+    }
+  }, {ticker:'NVDA', imageId:'img-1', requestId:'req-1'});
+  const dedupePending = sameImageDedupeSandbox.hasSuccessfulCompletedAnalysisForCurrentChartContext({
+    __analysisState:{
+      normalizedAnalysis:{ verdict:'Watch' },
+      analysisStatus:'committed',
+      ticker:'NVDA',
+      analysisChartImageId:'img-1',
+      chartImageId:'img-1',
+      analysisRequestId:'req-1',
+      error:''
+    },
+    __pending:{ ticker:'NVDA', imageId:'img-1', requestId:'req-1' }
+  }, {ticker:'NVDA', imageId:'img-1', requestId:'req-1'});
+  const dedupeRequestMismatch = sameImageDedupeSandbox.hasSuccessfulCompletedAnalysisForCurrentChartContext({
+    __analysisState:{
+      normalizedAnalysis:{ verdict:'Watch' },
+      analysisStatus:'committed',
+      ticker:'NVDA',
+      analysisChartImageId:'img-1',
+      chartImageId:'img-1',
+      analysisRequestId:'req-A',
+      error:''
+    }
+  }, {ticker:'NVDA', imageId:'img-1', requestId:'req-B'});
+  const quickContextMatch = sameImageDedupeSandbox.quickAnalysisCommittedForCurrentChartContext({
+    ticker:'NVDA',
+    review:{ quickChartAnalysis:{ ticker:'NVDA', chartImageId:'img-1', requestId:'req-1', status:'committed' } }
+  }, {ticker:'NVDA', imageId:'img-1', requestId:'req-1'});
+  const quickContextMismatch = sameImageDedupeSandbox.quickAnalysisCommittedForCurrentChartContext({
+    ticker:'NVDA',
+    review:{ quickChartAnalysis:{ ticker:'NVDA', chartImageId:'img-1', requestId:'req-A', status:'committed' } }
+  }, {ticker:'NVDA', imageId:'img-1', requestId:'req-B'});
+  if(dedupeSuccess !== true || dedupeFailed !== false || dedupeRawOnly !== false || dedupePending !== false || dedupeRequestMismatch !== false || quickContextMatch !== true || quickContextMismatch !== false){
+    throw new Error('Same-image dedupe must only suppress matching committed chart context, not failed, raw-only, pending, or request-mismatched states.');
   }
   const chartUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   const chartRelevantMaRequirementSource = extractFunctionSource(appSource, 'getStrategyRelevantMaRequirement');
