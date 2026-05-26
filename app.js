@@ -3817,6 +3817,7 @@ function clearReviewChartImageSources(review){
   review.chartImageOriginal = null;
   review.chartImagePreview = null;
   review.chartImageVerificationSource = null;
+  review.chartAttachmentContext = null;
   review.chartVerificationTrace = null;
   review.chartVerificationCommittedTrace = null;
   review.chartVerificationLifecycle = null;
@@ -4434,16 +4435,46 @@ function closeReviewChartLightbox(){
 function openReviewChartLightbox(record){
   const item = normalizeTickerRecord(record);
   const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const attachmentContext = review.chartAttachmentContext && typeof review.chartAttachmentContext === 'object'
+    ? review.chartAttachmentContext
+    : null;
   const source = review.chartImageOriginal && review.chartImageOriginal.dataUrl
     ? review.chartImageOriginal
     : (review.chartRef && review.chartRef.dataUrl ? review.chartRef : review.chartImagePreview);
   if(!source || !source.dataUrl) return false;
+  const modalTicker = normalizeTicker(source.ticker || (attachmentContext && attachmentContext.expectedTicker) || item.ticker || '');
+  const modalName = String(source.name || (attachmentContext && attachmentContext.name) || (review.chartRef && review.chartRef.name) || 'chart image');
+  const modalImageId = String(source.imageId || (attachmentContext && attachmentContext.imageId) || chartImageIdForReview(review) || '');
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_MODAL_CONTEXT]', {
+      recordTicker:normalizeTicker(item.ticker || ''),
+      modalTicker,
+      imageId:modalImageId,
+      name:modalName,
+      activeReviewTicker:activeReviewTicker() || '',
+      attachmentExpectedTicker:String(attachmentContext && attachmentContext.expectedTicker || ''),
+      attachmentRequestId:String(attachmentContext && attachmentContext.requestId || '')
+    });
+  }
+  if((modalTicker && normalizeTicker(item.ticker || '') && modalTicker !== normalizeTicker(item.ticker || ''))
+    || (modalName && review.chartRef && review.chartRef.name && modalName !== String(review.chartRef.name || ''))){
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[CHART_UPLOAD_METADATA_MISMATCH]', {
+        recordTicker:normalizeTicker(item.ticker || ''),
+        modalTicker,
+        imageId:modalImageId,
+        modalName,
+        chartRefName:String(review.chartRef && review.chartRef.name || ''),
+        attachmentExpectedTicker:String(attachmentContext && attachmentContext.expectedTicker || '')
+      });
+    }
+  }
   if(typeof uiState === 'object'){
     uiState.reviewChartLightbox = {
-      ticker:item.ticker,
-      imageId:chartImageIdForReview(review),
+      ticker:modalTicker,
+      imageId:modalImageId,
       dataUrl:source.dataUrl,
-      name:source.name || (review.chartRef && review.chartRef.name) || 'chart image',
+      name:modalName,
       open:true
     };
   }
@@ -4456,10 +4487,10 @@ function openReviewChartLightbox(record){
       : '';
     content.innerHTML = `
       <div class="review-chart-lightbox__figure">
-        <img class="review-chart-lightbox__image" src="${escapeHtml(source.dataUrl)}" alt="Expanded chart preview for ${escapeHtml(item.ticker)}" />
+        <img class="review-chart-lightbox__image" src="${escapeHtml(source.dataUrl)}" alt="Expanded chart preview for ${escapeHtml(modalTicker || item.ticker)}" />
         <div class="review-chart-lightbox__caption">
-          <strong>${escapeHtml(item.ticker)}</strong>
-          <div class="tiny">${escapeHtml(source.name || 'chart image')}</div>
+          <strong>${escapeHtml(modalTicker || item.ticker)}</strong>
+          <div class="tiny">${escapeHtml(modalName)}</div>
           ${debugFacts}
         </div>
       </div>
@@ -23468,6 +23499,19 @@ async function analyseSetup(ticker, options = {}){
     chartImageId:requestChartImageId
   });
   const requestController = new AbortController();
+  if(record.review && typeof record.review === 'object'){
+    if(record.review.chartAttachmentContext && typeof record.review.chartAttachmentContext === 'object'){
+      record.review.chartAttachmentContext.requestId = analysisRequestId;
+      record.review.chartAttachmentContext.expectedTicker = ticker;
+    }
+    ['chartRef', 'chartImageOriginal', 'chartImagePreview', 'chartImageVerificationSource'].forEach(field => {
+      const target = record.review[field];
+      if(target && typeof target === 'object'){
+        target.requestId = analysisRequestId;
+        target.ticker = ticker;
+      }
+    });
+  }
   uiState.analysisActiveRequest = {
     id:analysisRequestId,
     ticker,
@@ -23495,6 +23539,23 @@ async function analyseSetup(ticker, options = {}){
     imageId:requestChartImageId,
     startedAt:new Date().toISOString()
   });
+  if(typeof console !== 'undefined' && console.info){
+    const attachmentContext = record.review && record.review.chartAttachmentContext && typeof record.review.chartAttachmentContext === 'object'
+      ? record.review.chartAttachmentContext
+      : null;
+    console.info('[CHART_CONTEXT_AT_VERIFICATION_START]', {
+      ticker,
+      expectedTicker:ticker,
+      activeReviewTicker:activeReviewTicker() || '',
+      imageId:requestChartImageId,
+      requestId:analysisRequestId,
+      attachmentTicker:String(attachmentContext && attachmentContext.expectedTicker || ''),
+      attachmentRequestId:String(attachmentContext && attachmentContext.requestId || ''),
+      attachmentName:String(attachmentContext && attachmentContext.name || ''),
+      chartRefTicker:String(record.review && record.review.chartRef && record.review.chartRef.ticker || ''),
+      chartRefRequestId:String(record.review && record.review.chartRef && record.review.chartRef.requestId || '')
+    });
+  }
   logChartVerificationLifecycle('ai_request_started', {
     reviewTicker:ticker,
     verificationRequestId:analysisRequestId,
@@ -31929,6 +31990,16 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
     record.review.aiAnalysisRaw = '';
     record.review.normalizedAnalysis = null;
     record.review.cardOpen = true;
+    const attachmentRequestId = String(matchingActiveRequest && matchingActiveRequest.id || '');
+    record.review.chartAttachmentContext = {
+      expectedTicker:record.ticker,
+      imageId,
+      requestId:attachmentRequestId,
+      name:file.name,
+      type:file.type,
+      uploadedAt,
+      source:String(source || 'change_chart')
+    };
     record.review.chartRef = {
       name:file.name,
       type:file.type,
@@ -31936,6 +32007,8 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       width:dimensions.width,
       height:dimensions.height,
       bytes:file.size,
+      ticker:record.ticker,
+      requestId:attachmentRequestId,
       source:'file_upload',
       uploadedAt,
       imageId
@@ -31946,6 +32019,8 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       width:dimensions.width,
       height:dimensions.height,
       bytes:file.size,
+      ticker:record.ticker,
+      requestId:attachmentRequestId,
       source:'file_upload',
       dataUrlField:'chartRef.dataUrl',
       uploadedAt,
@@ -31956,6 +32031,8 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       type:file.type,
       width:dimensions.width,
       height:dimensions.height,
+      ticker:record.ticker,
+      requestId:attachmentRequestId,
       sourceField:'chartRef.dataUrl',
       displayMode:'thumb_object_fit_cover',
       objectFit:'cover',
@@ -31968,6 +32045,8 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       sourceField:'chartRef.dataUrl',
       width:dimensions.width,
       height:dimensions.height,
+      ticker:record.ticker,
+      requestId:attachmentRequestId,
       cropOrResizeOccurred:false,
       limited:false,
       uploadedAt,
@@ -31976,6 +32055,15 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
     record.review.chartAvailable = true;
     record.review.importedFromScreenshot = true;
     if(typeof console !== 'undefined' && console.info){
+      console.info(previousImageId ? '[CHART_ATTACHMENT_REPLACED]' : '[CHART_ATTACHMENT_CREATED]', {
+        source:String(source || 'change_chart'),
+        ticker:record.ticker,
+        expectedTicker:record.ticker,
+        name:file.name,
+        imageId,
+        requestId:attachmentRequestId,
+        previousImageId:previousImageId || ''
+      });
       console.info('[CHART_UPLOAD_ENTRY]', {
         source:String(source || 'change_chart'),
         ticker:record.ticker,

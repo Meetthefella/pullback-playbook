@@ -2538,8 +2538,17 @@ function runAiContractAssertions(){
   const handleChartSelectionSource = extractFunctionSource(appSource, 'handleChartSelection');
   if(!handleChartSelectionSource.includes("setActiveReviewTicker(symbol);")
     || !handleChartSelectionSource.includes("const matchingActiveRequest = activeRequest && normalizeTicker(activeRequest.ticker || '') === normalizeTicker(record.ticker || '')")
-    || !handleChartSelectionSource.includes("renderReviewWorkspace({source:'chart_upload', requestedTicker:symbol || record.ticker});")){
+    || !handleChartSelectionSource.includes("renderReviewWorkspace({source:'chart_upload', requestedTicker:symbol || record.ticker});")
+    || !handleChartSelectionSource.includes('record.review.chartAttachmentContext = {')
+    || !handleChartSelectionSource.includes("console.info(previousImageId ? '[CHART_ATTACHMENT_REPLACED]' : '[CHART_ATTACHMENT_CREATED]'")){
     throw new Error('Second chart uploads must rebind Review ownership to the upload ticker and avoid inheriting another ticker request context.');
+  }
+  const lightboxSource = extractFunctionSource(appSource, 'openReviewChartLightbox');
+  if(!lightboxSource.includes('const modalTicker = normalizeTicker(source.ticker || (attachmentContext && attachmentContext.expectedTicker) || item.ticker || \'\');')
+    || !lightboxSource.includes('[CHART_MODAL_CONTEXT]')
+    || !lightboxSource.includes('[CHART_UPLOAD_METADATA_MISMATCH]')
+    || !lightboxSource.includes("ticker:modalTicker")){
+    throw new Error('Chart lightbox must render attachment-bound ticker metadata and log mismatches.');
   }
   const beginReviewAiSource = extractFunctionSource(appSource, 'beginReviewAiAnalysis');
   const completeReviewAiSource = extractFunctionSource(appSource, 'completeReviewAiAnalysis');
@@ -2587,6 +2596,7 @@ function runAiContractAssertions(){
     || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_START]')
     || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_SKIPPED_DUPLICATE_IMAGE]')
     || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_NOT_DEDUPED_REQUEST_MISMATCH]')
+    || !appAnalyseSetupSource.includes('[CHART_CONTEXT_AT_VERIFICATION_START]')
     || !appAnalyseSetupSource.includes('autoAnalysisSource && requestChartImageId && quickAlreadyCommittedForCurrentContext && analysisAlreadyCommittedForCurrentContext')
     || appAnalyseSetupSource.indexOf('[QUICK_CHART_ANALYSIS_COMMITTED]') > appAnalyseSetupSource.indexOf('const aiSummaryCommitPayload = {')
     || !appAnalyseSetupSource.includes("status:'committed'")
