@@ -3954,6 +3954,17 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
     : null;
   const currentKey = reviewQuickChartAnalysisKey(item);
   const storedKey = stored ? String(stored.key || '') : '';
+  const currentContext = currentReviewChartContext(item, review);
+  const storedMatchesCurrentContext = !!(
+    stored
+    && currentContext.imageId
+    && String(stored.chartImageId || '') === String(currentContext.imageId || '')
+    && (
+      !String(currentContext.requestId || '')
+      || !String(stored.requestId || '')
+      || String(stored.requestId || '') === String(currentContext.requestId || '')
+    )
+  );
   const currentAnalysisState = options.analysisState && typeof options.analysisState === 'object'
     ? options.analysisState
     : getReviewAnalysisState(item);
@@ -3977,7 +3988,7 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
   const currentVerificationNeedsQuickAnalysis = !chartVerificationStatus || pendingStatuses.has(chartVerificationStatus);
   const hasChart = hasVerifiableReviewChartSource(review);
   const currentAnalysisComplete = !!(currentAnalysisState && currentAnalysisState.hasSavedAnalysis);
-  const matchesCurrentKey = !!(stored && storedKey && storedKey === currentKey);
+  const matchesCurrentKey = !!(stored && ((storedKey && storedKey === currentKey) || storedMatchesCurrentContext));
   const currentStatus = matchesCurrentKey ? String(stored.status || 'idle') : 'idle';
   const pending = matchesCurrentKey && ['queued', 'running'].includes(currentStatus);
   const attempted = matchesCurrentKey && ['running', 'complete', 'failed', 'committed'].includes(currentStatus);
@@ -20756,6 +20767,20 @@ function applyCommittedAiSummaryForChart(record, payload = {}){
       chartImageSource:mergedChartImageSource,
       updatedAt:new Date().toISOString()
     };
+    [item.review, canonicalReview].forEach(targetReview => {
+      if(!targetReview || !targetReview.quickChartAnalysis || typeof targetReview.quickChartAnalysis !== 'object') return;
+      targetReview.quickChartAnalysis = {
+        ...targetReview.quickChartAnalysis,
+        ticker:ticker,
+        reviewTicker:ticker,
+        chartImageId:requestChartImageId,
+        requestId:analysisRequestId,
+        status:'committed',
+        updatedAt:new Date().toISOString(),
+        committedAt:new Date().toISOString(),
+        resultStatus:String(mergedChartTrace && mergedChartTrace.status || '')
+      };
+    });
     const canonicalReadbackRecord = getTickerRecord(ticker) || canonicalReviewRecord;
     const canonicalReadbackReview = canonicalReadbackRecord && canonicalReadbackRecord.review && typeof canonicalReadbackRecord.review === 'object'
       ? canonicalReadbackRecord.review
@@ -22884,6 +22909,9 @@ function normalizeAnalysisResponse(raw){
   const suppliedRawOpinion = suppliedAiObservation && suppliedAiObservation.rawOpinion && typeof suppliedAiObservation.rawOpinion === 'object'
     ? cloneData(suppliedAiObservation.rawOpinion, {})
     : null;
+  const explicitChartIdentityProvenanceVersion = Number.isFinite(Number(raw.chartIdentityProvenanceVersion))
+    ? Number(raw.chartIdentityProvenanceVersion)
+    : null;
   const rawOpinion = suppliedRawOpinion || {
     verdict:String(raw.verdict || '').trim(),
     final_verdict:String(raw.final_verdict || '').trim(),
@@ -22926,8 +22954,18 @@ function normalizeAnalysisResponse(raw){
     ma200_extraction_method_used:String(raw.ma200_extraction_method_used || raw.extraction_method_used || '').trim(),
     visible_price_range:String(raw.visible_price_range || '').trim(),
     visible_date_range:String(raw.visible_date_range || '').trim(),
+    chartIdentityProvenanceVersion:explicitChartIdentityProvenanceVersion,
+    extraction_method_used:String(raw.extraction_method_used || raw.ma200_extraction_method_used || '').trim(),
     extraction_confidence:analysisNumberOrNull(raw.extraction_confidence),
     extraction_warnings:Array.isArray(raw.extraction_warnings) ? raw.extraction_warnings.map(item => String(item).trim()).filter(Boolean) : [],
+    visible_ticker_source:String(raw.visible_ticker_source || raw.ticker_extraction_source || '').trim(),
+    ticker_extraction_source:String(raw.ticker_extraction_source || raw.visible_ticker_source || '').trim(),
+    visible_price_source:String(raw.visible_price_source || raw.price_extraction_source || '').trim(),
+    price_extraction_source:String(raw.price_extraction_source || raw.visible_price_source || '').trim(),
+    visible_timeframe_source:String(raw.visible_timeframe_source || raw.timeframe_extraction_source || '').trim(),
+    timeframe_extraction_source:String(raw.timeframe_extraction_source || raw.visible_timeframe_source || '').trim(),
+    chart_region_confirmation:String(raw.chart_region_confirmation || '').trim(),
+    chart_region_confirmation_source:String(raw.chart_region_confirmation_source || '').trim(),
     // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
     chart_match_status:String(raw.chart_match_status || '').trim().toLowerCase(),
     chart_match_warning:String(raw.chart_match_warning || '').trim(),
@@ -22962,6 +23000,15 @@ function normalizeAnalysisResponse(raw){
     },
     final_verdict:''
   };
+}
+
+function hasExplicitChartIdentityProvenanceVersion(value){
+  return !!(value && typeof value === 'object' && Number.isFinite(Number(value.chartIdentityProvenanceVersion)));
+}
+
+function isStrictChartIdentityProvenanceAnalysis(value){
+  return hasExplicitChartIdentityProvenanceVersion(value)
+    && Number(value.chartIdentityProvenanceVersion) >= 1;
 }
 
 function isMissingAnalysisValue(value){
@@ -23362,6 +23409,18 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     ma200_extraction_method_used:parsed.ma200_extraction_method_used || '',
     visible_price_range:parsed.visible_price_range || '',
     visible_date_range:parsed.visible_date_range || '',
+    chartIdentityProvenanceVersion:hasExplicitChartIdentityProvenanceVersion(parsed)
+      ? Number(parsed.chartIdentityProvenanceVersion)
+      : null,
+    extraction_method_used:parsed.extraction_method_used || '',
+    visible_ticker_source:parsed.visible_ticker_source || '',
+    ticker_extraction_source:parsed.ticker_extraction_source || '',
+    visible_price_source:parsed.visible_price_source || '',
+    price_extraction_source:parsed.price_extraction_source || '',
+    visible_timeframe_source:parsed.visible_timeframe_source || '',
+    timeframe_extraction_source:parsed.timeframe_extraction_source || '',
+    chart_region_confirmation:parsed.chart_region_confirmation || '',
+    chart_region_confirmation_source:parsed.chart_region_confirmation_source || '',
     extraction_confidence:parsed.extraction_confidence,
     extraction_warnings:parsed.extraction_warnings || [],
     chart_match_status:mismatchStatus,
@@ -24028,7 +24087,12 @@ async function analyseSetup(ticker, options = {}){
       console.debug('[review-analysis] request_completed', {ticker, requestId:analysisRequestId});
       logAnalysisDebug('RAW_ANALYSIS_RESULT', data.analysis || null);
       logAnalysisDebug('PREVIOUS_TICKER_STATE', previousTickerState);
-      const analysis = normalizeAnalysisResult(data.analysis, previousTickerState);
+      const analysis = sanitizeChartAssessorVisibleIdentity(
+        record,
+        normalizeAnalysisResult(data.analysis, previousTickerState),
+        requestChartImageSource,
+        analysisRequestId
+      );
       const chartAssessorInput = buildChartAssessorInput(record, analysis, requestChartImageSource, analysisRequestId);
       record.review.chartVerificationContext = cloneData(chartAssessorInput, null);
       if(typeof console !== 'undefined' && console.info){
@@ -28576,9 +28640,9 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
   const extractionMethodHasEvidence = !!(extractionMethodUsed && !/^none$/i.test(extractionMethodUsed));
   const uiHeaderEvidenceSignals = [];
   const chartNativeEvidenceSignals = [];
-  const hasImageDerivedTicker = !!(visibleTicker && (sourceIsImageDerived(visibleTickerSource) || extractionMethodHasEvidence || visibleNumericLabelsCount > 0 || visibleMaValuesCount > 0 || maLineEvidenceCount > 0 || maVisibilityAssessedCount > 0));
-  const hasImageDerivedPrice = !!(visiblePrice !== null && (sourceIsImageDerived(visiblePriceSource) || visibleNumericLabelsCount > 0 || visibleMaValuesCount > 0 || extractionMethodHasEvidence || maVisibilityAssessedCount > 0));
-  const hasImageDerivedTimeframe = !!(visibleTimeframe && (sourceIsImageDerived(visibleTimeframeSource) || extractionMethodHasEvidence || maVisibilityAssessedCount > 0));
+  const hasImageDerivedTicker = !!(visibleTicker && sourceIsImageDerived(visibleTickerSource));
+  const hasImageDerivedPrice = !!(visiblePrice !== null && (sourceIsImageDerived(visiblePriceSource) || visibleNumericLabelsCount > 0));
+  const hasImageDerivedTimeframe = !!(visibleTimeframe && sourceIsImageDerived(visibleTimeframeSource));
   if(hasImageDerivedTicker) uiHeaderEvidenceSignals.push('image_derived_ticker');
   if(hasImageDerivedPrice) uiHeaderEvidenceSignals.push('image_derived_price');
   if(hasImageDerivedTimeframe) uiHeaderEvidenceSignals.push('image_derived_timeframe');
@@ -28594,7 +28658,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     && String(safeAnalysis.chart_match_status || '').trim().toLowerCase() === 'match'
     && String(safeAnalysis.chart_region_confirmation || '').trim()
   );
-  const independentImageEvidence = chartNativeEvidencePresent || trustedChartRegionConfirmation;
+  const independentImageEvidence = chartNativeEvidencePresent || trustedChartRegionConfirmation || hasImageDerivedTicker || hasImageDerivedPrice || hasImageDerivedTimeframe;
   const contextMirroringSuspected = !!(
     visibleTicker
     && expectedTicker
@@ -28695,6 +28759,7 @@ function buildChartVerificationFastPass(record = {}, analysis = null, chartImage
     && visibleTimeframe
     && isDailyTimeframe(visibleTimeframe)
     && visiblePrice !== null
+    && (hasImageDerivedTicker || hasImageDerivedPrice || hasImageDerivedTimeframe || chartNativeEvidencePresent)
   ){
     fastStatus = 'clear_match_candidate';
     status = 'clear_match_candidate';
@@ -28845,6 +28910,103 @@ function buildPreAiChartVerificationTrace(record = {}, chartImageSource = null){
       expectedTicker
     }
   };
+}
+
+function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, chartImageSource = null, verificationRequestId = ''){
+  const item = record && typeof record === 'object' ? record : {};
+  const safeAnalysis = analysis && typeof analysis === 'object' ? {...analysis} : {};
+  const safeSource = chartImageSource && typeof chartImageSource === 'object'
+    ? chartImageSource
+    : buildChartImageSourceTrace(item.review || {});
+  const expectedTicker = normaliseVisibleTicker(item.ticker || '');
+  const trustedPrice = chartVerificationNumberOrNull(item.marketData && typeof item.marketData === 'object' ? item.marketData.price : item.price);
+  const visibleTicker = normaliseVisibleTicker(safeAnalysis.visible_ticker || '');
+  const visibleTimeframe = String(safeAnalysis.visible_timeframe || '').trim();
+  const visiblePrice = chartVerificationNumberOrNull(safeAnalysis.visible_latest_price);
+  const visibleTickerSource = String(safeAnalysis.visible_ticker_source || safeAnalysis.ticker_extraction_source || '').trim().toLowerCase();
+  const visiblePriceSource = String(safeAnalysis.visible_price_source || safeAnalysis.price_extraction_source || '').trim().toLowerCase();
+  const visibleTimeframeSource = String(safeAnalysis.visible_timeframe_source || safeAnalysis.timeframe_extraction_source || '').trim().toLowerCase();
+  const visibleNumericLabelsCount = chartVerificationNumericLabels(safeAnalysis).length;
+  const strictProvenanceRequired = isStrictChartIdentityProvenanceAnalysis(safeAnalysis);
+  const sourceIsImageDerived = value => /\b(image|ocr|vision|visible|chart|extracted|screen|screenshot)\b/.test(String(value || ''));
+  const hasTickerEvidence = !!(visibleTicker && sourceIsImageDerived(visibleTickerSource));
+  const hasPriceEvidence = !!(visiblePrice !== null && (sourceIsImageDerived(visiblePriceSource) || visibleNumericLabelsCount > 0));
+  const hasTimeframeEvidence = !!(visibleTimeframe && sourceIsImageDerived(visibleTimeframeSource));
+  const leakedFields = [];
+  const blankedFields = [];
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_ASSESSOR_VISIBLE_IDENTITY]', {
+      ticker:normalizeTicker(item.ticker || ''),
+      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
+      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      extractedTicker:visibleTicker || '',
+      extractedTimeframe:visibleTimeframe || '',
+      extractedPrice:visiblePrice === null ? 'n/a' : visiblePrice,
+      strictProvenanceRequired,
+      visibleTickerSource,
+      visibleTimeframeSource,
+      visiblePriceSource,
+      visibleNumericLabelsCount
+    });
+    console.info('[CHART_ASSESSOR_TRUSTED_CONTEXT]', {
+      ticker:normalizeTicker(item.ticker || ''),
+      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
+      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      expectedTicker,
+      expectedTimeframe:'1D',
+      trustedPrice:trustedPrice === null ? 'n/a' : trustedPrice
+    });
+  }
+  if(strictProvenanceRequired && visibleTicker && !hasTickerEvidence){
+    if(expectedTicker && visibleTicker === expectedTicker) leakedFields.push('ticker');
+    safeAnalysis.visible_ticker = '';
+    safeAnalysis.visible_ticker_source = '';
+    safeAnalysis.ticker_extraction_source = '';
+    blankedFields.push('ticker');
+  }
+  if(strictProvenanceRequired && visiblePrice !== null && !hasPriceEvidence){
+    if(trustedPrice !== null && Math.abs(visiblePrice - trustedPrice) < 0.0001) leakedFields.push('price');
+    safeAnalysis.visible_latest_price = null;
+    safeAnalysis.visible_price_source = '';
+    safeAnalysis.price_extraction_source = '';
+    blankedFields.push('price');
+  }
+  if(strictProvenanceRequired && visibleTimeframe && !hasTimeframeEvidence){
+    safeAnalysis.visible_timeframe = '';
+    safeAnalysis.visible_timeframe_source = '';
+    safeAnalysis.timeframe_extraction_source = '';
+    blankedFields.push('timeframe');
+  }
+  if(blankedFields.length && typeof console !== 'undefined' && console.warn){
+    console.warn('[CHART_ASSESSOR_FALLBACK_USED]', {
+      ticker:normalizeTicker(item.ticker || ''),
+      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
+      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      blankedFields,
+      leakedFields
+    });
+  }
+  if(leakedFields.length && typeof console !== 'undefined' && console.warn){
+    console.warn('[CHART_ASSESSOR_EXPECTED_VALUE_LEAK]', {
+      ticker:normalizeTicker(item.ticker || ''),
+      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
+      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      leakedFields,
+      expectedTicker,
+      trustedPrice:trustedPrice === null ? 'n/a' : trustedPrice
+    });
+  }
+  if(!String(safeAnalysis.visible_ticker || '').trim() && !String(safeAnalysis.visible_timeframe || '').trim() && chartVerificationNumberOrNull(safeAnalysis.visible_latest_price) === null){
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[CHART_IDENTITY_EXTRACTION_UNREADABLE]', {
+        ticker:normalizeTicker(item.ticker || ''),
+        requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
+        imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+        reason:'no_readable_visible_identity'
+      });
+    }
+  }
+  return safeAnalysis;
 }
 
 function buildChartAssessorInput(record = {}, analysis = null, chartImageSource = null, verificationRequestId = ''){
@@ -29827,6 +29989,14 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       staleResponseRejected:true
     });
     analysis = null;
+  }
+  if(analysis && typeof analysis === 'object'){
+    analysis = sanitizeChartAssessorVisibleIdentity(
+      safeRecord,
+      analysis,
+      chartImageSource,
+      String(analysis.__analysisRequestId || analysis.verificationRequestId || analysis.requestId || '')
+    );
   }
   const chartRef = review.chartRef && typeof review.chartRef === 'object' ? review.chartRef : null;
   const hasChart = !!((chartRef && chartRef.dataUrl) || chartImageSource.sourceKind !== 'none');

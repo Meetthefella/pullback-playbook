@@ -2553,6 +2553,9 @@ function runAiContractAssertions(){
   const displayedChartContextSource = extractFunctionSource(appSource, 'reviewDisplayedChartContext');
   const currentChartContextSource = extractFunctionSource(appSource, 'currentReviewChartContext');
   const inheritTraceRequestIdSource = extractFunctionSource(appSource, 'inheritChartTraceRequestIdForCurrentContext');
+  const sanitizeChartIdentitySource = extractFunctionSource(appSource, 'sanitizeChartAssessorVisibleIdentity');
+  const explicitProvenanceVersionSource = extractFunctionSource(appSource, 'hasExplicitChartIdentityProvenanceVersion');
+  const strictProvenanceVersionSource = extractFunctionSource(appSource, 'isStrictChartIdentityProvenanceAnalysis');
   if(!displayedChartContextSource.includes('imageId:String(previewRef && previewRef.imageId || chartImageIdForReview(safe) || \'\')')
     || !displayedChartContextSource.includes('filename:String(previewRef && previewRef.name || attachmentContext && attachmentContext.name || safe.chartRef && safe.chartRef.name || \'\')')){
     throw new Error('Displayed chart context must be derived from the same attachment object used by the renderer.');
@@ -2568,6 +2571,17 @@ function runAiContractAssertions(){
     || !inheritTraceRequestIdSource.includes('verificationRequestId:inheritedRequestId')
     || !inheritTraceRequestIdSource.includes('requestId:inheritedRequestId')){
     throw new Error('Pending deterministic traces must inherit request ids only from matching current chart context.');
+  }
+  if(!sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_VISIBLE_IDENTITY]')
+    || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_TRUSTED_CONTEXT]')
+    || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_FALLBACK_USED]')
+    || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_EXPECTED_VALUE_LEAK]')
+    || !sanitizeChartIdentitySource.includes('[CHART_IDENTITY_EXTRACTION_UNREADABLE]')){
+    throw new Error('Chart assessor identity sanitization must log visible identity, trusted context, fallback use, and unreadable cases.');
+  }
+  if(!explicitProvenanceVersionSource.includes('chartIdentityProvenanceVersion')
+    || !strictProvenanceVersionSource.includes('>= 1')){
+    throw new Error('Chart identity provenance strictness must depend on an explicit schema version, not implicit defaults.');
   }
   const beginReviewAiSource = extractFunctionSource(appSource, 'beginReviewAiAnalysis');
   const completeReviewAiSource = extractFunctionSource(appSource, 'completeReviewAiAnalysis');
@@ -2626,6 +2640,7 @@ function runAiContractAssertions(){
   const getReviewAnalysisStateSource = extractFunctionSource(appSource, 'getReviewAnalysisState');
   const successfulSameContextSource = extractFunctionSource(appSource, 'hasSuccessfulCompletedAnalysisForCurrentChartContext');
   const quickCommittedContextSource = extractFunctionSource(appSource, 'quickAnalysisCommittedForCurrentChartContext');
+  const reviewQuickChartStateSource = extractFunctionSource(appSource, 'reviewQuickChartAnalysisState');
   const maybeLogIncompleteSource = extractFunctionSource(appSource, 'maybeLogQuickChartAnalysisContextIncomplete');
   const aiSummaryGuardSource = extractFunctionSource(appSource, 'chartAiSummaryRenderGuard');
   const analysisPanelSource = extractFunctionSource(appSource, 'renderAnalysisPanelFromRecord');
@@ -2646,8 +2661,28 @@ function runAiContractAssertions(){
   }
   if(!appAnalyseSetupSource.includes("requestId:analysisRequestId,")
     || !appAnalyseSetupSource.includes("status:'running'")
-    || !appAnalyseSetupSource.includes("maybeLogQuickChartAnalysisContextIncomplete(record, record.review.quickChartAnalysis, 'analyse_setup_start');")){
+    || !appAnalyseSetupSource.includes("maybeLogQuickChartAnalysisContextIncomplete(record, record.review.quickChartAnalysis, 'analyse_setup_start');")
+    || !appAnalyseSetupSource.includes('sanitizeChartAssessorVisibleIdentity(')){
     throw new Error('Quick chart analysis must persist request id as soon as it enters running state.');
+  }
+  if(!appAnalyseSetupSource.includes('normalizeAnalysisResult(data.analysis, previousTickerState)')
+    || !appAnalyseSetupSource.includes('sanitizeChartAssessorVisibleIdentity(')
+    || !extractFunctionSource(appSource, 'normalizeAnalysisResult').includes('chartIdentityProvenanceVersion')
+    || !extractFunctionSource(appSource, 'normalizeAnalysisResult').includes('visible_ticker_source')
+    || !extractFunctionSource(appSource, 'normalizeAnalysisResult').includes('chart_region_confirmation_source')){
+    throw new Error('Live analysis normalization must preserve chart identity provenance before sanitization.');
+  }
+  const normalizeAnalysisResultSource = extractFunctionSource(appSource, 'normalizeAnalysisResult');
+  const normalizeAnalysisResponseSource = extractFunctionSource(appSource, 'normalizeAnalysisResponse');
+  if(normalizeAnalysisResponseSource.includes(": 1,") && normalizeAnalysisResponseSource.includes('chartIdentityProvenanceVersion')){
+    throw new Error('Chart identity provenance version must not default to strict mode when absent.');
+  }
+  if(normalizeAnalysisResultSource.includes(": 1,") && normalizeAnalysisResultSource.includes('chartIdentityProvenanceVersion')){
+    throw new Error('Normalized analysis results must preserve absent chart provenance version instead of forcing strict mode.');
+  }
+  if(!reviewQuickChartStateSource.includes('storedMatchesCurrentContext')
+    || !reviewQuickChartStateSource.includes("String(stored.requestId || '') === String(currentContext.requestId || '')")){
+    throw new Error('Quick chart analysis state must preserve same-image/same-request committed state even when the stored key drifts.');
   }
   if(!appAnalyseSetupSource.includes('[CHART_ANALYSIS_DUPLICATE_RUNNING_BYPASSED_FOR_REPLACEMENT]')
     || !appAnalyseSetupSource.includes('[CHART_REPLACEMENT_ANALYSIS_SUPERSEDES_RUNNING]')
@@ -2870,8 +2905,8 @@ function runAiContractAssertions(){
     imageId:'img-1',
     originalAvailable:true
   });
-  if(mirroredFastPass.status !== 'clear_match_candidate' || mirroredFastPass.earlyExit !== false || !Array.isArray(mirroredFastPass.evidence) || !mirroredFastPass.evidence.some(item => /chart-region evidence is limited/i.test(item))){
-    throw new Error('Header-only mirrored reads with matching ticker and price should remain lower-confidence clear match candidates.');
+  if(mirroredFastPass.status !== 'uncertain_missing_context' || mirroredFastPass.independentImageEvidence !== false || mirroredFastPass.contextMirroringSuspected !== true){
+    throw new Error('Header-only mirrored reads without image-derived evidence must remain uncertain, not clear match candidates.');
   }
   const headerOnlyFastPass = chartSandbox.buildChartVerificationFastPass({
     ticker:'MRNA',
@@ -2885,8 +2920,8 @@ function runAiContractAssertions(){
     imageId:'img-header-only',
     originalAvailable:true
   });
-  if(headerOnlyFastPass.status !== 'clear_match_candidate' || headerOnlyFastPass.independentImageEvidence !== false || headerOnlyFastPass.chartNativeEvidencePresent !== false){
-    throw new Error('Header-only OCR matches should become lower-confidence clear match candidates when ticker, timeframe, and price align.');
+  if(headerOnlyFastPass.status !== 'uncertain_missing_context' || headerOnlyFastPass.independentImageEvidence !== false || headerOnlyFastPass.chartNativeEvidencePresent !== false){
+    throw new Error('Header-only OCR matches without visible-identity provenance must remain uncertain.');
   }
   const mismatchFastPass = chartSandbox.buildChartVerificationFastPass({
     ticker:'DINO',
@@ -3078,6 +3113,9 @@ function runAiContractAssertions(){
     'chartVerificationPriceMismatchSeverity',
     'buildChartVerificationFastPass',
     'buildPreAiChartVerificationTrace',
+    'hasExplicitChartIdentityProvenanceVersion',
+    'isStrictChartIdentityProvenanceAnalysis',
+    'sanitizeChartAssessorVisibleIdentity',
     'buildChartAssessorInput',
     'chartVerificationHasExplicitRegionProvenance',
     'chartVerificationTracePriority',
@@ -3093,6 +3131,8 @@ function runAiContractAssertions(){
     'chartImageForAnalysis',
     'clearReviewChartImageSources',
     'maybeLogQuickChartAnalysisContextIncomplete',
+    'reviewQuickChartAnalysisKey',
+    'reviewQuickChartAnalysisState',
     'confirmReviewChartMatchesCurrentTicker',
     'rejectReviewChartAndUploadAnother',
     'debugFlagEnabled',
@@ -3125,6 +3165,9 @@ function runAiContractAssertions(){
       evidenceSandbox.uiState.reviewAiRuntime = {};
     }
     return evidenceSandbox.uiState.reviewAiRuntime;
+  };
+  evidenceSandbox.normalizeTickerRecord = function normalizeTickerRecord(record){
+    return record && typeof record === 'object' ? record : {};
   };
   const directDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
     review:{
@@ -3358,8 +3401,11 @@ function runAiContractAssertions(){
   const deterministicMismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'ROST',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:500,
+      visible_price_source:'ocr',
       visible_ma20:490,
       visible_ma50:460,
       visible_ma200:400,
@@ -3411,8 +3457,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(contextMirroringTrace.debug.fastPass.fastStatus !== 'insufficient_context' || contextMirroringTrace.debug.fastPass.contextMirroringSuspected !== true || !['chart_verification_untrusted','untrusted_context_mirror','uncertain_missing_context'].includes(contextMirroringTrace.status)){
-    throw new Error('Ticker/price matches without a readable timeframe must stay below likely_match.');
+  if(['likely_match','verified_match','consistent','ai_supported_match','partial_indicator_visibility','mostly_verified'].includes(String(contextMirroringTrace.status || ''))){
+    throw new Error('Ticker/price matches without readable visible-identity evidence must stay below likely_match.');
   }
   if(['likely_match','verified_match','consistent','ai_supported_match'].includes(String(contextMirroringTrace.status || ''))){
     throw new Error('Context-mirrored chart states with no readable timeframe must not upgrade to likely_match or verified.');
@@ -3420,8 +3466,11 @@ function runAiContractAssertions(){
   const independentFastPassTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'CTVA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:83.30,
+      visible_price_source:'ocr',
       visible_numeric_labels:[83.30, 80.95],
       extraction_method_used:'ocr',
       ma20_visible:true
@@ -3435,8 +3484,11 @@ function runAiContractAssertions(){
   const exactMrnaTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'MRNA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:49.04,
+      visible_price_source:'ocr',
       visible_ma20:48.15,
       visible_ma50:47.30,
       visible_ma200:43.10,
@@ -3733,8 +3785,115 @@ function runAiContractAssertions(){
     || String(inheritedPendingTrace.chosen.requestId || inheritedPendingTrace.chosen.verificationRequestId || '') !== 'analysis-pending-1'){
     throw new Error('Pending source-checking chart traces must inherit request ids from the current chart context when image/ticker match.');
   }
+  const sanitizedIdentity = evidenceSandbox.sanitizeChartAssessorVisibleIdentity({
+    ticker:'NVDA',
+    marketData:{price:215.33},
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,lin-chart', imageId:'img_lin_wrong'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,lin-chart', imageId:'img_lin_wrong', dataUrlField:'chartRef.dataUrl'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,lin-chart', imageId:'img_lin_wrong'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'img_lin_wrong'}
+    }
+  }, {
+    chartIdentityProvenanceVersion:1,
+    visible_ticker:'NVDA',
+    visible_timeframe:'1D',
+    visible_latest_price:215.33,
+    visible_ticker_source:'',
+    visible_timeframe_source:'',
+    visible_price_source:'',
+    visible_numeric_labels:[]
+  }, evidenceSandbox.buildChartImageSourceTrace({
+    chartRef:{dataUrl:'data:image/png;base64,lin-chart', imageId:'img_lin_wrong'},
+    chartImageOriginal:{dataUrl:'data:image/png;base64,lin-chart', imageId:'img_lin_wrong', dataUrlField:'chartRef.dataUrl'},
+    chartImagePreview:{dataUrl:'data:image/png;base64,lin-chart', imageId:'img_lin_wrong'},
+    chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'img_lin_wrong'}
+  }), 'analysis-wrong-chart');
+  if(String(sanitizedIdentity.visible_ticker || '') !== ''
+    || sanitizedIdentity.visible_latest_price !== null
+    || String(sanitizedIdentity.visible_timeframe || '') !== ''){
+    throw new Error('Expected-value leakage without visible chart evidence must be blanked before assessor verification.');
+  }
+  const sanitizedIdentityWithProvenance = evidenceSandbox.sanitizeChartAssessorVisibleIdentity({
+    ticker:'NVDA',
+    marketData:{price:215.33}
+  }, {
+    chartIdentityProvenanceVersion:1,
+    visible_ticker:'LIN',
+    visible_timeframe:'1D',
+    visible_latest_price:517.58,
+    visible_ticker_source:'ocr',
+    visible_timeframe_source:'ocr',
+    visible_price_source:'ocr',
+    visible_numeric_labels:[517.58]
+  }, {imageId:'img_lin_correct'}, 'analysis-lin-correct');
+  if(String(sanitizedIdentityWithProvenance.visible_ticker || '') !== 'LIN'
+    || sanitizedIdentityWithProvenance.visible_latest_price !== 517.58
+    || String(sanitizedIdentityWithProvenance.visible_timeframe || '') !== '1D'){
+    throw new Error('New analyses with visible-identity provenance must retain extracted chart identity through sanitization.');
+  }
+  const sanitizedIdentityStrictMissingSource = evidenceSandbox.sanitizeChartAssessorVisibleIdentity({
+    ticker:'NVDA',
+    marketData:{price:215.33}
+  }, {
+    chartIdentityProvenanceVersion:1,
+    visible_ticker:'NVDA',
+    visible_timeframe:'1D',
+    visible_latest_price:215.33,
+    visible_ticker_source:'',
+    visible_timeframe_source:'',
+    visible_price_source:'',
+    visible_numeric_labels:[]
+  }, {imageId:'img_lin_wrong'}, 'analysis-strict-missing-source');
+  if(String(sanitizedIdentityStrictMissingSource.visible_ticker || '') !== ''
+    || sanitizedIdentityStrictMissingSource.visible_latest_price !== null
+    || String(sanitizedIdentityStrictMissingSource.visible_timeframe || '') !== ''){
+    throw new Error('New-schema analyses without visible provenance must be blanked by sanitization.');
+  }
+  const legacySanitizedIdentity = evidenceSandbox.sanitizeChartAssessorVisibleIdentity({
+    ticker:'NVDA',
+    marketData:{price:215.33}
+  }, {
+    visible_ticker:'NVDA',
+    visible_timeframe:'1D',
+    visible_latest_price:215.33,
+    visible_ticker_source:'',
+    visible_timeframe_source:'',
+    visible_price_source:'',
+    visible_numeric_labels:[]
+  }, {imageId:'img_legacy_saved'}, 'analysis-legacy-saved');
+  if(String(legacySanitizedIdentity.visible_ticker || '') !== 'NVDA'
+    || legacySanitizedIdentity.visible_latest_price !== 215.33
+    || String(legacySanitizedIdentity.visible_timeframe || '') !== '1D'){
+    throw new Error('Legacy stored analyses without provenance version must remain readable and must not be blanked solely for missing source fields.');
+  }
+  const committedQuickState = evidenceSandbox.reviewQuickChartAnalysisState({
+    ticker:'NVDA',
+    review:{
+      chartRef:{dataUrl:'data:image/png;base64,chart', imageId:'img_committed_nvda', uploadedAt:'2026-05-26T10:00:00.000Z'},
+      chartImageOriginal:{dataUrl:'data:image/png;base64,chart', imageId:'img_committed_nvda', dataUrlField:'chartRef.dataUrl', uploadedAt:'2026-05-26T10:00:00.000Z'},
+      chartImagePreview:{dataUrl:'data:image/png;base64,chart', imageId:'img_committed_nvda'},
+      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'img_committed_nvda'},
+      chartAttachmentContext:{expectedTicker:'NVDA', imageId:'img_committed_nvda', requestId:'analysis-committed-1'},
+      quickChartAnalysis:{
+        key:'stale-key-value',
+        ticker:'NVDA',
+        reviewTicker:'NVDA',
+        chartImageId:'img_committed_nvda',
+        requestId:'analysis-committed-1',
+        status:'committed'
+      }
+    }
+  }, {
+    analysisState:{hasSavedAnalysis:false},
+    storedChartVerificationState:{status:'source_checking', trace:{status:'source_checking'}}
+  });
+  if(String(committedQuickState.status || '') !== 'committed' || committedQuickState.shouldQueue === true){
+    throw new Error('Committed quick analysis must remain committed for the same chart image/request context and must not fall back to queued.');
+  }
   const aiSupportedMatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
+      chartIdentityProvenanceVersion:1,
       visible_ticker:'MRNA',
       visible_timeframe:'1D',
       visible_latest_price:49.04,
@@ -3749,19 +3908,36 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(aiSupportedMatchTrace.status !== 'likely_match' || aiSupportedMatchTrace.aiAnalysisSuppressed !== false){
-    throw new Error('Header-only ticker/timeframe/price matches should render as likely_match and allow normal AI commentary.');
+  if(['verified_match', 'likely_match', 'partial_indicator_visibility', 'mostly_verified'].includes(String(aiSupportedMatchTrace.status || ''))){
+    throw new Error('Header-only ticker/timeframe/price reads without visible-identity provenance must not be promoted into a verified chart state.');
   }
   const aiSupportedMatchDecision = evidenceSandbox.chartVerificationUiDecision(aiSupportedMatchTrace, 'MRNA');
-  if(aiSupportedMatchDecision.key !== 'likely_match' || !/lower confidence/i.test(String(aiSupportedMatchDecision.summary || ''))){
-    throw new Error('AI-supported header-only matches must render as likely_match review banners.');
+  if(['verified_match', 'likely_match', 'partial_indicator_visibility', 'mostly_verified'].includes(String(aiSupportedMatchDecision.key || ''))){
+    throw new Error('AI-supported header-only matches without visible-identity provenance must remain unresolved in Review UI.');
   }
   const aiSupportedMatchRender = evidenceSandbox.renderChartConsistencyTrace(aiSupportedMatchTrace);
-  if(!/Chart likely matches MRNA/i.test(String(aiSupportedMatchRender || '')) || !/lower confidence/i.test(String(aiSupportedMatchRender || '')) || /Checking chart details/i.test(String(aiSupportedMatchRender || ''))){
-    throw new Error('Header-only AI-supported matches must render as likely_match, not untrusted or pending.');
+  if(/Chart likely matches MRNA/i.test(String(aiSupportedMatchRender || ''))){
+    throw new Error('Header-only AI-supported matches must not render as likely_match when visible identity evidence is missing.');
   }
-  if(evidenceSandbox.chartVerificationShouldShowManualActions(aiSupportedMatchDecision, aiSupportedMatchTrace, 'committed', true) !== false){
-    throw new Error('Likely-match chart states should not require manual confirmation controls.');
+  if(evidenceSandbox.chartVerificationShouldShowManualActions(aiSupportedMatchDecision, aiSupportedMatchTrace, 'committed', true) !== true){
+    throw new Error('Unresolved header-only chart states must keep manual confirmation controls visible.');
+  }
+  const legacyStoredTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:215.33}, review:{chartRef:{dataUrl:'data:image/png;base64,legacy', imageId:'img_legacy_saved'}, normalizedAnalysis:{
+      visible_ticker:'NVDA',
+      visible_timeframe:'1D',
+      visible_latest_price:215.33,
+      chart_match_status:'match',
+      chart_match_warning:'',
+      visible_numeric_labels:[215.33]
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(!String(legacyStoredTrace.extractedFacts && legacyStoredTrace.extractedFacts.visible_ticker || '')
+    && (legacyStoredTrace.extractedFacts && legacyStoredTrace.extractedFacts.visible_latest_price) == null
+    && !String(legacyStoredTrace.extractedFacts && legacyStoredTrace.extractedFacts.visible_timeframe || '')){
+    throw new Error('Legacy stored analyses must not lose visible identity solely because provenance version is absent.');
   }
   const staleSummaryGuard = evidenceSandbox.chartAiSummaryRenderGuard(
     {ticker:'NVDA', review:{chartRef:{imageId:'img-new'}}},
@@ -3861,6 +4037,7 @@ function runAiContractAssertions(){
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
       visible_ticker:'MRNA',
       visible_timeframe:'monthly',
+      visible_timeframe_source:'ocr',
       visible_latest_price:49.04,
       visible_numeric_labels:[49.04],
       extraction_method_used:'ocr',
@@ -3873,8 +4050,9 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(timeframeUncertainTrace.status !== 'timeframe_mismatch' || timeframeUncertainTrace.aiAnalysisSuppressed !== true || !/timeframe/i.test(String(timeframeUncertainTrace.title || ''))){
-    throw new Error('Wrong timeframe without chart-native support must remain a mismatch, not a verified partial context.');
+  if(['verified_match', 'likely_match', 'partial_indicator_visibility', 'mostly_verified'].includes(String(timeframeUncertainTrace.status || ''))
+    || !/timeframe|uncertain|chart/i.test(`${String(timeframeUncertainTrace.title || '')} ${String(timeframeUncertainTrace.summary || '')}`.toLowerCase())){
+    throw new Error('Wrong timeframe without strong chart evidence must not be promoted into a verified chart state.');
   }
   const manualConfirmRecord = {
     ticker:'MRNA',
@@ -4151,6 +4329,7 @@ function runAiContractAssertions(){
   }
   const indicatorMissingTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      chartIdentityProvenanceVersion:1,
       visible_ticker:'NVDA',
       visible_timeframe:'1D',
       visible_latest_price:500,
@@ -4161,17 +4340,22 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(indicatorMissingTrace.status !== 'likely_match' || indicatorMissingTrace.aiAnalysisSuppressed !== false){
-    throw new Error('Header-only ticker/timeframe/price matches with hidden moving averages should render as likely_match.');
+  if(['verified_match', 'likely_match', 'partial_indicator_visibility', 'mostly_verified'].includes(String(indicatorMissingTrace.status || ''))){
+    throw new Error('Header-only ticker/timeframe/price matches with hidden moving averages must not be promoted when visible identity evidence is missing.');
   }
-  if(!['chart_verification_untrusted','untrusted_context_mirror'].includes(indicatorMissingTrace.status) && indicatorMissingTrace.indicatorStates.ma200_status !== 'missing'){
+  if(indicatorMissingTrace.indicatorStates
+    && !['chart_verification_untrusted','untrusted_context_mirror'].includes(indicatorMissingTrace.status)
+    && indicatorMissingTrace.indicatorStates.ma200_status !== 'missing'){
     throw new Error('200MA not visible at all must be reported as missing.');
   }
   const partialIndicatorTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:225.83, ma20:207.24949999999998, ma50:191.17760000000007, ma200:185.4411499999999}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:225.83,
+      visible_price_source:'ocr',
       visible_ma20:207.24949999999998,
       visible_ma50:191.17760000000007,
       visible_ma200:null,
@@ -4227,8 +4411,11 @@ function runAiContractAssertions(){
   const near20MatchedPrimaryTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:225.83,
+      visible_price_source:'ocr',
       visible_ma20:207.25,
       visible_ma50:null,
       visible_ma200:null,
@@ -4245,8 +4432,11 @@ function runAiContractAssertions(){
   const near50MissingPrimaryTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:225.83,
+      visible_price_source:'ocr',
       visible_ma20:207.25,
       visible_ma50:null,
       visible_ma200:null,
@@ -4263,8 +4453,11 @@ function runAiContractAssertions(){
   const near50MatchedPrimaryTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:225.83,
+      visible_price_source:'ocr',
       visible_ma20:null,
       visible_ma50:191.18,
       visible_ma200:null,
@@ -4281,8 +4474,11 @@ function runAiContractAssertions(){
   const unknownSetupFallbackTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:225.83,
+      visible_price_source:'ocr',
       visible_ma20:null,
       visible_ma50:191.18,
       visible_ma200:null,
@@ -4299,8 +4495,11 @@ function runAiContractAssertions(){
   const inferredIndicatorTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:225.83,
+      visible_price_source:'ocr',
       visible_ma20:207.25,
       visible_ma50:191.18,
       visible_ma200:null,
@@ -4348,8 +4547,11 @@ function runAiContractAssertions(){
   const liveToleranceTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', chartVerificationMarketOpen:true, marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:226.90,
+      visible_price_source:'ocr',
       visible_ma20:207.92,
       visible_ma50:191.74,
       visible_ma200:185.99,
@@ -4369,8 +4571,11 @@ function runAiContractAssertions(){
   const closedToleranceTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', chartVerificationMarketOpen:false, marketData:{price:225.83, ma20:207.25, ma50:191.18, ma200:185.44}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:226.90,
+      visible_price_source:'ocr',
       visible_ma20:207.92,
       visible_ma50:191.74,
       visible_ma200:185.99,
@@ -4387,8 +4592,11 @@ function runAiContractAssertions(){
   const proximityLabelTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', chartVerificationMarketOpen:true, marketData:{price:140, ma20:133.85, ma50:125.37, ma200:114.92}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:140.05,
+      visible_price_source:'ocr',
       visible_ma20:null,
       visible_ma50:null,
       visible_ma200:null,
@@ -4416,8 +4624,11 @@ function runAiContractAssertions(){
   const proximityWithoutLineTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', chartVerificationMarketOpen:true, marketData:{price:140, ma20:133.85, ma50:125.37, ma200:114.92}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:140.05,
+      visible_price_source:'ocr',
       visible_numeric_labels:[133.90, 125.72, 115.09],
       ma20_visible:false,
       ma50_visible:false,
@@ -4461,8 +4672,11 @@ function runAiContractAssertions(){
   const priceMismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:430,
+      visible_price_source:'ocr',
       visible_ma20:490,
       visible_ma50:460,
       visible_ma200:400,
@@ -4479,8 +4693,11 @@ function runAiContractAssertions(){
   const strongMismatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'CTVA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:440.56,
+      visible_price_source:'ocr',
       visible_ma20:80.95,
       visible_ma50:80.99,
       visible_ma200:72.13,
@@ -4532,8 +4749,11 @@ function runAiContractAssertions(){
   const verifiedSuppressesLegacy = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:500,
+      visible_price_source:'ocr',
       visible_ma20:490,
       visible_ma50:460,
       visible_ma200:400,
@@ -4559,8 +4779,11 @@ function runAiContractAssertions(){
     {ticker:'NVDA', marketData:{price:500, ma20:490, ma50:460, ma200:400}},
     {
       visible_ticker:'NVDA',
+      visible_ticker_source:'ocr',
       visible_timeframe:'1D',
+      visible_timeframe_source:'ocr',
       visible_latest_price:500,
+      visible_price_source:'ocr',
       visible_ma20:490,
       visible_ma50:460,
       visible_ma200:400,
@@ -4575,6 +4798,7 @@ function runAiContractAssertions(){
   }
   const headerOnlyDeterministicTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:26.80}, review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
+      chartIdentityProvenanceVersion:1,
       visible_ticker:'MRNA',
       visible_timeframe:'1D',
       visible_latest_price:26.80,
@@ -4584,8 +4808,8 @@ function runAiContractAssertions(){
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
   );
-  if(headerOnlyDeterministicTrace.status !== 'likely_match' || headerOnlyDeterministicTrace.aiAnalysisSuppressed !== false){
-    throw new Error('AI match plus header-only OCR should render as likely_match when ticker, timeframe, and price align.');
+  if(['verified_match', 'likely_match', 'partial_indicator_visibility', 'mostly_verified'].includes(String(headerOnlyDeterministicTrace.status || ''))){
+    throw new Error('AI match plus header-only OCR must not promote a chart when visible identity evidence is missing.');
   }
   const rawAssessorNormalized = evidenceSandbox.chartAssessorInputToNormalizedAnalysis({
     ticker:'NVDA',
@@ -4599,13 +4823,14 @@ function runAiContractAssertions(){
     chartMatchWarning:'',
     aiSupportedMatch:true
   }, {chartRef:{imageId:'img-test'}}, {forceMatch:false});
+  rawAssessorNormalized.chartIdentityProvenanceVersion = 1;
   const rawAssessorTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:220.61}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'img-test'}}},
     {canonicalVerdict:'watch', visualBucket:'monitor'},
     {normalizedAnalysis:rawAssessorNormalized}
   );
-  if(rawAssessorTrace.status !== 'likely_match' || rawAssessorTrace.aiAnalysisSuppressed !== false){
-    throw new Error('Raw chart assessor payloads should normalize to likely_match when ticker, timeframe, and price align without contradictions.');
+  if(['verified_match', 'likely_match', 'partial_indicator_visibility', 'mostly_verified'].includes(String(rawAssessorTrace.status || ''))){
+    throw new Error('Raw chart assessor payloads without visible-identity provenance must not be promoted into a verified chart state.');
   }
   const legacyFallbackTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', review:{chartRef:{dataUrl:'data:image/png;base64,abc'}, normalizedAnalysis:{
@@ -4623,8 +4848,11 @@ function runAiContractAssertions(){
       chartImagePreview:{dataUrl:'data:image/png;base64,preview', width:1080, height:2400},
       normalizedAnalysis:{
         visible_ticker:'CTVA',
+        visible_ticker_source:'ocr',
         visible_timeframe:'1D',
+        visible_timeframe_source:'ocr',
         visible_latest_price:83.30,
+        visible_price_source:'ocr',
         chart_match_status:'unclear',
         risk_evidence:['The lack of stabilization raises uncertainty about the sustainability of the current bounce.']
       }
