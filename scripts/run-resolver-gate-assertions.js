@@ -2550,6 +2550,11 @@ function runAiContractAssertions(){
     || !lightboxSource.includes("ticker:modalTicker")){
     throw new Error('Chart lightbox must render attachment-bound ticker metadata and log mismatches.');
   }
+  const displayedChartContextSource = extractFunctionSource(appSource, 'reviewDisplayedChartContext');
+  if(!displayedChartContextSource.includes('imageId:String(previewRef && previewRef.imageId || chartImageIdForReview(safe) || \'\')')
+    || !displayedChartContextSource.includes('filename:String(previewRef && previewRef.name || attachmentContext && attachmentContext.name || safe.chartRef && safe.chartRef.name || \'\')')){
+    throw new Error('Displayed chart context must be derived from the same attachment object used by the renderer.');
+  }
   const beginReviewAiSource = extractFunctionSource(appSource, 'beginReviewAiAnalysis');
   const completeReviewAiSource = extractFunctionSource(appSource, 'completeReviewAiAnalysis');
   const failReviewAiSource = extractFunctionSource(appSource, 'failReviewAiAnalysis');
@@ -2578,7 +2583,11 @@ function runAiContractAssertions(){
   const flushPendingAiSource = extractFunctionSource(appSource, 'flushPendingAiSummaryForChart');
   if(!flushPendingAiSource.includes("reason:'pending_context_stale'")
     || !flushPendingAiSource.includes('canCommitAiSummaryForChart({')
-    || !flushPendingAiSource.includes('applyCommittedAiSummaryForChart(item, pending)')){
+    || !flushPendingAiSource.includes('applyCommittedAiSummaryForChart(item, pending)')
+    || !flushPendingAiSource.includes('[AI_SUMMARY_PENDING_STATE]')
+    || !flushPendingAiSource.includes('[AI_SUMMARY_FLUSH_ATTEMPT]')
+    || !flushPendingAiSource.includes('[AI_SUMMARY_FLUSH_REJECTED]')
+    || !flushPendingAiSource.includes('[AI_SUMMARY_FLUSH_COMMITTED]')){
     throw new Error('Pending AI summaries must flush only for the same chart context and reject stale uploads.');
   }
   const chartTraceSelectorSource = extractFunctionSource(appSource, 'selectReviewChartTraceForRender');
@@ -2586,10 +2595,25 @@ function runAiContractAssertions(){
     || !chartTraceSelectorSource.includes('const mergedCandidatesAllowed = quickRunningForCurrentChart ? [] : mergedMatchingCandidates;')){
     throw new Error('Chart trace selection must block merged/post-AI traces while quick verification is still running.');
   }
+  const queueQuickSource = extractFunctionSource(appSource, 'queueReviewQuickChartAnalysis');
+  if(queueQuickSource.includes("review.quickChartAnalysis.status = 'running';")
+    || !queueQuickSource.includes("analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});")){
+    throw new Error('Bypass quick-analysis uploads must not create running quick state before a request id exists.');
+  }
+  const reviewWorkspaceSource = extractFunctionSource(appSource, 'renderReviewWorkspace');
+  if(!reviewWorkspaceSource.includes('[CHART_CONTEXT_SNAPSHOT]')
+    || !reviewWorkspaceSource.includes('[CHART_CONTEXT_MISMATCH]')
+    || !reviewWorkspaceSource.includes("status:'unknown_chart_identity'")
+    || !reviewWorkspaceSource.includes('displayedImageId !== renderContextSnapshot.verificationImageId')){
+    throw new Error('Review render must snapshot displayed-vs-verification chart context and refuse verified rendering on image mismatch.');
+  }
   const appAnalyseSetupSource = extractFunctionSource(appSource, 'analyseSetup');
   const getReviewAnalysisStateSource = extractFunctionSource(appSource, 'getReviewAnalysisState');
   const successfulSameContextSource = extractFunctionSource(appSource, 'hasSuccessfulCompletedAnalysisForCurrentChartContext');
   const quickCommittedContextSource = extractFunctionSource(appSource, 'quickAnalysisCommittedForCurrentChartContext');
+  const maybeLogIncompleteSource = extractFunctionSource(appSource, 'maybeLogQuickChartAnalysisContextIncomplete');
+  const aiSummaryGuardSource = extractFunctionSource(appSource, 'chartAiSummaryRenderGuard');
+  const analysisPanelSource = extractFunctionSource(appSource, 'renderAnalysisPanelFromRecord');
   if(appAnalyseSetupSource.indexOf('[QUICK_CHART_ANALYSIS_COMMITTED]') === -1
     || appAnalyseSetupSource.indexOf('[AI_SUMMARY_READY]') === -1
     || !appAnalyseSetupSource.includes("const analysisSource = String(options.source || 'unknown');")
@@ -2604,6 +2628,29 @@ function runAiContractAssertions(){
     || !appAnalyseSetupSource.includes("applyCommittedAiSummaryForChart(record, aiSummaryCommitPayload)")
     || !appAnalyseSetupSource.includes("flushPendingAiSummaryForChart(record, {source:'analyse_setup_failed'})")){
     throw new Error('AI summary commit must remain sequenced after quick chart analysis commit in the analysis path.');
+  }
+  if(!appAnalyseSetupSource.includes("requestId:analysisRequestId,")
+    || !appAnalyseSetupSource.includes("status:'running'")
+    || !appAnalyseSetupSource.includes("maybeLogQuickChartAnalysisContextIncomplete(record, record.review.quickChartAnalysis, 'analyse_setup_start');")){
+    throw new Error('Quick chart analysis must persist request id as soon as it enters running state.');
+  }
+  if(!appAnalyseSetupSource.includes('[CHART_ANALYSIS_DUPLICATE_RUNNING_BYPASSED_FOR_REPLACEMENT]')
+    || !appAnalyseSetupSource.includes('[CHART_REPLACEMENT_ANALYSIS_SUPERSEDES_RUNNING]')
+    || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_DUPLICATE_RUNNING_IGNORED]')
+    || !appAnalyseSetupSource.includes("const replacementUploadSupersedesRunning = analysisSource === 'chart_upload'")
+    || !appAnalyseSetupSource.includes("clearReviewAiAnalysis(ticker);")){
+    throw new Error('Replacement chart uploads must supersede same-ticker running analysis, while ordinary duplicate clicks stay ignored.');
+  }
+  if(!maybeLogIncompleteSource.includes("[QUICK_CHART_ANALYSIS_CONTEXT_INCOMPLETE]")
+    || !maybeLogIncompleteSource.includes("['running', 'committed', 'failed', 'timeout'].includes(status)")
+    || !maybeLogIncompleteSource.includes("const requestIdKey = String(requestId || 'missing_request_id');")){
+    throw new Error('Incomplete quick-analysis context must be detected and logged for terminal/running states with missing request ids.');
+  }
+  if(!aiSummaryGuardSource.includes("if(!allowedToRender && reason !== 'quick_running')")){
+    throw new Error('Quick-running AI summary gating must not be classified as stale context.');
+  }
+  if(!analysisPanelSource.includes('shouldLogAiSummaryQuickRunningWait(item, summaryGuard)')){
+    throw new Error('Quick-running AI summary wait logs must be deduplicated per chart context.');
   }
   if(!getReviewAnalysisStateSource.includes("analysisStatus = String(")
     || !getReviewAnalysisStateSource.includes("? 'failed'")
@@ -2948,6 +2995,7 @@ function runAiContractAssertions(){
     throw new Error('AI verdict fields must not participate in canonical/display verdict selection.');
   }
   const evidenceSandbox = {
+    uiState:{},
     normalizeTicker(value){
       return String(value || '').trim().toUpperCase();
     },
@@ -3027,6 +3075,7 @@ function runAiContractAssertions(){
     'hasVerifiableReviewChartSource',
     'chartImageForAnalysis',
     'clearReviewChartImageSources',
+    'maybeLogQuickChartAnalysisContextIncomplete',
     'confirmReviewChartMatchesCurrentTicker',
     'rejectReviewChartAndUploadAnother',
     'debugFlagEnabled',

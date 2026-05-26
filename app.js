@@ -3826,6 +3826,67 @@ function clearReviewChartImageSources(review){
   review.chartAvailable = false;
 }
 
+function reviewDisplayedChartContext(review = {}){
+  const safe = review && typeof review === 'object' ? review : {};
+  const previewRef = (safe.chartImagePreview && safe.chartImagePreview.dataUrl)
+    ? safe.chartImagePreview
+    : (safe.chartImageOriginal && safe.chartImageOriginal.dataUrl
+      ? safe.chartImageOriginal
+      : safe.chartRef);
+  const attachmentContext = safe.chartAttachmentContext && typeof safe.chartAttachmentContext === 'object'
+    ? safe.chartAttachmentContext
+    : null;
+  return {
+    imageId:String(previewRef && previewRef.imageId || chartImageIdForReview(safe) || ''),
+    filename:String(previewRef && previewRef.name || attachmentContext && attachmentContext.name || safe.chartRef && safe.chartRef.name || ''),
+    ticker:normalizeTicker(previewRef && previewRef.ticker || attachmentContext && attachmentContext.expectedTicker || ''),
+    requestId:String(previewRef && previewRef.requestId || attachmentContext && attachmentContext.requestId || '')
+  };
+}
+
+function maybeLogQuickChartAnalysisContextIncomplete(record, state = null, source = ''){
+  const item = record && typeof record === 'object' ? record : {};
+  const quick = state && typeof state === 'object'
+    ? state
+    : (item.review && item.review.quickChartAnalysis && typeof item.review.quickChartAnalysis === 'object'
+      ? item.review.quickChartAnalysis
+      : null);
+  if(!quick) return false;
+  const status = String(quick.status || '');
+  const imageId = String(quick.chartImageId || '');
+  const requestId = String(quick.requestId || '');
+  if(!['running', 'committed', 'failed', 'timeout'].includes(status) || !imageId || requestId) return false;
+  const requestIdKey = String(requestId || 'missing_request_id');
+  const key = [normalizeTicker(item.ticker || quick.ticker || ''), status, imageId, requestIdKey, String(source || '')].join('|');
+  uiState.quickChartContextIncompleteLogKey = String(uiState.quickChartContextIncompleteLogKey || '');
+  if(uiState.quickChartContextIncompleteLogKey === key) return false;
+  uiState.quickChartContextIncompleteLogKey = key;
+  if(typeof console !== 'undefined' && console.warn){
+    console.warn('[QUICK_CHART_ANALYSIS_CONTEXT_INCOMPLETE]', {
+      ticker:normalizeTicker(item.ticker || quick.ticker || ''),
+      status,
+      imageId,
+      requestId,
+      source:String(source || '')
+    });
+  }
+  return true;
+}
+
+function shouldLogAiSummaryQuickRunningWait(record, guard = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const key = [
+    normalizeTicker(item.ticker || ''),
+    String(guard.currentImageId || ''),
+    String(guard.currentRequestId || guard.summaryRequestId || ''),
+    'quick_running'
+  ].join('|');
+  uiState.aiSummaryQuickRunningWaitLogKey = String(uiState.aiSummaryQuickRunningWaitLogKey || '');
+  if(uiState.aiSummaryQuickRunningWaitLogKey === key) return false;
+  uiState.aiSummaryQuickRunningWaitLogKey = key;
+  return true;
+}
+
 function reviewQuickChartAnalysisKey(record = {}){
   const item = normalizeTickerRecord(record);
   const review = item.review && typeof item.review === 'object' ? item.review : {};
@@ -3945,8 +4006,6 @@ function queueReviewQuickChartAnalysis(record, options = {}){
     updatedAt:new Date().toISOString()
   };
   if(bypassQueue){
-    review.quickChartAnalysis.status = 'running';
-    review.quickChartAnalysis.startedAt = new Date().toISOString();
     commitTickerState();
     analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});
     return reviewQuickChartAnalysisState(liveRecord || liveItem, options);
@@ -20729,6 +20788,13 @@ function stagePendingAiSummaryForChart(record, payload = {}, reason = 'quick_run
   }, null);
   setPendingChartAiSummary(item, stagedPayload);
   if(typeof console !== 'undefined' && console.info){
+    console.info('[AI_SUMMARY_PENDING_STATE]', {
+      ticker:String(stagedPayload.ticker || item.ticker || ''),
+      requestId:String(stagedPayload.requestId || ''),
+      imageId:String(stagedPayload.imageId || stagedPayload.chartImageId || ''),
+      state:'staged_pending',
+      pendingReason:String(reason || 'quick_running')
+    });
     console.info('[AI_SUMMARY_COMMIT_BLOCKED_QUICK_RUNNING]', {
       ticker:String(stagedPayload.ticker || item.ticker || ''),
       requestId:String(stagedPayload.requestId || ''),
@@ -20744,6 +20810,15 @@ function flushPendingAiSummaryForChart(record, options = {}){
   const item = record && typeof record === 'object' ? record : null;
   if(!item || !item.review || typeof item.review !== 'object') return {committed:false, reason:'no_record'};
   const pending = getPendingChartAiSummary(item);
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[AI_SUMMARY_PENDING_STATE]', {
+      ticker:normalizeTicker(item && item.ticker || ''),
+      state:pending ? 'pending_present' : 'no_pending',
+      pendingRequestId:String(pending && pending.requestId || ''),
+      pendingImageId:String(pending && (pending.imageId || pending.chartImageId) || ''),
+      source:String(options.source || '')
+    });
+  }
   if(!pending) return {committed:false, reason:'no_pending'};
   const currentTicker = normalizeTicker(item.ticker || '');
   const currentImageId = chartImageIdForReview(item.review || {});
@@ -20759,9 +20834,30 @@ function flushPendingAiSummaryForChart(record, options = {}){
     || (currentImageId && pendingImageId && currentImageId !== pendingImageId)
     || (currentRequestId && pendingRequestId && currentRequestId !== pendingRequestId)
   );
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[AI_SUMMARY_FLUSH_ATTEMPT]', {
+      ticker:currentTicker,
+      currentImageId,
+      currentRequestId,
+      pendingTicker,
+      pendingImageId,
+      pendingRequestId,
+      source:String(options.source || '')
+    });
+  }
   if(staleContext){
     clearPendingChartAiSummary(item);
     if(typeof console !== 'undefined' && console.info){
+      console.info('[AI_SUMMARY_FLUSH_REJECTED]', {
+        ticker:currentTicker,
+        currentImageId,
+        currentRequestId,
+        pendingTicker,
+        pendingImageId,
+        pendingRequestId,
+        reason:'stale_context',
+        source:String(options.source || '')
+      });
       console.info('[CHART_AI_SUMMARY_REJECTED_STALE_CONTEXT]', {
         currentTicker,
         summaryTicker:pendingTicker,
@@ -20781,9 +20877,32 @@ function flushPendingAiSummaryForChart(record, options = {}){
     imageId:pendingImageId,
     requestId:pendingRequestId
   })){
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[AI_SUMMARY_FLUSH_REJECTED]', {
+        ticker:currentTicker,
+        currentImageId,
+        currentRequestId,
+        pendingTicker,
+        pendingImageId,
+        pendingRequestId,
+        reason:'quick_not_terminal',
+        source:String(options.source || '')
+      });
+    }
     return {committed:false, reason:'quick_not_terminal'};
   }
   const committed = applyCommittedAiSummaryForChart(item, pending);
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[AI_SUMMARY_FLUSH_COMMITTED]', {
+      ticker:currentTicker,
+      currentImageId,
+      currentRequestId,
+      pendingTicker,
+      pendingImageId,
+      pendingRequestId,
+      source:String(options.source || '')
+    });
+  }
   return {committed, reason:committed ? 'committed' : 'apply_failed'};
 }
 
@@ -23406,9 +23525,48 @@ async function analyseSetup(ticker, options = {}){
     ? uiState.analysisActiveRequest
     : null;
   const runtime = getReviewAiRuntime();
-  if(runtime.status === 'running' && normalizeTicker(runtime.ticker || '') === ticker && !isReviewAiAnalysisStale(ticker)){
-    console.warn('[review-analysis] duplicate_running_click_ignored', {ticker});
-    return;
+  const sameTickerRuntimeRunning = runtime.status === 'running' && normalizeTicker(runtime.ticker || '') === ticker && !isReviewAiAnalysisStale(ticker);
+  const sameTickerActiveRequest = activeRequest && normalizeTicker(activeRequest.ticker || '') === ticker;
+  const replacementUploadSupersedesRunning = analysisSource === 'chart_upload'
+    && sameTickerRuntimeRunning
+    && !!sameTickerActiveRequest;
+  if(sameTickerRuntimeRunning){
+    if(replacementUploadSupersedesRunning){
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[CHART_ANALYSIS_DUPLICATE_RUNNING_BYPASSED_FOR_REPLACEMENT]', {
+          ticker,
+          source:analysisSource,
+          activeRequestId:String(activeRequest && activeRequest.id || ''),
+          runtimeRequestId:String(runtime.requestId || '')
+        });
+      }
+      if(activeRequest && activeRequest.controller && typeof activeRequest.controller.abort === 'function' && !activeRequest.controller.signal.aborted){
+        activeRequest.cancelReason = 'chart_replaced';
+        try{
+          activeRequest.controller.abort('chart_replaced');
+        }catch(_error){}
+      }
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[CHART_REPLACEMENT_ANALYSIS_SUPERSEDES_RUNNING]', {
+          ticker,
+          source:analysisSource,
+          activeRequestId:String(activeRequest && activeRequest.id || ''),
+          runtimeRequestId:String(runtime.requestId || '')
+        });
+      }
+      clearReviewAiAnalysis(ticker);
+    }else{
+      if(typeof console !== 'undefined' && console.warn){
+        console.warn('[CHART_ANALYSIS_DUPLICATE_RUNNING_IGNORED]', {
+          ticker,
+          source:analysisSource,
+          activeRequestId:String(activeRequest && activeRequest.id || ''),
+          runtimeRequestId:String(runtime.requestId || '')
+        });
+      }
+      console.warn('[review-analysis] duplicate_running_click_ignored', {ticker});
+      return;
+    }
   }
   // Compatibility-only legacy flag reconciliation.
   // reviewAiRuntime is the sole control-flow authority for running/stale state.
@@ -23602,6 +23760,7 @@ async function analyseSetup(ticker, options = {}){
           imageId:requestChartImageId
         });
       }
+      maybeLogQuickChartAnalysisContextIncomplete(record, record.review.quickChartAnalysis, 'analyse_setup_start');
     }
   }
   renderCards();
@@ -24321,6 +24480,7 @@ function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null
   const quickStatus = String(quickAnalysisState && quickAnalysisState.status || '').trim();
   const quickImageId = String(quickAnalysisState && quickAnalysisState.chartImageId || '');
   const quickRequestId = String(quickAnalysisState && quickAnalysisState.requestId || '');
+  maybeLogQuickChartAnalysisContextIncomplete(item, quickAnalysisState, 'chart_ai_summary_guard');
   const summaryTicker = normalizeTicker(safeState.ticker || '');
   const summaryImageId = String(safeState.analysisChartImageId || safeState.chartImageId || '');
   const summaryRequestId = String(safeState.analysisRequestId || '');
@@ -24370,7 +24530,7 @@ function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null
       allowedToRender,
       reason
     });
-    if(!allowedToRender){
+    if(!allowedToRender && reason !== 'quick_running'){
       console.info('[CHART_AI_SUMMARY_REJECTED_STALE_CONTEXT]', {
         currentTicker,
         summaryTicker,
@@ -24436,7 +24596,7 @@ function renderAnalysisPanelFromRecord(record, options = {}){
     return `<div class="responsegrid"><div class="summary tiny ai-summary-message ai-summary-message--failed">${escapeHtml(analysisState.error)}</div>${analysisState.rawAnalysis ? `<details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(analysisState.rawAnalysis)}</div></details>` : ''}</div>`;
   }
   if(!summaryGuard.allowedToRender){
-    if(summaryGuard.reason === 'quick_running' && typeof console !== 'undefined' && console.info){
+    if(summaryGuard.reason === 'quick_running' && typeof console !== 'undefined' && console.info && shouldLogAiSummaryQuickRunningWait(item, summaryGuard)){
       console.info('[AI_SUMMARY_COMMIT_BLOCKED_QUICK_RUNNING]', {
         ticker:item.ticker,
         currentImageId:summaryGuard.currentImageId,
@@ -31272,6 +31432,7 @@ function renderReviewWorkspace(options = {}){
     ? 'Enter planned entry, stop, and first target to calculate size.'
     : ((primaryPlanMessage && primaryPlanMessage === tradeStatusText.line1) ? '' : primaryPlanMessage);
   const chartSourceTrace = buildChartImageSourceTrace(record.review || {});
+  const displayedChartContext = reviewDisplayedChartContext(record.review || {});
   const hasVerifiableChart = chartSourceTrace.originalAvailable === true;
   const storedChartVerificationWrapper = hasVerifiableChart && record.review
     ? (
@@ -31338,6 +31499,48 @@ function renderReviewWorkspace(options = {}){
     chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTrace;
     if(committedAssessorTrace && !['pending_chart_native_verification', 'uncertain_missing_context', 'partial_context_unverified_chart', 'partial_context_timeframe_uncertain', 'indicator_missing', 'indicator_incomplete', 'uncertain_match'].includes(String(committedAssessorTrace.status || ''))){
       chartConsistencyTraceForDisplay = committedAssessorTrace;
+    }
+    const verificationImageId = String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId) || '');
+    const verificationRequestId = String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || '');
+    const renderContextSnapshot = {
+      reviewTicker:normalizeTicker(record.ticker || ''),
+      imageId:String(chartImageIdForReview(record.review || {}) || ''),
+      requestId:String(record.review && record.review.chartAttachmentContext && record.review.chartAttachmentContext.requestId || quickChartAnalysisState && quickChartAnalysisState.requestId || ''),
+      filename:String(displayedChartContext.filename || ''),
+      chartImageSource:String(chartSourceTrace.sourceKind || ''),
+      verificationImageId,
+      verificationRequestId,
+      displayedImageId:String(displayedChartContext.imageId || ''),
+      displayedFilename:String(displayedChartContext.filename || '')
+    };
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_CONTEXT_SNAPSHOT]', renderContextSnapshot);
+    }
+    const chartContextMismatch = !!(
+      renderContextSnapshot.displayedImageId
+      && renderContextSnapshot.verificationImageId
+      && renderContextSnapshot.displayedImageId !== renderContextSnapshot.verificationImageId
+    );
+    if(chartContextMismatch){
+      if(typeof console !== 'undefined' && console.warn){
+        console.warn('[CHART_CONTEXT_MISMATCH]', renderContextSnapshot);
+      }
+      chartConsistencyTraceForDisplay = {
+        ...chartConsistencyTraceForDisplay,
+        status:'unknown_chart_identity',
+        title:'Chart verification incomplete',
+        summary:'Displayed chart and verification context are out of sync. Re-open or upload the chart again before trusting this review.',
+        renderedStatus:'unknown_chart_identity',
+        mergedStatus:'unknown_chart_identity',
+        aiAnalysisSuppressed:true,
+        suppressionReason:'Displayed chart and verification context are out of sync.',
+        debug:{
+          ...(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.debug && typeof chartConsistencyTraceForDisplay.debug === 'object' ? chartConsistencyTraceForDisplay.debug : {}),
+          chartContextMismatch:true,
+          displayedImageId:renderContextSnapshot.displayedImageId,
+          verificationImageId:renderContextSnapshot.verificationImageId
+        }
+      };
     }
     if(quickChartAnalysisStatus === 'failed' && chartConsistencyTraceForDisplay && ['pending_chart_native_verification', 'uncertain_missing_context'].includes(String(chartConsistencyTraceForDisplay.status || ''))){
       chartConsistencyTraceForDisplay = {
