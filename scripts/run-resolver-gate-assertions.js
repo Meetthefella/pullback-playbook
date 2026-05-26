@@ -2582,6 +2582,10 @@ function runAiContractAssertions(){
     || !sanitizeChartIdentitySource.includes('[CHART_IDENTITY_EXTRACTION_UNREADABLE]')){
     throw new Error('Chart assessor identity sanitization must log visible identity, trusted context, fallback use, and unreadable cases.');
   }
+  if(!extractFunctionSource(appSource, 'buildDeterministicChartVerification').includes('[CHART_IDENTITY_EVIDENCE_INSUFFICIENT]')
+    || !extractFunctionSource(appSource, 'buildDeterministicChartVerification').includes('identityEvidenceInsufficient')){
+    throw new Error('Deterministic chart verification must explicitly reject strict-sanitized blank identity as insufficient evidence.');
+  }
   if(!explicitProvenanceVersionSource.includes('chartIdentityProvenanceVersion')
     || !strictProvenanceVersionSource.includes('>= 1')){
     throw new Error('Chart identity provenance strictness must depend on an explicit schema version, not implicit defaults.');
@@ -3896,6 +3900,29 @@ function runAiContractAssertions(){
     || String(sanitizedIdentityStrictMissingSource.visible_timeframe || '') !== ''){
     throw new Error('New-schema analyses without visible provenance must be blanked by sanitization.');
   }
+  const strictBlankIdentityTrace = evidenceSandbox.buildChartConsistencyTrace(
+    {ticker:'NVDA', marketData:{price:215.33, ma20:210, ma50:205, ma200:190}, review:{chartRef:{dataUrl:'data:image/png;base64,wrong', imageId:'img_wrong_chart'}, normalizedAnalysis:{
+      chartIdentityProvenanceVersion:1,
+      visible_ticker:'',
+      visible_timeframe:'',
+      visible_latest_price:null,
+      chart_match_status:'match',
+      chart_match_warning:'',
+      visible_numeric_labels:[]
+    }}},
+    {canonicalVerdict:'watch', visualBucket:'monitor'},
+    {derivedStates:{structureState:'intact', bounceState:'attempt', pullbackZone:'near_20ma'}}
+  );
+  if(['consistent','likely_match','verified_match','partial_indicator_visibility','mostly_verified'].includes(String(strictBlankIdentityTrace.status || ''))){
+    throw new Error('Strict blank chart identity must not fall through to a positive merged verification state.');
+  }
+  if(!['unknown_chart_identity','insufficient_identity_evidence'].includes(String(strictBlankIdentityTrace.status || ''))){
+    throw new Error('Strict blank chart identity must resolve to an unknown or insufficient-evidence final state.');
+  }
+  const strictBlankDecision = evidenceSandbox.chartVerificationUiDecision(strictBlankIdentityTrace, 'NVDA');
+  if(evidenceSandbox.chartVerificationShouldShowManualActions(strictBlankDecision, strictBlankIdentityTrace, 'committed', true) !== true){
+    throw new Error('Strict blank chart identity must keep manual verification controls visible.');
+  }
   const legacySanitizedIdentity = evidenceSandbox.sanitizeChartAssessorVisibleIdentity({
     ticker:'NVDA',
     marketData:{price:215.33}
@@ -4390,7 +4417,7 @@ function runAiContractAssertions(){
     throw new Error('Header-only ticker/timeframe/price matches with hidden moving averages must not be promoted when visible identity evidence is missing.');
   }
   if(indicatorMissingTrace.indicatorStates
-    && !['chart_verification_untrusted','untrusted_context_mirror'].includes(indicatorMissingTrace.status)
+    && !['chart_verification_untrusted','untrusted_context_mirror','unknown_chart_identity','insufficient_identity_evidence'].includes(indicatorMissingTrace.status)
     && indicatorMissingTrace.indicatorStates.ma200_status !== 'missing'){
     throw new Error('200MA not visible at all must be reported as missing.');
   }

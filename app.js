@@ -29685,6 +29685,39 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
   const nonCriticalMissing = missing.filter(field => field === 'visible timeframe');
   const suppliedFastPass = options.fastPass && typeof options.fastPass === 'object' ? options.fastPass : null;
   const fastPass = suppliedFastPass || buildChartVerificationFastPass(safeRecord, safeAnalysis, chartImageSource);
+  const strictProvenanceRequired = isStrictChartIdentityProvenanceAnalysis(safeAnalysis);
+  const expectedValueLeakDetected = !!(
+    strictProvenanceRequired
+    && !visibleTicker
+    && !visibleTimeframe
+    && visiblePrice === null
+    && (
+      String(safeAnalysis.chart_match_status || '').trim().toLowerCase() === 'match'
+      || fastPass.contextMirroringSuspected === true
+    )
+  );
+  const identityEvidenceInsufficient = !!(
+    strictProvenanceRequired
+    && !visibleTicker
+    && !visibleTimeframe
+    && visiblePrice === null
+    && !chartVerificationHasExplicitRegionProvenance({
+      chart_region_confirmation:String(safeAnalysis.chart_region_confirmation || '').trim(),
+      chart_region_confirmation_source:String(safeAnalysis.chart_region_confirmation_source || '').trim(),
+      chart_match_status:String(safeAnalysis.chart_match_status || '').trim().toLowerCase()
+    })
+  );
+  if(identityEvidenceInsufficient && typeof console !== 'undefined' && console.warn){
+    console.warn('[CHART_IDENTITY_EVIDENCE_INSUFFICIENT]', {
+      ticker:normalizeTicker(safeRecord.ticker || ''),
+      extractedTicker:visibleTicker || '',
+      extractedPrice:visiblePrice === null ? 'n/a' : visiblePrice,
+      extractedTimeframe:visibleTimeframe || '',
+      strictProvenanceRequired,
+      expectedValueLeakDetected,
+      visibleNumericLabelsCount:visibleNumericLabels.length
+    });
+  }
   const fastPassClearMatch = !!(
     fastPass
     && fastPass.fastStatus === 'clear_match_candidate'
@@ -29734,7 +29767,18 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
   let title = 'Chart not verified';
   let summary = 'The uploaded image does not show enough ticker/timeframe information for deterministic verification.';
 
-  if(!hasExtractedEvidence){
+  if(identityEvidenceInsufficient){
+    status = expectedValueLeakDetected ? 'unknown_chart_identity' : 'insufficient_identity_evidence';
+    severity = 'warning';
+    title = 'Chart verification incomplete';
+    summary = expectedValueLeakDetected
+      ? 'Visible chart identity could not be verified. The extracted values looked echoed from trusted context rather than read from the chart.'
+      : 'We could not auto-read enough chart identity from the uploaded image to verify the ticker, timeframe, and price.';
+    evidence.push('Visible ticker, timeframe, and price could not be verified from the chart image.');
+    if(expectedValueLeakDetected){
+      evidence.push('Extracted values appeared to mirror trusted app values without visible chart evidence.');
+    }
+  }else if(!hasExtractedEvidence){
     summary = 'No deterministic chart facts were extracted from the image.';
   }else if(visibleTicker && expectedTicker && visibleTicker !== expectedTicker){
     status = 'ticker_mismatch';
@@ -30114,6 +30158,72 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
   const needsImprove = analysis ? chartConsistencyArray(analysis.what_needs_to_improve) : [];
   const constructiveEvidence = analysis ? chartConsistencyArray(analysis.constructive_evidence || analysis.key_reasons) : [];
   const coachSummary = analysis ? String(analysis.coach_summary || analysis.plain_english_chart_read || '').trim() : '';
+  const strictBlankIdentityAtTraceBoundary = !!(
+    analysis
+    && isStrictChartIdentityProvenanceAnalysis(analysis)
+    && !String(analysis.visible_ticker || '').trim()
+    && !String(analysis.visible_timeframe || '').trim()
+    && chartVerificationNumberOrNull(analysis.visible_latest_price) === null
+    && !chartVerificationHasExplicitRegionProvenance({
+      chart_region_confirmation:String(analysis.chart_region_confirmation || '').trim(),
+      chart_region_confirmation_source:String(analysis.chart_region_confirmation_source || '').trim(),
+      chart_match_status:String(analysis.chart_match_status || '').trim().toLowerCase()
+    })
+  );
+  if(strictBlankIdentityAtTraceBoundary){
+    return {
+      visible:true,
+      status:'unknown_chart_identity',
+      severity:'warning',
+      title:'Chart verification incomplete',
+      summary:'Visible chart identity could not be verified from the uploaded image. Confirm manually if this is the correct chart.',
+      evidence:['Visible ticker, timeframe, and price could not be verified from the chart image.'],
+      missing:['visible ticker','visible timeframe','latest price'],
+      initialMissingIndicators:[],
+      finalMissingIndicators:[],
+      summaryDerivedFromFinalState:true,
+      mismatchSeverity:'none',
+      aiAnalysisSuppressed:true,
+      suppressionReason:'insufficient_identity_evidence',
+      missingIndicators:[],
+      partialIndicators:[],
+      likelyMatchedIndicators:[],
+      inferredIndicators:[],
+      strategyRelevantMaRequirement:getStrategyRelevantMaRequirement({
+        ...safeRecord,
+        derivedStates:derived
+      }, {
+        pullbackZone:derived.pullbackZone || '',
+        setupType:safeRecord.setupType || safeRecord.scanSetupType || ''
+      }),
+      pullbackZone:String((derived && derived.pullbackZone) || '').trim().toLowerCase(),
+      setupType:String(safeRecord.setupType || safeRecord.scanSetupType || '').trim().toLowerCase(),
+      indicatorStates:{},
+      extractedFacts:{
+        visible_ticker:'',
+        visible_timeframe:'',
+        visible_latest_price:null
+      },
+      trustedFacts:{
+        ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
+        expected_timeframe:'1D',
+        latest_price:chartVerificationNumberOrNull((safeRecord.marketData && safeRecord.marketData.price) ?? safeRecord.price)
+      },
+      sources:['insufficient_identity_evidence'],
+      chartImageSource,
+      debug:{
+        ticker:String(safeRecord.ticker || '').trim(),
+        source:'strict_blank_identity_guard',
+        hasChart,
+        hasAnalysis:!!analysis,
+        identityEvidenceInsufficient:true,
+        aiAnalysisSuppressed:true,
+        suppressionReason:'insufficient_identity_evidence',
+        canonicalVerdict:simplifiedState && simplifiedState.canonicalVerdict || '',
+        visualBucket:simplifiedState && simplifiedState.visualBucket || ''
+      }
+    };
+  }
   const combinedText = [
     chartWarning,
     coachSummary,
@@ -30323,6 +30433,56 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       derivedStates:derived
     });
   if(deterministic.available){
+    const strictSanitizedBlankIdentity = !!(
+      analysis
+      && isStrictChartIdentityProvenanceAnalysis(analysis)
+      && !String(deterministic.extractedFacts && deterministic.extractedFacts.visible_ticker || '').trim()
+      && !String(deterministic.extractedFacts && deterministic.extractedFacts.visible_timeframe || '').trim()
+      && chartVerificationNumberOrNull(deterministic.extractedFacts && deterministic.extractedFacts.visible_latest_price) === null
+      && !chartVerificationHasExplicitRegionProvenance({
+        chartRegionProvenance:deterministic.chartRegionProvenance === true,
+        debug:{fastPass:deterministic.debug && deterministic.debug.fastPass ? deterministic.debug.fastPass : null}
+      })
+    );
+    if(strictSanitizedBlankIdentity){
+      return {
+        visible:true,
+        status:'unknown_chart_identity',
+        severity:'warning',
+        title:'Chart verification incomplete',
+        summary:'Visible chart identity could not be verified from the uploaded image. Confirm manually if this is the correct chart.',
+        evidence:[
+          'Visible ticker, timeframe, and price could not be verified from the chart image.'
+        ],
+        missing:deterministic.missing,
+        initialMissingIndicators:deterministic.initialMissingIndicators,
+        finalMissingIndicators:deterministic.finalMissingIndicators,
+        summaryDerivedFromFinalState:true,
+        mismatchSeverity:'none',
+        aiAnalysisSuppressed:true,
+        suppressionReason:'insufficient_identity_evidence',
+        missingIndicators:deterministic.missingIndicators,
+        partialIndicators:deterministic.partialIndicators,
+        likelyMatchedIndicators:deterministic.likelyMatchedIndicators,
+        inferredIndicators:deterministic.inferredIndicators,
+        strategyRelevantMaRequirement:deterministic.strategyRelevantMaRequirement || 'either',
+        pullbackZone:String((deterministic.debug && deterministic.debug.pullbackZone) || (derived && derived.pullbackZone) || '').trim().toLowerCase(),
+        setupType:String((deterministic.debug && deterministic.debug.setupType) || safeRecord.setupType || safeRecord.scanSetupType || '').trim().toLowerCase(),
+        indicatorStates:deterministic.indicatorStates,
+        extractedFacts:deterministic.extractedFacts,
+        trustedFacts:deterministic.trustedFacts,
+        sources:[...new Set((deterministic.sources || []).concat(['insufficient_identity_evidence']))],
+        chartImageSource,
+        debug:{
+          ...(deterministic.debug || {}),
+          source:'deterministic_chart_verification',
+          identityEvidenceInsufficient:true,
+          deterministicStatus:'unknown_chart_identity',
+          aiAnalysisSuppressed:true,
+          suppressionReason:'insufficient_identity_evidence'
+        }
+      };
+    }
     const chartContextIncomplete = deterministic.status === 'uncertain_missing_context';
     const chartSpecificFallbackEvidence = [];
     if(chartStatus === 'mismatch') chartSpecificFallbackEvidence.push(chartWarning || 'AI could not match the uploaded chart confidently to this ticker.');
