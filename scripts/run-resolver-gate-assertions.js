@@ -2573,6 +2573,8 @@ function runAiContractAssertions(){
     throw new Error('Pending deterministic traces must inherit request ids only from matching current chart context.');
   }
   if(!sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_VISIBLE_IDENTITY]')
+    || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_SANITIZER_MODE]')
+    || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_SANITIZED_OUTPUT]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_TRUSTED_CONTEXT]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_FALLBACK_USED]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_EXPECTED_VALUE_LEAK]')
@@ -2637,6 +2639,8 @@ function runAiContractAssertions(){
     throw new Error('Review render must snapshot displayed-vs-verification chart context and refuse verified rendering on image mismatch.');
   }
   const appAnalyseSetupSource = extractFunctionSource(appSource, 'analyseSetup');
+  const chartAssessorInputSource = extractFunctionSource(appSource, 'buildChartAssessorInput');
+  const chartAssessorToNormalizedSource = extractFunctionSource(appSource, 'chartAssessorInputToNormalizedAnalysis');
   const getReviewAnalysisStateSource = extractFunctionSource(appSource, 'getReviewAnalysisState');
   const successfulSameContextSource = extractFunctionSource(appSource, 'hasSuccessfulCompletedAnalysisForCurrentChartContext');
   const quickCommittedContextSource = extractFunctionSource(appSource, 'quickAnalysisCommittedForCurrentChartContext');
@@ -2664,6 +2668,28 @@ function runAiContractAssertions(){
     || !appAnalyseSetupSource.includes("maybeLogQuickChartAnalysisContextIncomplete(record, record.review.quickChartAnalysis, 'analyse_setup_start');")
     || !appAnalyseSetupSource.includes('sanitizeChartAssessorVisibleIdentity(')){
     throw new Error('Quick chart analysis must persist request id as soon as it enters running state.');
+  }
+  if(!appAnalyseSetupSource.includes('normalizedLiveAnalysis.chartIdentityProvenanceVersion = 1')){
+    throw new Error('Live analyseSetup results must be explicitly marked strict before chart identity sanitization.');
+  }
+  if(!chartAssessorInputSource.includes('chartIdentityProvenanceVersion')
+    || !chartAssessorInputSource.includes('visibleTickerSource')
+    || !chartAssessorInputSource.includes('visibleTimeframeSource')
+    || !chartAssessorInputSource.includes('visiblePriceSource')
+    || !chartAssessorInputSource.includes('chartRegionConfirmation')
+    || !chartAssessorInputSource.includes('chartRegionConfirmationSource')){
+    throw new Error('Chart assessor input must preserve sanitized provenance context for downstream deterministic verification.');
+  }
+  if(!chartAssessorToNormalizedSource.includes('chartIdentityProvenanceVersion')
+    || !chartAssessorToNormalizedSource.includes('visible_ticker_source')
+    || !chartAssessorToNormalizedSource.includes('visible_timeframe_source')
+    || !chartAssessorToNormalizedSource.includes('visible_price_source')
+    || !chartAssessorToNormalizedSource.includes('chart_region_confirmation')
+    || !chartAssessorToNormalizedSource.includes('chart_region_confirmation_source')){
+    throw new Error('Chart assessor normalized replay must preserve provenance fields rather than dropping them.');
+  }
+  if(!chartAssessorToNormalizedSource.includes('[CHART_ASSESSOR_REHYDRATED_FROM_TRUSTED_CONTEXT]')){
+    throw new Error('Any downstream trusted-context rehydration must be explicitly logged.');
   }
   if(!appAnalyseSetupSource.includes('normalizeAnalysisResult(data.analysis, previousTickerState)')
     || !appAnalyseSetupSource.includes('sanitizeChartAssessorVisibleIdentity(')
@@ -3620,6 +3646,8 @@ function runAiContractAssertions(){
       visible_ticker:'NVDA',
       visible_timeframe:'1D',
       visible_latest_price:480.5,
+      chart_region_confirmation:'top-left header and right price axis align with the same chart',
+      chart_region_confirmation_source:'chart_region_ocr',
       visible_ma20:472.1,
       visible_ma50:463.4,
       visible_ma200:410.2,
@@ -3638,9 +3666,17 @@ function runAiContractAssertions(){
   if(nvdaAssessorInput.extractedTicker !== 'NVDA' || nvdaAssessorInput.reviewTicker !== 'NVDA' || nvdaAssessorInput.verificationRequestId !== 'analysis-1' || nvdaAssessorInput.chartImageId !== 'chart-1'){
     throw new Error('Chart assessor input must carry the current ticker/image/request identity.');
   }
+  if(String(nvdaAssessorInput.chartRegionConfirmation || '') !== 'top-left header and right price axis align with the same chart'
+    || String(nvdaAssessorInput.chartRegionConfirmationSource || '') !== 'chart_region_ocr'){
+    throw new Error('Chart assessor input must preserve explicit chart region confirmation provenance.');
+  }
   const nvdaNormalizedFallback = evidenceSandbox.chartAssessorInputToNormalizedAnalysis(nvdaAssessorInput, {ticker:'NVDA', review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'}, chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}}}, {forceMatch:true});
   if(nvdaNormalizedFallback.visible_ticker !== 'NVDA' || nvdaNormalizedFallback.visible_timeframe !== '1D' || nvdaNormalizedFallback.chart_match_status !== 'match'){
     throw new Error('Normalized chart assessor input must round-trip already normalized analysis into a committed chart context.');
+  }
+  if(String(nvdaNormalizedFallback.chart_region_confirmation || '') !== 'top-left header and right price axis align with the same chart'
+    || String(nvdaNormalizedFallback.chart_region_confirmation_source || '') !== 'chart_region_ocr'){
+    throw new Error('Chart assessor normalized replay must restore explicit chart region confirmation provenance.');
   }
   const nvdaAssessorResult = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'NVDA', marketData:{price:480.5, ma20:472.1, ma50:463.4, ma200:410.2}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageOriginal:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1', dataUrlField:'chartRef.dataUrl'}, chartImagePreview:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'chart-1'}, chartVerificationContext:nvdaAssessorInput, normalizedAnalysis:nvdaAssessorInput}},

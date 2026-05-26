@@ -24087,9 +24087,13 @@ async function analyseSetup(ticker, options = {}){
       console.debug('[review-analysis] request_completed', {ticker, requestId:analysisRequestId});
       logAnalysisDebug('RAW_ANALYSIS_RESULT', data.analysis || null);
       logAnalysisDebug('PREVIOUS_TICKER_STATE', previousTickerState);
+      const normalizedLiveAnalysis = normalizeAnalysisResult(data.analysis, previousTickerState);
+      if(normalizedLiveAnalysis && !hasExplicitChartIdentityProvenanceVersion(normalizedLiveAnalysis)){
+        normalizedLiveAnalysis.chartIdentityProvenanceVersion = 1;
+      }
       const analysis = sanitizeChartAssessorVisibleIdentity(
         record,
-        normalizeAnalysisResult(data.analysis, previousTickerState),
+        normalizedLiveAnalysis,
         requestChartImageSource,
         analysisRequestId
       );
@@ -28935,6 +28939,15 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   const leakedFields = [];
   const blankedFields = [];
   if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_ASSESSOR_SANITIZER_MODE]', {
+      ticker:normalizeTicker(item.ticker || ''),
+      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
+      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      mode:strictProvenanceRequired ? 'strict' : 'legacy',
+      chartIdentityProvenanceVersion:hasExplicitChartIdentityProvenanceVersion(safeAnalysis)
+        ? Number(safeAnalysis.chartIdentityProvenanceVersion)
+        : ''
+    });
     console.info('[CHART_ASSESSOR_VISIBLE_IDENTITY]', {
       ticker:normalizeTicker(item.ticker || ''),
       requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
@@ -29006,6 +29019,17 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
       });
     }
   }
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_ASSESSOR_SANITIZED_OUTPUT]', {
+      ticker:normalizeTicker(item.ticker || ''),
+      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
+      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      extractedTicker:String(safeAnalysis.visible_ticker || '').trim(),
+      extractedTimeframe:String(safeAnalysis.visible_timeframe || '').trim(),
+      extractedPrice:chartVerificationNumberOrNull(safeAnalysis.visible_latest_price) === null ? 'n/a' : chartVerificationNumberOrNull(safeAnalysis.visible_latest_price),
+      mode:strictProvenanceRequired ? 'strict' : 'legacy'
+    });
+  }
   return safeAnalysis;
 }
 
@@ -29021,9 +29045,17 @@ function buildChartAssessorInput(record = {}, analysis = null, chartImageSource 
     verificationRequestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || '').trim(),
     chartImageId:String(safeAnalysis.__chartImageId || source.imageId || chartImageIdForReview(safeRecord.review || {}) || ''),
     chartImageSource:source,
+    chartIdentityProvenanceVersion:hasExplicitChartIdentityProvenanceVersion(safeAnalysis)
+      ? Number(safeAnalysis.chartIdentityProvenanceVersion)
+      : null,
     extractedTicker:String(safeAnalysis.visible_ticker || '').trim(),
     extractedTimeframe:String(safeAnalysis.visible_timeframe || '').trim(),
     extractedPrice:chartVerificationNumberOrNull(safeAnalysis.visible_latest_price),
+    visibleTickerSource:String(safeAnalysis.visible_ticker_source || safeAnalysis.ticker_extraction_source || '').trim(),
+    visibleTimeframeSource:String(safeAnalysis.visible_timeframe_source || safeAnalysis.timeframe_extraction_source || '').trim(),
+    visiblePriceSource:String(safeAnalysis.visible_price_source || safeAnalysis.price_extraction_source || '').trim(),
+    chartRegionConfirmation:String(safeAnalysis.chart_region_confirmation || '').trim(),
+    chartRegionConfirmationSource:String(safeAnalysis.chart_region_confirmation_source || '').trim(),
     extractedMa20:chartVerificationNumberOrNull(safeAnalysis.visible_ma20),
     extractedMa50:chartVerificationNumberOrNull(safeAnalysis.visible_ma50),
     extractedMa200:chartVerificationNumberOrNull(safeAnalysis.visible_ma200),
@@ -29104,9 +29136,20 @@ function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}, options
     || Object.prototype.hasOwnProperty.call(safe, 'visible_ma200');
   if(alreadyNormalized){
     return {
+      chartIdentityProvenanceVersion:hasExplicitChartIdentityProvenanceVersion(safe)
+        ? Number(safe.chartIdentityProvenanceVersion)
+        : null,
       visible_ticker:String(safe.visible_ticker || '').trim(),
+      visible_ticker_source:String(safe.visible_ticker_source || safe.ticker_extraction_source || '').trim(),
+      ticker_extraction_source:String(safe.ticker_extraction_source || safe.visible_ticker_source || '').trim(),
       visible_timeframe:String(safe.visible_timeframe || '').trim(),
+      visible_timeframe_source:String(safe.visible_timeframe_source || safe.timeframe_extraction_source || '').trim(),
+      timeframe_extraction_source:String(safe.timeframe_extraction_source || safe.visible_timeframe_source || '').trim(),
       visible_latest_price:chartVerificationNumberOrNull(safe.visible_latest_price),
+      visible_price_source:String(safe.visible_price_source || safe.price_extraction_source || '').trim(),
+      price_extraction_source:String(safe.price_extraction_source || safe.visible_price_source || '').trim(),
+      chart_region_confirmation:String(safe.chart_region_confirmation || '').trim(),
+      chart_region_confirmation_source:String(safe.chart_region_confirmation_source || '').trim(),
       visible_ma20:chartVerificationNumberOrNull(safe.visible_ma20),
       visible_ma50:chartVerificationNumberOrNull(safe.visible_ma50),
       visible_ma200:chartVerificationNumberOrNull(safe.visible_ma200),
@@ -29119,10 +29162,21 @@ function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}, options
     };
   }
   const chartMatchStatus = String(safe.chartMatchStatus || (safe.aiSupportedMatch === true ? 'match' : '')).trim().toLowerCase();
-  return {
+  const normalized = {
+    chartIdentityProvenanceVersion:hasExplicitChartIdentityProvenanceVersion(safe)
+      ? Number(safe.chartIdentityProvenanceVersion)
+      : null,
     visible_ticker:String(safe.extractedTicker || '').trim(),
+    visible_ticker_source:String(safe.visibleTickerSource || '').trim(),
+    ticker_extraction_source:String(safe.visibleTickerSource || '').trim(),
     visible_timeframe:String(safe.extractedTimeframe || '').trim(),
+    visible_timeframe_source:String(safe.visibleTimeframeSource || '').trim(),
+    timeframe_extraction_source:String(safe.visibleTimeframeSource || '').trim(),
     visible_latest_price:chartVerificationNumberOrNull(safe.extractedPrice),
+    visible_price_source:String(safe.visiblePriceSource || '').trim(),
+    price_extraction_source:String(safe.visiblePriceSource || '').trim(),
+    chart_region_confirmation:String(safe.chartRegionConfirmation || '').trim(),
+    chart_region_confirmation_source:String(safe.chartRegionConfirmationSource || '').trim(),
     visible_ma20:chartVerificationNumberOrNull(safe.extractedMa20),
     visible_ma50:chartVerificationNumberOrNull(safe.extractedMa50),
     visible_ma200:chartVerificationNumberOrNull(safe.extractedMa200),
@@ -29133,6 +29187,26 @@ function chartAssessorInputToNormalizedAnalysis(input = {}, review = {}, options
     __analysisRequestId:String(safe.verificationRequestId || safe.requestId || ''),
     __chartImageSource:safe.chartImageSource || buildChartImageSourceTrace(review)
   };
+  if(typeof console !== 'undefined' && console.warn){
+    const trustedTicker = normalizeTicker(safe.ticker || safe.reviewTicker || '');
+    const trustedPrice = chartVerificationNumberOrNull(safe.trustedPrice);
+    const trustedTimeframe = '1D';
+    const rehydratedFields = [];
+    if(!String(safe.extractedTicker || '').trim() && String(normalized.visible_ticker || '').trim()) rehydratedFields.push('ticker');
+    if(chartVerificationNumberOrNull(safe.extractedPrice) === null && chartVerificationNumberOrNull(normalized.visible_latest_price) !== null) rehydratedFields.push('price');
+    if(!String(safe.extractedTimeframe || '').trim() && String(normalized.visible_timeframe || '').trim()) rehydratedFields.push('timeframe');
+    if(rehydratedFields.length){
+      console.warn('[CHART_ASSESSOR_REHYDRATED_FROM_TRUSTED_CONTEXT]', {
+        ticker:trustedTicker,
+        imageId:String(safe.chartImageId || chartImageIdForReview(review) || ''),
+        requestId:String(safe.verificationRequestId || safe.requestId || ''),
+        rehydratedFields,
+        trustedPrice:trustedPrice === null ? 'n/a' : trustedPrice,
+        trustedTimeframe
+      });
+    }
+  }
+  return normalized;
 }
 
 function selectReviewChartTraceForRender(record = {}, storedChartVerificationState = null, derivedTrace = null, quickChartAnalysisStatus = '', chartAssessorContext = null, simplifiedState = {}){
