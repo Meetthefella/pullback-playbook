@@ -2575,6 +2575,7 @@ function runAiContractAssertions(){
   if(!sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_VISIBLE_IDENTITY]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_SANITIZER_MODE]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_SANITIZED_OUTPUT]')
+    || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_VERSION_DOWNGRADE]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_TRUSTED_CONTEXT]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_FALLBACK_USED]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_EXPECTED_VALUE_LEAK]')
@@ -2669,8 +2670,17 @@ function runAiContractAssertions(){
     || !appAnalyseSetupSource.includes('sanitizeChartAssessorVisibleIdentity(')){
     throw new Error('Quick chart analysis must persist request id as soon as it enters running state.');
   }
-  if(!appAnalyseSetupSource.includes('normalizedLiveAnalysis.chartIdentityProvenanceVersion = 1')){
-    throw new Error('Live analyseSetup results must be explicitly marked strict before chart identity sanitization.');
+  if(!appAnalyseSetupSource.includes('!isStrictChartIdentityProvenanceAnalysis(normalizedLiveAnalysis)')
+    || !appAnalyseSetupSource.includes('normalizedLiveAnalysis.chartIdentityProvenanceVersion = 1')){
+    throw new Error('Live analyseSetup results must upgrade any non-strict analysis into strict provenance mode before sanitization.');
+  }
+  if(!appAnalyseSetupSource.includes("{caller:'analyse_setup_live'}")
+    || !extractFunctionSource(appSource, 'buildChartConsistencyTrace').includes("{caller:'build_chart_consistency_trace'}")){
+    throw new Error('Chart assessor sanitization must log its live and merged caller sources.');
+  }
+  if(!sanitizeChartIdentitySource.includes('liveCurrentContext')
+    || !sanitizeChartIdentitySource.includes('safeAnalysis.chartIdentityProvenanceVersion = 1')){
+    throw new Error('Current live chart context must force strict provenance if a rebuilt analysis downgrades version unexpectedly.');
   }
   if(!chartAssessorInputSource.includes('chartIdentityProvenanceVersion')
     || !chartAssessorInputSource.includes('visibleTickerSource')

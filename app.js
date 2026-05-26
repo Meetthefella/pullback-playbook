@@ -24088,14 +24088,15 @@ async function analyseSetup(ticker, options = {}){
       logAnalysisDebug('RAW_ANALYSIS_RESULT', data.analysis || null);
       logAnalysisDebug('PREVIOUS_TICKER_STATE', previousTickerState);
       const normalizedLiveAnalysis = normalizeAnalysisResult(data.analysis, previousTickerState);
-      if(normalizedLiveAnalysis && !hasExplicitChartIdentityProvenanceVersion(normalizedLiveAnalysis)){
+      if(normalizedLiveAnalysis && !isStrictChartIdentityProvenanceAnalysis(normalizedLiveAnalysis)){
         normalizedLiveAnalysis.chartIdentityProvenanceVersion = 1;
       }
       const analysis = sanitizeChartAssessorVisibleIdentity(
         record,
         normalizedLiveAnalysis,
         requestChartImageSource,
-        analysisRequestId
+        analysisRequestId,
+        {caller:'analyse_setup_live'}
       );
       const chartAssessorInput = buildChartAssessorInput(record, analysis, requestChartImageSource, analysisRequestId);
       record.review.chartVerificationContext = cloneData(chartAssessorInput, null);
@@ -28916,12 +28917,15 @@ function buildPreAiChartVerificationTrace(record = {}, chartImageSource = null){
   };
 }
 
-function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, chartImageSource = null, verificationRequestId = ''){
+function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, chartImageSource = null, verificationRequestId = '', options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? {...analysis} : {};
+  const caller = String(options && options.caller || '').trim() || 'unknown';
   const safeSource = chartImageSource && typeof chartImageSource === 'object'
     ? chartImageSource
     : buildChartImageSourceTrace(item.review || {});
+  const currentChartContext = currentReviewChartContext(item, item.review || {});
+  const activeAnalysisRequestId = String(uiState.analysisActiveRequest && uiState.analysisActiveRequest.id || '');
   const expectedTicker = normaliseVisibleTicker(item.ticker || '');
   const trustedPrice = chartVerificationNumberOrNull(item.marketData && typeof item.marketData === 'object' ? item.marketData.price : item.price);
   const visibleTicker = normaliseVisibleTicker(safeAnalysis.visible_ticker || '');
@@ -28931,6 +28935,27 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   const visiblePriceSource = String(safeAnalysis.visible_price_source || safeAnalysis.price_extraction_source || '').trim().toLowerCase();
   const visibleTimeframeSource = String(safeAnalysis.visible_timeframe_source || safeAnalysis.timeframe_extraction_source || '').trim().toLowerCase();
   const visibleNumericLabelsCount = chartVerificationNumericLabels(safeAnalysis).length;
+  const initialVersion = hasExplicitChartIdentityProvenanceVersion(safeAnalysis)
+    ? Number(safeAnalysis.chartIdentityProvenanceVersion)
+    : null;
+  const sanitizedRequestId = String(verificationRequestId || safeAnalysis.__analysisRequestId || safeAnalysis.verificationRequestId || safeAnalysis.requestId || '');
+  const sanitizedImageId = String(safeSource.imageId || safeAnalysis.__chartImageId || '');
+  const currentRequestMatches = !!(sanitizedRequestId && (String(currentChartContext.requestId || '') === sanitizedRequestId || activeAnalysisRequestId === sanitizedRequestId));
+  const currentImageMatches = !!(sanitizedImageId && (!String(currentChartContext.imageId || '') || String(currentChartContext.imageId || '') === sanitizedImageId));
+  const liveCurrentContext = currentRequestMatches && currentImageMatches;
+  if(liveCurrentContext && !isStrictChartIdentityProvenanceAnalysis(safeAnalysis)){
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[CHART_ASSESSOR_VERSION_DOWNGRADE]', {
+        ticker:normalizeTicker(item.ticker || ''),
+        requestId:sanitizedRequestId,
+        imageId:sanitizedImageId,
+        caller,
+        previousVersion:initialVersion == null ? '' : initialVersion,
+        forcedVersion:1
+      });
+    }
+    safeAnalysis.chartIdentityProvenanceVersion = 1;
+  }
   const strictProvenanceRequired = isStrictChartIdentityProvenanceAnalysis(safeAnalysis);
   const sourceIsImageDerived = value => /\b(image|ocr|vision|visible|chart|extracted|screen|screenshot)\b/.test(String(value || ''));
   const hasTickerEvidence = !!(visibleTicker && sourceIsImageDerived(visibleTickerSource));
@@ -28941,8 +28966,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   if(typeof console !== 'undefined' && console.info){
     console.info('[CHART_ASSESSOR_SANITIZER_MODE]', {
       ticker:normalizeTicker(item.ticker || ''),
-      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
-      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      requestId:sanitizedRequestId,
+      imageId:sanitizedImageId,
+      caller,
       mode:strictProvenanceRequired ? 'strict' : 'legacy',
       chartIdentityProvenanceVersion:hasExplicitChartIdentityProvenanceVersion(safeAnalysis)
         ? Number(safeAnalysis.chartIdentityProvenanceVersion)
@@ -28950,8 +28976,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
     });
     console.info('[CHART_ASSESSOR_VISIBLE_IDENTITY]', {
       ticker:normalizeTicker(item.ticker || ''),
-      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
-      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      requestId:sanitizedRequestId,
+      imageId:sanitizedImageId,
+      caller,
       extractedTicker:visibleTicker || '',
       extractedTimeframe:visibleTimeframe || '',
       extractedPrice:visiblePrice === null ? 'n/a' : visiblePrice,
@@ -28963,8 +28990,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
     });
     console.info('[CHART_ASSESSOR_TRUSTED_CONTEXT]', {
       ticker:normalizeTicker(item.ticker || ''),
-      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
-      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      requestId:sanitizedRequestId,
+      imageId:sanitizedImageId,
+      caller,
       expectedTicker,
       expectedTimeframe:'1D',
       trustedPrice:trustedPrice === null ? 'n/a' : trustedPrice
@@ -28993,8 +29021,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   if(blankedFields.length && typeof console !== 'undefined' && console.warn){
     console.warn('[CHART_ASSESSOR_FALLBACK_USED]', {
       ticker:normalizeTicker(item.ticker || ''),
-      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
-      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      requestId:sanitizedRequestId,
+      imageId:sanitizedImageId,
+      caller,
       blankedFields,
       leakedFields
     });
@@ -29002,8 +29031,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   if(leakedFields.length && typeof console !== 'undefined' && console.warn){
     console.warn('[CHART_ASSESSOR_EXPECTED_VALUE_LEAK]', {
       ticker:normalizeTicker(item.ticker || ''),
-      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
-      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      requestId:sanitizedRequestId,
+      imageId:sanitizedImageId,
+      caller,
       leakedFields,
       expectedTicker,
       trustedPrice:trustedPrice === null ? 'n/a' : trustedPrice
@@ -29013,8 +29043,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
     if(typeof console !== 'undefined' && console.warn){
       console.warn('[CHART_IDENTITY_EXTRACTION_UNREADABLE]', {
         ticker:normalizeTicker(item.ticker || ''),
-        requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
-        imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+        requestId:sanitizedRequestId,
+        imageId:sanitizedImageId,
+        caller,
         reason:'no_readable_visible_identity'
       });
     }
@@ -29022,8 +29053,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   if(typeof console !== 'undefined' && console.info){
     console.info('[CHART_ASSESSOR_SANITIZED_OUTPUT]', {
       ticker:normalizeTicker(item.ticker || ''),
-      requestId:String(verificationRequestId || safeAnalysis.__analysisRequestId || ''),
-      imageId:String(safeSource.imageId || safeAnalysis.__chartImageId || ''),
+      requestId:sanitizedRequestId,
+      imageId:sanitizedImageId,
+      caller,
       extractedTicker:String(safeAnalysis.visible_ticker || '').trim(),
       extractedTimeframe:String(safeAnalysis.visible_timeframe || '').trim(),
       extractedPrice:chartVerificationNumberOrNull(safeAnalysis.visible_latest_price) === null ? 'n/a' : chartVerificationNumberOrNull(safeAnalysis.visible_latest_price),
@@ -30069,7 +30101,8 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       safeRecord,
       analysis,
       chartImageSource,
-      String(analysis.__analysisRequestId || analysis.verificationRequestId || analysis.requestId || '')
+      String(analysis.__analysisRequestId || analysis.verificationRequestId || analysis.requestId || ''),
+      {caller:'build_chart_consistency_trace'}
     );
   }
   const chartRef = review.chartRef && typeof review.chartRef === 'object' ? review.chartRef : null;
