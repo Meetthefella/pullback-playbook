@@ -4819,7 +4819,7 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
       visible_latest_price:observedPrice
     },
     event:String(reason || status || ''),
-    source:String((forcedFinalizeSource ? 'chart_analysis_finalize' : '') || safeContext.source || safeTrace.source || 'verification_gate_blocked'),
+    source:String(safeContext.source || (forcedFinalizeSource ? 'chart_analysis_finalize' : '') || safeTrace.source || 'verification_gate_blocked'),
     updatedAt:new Date().toISOString(),
     createdAt:String(safeTrace.createdAt || new Date().toISOString())
   }, null);
@@ -33433,6 +33433,7 @@ function renderReviewWorkspace(options = {}){
     const finalGuardFactsMissing = !finalGuardVisibleTicker
       && !finalGuardVisibleTimeframe
       && finalGuardVisiblePrice === null;
+    const finalGuardSource = String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.source || chartConsistencyTraceForDisplay.sourceType) || '').trim();
     const activeRuntime = getReviewAiRuntime();
     const activeRuntimeMatchesCurrentChart = !!(
       activeRuntime
@@ -33446,6 +33447,7 @@ function renderReviewWorkspace(options = {}){
       && finalGuardTrustedTicker
       && chartConsistencyTraceForDisplay
       && String(chartConsistencyTraceForDisplay.status || '') === 'source_checking'
+      && finalGuardSource === 'chart_pre_ai_fast_pass'
       && finalGuardFactsMissing
       && (
         currentLifecycleFinalizeReason === 'blocked_unknown_chart_identity'
