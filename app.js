@@ -4481,6 +4481,7 @@ function chartVerificationSupportsNonBlockingIndicatorPartial(record = {}, verif
 
 function chartVerificationIsBlockedOrMismatchStatus(status = ''){
   return [
+    'manual_confirmation_required',
     'unknown_chart_identity',
     'insufficient_identity_evidence',
     'ticker_mismatch',
@@ -4527,6 +4528,7 @@ function chartVerificationBlockedDecisionVariant(key = ''){
     'possible_mismatch'
   ].includes(normalizedKey)) return 'mismatch';
   if([
+    'manual_confirmation_required',
     'unknown_chart_identity',
     'insufficient_identity_evidence',
     'verification_failed',
@@ -4585,14 +4587,14 @@ function chartVerificationUiDecision(trace, ticker = ''){
       detail:'No contradictions were found, but chart-native confirmation remains limited.'
     };
   }
-  if(['unknown_chart_identity','insufficient_identity_evidence'].includes(status)){
+  if(['manual_confirmation_required','unknown_chart_identity','insufficient_identity_evidence'].includes(status)){
     return {
       key:status,
-      title:'Could not verify chart identity',
-      summary:'The ticker or price could not be read from the uploaded chart.',
+      title:'Chart identity needs confirmation',
+      summary:`The app could not confirm this chart matches ${expectedTicker || 'this review'}.`,
       detail:unreadableReasons.length
         ? unreadableReasons.join(' ')
-        : 'AI analysis has been skipped until chart identity is confirmed.'
+        : `Please confirm or reject it before AI chart analysis runs.`
     };
   }
   if(chartVerificationSupportsNonBlockingIndicatorPartial({}, safe)){
@@ -4753,7 +4755,10 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
   const safeTrace = trace && typeof trace === 'object' ? trace : {};
   const safeGate = gate && typeof gate === 'object' ? gate : {};
   const safeContext = context && typeof context === 'object' ? context : {};
-  const status = String(safeGate.status || safeTrace.status || safeGate.reason || 'verification_failed').trim() || 'verification_failed';
+  const rawStatus = String(safeGate.status || safeTrace.status || safeGate.reason || 'verification_failed').trim() || 'verification_failed';
+  const status = ['unknown_chart_identity', 'insufficient_identity_evidence'].includes(rawStatus)
+    ? 'manual_confirmation_required'
+    : rawStatus;
   const expectedTicker = String(safeGate.expectedTicker || '').trim();
   const observedTicker = String(safeGate.observedTicker || '').trim();
   const expectedPrice = chartVerificationNumberOrNull(safeGate.expectedPrice);
@@ -4769,7 +4774,12 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
   let title = String(safeTrace.title || '').trim();
   let summary = String(safeTrace.summary || '').trim();
   let detail = baseDetail;
-  if(['unknown_chart_identity', 'insufficient_identity_evidence'].includes(status)){
+  const reason = String(safeContext.finalizeReason || safeGate.reason || rawStatus || '').trim();
+  const forcedFinalizeSource = reason === 'blocked_unknown_chart_identity'
+    || status === 'manual_confirmation_required'
+    || status === 'unknown_chart_identity'
+    || status === 'insufficient_identity_evidence';
+  if(['manual_confirmation_required', 'unknown_chart_identity', 'insufficient_identity_evidence'].includes(status)){
     title = 'Chart identity needs confirmation';
     summary = `The app could not confirm this chart matches ${expectedTicker || String(safeContext.ticker || '').trim() || 'the selected ticker'}.`;
     detail = detail || 'Please confirm or reject it before AI chart analysis runs.';
@@ -4790,6 +4800,14 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
     suppressionReason:detail || summary || status,
     mismatchReasons,
     unreadableReasons,
+    reason,
+    finalized:true,
+    ticker:String(safeContext.ticker || safeTrace.ticker || '').trim(),
+    reviewTicker:String(safeContext.ticker || safeTrace.reviewTicker || safeTrace.ticker || '').trim(),
+    imageId:String(safeContext.imageId || safeTrace.imageId || safeTrace.chartImageId || ''),
+    chartImageId:String(safeContext.imageId || safeTrace.chartImageId || safeTrace.imageId || ''),
+    requestId:String(safeContext.requestId || safeTrace.requestId || safeTrace.verificationRequestId || ''),
+    verificationRequestId:String(safeContext.requestId || safeTrace.verificationRequestId || safeTrace.requestId || ''),
     trustedFacts:{
       ...(safeTrace.trustedFacts && typeof safeTrace.trustedFacts === 'object' ? safeTrace.trustedFacts : {}),
       ticker:expectedTicker || (safeTrace.trustedFacts && safeTrace.trustedFacts.ticker) || String(safeContext.ticker || '').trim() || '',
@@ -4800,11 +4818,68 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
       visible_ticker:observedTicker || (safeTrace.extractedFacts && safeTrace.extractedFacts.visible_ticker) || '',
       visible_latest_price:observedPrice
     },
-    event:String(safeContext.finalizeReason || safeGate.reason || status || ''),
-    source:String(safeTrace.source || 'verification_gate_blocked'),
+    event:String(reason || status || ''),
+    source:String((forcedFinalizeSource ? 'chart_analysis_finalize' : '') || safeContext.source || safeTrace.source || 'verification_gate_blocked'),
     updatedAt:new Date().toISOString(),
     createdAt:String(safeTrace.createdAt || new Date().toISOString())
   }, null);
+}
+
+function commitTerminalChartVerificationTrace(record, trace = {}, context = {}){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item || !item.review || typeof item.review !== 'object') return null;
+  const safeTrace = trace && typeof trace === 'object' ? trace : null;
+  if(!safeTrace) return null;
+  const safeContext = context && typeof context === 'object' ? context : {};
+  const chartImageId = String(safeContext.imageId || safeTrace.imageId || safeTrace.chartImageId || chartImageIdForReview(item.review || {}) || '');
+  const requestId = String(safeContext.requestId || safeTrace.requestId || safeTrace.verificationRequestId || '');
+  const wrappedTrace = cloneData({
+    ticker:item.ticker,
+    reviewTicker:item.ticker,
+    chartImageId,
+    imageId:chartImageId,
+    verificationRequestId:requestId,
+    requestId,
+    status:String(safeTrace.status || ''),
+    renderedStatus:String(safeTrace.renderedStatus || safeTrace.status || ''),
+    mergedStatus:String(safeTrace.mergedStatus || safeTrace.status || ''),
+    reason:String(safeTrace.reason || safeContext.finalizeReason || ''),
+    finalized:safeTrace.finalized === true,
+    phase:'merged',
+    chartImageSource:safeContext.chartImageSource || safeTrace.chartImageSource || buildChartImageSourceTrace(item.review || {}),
+    chartAssessorInput:safeContext.chartAssessorInput || item.review.chartVerificationContext || null,
+    source:String(safeTrace.source || safeContext.source || 'chart_analysis_finalize'),
+    createdAt:String(safeTrace.createdAt || new Date().toISOString()),
+    updatedAt:String(safeTrace.updatedAt || new Date().toISOString()),
+    trace:safeTrace
+  }, null);
+  item.review.chartVerificationTrace = wrappedTrace;
+  item.review.chartVerificationCommittedTrace = cloneData(wrappedTrace, null);
+  item.review.chartVerificationLifecycle = {
+    ...(item.review.chartVerificationLifecycle || {}),
+    phase:'merged',
+    ticker:item.ticker,
+    reviewTicker:item.ticker,
+    chartImageId,
+    imageId:chartImageId,
+    requestId,
+    chartImageSource:wrappedTrace.chartImageSource || null,
+    updatedAt:new Date().toISOString(),
+    finalizeReason:String(safeTrace.reason || safeContext.finalizeReason || ''),
+    finalStatus:String(safeTrace.status || '')
+  };
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_TERMINAL_TRACE_COMMITTED]', {
+      ticker:item.ticker,
+      imageId:chartImageId,
+      requestId,
+      status:String(safeTrace.status || ''),
+      reason:String(safeTrace.reason || safeContext.finalizeReason || ''),
+      source:String(safeTrace.source || safeContext.source || ''),
+      finalized:safeTrace.finalized === true
+    });
+  }
+  return wrappedTrace;
 }
 
 function chartVerificationHasExplicitRegionProvenance(trace = {}){
@@ -24854,35 +24929,17 @@ async function analyseSetup(ticker, options = {}){
           ticker:record.ticker,
           imageId:requestChartImageId,
           requestId:analysisRequestId,
-          finalizeReason:requestFinalizeReason
+          finalizeReason:requestFinalizeReason,
+          source:'chart_analysis_finalize'
         });
-        record.review.chartVerificationTrace = cloneData({
-          ticker:record.ticker,
-          reviewTicker:record.ticker,
-          chartImageId:requestChartImageId,
+        commitTerminalChartVerificationTrace(record, committedBlockedTrace, {
           imageId:requestChartImageId,
-          verificationRequestId:analysisRequestId,
           requestId:analysisRequestId,
-          phase:'merged',
           chartImageSource:requestChartImageSource,
           chartAssessorInput:verificationChartAssessorInput,
-          createdAt:new Date().toISOString(),
-          trace:committedBlockedTrace
-        }, null);
-        record.review.chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);
-        record.review.chartVerificationLifecycle = {
-          ...(record.review.chartVerificationLifecycle || {}),
-          phase:'merged',
-          ticker:record.ticker,
-          reviewTicker:record.ticker,
-          chartImageId:requestChartImageId,
-          imageId:requestChartImageId,
-          requestId:analysisRequestId,
-          chartImageSource:requestChartImageSource,
-          updatedAt:new Date().toISOString(),
           finalizeReason:requestFinalizeReason,
-          finalStatus:String(committedBlockedTrace && committedBlockedTrace.status || '')
-        };
+          source:'chart_analysis_finalize'
+        });
         if(record.review.quickChartAnalysis && typeof record.review.quickChartAnalysis === 'object'){
           record.review.quickChartAnalysis = {
             ...record.review.quickChartAnalysis,
@@ -30131,12 +30188,16 @@ function buildChartAssessorInput(record = {}, analysis = null, chartImageSource 
 function chartVerificationTracePriority(trace = {}){
   const status = String(trace && trace.status || '').trim();
   const explicitChartRegionProvenance = chartVerificationHasExplicitRegionProvenance(trace);
-  if(chartVerificationIsBlockedOrMismatchStatus(status)) return 4;
-  if(['verified_match','likely_match','manually_verified','user_confirmed_match'].includes(status)) return 3;
-  if(status === 'ai_supported_match') return explicitChartRegionProvenance ? 3 : 2;
-  if(['partial_context_timeframe_uncertain','partial_context_unverified_chart','indicator_partial','indicator_incomplete','uncertain_match'].includes(status)) return 2;
-  if(['pending_chart_native_verification','uncertain_missing_context'].includes(status)) return 1;
-  return 1;
+  if(['user_confirmed_match','manually_verified'].includes(status)) return 7;
+  if(status === 'verified_match') return 6;
+  if(status === 'likely_match') return 5;
+  if(['manual_confirmation_required','unknown_chart_identity','insufficient_identity_evidence'].includes(status)) return 4;
+  if(chartVerificationIsBlockedOrMismatchStatus(status)) return 3;
+  if(status === 'ai_supported_match') return explicitChartRegionProvenance ? 2 : 1;
+  if(['partial_context_timeframe_uncertain','partial_context_unverified_chart','indicator_partial','indicator_incomplete','uncertain_match','partial_indicator_visibility','mostly_verified','consistent'].includes(status)) return 2;
+  if(status === 'source_checking') return 1;
+  if(['pending_chart_native_verification','uncertain_missing_context'].includes(status)) return 0;
+  return 0;
 }
 
 function annotateChartTraceForRender(trace = {}, state = {}, extras = {}){
@@ -30276,6 +30337,9 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
     ? canonicalRecord.review
     : null;
   const review = canonicalReview || (item.review && typeof item.review === 'object' ? item.review : {});
+  const currentChartContext = currentReviewChartContext(item, review);
+  const currentChartContextImageId = String(currentChartContext.imageId || '');
+  const currentChartContextRequestId = String(currentChartContext.requestId || '');
   const reviewObjectIdentityId = value => {
     if(!value || typeof value !== 'object' || typeof WeakMap !== 'function') return '';
     if(!selectReviewChartTraceForRender._reviewObjectIdentityRegistry){
@@ -30312,7 +30376,6 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
   const currentLifecycleState = review.chartVerificationLifecycle && typeof review.chartVerificationLifecycle === 'object'
     ? review.chartVerificationLifecycle
     : null;
-  const currentChartContext = currentReviewChartContext(item, review);
   const currentLifecyclePhase = String(currentLifecycleState && currentLifecycleState.phase || '').trim();
   const storedState = storedChartVerificationState && typeof storedChartVerificationState === 'object' ? storedChartVerificationState : null;
   const storedTrace = storedState && storedState.trace && typeof storedState.trace === 'object' ? storedState.trace : null;
@@ -30469,6 +30532,75 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
       });
     }
   }
+  const lifecycleFinalizeReason = String(currentLifecycleState && currentLifecycleState.finalizeReason || '').trim();
+  const lifecycleFinalStatus = String(currentLifecycleState && currentLifecycleState.finalStatus || '').trim();
+  const committedTraceMatchesCurrentContext = !!(
+    committedState
+    && committedTrace
+    && currentChartContextImageId
+    && currentChartContextRequestId
+    && String(committedState.imageId || committedState.chartImageId || committedTrace.imageId || committedTrace.chartImageId || '') === currentChartContextImageId
+    && String(committedState.requestId || committedState.verificationRequestId || committedTrace.requestId || committedTrace.verificationRequestId || '') === currentChartContextRequestId
+  );
+  if(
+    currentChartContextImageId
+    && currentChartContextRequestId
+    && (
+      lifecycleFinalizeReason === 'blocked_unknown_chart_identity'
+      || lifecycleFinalStatus === 'manual_confirmation_required'
+      || lifecycleFinalStatus === 'unknown_chart_identity'
+      || lifecycleFinalStatus === 'insufficient_identity_evidence'
+    )
+  ){
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_TRACE_SELECTION_LIFECYCLE_MANUAL_TRACE]', {
+        ticker:normalizeTicker(item.ticker || ''),
+        imageId:currentChartContextImageId,
+        requestId:currentChartContextRequestId,
+        finalizeReason:lifecycleFinalizeReason || lifecycleFinalStatus || 'blocked_unknown_chart_identity',
+        action:committedTraceMatchesCurrentContext ? 'skipped_because_committed_trace_exists' : 'injected_because_committed_trace_absent'
+      });
+    }
+    if(!committedTraceMatchesCurrentContext){
+      const fallbackManualTrace = materializeTerminalBlockedChartTrace({
+        status:lifecycleFinalStatus || 'manual_confirmation_required',
+        unreadableReasons:['The uploaded chart could not be confidently identified from visible ticker, timeframe, or price evidence.'],
+        trustedFacts:{
+          ticker:normalizeTicker(item.ticker || ''),
+          expected_timeframe:'1D'
+        },
+        chartImageSource,
+        source:'chart_analysis_finalize'
+      }, {
+        status:lifecycleFinalStatus || 'unknown_chart_identity',
+        reason:lifecycleFinalizeReason || lifecycleFinalStatus || 'blocked_unknown_chart_identity',
+        expectedTicker:normalizeTicker(item.ticker || '')
+      }, {
+        ticker:normalizeTicker(item.ticker || ''),
+        imageId:currentChartContextImageId,
+        requestId:currentChartContextRequestId,
+        finalizeReason:lifecycleFinalizeReason || lifecycleFinalStatus || 'blocked_unknown_chart_identity'
+      });
+      candidates.push({
+        label:'lifecycle_finalized_manual_trace',
+        trace:annotateChartTraceForRender(fallbackManualTrace, {
+          chartImageId:currentChartContextImageId,
+          imageId:currentChartContextImageId,
+          verificationRequestId:currentChartContextRequestId,
+          requestId:currentChartContextRequestId,
+          chartImageSource,
+          phase:'merged',
+          source:'chart_analysis_finalize',
+          event:lifecycleFinalizeReason || lifecycleFinalStatus || 'blocked_unknown_chart_identity'
+        }, {chartImageSource}),
+        type:'post_ai_merged',
+        source:'chart_analysis_finalize',
+        event:lifecycleFinalizeReason || lifecycleFinalStatus || 'blocked_unknown_chart_identity',
+        renderedStatus:String(fallbackManualTrace.status || ''),
+        mergedStatus:String(fallbackManualTrace.status || '')
+      });
+    }
+  }
   const ranked = candidates.map(candidate => {
     const inheritedTrace = inheritChartTraceRequestIdForCurrentContext(candidate.trace, currentChartContext, {traceSource:candidate.label || candidate.type || ''});
     return {
@@ -30607,6 +30739,8 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
       phase:String(item.trace && item.trace.phase || ''),
       source:String(item.trace && item.trace.source || item.trace && item.trace.sourceType || item.type || ''),
       event:String(item.trace && item.trace.event || ''),
+      finalized:item.trace && item.trace.finalized === true,
+      priorityScore:item.priority,
       sourceType:item.type || '',
       hasNormalizedAnalysis:!!(item.trace && (item.trace.normalizedAnalysis || item.trace.chartAssessorInput)),
       hasMergedAnalysis:String(item.trace && item.trace.phase || '') === 'merged' || item.type === 'post_ai_merged',
@@ -30628,6 +30762,7 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
       phase:String(chosen.trace && chosen.trace.phase || ''),
       source:String(chosen.trace && chosen.trace.source || chosen.trace && chosen.trace.sourceType || chosen.type || ''),
       event:String(chosen.trace && chosen.trace.event || ''),
+      finalized:chosen.trace && chosen.trace.finalized === true,
       hasNormalizedAnalysis:!!(chosen.trace && (chosen.trace.normalizedAnalysis || chosen.trace.chartAssessorInput)),
       hasMergedAnalysis:String(chosen.trace && chosen.trace.phase || '') === 'merged' || chosen.type === 'post_ai_merged',
       isPendingTrace:chosen.isPendingTrace === true
@@ -33151,7 +33286,7 @@ function renderReviewWorkspace(options = {}){
         derivedStates,
         chartAssessorInput:chartAssessorRenderContext
       }));
-    const selectedChartTrace = selectReviewChartTraceForRender(
+    let selectedChartTrace = selectReviewChartTraceForRender(
       record,
       storedChartVerificationWrapper,
       chartConsistencyTrace,
@@ -33160,6 +33295,71 @@ function renderReviewWorkspace(options = {}){
       simplifiedState
     );
     chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTrace;
+    const currentLifecycleFinalizeReason = String(record.review && record.review.chartVerificationLifecycle && record.review.chartVerificationLifecycle.finalizeReason || '').trim();
+    const visibleFacts = chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.extractedFacts && typeof chartConsistencyTraceForDisplay.extractedFacts === 'object'
+      ? chartConsistencyTraceForDisplay.extractedFacts
+      : {};
+    const hasReadableVisibleFacts = !!(
+      String(visibleFacts.visible_ticker || '').trim()
+      || String(visibleFacts.visible_timeframe || '').trim()
+      || chartVerificationNumberOrNull(visibleFacts.visible_latest_price) !== null
+    );
+    if(
+      hasVerifiableChart
+      && normalizeTicker(record.ticker || '')
+      && chartConsistencyTraceForDisplay
+      && String(chartConsistencyTraceForDisplay.status || '') === 'source_checking'
+      && !hasReadableVisibleFacts
+      && (
+        currentLifecycleFinalizeReason === 'blocked_unknown_chart_identity'
+        || !['queued', 'running'].includes(String(quickChartAnalysisStatus || ''))
+      )
+    ){
+      chartConsistencyTraceForDisplay = materializeTerminalBlockedChartTrace(chartConsistencyTraceForDisplay, {
+        status:'unknown_chart_identity',
+        reason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
+        expectedTicker:normalizeTicker(record.ticker || '')
+      }, {
+        ticker:normalizeTicker(record.ticker || ''),
+        imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
+        requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
+        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity'
+      });
+      commitTerminalChartVerificationTrace(record, chartConsistencyTraceForDisplay, {
+        imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
+        requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
+        chartImageSource:chartSourceTrace,
+        chartAssessorInput:chartAssessorRenderContext,
+        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
+        source:'chart_analysis_finalize'
+      });
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[CHART_RENDER_FALLBACK_PERSISTED]', {
+          ticker:record.ticker,
+          imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
+          requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
+          status:String(chartConsistencyTraceForDisplay.status || ''),
+          reason:String(chartConsistencyTraceForDisplay.reason || currentLifecycleFinalizeReason || ''),
+          source:String(chartConsistencyTraceForDisplay.source || 'chart_analysis_finalize'),
+          finalized:chartConsistencyTraceForDisplay.finalized === true
+        });
+      }
+      const refreshedStoredChartVerificationWrapper = (record.review.chartVerificationCommittedTrace && typeof record.review.chartVerificationCommittedTrace === 'object'
+        ? record.review.chartVerificationCommittedTrace
+        : null)
+        || (record.review.chartVerificationTrace && typeof record.review.chartVerificationTrace === 'object'
+          ? record.review.chartVerificationTrace
+          : null);
+      selectedChartTrace = selectReviewChartTraceForRender(
+        record,
+        refreshedStoredChartVerificationWrapper,
+        chartConsistencyTrace,
+        quickChartAnalysisStatus,
+        chartAssessorRenderContext,
+        simplifiedState
+      );
+      chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTraceForDisplay;
+    }
     if(committedAssessorTrace && !['pending_chart_native_verification', 'uncertain_missing_context', 'partial_context_unverified_chart', 'partial_context_timeframe_uncertain', 'indicator_missing', 'indicator_incomplete', 'uncertain_match'].includes(String(committedAssessorTrace.status || ''))){
       chartConsistencyTraceForDisplay = committedAssessorTrace;
     }
@@ -33326,6 +33526,8 @@ function renderReviewWorkspace(options = {}){
           event:String(candidate.event || ''),
           updatedAt:String(candidate.updatedAt || ''),
           createdAt:String(candidate.createdAt || ''),
+          finalized:candidate.finalized === true,
+          priorityScore:candidate.priorityScore == null ? null : candidate.priorityScore,
           hasNormalizedAnalysis:!!candidate.hasNormalizedAnalysis,
           hasMergedAnalysis:!!candidate.hasMergedAnalysis
         })),
@@ -33340,6 +33542,7 @@ function renderReviewWorkspace(options = {}){
           event:String(chartConsistencyTraceForDisplay.event || ''),
           updatedAt:String(chartConsistencyTraceForDisplay.updatedAt || ''),
           createdAt:String(chartConsistencyTraceForDisplay.createdAt || ''),
+          finalized:chartConsistencyTraceForDisplay.finalized === true,
           hasNormalizedAnalysis:!!(chartConsistencyTraceForDisplay.normalizedAnalysis || chartConsistencyTraceForDisplay.chartAssessorInput),
           hasMergedAnalysis:String(chartConsistencyTraceForDisplay.phase || '') === 'merged'
         } : null

@@ -2906,7 +2906,8 @@ function runAiContractAssertions(){
   }
   const selectReviewChartTraceSource = extractFunctionSource(appSource, 'selectReviewChartTraceForRender');
   const blockedMismatchHelperSource = extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus');
-  if(!blockedMismatchHelperSource.includes("'strong_mismatch'")
+  if(!blockedMismatchHelperSource.includes("'manual_confirmation_required'")
+    || !blockedMismatchHelperSource.includes("'strong_mismatch'")
     || !blockedMismatchHelperSource.includes("'possible_mismatch'")
     || !blockedMismatchHelperSource.includes("'stale_state_detected'")
     || !blockedMismatchHelperSource.includes("'verification_failed'")
@@ -2921,14 +2922,39 @@ function runAiContractAssertions(){
   const renderReviewWorkspaceSource = extractFunctionSource(appSource, 'renderReviewWorkspace');
   if(!renderReviewWorkspaceSource.includes('preferredTerminalBlocked:')
     || !renderReviewWorkspaceSource.includes("reason:'terminal_blocked_candidate_for_current_chart'")
-    || !renderReviewWorkspaceSource.includes('selectionReason:String(selectedChartTrace.reason || \'\')')){
+    || !renderReviewWorkspaceSource.includes('selectionReason:String(selectedChartTrace.reason || \'\')')
+    || !renderReviewWorkspaceSource.includes('currentLifecycleFinalizeReason === \'blocked_unknown_chart_identity\'')
+    || !renderReviewWorkspaceSource.includes('status:\'unknown_chart_identity\'')
+    || !renderReviewWorkspaceSource.includes('!hasReadableVisibleFacts')
+    || !renderReviewWorkspaceSource.includes('commitTerminalChartVerificationTrace(record, chartConsistencyTraceForDisplay')
+    || !renderReviewWorkspaceSource.includes('[CHART_RENDER_FALLBACK_PERSISTED]')
+    || !renderReviewWorkspaceSource.includes('selectedChartTrace = selectReviewChartTraceForRender(')
+    || !renderReviewWorkspaceSource.includes('const refreshedStoredChartVerificationWrapper = (record.review.chartVerificationCommittedTrace')){
     throw new Error('Deep chart trace selection diagnostics must explain when a terminal blocked trace won over source_checking.');
+  }
+  if(!selectReviewChartTraceSource.includes('[CHART_TRACE_SELECTION_LIFECYCLE_MANUAL_TRACE]')
+    || !selectReviewChartTraceSource.includes("action:committedTraceMatchesCurrentContext ? 'skipped_because_committed_trace_exists' : 'injected_because_committed_trace_absent'")
+    || !selectReviewChartTraceSource.includes('if(!committedTraceMatchesCurrentContext){')){
+    throw new Error('Synthetic lifecycle manual trace fallback must be skipped when a committed trace already exists for the active chart context.');
   }
   if(!appAnalyseSetupSource.includes('materializeTerminalBlockedChartTrace(verificationMergedTrace, verificationGate')
     || !appAnalyseSetupSource.includes("requestFinalizeReason = `blocked_${verificationGate.reason || verificationGate.status || 'verification_incomplete'}`;")
-    || !appAnalyseSetupSource.includes("finalStatus:String(committedBlockedTrace && committedBlockedTrace.status || '')")
+    || !appAnalyseSetupSource.includes("source:'chart_analysis_finalize'")
+    || !appAnalyseSetupSource.includes('commitTerminalChartVerificationTrace(record, committedBlockedTrace')
     || !appAnalyseSetupSource.includes("if(activeReviewTicker() === ticker) renderReviewWorkspace({source:'chart_ai_analysis_blocked'});")){
     throw new Error('Blocked verification finalize paths must materialize a terminal committed chart trace for the current request and rerender it.');
+  }
+  const materializeTerminalBlockedTraceSource = extractFunctionSource(appSource, 'materializeTerminalBlockedChartTrace');
+  if(!materializeTerminalBlockedTraceSource.includes("source:String((forcedFinalizeSource ? 'chart_analysis_finalize' : '')")
+    || !materializeTerminalBlockedTraceSource.includes("status = ['unknown_chart_identity', 'insufficient_identity_evidence'].includes(rawStatus)")
+    || !materializeTerminalBlockedTraceSource.includes('finalized:true')){
+    throw new Error('Terminal blocked chart traces must force chart_analysis_finalize source and finalized metadata for blocked unknown identity.');
+  }
+  const commitTerminalChartVerificationTraceSource = extractFunctionSource(appSource, 'commitTerminalChartVerificationTrace');
+  if(!commitTerminalChartVerificationTraceSource.includes('[CHART_TERMINAL_TRACE_COMMITTED]')
+    || !commitTerminalChartVerificationTraceSource.includes("source:String(safeTrace.source || safeContext.source || 'chart_analysis_finalize')")
+    || !commitTerminalChartVerificationTraceSource.includes('item.review.chartVerificationCommittedTrace = cloneData(wrappedTrace, null);')){
+    throw new Error('Terminal chart trace commit helper must persist authoritative committed traces for blocked chart identity states.');
   }
   const chartVerificationUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   if(!chartVerificationUiDecisionSource.includes('chartVerificationIsBlockedOrMismatchStatus(status)')
@@ -2938,7 +2964,8 @@ function runAiContractAssertions(){
     || !chartVerificationUiDecisionSource.includes("'verification_failed'")
     || !chartVerificationUiDecisionSource.includes("'stale_state_detected'")
     || !chartVerificationUiDecisionSource.includes('Chart verification needs attention')
-    || !chartVerificationUiDecisionSource.includes('Could not verify chart identity')
+    || !chartVerificationUiDecisionSource.includes('Chart identity needs confirmation')
+    || !chartVerificationUiDecisionSource.includes('Please confirm or reject it before AI chart analysis runs.')
     || !chartVerificationUiDecisionSource.includes('Chart mismatch detected')){
     throw new Error('Review chart verification UI must use the shared blocked/mismatch status helper and render explicit blocked copy for verification_failed/source_mismatch.');
   }
