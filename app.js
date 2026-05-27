@@ -24441,6 +24441,57 @@ async function analyseSetup(ticker, options = {}){
       return;
     }
     let lastFailureData = null;
+    const applyVerificationFailureTrace = (reasonCode = 'verification_failed', errorMessage = '') => {
+      const failureDetail = String(errorMessage || 'The chart check could not be trusted because the chart source or verification state was inconsistent. Confirm the chart manually or upload it again.').trim();
+      const failureTrace = cloneData({
+        status:'verification_failed',
+        title:'Chart verification needs attention',
+        summary:'The chart check could not be trusted because the chart source or verification state was inconsistent.',
+        detail:failureDetail,
+        aiAnalysisSuppressed:true,
+        suppressionReason:failureDetail,
+        unreadableReasons:[],
+        mismatchReasons:[],
+        visible:true,
+        source:'verification_only_failure',
+        event:String(reasonCode || 'verification_failed'),
+        createdAt:new Date().toISOString()
+      }, null);
+      record.review.chartVerificationTrace = cloneData({
+        ticker:record.ticker,
+        reviewTicker:record.ticker,
+        chartImageId:requestChartImageId,
+        imageId:requestChartImageId,
+        verificationRequestId:analysisRequestId,
+        requestId:analysisRequestId,
+        phase:'merged',
+        chartImageSource:requestChartImageSource,
+        createdAt:new Date().toISOString(),
+        trace:failureTrace
+      }, null);
+      record.review.chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);
+      record.review.chartVerificationLifecycle = {
+        phase:'merged',
+        ticker:record.ticker,
+        reviewTicker:record.ticker,
+        chartImageId:requestChartImageId,
+        imageId:requestChartImageId,
+        requestId:analysisRequestId,
+        chartImageSource:requestChartImageSource,
+        updatedAt:new Date().toISOString()
+      };
+      if(record.review.quickChartAnalysis && typeof record.review.quickChartAnalysis === 'object'){
+        record.review.quickChartAnalysis = {
+          ...record.review.quickChartAnalysis,
+          status:'failed',
+          requestId:analysisRequestId,
+          updatedAt:new Date().toISOString(),
+          completedAt:new Date().toISOString(),
+          failureReason:failureDetail,
+          resultStatus:'verification_failed'
+        };
+      }
+    };
     const runAnalysisEndpointRequest = async ({verificationOnly = false, controller, isRequestCurrent, classifyAbortReason} = {}) => {
       const chartImageSource = chartImageForAnalysis(record.review);
       if(!verificationOnly && typeof console !== 'undefined' && console.info){
@@ -24460,7 +24511,10 @@ async function analyseSetup(ticker, options = {}){
       }
       const requestPayload = verificationOnly ? buildVerificationOnlyPayload(card) : buildAnalysisPayload(card);
       const requestPrompt = verificationOnly ? buildVerificationOnlyPrompt(card) : prompt;
-      return analysisService.requestAnalysisFromEndpoints({
+      let reachedTerminalOutcome = false;
+      let terminalOutcome = 'request_failed';
+      try{
+        return await analysisService.requestAnalysisFromEndpoints({
         endpoints,
         timeoutMs:ANALYSIS_TIMEOUT_MS,
         controller,
@@ -24473,11 +24527,120 @@ async function analyseSetup(ticker, options = {}){
         }),
         classifyAbortReason,
         onStage:message => setAnalysisLoadingStage(ticker, message),
+        onRequestDispatched:({endpoint, requestBody}) => {
+          if(typeof console !== 'undefined' && console.info){
+            console.info('[ANALYSE_SETUP_REQUEST_DISPATCHED]', {
+              ticker,
+              requestId:analysisRequestId,
+              imageId:requestChartImageId,
+              source:analysisSource,
+              verificationOnly,
+              url:String(endpoint || ''),
+              payloadShape:{
+                hasPayload:!!(requestBody && requestBody.payload),
+                payloadKeys:Object.keys(requestBody && requestBody.payload && typeof requestBody.payload === 'object' ? requestBody.payload : {}),
+                hasPrompt:!!String(requestBody && requestBody.prompt || ''),
+                hasChartRef:!!(requestBody && requestBody.chartRef),
+                verificationOnly:requestBody && requestBody.verificationOnly === true
+              }
+            });
+          }
+        },
         onApiResponse:({endpoint, response, data}) => {
           logAnalysisDebug('ANALYSIS_API_RESPONSE', { endpoint, ok:response.ok, status:response.status, data, verificationOnly });
         },
+        onResponseHeaders:({response, contentType}) => {
+          if(typeof console !== 'undefined' && console.info){
+            console.info('[ANALYSE_SETUP_RESPONSE_HEADERS]', {
+              ticker,
+              requestId:analysisRequestId,
+              imageId:requestChartImageId,
+              status:Number(response && response.status || 0),
+              ok:response && response.ok === true,
+              contentType:String(contentType || '')
+            });
+          }
+        },
+        onResponseTextReceived:({responseText}) => {
+          if(typeof console !== 'undefined' && console.info){
+            console.info('[ANALYSE_SETUP_RESPONSE_TEXT_RECEIVED]', {
+              ticker,
+              requestId:analysisRequestId,
+              imageId:requestChartImageId,
+              textLength:String(responseText || '').length
+            });
+          }
+        },
+        onJsonParseStart:() => {
+          if(typeof console !== 'undefined' && console.info){
+            console.info('[ANALYSE_SETUP_JSON_PARSE_START]', {
+              ticker,
+              requestId:analysisRequestId,
+              imageId:requestChartImageId
+            });
+          }
+        },
+        onJsonParseSuccess:() => {
+          if(typeof console !== 'undefined' && console.info){
+            console.info('[ANALYSE_SETUP_JSON_PARSE_SUCCESS]', {
+              ticker,
+              requestId:analysisRequestId,
+              imageId:requestChartImageId
+            });
+          }
+        },
+        onJsonParseFailed:({error}) => {
+          if(typeof console !== 'undefined' && console.warn){
+            console.warn('[ANALYSE_SETUP_JSON_PARSE_FAILED]', {
+              ticker,
+              requestId:analysisRequestId,
+              imageId:requestChartImageId,
+              errorName:String(error && error.name || ''),
+              errorMessage:String(error && error.message || '')
+            });
+          }
+        },
+        onRequestAborted:({error, abortReason}) => {
+          if(typeof console !== 'undefined' && console.warn){
+            console.warn('[ANALYSE_SETUP_REQUEST_ABORTED]', {
+              ticker,
+              requestId:analysisRequestId,
+              imageId:requestChartImageId,
+              abortName:String(error && error.name || ''),
+              abortMessage:String(error && error.message || ''),
+              abortReason:String(abortReason || '')
+            });
+          }
+        },
+        onRequestFailed:({error}) => {
+          if(typeof console !== 'undefined' && console.error){
+            console.error('[ANALYSE_SETUP_REQUEST_FAILED]', {
+              ticker,
+              requestId:analysisRequestId,
+              imageId:requestChartImageId,
+              errorName:String(error && error.name || ''),
+              errorMessage:String(error && error.message || ''),
+              stack:String(error && error.stack || '')
+            });
+          }
+        },
+        onRequestFinally:({terminalOutcome:serviceTerminalOutcome}) => {
+          reachedTerminalOutcome = true;
+          terminalOutcome = String(serviceTerminalOutcome || 'request_failed');
+        },
         buildErrorMessage:(status, data, fallback) => buildAnalysisErrorMessage(status, data, fallback)
       });
+      }finally{
+        if(typeof console !== 'undefined' && console.info){
+          console.info('[ANALYSE_SETUP_REQUEST_FINALLY]', {
+            ticker,
+            requestId:analysisRequestId,
+            imageId:requestChartImageId,
+            reachedTerminalOutcome,
+            terminalOutcome
+          });
+        }
+      }
     };
     if(analysisSource !== 'manual_chart_confirm' && options.skipVerificationGate !== true){
       const verificationController = new AbortController();
@@ -24502,6 +24665,9 @@ async function analyseSetup(ticker, options = {}){
       if(verificationResult.status !== 'ok'){
         requestFinalizeReason = 'verification_failed';
         lastFailureData = verificationResult.lastFailureData;
+        applyVerificationFailureTrace('verification_request_failed', verificationResult.errorMessage || 'Chart verification failed.');
+        commitTickerState();
+        renderCards();
         emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
           reason:'verification_request_failed',
           error:verificationResult.errorMessage || 'Chart verification failed.'

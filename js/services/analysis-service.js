@@ -9,6 +9,15 @@
       const classifyAbortReason = typeof options.classifyAbortReason === 'function' ? options.classifyAbortReason : (() => '');
       const onStage = typeof options.onStage === 'function' ? options.onStage : (() => {});
       const onApiResponse = typeof options.onApiResponse === 'function' ? options.onApiResponse : (() => {});
+      const onRequestDispatched = typeof options.onRequestDispatched === 'function' ? options.onRequestDispatched : (() => {});
+      const onResponseHeaders = typeof options.onResponseHeaders === 'function' ? options.onResponseHeaders : (() => {});
+      const onResponseTextReceived = typeof options.onResponseTextReceived === 'function' ? options.onResponseTextReceived : (() => {});
+      const onJsonParseStart = typeof options.onJsonParseStart === 'function' ? options.onJsonParseStart : (() => {});
+      const onJsonParseSuccess = typeof options.onJsonParseSuccess === 'function' ? options.onJsonParseSuccess : (() => {});
+      const onJsonParseFailed = typeof options.onJsonParseFailed === 'function' ? options.onJsonParseFailed : (() => {});
+      const onRequestAborted = typeof options.onRequestAborted === 'function' ? options.onRequestAborted : (() => {});
+      const onRequestFailed = typeof options.onRequestFailed === 'function' ? options.onRequestFailed : (() => {});
+      const onRequestFinally = typeof options.onRequestFinally === 'function' ? options.onRequestFinally : (() => {});
       const buildErrorMessage = typeof options.buildErrorMessage === 'function'
         ? options.buildErrorMessage
         : ((status, data, fallback) => fallback || `Request failed (${status}).`);
@@ -23,8 +32,11 @@
       for(const endpoint of endpoints){
         let timer = null;
         let data = {};
+        let terminalOutcome = 'request_failed';
         try{
           onStage('Building analysis...');
+          const requestBody = buildRequestBody();
+          onRequestDispatched({endpoint, requestBody});
           timer = setTimeout(() => {
             if(!isRequestCurrent()) return;
             if(controller && controller.signal && !controller.signal.aborted){
@@ -37,27 +49,51 @@
             method:'POST',
             headers:{'Content-Type':'application/json'},
             signal:controller && controller.signal ? controller.signal : undefined,
-            body:JSON.stringify(buildRequestBody())
+            body:JSON.stringify(requestBody)
+          });
+          onResponseHeaders({
+            endpoint,
+            response,
+            contentType:String(response.headers && typeof response.headers.get === 'function' ? response.headers.get('content-type') || '' : '')
           });
           if(!isRequestCurrent()) return {status:'stale'};
-          data = await response.json().catch(() => ({}));
+          const responseText = await response.text();
+          onResponseTextReceived({endpoint, responseText});
+          if(responseText && String(responseText).trim()){
+            onJsonParseStart({endpoint});
+            try{
+              data = JSON.parse(responseText);
+              onJsonParseSuccess({endpoint, data});
+            }catch(parseError){
+              onJsonParseFailed({endpoint, error:parseError, responseText});
+              throw new Error('Analysis request returned malformed JSON.');
+            }
+          }else{
+            data = {};
+          }
           onApiResponse({endpoint, response, data});
           if(!response.ok) throw new Error(buildErrorMessage(response.status, data, 'Analysis request failed.'));
           onStage('Applying analysis...');
+          terminalOutcome = 'ok';
           return {status:'ok', data};
         }catch(error){
           lastFailureData = data && typeof data === 'object' ? data : null;
           const abortReason = String(classifyAbortReason() || '').trim().toLowerCase();
           if(error && error.name === 'AbortError'){
+            onRequestAborted({endpoint, error, abortReason});
             lastError = abortReason === 'superseded'
               ? 'Analysis request superseded.'
               : 'The analysis request timed out. Retry the setup.';
+            terminalOutcome = abortReason === 'superseded' ? 'aborted_superseded' : 'aborted_timeout';
           }else{
+            onRequestFailed({endpoint, error});
             lastError = String(error && error.message || 'Analysis request failed.');
+            terminalOutcome = 'request_failed';
           }
           if(abortReason === 'superseded') break;
         }finally{
           if(timer) clearTimeout(timer);
+          onRequestFinally({endpoint, terminalOutcome});
         }
       }
 
