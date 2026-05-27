@@ -270,6 +270,11 @@ function extractFunctionSource(source, functionName){
   throw new Error(`Unable to extract ${functionName} from app.js.`);
 }
 
+function selectReviewChartSourceIncludesTerminalBlockedChosen(source){
+  return source.includes('const chosen = (terminalBlockedCandidates[0] || mergedCandidatesAllowed[0] || nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);')
+    && source.includes("? 'terminal blocked trace'");
+}
+
 function extractRegistryAccessorSource(source){
   const start = source.indexOf('const SCANNER_PROJECTION_FIELD_REGISTRY');
   if(start < 0) throw new Error('Unable to find SCANNER_PROJECTION_FIELD_REGISTRY in app.js.');
@@ -2505,6 +2510,8 @@ function runAiContractAssertions(){
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationSupportsNonBlockingIndicatorPartial'), panelStateSandbox, {filename:'app.js#chartVerificationSupportsNonBlockingIndicatorPartial'});
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationHasCoreIdentityMatch'), panelStateSandbox, {filename:'app.js#chartVerificationHasCoreIdentityMatch'});
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationHasPrimaryIndicatorSupport'), panelStateSandbox, {filename:'app.js#chartVerificationHasPrimaryIndicatorSupport'});
+  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus'), panelStateSandbox, {filename:'app.js#chartVerificationIsBlockedOrMismatchStatus'});
+  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationBlockedDecisionVariant'), panelStateSandbox, {filename:'app.js#chartVerificationBlockedDecisionVariant'});
   vm.runInContext(extractFunctionSource(appSource, 'getStrategyRelevantMaRequirement'), panelStateSandbox, {filename:'app.js#getStrategyRelevantMaRequirement'});
   vm.runInContext(extractFunctionSource(appSource, 'normaliseVisibleTicker'), panelStateSandbox, {filename:'app.js#normaliseVisibleTicker'});
   vm.runInContext(chartUiDecisionRenderSource, panelStateSandbox, {filename:'app.js#chartVerificationUiDecision'});
@@ -2539,6 +2546,36 @@ function runAiContractAssertions(){
   if(untrustedPanel.panelVariant !== 'untrusted' || untrustedPanel.visibleTitle !== 'Chart verification incomplete'){
     throw new Error('Untrusted merged chart panels must not render as verified.');
   }
+  const unreadablePanel = panelStateSandbox.chartVerificationPanelState(
+    {key:'unknown_chart_identity', title:'Could not verify chart identity', summary:'The ticker or price could not be read from the uploaded chart.'},
+    {status:'unknown_chart_identity'},
+    'committed',
+    true,
+    {type:'post_ai_merged', phase:'merged'}
+  );
+  if(unreadablePanel.panelVariant !== 'warning' || unreadablePanel.hasVerifiedTrace !== false || unreadablePanel.visibleTitle !== 'Could not verify chart identity'){
+    throw new Error('Unreadable chart verification panels must render as warning/blocked, not generic review or verified.');
+  }
+  const staleSystemPanel = panelStateSandbox.chartVerificationPanelState(
+    {key:'stale_state_detected', title:'Chart verification needs attention', summary:'The chart check could not be trusted because the chart source or verification state was inconsistent.'},
+    {status:'stale_state_detected'},
+    'committed',
+    true,
+    {type:'post_ai_merged', phase:'merged'}
+  );
+  if(staleSystemPanel.panelVariant !== 'warning' || staleSystemPanel.visibleTitle !== 'Chart verification needs attention'){
+    throw new Error('Stale/system chart verification panels must render as warning/blocked, not generic review.');
+  }
+  const mismatchPanel = panelStateSandbox.chartVerificationPanelState(
+    {key:'chart_mismatch', title:'Chart mismatch detected', summary:'AI analysis has been skipped because the uploaded chart does not appear to match this review.'},
+    {status:'ticker_mismatch'},
+    'committed',
+    true,
+    {type:'post_ai_merged', phase:'merged'}
+  );
+  if(mismatchPanel.panelVariant !== 'mismatch' || mismatchPanel.visibleTitle !== 'Chart mismatch detected'){
+    throw new Error('Mismatch chart verification panels must stay on the mismatch variant.');
+  }
   if(panelStateSandbox.chartVerificationIsVerifiedStatus('consistent')
     || panelStateSandbox.chartVerificationIsVerifiedStatus('partial_indicator_visibility')
     || panelStateSandbox.chartVerificationIsVerifiedStatus('mostly_verified')){
@@ -2556,11 +2593,32 @@ function runAiContractAssertions(){
     throw new Error('Partial-indicator verification must stay blocked and explicitly require manual confirmation.');
   }
   const manualActionsSource = extractFunctionSource(appSource, 'chartVerificationShouldShowManualActions');
-  if(!manualActionsSource.includes("manualEligibleStatuses")
+  if(!manualActionsSource.includes("chartVerificationRequiresManualAction(status)")
+    || !manualActionsSource.includes("chartVerificationRequiresManualAction(key)")
     || !manualActionsSource.includes("timeframeMissingButExpected")
     || !manualActionsSource.includes("aiAnalysisSuppressed")
     || !manualActionsSource.includes("['queued', 'running'].includes(normalizedQuickStatus) && !hasResolvedTrace")){
     throw new Error('Manual chart override logic must keep resolved untrusted states visible after quick-analysis completion.');
+  }
+  const manualActionHelperSource = extractFunctionSource(appSource, 'chartVerificationRequiresManualAction');
+  const manualBlockedMismatchSource = extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus');
+  const blockedDecisionVariantSource = extractFunctionSource(appSource, 'chartVerificationBlockedDecisionVariant');
+  if(!manualActionHelperSource.includes("chartVerificationIsBlockedOrMismatchStatus(normalizedStatus)")
+    || !manualActionHelperSource.includes("'pending_manual_confirmation'")
+    || !manualBlockedMismatchSource.includes("'source_mismatch'")
+    || !manualBlockedMismatchSource.includes("'stale_state_detected'")
+    || !manualBlockedMismatchSource.includes("'verification_failed'")
+    || !manualBlockedMismatchSource.includes("'unknown_chart_identity'")
+    || !manualBlockedMismatchSource.includes("'insufficient_identity_evidence'")){
+    throw new Error('Manual chart controls must use the shared blocked/manual helper for mismatch, unreadable, and source/stale/system states.');
+  }
+  if(!blockedDecisionVariantSource.includes("'chart_mismatch'")
+    || !blockedDecisionVariantSource.includes("'unknown_chart_identity'")
+    || !blockedDecisionVariantSource.includes("'verification_failed'")
+    || !extractFunctionSource(appSource, 'chartVerificationPanelState').includes('const blockedDecisionVariant = chartVerificationBlockedDecisionVariant(key);')
+    || !extractFunctionSource(appSource, 'chartVerificationPanelState').includes('|| !!blockedDecisionVariant')
+    || !extractFunctionSource(appSource, 'chartVerificationPanelState').includes('panelVariant = blockedDecisionVariant;')){
+    throw new Error('Chart verification panel state must use explicit blocked decision variants instead of falling back to generic review.');
   }
   const manualConfirmSource = extractFunctionSource(appSource, 'confirmReviewChartMatchesCurrentTicker');
   if(!manualConfirmSource.includes('chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);')
@@ -2692,8 +2750,7 @@ function runAiContractAssertions(){
     throw new Error('Chart verification must define a narrow allowlist before AI setup analysis can start.');
   }
   const tracePrioritySource = extractFunctionSource(appSource, 'chartVerificationTracePriority');
-  if(!tracePrioritySource.includes("'unknown_chart_identity'")
-    || !tracePrioritySource.includes("'insufficient_identity_evidence'")){
+  if(!tracePrioritySource.includes('chartVerificationIsBlockedOrMismatchStatus(status)')){
     throw new Error('Terminal blocked chart-verification states must outrank pending source_checking traces in trace selection.');
   }
   if(!chartVerificationGateDecisionSource.includes('mismatchReasons')
@@ -2828,8 +2885,48 @@ function runAiContractAssertions(){
     throw new Error('Normalized analysis results must preserve absent chart provenance version instead of forcing strict mode.');
   }
   if(!reviewQuickChartStateSource.includes('storedMatchesCurrentContext')
-    || !reviewQuickChartStateSource.includes("String(stored.requestId || '') === String(currentContext.requestId || '')")){
+    || !reviewQuickChartStateSource.includes("String(stored.requestId || stored.verificationRequestId || '') === currentRequestId")){
     throw new Error('Quick chart analysis state must preserve same-image/same-request committed state even when the stored key drifts.');
+  }
+  if(!reviewQuickChartStateSource.includes('[QUICK_CHART_ANALYSIS_STALE_CONTEXT_IGNORED]')
+    || !reviewQuickChartStateSource.includes('storedRequestId !== currentRequestId')
+    || !reviewQuickChartStateSource.includes('stored = null;')
+    || !reviewQuickChartStateSource.includes('clearStaleQuickChartAnalysisState(')
+    || !extractFunctionSource(appSource, 'clearStaleQuickChartAnalysisState').includes('[QUICK_CHART_ANALYSIS_STALE_CONTEXT_CLEARED]')){
+    throw new Error('Quick chart analysis state must ignore stale queued/running context from a different request for the same chart image.');
+  }
+  if(!aiCommitGateSource.includes("reviewQuickChartAnalysisState(item, {source:'can_commit_ai_summary'})")
+    || !appAnalyseSetupSource.includes("reviewQuickChartAnalysisState(record, {source:'analyse_setup_current_context'})")
+    || !flushPendingAiSource.includes("reviewQuickChartAnalysisState(item, {source:'flush_pending_ai_summary'})")
+    || !flushPendingAiSource.includes('const currentChartContext = currentReviewChartContext(item, item.review || {});')
+    || !flushPendingAiSource.includes('const currentRequestId = String(currentChartContext.requestId || \'\');')){
+    throw new Error('Sensitive AI-summary and analyseSetup request-context reads must use sanitized quick-chart state instead of raw persisted quick state.');
+  }
+  const selectReviewChartTraceSource = extractFunctionSource(appSource, 'selectReviewChartTraceForRender');
+  const blockedMismatchHelperSource = extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus');
+  if(!blockedMismatchHelperSource.includes("'strong_mismatch'")
+    || !blockedMismatchHelperSource.includes("'possible_mismatch'")
+    || !blockedMismatchHelperSource.includes("'stale_state_detected'")
+    || !blockedMismatchHelperSource.includes("'verification_failed'")
+    || !blockedMismatchHelperSource.includes("'source_mismatch'")){
+    throw new Error('Chart verification must define a shared blocked/mismatch helper covering terminal mismatch and stale states.');
+  }
+  if(!selectReviewChartTraceSource.includes('[CHART_TRACE_SELECTION_TERMINAL_BLOCKED_PREFERRED]')
+    || !selectReviewChartTraceSource.includes('chartVerificationIsBlockedOrMismatchStatus(status)')
+    || !selectReviewChartSourceIncludesTerminalBlockedChosen(selectReviewChartTraceSource)){
+    throw new Error('Terminal blocked chart-verification traces must be preferred over pending source_checking traces for the current chart context.');
+  }
+  const chartVerificationUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
+  if(!chartVerificationUiDecisionSource.includes('chartVerificationIsBlockedOrMismatchStatus(status)')
+    || !chartVerificationUiDecisionSource.includes("const mismatchStatuses = new Set([")
+    || !chartVerificationUiDecisionSource.includes("const sourceOrSystemStatuses = new Set([")
+    || !chartVerificationUiDecisionSource.includes("'source_mismatch'")
+    || !chartVerificationUiDecisionSource.includes("'verification_failed'")
+    || !chartVerificationUiDecisionSource.includes("'stale_state_detected'")
+    || !chartVerificationUiDecisionSource.includes('Chart verification needs attention')
+    || !chartVerificationUiDecisionSource.includes('Could not verify chart identity')
+    || !chartVerificationUiDecisionSource.includes('Chart mismatch detected')){
+    throw new Error('Review chart verification UI must use the shared blocked/mismatch status helper and render explicit blocked copy for verification_failed/source_mismatch.');
   }
   if(!appAnalyseSetupSource.includes('[CHART_ANALYSIS_DUPLICATE_RUNNING_BYPASSED_FOR_REPLACEMENT]')
     || !appAnalyseSetupSource.includes('[CHART_REPLACEMENT_ANALYSIS_SUPERSEDES_RUNNING]')
@@ -2872,7 +2969,16 @@ function runAiContractAssertions(){
     throw new Error('Analyse Setup callers must pass explicit request sources for duplicate-request audits.');
   }
   const aiGateSandbox = {
-    normalizeTicker(value){ return String(value || '').trim().toUpperCase(); }
+    normalizeTicker(value){ return String(value || '').trim().toUpperCase(); },
+    reviewQuickChartAnalysisState(record = {}){
+      const quick = record && record.review && record.review.quickChartAnalysis && typeof record.review.quickChartAnalysis === 'object'
+        ? record.review.quickChartAnalysis
+        : null;
+      return {
+        stored:quick,
+        matchesCurrentKey:!!quick
+      };
+    }
   };
   vm.createContext(aiGateSandbox);
   vm.runInContext(aiCommitGateSource, aiGateSandbox, {filename:'app.js#canCommitAiSummaryForChart'});
@@ -3036,6 +3142,9 @@ function runAiContractAssertions(){
   vm.runInContext(chartCoreIdentityMatchSource, chartSandbox, {filename:'app.js#chartVerificationHasCoreIdentityMatch'});
   vm.runInContext(chartPrimaryIndicatorSupportSource, chartSandbox, {filename:'app.js#chartVerificationHasPrimaryIndicatorSupport'});
   vm.runInContext(chartSupportsPartialSource, chartSandbox, {filename:'app.js#chartVerificationSupportsNonBlockingIndicatorPartial'});
+  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus'), chartSandbox, {filename:'app.js#chartVerificationIsBlockedOrMismatchStatus'});
+  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationRequiresManualAction'), chartSandbox, {filename:'app.js#chartVerificationRequiresManualAction'});
+  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationShouldShowManualActions'), chartSandbox, {filename:'app.js#chartVerificationShouldShowManualActions'});
   vm.runInContext(chartUiDecisionRenderSource, chartSandbox, {filename:'app.js#chartVerificationUiDecision'});
   vm.runInContext(explicitProvenanceFnSource, chartSandbox, {filename:'app.js#chartVerificationHasExplicitRegionProvenance'});
   vm.runInContext(chartDecisionClassNameSource, chartSandbox, {filename:'app.js#chartDecisionClassName'});
@@ -3265,6 +3374,7 @@ function runAiContractAssertions(){
     'sanitizeChartAssessorVisibleIdentity',
     'buildChartAssessorInput',
     'chartVerificationHasExplicitRegionProvenance',
+    'chartVerificationIsBlockedOrMismatchStatus',
     'chartVerificationTracePriority',
     'annotateChartTraceForRender',
     'currentReviewChartContext',
@@ -3290,6 +3400,7 @@ function runAiContractAssertions(){
     'chartVerificationSupportsNonBlockingIndicatorPartial',
     'chartVerificationUiDecision',
     'chartDecisionClassName',
+    'chartVerificationRequiresManualAction',
     'ensureReviewChartLightboxShell',
     'closeReviewChartLightbox',
     'openReviewChartLightbox',
@@ -3302,6 +3413,7 @@ function runAiContractAssertions(){
     'renderChartConsistencyTrace',
     'chartVerificationIsVerifiedStatus',
     'chartVerificationAllowsAiAnalysisStatus',
+    'chartVerificationIsBlockedOrMismatchStatus',
     'chartVerificationHasExplicitRegionProvenance',
     'chartVerificationShouldShowManualActions',
     'getReviewChartVerificationState',
@@ -4895,7 +5007,7 @@ function runAiContractAssertions(){
     throw new Error('Severe chart price mismatch must fast-exit as strong_mismatch without changing resolver state.');
   }
   const strongMismatchSummary = strongMismatchMarkup.split('<summary>Show details</summary>')[0] || strongMismatchMarkup;
-  if(!/Chart mismatch detected/.test(strongMismatchSummary) || !/AI analysis has been skipped because the uploaded chart does not appear to match the selected ticker\./.test(strongMismatchSummary)){
+  if(!/Chart mismatch detected/.test(strongMismatchSummary) || !/AI analysis has been skipped because the uploaded chart does not appear to match this review\./.test(strongMismatchSummary)){
     throw new Error('Strong mismatch UI must surface the explicit blocked-analysis mismatch copy.');
   }
   const strongMismatchSuppression = evidenceSandbox.chartVerificationAiSuppression(
