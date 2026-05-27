@@ -4721,6 +4721,53 @@ function chartVerificationAllowsAiAnalysisStatus(status = ''){
   return ['verified_match', 'likely_match', 'user_confirmed_match', 'manually_verified'].includes(String(status || '').trim());
 }
 
+const QUICK_CHART_QUEUED_RENDER_WINDOW_MS = 15000;
+
+function effectiveQuickChartAnalysisStatusForRender(record, quickState = null, currentChartContext = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const safeQuickState = quickState && typeof quickState === 'object' ? quickState : null;
+  const rawStatus = String(safeQuickState && safeQuickState.status || '').trim();
+  if(rawStatus !== 'queued') return rawStatus;
+  const currentTicker = normalizeTicker(item.ticker || currentChartContext && currentChartContext.ticker || '');
+  const currentImageId = String(currentChartContext && currentChartContext.imageId || '');
+  const currentRequestId = String(currentChartContext && currentChartContext.requestId || '');
+  const activeRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
+    ? uiState.analysisActiveRequest
+    : null;
+  const activeRequestMatches = !!(
+    activeRequest
+    && normalizeTicker(activeRequest.ticker || '') === currentTicker
+    && (!currentImageId || !String(activeRequest.chartImageId || '') || String(activeRequest.chartImageId || '') === currentImageId)
+    && (!currentRequestId || !String(activeRequest.id || '') || String(activeRequest.id || '') === currentRequestId)
+  );
+  const runtime = getReviewAiRuntime();
+  const runtimeMatches = !!(
+    runtime
+    && runtime.status === 'running'
+    && normalizeTicker(runtime.ticker || '') === currentTicker
+    && (!currentImageId || !String(runtime.chartImageId || '') || String(runtime.chartImageId || '') === currentImageId)
+    && (!currentRequestId || !String(runtime.requestId || '') || String(runtime.requestId || '') === currentRequestId)
+  );
+  const queuedAt = Date.parse(String(
+    safeQuickState && (safeQuickState.queuedAt || safeQuickState.updatedAt || '')
+    || ''
+  ));
+  const recentlyQueued = Number.isFinite(queuedAt) && queuedAt > 0 && (Date.now() - queuedAt) <= QUICK_CHART_QUEUED_RENDER_WINDOW_MS;
+  if(activeRequestMatches || runtimeMatches || recentlyQueued) return rawStatus;
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[QUICK_CHART_ANALYSIS_STALE_QUEUED_IGNORED]', {
+      ticker:currentTicker,
+      imageId:currentImageId,
+      requestId:currentRequestId,
+      queuedAt:String(safeQuickState && (safeQuickState.queuedAt || safeQuickState.updatedAt) || ''),
+      activeRequestMatches,
+      runtimeMatches,
+      recentlyQueued
+    });
+  }
+  return 'idle';
+}
+
 function chartVerificationGateDecision(trace = {}, ticker = '', requestId = '', imageId = ''){
   const safe = trace && typeof trace === 'object' ? trace : {};
   const status = String(safe.status || '').trim();
@@ -33250,6 +33297,11 @@ function renderReviewWorkspace(options = {}){
     storedChartVerificationState
   }) : {status:'idle', hasChart:false, needsQuickAnalysis:false};
   const quickChartAnalysisStatus = String(quickChartAnalysisState && quickChartAnalysisState.status || '');
+  const effectiveQuickChartAnalysisStatus = effectiveQuickChartAnalysisStatusForRender(
+    record,
+    quickChartAnalysisState,
+    activeChartContext
+  );
   const storedChartAssessorContext = hasVerifiableChart && record.review && record.review.chartVerificationContext && typeof record.review.chartVerificationContext === 'object'
     ? record.review.chartVerificationContext
     : null;
@@ -33312,7 +33364,7 @@ function renderReviewWorkspace(options = {}){
       && !hasReadableVisibleFacts
       && (
         currentLifecycleFinalizeReason === 'blocked_unknown_chart_identity'
-        || !['queued', 'running'].includes(String(quickChartAnalysisStatus || ''))
+        || !['queued', 'running'].includes(String(effectiveQuickChartAnalysisStatus || ''))
       )
     ){
       chartConsistencyTraceForDisplay = materializeTerminalBlockedChartTrace(chartConsistencyTraceForDisplay, {
@@ -33354,7 +33406,7 @@ function renderReviewWorkspace(options = {}){
         record,
         refreshedStoredChartVerificationWrapper,
         chartConsistencyTrace,
-        quickChartAnalysisStatus,
+        effectiveQuickChartAnalysisStatus,
         chartAssessorRenderContext,
         simplifiedState
       );
@@ -33451,7 +33503,7 @@ function renderReviewWorkspace(options = {}){
       && finalGuardFactsMissing
       && (
         currentLifecycleFinalizeReason === 'blocked_unknown_chart_identity'
-        || (!['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) && !activeRuntimeMatchesCurrentChart)
+        || (!['queued', 'running'].includes(String(effectiveQuickChartAnalysisStatus || '')) && !activeRuntimeMatchesCurrentChart)
       )
     );
     if(finalGuardShouldOverrideSourceChecking){
@@ -33495,7 +33547,7 @@ function renderReviewWorkspace(options = {}){
         record,
         finalGuardStoredChartVerificationWrapper,
         chartConsistencyTrace,
-        quickChartAnalysisStatus,
+        effectiveQuickChartAnalysisStatus,
         chartAssessorRenderContext,
         simplifiedState
       );
@@ -33548,7 +33600,7 @@ function renderReviewWorkspace(options = {}){
     const chartPanelState = chartVerificationPanelState(
       chartUiDecision,
       chartConsistencyTraceForDisplay,
-      quickChartAnalysisStatus,
+      effectiveQuickChartAnalysisStatus,
       hasVerifiableChart,
       selectedChartTrace.chosenCandidate || chartConsistencyTraceForDisplay
     );
@@ -33636,13 +33688,13 @@ function renderReviewWorkspace(options = {}){
         ? 'mismatch'
         : 'uncertain');
     const hasChartScreenshot = hasVerifiableChart;
-    const showChartManualActions = chartVerificationShouldShowManualActions(chartUiDecision, chartConsistencyTraceForDisplay, quickChartAnalysisStatus, hasChartScreenshot);
+    const showChartManualActions = chartVerificationShouldShowManualActions(chartUiDecision, chartConsistencyTraceForDisplay, effectiveQuickChartAnalysisStatus, hasChartScreenshot);
     if(typeof console !== 'undefined' && console.info){
       console.info('[MANUAL_CHART_CONTROLS_VISIBILITY]', {
         ticker:record.ticker,
         decisionKey:String(chartUiDecision && chartUiDecision.key || ''),
         traceStatus:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''),
-        quickStatus:String(quickChartAnalysisStatus || ''),
+        quickStatus:String(effectiveQuickChartAnalysisStatus || ''),
         hasChartScreenshot,
         visible:showChartManualActions
       });
