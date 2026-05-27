@@ -2700,6 +2700,7 @@ function runAiContractAssertions(){
     || !analyseSetupGateSource.includes('[CHART_AI_ANALYSIS_ALLOWED]')
     || !analyseSetupGateSource.includes('[CHART_VERIFICATION_FAILED]')
     || !analyseSetupGateSource.includes('[CHART_ANALYSIS_REQUEST_FINALIZE_REASON]')
+    || !appSource.includes('[CHART_REQUEST_ID_MUTATION]')
     || !analyseSetupGateSource.includes('chartVerificationGateDecision(')
     || !analyseSetupGateSource.includes('if(!verificationGate.allowed)')
     || !analyseSetupGateSource.includes('beginReviewAiAnalysis(ticker, prompt, {')){
@@ -3258,6 +3259,7 @@ function runAiContractAssertions(){
     'chartImageDimensionsFromRef',
     'chartImageDimensionsLabel',
     'buildChartImageSourceTrace',
+    'logChartRequestIdMutation',
     'hasVerifiableReviewChartSource',
     'chartImageForAnalysis',
     'clearReviewChartImageSources',
