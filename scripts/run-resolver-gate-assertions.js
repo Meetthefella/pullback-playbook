@@ -2678,6 +2678,11 @@ function runAiContractAssertions(){
     || !queueQuickSource.includes("analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});")){
     throw new Error('Bypass quick-analysis uploads must not create running quick state before a request id exists.');
   }
+  if(!queueQuickSource.includes('currentReviewChartContext(liveRecord || liveItem, review)')
+    || !queueQuickSource.includes('state.stored && state.stored.requestId')
+    || !queueQuickSource.includes('currentChartContext && currentChartContext.requestId')){
+    throw new Error('Queued quick-chart analysis state must inherit the current chart-context request id instead of defaulting to blank.');
+  }
   if(!refreshTrackOnlySource.includes('clearTrackPatchNoChangeFlags();')
     || !refreshTrackOnlySource.includes("console.info('[TrackPullRefresh]', {event:'riskRecalcSkipped', source, reason:'no_changed_inputs'});")
     || !refreshTrackOnlySource.includes('startupCoordinator.trackNeedsFullRender = false;')){
@@ -2685,6 +2690,11 @@ function runAiContractAssertions(){
   }
   if(!chartVerificationAllowsAiAnalysisStatusSource.includes("['verified_match', 'likely_match', 'user_confirmed_match', 'manually_verified']")){
     throw new Error('Chart verification must define a narrow allowlist before AI setup analysis can start.');
+  }
+  const tracePrioritySource = extractFunctionSource(appSource, 'chartVerificationTracePriority');
+  if(!tracePrioritySource.includes("'unknown_chart_identity'")
+    || !tracePrioritySource.includes("'insufficient_identity_evidence'")){
+    throw new Error('Terminal blocked chart-verification states must outrank pending source_checking traces in trace selection.');
   }
   if(!chartVerificationGateDecisionSource.includes('mismatchReasons')
     || !chartVerificationGateDecisionSource.includes('unreadableReasons')

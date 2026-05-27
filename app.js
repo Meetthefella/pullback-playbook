@@ -4183,6 +4183,7 @@ function queueReviewQuickChartAnalysis(record, options = {}){
     : null;
   if(!review) return reviewQuickChartAnalysisState(liveItem, options);
   const state = reviewQuickChartAnalysisState(liveRecord || liveItem, options);
+  const currentChartContext = currentReviewChartContext(liveRecord || liveItem, review);
   const triggerSource = String(options.source || 'review_render');
   const triggerReason = String(options.triggerReason || state.currentVerificationStatus || 'chart_verification_pending');
   const bypassQueue = options.bypassQueue === true;
@@ -4210,13 +4211,18 @@ function queueReviewQuickChartAnalysis(record, options = {}){
     reviewTicker:liveItem.ticker || item.ticker,
     chartImageId:state.imageId,
     chartImageSource:state.sourceTrace,
-    requestId:String(state.stored && state.stored.requestId || ''),
+    requestId:String(
+      state.stored && state.stored.requestId
+      || currentChartContext && currentChartContext.requestId
+      || ''
+    ),
     status:'queued',
     triggerSource,
     triggerReason,
     queuedAt:new Date().toISOString(),
     updatedAt:new Date().toISOString()
   };
+  maybeLogQuickChartAnalysisContextIncomplete(liveRecord || liveItem, review.quickChartAnalysis, 'queue_review_quick_chart_analysis');
   if(bypassQueue){
     commitTickerState();
     analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});
@@ -29701,7 +29707,16 @@ function buildChartAssessorInput(record = {}, analysis = null, chartImageSource 
 function chartVerificationTracePriority(trace = {}){
   const status = String(trace && trace.status || '').trim();
   const explicitChartRegionProvenance = chartVerificationHasExplicitRegionProvenance(trace);
-  if(['ticker_mismatch','timeframe_mismatch','strong_mismatch','possible_mismatch','stale_state_detected'].includes(status)) return 4;
+  if([
+    'ticker_mismatch',
+    'timeframe_mismatch',
+    'strong_mismatch',
+    'possible_mismatch',
+    'stale_state_detected',
+    'unknown_chart_identity',
+    'insufficient_identity_evidence',
+    'chart_mismatch'
+  ].includes(status)) return 4;
   if(['verified_match','likely_match','manually_verified','user_confirmed_match'].includes(status)) return 3;
   if(status === 'ai_supported_match') return explicitChartRegionProvenance ? 3 : 2;
   if(['partial_context_timeframe_uncertain','partial_context_unverified_chart','indicator_partial','indicator_incomplete','uncertain_match'].includes(status)) return 2;
