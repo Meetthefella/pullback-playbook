@@ -271,8 +271,10 @@ function extractFunctionSource(source, functionName){
 }
 
 function selectReviewChartSourceIncludesTerminalBlockedChosen(source){
-  return source.includes('const chosen = (terminalBlockedCandidates[0] || mergedCandidatesAllowed[0] || nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);')
-    && source.includes("? 'terminal blocked trace'");
+  return source.includes('const preferredTerminalBlocked = terminalBlockedCandidates[0] || null;')
+    && source.includes('const chosen = (preferredTerminalBlocked || mergedCandidatesAllowed[0] || nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);')
+    && source.includes("preferredTerminalBlocked && chosen === preferredTerminalBlocked")
+    && source.includes("'terminal blocked trace'");
 }
 
 function extractRegistryAccessorSource(source){
@@ -2915,6 +2917,18 @@ function runAiContractAssertions(){
     || !selectReviewChartTraceSource.includes('chartVerificationIsBlockedOrMismatchStatus(status)')
     || !selectReviewChartSourceIncludesTerminalBlockedChosen(selectReviewChartTraceSource)){
     throw new Error('Terminal blocked chart-verification traces must be preferred over pending source_checking traces for the current chart context.');
+  }
+  const renderReviewWorkspaceSource = extractFunctionSource(appSource, 'renderReviewWorkspace');
+  if(!renderReviewWorkspaceSource.includes('preferredTerminalBlocked:')
+    || !renderReviewWorkspaceSource.includes("reason:'terminal_blocked_candidate_for_current_chart'")
+    || !renderReviewWorkspaceSource.includes('selectionReason:String(selectedChartTrace.reason || \'\')')){
+    throw new Error('Deep chart trace selection diagnostics must explain when a terminal blocked trace won over source_checking.');
+  }
+  if(!appAnalyseSetupSource.includes('materializeTerminalBlockedChartTrace(verificationMergedTrace, verificationGate')
+    || !appAnalyseSetupSource.includes("requestFinalizeReason = `blocked_${verificationGate.reason || verificationGate.status || 'verification_incomplete'}`;")
+    || !appAnalyseSetupSource.includes("finalStatus:String(committedBlockedTrace && committedBlockedTrace.status || '')")
+    || !appAnalyseSetupSource.includes("if(activeReviewTicker() === ticker) renderReviewWorkspace({source:'chart_ai_analysis_blocked'});")){
+    throw new Error('Blocked verification finalize paths must materialize a terminal committed chart trace for the current request and rerender it.');
   }
   const chartVerificationUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   if(!chartVerificationUiDecisionSource.includes('chartVerificationIsBlockedOrMismatchStatus(status)')

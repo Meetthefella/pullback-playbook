@@ -4749,6 +4749,64 @@ function chartVerificationGateDecision(trace = {}, ticker = '', requestId = '', 
   };
 }
 
+function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {}){
+  const safeTrace = trace && typeof trace === 'object' ? trace : {};
+  const safeGate = gate && typeof gate === 'object' ? gate : {};
+  const safeContext = context && typeof context === 'object' ? context : {};
+  const status = String(safeGate.status || safeTrace.status || safeGate.reason || 'verification_failed').trim() || 'verification_failed';
+  const expectedTicker = String(safeGate.expectedTicker || '').trim();
+  const observedTicker = String(safeGate.observedTicker || '').trim();
+  const expectedPrice = chartVerificationNumberOrNull(safeGate.expectedPrice);
+  const observedPrice = chartVerificationNumberOrNull(safeGate.observedPrice);
+  const mismatchReasons = Array.isArray(safeGate.mismatchReasons) ? safeGate.mismatchReasons : (Array.isArray(safeTrace.mismatchReasons) ? safeTrace.mismatchReasons : []);
+  const unreadableReasons = Array.isArray(safeGate.unreadableReasons) ? safeGate.unreadableReasons : (Array.isArray(safeTrace.unreadableReasons) ? safeTrace.unreadableReasons : []);
+  const baseDetail = String(
+    safeTrace.detail
+    || safeTrace.summary
+    || safeTrace.suppressionReason
+    || ''
+  ).trim();
+  let title = String(safeTrace.title || '').trim();
+  let summary = String(safeTrace.summary || '').trim();
+  let detail = baseDetail;
+  if(['unknown_chart_identity', 'insufficient_identity_evidence'].includes(status)){
+    title = 'Chart identity needs confirmation';
+    summary = `The app could not confirm this chart matches ${expectedTicker || String(safeContext.ticker || '').trim() || 'the selected ticker'}.`;
+    detail = detail || 'Please confirm or reject it before AI chart analysis runs.';
+  }else if(chartVerificationIsBlockedOrMismatchStatus(status)){
+    title = title || 'Chart verification needs attention';
+    summary = summary || 'AI chart analysis has been skipped until this chart is confirmed or replaced.';
+    detail = detail || 'Confirm the current chart manually or upload another chart.';
+  }
+  return cloneData({
+    ...safeTrace,
+    status,
+    renderedStatus:status,
+    mergedStatus:status,
+    title,
+    summary,
+    detail,
+    aiAnalysisSuppressed:true,
+    suppressionReason:detail || summary || status,
+    mismatchReasons,
+    unreadableReasons,
+    trustedFacts:{
+      ...(safeTrace.trustedFacts && typeof safeTrace.trustedFacts === 'object' ? safeTrace.trustedFacts : {}),
+      ticker:expectedTicker || (safeTrace.trustedFacts && safeTrace.trustedFacts.ticker) || String(safeContext.ticker || '').trim() || '',
+      latest_price:expectedPrice
+    },
+    extractedFacts:{
+      ...(safeTrace.extractedFacts && typeof safeTrace.extractedFacts === 'object' ? safeTrace.extractedFacts : {}),
+      visible_ticker:observedTicker || (safeTrace.extractedFacts && safeTrace.extractedFacts.visible_ticker) || '',
+      visible_latest_price:observedPrice
+    },
+    event:String(safeContext.finalizeReason || safeGate.reason || status || ''),
+    source:String(safeTrace.source || 'verification_gate_blocked'),
+    updatedAt:new Date().toISOString(),
+    createdAt:String(safeTrace.createdAt || new Date().toISOString())
+  }, null);
+}
+
 function chartVerificationHasExplicitRegionProvenance(trace = {}){
   const safe = trace && typeof trace === 'object' ? trace : {};
   return !!(
@@ -24792,6 +24850,49 @@ async function analyseSetup(ticker, options = {}){
       renderCards();
       if(!verificationGate.allowed){
         requestFinalizeReason = `blocked_${verificationGate.reason || verificationGate.status || 'verification_incomplete'}`;
+        const committedBlockedTrace = materializeTerminalBlockedChartTrace(verificationMergedTrace, verificationGate, {
+          ticker:record.ticker,
+          imageId:requestChartImageId,
+          requestId:analysisRequestId,
+          finalizeReason:requestFinalizeReason
+        });
+        record.review.chartVerificationTrace = cloneData({
+          ticker:record.ticker,
+          reviewTicker:record.ticker,
+          chartImageId:requestChartImageId,
+          imageId:requestChartImageId,
+          verificationRequestId:analysisRequestId,
+          requestId:analysisRequestId,
+          phase:'merged',
+          chartImageSource:requestChartImageSource,
+          chartAssessorInput:verificationChartAssessorInput,
+          createdAt:new Date().toISOString(),
+          trace:committedBlockedTrace
+        }, null);
+        record.review.chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);
+        record.review.chartVerificationLifecycle = {
+          ...(record.review.chartVerificationLifecycle || {}),
+          phase:'merged',
+          ticker:record.ticker,
+          reviewTicker:record.ticker,
+          chartImageId:requestChartImageId,
+          imageId:requestChartImageId,
+          requestId:analysisRequestId,
+          chartImageSource:requestChartImageSource,
+          updatedAt:new Date().toISOString(),
+          finalizeReason:requestFinalizeReason,
+          finalStatus:String(committedBlockedTrace && committedBlockedTrace.status || '')
+        };
+        if(record.review.quickChartAnalysis && typeof record.review.quickChartAnalysis === 'object'){
+          record.review.quickChartAnalysis = {
+            ...record.review.quickChartAnalysis,
+            requestId:analysisRequestId,
+            status:'committed',
+            updatedAt:new Date().toISOString(),
+            committedAt:new Date().toISOString(),
+            resultStatus:String(committedBlockedTrace && committedBlockedTrace.status || verificationGate.status || '')
+          };
+        }
         clearPendingChartAiSummary(record);
         setReviewAnalysisState(record, {
           raw:'',
@@ -24815,6 +24916,7 @@ async function analyseSetup(ticker, options = {}){
           });
         }
         terminalChartAnalysisDiagnosticEmitted = true;
+        commitTickerState();
         if(activeReviewTicker() === ticker) renderReviewWorkspace({source:'chart_ai_analysis_blocked'});
         renderCards();
         return;
@@ -30437,8 +30539,8 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
     if(sameRequestId && candidateRequestId && candidateRequestId !== sameRequestId) return false;
     return true;
   });
+  const preferredTerminalBlocked = terminalBlockedCandidates[0] || null;
   if(terminalBlockedCandidates.length && typeof console !== 'undefined' && console.info){
-    const preferredTerminalBlocked = terminalBlockedCandidates[0];
     console.info('[CHART_TRACE_SELECTION_TERMINAL_BLOCKED_PREFERRED]', {
       ticker:normalizeTicker(item.ticker || ''),
       imageId:sameImageId,
@@ -30477,9 +30579,9 @@ function selectReviewChartTraceForRender(record = {}, storedChartVerificationSta
     });
   }
   const nonPendingMatchingCandidates = matchingCandidates.filter(candidate => !candidate.isPendingTrace);
-  const chosen = (terminalBlockedCandidates[0] || mergedCandidatesAllowed[0] || nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);
+  const chosen = (preferredTerminalBlocked || mergedCandidatesAllowed[0] || nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);
   const reason = chosen
-    ? (terminalBlockedCandidates[0] && chosen === terminalBlockedCandidates[0]
+    ? (preferredTerminalBlocked && chosen === preferredTerminalBlocked
       ? 'terminal blocked trace'
       : (mergedCandidatesAllowed[0] && chosen === mergedCandidatesAllowed[0]
       ? 'merged trace'
@@ -33183,6 +33285,11 @@ function renderReviewWorkspace(options = {}){
       });
     }
     if(typeof console !== 'undefined' && console.info){
+      const preferredTerminalBlockedForRender = selectedChartTrace.reason === 'terminal blocked trace'
+        && selectedChartTrace.chosenCandidate
+        && typeof selectedChartTrace.chosenCandidate === 'object'
+        ? selectedChartTrace.chosenCandidate
+        : null;
       console.info('[CHART_TRACE_SELECTION]', {
         ticker:record.ticker,
         candidateTraces:selectedChartTrace.candidates,
@@ -33198,6 +33305,14 @@ function renderReviewWorkspace(options = {}){
       });
       console.info('[CHART_TRACE_SELECTION_DEEP]', {
         ticker:record.ticker,
+        preferredTerminalBlocked:preferredTerminalBlockedForRender ? {
+          label:String(preferredTerminalBlockedForRender.label || ''),
+          status:String(preferredTerminalBlockedForRender.status || ''),
+          requestId:String(preferredTerminalBlockedForRender.requestId || ''),
+          imageId:String(preferredTerminalBlockedForRender.imageId || ''),
+          reason:'terminal_blocked_candidate_for_current_chart'
+        } : null,
+        selectionReason:String(selectedChartTrace.reason || ''),
         candidateTraces:selectedChartTrace.candidates.map(candidate => ({
           label:candidate.label,
           type:candidate.type,
