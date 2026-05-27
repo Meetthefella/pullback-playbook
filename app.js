@@ -4108,9 +4108,30 @@ function reviewQuickChartAnalysisKey(record = {}){
 function reviewQuickChartAnalysisState(record = {}, options = {}){
   const item = normalizeTickerRecord(record);
   const review = item.review && typeof item.review === 'object' ? item.review : {};
-  const stored = review.quickChartAnalysis && typeof review.quickChartAnalysis === 'object'
+  const rawStored = review.quickChartAnalysis && typeof review.quickChartAnalysis === 'object'
     ? review.quickChartAnalysis
     : null;
+  let stored = rawStored;
+  if(stored){
+    const staleIncompleteRunning = !!(
+      String(stored.status || '') === 'running'
+      && String(stored.chartImageId || '') 
+      && !String(stored.requestId || stored.verificationRequestId || '')
+    );
+    if(staleIncompleteRunning){
+      if(typeof console !== 'undefined' && console.warn){
+        console.warn('[QUICK_CHART_ANALYSIS_STALE_INCOMPLETE_CLEARED]', {
+          ticker:normalizeTicker(item.ticker || stored.ticker || ''),
+          status:String(stored.status || ''),
+          imageId:String(stored.chartImageId || ''),
+          requestId:'',
+          source:String(options.source || 'review_quick_chart_analysis_state')
+        });
+      }
+      review.quickChartAnalysis = null;
+      stored = null;
+    }
+  }
   const currentKey = reviewQuickChartAnalysisKey(item);
   const storedKey = stored ? String(stored.key || '') : '';
   const currentContext = currentReviewChartContext(item, review);
@@ -25179,8 +25200,13 @@ function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null
   const currentTicker = normalizeTicker(item.ticker || '');
   const currentImageId = chartImageIdForReview(item.review || {});
   const currentRequestId = String(safeTrace && (safeTrace.verificationRequestId || safeTrace.requestId) || '');
-  const quickAnalysisState = item.review && item.review.quickChartAnalysis && typeof item.review.quickChartAnalysis === 'object'
-    ? item.review.quickChartAnalysis
+  const quickStateSnapshot = reviewQuickChartAnalysisState(item, {
+    source:'chart_ai_summary_guard',
+    analysisState:safeState,
+    storedChartVerificationState:getReviewChartVerificationState(item)
+  });
+  const quickAnalysisState = quickStateSnapshot && quickStateSnapshot.stored && quickStateSnapshot.matchesCurrentKey
+    ? quickStateSnapshot.stored
     : null;
   const quickStatus = String(quickAnalysisState && quickAnalysisState.status || '').trim();
   const quickImageId = String(quickAnalysisState && quickAnalysisState.chartImageId || '');

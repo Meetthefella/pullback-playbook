@@ -2777,6 +2777,11 @@ function runAiContractAssertions(){
     || !appAnalyseSetupSource.includes('normalizedLiveAnalysis.chartIdentityProvenanceVersion = 1')){
     throw new Error('Live analyseSetup results must upgrade any non-strict analysis into strict provenance mode before sanitization.');
   }
+  if(!appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_FINALIZE_REASON]')
+    || !extractFunctionSource(appSource, 'reviewQuickChartAnalysisState').includes('[QUICK_CHART_ANALYSIS_STALE_INCOMPLETE_CLEARED]')
+    || !extractFunctionSource(appSource, 'chartAiSummaryRenderGuard').includes("source:'chart_ai_summary_guard'")){
+    throw new Error('Stale running quick-chart state must be cleared on read and must not be revived by Review-focus AI-summary guards.');
+  }
   if(/ai_supported_match[\s\S]+chartVerificationHasExplicitRegionProvenance/.test(savedAnalysisPanelSource)){
     throw new Error('Saved-analysis Review rendering must not keep an ai_supported_match verified exception outside the hard gate allowlist.');
   }
