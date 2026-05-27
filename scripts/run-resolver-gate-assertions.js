@@ -2698,10 +2698,12 @@ function runAiContractAssertions(){
   if(!analyseSetupGateSource.includes('verificationOnly:true')
     || !analyseSetupGateSource.includes('[CHART_AI_ANALYSIS_BLOCKED]')
     || !analyseSetupGateSource.includes('[CHART_AI_ANALYSIS_ALLOWED]')
+    || !analyseSetupGateSource.includes('[CHART_VERIFICATION_FAILED]')
+    || !analyseSetupGateSource.includes('[CHART_ANALYSIS_REQUEST_FINALIZE_REASON]')
     || !analyseSetupGateSource.includes('chartVerificationGateDecision(')
     || !analyseSetupGateSource.includes('if(!verificationGate.allowed)')
     || !analyseSetupGateSource.includes('beginReviewAiAnalysis(ticker, prompt, {')){
-    throw new Error('Analyse setup must run a verification-only gate first and only begin full AI analysis after verification is allowed.');
+    throw new Error('Analyse setup must run a verification-only gate first and emit an explicit terminal/finalize reason for every started chart-analysis request.');
   }
   if(analyseSetupGateSource.indexOf('let lastFailureData = null;') === -1
     || analyseSetupGateSource.indexOf('let lastFailureData = null;') > analyseSetupGateSource.indexOf('if(analysisSource !== \'manual_chart_confirm\' && options.skipVerificationGate !== true)')){

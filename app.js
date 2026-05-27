@@ -23892,6 +23892,8 @@ async function analyseSetup(ticker, options = {}){
   card.lastPrompt = prompt;
   const requestChartImageId = chartImageIdForReview(record.review || {});
   const requestChartImageSource = buildChartImageSourceTrace(record.review || {});
+  let requestFinalizeReason = 'started';
+  let terminalChartAnalysisDiagnosticEmitted = false;
   const currentAnalysisState = getReviewAnalysisState(record);
   const currentQuickState = record.review && record.review.quickChartAnalysis && typeof record.review.quickChartAnalysis === 'object'
     ? record.review.quickChartAnalysis
@@ -23959,6 +23961,19 @@ async function analyseSetup(ticker, options = {}){
     });
   }
   console.debug('[review-analysis] request_started', {ticker, requestId:analysisRequestId, source:analysisSource, imageId:requestChartImageId});
+  function emitChartAnalysisTerminalDiagnostic(type, payload = {}){
+    if(terminalChartAnalysisDiagnosticEmitted) return;
+    terminalChartAnalysisDiagnosticEmitted = true;
+    if(typeof console !== 'undefined' && console.info){
+      console.info(type, {
+        ticker,
+        source:analysisSource,
+        requestId:analysisRequestId,
+        imageId:requestChartImageId,
+        ...payload
+      });
+    }
+  }
   if(typeof console !== 'undefined' && console.info){
     console.info('[CHART_ANALYSIS_REQUEST_START]', {
       ticker,
@@ -24053,6 +24068,7 @@ async function analyseSetup(ticker, options = {}){
     setAnalysisLoadingStage(ticker, 'Checking structure...');
     if(!(record.review && record.review.chartRef && record.review.chartRef.dataUrl)){
       const reason = 'AI analysis failed: add or import a chart screenshot first.';
+      requestFinalizeReason = 'missing_chart';
       console.warn('[review-analysis] blocked_missing_chart', {ticker});
       card.lastError = reason;
       setReviewAnalysisState(record, {
@@ -24061,6 +24077,10 @@ async function analyseSetup(ticker, options = {}){
         error:reason,
         prompt,
         reviewedAt:new Date().toISOString()
+      });
+      emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+        reason:'missing_chart',
+        error:reason
       });
       record.review.cardOpen = true;
       failReviewAiAnalysis(ticker, analysisRequestId, reason);
@@ -24147,6 +24167,7 @@ async function analyseSetup(ticker, options = {}){
     });
     const endpoints = analysisEndpoints();
     if(!endpoints.length){
+      requestFinalizeReason = 'no_endpoint';
       card.lastError = 'AI analysis failed: add an AI endpoint URL first.';
       setReviewAnalysisState(record, {
         raw:'',
@@ -24157,6 +24178,10 @@ async function analyseSetup(ticker, options = {}){
       });
       failReviewAiAnalysis(ticker, analysisRequestId, card.lastError);
       setScannerCardClickTrace(ticker, 'analyseSetup.no_endpoint', 'no_endpoint');
+      emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+        reason:'no_endpoint',
+        error:card.lastError
+      });
       return;
     }
     let lastFailureData = null;
@@ -24211,11 +24236,20 @@ async function analyseSetup(ticker, options = {}){
         classifyAbortReason:() => String(verificationController.signal.reason || '').trim().toLowerCase()
       });
       if(verificationResult.status === 'stale'){
+        requestFinalizeReason = 'verification_stale';
         setScannerCardClickTrace(ticker, 'analyseSetup.verification_stale_ignored', `request=${analysisRequestId}`);
+        emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+          reason:'verification_stale'
+        });
         return;
       }
       if(verificationResult.status !== 'ok'){
+        requestFinalizeReason = 'verification_failed';
         lastFailureData = verificationResult.lastFailureData;
+        emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+          reason:'verification_request_failed',
+          error:verificationResult.errorMessage || 'Chart verification failed.'
+        });
         throw new Error(verificationResult.errorMessage || 'Chart verification failed.');
       }
       const verificationData = verificationResult.data && typeof verificationResult.data === 'object'
@@ -24223,7 +24257,12 @@ async function analyseSetup(ticker, options = {}){
         : {};
       const currentChartImageId = chartImageIdForReview(record.review || {});
       if(requestChartImageId && (!currentChartImageId || requestChartImageId !== currentChartImageId)){
+        requestFinalizeReason = 'verification_chart_stale';
         setScannerCardClickTrace(ticker, 'analyseSetup.verification_chart_stale_ignored', `request=${analysisRequestId}`);
+        emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+          reason:'verification_chart_stale',
+          currentChartImageId:String(currentChartImageId || '')
+        });
         return;
       }
       const verificationNormalizedAnalysis = normalizeAnalysisResult(verificationData.analysis, previousTickerState);
@@ -24312,6 +24351,7 @@ async function analyseSetup(ticker, options = {}){
       commitTickerState();
       renderCards();
       if(!verificationGate.allowed){
+        requestFinalizeReason = `blocked_${verificationGate.reason || verificationGate.status || 'verification_incomplete'}`;
         clearPendingChartAiSummary(record);
         setReviewAnalysisState(record, {
           raw:'',
@@ -24334,6 +24374,7 @@ async function analyseSetup(ticker, options = {}){
             imageId:requestChartImageId
           });
         }
+        terminalChartAnalysisDiagnosticEmitted = true;
         if(activeReviewTicker() === ticker) renderReviewWorkspace({source:'chart_ai_analysis_blocked'});
         renderCards();
         return;
@@ -24345,6 +24386,8 @@ async function analyseSetup(ticker, options = {}){
           imageId:requestChartImageId
         });
       }
+      terminalChartAnalysisDiagnosticEmitted = true;
+      requestFinalizeReason = 'verification_allowed';
     }
     if((analysisSource === 'manual_chart_confirm' || options.skipVerificationGate === true) && typeof console !== 'undefined' && console.info){
       console.info('[CHART_AI_ANALYSIS_ALLOWED]', {
@@ -24352,6 +24395,8 @@ async function analyseSetup(ticker, options = {}){
         requestId:analysisRequestId,
         imageId:requestChartImageId
       });
+      terminalChartAnalysisDiagnosticEmitted = true;
+      requestFinalizeReason = 'manual_or_skip_gate_allowed';
     }
     const requestController = new AbortController();
     beginReviewAiAnalysis(ticker, prompt, {
@@ -24396,7 +24441,13 @@ async function analyseSetup(ticker, options = {}){
         }
       });
       if(analysisRequestResult.status === 'stale'){
+        requestFinalizeReason = 'analysis_response_stale';
         setScannerCardClickTrace(ticker, 'analyseSetup.stale_response_ignored', `request=${analysisRequestId}`);
+        if(!terminalChartAnalysisDiagnosticEmitted){
+          emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+            reason:'analysis_response_stale'
+          });
+        }
         return;
       }
       if(analysisRequestResult.status !== 'ok'){
@@ -24408,6 +24459,7 @@ async function analyseSetup(ticker, options = {}){
         : {};
       const currentChartImageId = chartImageIdForReview(record.review || {});
       if(requestChartImageId && (!currentChartImageId || requestChartImageId !== currentChartImageId)){
+        requestFinalizeReason = 'analysis_chart_stale';
         setScannerCardClickTrace(ticker, 'analyseSetup.stale_chart_response_ignored', `request=${analysisRequestId}`);
         logChartVerificationLifecycle('stale_response_rejected', {
           reviewTicker:ticker,
@@ -24417,10 +24469,17 @@ async function analyseSetup(ticker, options = {}){
           staleResponseRejected:true,
           completedAt:new Date().toISOString()
         });
+        if(!terminalChartAnalysisDiagnosticEmitted){
+          emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+            reason:'analysis_chart_stale',
+            currentChartImageId:String(currentChartImageId || '')
+          });
+        }
         return;
       }
       const currentActiveReviewTicker = normalizeTicker(activeReviewTicker() || '');
       if(currentActiveReviewTicker && currentActiveReviewTicker !== ticker){
+        requestFinalizeReason = 'active_review_ticker_mismatch';
         setScannerCardClickTrace(ticker, 'analyseSetup.stale_review_ticker_ignored', `active=${currentActiveReviewTicker} request=${analysisRequestId}`);
         logChartVerificationLifecycle('stale_response_rejected', {
           reviewTicker:ticker,
@@ -24431,11 +24490,23 @@ async function analyseSetup(ticker, options = {}){
           rejectionReason:'active_review_ticker_mismatch',
           completedAt:new Date().toISOString()
         });
+        if(!terminalChartAnalysisDiagnosticEmitted){
+          emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+            reason:'active_review_ticker_mismatch',
+            activeReviewTicker:currentActiveReviewTicker
+          });
+        }
         return;
       }
       if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
+        requestFinalizeReason = 'stale_apply_ignored';
         setScannerCardClickTrace(ticker, 'analyseSetup.stale_apply_ignored', `request=${analysisRequestId}`);
         console.warn('[review-analysis] stale_response_ignored', {ticker, requestId:analysisRequestId});
+        if(!terminalChartAnalysisDiagnosticEmitted){
+          emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+            reason:'stale_apply_ignored'
+          });
+        }
         return;
       }
       if(!data || !data.analysis || typeof data.analysis !== 'object'){
@@ -24672,6 +24743,7 @@ async function analyseSetup(ticker, options = {}){
         render:false,
         force:true
       });
+      requestFinalizeReason = 'analysis_completed';
       completeReviewAiAnalysis(ticker, analysisRequestId);
       logChartVerificationLifecycle('verification_completed', {
         reviewTicker:ticker,
@@ -24692,6 +24764,7 @@ async function analyseSetup(ticker, options = {}){
       const supersededAbort = (err && err.name === 'AbortError' && abortReason === 'superseded')
         || /superseded/i.test(String(err && err.message || ''));
       if(supersededAbort){
+        requestFinalizeReason = 'superseded_abort';
         setScannerCardClickTrace(ticker, 'analyseSetup.aborted', `superseded request=${analysisRequestId}`);
         if(typeof console !== 'undefined' && console.info){
           console.info('[QUICK_ANALYSIS_JOB_DROPPED]', {
@@ -24700,19 +24773,37 @@ async function analyseSetup(ticker, options = {}){
             reason:'superseded_abort'
           });
         }
+        if(!terminalChartAnalysisDiagnosticEmitted){
+          emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+            reason:'superseded_abort'
+          });
+        }
         return;
       }
       if(!uiState.analysisActiveRequest || uiState.analysisActiveRequest.id !== analysisRequestId){
+        requestFinalizeReason = 'stale_error_ignored';
         setScannerCardClickTrace(ticker, 'analyseSetup.stale_error_ignored', `request=${analysisRequestId}`);
         console.warn('[review-analysis] stale_response_ignored', {ticker, requestId:analysisRequestId, kind:'error'});
+        if(!terminalChartAnalysisDiagnosticEmitted){
+          emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+            reason:'stale_error_ignored'
+          });
+        }
         return;
       }
+      requestFinalizeReason = 'analysis_failed';
       setScannerCardClickTrace(ticker, 'analyseSetup.error', err && err.message ? err.message : 'unknown_error');
       console.error('[review-analysis] request_failed', {
         ticker,
         requestId:analysisRequestId,
         error:err && err.message ? err.message : String(err || 'unknown_error')
       });
+      if(!terminalChartAnalysisDiagnosticEmitted){
+        emitChartAnalysisTerminalDiagnostic('[CHART_VERIFICATION_FAILED]', {
+          reason:'analysis_failed',
+          error:err && err.message ? err.message : String(err || 'unknown_error')
+        });
+      }
       const baseMessage = err && err.name === 'AbortError'
         ? 'The analysis request timed out. Retry the setup.'
         : String(err.message || 'Analysis request failed.');
@@ -24791,6 +24882,18 @@ async function analyseSetup(ticker, options = {}){
     }else{
       setScannerCardClickTrace(ticker, 'analyseSetup.finally', `stale_request_preserved request=${analysisRequestId}`);
       console.debug('[review-analysis] request_finalized', {ticker, requestId:analysisRequestId, cleared:false});
+    }
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_ANALYSIS_REQUEST_FINALIZE_REASON]', {
+        ticker,
+        requestId:analysisRequestId,
+        source:analysisSource,
+        imageId:requestChartImageId,
+        reason:String(requestFinalizeReason || 'unknown'),
+        runtimeStatus:String(getReviewAiRuntime().status || ''),
+        activeRequestId:String(currentRequest && currentRequest.id || ''),
+        cleared:ownsActiveRequest
+      });
     }
     requestWatchlistRender({includeFocusQueue:true});
     renderCards();
