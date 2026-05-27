@@ -33419,6 +33419,86 @@ function renderReviewWorkspace(options = {}){
         }
       };
     }
+    const finalGuardVisibleFacts = chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.extractedFacts && typeof chartConsistencyTraceForDisplay.extractedFacts === 'object'
+      ? chartConsistencyTraceForDisplay.extractedFacts
+      : {};
+    const finalGuardVisibleTicker = String(finalGuardVisibleFacts.visible_ticker || '').trim();
+    const finalGuardVisibleTimeframe = String(finalGuardVisibleFacts.visible_timeframe || '').trim();
+    const finalGuardVisiblePrice = chartVerificationNumberOrNull(finalGuardVisibleFacts.visible_latest_price);
+    const finalGuardTrustedTicker = normalizeTicker(
+      record.ticker
+      || chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.trustedFacts && chartConsistencyTraceForDisplay.trustedFacts.ticker
+      || ''
+    );
+    const finalGuardFactsMissing = !finalGuardVisibleTicker
+      && !finalGuardVisibleTimeframe
+      && finalGuardVisiblePrice === null;
+    const activeRuntime = getReviewAiRuntime();
+    const activeRuntimeMatchesCurrentChart = !!(
+      activeRuntime
+      && activeRuntime.status === 'running'
+      && normalizeTicker(activeRuntime.ticker || '') === normalizeTicker(record.ticker || '')
+      && (!activeChartContext.requestId || !String(activeRuntime.requestId || '') || String(activeRuntime.requestId || '') === String(activeChartContext.requestId || ''))
+      && (!activeChartContext.imageId || !String(activeRuntime.chartImageId || '') || String(activeRuntime.chartImageId || '') === String(activeChartContext.imageId || ''))
+    );
+    const finalGuardShouldOverrideSourceChecking = !!(
+      hasVerifiableChart
+      && finalGuardTrustedTicker
+      && chartConsistencyTraceForDisplay
+      && String(chartConsistencyTraceForDisplay.status || '') === 'source_checking'
+      && finalGuardFactsMissing
+      && (
+        currentLifecycleFinalizeReason === 'blocked_unknown_chart_identity'
+        || (!['queued', 'running'].includes(String(quickChartAnalysisStatus || '')) && !activeRuntimeMatchesCurrentChart)
+      )
+    );
+    if(finalGuardShouldOverrideSourceChecking){
+      chartConsistencyTraceForDisplay = materializeTerminalBlockedChartTrace(chartConsistencyTraceForDisplay, {
+        status:'unknown_chart_identity',
+        reason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
+        expectedTicker:finalGuardTrustedTicker
+      }, {
+        ticker:finalGuardTrustedTicker,
+        imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
+        requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
+        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
+        source:'chart_render_terminal_guard'
+      });
+      commitTerminalChartVerificationTrace(record, chartConsistencyTraceForDisplay, {
+        imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
+        requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
+        chartImageSource:chartSourceTrace,
+        chartAssessorInput:chartAssessorRenderContext,
+        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
+        source:'chart_render_terminal_guard'
+      });
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[CHART_RENDER_TERMINAL_GUARD_PERSISTED]', {
+          ticker:record.ticker,
+          imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
+          requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
+          status:String(chartConsistencyTraceForDisplay.status || ''),
+          reason:String(chartConsistencyTraceForDisplay.reason || currentLifecycleFinalizeReason || ''),
+          source:String(chartConsistencyTraceForDisplay.source || 'chart_render_terminal_guard'),
+          finalized:chartConsistencyTraceForDisplay.finalized === true
+        });
+      }
+      const finalGuardStoredChartVerificationWrapper = (record.review.chartVerificationCommittedTrace && typeof record.review.chartVerificationCommittedTrace === 'object'
+        ? record.review.chartVerificationCommittedTrace
+        : null)
+        || (record.review.chartVerificationTrace && typeof record.review.chartVerificationTrace === 'object'
+          ? record.review.chartVerificationTrace
+          : null);
+      selectedChartTrace = selectReviewChartTraceForRender(
+        record,
+        finalGuardStoredChartVerificationWrapper,
+        chartConsistencyTrace,
+        quickChartAnalysisStatus,
+        chartAssessorRenderContext,
+        simplifiedState
+      );
+      chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTraceForDisplay;
+    }
     if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info && chartConsistencyTraceForDisplay.visible){
       console.info('[CHART_CONSISTENCY_TRACE]', {
         ticker:record.ticker,
