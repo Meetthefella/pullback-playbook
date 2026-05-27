@@ -50,7 +50,7 @@ function sleep(ms){
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function buildRequestBody(model, instructions, content){
+function buildRequestBody(model, instructions, content, maxOutputTokens = 1000){
   return {
     model,
     instructions,
@@ -60,8 +60,34 @@ function buildRequestBody(model, instructions, content){
         type: 'json_object'
       }
     },
-    max_output_tokens: 1000
+    max_output_tokens: maxOutputTokens
   };
+}
+
+function buildVerificationOnlyContent(payload = {}, chartRef = null){
+  const verificationContext = {
+    mode: 'chart_identity_verification',
+    review_ticker: normaliseString(payload?.ticker, ''),
+    chart_attached: payload?.chartAttached === true,
+    chart_file_name: normaliseString(payload?.chartFileName, ''),
+    image_dimensions: chartRef && typeof chartRef === 'object'
+      ? {
+        width: Number.isFinite(Number(chartRef.width)) ? Number(chartRef.width) : null,
+        height: Number.isFinite(Number(chartRef.height)) ? Number(chartRef.height) : null
+      }
+      : null
+  };
+  return [
+    {
+      type: 'input_text',
+      text: [
+        'Chart verification only.',
+        'Use the uploaded chart image as the primary source of truth.',
+        'Return only visible identity evidence as JSON.',
+        JSON.stringify(verificationContext, null, 2)
+      ].join('\n\n')
+    }
+  ];
 }
 
 async function sendOpenAiRequest(apiKey, requestBody){
@@ -276,14 +302,15 @@ exports.handler = async function handler(event){
   const payload = body.payload || {};
   const prompt = String(body.prompt || '').trim();
   const chartRef = body.chartRef || null;
+  const verificationOnly = body.verificationOnly === true;
 
-  if(!payload.ticker || !payload.marketStatus || !prompt){
+  if(!payload.ticker || !payload.marketStatus || (!verificationOnly && !prompt)){
     return jsonResponse(400, {
       error: 'Missing ticker, market status, or prompt.'
     });
   }
 
-  if(prompt.length > 12000){
+  if(!verificationOnly && prompt.length > 12000){
     return jsonResponse(400, {
       error: 'Prompt is too large for the serverless endpoint.'
     });
@@ -298,9 +325,11 @@ exports.handler = async function handler(event){
     'Do not include commentary before or after the JSON.'
   ].join('\n');
 
-  const content = [
-    { type: 'input_text', text: tightenedPrompt }
-  ];
+  const content = verificationOnly
+    ? buildVerificationOnlyContent(payload, chartRef)
+    : [
+      { type: 'input_text', text: tightenedPrompt }
+    ];
 
   if(chartRef && typeof chartRef.dataUrl === 'string' && /^data:image\/(png|jpeg);base64,/i.test(chartRef.dataUrl)){
     if(chartRef.dataUrl.length > MAX_CHART_DATA_URL_LENGTH){
@@ -324,24 +353,41 @@ exports.handler = async function handler(event){
     });
   }
 
-  const instructions = [
-    'Analyse a Quality Pullback chart as an observation-only chart coach.',
-    'Use plain English for a novice retail trader.',
-    'Be honest about uncertainty.',
-    'Do not invent chart details that are not provided.',
-    'Do not issue buy/sell advice.',
-    'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
-    'The deterministic app resolver will decide final state.',
-    'If a chart image is attached, extract visible facts only: visible ticker, timeframe, latest price, moving average values, visible price/date range, and confidence.',
-    'If numeric chart labels are visible but cannot be confidently assigned to latest price or a specific moving average, include them in visible_numeric_labels.',
-    'TradingView mobile/narrow screenshots may crop MA legend text or numeric labels. If an MA line is visible but its value is unreadable, report the line as visible and keep the numeric value null.',
-    'Do not fabricate MA values. Visibility can be partial/inferred; numeric values require readable text.',
-    'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',
-    'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
-    'Return exactly one JSON object.',
-    'Return evidence fields only; ai_observation_only must be true.',
-    'If a field is unknown, return null.'
-  ].join('\n');
+  const instructions = verificationOnly
+    ? [
+      'Verify chart identity only.',
+      'Do not perform setup analysis.',
+      'Do not generate coaching, entry, stop, target, or verdict content.',
+      'Extract visible facts only: visible ticker, timeframe, latest price, moving average values, visible price/date range, and extraction confidence.',
+      'If numeric chart labels are visible but cannot be confidently assigned to latest price or a specific moving average, include them in visible_numeric_labels.',
+      'TradingView mobile/narrow screenshots may crop MA legend text or numeric labels. If an MA line is visible but its value is unreadable, report the line as visible and keep the numeric value null.',
+      'Do not fabricate ticker, timeframe, price, or MA values.',
+      'Do not use trusted app context as a fallback for visible values.',
+      'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',
+      'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
+      'Return exactly one JSON object.',
+      'Return evidence fields only; ai_observation_only must be true.',
+      'Set coach_summary, plain_english_chart_read, constructive_evidence, risk_evidence, and what_needs_to_improve to empty values.',
+      'If a field is unknown, return null.'
+    ].join('\n')
+    : [
+      'Analyse a Quality Pullback chart as an observation-only chart coach.',
+      'Use plain English for a novice retail trader.',
+      'Be honest about uncertainty.',
+      'Do not invent chart details that are not provided.',
+      'Do not issue buy/sell advice.',
+      'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
+      'The deterministic app resolver will decide final state.',
+      'If a chart image is attached, extract visible facts only: visible ticker, timeframe, latest price, moving average values, visible price/date range, and confidence.',
+      'If numeric chart labels are visible but cannot be confidently assigned to latest price or a specific moving average, include them in visible_numeric_labels.',
+      'TradingView mobile/narrow screenshots may crop MA legend text or numeric labels. If an MA line is visible but its value is unreadable, report the line as visible and keep the numeric value null.',
+      'Do not fabricate MA values. Visibility can be partial/inferred; numeric values require readable text.',
+      'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',
+      'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
+      'Return exactly one JSON object.',
+      'Return evidence fields only; ai_observation_only must be true.',
+      'If a field is unknown, return null.'
+    ].join('\n');
 
   let upstream;
   let upstreamJson = {};
@@ -350,7 +396,7 @@ exports.handler = async function handler(event){
   try{
     ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
       apiKey,
-      buildRequestBody(model, instructions, activeContent)
+      buildRequestBody(model, instructions, activeContent, verificationOnly ? 600 : 1000)
     ));
   }catch(err){
     const message = err?.name === 'AbortError'
@@ -374,7 +420,7 @@ exports.handler = async function handler(event){
     try{
       ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
         apiKey,
-        buildRequestBody(model, instructions, activeContent)
+        buildRequestBody(model, instructions, activeContent, verificationOnly ? 600 : 1000)
       ));
     }catch(err){
       const message = err?.name === 'AbortError'
@@ -390,7 +436,7 @@ exports.handler = async function handler(event){
     try{
       ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
         apiKey,
-        buildRequestBody(model, instructions, activeContent)
+        buildRequestBody(model, instructions, activeContent, verificationOnly ? 600 : 1000)
       ));
     }catch(err){
       const message = err?.name === 'AbortError'

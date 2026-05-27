@@ -2481,15 +2481,33 @@ function runAiContractAssertions(){
     throw new Error('AI ingestion must quarantine legacy verdict-like fields as non-authoritative observation data.');
   }
   const verifiedStatusSource = extractFunctionSource(appSource, 'chartVerificationIsVerifiedStatus');
+  const allowsAiStatusSource = extractFunctionSource(appSource, 'chartVerificationAllowsAiAnalysisStatus');
   const explicitProvenanceSource = extractFunctionSource(appSource, 'chartVerificationHasExplicitRegionProvenance');
   const chartDecisionClassNameSource = extractFunctionSource(appSource, 'chartDecisionClassName');
+  const chartUiDecisionRenderSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   const panelStateSource = extractFunctionSource(appSource, 'chartVerificationPanelState');
-  const panelStateSandbox = {};
+  const panelStateSandbox = {
+    chartVerificationNumberOrNull(value){
+      if(value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    isDailyTimeframe(value){
+      return String(value || '').trim().toUpperCase() === '1D';
+    }
+  };
   vm.createContext(panelStateSandbox);
   vm.runInContext(verifiedStatusSource, panelStateSandbox, {filename:'app.js#chartVerificationIsVerifiedStatus'});
+  vm.runInContext(allowsAiStatusSource, panelStateSandbox, {filename:'app.js#chartVerificationAllowsAiAnalysisStatus'});
   vm.runInContext(explicitProvenanceSource, panelStateSandbox, {filename:'app.js#chartVerificationHasExplicitRegionProvenance'});
   vm.runInContext(chartDecisionClassNameSource, panelStateSandbox, {filename:'app.js#chartDecisionClassName'});
-  vm.runInContext('this.chartVerificationIsVerifiedStatus = chartVerificationIsVerifiedStatus; this.chartVerificationHasExplicitRegionProvenance = chartVerificationHasExplicitRegionProvenance;', panelStateSandbox);
+  vm.runInContext('this.chartVerificationIsVerifiedStatus = chartVerificationIsVerifiedStatus; this.chartVerificationAllowsAiAnalysisStatus = chartVerificationAllowsAiAnalysisStatus; this.chartVerificationHasExplicitRegionProvenance = chartVerificationHasExplicitRegionProvenance;', panelStateSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationSupportsNonBlockingIndicatorPartial'), panelStateSandbox, {filename:'app.js#chartVerificationSupportsNonBlockingIndicatorPartial'});
+  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationHasCoreIdentityMatch'), panelStateSandbox, {filename:'app.js#chartVerificationHasCoreIdentityMatch'});
+  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationHasPrimaryIndicatorSupport'), panelStateSandbox, {filename:'app.js#chartVerificationHasPrimaryIndicatorSupport'});
+  vm.runInContext(extractFunctionSource(appSource, 'getStrategyRelevantMaRequirement'), panelStateSandbox, {filename:'app.js#getStrategyRelevantMaRequirement'});
+  vm.runInContext(extractFunctionSource(appSource, 'normaliseVisibleTicker'), panelStateSandbox, {filename:'app.js#normaliseVisibleTicker'});
+  vm.runInContext(chartUiDecisionRenderSource, panelStateSandbox, {filename:'app.js#chartVerificationUiDecision'});
   vm.runInContext(panelStateSource, panelStateSandbox, {filename:'app.js#chartVerificationPanelState'});
   const verifiedPanel = panelStateSandbox.chartVerificationPanelState(
     {key:'verified_match', title:'Chart verified', summary:'AI confirms the match.'},
@@ -2520,6 +2538,22 @@ function runAiContractAssertions(){
   );
   if(untrustedPanel.panelVariant !== 'untrusted' || untrustedPanel.visibleTitle !== 'Chart verification incomplete'){
     throw new Error('Untrusted merged chart panels must not render as verified.');
+  }
+  if(panelStateSandbox.chartVerificationIsVerifiedStatus('consistent')
+    || panelStateSandbox.chartVerificationIsVerifiedStatus('partial_indicator_visibility')
+    || panelStateSandbox.chartVerificationIsVerifiedStatus('mostly_verified')){
+    throw new Error('Blocked chart-verification statuses must not be treated as verified by the shared UI helper.');
+  }
+  if(!panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('verified_match')
+    || !panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('likely_match')
+    || !panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('user_confirmed_match')
+    || panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('consistent')
+    || panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('partial_indicator_visibility')){
+    throw new Error('AI-analysis allowlist must stay narrower than general chart-review statuses.');
+  }
+  if(!chartUiDecisionRenderSource.includes("key:'partial_indicator_visibility'")
+    || !chartUiDecisionRenderSource.includes('AI analysis has been skipped until you confirm this chart manually.')){
+    throw new Error('Partial-indicator verification must stay blocked and explicitly require manual confirmation.');
   }
   const manualActionsSource = extractFunctionSource(appSource, 'chartVerificationShouldShowManualActions');
   if(!manualActionsSource.includes("manualEligibleStatuses")
@@ -2635,9 +2669,43 @@ function runAiContractAssertions(){
     throw new Error('Chart trace selection must block merged/post-AI traces while quick verification is still running.');
   }
   const queueQuickSource = extractFunctionSource(appSource, 'queueReviewQuickChartAnalysis');
+  const refreshTrackOnlySource = extractFunctionSource(appSource, 'refreshTrackOnly');
+  const chartVerificationGateDecisionSource = extractFunctionSource(appSource, 'chartVerificationGateDecision');
+  const chartVerificationAllowsAiAnalysisStatusSource = extractFunctionSource(appSource, 'chartVerificationAllowsAiAnalysisStatus');
+  const confirmReviewChartMatchesCurrentTickerSource = extractFunctionSource(appSource, 'confirmReviewChartMatchesCurrentTicker');
+  const analyseSetupGateSource = extractFunctionSource(appSource, 'analyseSetup');
   if(queueQuickSource.includes("review.quickChartAnalysis.status = 'running';")
     || !queueQuickSource.includes("analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});")){
     throw new Error('Bypass quick-analysis uploads must not create running quick state before a request id exists.');
+  }
+  if(!refreshTrackOnlySource.includes('clearTrackPatchNoChangeFlags();')
+    || !refreshTrackOnlySource.includes("console.info('[TrackPullRefresh]', {event:'riskRecalcSkipped', source, reason:'no_changed_inputs'});")
+    || !refreshTrackOnlySource.includes('startupCoordinator.trackNeedsFullRender = false;')){
+    throw new Error('No-change Track refreshes must clear stale dirty/full-render flags so Track refocus does not rerun unnecessarily.');
+  }
+  if(!chartVerificationAllowsAiAnalysisStatusSource.includes("['verified_match', 'likely_match', 'user_confirmed_match', 'manually_verified']")){
+    throw new Error('Chart verification must define a narrow allowlist before AI setup analysis can start.');
+  }
+  if(!chartVerificationGateDecisionSource.includes('mismatchReasons')
+    || !chartVerificationGateDecisionSource.includes('unreadableReasons')
+    || !chartVerificationGateDecisionSource.includes('allowed = chartVerificationAllowsAiAnalysisStatus(status)')){
+    throw new Error('Chart verification gate decisions must be driven by authoritative verification status plus structured mismatch context.');
+  }
+  if(!confirmReviewChartMatchesCurrentTickerSource.includes("status:'user_confirmed_match'")
+    || !confirmReviewChartMatchesCurrentTickerSource.includes("analyseSetup(symbol, {source:'manual_chart_confirm'}).catch(() => {});")){
+    throw new Error('Manual chart confirmation must promote the chart to user_confirmed_match and then start AI analysis explicitly.');
+  }
+  if(!analyseSetupGateSource.includes('verificationOnly:true')
+    || !analyseSetupGateSource.includes('[CHART_AI_ANALYSIS_BLOCKED]')
+    || !analyseSetupGateSource.includes('[CHART_AI_ANALYSIS_ALLOWED]')
+    || !analyseSetupGateSource.includes('chartVerificationGateDecision(')
+    || !analyseSetupGateSource.includes('if(!verificationGate.allowed)')
+    || !analyseSetupGateSource.includes('beginReviewAiAnalysis(ticker, prompt, {')){
+    throw new Error('Analyse setup must run a verification-only gate first and only begin full AI analysis after verification is allowed.');
+  }
+  if(analyseSetupGateSource.indexOf('let lastFailureData = null;') === -1
+    || analyseSetupGateSource.indexOf('let lastFailureData = null;') > analyseSetupGateSource.indexOf('if(analysisSource !== \'manual_chart_confirm\' && options.skipVerificationGate !== true)')){
+    throw new Error('Verification-only failure handling must declare lastFailureData before the gate branch can assign to it.');
   }
   const reviewWorkspaceSource = extractFunctionSource(appSource, 'renderReviewWorkspace');
   if(!handleWorkspaceTabChangeSource.includes("nextTab === 'review'")
@@ -2670,6 +2738,7 @@ function runAiContractAssertions(){
   const maybeLogIncompleteSource = extractFunctionSource(appSource, 'maybeLogQuickChartAnalysisContextIncomplete');
   const aiSummaryGuardSource = extractFunctionSource(appSource, 'chartAiSummaryRenderGuard');
   const analysisPanelSource = extractFunctionSource(appSource, 'renderAnalysisPanelFromRecord');
+  const savedAnalysisPanelSource = extractFunctionSource(appSource, 'renderAnalysisPanel');
   if(appAnalyseSetupSource.indexOf('[QUICK_CHART_ANALYSIS_COMMITTED]') === -1
     || appAnalyseSetupSource.indexOf('[AI_SUMMARY_READY]') === -1
     || !appAnalyseSetupSource.includes("const analysisSource = String(options.source || 'unknown');")
@@ -2694,6 +2763,9 @@ function runAiContractAssertions(){
   if(!appAnalyseSetupSource.includes('!isStrictChartIdentityProvenanceAnalysis(normalizedLiveAnalysis)')
     || !appAnalyseSetupSource.includes('normalizedLiveAnalysis.chartIdentityProvenanceVersion = 1')){
     throw new Error('Live analyseSetup results must upgrade any non-strict analysis into strict provenance mode before sanitization.');
+  }
+  if(/ai_supported_match[\s\S]+chartVerificationHasExplicitRegionProvenance/.test(savedAnalysisPanelSource)){
+    throw new Error('Saved-analysis Review rendering must not keep an ai_supported_match verified exception outside the hard gate allowlist.');
   }
   if(!appAnalyseSetupSource.includes("{caller:'analyse_setup_live'}")
     || !extractFunctionSource(appSource, 'buildChartConsistencyTrace').includes("{caller:'build_chart_consistency_trace'}")){
@@ -2946,7 +3018,7 @@ function runAiContractAssertions(){
   vm.runInContext(chartCoreIdentityMatchSource, chartSandbox, {filename:'app.js#chartVerificationHasCoreIdentityMatch'});
   vm.runInContext(chartPrimaryIndicatorSupportSource, chartSandbox, {filename:'app.js#chartVerificationHasPrimaryIndicatorSupport'});
   vm.runInContext(chartSupportsPartialSource, chartSandbox, {filename:'app.js#chartVerificationSupportsNonBlockingIndicatorPartial'});
-  vm.runInContext(chartUiDecisionSource, chartSandbox, {filename:'app.js#chartVerificationUiDecision'});
+  vm.runInContext(chartUiDecisionRenderSource, chartSandbox, {filename:'app.js#chartVerificationUiDecision'});
   vm.runInContext(explicitProvenanceFnSource, chartSandbox, {filename:'app.js#chartVerificationHasExplicitRegionProvenance'});
   vm.runInContext(chartDecisionClassNameSource, chartSandbox, {filename:'app.js#chartDecisionClassName'});
   vm.runInContext(chartFastPassSource, chartSandbox, {filename:'app.js#buildChartVerificationFastPass'});
@@ -3210,6 +3282,7 @@ function runAiContractAssertions(){
     'renderSuppressedAiAnalysisPanel',
     'renderChartConsistencyTrace',
     'chartVerificationIsVerifiedStatus',
+    'chartVerificationAllowsAiAnalysisStatus',
     'chartVerificationHasExplicitRegionProvenance',
     'chartVerificationShouldShowManualActions',
     'getReviewChartVerificationState',
@@ -4083,12 +4156,10 @@ function runAiContractAssertions(){
     throw new Error('Source-checking states must hide manual actions while extraction is still running.');
   }
   const userConfirmedDecision = evidenceSandbox.chartVerificationUiDecision({
-    status:'manually_verified',
-    manualConfirmed:true,
-    chartUserConfirmed:true
+    status:'user_confirmed_match'
   }, 'LIN');
-  if(userConfirmedDecision.key !== 'user_confirmed_match' || evidenceSandbox.chartVerificationShouldShowManualActions(userConfirmedDecision, {status:'manually_verified', manualConfirmed:true, chartUserConfirmed:true}, 'committed', true) !== false){
-    throw new Error('User-confirmed charts must hide confirm/reject controls.');
+  if(userConfirmedDecision.key !== 'user_confirmed_match' || evidenceSandbox.chartVerificationShouldShowManualActions(userConfirmedDecision, {status:'user_confirmed_match'}, 'committed', true) !== false){
+    throw new Error('user_confirmed_match must remain authoritative even when rebuilt without manual-confirm boolean flags.');
   }
   const aiSupportedWithRegionTrace = {
     ...aiSupportedMatchTrace,
@@ -4104,8 +4175,10 @@ function runAiContractAssertions(){
     }
   };
   const aiSupportedWithRegionDecision = evidenceSandbox.chartVerificationUiDecision(aiSupportedWithRegionTrace, 'MRNA');
-  if(aiSupportedWithRegionDecision.key !== 'verified_match'){
-    throw new Error('AI-supported matches with explicit chart-region provenance must remain acceptable.');
+  if(aiSupportedWithRegionDecision.key === 'verified_match'
+    || evidenceSandbox.chartVerificationIsVerifiedStatus(aiSupportedWithRegionDecision.key)
+    || evidenceSandbox.chartVerificationAllowsAiAnalysisStatus(aiSupportedWithRegionTrace.status)){
+    throw new Error('AI-supported matches outside the allowlist must not present as fully verified or analysis-eligible.');
   }
   const echoedWrongChartDecision = evidenceSandbox.chartVerificationUiDecision({
     ...aiSupportedMatchTrace,
@@ -4460,18 +4533,18 @@ function runAiContractAssertions(){
     throw new Error('200MA line visible but value missing must become a non-blocking partial-indicator verification state.');
   }
   if(!/Chart mostly verified/.test(partialIndicatorTrace.title) || !/Some indicators were not clearly readable/i.test(partialIndicatorTrace.summary || '')){
-    throw new Error('Partial MA visibility must use the non-blocking mostly-verified wording.');
+    throw new Error('Partial MA visibility must still surface the partial-indicator verification trace clearly.');
   }
   const partialIndicatorDecision = evidenceSandbox.chartVerificationUiDecision(partialIndicatorTrace, 'NVDA');
   if(partialIndicatorDecision.key !== 'partial_indicator_visibility'){
     throw new Error('Non-blocking partial-indicator traces must map to the partial_indicator_visibility UI decision.');
   }
-  if(evidenceSandbox.chartVerificationShouldShowManualActions(partialIndicatorDecision, partialIndicatorTrace, 'committed', true) !== false){
-    throw new Error('Partial indicator visibility must hide manual chart confirmation controls.');
+  if(evidenceSandbox.chartVerificationShouldShowManualActions(partialIndicatorDecision, partialIndicatorTrace, 'committed', true) !== true){
+    throw new Error('Partial indicator visibility must keep manual chart confirmation controls visible while AI analysis is blocked.');
   }
   const partialIndicatorMarkup = evidenceSandbox.renderChartConsistencyTrace(partialIndicatorTrace);
-  if(!/Chart mostly verified/i.test(partialIndicatorMarkup) || !/20 207\.25/.test(partialIndicatorMarkup) || !/50 191\.18/.test(partialIndicatorMarkup) || !/200 n\/a/.test(partialIndicatorMarkup) || !/200 185\.44/.test(partialIndicatorMarkup)){
-    throw new Error('Chart verification display values must be formatted to 2 decimals and null as n/a.');
+  if(!/Chart verification incomplete/i.test(partialIndicatorMarkup) || !/20 207\.25/.test(partialIndicatorMarkup) || !/50 191\.18/.test(partialIndicatorMarkup) || !/200 n\/a/.test(partialIndicatorMarkup) || !/200 185\.44/.test(partialIndicatorMarkup)){
+    throw new Error('Blocked partial-indicator chart verification must render as an incomplete warning while preserving chart values.');
   }
   if(!/Show details/.test(partialIndicatorMarkup) || !/Extracted:/.test(partialIndicatorMarkup) || !/Trusted:/.test(partialIndicatorMarkup)){
     throw new Error('Chart verification panel must show a compact user-facing summary with diagnostics behind details.');
@@ -4803,8 +4876,8 @@ function runAiContractAssertions(){
     throw new Error('Severe chart price mismatch must fast-exit as strong_mismatch without changing resolver state.');
   }
   const strongMismatchSummary = strongMismatchMarkup.split('<summary>Show details</summary>')[0] || strongMismatchMarkup;
-  if(!/Uploaded chart does not appear to match CTVA\./.test(strongMismatchSummary) || /Visible price 440\.56/.test(strongMismatchSummary)){
-    throw new Error('Strong mismatch default wording must be short and non-technical.');
+  if(!/Chart mismatch detected/.test(strongMismatchSummary) || !/AI analysis has been skipped because the uploaded chart does not appear to match the selected ticker\./.test(strongMismatchSummary)){
+    throw new Error('Strong mismatch UI must surface the explicit blocked-analysis mismatch copy.');
   }
   const strongMismatchSuppression = evidenceSandbox.chartVerificationAiSuppression(
     {ticker:'CTVA', marketData:{price:83.30, ma20:80.95, ma50:80.99, ma200:72.13}},
@@ -5063,8 +5136,15 @@ function runAiContractAssertions(){
     throw new Error('Unknown structure from AI fallback must not allow Entry/Near Entry promotion.');
   }
   const analyseSetupSource = fs.readFileSync(path.join(root, 'netlify/functions/analyse-setup.js'), 'utf8');
-  if(!/max_output_tokens:\s*(9\d\d|1\d{3,})/.test(analyseSetupSource)){
-    throw new Error('AI chart-coach endpoint must allow enough output tokens for the expanded evidence schema.');
+  if(!analyseSetupSource.includes('max_output_tokens: maxOutputTokens')
+    || !analyseSetupSource.includes('buildRequestBody(model, instructions, activeContent, verificationOnly ? 600 : 1000)')){
+    throw new Error('AI chart-coach endpoint must keep separate token budgets for verification-only and full-analysis requests.');
+  }
+  if(!analyseSetupSource.includes('buildVerificationOnlyContent(payload, chartRef)')
+    || !analyseSetupSource.includes('const content = verificationOnly')
+    || !analyseSetupSource.includes('Do not perform setup analysis.')
+    || !analyseSetupSource.includes('Do not generate coaching, entry, stop, target, or verdict content.')){
+    throw new Error('Verification-only backend requests must use a narrow chart-identity prompt path instead of the full setup-analysis prompt.');
   }
   if(/Entry, Near Entry, Watch, Monitor, Diminishing, Avoid, Buy, Sell, or Hold/.test(analyseSetupSource)){
     throw new Error('AI endpoint prompt must not prime explicit final app labels.');
