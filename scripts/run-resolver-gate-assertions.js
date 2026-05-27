@@ -2626,6 +2626,9 @@ function runAiContractAssertions(){
     throw new Error('Pending AI summaries must flush only for the same chart context and reject stale uploads.');
   }
   const chartTraceSelectorSource = extractFunctionSource(appSource, 'selectReviewChartTraceForRender');
+  const handleWorkspaceTabChangeSource = extractFunctionSource(appSource, 'handleWorkspaceTabChange');
+  const reconcileVisibleReviewStateSource = extractFunctionSource(appSource, 'reconcileVisibleReviewState');
+  const renderNeutralReviewPendingStateSource = extractFunctionSource(appSource, 'renderNeutralReviewPendingState');
   if(!chartTraceSelectorSource.includes('CHART_RENDER_BLOCKED_QUICK_RUNNING')
     || !chartTraceSelectorSource.includes('const mergedCandidatesAllowed = quickRunningForCurrentChart ? [] : mergedMatchingCandidates;')
     || !chartTraceSelectorSource.includes('inheritChartTraceRequestIdForCurrentContext(candidate.trace, currentChartContext')){
@@ -2637,10 +2640,24 @@ function runAiContractAssertions(){
     throw new Error('Bypass quick-analysis uploads must not create running quick state before a request id exists.');
   }
   const reviewWorkspaceSource = extractFunctionSource(appSource, 'renderReviewWorkspace');
+  if(!handleWorkspaceTabChangeSource.includes("nextTab === 'review'")
+    || !handleWorkspaceTabChangeSource.includes("reconcileVisibleReviewState({")
+    || !handleWorkspaceTabChangeSource.includes("source:'review_tab_activation'")){
+    throw new Error('Review tab activation must reconcile visible Review DOM before deferred Review rendering runs.');
+  }
+  if(!reconcileVisibleReviewStateSource.includes('[REVIEW_VISIBLE_STATE_CHECK]')
+    || !reconcileVisibleReviewStateSource.includes('[REVIEW_VISIBLE_STATE_VALID]')
+    || !renderNeutralReviewPendingStateSource.includes('[REVIEW_STALE_DOM_CLEARED]')
+    || !renderNeutralReviewPendingStateSource.includes('Preparing Review')
+    || !renderNeutralReviewPendingStateSource.includes('Waiting for latest setup data')){
+    throw new Error('Review visible-state reconciliation must clear stale Review DOM into a neutral pending state with diagnostics.');
+  }
   if(!reviewWorkspaceSource.includes('[CHART_CONTEXT_SNAPSHOT]')
     || !reviewWorkspaceSource.includes('[CHART_CONTEXT_MISMATCH]')
     || !reviewWorkspaceSource.includes("status:'unknown_chart_identity'")
-    || !reviewWorkspaceSource.includes('displayedImageId !== renderContextSnapshot.verificationImageId')){
+    || !reviewWorkspaceSource.includes('displayedImageId !== renderContextSnapshot.verificationImageId')
+    || !reviewWorkspaceSource.includes('box.dataset.renderedReviewTicker = normalizeTicker(record.ticker || \'\');')
+    || !reviewWorkspaceSource.includes('box.dataset.renderedReviewRequestToken = String(currentRenderedReviewRequestToken() || \'\');')){
     throw new Error('Review render must snapshot displayed-vs-verification chart context and refuse verified rendering on image mismatch.');
   }
   const appAnalyseSetupSource = extractFunctionSource(appSource, 'analyseSetup');

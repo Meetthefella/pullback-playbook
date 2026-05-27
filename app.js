@@ -1871,6 +1871,10 @@ function activeReviewTicker(){
 function setActiveReviewTicker(ticker){
   const symbol = normalizeTicker(ticker);
   uiState.activeReviewTicker = symbol;
+  if(normalizeTicker(uiState.lastResolvedReviewTicker || '') && normalizeTicker(uiState.lastResolvedReviewTicker || '') !== symbol){
+    uiState.lastResolvedReviewTicker = '';
+    uiState.lastResolvedReviewRequestToken = '';
+  }
   if($('selectedTicker')) $('selectedTicker').value = symbol;
   Object.values(state.tickerRecords || {}).forEach(record => {
     if(record && record.review) record.review.cardOpen = record.ticker === symbol;
@@ -1943,6 +1947,122 @@ function reviewTickerOwnershipTrace(source, details = {}){
     chartTicker,
     statusText
   });
+}
+
+function currentRenderedReviewRequestToken(){
+  const ticker = normalizeTicker(activeReviewTicker() || '');
+  const resolvedTicker = normalizeTicker(uiState.lastResolvedReviewTicker || '');
+  if(!ticker || !resolvedTicker || ticker !== resolvedTicker) return '';
+  return String(uiState.lastResolvedReviewRequestToken || '');
+}
+
+function reviewVisibleStateSnapshot(options = {}){
+  const box = $('reviewWorkspace');
+  const renderedTicker = normalizeTicker((box && box.dataset && box.dataset.renderedReviewTicker) || '');
+  const renderedRequestToken = String((box && box.dataset && box.dataset.renderedReviewRequestToken) || '');
+  const activeTicker = normalizeTicker(activeReviewTicker() || '');
+  const pending = uiState.pendingReviewRequest && typeof uiState.pendingReviewRequest === 'object'
+    ? uiState.pendingReviewRequest
+    : null;
+  const pendingTickerValue = normalizeTicker((pending && pending.ticker) || pendingReviewTicker() || '');
+  const requestToken = String((pending && pending.reviewRequestToken) || '');
+  const requestedTicker = normalizeTicker(options.requestedTicker || options.ticker || pendingTickerValue || activeTicker || '');
+  let reason = '';
+  let isStaleVisible = false;
+  if(!box){
+    reason = 'missing_review_workspace';
+  }else if(!renderedTicker){
+    reason = 'no_rendered_review_ticker';
+  }else if(requestedTicker && renderedTicker !== requestedTicker){
+    isStaleVisible = true;
+    reason = 'requested_ticker_mismatch';
+  }else if(activeTicker && renderedTicker !== activeTicker){
+    isStaleVisible = true;
+    reason = 'active_ticker_mismatch';
+  }else if(pendingTickerValue && renderedTicker !== pendingTickerValue){
+    isStaleVisible = true;
+    reason = 'pending_ticker_mismatch';
+  }else if(requestToken && renderedRequestToken && renderedRequestToken !== requestToken){
+    isStaleVisible = true;
+    reason = 'pending_request_token_mismatch';
+  }else if(requestToken && pendingTickerValue && renderedTicker === pendingTickerValue && renderedRequestToken !== requestToken){
+    isStaleVisible = true;
+    reason = 'pending_request_token_unrendered';
+  }else{
+    reason = renderedTicker ? 'current_visible_review_valid' : 'no_rendered_review_ticker';
+  }
+  return {
+    box,
+    activeTicker,
+    renderedTicker,
+    pendingTicker:pendingTickerValue,
+    requestedTicker,
+    requestToken,
+    renderedRequestToken,
+    isStaleVisible,
+    reason
+  };
+}
+
+function renderNeutralReviewPendingState(options = {}){
+  const snapshot = options.snapshot && typeof options.snapshot === 'object'
+    ? options.snapshot
+    : reviewVisibleStateSnapshot(options);
+  const box = snapshot.box || $('reviewWorkspace');
+  if(!box) return snapshot;
+  const pendingTickerValue = normalizeTicker(snapshot.requestedTicker || snapshot.pendingTicker || snapshot.activeTicker || '');
+  const requestToken = String(snapshot.requestToken || '');
+  box.className = 'list reviewworkspace-shell';
+  box.dataset.renderedReviewTicker = pendingTickerValue;
+  box.dataset.renderedReviewRequestToken = requestToken;
+  box.dataset.reviewPresentationState = 'review_pending';
+  box.dataset.reviewVisualSource = 'review_pending';
+  box.innerHTML = `<div class="summary">Preparing Review</div><div class="tiny">Waiting for latest setup data</div>`;
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_STALE_DOM_CLEARED]', {
+      activeTicker:snapshot.activeTicker || '',
+      renderedTicker:snapshot.renderedTicker || '',
+      pendingTicker:snapshot.pendingTicker || '',
+      requestToken,
+      renderedRequestToken:String(snapshot.renderedRequestToken || ''),
+      reason:String(options.reason || snapshot.reason || 'stale_visible_review')
+    });
+  }
+  return snapshot;
+}
+
+function reconcileVisibleReviewState(options = {}){
+  const snapshot = reviewVisibleStateSnapshot(options);
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_VISIBLE_STATE_CHECK]', {
+      activeTicker:snapshot.activeTicker || '',
+      renderedTicker:snapshot.renderedTicker || '',
+      pendingTicker:snapshot.pendingTicker || '',
+      requestToken:snapshot.requestToken || '',
+      renderedRequestToken:snapshot.renderedRequestToken || '',
+      isStaleVisible:snapshot.isStaleVisible === true,
+      reason:snapshot.reason || ''
+    });
+  }
+  if(snapshot.isStaleVisible){
+    renderNeutralReviewPendingState({
+      ...options,
+      snapshot,
+      reason:options.reason || snapshot.reason || 'stale_visible_review'
+    });
+    return snapshot;
+  }
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_VISIBLE_STATE_VALID]', {
+      activeTicker:snapshot.activeTicker || '',
+      renderedTicker:snapshot.renderedTicker || '',
+      pendingTicker:snapshot.pendingTicker || '',
+      requestToken:snapshot.requestToken || '',
+      renderedRequestToken:snapshot.renderedRequestToken || '',
+      reason:snapshot.reason || 'current_visible_review_valid'
+    });
+  }
+  return snapshot;
 }
 
 function clearPendingReviewRequest(options = {}){
@@ -6343,6 +6463,12 @@ function handleWorkspaceTabChange(tab){
       });
     }, {idle:false});
     return;
+  }else if(nextTab === 'review'){
+    reconcileVisibleReviewState({
+      source:'review_tab_activation',
+      reason:'review_tab_activation',
+      requestedTicker:pendingReviewTicker() || activeReviewTicker() || ''
+    });
   }else if(nextTab === 'diary'){
     if(startupCoordinator.renderedTabs.diary && startupCoordinator.diaryAnalyticsRendered) return;
   }else if(startupCoordinator.renderedTabs[nextTab]){
@@ -25316,6 +25442,8 @@ function loadTickerIntoReview(ticker, options = {}){
           });
         }
         setActiveReviewTicker(symbol);
+        uiState.lastResolvedReviewTicker = symbol;
+        uiState.lastResolvedReviewRequestToken = reviewRequestToken;
         const candidate = pendingReviewCandidate();
         clearPendingReviewRequest({
           reason:'completed',
@@ -30820,6 +30948,11 @@ function renderReviewWorkspace(options = {}){
     traceReviewRenderBailout('missing_review_workspace');
     return;
   }
+  reconcileVisibleReviewState({
+    source:'render_review_workspace',
+    reason:String(options.source || options.reason || 'render_review_workspace'),
+    requestedTicker:requestedTickerForRender || ''
+  });
   traceScrollEvent('review:render:before', {
     caller:'renderReviewWorkspace',
     reason:String(options.source || options.reason || 'direct'),
@@ -30854,6 +30987,12 @@ function renderReviewWorkspace(options = {}){
       reason:reviewRenderSource,
       ticker:requestedTicker || activeReviewTicker() || ''
     });
+  };
+  const applyReviewRenderedDomContext = (context = {}) => {
+    box.dataset.renderedReviewTicker = normalizeTicker(context.ticker || '');
+    box.dataset.renderedReviewRequestToken = String(context.reviewRequestToken || '');
+    if(context.presentationState !== undefined) box.dataset.reviewPresentationState = String(context.presentationState || '');
+    if(context.visualSource !== undefined) box.dataset.reviewVisualSource = String(context.visualSource || '');
   };
   box.className = 'list reviewworkspace-shell';
   box.innerHTML = '';
@@ -30905,6 +31044,12 @@ function renderReviewWorkspace(options = {}){
       reason,
       statusText
     });
+    applyReviewRenderedDomContext({
+      ticker:errorTicker,
+      reviewRequestToken:String((pendingLoadError && pendingLoadError.reviewRequestToken) || ''),
+      presentationState:'review_error',
+      visualSource:'review_error'
+    });
     box.innerHTML = `<div class="summary">Review could not load ${escapeHtml(errorTicker)}. Try again.</div><div class="tiny">${escapeHtml(errorMessage)}</div><div class="actions"><button class="secondary compactbutton" type="button" data-act="retry-review-load" data-ticker="${escapeHtml(errorTicker)}">Try again</button></div>`;
     finishReviewRenderLog();
   };
@@ -30948,6 +31093,8 @@ function renderReviewWorkspace(options = {}){
         });
       }
       setActiveReviewTicker(requestedTicker);
+      uiState.lastResolvedReviewTicker = requestedTicker;
+      uiState.lastResolvedReviewRequestToken = pendingToken;
       const promotedCandidate = pendingReviewCandidate();
       clearPendingReviewRequest({
         reason:'completed',
@@ -31018,6 +31165,12 @@ function renderReviewWorkspace(options = {}){
         statusText
       });
     }
+    applyReviewRenderedDomContext({
+      ticker:requestedTicker,
+      reviewRequestToken:String((uiState.pendingReviewRequest && uiState.pendingReviewRequest.reviewRequestToken) || ''),
+      presentationState:'review_pending',
+      visualSource:'review_pending'
+    });
     box.innerHTML = `<div class="summary">Review pending: ${escapeHtml(requestedTicker)}</div><div class="tiny">Waiting for the requested review record to finish loading.</div>`;
     finishReviewRenderLog();
     return;
@@ -31064,6 +31217,12 @@ function renderReviewWorkspace(options = {}){
         statusText
       });
     }
+    applyReviewRenderedDomContext({
+      ticker:pendingTicker,
+      reviewRequestToken:String((uiState.pendingReviewRequest && uiState.pendingReviewRequest.reviewRequestToken) || ''),
+      presentationState:'review_pending',
+      visualSource:'review_pending'
+    });
     box.innerHTML = `<div class="summary">Review pending: ${escapeHtml(pendingTicker)}</div><div class="tiny">Waiting for the requested review record to finish loading.</div>`;
     finishReviewRenderLog();
     return;
@@ -31074,6 +31233,12 @@ function renderReviewWorkspace(options = {}){
       traceReviewRenderBailout('no_active_ticker_resume_saved_reviews', {
         savedReviewRecordsCount:savedReviewRecords.length
       });
+      applyReviewRenderedDomContext({
+        ticker:'',
+        reviewRequestToken:'',
+        presentationState:'review_idle',
+        visualSource:'review_idle'
+      });
       box.innerHTML = `<div class="summary">Resume a saved review or open a ranked result.</div><div class="actions">${savedReviewRecords.map(record => `<button class="secondary compactbutton" type="button" data-act="resume-review" data-ticker="${escapeHtml(record.ticker)}">${escapeHtml(record.ticker)}</button>`).join('')}</div>${(state.tickers || []).length ? '<a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>' : '<a class="helperbutton" href="#dailyInput">Go To Scan List</a>'}`;
       box.querySelectorAll('[data-act="resume-review"]').forEach(button => {
         button.onclick = () => resumeSavedReviewTicker(button.getAttribute('data-ticker') || '');
@@ -31083,6 +31248,12 @@ function renderReviewWorkspace(options = {}){
     }
     traceReviewRenderBailout('no_active_ticker_empty_review_shell', {
       watchlistCount:(state.tickers || []).length
+    });
+    applyReviewRenderedDomContext({
+      ticker:'',
+      reviewRequestToken:'',
+      presentationState:'review_idle',
+      visualSource:'review_idle'
     });
     box.innerHTML = (state.tickers || []).length
       ? '<div class="summary">Open one ranked result to load it into the review workspace.</div><a class="helperbutton" href="#resultsSection">Go To Ranked Results</a>'
@@ -31115,11 +31286,23 @@ function renderReviewWorkspace(options = {}){
       currentReviewRecordTicker:liveRecord.ticker || '',
       statusText
     });
+    applyReviewRenderedDomContext({
+      ticker:ticker,
+      reviewRequestToken:String((uiState.pendingReviewRequest && uiState.pendingReviewRequest.reviewRequestToken) || currentRenderedReviewRequestToken() || ''),
+      presentationState:'review_pending',
+      visualSource:'review_pending'
+    });
     box.innerHTML = `<div class="summary">Review pending: ${escapeHtml(ticker)}</div><div class="tiny">Waiting for the requested review record to finish loading.</div>`;
     finishReviewRenderLog();
     return;
   }
   if(pendingLoadError && normalizeTicker(pendingLoadError.ticker || '') === ticker){
+    applyReviewRenderedDomContext({
+      ticker:ticker,
+      reviewRequestToken:String((pendingLoadError && pendingLoadError.reviewRequestToken) || ''),
+      presentationState:'review_error',
+      visualSource:'review_error'
+    });
     box.innerHTML = `<div class="summary">Review could not load ${escapeHtml(ticker)}. Try again.</div><div class="tiny">The requested review did not finish loading in time.</div><div class="actions"><button class="secondary compactbutton" type="button" data-act="retry-review-load" data-ticker="${escapeHtml(ticker)}">Try again</button></div>`;
     if(typeof console !== 'undefined' && console.info){
       console.info('[REVIEW_PENDING_WAIT]', {
@@ -32450,6 +32633,8 @@ function renderReviewWorkspace(options = {}){
   box.dataset.visualState = finalReviewVisualState || visualState.state || '';
   box.dataset.reviewPresentationState = effectiveReviewPresentationState || '';
   box.dataset.reviewVisualSource = reviewVisualStateSource;
+  box.dataset.renderedReviewTicker = normalizeTicker(record.ticker || '');
+  box.dataset.renderedReviewRequestToken = String(currentRenderedReviewRequestToken() || '');
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate({persist:false});
   });
