@@ -3982,6 +3982,7 @@ function clearReviewChartImageSources(review){
   review.chartVerificationLifecycle = null;
   review.chartVerificationContext = null;
   review.quickChartAnalysis = null;
+  review.chartAnalysisPipeline = null;
   review.chartAvailable = false;
 }
 
@@ -4043,6 +4044,470 @@ function currentReviewChartContext(record = {}, review = null){
     imageId,
     requestId
   };
+}
+
+function getReviewChartAnalysisPipeline(record = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : null;
+  if(!review || !review.chartAnalysisPipeline || typeof review.chartAnalysisPipeline !== 'object') return null;
+  return review.chartAnalysisPipeline;
+}
+
+function clearLegacyChartAnalysisState(review = {}){
+  const safe = review && typeof review === 'object' ? review : null;
+  if(!safe) return;
+  safe.chartVerificationTrace = null;
+  safe.chartVerificationCommittedTrace = null;
+  safe.chartVerificationLifecycle = null;
+  safe.chartVerificationContext = null;
+  safe.quickChartAnalysis = null;
+  safe.pendingChartAiSummary = null;
+  safe.rawChartFactExtraction = null;
+  safe.aiAnalysisRaw = '';
+  safe.normalizedAnalysis = null;
+}
+
+function buildChartPipelineExpectedFacts(record = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  return {
+    ticker:normalizeTicker(item.ticker || ''),
+    timeframe:'1D',
+    price:chartVerificationNumberOrNull((item.marketData && item.marketData.price) ?? item.price),
+    ma20:chartVerificationNumberOrNull(item.marketData && item.marketData.ma20),
+    ma50:chartVerificationNumberOrNull(item.marketData && item.marketData.ma50),
+    ma200:chartVerificationNumberOrNull(item.marketData && item.marketData.ma200)
+  };
+}
+
+function buildChartPipelineReadFacts(source = {}){
+  const safe = source && typeof source === 'object' ? source : {};
+  return {
+    ticker:normaliseVisibleTicker(safe.extractedTicker || safe.visible_ticker || ''),
+    timeframe:String(safe.extractedTimeframe || safe.visible_timeframe || '').trim(),
+    price:chartVerificationNumberOrNull(safe.extractedPrice ?? safe.visible_latest_price),
+    ma20:chartVerificationNumberOrNull(safe.extractedMa20 ?? safe.visible_ma20),
+    ma50:chartVerificationNumberOrNull(safe.extractedMa50 ?? safe.visible_ma50),
+    ma200:chartVerificationNumberOrNull(safe.extractedMa200 ?? safe.visible_ma200)
+  };
+}
+
+function chartPipelineHasAnyReadFacts(read = {}){
+  const safe = read && typeof read === 'object' ? read : {};
+  return !!(
+    String(safe.ticker || '').trim()
+    || String(safe.timeframe || '').trim()
+    || chartVerificationNumberOrNull(safe.price) !== null
+    || chartVerificationNumberOrNull(safe.ma20) !== null
+    || chartVerificationNumberOrNull(safe.ma50) !== null
+    || chartVerificationNumberOrNull(safe.ma200) !== null
+  );
+}
+
+function chartPipelineStatusFromPhase(phase = ''){
+  switch(String(phase || '').trim()){
+    case 'uploading':
+    case 'verifying':
+      return 'source_checking';
+    case 'verified':
+    case 'analysis_running':
+    case 'analysis_complete':
+      return 'verified_match';
+    case 'possible_mismatch':
+      return 'chart_mismatch';
+    case 'insufficient_identity':
+    case 'analysis_failed':
+      return 'manual_confirmation_required';
+    default:
+      return '';
+  }
+}
+
+function chartPipelineAllowsAi(phase = ''){
+  return ['verified', 'analysis_running', 'analysis_complete'].includes(String(phase || '').trim());
+}
+
+function buildChartPipelineFromVerification(record = {}, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const expected = buildChartPipelineExpectedFacts(item);
+  const read = buildChartPipelineReadFacts(options.chartAssessorInput || options.analysis || {});
+  const readTicker = normaliseVisibleTicker(read.ticker || '');
+  const expectedTicker = normaliseVisibleTicker(expected.ticker || '');
+  const tickerMismatch = !!(readTicker && expectedTicker && readTicker !== expectedTicker);
+  const verifiedMatch = !!(readTicker && expectedTicker && readTicker === expectedTicker);
+  const hasFacts = chartPipelineHasAnyReadFacts(read);
+  const phase = tickerMismatch
+    ? 'possible_mismatch'
+    : (verifiedMatch ? 'verified' : 'insufficient_identity');
+  const missing = [];
+  if(!read.ticker) missing.push('visible ticker');
+  if(!read.timeframe) missing.push('visible timeframe');
+  if(chartVerificationNumberOrNull(read.price) === null) missing.push('latest price');
+  const evidence = [];
+  if(phase === 'possible_mismatch'){
+    evidence.push(`Expected ${expectedTicker || 'ticker'} but read ${readTicker || 'n/a'}.`);
+    if(chartVerificationNumberOrNull(read.price) !== null){
+      evidence.push(`Read latest price ${chartVerificationDisplayValue(read.price)} from the chart image.`);
+    }
+  }else if(phase === 'verified'){
+    evidence.push(`Read ticker ${readTicker || expectedTicker} from the chart image.`);
+  }else if(!hasFacts){
+    evidence.push('Visible ticker, timeframe and price could not be verified from the chart image.');
+  }else{
+    if(!read.ticker) evidence.push('Visible ticker could not be verified from the chart image.');
+    if(!read.timeframe) evidence.push('Visible timeframe could not be verified from the chart image.');
+    if(chartVerificationNumberOrNull(read.price) === null) evidence.push('Visible price could not be verified from the chart image.');
+  }
+  return {
+    version:1,
+    ticker:expectedTicker,
+    imageId:String(options.imageId || ''),
+    requestId:String(options.requestId || ''),
+    source:String(options.source || 'chart_pipeline_quick_check'),
+    phase,
+    expectedFacts:expected,
+    readFacts:read,
+    missing,
+    evidence,
+    aiAllowed:chartPipelineAllowsAi(phase),
+    manualConfirmed:false,
+    verifiedMatch,
+    mismatch:tickerMismatch,
+    hasFacts,
+    chartAssessorInput:cloneData(options.chartAssessorInput || null, null),
+    chartImageSource:cloneData(options.chartImageSource || null, null),
+    updatedAt:new Date().toISOString()
+  };
+}
+
+function upsertReviewChartAnalysisPipeline(record = {}, nextPipeline = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  if(!item.review || typeof item.review !== 'object') item.review = {};
+  const existing = getReviewChartAnalysisPipeline(item) || {};
+  const merged = {
+    ...existing,
+    ...cloneData(nextPipeline, {}),
+    version:1
+  };
+  item.review.chartAnalysisPipeline = merged;
+  return merged;
+}
+
+function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  const expected = safe.expectedFacts && typeof safe.expectedFacts === 'object' ? safe.expectedFacts : buildChartPipelineExpectedFacts(item);
+  const read = safe.readFacts && typeof safe.readFacts === 'object' ? safe.readFacts : {};
+  const phase = String(safe.phase || '').trim();
+  const status = chartPipelineStatusFromPhase(phase);
+  const expectedTicker = normalizeTicker(item.ticker || expected.ticker || '');
+  const detailText = phase === 'possible_mismatch'
+    ? `AI analysis has been skipped because the uploaded chart does not appear to match ${expectedTicker || 'this review'}.`
+    : (phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete'
+      ? `Quick chart verification matched the uploaded chart to ${expectedTicker || 'the selected ticker'}.`
+      : `The app could not confirm this chart matches ${expectedTicker || 'the selected ticker'}.`);
+  return {
+    visible:true,
+    status,
+    renderedStatus:status,
+    mergedStatus:status,
+    title:phase === 'possible_mismatch' ? `Possible mismatch for ${expectedTicker || item.ticker || ''}` : 'Chart identity needs confirmation',
+    summary:detailText,
+    detail:detailText,
+    reviewTicker:expectedTicker,
+    ticker:expectedTicker,
+    requestId:String(safe.requestId || ''),
+    verificationRequestId:String(safe.requestId || ''),
+    imageId:String(safe.imageId || ''),
+    chartImageId:String(safe.imageId || ''),
+    extractedFacts:{
+      visible_ticker:String(read.ticker || ''),
+      visible_timeframe:String(read.timeframe || ''),
+      visible_latest_price:chartVerificationNumberOrNull(read.price),
+      visible_ma20:chartVerificationNumberOrNull(read.ma20),
+      visible_ma50:chartVerificationNumberOrNull(read.ma50),
+      visible_ma200:chartVerificationNumberOrNull(read.ma200)
+    },
+    trustedFacts:{
+      ticker:expectedTicker,
+      expected_timeframe:String(expected.timeframe || ''),
+      latest_price:chartVerificationNumberOrNull(expected.price),
+      ma20:chartVerificationNumberOrNull(expected.ma20),
+      ma50:chartVerificationNumberOrNull(expected.ma50),
+      ma200:chartVerificationNumberOrNull(expected.ma200)
+    },
+    missing:Array.isArray(safe.missing) ? safe.missing.slice() : [],
+    evidence:Array.isArray(safe.evidence) ? safe.evidence.slice() : [],
+    unreadableReasons:Array.isArray(safe.evidence) ? safe.evidence.slice() : [],
+    sources:[String(safe.source || 'chart_pipeline_quick_check')],
+    source:String(safe.source || 'chart_pipeline_quick_check'),
+    chartImageSource:cloneData(safe.chartImageSource || buildChartImageSourceTrace(item.review || {}), null),
+    aiAnalysisSuppressed:!chartPipelineAllowsAi(phase),
+    suppressionReason:chartPipelineAllowsAi(phase) ? '' : detailText,
+    chartUserConfirmed:safe.manualConfirmed === true,
+    manualConfirmed:safe.manualConfirmed === true,
+    finalized:phase !== 'verifying' && phase !== 'uploading'
+  };
+}
+
+function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
+  const trace = buildSimplifiedChartPipelineTrace(record, pipeline);
+  const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  const phase = String(safe.phase || '').trim();
+  const expectedTicker = normalizeTicker(record && record.ticker || trace.ticker || '');
+  if(phase === 'verifying' || phase === 'uploading'){
+    return {
+      key:'source_checking',
+      title:'Chart uploaded - checking details',
+      summary:'Quick chart verification is running.',
+      detail:'',
+      visible:true,
+      trace
+    };
+  }
+  if(phase === 'possible_mismatch'){
+    return {
+      key:'chart_mismatch',
+      title:`Possible mismatch for ${expectedTicker || 'chart upload'}`,
+      summary:`Expected ${expectedTicker || 'n/a'} ${chartVerificationDisplayValue(trace.trustedFacts && trace.trustedFacts.latest_price)} | Read ${trace.extractedFacts && trace.extractedFacts.visible_ticker || 'n/a'} ${chartVerificationDisplayValue(trace.extractedFacts && trace.extractedFacts.visible_latest_price)}`,
+      detail:'AI analysis has been skipped because the uploaded chart does not appear to match this review.',
+      visible:true,
+      trace
+    };
+  }
+  if(chartPipelineAllowsAi(phase)){
+    return {
+      key:safe.manualConfirmed === true ? 'user_confirmed_match' : 'verified_match',
+      title:`Chart matched ${expectedTicker || 'selected ticker'}`,
+      summary:phase === 'analysis_complete' ? 'Chart verified and AI analysis is available.' : 'Chart verified. AI analysis is running.',
+      detail:'',
+      visible:true,
+      trace
+    };
+  }
+  return {
+    key:'manual_confirmation_required',
+    title:'Chart identity needs confirmation',
+    summary:`The app could not confirm this chart matches ${expectedTicker || 'the selected ticker'}.`,
+    detail:'',
+    visible:true,
+    trace
+  };
+}
+
+function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
+  const decision = buildSimplifiedChartPipelineDecision(record, pipeline);
+  const trace = decision.trace;
+  const detailsOpen = !!(uiState.reviewChartDetailsOpen && uiState.reviewChartDetailsOpen[normalizeTicker(record && record.ticker || '')]);
+  const detailsOpenAttr = detailsOpen ? ' open' : '';
+  const facts = trace.extractedFacts || {};
+  const trusted = trace.trustedFacts || {};
+  const evidenceLine = Array.isArray(trace.evidence) && trace.evidence.length
+    ? `<div class="tiny badtext">${escapeHtml(`Evidence: ${trace.evidence.join(' | ')}`)}</div>`
+    : '';
+  const missingLine = Array.isArray(trace.missing) && trace.missing.length
+    ? `<div class="tiny">Missing context: ${escapeHtml(trace.missing.join(', '))}</div>`
+    : '';
+  const extracted = `<div class="tiny">Extracted: ticker ${escapeHtml(facts.visible_ticker || 'n/a')} | timeframe ${escapeHtml(facts.visible_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(facts.visible_latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>`;
+  const trustedFacts = `<div class="tiny">Trusted: ticker ${escapeHtml(trusted.ticker || 'n/a')} | timeframe ${escapeHtml(trusted.expected_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(trusted.latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(trusted.ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(trusted.ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(trusted.ma200))}</div>`;
+  const imageSource = trace.chartImageSource && typeof trace.chartImageSource === 'object'
+    ? `<div class="tiny">Image source: ${escapeHtml(trace.chartImageSource.sourceKind || 'unknown')} | original ${escapeHtml(trace.chartImageSource.originalDimensions || 'unknown')} | preview ${escapeHtml(trace.chartImageSource.previewDimensions || 'unknown')} | verification ${escapeHtml(trace.chartImageSource.verificationSourceDimensions || 'unknown')}</div>`
+    : '';
+  const extraEvidence = Array.isArray(trace.evidence) && trace.evidence.length
+    ? trace.evidence.map(item => `<div class="tiny">${escapeHtml(item)}</div>`).join('')
+    : '';
+  const sources = `<div class="tiny">Sources: ${escapeHtml((trace.sources || []).join(', ') || 'chart_pipeline_quick_check')}</div>`;
+  const details = `${missingLine}${extracted}${trustedFacts}${imageSource}${extraEvidence}${sources}`;
+  return {
+    decision,
+    trace,
+    markup:`<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>${escapeHtml(decision.title || 'Chart verification')}</strong><div>${escapeHtml(decision.summary || '')}</div><div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([facts.visible_ticker || 'n/a', facts.visible_timeframe || 'n/a', chartVerificationDisplayValue(facts.visible_latest_price)].join(' | '))} <strong>Expected:</strong> ${escapeHtml([trusted.ticker || 'n/a', trusted.expected_timeframe || 'n/a', chartVerificationDisplayValue(trusted.latest_price)].join(' | '))}</div><div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>${evidenceLine}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`,
+    manualActionsMarkup:['possible_mismatch', 'insufficient_identity'].includes(String(pipeline && pipeline.phase || '').trim())
+      ? `<div class="actions chart-verification-actions" style="margin-top:8px">
+          <button class="primary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record && record.ticker || '')}</button>
+          <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">Reject and upload another chart</button>
+        </div>`
+      : ''
+  };
+}
+
+async function runSimplifiedChartAnalysis(record = {}, options = {}){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item || !item.review) return null;
+  const ticker = normalizeTicker(item.ticker || '');
+  const imageId = String(chartImageIdForReview(item.review || {}) || '');
+  if(!ticker || !imageId) return null;
+  const existing = getReviewChartAnalysisPipeline(item) || {};
+  const requestId = String(options.requestId || existing.requestId || nextReviewAiAnalysisRequestId());
+  const source = String(options.source || 'chart_upload');
+  const chartImageSource = buildChartImageSourceTrace(item.review || {});
+  const card = tickerRecordToLegacyCard(item);
+  if(options.phase){
+    upsertReviewChartAnalysisPipeline(item, {
+      imageId,
+      requestId,
+      source,
+      phase:String(options.phase || 'verifying'),
+      expectedFacts:buildChartPipelineExpectedFacts(item),
+      readFacts:existing.readFacts || {},
+      evidence:Array.isArray(existing.evidence) ? existing.evidence.slice() : [],
+      missing:Array.isArray(existing.missing) ? existing.missing.slice() : ['visible ticker', 'visible timeframe', 'latest price'],
+      aiAllowed:false,
+      manualConfirmed:existing.manualConfirmed === true,
+      chartImageSource,
+      updatedAt:new Date().toISOString()
+    });
+    commitTickerState();
+    renderReviewWorkspace({source:'chart_pipeline_phase', requestedTicker:ticker});
+  }
+  const endpoints = analysisEndpoints();
+  if(!endpoints.length){
+    upsertReviewChartAnalysisPipeline(item, {
+      imageId,
+      requestId,
+      source,
+      phase:'insufficient_identity',
+      expectedFacts:buildChartPipelineExpectedFacts(item),
+      readFacts:{},
+      missing:['visible ticker', 'visible timeframe', 'latest price'],
+      evidence:['AI analysis endpoint is not configured.'],
+      aiAllowed:false,
+      chartImageSource,
+      updatedAt:new Date().toISOString()
+    });
+    commitTickerState();
+    renderReviewWorkspace({source:'chart_pipeline_no_endpoint', requestedTicker:ticker});
+    return getReviewChartAnalysisPipeline(item);
+  }
+  const chartPayload = chartImageForAnalysis(item.review || {});
+  if(!chartPayload.chartRef){
+    return null;
+  }
+  const previousTickerState = normalizeCard(card);
+  const result = await analysisService.requestAnalysisFromEndpoints({
+    endpoints,
+    timeoutMs:ANALYSIS_TIMEOUT_MS,
+    buildRequestBody:() => ({
+      payload:buildVerificationOnlyPayload(card),
+      prompt:buildVerificationOnlyPrompt(card),
+      chartRef:chartPayload.chartRef,
+      verificationOnly:true
+    }),
+    buildErrorMessage:(status, data, fallback) => buildAnalysisErrorMessage(status, data, fallback)
+  });
+  const currentImageId = String(chartImageIdForReview(item.review || {}) || '');
+  if(currentImageId !== imageId){
+    return null;
+  }
+  if(result.status !== 'ok'){
+    upsertReviewChartAnalysisPipeline(item, {
+      imageId,
+      requestId,
+      source,
+      phase:'insufficient_identity',
+      expectedFacts:buildChartPipelineExpectedFacts(item),
+      readFacts:{},
+      missing:['visible ticker', 'visible timeframe', 'latest price'],
+      evidence:[String(result.errorMessage || 'Chart verification failed.')],
+      aiAllowed:false,
+      chartImageSource,
+      updatedAt:new Date().toISOString()
+    });
+    commitTickerState();
+    renderReviewWorkspace({source:'chart_pipeline_verify_failed', requestedTicker:ticker});
+    return getReviewChartAnalysisPipeline(item);
+  }
+  const data = result.data && typeof result.data === 'object' ? result.data : {};
+  const normalized = normalizeAnalysisResult(data.analysis && typeof data.analysis === 'object' ? data.analysis : {}, previousTickerState);
+  const sanitized = sanitizeChartAssessorVisibleIdentity(
+    item,
+    normalized,
+    chartImageSource,
+    requestId,
+    {caller:'chart_pipeline_quick'}
+  );
+  const chartAssessorInput = buildChartAssessorInput(item, sanitized, chartImageSource, requestId);
+  item.review.chartVerificationContext = cloneData(chartAssessorInput, null);
+  item.review.rawChartFactExtraction = cloneData({
+    ticker,
+    imageId,
+    requestId,
+    source:'chart_pipeline_quick',
+    rawExtractedFacts:{
+      visible_ticker:String((data.analysis && data.analysis.visible_ticker) || ''),
+      visible_timeframe:String((data.analysis && data.analysis.visible_timeframe) || ''),
+      visible_latest_price:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_latest_price),
+      visible_ma20:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma20),
+      visible_ma50:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma50),
+      visible_ma200:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma200)
+    }
+  }, null);
+  const nextPipeline = buildChartPipelineFromVerification(item, {
+    imageId,
+    requestId,
+    source:'chart_pipeline_quick_check',
+    analysis:sanitized,
+    chartAssessorInput,
+    chartImageSource
+  });
+  upsertReviewChartAnalysisPipeline(item, nextPipeline);
+  commitTickerState();
+  renderReviewWorkspace({source:'chart_pipeline_verified', requestedTicker:ticker});
+  if(nextPipeline.phase === 'verified'){
+    runSimplifiedChartFullAnalysis(item, {
+      source:'chart_pipeline_auto',
+      requestId,
+      manualConfirmed:false
+    }).catch(() => {});
+  }
+  return getReviewChartAnalysisPipeline(item);
+}
+
+async function runSimplifiedChartFullAnalysis(record = {}, options = {}){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item || !item.review) return false;
+  const ticker = normalizeTicker(item.ticker || '');
+  const pipeline = getReviewChartAnalysisPipeline(item);
+  if(!ticker || !pipeline) return false;
+  const imageId = String(chartImageIdForReview(item.review || {}) || '');
+  upsertReviewChartAnalysisPipeline(item, {
+    ...pipeline,
+    imageId,
+    requestId:String(options.requestId || pipeline.requestId || ''),
+    phase:'analysis_running',
+    aiAllowed:true,
+    manualConfirmed:options.manualConfirmed === true || pipeline.manualConfirmed === true,
+    source:String(options.source || pipeline.source || 'chart_pipeline_auto'),
+    updatedAt:new Date().toISOString()
+  });
+  commitTickerState();
+  renderReviewWorkspace({source:'chart_pipeline_analysis_running', requestedTicker:ticker});
+  try{
+    await analyseSetup(ticker, {
+      source:String(options.source || 'chart_pipeline_auto'),
+      skipVerificationGate:true,
+      requestId:String(options.requestId || pipeline.requestId || '')
+    });
+    const liveRecord = getTickerRecord(ticker) || item;
+    const analysisState = getReviewAnalysisState(liveRecord);
+    upsertReviewChartAnalysisPipeline(liveRecord, {
+      phase:analysisState && analysisState.normalizedAnalysis ? 'analysis_complete' : 'verified',
+      aiAllowed:true,
+      updatedAt:new Date().toISOString()
+    });
+    commitTickerState();
+    renderReviewWorkspace({source:'chart_pipeline_analysis_complete', requestedTicker:ticker});
+    return true;
+  }catch(error){
+    upsertReviewChartAnalysisPipeline(item, {
+      phase:'analysis_failed',
+      aiAllowed:false,
+      evidence:[String(error && error.message || 'AI analysis failed.')],
+      updatedAt:new Date().toISOString()
+    });
+    commitTickerState();
+    renderReviewWorkspace({source:'chart_pipeline_analysis_failed', requestedTicker:ticker});
+    return false;
+  }
 }
 
 function maybeLogQuickChartAnalysisContextIncomplete(record, state = null, source = ''){
@@ -4524,21 +4989,27 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
   if(!symbol) return false;
   const record = getTickerRecord(symbol);
   if(!record || !record.review) return false;
-  const currentState = getReviewChartVerificationState(record);
-  if(!currentState) return false;
-  const currentTrace = currentState.trace && typeof currentState.trace === 'object'
-    ? currentState.trace
-    : currentState;
   const currentImageId = chartImageIdForReview(record.review || {});
   if(!currentImageId) return false;
-  const currentRequestId = String(
-    currentTrace && (currentTrace.requestId || currentTrace.verificationRequestId)
-    || currentState && (currentState.requestId || currentState.verificationRequestId)
-    || currentReviewChartContext(record, record.review || {}).requestId
-    || ''
-  );
+  const currentPipeline = getReviewChartAnalysisPipeline(record) || {};
+  const currentRequestId = String(currentPipeline.requestId || nextReviewAiAnalysisRequestId());
+  upsertReviewChartAnalysisPipeline(record, {
+    ...currentPipeline,
+    ticker:symbol,
+    imageId:currentImageId,
+    requestId:currentRequestId,
+    phase:'analysis_running',
+    aiAllowed:true,
+    manualConfirmed:true,
+    expectedFacts:currentPipeline.expectedFacts || buildChartPipelineExpectedFacts(record),
+    readFacts:currentPipeline.readFacts || {},
+    source:'chart_pipeline_manual_confirm',
+    updatedAt:new Date().toISOString()
+  });
   record.review.chartVerificationTrace = cloneData({
-    ...currentState,
+    ...(record.review.chartVerificationTrace && typeof record.review.chartVerificationTrace === 'object'
+      ? (record.review.chartVerificationTrace.trace || record.review.chartVerificationTrace)
+      : {}),
     manualConfirmed:true,
     chartUserConfirmed:true,
     status:'user_confirmed_match',
@@ -4546,6 +5017,8 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
     renderedStatus:'user_confirmed_match',
     requestId:currentRequestId,
     verificationRequestId:currentRequestId,
+    imageId:currentImageId,
+    chartImageId:currentImageId,
     aiAnalysisSuppressed:false,
     suppressionReason:'',
     manualConfirmedAt:new Date().toISOString(),
@@ -4554,25 +5027,6 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
     manualConfirmedBy:'user'
   }, null);
   record.review.chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);
-  record.review.chartVerificationLifecycle = {
-    ...(record.review.chartVerificationLifecycle || {}),
-    phase:'user_confirmed_match',
-    ticker:symbol,
-    reviewTicker:symbol,
-    chartImageId:currentImageId,
-    imageId:currentImageId,
-    requestId:currentRequestId,
-    updatedAt:new Date().toISOString()
-  };
-  if(record.review.quickChartAnalysis && typeof record.review.quickChartAnalysis === 'object'){
-    record.review.quickChartAnalysis = {
-      ...record.review.quickChartAnalysis,
-      manualConfirmed:true,
-      chartUserConfirmed:true,
-      status:'committed',
-      updatedAt:new Date().toISOString()
-    };
-  }
   commitTickerState();
   renderReviewWorkspace({source:'manual_chart_confirm'});
   renderCards();
@@ -4586,6 +5040,7 @@ function rejectReviewChartAndUploadAnother(ticker){
   const record = getTickerRecord(symbol);
   if(!record || !record.review) return false;
   clearReviewChartImageSources(record.review);
+  clearLegacyChartAnalysisState(record.review);
   commitTickerState();
   renderReviewWorkspace({source:'reject_chart_upload'});
   const fileInput = $('reviewChartFile');
@@ -29169,6 +29624,22 @@ async function refreshWatchlistTicker(ticker){
 function analyseActiveReviewTicker(){
   const ticker = activeReviewTicker();
   const record = ticker ? getTickerRecord(ticker) : null;
+  const pipeline = record ? getReviewChartAnalysisPipeline(record) : null;
+  if(record && pipeline){
+    const phase = String(pipeline.phase || '').trim();
+    if(['possible_mismatch', 'insufficient_identity'].includes(phase)){
+      setStatus('reviewWorkspaceStatus', '<span class="warntext">Confirm the uploaded chart or replace it before running AI analysis.</span>');
+      renderReviewWorkspace({source:'analyse_setup_blocked_by_chart_pipeline', requestedTicker:ticker});
+      return;
+    }
+    if(chartPipelineAllowsAi(phase) || phase === 'analysis_failed'){
+      runSimplifiedChartFullAnalysis(record, {
+        source:'manual_button',
+        requestId:String(pipeline.requestId || '')
+      }).catch(() => {});
+      return;
+    }
+  }
   if(record && record.review && record.review.chartAvailable){
     const verificationState = getReviewChartVerificationState(record);
     const trace = verificationState && typeof verificationState === 'object'
@@ -34293,6 +34764,11 @@ function renderReviewWorkspace(options = {}){
   const displayedChartContext = reviewDisplayedChartContext(record.review || {});
   const activeChartContext = currentReviewChartContext(record, record.review || {});
   const hasVerifiableChart = chartSourceTrace.originalAvailable === true;
+  const simplifiedChartPipeline = hasVerifiableChart ? getReviewChartAnalysisPipeline(record) : null;
+  const simplifiedChartPipelineActive = !!(
+    simplifiedChartPipeline
+    && String(simplifiedChartPipeline.imageId || '') === String(chartImageIdForReview(record.review || {}) || '')
+  );
   const storedChartVerificationWrapper = hasVerifiableChart && record.review
     ? (
       (record.review.chartVerificationCommittedTrace && typeof record.review.chartVerificationCommittedTrace === 'object'
@@ -34304,12 +34780,24 @@ function renderReviewWorkspace(options = {}){
     )
     : null;
   const storedChartVerificationState = hasVerifiableChart ? getReviewChartVerificationState(record) : null;
-  const quickChartAnalysisState = hasVerifiableChart ? queueReviewQuickChartAnalysis(record, {
-    source:reviewRenderSource,
-    renderPass:reviewRenderPass,
-    analysisState,
-    storedChartVerificationState
-  }) : {status:'idle', hasChart:false, needsQuickAnalysis:false};
+  const quickChartAnalysisState = hasVerifiableChart
+    ? (
+      simplifiedChartPipelineActive
+        ? {
+          status:String(simplifiedChartPipeline.phase || 'idle'),
+          hasChart:true,
+          needsQuickAnalysis:false,
+          key:String(simplifiedChartPipeline.imageId || ''),
+          stored:simplifiedChartPipeline
+        }
+        : queueReviewQuickChartAnalysis(record, {
+          source:reviewRenderSource,
+          renderPass:reviewRenderPass,
+          analysisState,
+          storedChartVerificationState
+        })
+    )
+    : {status:'idle', hasChart:false, needsQuickAnalysis:false};
   const quickChartAnalysisStatus = String(quickChartAnalysisState && quickChartAnalysisState.status || '');
   const effectiveQuickChartAnalysisStatus = effectiveQuickChartAnalysisStatusForRender(
     record,
@@ -34328,6 +34816,13 @@ function renderReviewWorkspace(options = {}){
   let chartConsistencyTraceMarkup = '';
   let chartManualActionsMarkup = '';
   if(hasVerifiableChart){
+    if(simplifiedChartPipelineActive){
+      const pipelinePresentation = renderSimplifiedChartPipelineMarkup(record, simplifiedChartPipeline);
+      chartConsistencyTraceForDisplay = pipelinePresentation.trace;
+      chartUiDecision = pipelinePresentation.decision;
+      chartConsistencyTraceMarkup = pipelinePresentation.markup;
+      chartManualActionsMarkup = pipelinePresentation.manualActionsMarkup;
+    }else{
     const storedChartConsistencyTrace = storedChartVerificationState && storedChartVerificationState.trace
       ? storedChartVerificationState.trace
       : null;
@@ -34771,6 +35266,7 @@ function renderReviewWorkspace(options = {}){
         reviewObjectId:reviewObjectIdentityId(record.review)
       });
     }
+    }
   }else{
     if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
       console.info('[REVIEW_CHART_VERIFICATION_RENDER]', {
@@ -34839,7 +35335,12 @@ function renderReviewWorkspace(options = {}){
   );
   const aiSuppressionText = String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.suppressionReason || '')
     || 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
-  const aiSummaryGuard = chartAiSummaryRenderGuard(record, analysisState, chartConsistencyTraceForDisplay);
+  const aiSummaryGuard = simplifiedChartPipelineActive
+    ? {
+      allowedToRender:chartPipelineAllowsAi(String(simplifiedChartPipeline.phase || '')) && !!(analysisState && (analysisState.normalizedAnalysis || analysisState.rawAnalysis)),
+      reason:chartPipelineAllowsAi(String(simplifiedChartPipeline.phase || '')) ? '' : String(simplifiedChartPipeline.phase || 'chart_pipeline_blocked')
+    }
+    : chartAiSummaryRenderGuard(record, analysisState, chartConsistencyTraceForDisplay);
   const previewRef = (record.review.chartImagePreview && record.review.chartImagePreview.dataUrl)
     ? record.review.chartImagePreview
     : record.review.chartRef;
@@ -34881,6 +35382,10 @@ function renderReviewWorkspace(options = {}){
   if(chartVerificationBlocksAiReview && !loading && !analysisBusy){
     analyseDisabled = true;
     analyseLabel = 'Confirm chart first';
+  }
+  if(simplifiedChartPipelineActive && ['verifying', 'uploading', 'analysis_running'].includes(String(simplifiedChartPipeline.phase || ''))){
+    analyseDisabled = true;
+    analyseLabel = String(simplifiedChartPipeline.phase || '') === 'analysis_running' ? 'Analysing...' : 'Checking chart...';
   }
   syncAdvancedDebugVisibilityClass();
   const advancedDebugVisible = isAdvancedDebugVisible();
@@ -35249,15 +35754,8 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
         activeRequest.controller.abort('chart_replaced');
       }catch(_error){}
     }
-    record.review.chartVerificationTrace = null;
-    record.review.chartVerificationCommittedTrace = null;
-    record.review.chartVerificationLifecycle = null;
-    record.review.chartVerificationContext = null;
-    record.review.quickChartAnalysis = null;
-    record.review.pendingChartAiSummary = null;
-    record.review.rawChartFactExtraction = null;
-    record.review.aiAnalysisRaw = '';
-    record.review.normalizedAnalysis = null;
+    clearLegacyChartAnalysisState(record.review);
+    record.review.chartAnalysisPipeline = null;
     record.review.cardOpen = true;
     const attachmentRequestId = String(matchingActiveRequest && matchingActiveRequest.id || '');
     record.review.chartAttachmentContext = {
@@ -35323,6 +35821,31 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
     };
     record.review.chartAvailable = true;
     record.review.importedFromScreenshot = true;
+    const preAiVerificationRequestId = nextReviewAiAnalysisRequestId();
+    if(record.review.chartAttachmentContext) record.review.chartAttachmentContext.requestId = preAiVerificationRequestId;
+    if(record.review.chartRef) record.review.chartRef.requestId = preAiVerificationRequestId;
+    if(record.review.chartImageOriginal) record.review.chartImageOriginal.requestId = preAiVerificationRequestId;
+    if(record.review.chartImagePreview) record.review.chartImagePreview.requestId = preAiVerificationRequestId;
+    if(record.review.chartImageVerificationSource) record.review.chartImageVerificationSource.requestId = preAiVerificationRequestId;
+    upsertReviewChartAnalysisPipeline(record, {
+      ticker:record.ticker,
+      imageId,
+      requestId:preAiVerificationRequestId,
+      source:'chart_pipeline_quick_check',
+      phase:'verifying',
+      expectedFacts:buildChartPipelineExpectedFacts(record),
+      readFacts:{},
+      missing:['visible ticker', 'visible timeframe', 'latest price'],
+      evidence:[],
+      aiAllowed:false,
+      manualConfirmed:false,
+      chartImageSource:buildChartImageSourceTrace(record.review),
+      updatedAt:new Date().toISOString()
+    });
+    setReviewAnalysisState(record, {raw:'', normalized:null, error:'', reviewedAt:'', chartImageId:imageId, requestId:'', ticker:record.ticker});
+    record.review.lastReviewedAt = new Date().toISOString();
+    record.meta.updatedAt = record.review.lastReviewedAt;
+    commitTickerState();
     if(typeof console !== 'undefined' && console.info){
       console.info(previousImageId ? '[CHART_ATTACHMENT_REPLACED]' : '[CHART_ATTACHMENT_CREATED]', {
         source:String(source || 'change_chart'),
@@ -35330,7 +35853,7 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
         expectedTicker:record.ticker,
         name:file.name,
         imageId,
-        requestId:attachmentRequestId,
+        requestId:preAiVerificationRequestId,
         previousImageId:previousImageId || ''
       });
       console.info('[CHART_UPLOAD_ENTRY]', {
@@ -35340,77 +35863,6 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
         hasOriginal:!!(record.review.chartImageOriginal && record.review.chartImageOriginal.imageId),
         hasPreview:!!(record.review.chartImagePreview && record.review.chartImagePreview.imageId)
       });
-      console.info('[CHART_VERIFICATION_START]', {
-        source:String(source || 'change_chart'),
-        ticker:record.ticker,
-        imageId
-      });
-    }
-    const preAiChartTrace = buildPreAiChartVerificationTrace(record, buildChartImageSourceTrace(record.review));
-    if(typeof console !== 'undefined' && console.info){
-      console.info('[CHART_VERIFICATION_RESULT]', {
-        source:String(source || 'change_chart'),
-        ticker:record.ticker,
-        imageId,
-        status:String(preAiChartTrace && preAiChartTrace.status || ''),
-        aiAnalysisSuppressed:preAiChartTrace && preAiChartTrace.aiAnalysisSuppressed === true
-      });
-    }
-    if(preAiChartTrace){
-      const preAiVerificationRequestId = String(matchingActiveRequest && matchingActiveRequest.id || '');
-      record.review.chartVerificationTrace = cloneData({
-        ticker:record.ticker,
-        reviewTicker:record.ticker,
-        chartImageId:imageId,
-        imageId,
-        verificationRequestId:preAiVerificationRequestId,
-        requestId:preAiVerificationRequestId,
-        chartImageSource:buildChartImageSourceTrace(record.review),
-        createdAt:new Date().toISOString(),
-        trace:preAiChartTrace
-      }, null);
-      record.review.chartVerificationLifecycle = {
-        phase:'deterministic_ready',
-        ticker:record.ticker,
-        reviewTicker:record.ticker,
-        chartImageId:imageId,
-        imageId,
-        requestId:preAiVerificationRequestId,
-        chartImageSource:buildChartImageSourceTrace(record.review),
-        updatedAt:new Date().toISOString()
-      };
-      logChartVerificationLifecycle('deterministic_ready', {
-        reviewTicker:record.ticker,
-        verificationRequestId:preAiVerificationRequestId,
-        imageId,
-        deterministicStatus:preAiChartTrace.status || '',
-        aiAnalysisSuppressed:preAiChartTrace.aiAnalysisSuppressed === true,
-        suppressionReason:preAiChartTrace.suppressionReason || ''
-      });
-    }
-    setReviewAnalysisState(record, {raw:'', normalized:null, error:'', reviewedAt:'', chartImageId:imageId, requestId:'', ticker:record.ticker});
-    record.review.lastReviewedAt = new Date().toISOString();
-    record.meta.updatedAt = record.review.lastReviewedAt;
-    logChartVerificationLifecycle('chart_replaced', {
-      reviewTicker:record.ticker,
-      uploadedImageDimensions:chartImageDimensionsLabel(record.review.chartRef),
-      imageId,
-      previousImageId,
-      verificationRequestId:activeRequest && activeRequest.id || '',
-      priorVerificationInvalidated:true,
-      uploadedAt
-    });
-    commitTickerState();
-    if(preAiChartTrace){
-      queueReviewQuickChartAnalysis(record, {
-        source:'chart_upload',
-        triggerReason:preAiChartTrace.status || 'chart_verification_pending',
-        analysisState:getReviewAnalysisState(record),
-        storedChartVerificationState:getReviewChartVerificationState(record),
-        bypassQueue:true
-      });
-    }
-    if(typeof console !== 'undefined' && console.info){
       console.info('[CHART_IMAGE_SOURCE]', {
         ticker:record.ticker,
         ...buildChartImageSourceTrace(record.review)
@@ -35420,7 +35872,7 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
         ticker:record.ticker,
         expectedTicker:record.ticker,
         imageId,
-        requestId:String(record.review && record.review.chartVerificationLifecycle && record.review.chartVerificationLifecycle.requestId || ''),
+        requestId:String(preAiVerificationRequestId || ''),
         previousImageId:previousImageId || '',
         inheritedActiveRequestId:String(activeRequest && activeRequest.id || ''),
         reusedActiveRequestId:String(matchingActiveRequest && matchingActiveRequest.id || '')
@@ -35435,23 +35887,20 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       });
     }
     renderReviewWorkspace({source:'chart_upload', requestedTicker:symbol || record.ticker});
-    if(preAiChartTrace){
-      logChartVerificationLifecycle('deterministic_render_committed', {
-        reviewTicker:record.ticker,
-        verificationRequestId:String(activeRequest && activeRequest.id || ''),
-        imageId,
-        renderedStatus:preAiChartTrace.status || '',
-        renderedAt:new Date().toISOString()
-      });
-    }
+    runSimplifiedChartAnalysis(record, {
+      source:String(source || 'chart_upload'),
+      requestId:preAiVerificationRequestId,
+      phase:'verifying'
+    }).catch(() => {});
     const liveStatus = $('reviewWorkspaceStatus') || $(`cardStatus-${ticker}`);
     if(liveStatus){
-      const currentChartState = getReviewChartVerificationState(getTickerRecord(ticker) || record);
-      const currentChartDecision = currentChartState ? chartVerificationUiDecision(currentChartState.trace || currentChartState, ticker) : null;
+      const liveRecord = getTickerRecord(ticker) || record;
+      const currentPipeline = getReviewChartAnalysisPipeline(liveRecord);
+      const currentChartDecision = currentPipeline ? buildSimplifiedChartPipelineDecision(liveRecord, currentPipeline) : null;
       liveStatus.innerHTML = renderChartWorkspaceStatusLineFromDecision(
         currentChartDecision || {},
-        currentChartState && (currentChartState.trace || currentChartState) || {},
-        currentChartState && currentChartState.quickChartAnalysisStatus || '',
+        currentChartDecision && currentChartDecision.trace || {},
+        currentPipeline && currentPipeline.phase || '',
         true
       );
     }
