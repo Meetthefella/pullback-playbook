@@ -4430,6 +4430,12 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
     : currentState;
   const currentImageId = chartImageIdForReview(record.review || {});
   if(!currentImageId) return false;
+  const currentRequestId = String(
+    currentTrace && (currentTrace.requestId || currentTrace.verificationRequestId)
+    || currentState && (currentState.requestId || currentState.verificationRequestId)
+    || currentReviewChartContext(record, record.review || {}).requestId
+    || ''
+  );
   record.review.chartVerificationTrace = cloneData({
     ...currentState,
     manualConfirmed:true,
@@ -4437,6 +4443,8 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
     status:'user_confirmed_match',
     mergedStatus:'user_confirmed_match',
     renderedStatus:'user_confirmed_match',
+    requestId:currentRequestId,
+    verificationRequestId:currentRequestId,
     aiAnalysisSuppressed:false,
     suppressionReason:'',
     manualConfirmedAt:new Date().toISOString(),
@@ -4452,6 +4460,7 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
     reviewTicker:symbol,
     chartImageId:currentImageId,
     imageId:currentImageId,
+    requestId:currentRequestId,
     updatedAt:new Date().toISOString()
   };
   if(record.review.quickChartAnalysis && typeof record.review.quickChartAnalysis === 'object'){
@@ -21357,6 +21366,20 @@ function applyCommittedAiSummaryForChart(record, payload = {}){
   const canonicalReview = canonicalReviewRecord && canonicalReviewRecord.review && typeof canonicalReviewRecord.review === 'object'
     ? canonicalReviewRecord.review
     : null;
+  const existingVerificationState = getReviewChartVerificationState(item);
+  const existingVerificationTrace = existingVerificationState && typeof existingVerificationState === 'object'
+    ? (existingVerificationState.trace || existingVerificationState)
+    : ((item.review && item.review.chartVerificationTrace && typeof item.review.chartVerificationTrace === 'object'
+      ? (item.review.chartVerificationTrace.trace || item.review.chartVerificationTrace)
+      : null));
+  const preserveManualConfirmation = !!(
+    existingVerificationTrace
+    && (
+      existingVerificationTrace.manualConfirmed === true
+      || existingVerificationTrace.chartUserConfirmed === true
+      || ['user_confirmed_match', 'manually_verified'].includes(String(existingVerificationTrace.status || '').trim())
+    )
+  );
   const shouldCommitMergedTrace = !!(
     requestChartImageId &&
     currentChartImageId &&
@@ -21369,14 +21392,16 @@ function applyCommittedAiSummaryForChart(record, payload = {}){
     const mergedChartImageSource = buildChartImageSourceTrace(item.review || {});
     const committedMergedChartTrace = cloneData({
       ...mergedChartTrace,
-      status:String(mergedChartTrace && mergedChartTrace.status || ''),
-      mergedStatus:String(mergedChartTrace && mergedChartTrace.status || ''),
-      renderedStatus:String(mergedChartTrace && mergedChartTrace.status || ''),
+      status:preserveManualConfirmation ? 'user_confirmed_match' : String(mergedChartTrace && mergedChartTrace.status || ''),
+      mergedStatus:preserveManualConfirmation ? 'user_confirmed_match' : String(mergedChartTrace && mergedChartTrace.status || ''),
+      renderedStatus:preserveManualConfirmation ? 'user_confirmed_match' : String(mergedChartTrace && mergedChartTrace.status || ''),
       normalizedAnalysis:analysis,
       mergedAnalysis:mergedChartTrace,
       chartAssessorInput,
       source:'quickChartAnalysis',
-      event:'quick_analysis_committed'
+      event:'quick_analysis_committed',
+      manualConfirmed:preserveManualConfirmation ? true : !!(mergedChartTrace && mergedChartTrace.manualConfirmed === true),
+      chartUserConfirmed:preserveManualConfirmation ? true : !!(mergedChartTrace && mergedChartTrace.chartUserConfirmed === true)
     }, null);
     const committedChartVerificationState = cloneData({
       ticker:item.ticker,
@@ -30403,6 +30428,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   const visiblePriceSource = String(safeAnalysis.visible_price_source || safeAnalysis.price_extraction_source || '').trim().toLowerCase();
   const visibleTimeframeSource = String(safeAnalysis.visible_timeframe_source || safeAnalysis.timeframe_extraction_source || '').trim().toLowerCase();
   const visibleNumericLabelsCount = chartVerificationNumericLabels(safeAnalysis).length;
+  const priceLeakTolerance = trustedPrice !== null
+    ? Number(chartVerificationToleranceDetail(visiblePrice, trustedPrice, 'price').tolerance || 0.0001)
+    : 0.0001;
   const initialVersion = hasExplicitChartIdentityProvenanceVersion(safeAnalysis)
     ? Number(safeAnalysis.chartIdentityProvenanceVersion)
     : null;
@@ -30431,6 +30459,7 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   const hasTimeframeEvidence = !!(visibleTimeframe && sourceIsImageDerived(visibleTimeframeSource));
   const leakedFields = [];
   const blankedFields = [];
+  const relaxedFields = [];
   if(typeof console !== 'undefined' && console.info){
     console.info('[CHART_ASSESSOR_SANITIZER_MODE]', {
       ticker:normalizeTicker(item.ticker || ''),
@@ -30467,24 +30496,36 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
     });
   }
   if(strictProvenanceRequired && visibleTicker && !hasTickerEvidence){
-    if(expectedTicker && visibleTicker === expectedTicker) leakedFields.push('ticker');
-    safeAnalysis.visible_ticker = '';
-    safeAnalysis.visible_ticker_source = '';
-    safeAnalysis.ticker_extraction_source = '';
-    blankedFields.push('ticker');
+    if(expectedTicker && visibleTicker === expectedTicker){
+      leakedFields.push('ticker');
+      safeAnalysis.visible_ticker = '';
+      safeAnalysis.visible_ticker_source = '';
+      safeAnalysis.ticker_extraction_source = '';
+      blankedFields.push('ticker');
+    }else{
+      relaxedFields.push('ticker');
+    }
   }
   if(strictProvenanceRequired && visiblePrice !== null && !hasPriceEvidence){
-    if(trustedPrice !== null && Math.abs(visiblePrice - trustedPrice) < 0.0001) leakedFields.push('price');
-    safeAnalysis.visible_latest_price = null;
-    safeAnalysis.visible_price_source = '';
-    safeAnalysis.price_extraction_source = '';
-    blankedFields.push('price');
+    if(trustedPrice !== null && Math.abs(visiblePrice - trustedPrice) <= priceLeakTolerance){
+      leakedFields.push('price');
+      safeAnalysis.visible_latest_price = null;
+      safeAnalysis.visible_price_source = '';
+      safeAnalysis.price_extraction_source = '';
+      blankedFields.push('price');
+    }else{
+      relaxedFields.push('price');
+    }
   }
   if(strictProvenanceRequired && visibleTimeframe && !hasTimeframeEvidence){
-    safeAnalysis.visible_timeframe = '';
-    safeAnalysis.visible_timeframe_source = '';
-    safeAnalysis.timeframe_extraction_source = '';
-    blankedFields.push('timeframe');
+    if(!hasTickerEvidence && !hasPriceEvidence && isDailyTimeframe(visibleTimeframe)){
+      safeAnalysis.visible_timeframe = '';
+      safeAnalysis.visible_timeframe_source = '';
+      safeAnalysis.timeframe_extraction_source = '';
+      blankedFields.push('timeframe');
+    }else{
+      relaxedFields.push('timeframe');
+    }
   }
   if(blankedFields.length && typeof console !== 'undefined' && console.warn){
     console.warn('[CHART_ASSESSOR_FALLBACK_USED]', {
@@ -30494,6 +30535,17 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
       caller,
       blankedFields,
       leakedFields
+    });
+  }
+  if(relaxedFields.length && typeof console !== 'undefined' && console.info){
+    console.info('[CHART_ASSESSOR_PROVENANCE_RELAXED]', {
+      ticker:normalizeTicker(item.ticker || ''),
+      requestId:sanitizedRequestId,
+      imageId:sanitizedImageId,
+      caller,
+      relaxedFields,
+      expectedTicker,
+      trustedPrice:trustedPrice === null ? 'n/a' : trustedPrice
     });
   }
   if(leakedFields.length && typeof console !== 'undefined' && console.warn){
