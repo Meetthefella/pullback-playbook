@@ -34705,6 +34705,9 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
     record.review.chartVerificationCommittedTrace = null;
     record.review.chartVerificationLifecycle = null;
     record.review.chartVerificationContext = null;
+    record.review.quickChartAnalysis = null;
+    record.review.pendingChartAiSummary = null;
+    record.review.rawChartFactExtraction = null;
     record.review.aiAnalysisRaw = '';
     record.review.normalizedAnalysis = null;
     record.review.cardOpen = true;
@@ -34837,7 +34840,7 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
         suppressionReason:preAiChartTrace.suppressionReason || ''
       });
     }
-    setReviewAnalysisState(record, {raw:'', normalized:null, error:'', reviewedAt:'', chartImageId:imageId});
+    setReviewAnalysisState(record, {raw:'', normalized:null, error:'', reviewedAt:'', chartImageId:imageId, requestId:'', ticker:record.ticker});
     record.review.lastReviewedAt = new Date().toISOString();
     record.meta.updatedAt = record.review.lastReviewedAt;
     logChartVerificationLifecycle('chart_replaced', {
