@@ -4134,6 +4134,7 @@ function clearStaleQuickChartAnalysisState(record = {}, review = {}, stored = nu
 
 function reviewQuickChartAnalysisState(record = {}, options = {}){
   const item = normalizeTickerRecord(record);
+  const itemTicker = normalizeTicker(item.ticker || '');
   const review = item.review && typeof item.review === 'object' ? item.review : {};
   const rawStored = review.quickChartAnalysis && typeof review.quickChartAnalysis === 'object'
     ? review.quickChartAnalysis
@@ -4221,6 +4222,27 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
     }
   }
   const currentKey = reviewQuickChartAnalysisKey(item);
+  const preRequestStore = uiState.reviewChartPreRequest && typeof uiState.reviewChartPreRequest === 'object'
+    ? uiState.reviewChartPreRequest
+    : null;
+  let preRequestEntry = preRequestStore && itemTicker && typeof preRequestStore[itemTicker] === 'object'
+    ? preRequestStore[itemTicker]
+    : null;
+  const preRequestStartedAt = Number(preRequestEntry && preRequestEntry.startedAt || 0);
+  if(
+    preRequestEntry
+    && (!Number.isFinite(preRequestStartedAt) || preRequestStartedAt <= 0 || (Date.now() - preRequestStartedAt) > REVIEW_CHART_PRE_REQUEST_STALE_TIMEOUT_MS)
+  ){
+    if(preRequestStore && itemTicker){
+      delete preRequestStore[itemTicker];
+    }
+    preRequestEntry = null;
+  }
+  const preRequestMatchesCurrentContext = !!(
+    preRequestEntry
+    && currentImageId
+    && String(preRequestEntry.imageId || '') === currentImageId
+  );
   if(stored){
     const storedImageId = String(stored.chartImageId || '');
     const storedRequestId = String(stored.requestId || stored.verificationRequestId || '');
@@ -4286,9 +4308,11 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
   const hasChart = hasVerifiableReviewChartSource(review);
   const currentAnalysisComplete = !!(currentAnalysisState && currentAnalysisState.hasSavedAnalysis);
   const matchesCurrentKey = !!(stored && ((storedKey && storedKey === currentKey) || storedMatchesCurrentContext));
-  const currentStatus = matchesCurrentKey ? String(stored.status || 'idle') : 'idle';
-  const pending = matchesCurrentKey && ['queued', 'running'].includes(currentStatus);
-  const attempted = matchesCurrentKey && ['running', 'complete', 'failed', 'committed'].includes(currentStatus);
+  const currentStatus = preRequestMatchesCurrentContext && !matchesCurrentKey
+    ? 'starting'
+    : (matchesCurrentKey ? String(stored.status || 'idle') : 'idle');
+  const pending = preRequestMatchesCurrentContext || (matchesCurrentKey && ['queued', 'running'].includes(currentStatus));
+  const attempted = preRequestMatchesCurrentContext || (matchesCurrentKey && ['running', 'complete', 'failed', 'committed'].includes(currentStatus));
   const completed = matchesCurrentKey && ['complete', 'committed'].includes(currentStatus);
   const failed = matchesCurrentKey && currentStatus === 'failed';
   const shouldQueue = !!(hasChart && currentVerificationNeedsQuickAnalysis && !currentAnalysisComplete && !pending && !attempted && !completed && !failed);
@@ -4307,7 +4331,8 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
     failed,
     shouldQueue,
     stored,
-    hasChart
+    hasChart,
+    preRequestPending:preRequestMatchesCurrentContext
   };
 }
 
@@ -4442,7 +4467,28 @@ function queueReviewQuickChartAnalysis(record, options = {}){
     commitTickerState();
     analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});
     const startedContext = currentReviewChartContext(liveRecord || liveItem, review);
-    if(!String(startedContext && startedContext.requestId || '')){
+    const pendingPreRequestSymbol = normalizeTicker(liveItem.ticker || item.ticker || '');
+    const pendingPreRequestStore = uiState.reviewChartPreRequest && typeof uiState.reviewChartPreRequest === 'object'
+      ? uiState.reviewChartPreRequest
+      : null;
+    let pendingPreRequest = pendingPreRequestStore && pendingPreRequestSymbol && typeof pendingPreRequestStore[pendingPreRequestSymbol] === 'object'
+      ? pendingPreRequestStore[pendingPreRequestSymbol]
+      : null;
+    const pendingStartedAt = Number(pendingPreRequest && pendingPreRequest.startedAt || 0);
+    if(
+      pendingPreRequest
+      && (!Number.isFinite(pendingStartedAt) || pendingStartedAt <= 0 || (Date.now() - pendingStartedAt) > REVIEW_CHART_PRE_REQUEST_STALE_TIMEOUT_MS)
+    ){
+      if(pendingPreRequestStore && pendingPreRequestSymbol){
+        delete pendingPreRequestStore[pendingPreRequestSymbol];
+      }
+      pendingPreRequest = null;
+    }
+    const preRequestStillPending = !!(
+      pendingPreRequest
+      && String(pendingPreRequest.imageId || '') === String(state.imageId || chartImageIdForReview(review) || '')
+    );
+    if(!String(startedContext && startedContext.requestId || '') && !preRequestStillPending){
       return commitVerificationRequestNotStarted('verification_request_not_started');
     }
     return reviewQuickChartAnalysisState(liveRecord || liveItem, options);
