@@ -4899,6 +4899,12 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
   const observedTicker = String(safeGate.observedTicker || '').trim();
   const expectedPrice = chartVerificationNumberOrNull(safeGate.expectedPrice);
   const observedPrice = chartVerificationNumberOrNull(safeGate.observedPrice);
+  const safeTraceExtractedFacts = safeTrace.extractedFacts && typeof safeTrace.extractedFacts === 'object'
+    ? safeTrace.extractedFacts
+    : {};
+  const safeTraceTrustedFacts = safeTrace.trustedFacts && typeof safeTrace.trustedFacts === 'object'
+    ? safeTrace.trustedFacts
+    : {};
   const mismatchReasons = Array.isArray(safeGate.mismatchReasons) ? safeGate.mismatchReasons : (Array.isArray(safeTrace.mismatchReasons) ? safeTrace.mismatchReasons : []);
   const unreadableReasons = Array.isArray(safeGate.unreadableReasons) ? safeGate.unreadableReasons : (Array.isArray(safeTrace.unreadableReasons) ? safeTrace.unreadableReasons : []);
   const baseDetail = String(
@@ -4945,15 +4951,29 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
     requestId:String(safeContext.requestId || safeTrace.requestId || safeTrace.verificationRequestId || ''),
     verificationRequestId:String(safeContext.requestId || safeTrace.verificationRequestId || safeTrace.requestId || ''),
     trustedFacts:{
-      ...(safeTrace.trustedFacts && typeof safeTrace.trustedFacts === 'object' ? safeTrace.trustedFacts : {}),
-      ticker:expectedTicker || (safeTrace.trustedFacts && safeTrace.trustedFacts.ticker) || String(safeContext.ticker || '').trim() || '',
-      latest_price:expectedPrice
+      ...safeTraceTrustedFacts,
+      ticker:expectedTicker || safeTraceTrustedFacts.ticker || String(safeContext.ticker || '').trim() || '',
+      expected_timeframe:String(safeTraceTrustedFacts.expected_timeframe || ''),
+      latest_price:expectedPrice === null ? chartVerificationNumberOrNull(safeTraceTrustedFacts.latest_price) : expectedPrice,
+      ma20:chartVerificationNumberOrNull(safeTraceTrustedFacts.ma20),
+      ma50:chartVerificationNumberOrNull(safeTraceTrustedFacts.ma50),
+      ma200:chartVerificationNumberOrNull(safeTraceTrustedFacts.ma200)
     },
     extractedFacts:{
-      ...(safeTrace.extractedFacts && typeof safeTrace.extractedFacts === 'object' ? safeTrace.extractedFacts : {}),
-      visible_ticker:observedTicker || (safeTrace.extractedFacts && safeTrace.extractedFacts.visible_ticker) || '',
-      visible_latest_price:observedPrice
+      ...safeTraceExtractedFacts,
+      visible_ticker:observedTicker || safeTraceExtractedFacts.visible_ticker || '',
+      visible_timeframe:String(safeTraceExtractedFacts.visible_timeframe || ''),
+      visible_latest_price:observedPrice === null ? chartVerificationNumberOrNull(safeTraceExtractedFacts.visible_latest_price) : observedPrice,
+      visible_ma20:chartVerificationNumberOrNull(safeTraceExtractedFacts.visible_ma20),
+      visible_ma50:chartVerificationNumberOrNull(safeTraceExtractedFacts.visible_ma50),
+      visible_ma200:chartVerificationNumberOrNull(safeTraceExtractedFacts.visible_ma200)
     },
+    readableIdentityFields:safeTrace.readableIdentityFields && typeof safeTrace.readableIdentityFields === 'object'
+      ? cloneData(safeTrace.readableIdentityFields, {})
+      : {},
+    expectedIdentityFields:safeTrace.expectedIdentityFields && typeof safeTrace.expectedIdentityFields === 'object'
+      ? cloneData(safeTrace.expectedIdentityFields, {})
+      : {},
     event:String(reason || status || ''),
     source:String(safeContext.source || (forcedFinalizeSource ? 'chart_analysis_finalize' : '') || safeTrace.source || 'verification_gate_blocked'),
     updatedAt:new Date().toISOString(),
@@ -5089,7 +5109,16 @@ function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisSta
 }
 
 function renderChartWorkspaceStatusLineFromDecision(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false, selectedTrace = null){
-  const panelState = chartVerificationPanelState(decision, trace, quickChartAnalysisStatus, hasChartScreenshot, selectedTrace);
+  const status = String(trace && trace.status || '').trim();
+  const key = String(decision && decision.key || '').trim();
+  const normalizedQuickStatus = (
+    (chartVerificationRequiresManualAction(status) || chartVerificationRequiresManualAction(key))
+    && !chartVerificationAllowsAiAnalysisStatus(status)
+    && !chartVerificationAllowsAiAnalysisStatus(key)
+  )
+    ? ''
+    : quickChartAnalysisStatus;
+  const panelState = chartVerificationPanelState(decision, trace, normalizedQuickStatus, hasChartScreenshot, selectedTrace);
   if(panelState.panelVariant === 'no_chart'){
     return '<span class="warntext">No chart attached yet.</span>';
   }
@@ -26089,6 +26118,17 @@ function renderSuppressedAiAnalysisPanel(suppression, rawResponse, options = {})
   return `<div class="responsegrid"><div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>AI analysis limited</strong><div>${escapeHtml(message)}</div></div>${raw ? `<details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(raw)}</div></details>` : ''}</div>`;
 }
 
+function renderBlockedChartAiDetailTrace(decision, trace = {}){
+  const safeDecision = decision && typeof decision === 'object' ? decision : {};
+  const safeTrace = trace && typeof trace === 'object' ? trace : {};
+  const title = String(safeDecision.title || 'Chart identity needs confirmation').trim() || 'Chart identity needs confirmation';
+  const summary = String(safeDecision.summary || safeDecision.detail || 'AI chart analysis is blocked until you confirm or reject this chart.').trim()
+    || 'AI chart analysis is blocked until you confirm or reject this chart.';
+  const detail = String(safeDecision.detail || '').trim();
+  const traceStatus = String(safeTrace.status || safeTrace.renderedStatus || '').trim();
+  return `<div class="responsegrid"><div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>${escapeHtml(title)}</strong><div>${escapeHtml(summary)}</div>${detail && detail !== summary ? `<div class="tiny" style="margin-top:6px">${escapeHtml(detail)}</div>` : ''}${traceStatus ? `<div class="tiny" style="margin-top:6px">Verification state: ${escapeHtml(traceStatus)}</div>` : ''}</div></div>`;
+}
+
 function renderAnalysisPanelFromRecord(record, options = {}){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
@@ -28692,6 +28732,21 @@ async function refreshWatchlistTicker(ticker){
 }
 
 function analyseActiveReviewTicker(){
+  const ticker = activeReviewTicker();
+  const record = ticker ? getTickerRecord(ticker) : null;
+  if(record && record.review && record.review.chartAvailable){
+    const verificationState = getReviewChartVerificationState(record);
+    const trace = verificationState && typeof verificationState === 'object'
+      ? (verificationState.trace || verificationState)
+      : null;
+    const status = String(trace && (trace.status || trace.renderedStatus) || '').trim();
+    if(status && !chartVerificationAllowsAiAnalysisStatus(status) && chartVerificationRequiresManualAction(status)){
+      const decision = chartVerificationUiDecision(trace || {}, ticker);
+      setStatus('reviewWorkspaceStatus', renderChartWorkspaceStatusLineFromDecision(decision, trace || {}, '', true, trace || null));
+      renderReviewWorkspace({source:'analyse_setup_blocked_by_chart_verification', requestedTicker:ticker});
+      return;
+    }
+  }
   reviewAnalysisFeature.analyseActiveReviewTicker();
 }
 
@@ -33545,12 +33600,12 @@ function renderReviewWorkspace(options = {}){
   const analysisBusy = !!uiState.loadingTicker;
   const analysisUiState = reviewAnalysisUiStateForRecord(record);
   const analysisLoadingStage = getAnalysisLoadingStage(record.ticker) || 'Building analysis...';
-  const analyseLabel = loading
+  let analyseLabel = loading
     ? 'Analysing...'
     : (analysisUiState === 'complete'
       ? 'Re-run analysis'
       : (analysisUiState === 'error' ? 'Analyse Setup' : 'Analyse Setup'));
-  const analyseDisabled = analysisUiState === 'idle' || loading || (analysisBusy && !loading);
+  let analyseDisabled = analysisUiState === 'idle' || loading || (analysisBusy && !loading);
   const analysisPanelClass = `reviewanalysispanel ${reviewPanelToneClass}`.trim();
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
@@ -34096,6 +34151,17 @@ function renderReviewWorkspace(options = {}){
     || (chartUiDecision && chartUiDecision.key === 'chart_mismatch')
     || ['chart_mismatch', 'untrusted_context_mirror', 'chart_verification_untrusted', 'uncertain_missing_context'].includes(String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''))
   );
+  const chartVerificationStatusForReview = String(
+    (chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.status || chartConsistencyTraceForDisplay.renderedStatus))
+    || (chartUiDecision && chartUiDecision.key)
+    || ''
+  ).trim();
+  const chartVerificationBlocksAiReview = !!(
+    hasVerifiableChart
+    && chartVerificationStatusForReview
+    && !chartVerificationAllowsAiAnalysisStatus(chartVerificationStatusForReview)
+    && chartVerificationRequiresManualAction(chartVerificationStatusForReview)
+  );
   const aiSuppressionText = String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.suppressionReason || '')
     || 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
   const aiSummaryGuard = chartAiSummaryRenderGuard(record, analysisState, chartConsistencyTraceForDisplay);
@@ -34118,6 +34184,7 @@ function renderReviewWorkspace(options = {}){
     ? `<details class="compact-details review-chart-controls"><summary>Change chart</summary>${chartControlsFullMarkup}</details>`
     : chartControlsFullMarkup;
   const aiSummaryPreview = (() => {
+    if(chartVerificationBlocksAiReview) return String(chartUiDecision && (chartUiDecision.summary || chartUiDecision.title) || 'AI chart analysis is blocked until you confirm this chart manually.').trim();
     if(!aiSummaryGuard.allowedToRender) return 'No AI analysis saved yet.';
     if(aiAnalysisSuppressedByChartMismatch) return aiSuppressionText;
     if(analysisState.error) return `AI analysis failed: ${analysisState.error}`;
@@ -34131,9 +34198,15 @@ function renderReviewWorkspace(options = {}){
     const fallback = String(analysisState.rawAnalysis || '').trim();
     return fallback || 'No AI analysis saved yet.';
   })();
-  const aiDetailTraceMarkup = aiAnalysisSuppressedByChartMismatch
+  const aiDetailTraceMarkup = chartVerificationBlocksAiReview
+    ? renderBlockedChartAiDetailTrace(chartUiDecision, chartConsistencyTraceForDisplay)
+    : (aiAnalysisSuppressedByChartMismatch
     ? `<div class="summary warntext">${escapeHtml(aiSuppressionText)}</div>`
-    : renderAnalysisPanelFromRecord(record, {chartConsistencyTrace:chartConsistencyTraceForDisplay});
+    : renderAnalysisPanelFromRecord(record, {chartConsistencyTrace:chartConsistencyTraceForDisplay}));
+  if(chartVerificationBlocksAiReview && !loading && !analysisBusy){
+    analyseDisabled = true;
+    analyseLabel = 'Confirm chart first';
+  }
   syncAdvancedDebugVisibilityClass();
   const advancedDebugVisible = isAdvancedDebugVisible();
   const advancedOpen = advancedDebugVisible && isReviewAdvancedOpen(record.ticker);
@@ -34371,7 +34444,7 @@ function renderReviewWorkspace(options = {}){
             <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
             <div class="reviewactions reviewactions-secondary"><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button></div>
             ${reviewDebug}
-            <div class="statusline tiny" id="reviewWorkspaceStatus">${renderChartWorkspaceStatusLineFromDecision(chartUiDecision, chartConsistencyTraceForDisplay, quickChartAnalysisStatus, hasVerifiableChart)}</div>
+            <div class="statusline tiny" id="reviewWorkspaceStatus">${renderChartWorkspaceStatusLineFromDecision(chartUiDecision, chartConsistencyTraceForDisplay, effectiveQuickChartAnalysisStatus, hasVerifiableChart)}</div>
           </details>
         </div>` : ''}
       </details>
