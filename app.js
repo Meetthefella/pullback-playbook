@@ -24324,6 +24324,8 @@ async function analyseSetup(ticker, options = {}){
   ticker = symbol;
   const analysisSource = String(options.source || 'unknown');
   console.debug('[review-analysis] analyse_setup_click', {ticker, source:analysisSource});
+  const preflightRecord = upsertTickerRecord(ticker);
+  const preflightChartImageId = chartImageIdForReview(preflightRecord.review || {});
   if(isReviewAiAnalysisStale(ticker)){
     console.warn('[review-analysis] stale_runtime_cleared_before_start', {ticker});
     clearReviewAiAnalysis(ticker);
@@ -24334,9 +24336,17 @@ async function analyseSetup(ticker, options = {}){
   const runtime = getReviewAiRuntime();
   const sameTickerRuntimeRunning = runtime.status === 'running' && normalizeTicker(runtime.ticker || '') === ticker && !isReviewAiAnalysisStale(ticker);
   const sameTickerActiveRequest = activeRequest && normalizeTicker(activeRequest.ticker || '') === ticker;
+  const runtimeChartImageId = String(runtime.chartImageId || '');
   const replacementUploadSupersedesRunning = analysisSource === 'chart_upload'
     && sameTickerRuntimeRunning
-    && !!sameTickerActiveRequest;
+    && (
+      !!sameTickerActiveRequest
+      || !activeRequest
+      || !String(runtime.requestId || '')
+      || !preflightChartImageId
+      || !runtimeChartImageId
+      || runtimeChartImageId !== String(preflightChartImageId || '')
+    );
   if(sameTickerRuntimeRunning){
     if(replacementUploadSupersedesRunning){
       if(typeof console !== 'undefined' && console.info){
@@ -24344,7 +24354,9 @@ async function analyseSetup(ticker, options = {}){
           ticker,
           source:analysisSource,
           activeRequestId:String(activeRequest && activeRequest.id || ''),
-          runtimeRequestId:String(runtime.requestId || '')
+          runtimeRequestId:String(runtime.requestId || ''),
+          runtimeChartImageId,
+          replacementChartImageId:String(preflightChartImageId || '')
         });
       }
       if(activeRequest && activeRequest.controller && typeof activeRequest.controller.abort === 'function' && !activeRequest.controller.signal.aborted){
@@ -24358,7 +24370,9 @@ async function analyseSetup(ticker, options = {}){
           ticker,
           source:analysisSource,
           activeRequestId:String(activeRequest && activeRequest.id || ''),
-          runtimeRequestId:String(runtime.requestId || '')
+          runtimeRequestId:String(runtime.requestId || ''),
+          runtimeChartImageId,
+          replacementChartImageId:String(preflightChartImageId || '')
         });
       }
       clearReviewAiAnalysis(ticker);
