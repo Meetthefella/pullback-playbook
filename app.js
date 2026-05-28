@@ -4190,12 +4190,15 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
       && storedRequestId
       && String(activeRequest.id || '') === storedRequestId
     );
+    const queuedAtMs = Date.parse(String(stored.queuedAt || stored.updatedAt || ''));
+    const queuedAgeMs = Number.isFinite(queuedAtMs) ? Math.max(0, Date.now() - queuedAtMs) : Number.POSITIVE_INFINITY;
     const staleUnownedQueued = !!(
       storedStatus === 'queued'
       && storedImageId
       && !storedRequestId
       && !hasMatchingLiveRuntime
       && !hasMatchingActiveRequest
+      && queuedAgeMs > QUICK_CHART_QUEUED_RENDER_WINDOW_MS
     );
     if(staleUnownedQueued){
       if(typeof console !== 'undefined' && console.warn){
@@ -4204,6 +4207,7 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
           status:storedStatus,
           imageId:storedImageId,
           requestId:'',
+          queuedAgeMs:Number.isFinite(queuedAgeMs) ? queuedAgeMs : null,
           currentImageId,
           currentRequestId,
           source:String(options.source || 'review_quick_chart_analysis_state')
