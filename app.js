@@ -4138,6 +4138,9 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
   const rawStored = review.quickChartAnalysis && typeof review.quickChartAnalysis === 'object'
     ? review.quickChartAnalysis
     : null;
+  const currentContext = currentReviewChartContext(item, review);
+  const currentRequestId = String(currentContext.requestId || '');
+  const currentImageId = String(currentContext.imageId || '');
   let stored = rawStored;
   if(stored){
     const staleIncompleteRunning = !!(
@@ -4162,10 +4165,58 @@ function reviewQuickChartAnalysisState(record = {}, options = {}){
       stored = null;
     }
   }
+  if(stored){
+    const storedStatus = String(stored.status || '').trim();
+    const storedRequestId = String(stored.requestId || stored.verificationRequestId || '');
+    const storedImageId = String(stored.chartImageId || '');
+    const activeRuntime = getReviewAiRuntime();
+    const activeRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
+      ? uiState.analysisActiveRequest
+      : null;
+    const hasMatchingLiveRuntime = !!(
+      activeRuntime
+      && String(activeRuntime.status || '').trim() === 'running'
+      && normalizeTicker(activeRuntime.ticker || '') === normalizeTicker(item.ticker || '')
+      && storedImageId
+      && String(activeRuntime.chartImageId || '') === storedImageId
+      && storedRequestId
+      && String(activeRuntime.requestId || '') === storedRequestId
+    );
+    const hasMatchingActiveRequest = !!(
+      activeRequest
+      && normalizeTicker(activeRequest.ticker || '') === normalizeTicker(item.ticker || '')
+      && storedImageId
+      && String(activeRequest.chartImageId || '') === storedImageId
+      && storedRequestId
+      && String(activeRequest.id || '') === storedRequestId
+    );
+    const staleUnownedQueued = !!(
+      storedStatus === 'queued'
+      && storedImageId
+      && !storedRequestId
+      && !hasMatchingLiveRuntime
+      && !hasMatchingActiveRequest
+    );
+    if(staleUnownedQueued){
+      if(typeof console !== 'undefined' && console.warn){
+        console.warn('[QUICK_CHART_ANALYSIS_QUEUED_UNOWNED_CLEARED]', {
+          ticker:normalizeTicker(item.ticker || stored.ticker || ''),
+          status:storedStatus,
+          imageId:storedImageId,
+          requestId:'',
+          currentImageId,
+          currentRequestId,
+          source:String(options.source || 'review_quick_chart_analysis_state')
+        });
+      }
+      clearStaleQuickChartAnalysisState(item, review, stored, currentContext, {
+        reason:'queued_unowned',
+        source:String(options.source || 'review_quick_chart_analysis_state')
+      });
+      stored = null;
+    }
+  }
   const currentKey = reviewQuickChartAnalysisKey(item);
-  const currentContext = currentReviewChartContext(item, review);
-  const currentRequestId = String(currentContext.requestId || '');
-  const currentImageId = String(currentContext.imageId || '');
   if(stored){
     const storedImageId = String(stored.chartImageId || '');
     const storedRequestId = String(stored.requestId || stored.verificationRequestId || '');
