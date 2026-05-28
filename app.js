@@ -32291,9 +32291,45 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
     }
     return null;
   })();
-  const carryForwardExtractedFacts = sameContextStoredTrace && sameContextStoredTrace.extractedFacts && typeof sameContextStoredTrace.extractedFacts === 'object'
-    ? sameContextStoredTrace.extractedFacts
-    : {};
+  const sameContextChartVerificationContext = (() => {
+    const context = review.chartVerificationContext && typeof review.chartVerificationContext === 'object'
+      ? review.chartVerificationContext
+      : null;
+    if(!context) return null;
+    const contextImageId = String(context.chartImageId || context.imageId || '');
+    const contextRequestId = String(context.verificationRequestId || context.requestId || '');
+    if(currentChartImageId && contextImageId && currentChartImageId !== contextImageId) return null;
+    if(currentVerificationRequestId && contextRequestId && currentVerificationRequestId !== contextRequestId) return null;
+    return {
+      visible_ticker:String(context.extractedTicker || '').trim(),
+      visible_timeframe:String(context.extractedTimeframe || '').trim(),
+      visible_latest_price:chartVerificationNumberOrNull(context.extractedPrice),
+      visible_ma20:chartVerificationNumberOrNull(context.extractedMa20),
+      visible_ma50:chartVerificationNumberOrNull(context.extractedMa50),
+      visible_ma200:chartVerificationNumberOrNull(context.extractedMa200)
+    };
+  })();
+  const sameContextRawExtractionFacts = (() => {
+    const rawExtraction = review.rawChartFactExtraction && typeof review.rawChartFactExtraction === 'object'
+      ? review.rawChartFactExtraction
+      : null;
+    const rawFacts = rawExtraction && rawExtraction.rawExtractedFacts && typeof rawExtraction.rawExtractedFacts === 'object'
+      ? rawExtraction.rawExtractedFacts
+      : null;
+    if(!rawFacts) return null;
+    const rawImageId = String(rawExtraction.imageId || '');
+    const rawRequestId = String(rawExtraction.requestId || '');
+    if(currentChartImageId && rawImageId && currentChartImageId !== rawImageId) return null;
+    if(currentVerificationRequestId && rawRequestId && currentVerificationRequestId !== rawRequestId) return null;
+    return rawFacts;
+  })();
+  const carryForwardExtractedFacts = {
+    ...(sameContextRawExtractionFacts || {}),
+    ...(sameContextChartVerificationContext || {}),
+    ...(sameContextStoredTrace && sameContextStoredTrace.extractedFacts && typeof sameContextStoredTrace.extractedFacts === 'object'
+      ? sameContextStoredTrace.extractedFacts
+      : {})
+  };
   const mergeExtractedFactsWithCarryForward = facts => {
     const safeFacts = facts && typeof facts === 'object' ? facts : {};
     return {
