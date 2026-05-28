@@ -5001,6 +5001,9 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
   const safeTrace = trace && typeof trace === 'object' ? trace : {};
   const safeGate = gate && typeof gate === 'object' ? gate : {};
   const safeContext = context && typeof context === 'object' ? context : {};
+  const safeAssessorFacts = safeContext.chartAssessorInput && typeof safeContext.chartAssessorInput === 'object'
+    ? safeContext.chartAssessorInput
+    : {};
   const rawStatus = String(safeGate.status || safeTrace.status || safeGate.reason || 'verification_failed').trim() || 'verification_failed';
   const status = ['unknown_chart_identity', 'insufficient_identity_evidence'].includes(rawStatus)
     ? 'manual_confirmation_required'
@@ -5015,6 +5018,155 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
   const safeTraceTrustedFacts = safeTrace.trustedFacts && typeof safeTrace.trustedFacts === 'object'
     ? safeTrace.trustedFacts
     : {};
+  const assessorExtractedFacts = {
+    visible_ticker:String(
+      safeAssessorFacts.visible_ticker
+      || safeAssessorFacts.extractedTicker
+      || ''
+    ).trim(),
+    visible_timeframe:String(
+      safeAssessorFacts.visible_timeframe
+      || safeAssessorFacts.extractedTimeframe
+      || ''
+    ).trim(),
+    visible_latest_price:chartVerificationNumberOrNull(
+      safeAssessorFacts.visible_latest_price !== undefined
+        ? safeAssessorFacts.visible_latest_price
+        : safeAssessorFacts.extractedPrice
+    ),
+    visible_ma20:chartVerificationNumberOrNull(
+      safeAssessorFacts.visible_ma20 !== undefined
+        ? safeAssessorFacts.visible_ma20
+        : safeAssessorFacts.extractedMa20
+    ),
+    visible_ma50:chartVerificationNumberOrNull(
+      safeAssessorFacts.visible_ma50 !== undefined
+        ? safeAssessorFacts.visible_ma50
+        : safeAssessorFacts.extractedMa50
+    ),
+    visible_ma200:chartVerificationNumberOrNull(
+      safeAssessorFacts.visible_ma200 !== undefined
+        ? safeAssessorFacts.visible_ma200
+        : safeAssessorFacts.extractedMa200
+    )
+  };
+  const assessorTrustedFacts = {
+    ticker:String(
+      safeAssessorFacts.expectedTicker
+      || safeAssessorFacts.ticker
+      || safeAssessorFacts.reviewTicker
+      || ''
+    ).trim(),
+    expected_timeframe:String(
+      safeAssessorFacts.expectedTimeframe
+      || safeAssessorFacts.expected_timeframe
+      || ''
+    ).trim(),
+    latest_price:chartVerificationNumberOrNull(
+      safeAssessorFacts.trustedPrice !== undefined
+        ? safeAssessorFacts.trustedPrice
+        : safeAssessorFacts.latest_price
+    ),
+    ma20:chartVerificationNumberOrNull(
+      safeAssessorFacts.trustedMa20 !== undefined
+        ? safeAssessorFacts.trustedMa20
+        : safeAssessorFacts.ma20
+    ),
+    ma50:chartVerificationNumberOrNull(
+      safeAssessorFacts.trustedMa50 !== undefined
+        ? safeAssessorFacts.trustedMa50
+        : safeAssessorFacts.ma50
+    ),
+    ma200:chartVerificationNumberOrNull(
+      safeAssessorFacts.trustedMa200 !== undefined
+        ? safeAssessorFacts.trustedMa200
+        : safeAssessorFacts.ma200
+    )
+  };
+  const extractedFacts = {
+    ...safeTraceExtractedFacts,
+    visible_ticker:String(
+      observedTicker
+      || safeTraceExtractedFacts.visible_ticker
+      || assessorExtractedFacts.visible_ticker
+      || ''
+    ).trim(),
+    visible_timeframe:String(
+      safeTraceExtractedFacts.visible_timeframe
+      || assessorExtractedFacts.visible_timeframe
+      || ''
+    ).trim(),
+    visible_latest_price:observedPrice === null
+      ? chartVerificationNumberOrNull(
+        safeTraceExtractedFacts.visible_latest_price !== undefined
+          ? safeTraceExtractedFacts.visible_latest_price
+          : assessorExtractedFacts.visible_latest_price
+      )
+      : observedPrice,
+    visible_ma20:chartVerificationNumberOrNull(
+      safeTraceExtractedFacts.visible_ma20 !== undefined
+        ? safeTraceExtractedFacts.visible_ma20
+        : assessorExtractedFacts.visible_ma20
+    ),
+    visible_ma50:chartVerificationNumberOrNull(
+      safeTraceExtractedFacts.visible_ma50 !== undefined
+        ? safeTraceExtractedFacts.visible_ma50
+        : assessorExtractedFacts.visible_ma50
+    ),
+    visible_ma200:chartVerificationNumberOrNull(
+      safeTraceExtractedFacts.visible_ma200 !== undefined
+        ? safeTraceExtractedFacts.visible_ma200
+        : assessorExtractedFacts.visible_ma200
+    )
+  };
+  const hasVisibleTicker = !!String(extractedFacts.visible_ticker || '').trim();
+  const hasVisibleTimeframe = !!String(extractedFacts.visible_timeframe || '').trim();
+  const hasVisiblePrice = chartVerificationNumberOrNull(extractedFacts.visible_latest_price) !== null;
+  const hasVisibleMa20 = chartVerificationNumberOrNull(extractedFacts.visible_ma20) !== null;
+  const hasVisibleMa50 = chartVerificationNumberOrNull(extractedFacts.visible_ma50) !== null;
+  const hasVisibleMa200 = chartVerificationNumberOrNull(extractedFacts.visible_ma200) !== null;
+  const hasVisibleFacts = hasVisibleTicker || hasVisibleTimeframe || hasVisiblePrice || hasVisibleMa20 || hasVisibleMa50 || hasVisibleMa200;
+  const normalizedMissing = Array.isArray(safeTrace.missing) ? safeTrace.missing.filter(item => {
+    const label = String(item || '').trim().toLowerCase();
+    if(label === 'extracted chart facts'){
+      return !hasVisibleFacts;
+    }
+    if(label === 'visible ticker'){
+      return !hasVisibleTicker;
+    }
+    if(label === 'visible timeframe'){
+      return !hasVisibleTimeframe;
+    }
+    if(label === 'latest price'){
+      return !hasVisiblePrice;
+    }
+    if(label === '20ma' || label === 'ma20'){
+      return !hasVisibleMa20;
+    }
+    if(label === '50ma' || label === 'ma50'){
+      return !hasVisibleMa50;
+    }
+    if(label === '200ma' || label === 'ma200'){
+      return !hasVisibleMa200;
+    }
+    return true;
+  }) : [];
+  const normalizedEvidence = Array.isArray(safeTrace.evidence) ? safeTrace.evidence.filter(item => {
+    const text = String(item || '').trim().toLowerCase();
+    if(!hasVisibleFacts) return true;
+    return text !== 'no extracted chart facts are available yet.';
+  }) : [];
+  const normalizedSources = (() => {
+    const sourceList = Array.isArray(safeTrace.sources) ? safeTrace.sources.map(item => String(item || '').trim()).filter(Boolean) : [];
+    if(!hasVisibleFacts) return sourceList;
+    const filtered = sourceList.filter(item => item !== 'chart_pre_ai_fast_pass');
+    if(!filtered.length){
+      filtered.push('chart_value_comparison');
+    }else if(!filtered.includes('chart_value_comparison') && !filtered.includes('chart_fact_extraction_empty') && !filtered.includes('chart_fact_extraction_sanitized_empty')){
+      filtered.push('chart_value_comparison');
+    }
+    return [...new Set(filtered)];
+  })();
   const mismatchReasons = Array.isArray(safeGate.mismatchReasons) ? safeGate.mismatchReasons : (Array.isArray(safeTrace.mismatchReasons) ? safeTrace.mismatchReasons : []);
   const unreadableReasons = Array.isArray(safeGate.unreadableReasons) ? safeGate.unreadableReasons : (Array.isArray(safeTrace.unreadableReasons) ? safeTrace.unreadableReasons : []);
   const baseDetail = String(
@@ -5052,6 +5204,9 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
     suppressionReason:detail || summary || status,
     mismatchReasons,
     unreadableReasons,
+    evidence:normalizedEvidence,
+    missing:normalizedMissing,
+    sources:normalizedSources,
     reason,
     finalized:true,
     ticker:String(safeContext.ticker || safeTrace.ticker || '').trim(),
@@ -5062,22 +5217,32 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
     verificationRequestId:String(safeContext.requestId || safeTrace.verificationRequestId || safeTrace.requestId || ''),
     trustedFacts:{
       ...safeTraceTrustedFacts,
-      ticker:expectedTicker || safeTraceTrustedFacts.ticker || String(safeContext.ticker || '').trim() || '',
-      expected_timeframe:String(safeTraceTrustedFacts.expected_timeframe || ''),
-      latest_price:expectedPrice === null ? chartVerificationNumberOrNull(safeTraceTrustedFacts.latest_price) : expectedPrice,
-      ma20:chartVerificationNumberOrNull(safeTraceTrustedFacts.ma20),
-      ma50:chartVerificationNumberOrNull(safeTraceTrustedFacts.ma50),
-      ma200:chartVerificationNumberOrNull(safeTraceTrustedFacts.ma200)
+      ticker:expectedTicker || safeTraceTrustedFacts.ticker || assessorTrustedFacts.ticker || String(safeContext.ticker || '').trim() || '',
+      expected_timeframe:String(safeTraceTrustedFacts.expected_timeframe || assessorTrustedFacts.expected_timeframe || ''),
+      latest_price:expectedPrice === null
+        ? chartVerificationNumberOrNull(
+          safeTraceTrustedFacts.latest_price !== undefined
+            ? safeTraceTrustedFacts.latest_price
+            : assessorTrustedFacts.latest_price
+        )
+        : expectedPrice,
+      ma20:chartVerificationNumberOrNull(
+        safeTraceTrustedFacts.ma20 !== undefined
+          ? safeTraceTrustedFacts.ma20
+          : assessorTrustedFacts.ma20
+      ),
+      ma50:chartVerificationNumberOrNull(
+        safeTraceTrustedFacts.ma50 !== undefined
+          ? safeTraceTrustedFacts.ma50
+          : assessorTrustedFacts.ma50
+      ),
+      ma200:chartVerificationNumberOrNull(
+        safeTraceTrustedFacts.ma200 !== undefined
+          ? safeTraceTrustedFacts.ma200
+          : assessorTrustedFacts.ma200
+      )
     },
-    extractedFacts:{
-      ...safeTraceExtractedFacts,
-      visible_ticker:observedTicker || safeTraceExtractedFacts.visible_ticker || '',
-      visible_timeframe:String(safeTraceExtractedFacts.visible_timeframe || ''),
-      visible_latest_price:observedPrice === null ? chartVerificationNumberOrNull(safeTraceExtractedFacts.visible_latest_price) : observedPrice,
-      visible_ma20:chartVerificationNumberOrNull(safeTraceExtractedFacts.visible_ma20),
-      visible_ma50:chartVerificationNumberOrNull(safeTraceExtractedFacts.visible_ma50),
-      visible_ma200:chartVerificationNumberOrNull(safeTraceExtractedFacts.visible_ma200)
-    },
+    extractedFacts,
     readableIdentityFields:safeTrace.readableIdentityFields && typeof safeTrace.readableIdentityFields === 'object'
       ? cloneData(safeTrace.readableIdentityFields, {})
       : {},
@@ -25519,7 +25684,8 @@ async function analyseSetup(ticker, options = {}){
           imageId:requestChartImageId,
           requestId:analysisRequestId,
           finalizeReason:requestFinalizeReason,
-          source:'chart_analysis_finalize'
+          source:'chart_analysis_finalize',
+          chartAssessorInput:verificationChartAssessorInput
         });
         commitTerminalChartVerificationTrace(record, committedBlockedTrace, {
           imageId:requestChartImageId,
@@ -34065,7 +34231,8 @@ function renderReviewWorkspace(options = {}){
         ticker:normalizeTicker(record.ticker || ''),
         imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
         requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
-        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity'
+        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
+        chartAssessorInput:chartAssessorRenderContext
       });
       commitTerminalChartVerificationTrace(record, chartConsistencyTraceForDisplay, {
         imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
@@ -34213,7 +34380,8 @@ function renderReviewWorkspace(options = {}){
         imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
         requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
         finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
-        source:'chart_render_terminal_guard'
+        source:'chart_render_terminal_guard',
+        chartAssessorInput:chartAssessorRenderContext
       });
       commitTerminalChartVerificationTrace(record, chartConsistencyTraceForDisplay, {
         imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
