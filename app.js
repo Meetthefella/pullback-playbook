@@ -4129,7 +4129,22 @@ function chartPipelineAllowsAi(phase = ''){
 function buildChartPipelineFromVerification(record = {}, options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const expected = buildChartPipelineExpectedFacts(item);
-  const read = buildChartPipelineReadFacts(options.chartAssessorInput || options.analysis || {});
+  const analysisReadFacts = buildChartPipelineReadFacts(options.analysis || {});
+  const assessorReadFacts = buildChartPipelineReadFacts(options.chartAssessorInput || {});
+  const read = {
+    ticker:String(analysisReadFacts.ticker || '').trim(),
+    timeframe:String(analysisReadFacts.timeframe || '').trim(),
+    price:chartVerificationNumberOrNull(analysisReadFacts.price),
+    ma20:chartVerificationNumberOrNull(analysisReadFacts.ma20) !== null
+      ? chartVerificationNumberOrNull(analysisReadFacts.ma20)
+      : chartVerificationNumberOrNull(assessorReadFacts.ma20),
+    ma50:chartVerificationNumberOrNull(analysisReadFacts.ma50) !== null
+      ? chartVerificationNumberOrNull(analysisReadFacts.ma50)
+      : chartVerificationNumberOrNull(assessorReadFacts.ma50),
+    ma200:chartVerificationNumberOrNull(analysisReadFacts.ma200) !== null
+      ? chartVerificationNumberOrNull(analysisReadFacts.ma200)
+      : chartVerificationNumberOrNull(assessorReadFacts.ma200)
+  };
   const readTicker = normaliseVisibleTicker(read.ticker || '');
   const expectedTicker = normaliseVisibleTicker(expected.ticker || '');
   const tickerMismatch = !!(readTicker && expectedTicker && readTicker !== expectedTicker);
