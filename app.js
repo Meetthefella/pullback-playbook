@@ -4128,7 +4128,22 @@ function chartPipelineAllowsAi(phase = ''){
 
 function chartPipelineHasVerifiedIdentity(pipeline = {}){
   const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
-  return safe.manualConfirmed === true || safe.verifiedMatch === true;
+  const readFacts = safe.readFacts && typeof safe.readFacts === 'object' ? safe.readFacts : {};
+  const verifiedReadTicker = normaliseVisibleTicker(readFacts.ticker || '');
+  return safe.manualConfirmed === true || (!!verifiedReadTicker && safe.verifiedMatch === true);
+}
+
+function normalizeChartPipelineForRender(pipeline = {}){
+  const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  const normalized = cloneData(safe, {});
+  const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(normalized);
+  if(!hasVerifiedIdentity && normalized.manualConfirmed !== true){
+    if(['verified', 'analysis_running', 'analysis_complete'].includes(String(normalized.phase || '').trim())){
+      normalized.phase = 'insufficient_identity';
+      normalized.aiAllowed = false;
+    }
+  }
+  return normalized;
 }
 
 function buildChartPipelineFromVerification(record = {}, options = {}){
@@ -4217,7 +4232,7 @@ function upsertReviewChartAnalysisPipeline(record = {}, nextPipeline = {}){
 
 function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
   const item = record && typeof record === 'object' ? record : {};
-  const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  const safe = normalizeChartPipelineForRender(pipeline);
   const expected = safe.expectedFacts && typeof safe.expectedFacts === 'object' ? safe.expectedFacts : buildChartPipelineExpectedFacts(item);
   const read = safe.readFacts && typeof safe.readFacts === 'object' ? safe.readFacts : {};
   const phase = String(safe.phase || '').trim();
@@ -4273,8 +4288,8 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
 }
 
 function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
-  const trace = buildSimplifiedChartPipelineTrace(record, pipeline);
-  const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  const safe = normalizeChartPipelineForRender(pipeline);
+  const trace = buildSimplifiedChartPipelineTrace(record, safe);
   const phase = String(safe.phase || '').trim();
   const expectedTicker = normalizeTicker(record && record.ticker || trace.ticker || '');
   const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(safe);
@@ -4319,7 +4334,8 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
 }
 
 function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
-  const decision = buildSimplifiedChartPipelineDecision(record, pipeline);
+  const normalizedPipeline = normalizeChartPipelineForRender(pipeline);
+  const decision = buildSimplifiedChartPipelineDecision(record, normalizedPipeline);
   const trace = decision.trace;
   const detailsOpen = !!(uiState.reviewChartDetailsOpen && uiState.reviewChartDetailsOpen[normalizeTicker(record && record.ticker || '')]);
   const detailsOpenAttr = detailsOpen ? ' open' : '';
@@ -4345,7 +4361,7 @@ function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
     decision,
     trace,
     markup:`<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>${escapeHtml(decision.title || 'Chart verification')}</strong><div>${escapeHtml(decision.summary || '')}</div><div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([facts.visible_ticker || 'n/a', facts.visible_timeframe || 'n/a', chartVerificationDisplayValue(facts.visible_latest_price)].join(' | '))} <strong>Expected:</strong> ${escapeHtml([trusted.ticker || 'n/a', trusted.expected_timeframe || 'n/a', chartVerificationDisplayValue(trusted.latest_price)].join(' | '))}</div><div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>${evidenceLine}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`,
-    manualActionsMarkup:['possible_mismatch', 'insufficient_identity'].includes(String(pipeline && pipeline.phase || '').trim())
+    manualActionsMarkup:['possible_mismatch', 'insufficient_identity'].includes(String(normalizedPipeline && normalizedPipeline.phase || '').trim())
       ? `<div class="actions chart-verification-actions" style="margin-top:8px">
           <button class="primary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record && record.ticker || '')}</button>
           <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">Reject and upload another chart</button>
