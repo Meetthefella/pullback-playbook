@@ -30424,6 +30424,11 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   const visibleTicker = normaliseVisibleTicker(safeAnalysis.visible_ticker || '');
   const visibleTimeframe = String(safeAnalysis.visible_timeframe || '').trim();
   const visiblePrice = chartVerificationNumberOrNull(safeAnalysis.visible_latest_price);
+  const hasOnlyTickerExtracted = !!(
+    visibleTicker
+    && !visibleTimeframe
+    && visiblePrice === null
+  );
   const visibleTickerSource = String(safeAnalysis.visible_ticker_source || safeAnalysis.ticker_extraction_source || '').trim().toLowerCase();
   const visiblePriceSource = String(safeAnalysis.visible_price_source || safeAnalysis.price_extraction_source || '').trim().toLowerCase();
   const visibleTimeframeSource = String(safeAnalysis.visible_timeframe_source || safeAnalysis.timeframe_extraction_source || '').trim().toLowerCase();
@@ -30497,11 +30502,15 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   }
   if(strictProvenanceRequired && visibleTicker && !hasTickerEvidence){
     if(expectedTicker && visibleTicker === expectedTicker){
-      leakedFields.push('ticker');
-      safeAnalysis.visible_ticker = '';
-      safeAnalysis.visible_ticker_source = '';
-      safeAnalysis.ticker_extraction_source = '';
-      blankedFields.push('ticker');
+      if(hasOnlyTickerExtracted){
+        relaxedFields.push('ticker_only_partial_match');
+      }else{
+        leakedFields.push('ticker');
+        safeAnalysis.visible_ticker = '';
+        safeAnalysis.visible_ticker_source = '';
+        safeAnalysis.ticker_extraction_source = '';
+        blankedFields.push('ticker');
+      }
     }else{
       relaxedFields.push('ticker');
     }
