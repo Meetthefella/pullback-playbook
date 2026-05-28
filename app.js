@@ -4270,9 +4270,77 @@ function queueReviewQuickChartAnalysis(record, options = {}){
   const triggerSource = String(options.source || 'review_render');
   const triggerReason = String(options.triggerReason || state.currentVerificationStatus || 'chart_verification_pending');
   const bypassQueue = options.bypassQueue === true;
+  const queueStateDetail = {
+    status:String(state.status || ''),
+    shouldQueue:state.shouldQueue === true,
+    pending:state.pending === true,
+    attempted:state.attempted === true,
+    completed:state.completed === true,
+    failed:state.failed === true,
+    matchesCurrentKey:state.matchesCurrentKey === true,
+    currentVerificationStatus:String(state.currentVerificationStatus || '')
+  };
   if(!state.hasChart){
     return state;
   }
+  const commitVerificationRequestNotStarted = (reason = 'verification_request_not_started') => {
+    const activeRuntime = getReviewAiRuntime();
+    const activeRequest = uiState.analysisActiveRequest && typeof uiState.analysisActiveRequest === 'object'
+      ? uiState.analysisActiveRequest
+      : null;
+    const chartImageId = String(state.imageId || chartImageIdForReview(review) || '');
+    const filename = String(
+      review.chartAttachmentContext && review.chartAttachmentContext.name
+      || review.chartRef && review.chartRef.name
+      || review.chartImageOriginal && review.chartImageOriginal.name
+      || ''
+    );
+    const duplicateSuppressed = !!(
+      activeRequest
+      && normalizeTicker(activeRequest.ticker || '') === normalizeTicker(liveItem.ticker || item.ticker || '')
+    );
+    if(typeof console !== 'undefined' && console.warn){
+      console.warn('[CHART_VERIFICATION_REQUEST_NOT_STARTED]', {
+        ticker:normalizeTicker(liveItem.ticker || item.ticker || ''),
+        imageId:chartImageId,
+        filename,
+        reason,
+        activeRuntimeStatus:String(activeRuntime.status || ''),
+        activeRequestId:String(activeRequest && activeRequest.id || ''),
+        duplicateSuppressed,
+        queueState:queueStateDetail
+      });
+    }
+    review.quickChartAnalysis = null;
+    const committedTrace = materializeTerminalBlockedChartTrace(
+      state.stored && state.stored.trace && typeof state.stored.trace === 'object'
+        ? state.stored.trace
+        : (review.chartVerificationTrace && review.chartVerificationTrace.trace && typeof review.chartVerificationTrace.trace === 'object'
+          ? review.chartVerificationTrace.trace
+          : (review.chartVerificationCommittedTrace && review.chartVerificationCommittedTrace.trace && typeof review.chartVerificationCommittedTrace.trace === 'object'
+            ? review.chartVerificationCommittedTrace.trace
+            : {})),
+      {
+        status:'verification_failed',
+        reason
+      },
+      {
+        ticker:normalizeTicker(liveItem.ticker || item.ticker || ''),
+        imageId:chartImageId,
+        requestId:'',
+        source:'chart_verification_request_not_started'
+      }
+    );
+    commitTerminalChartVerificationTrace(liveRecord || liveItem, committedTrace, {
+      imageId:chartImageId,
+      requestId:'',
+      chartImageSource:state.sourceTrace,
+      finalizeReason:reason,
+      source:'chart_verification_request_not_started'
+    });
+    commitTickerState();
+    return reviewQuickChartAnalysisState(liveRecord || liveItem, options);
+  };
   if(!state.shouldQueue){
     const stableCurrentState = state.matchesCurrentKey && ['queued', 'running', 'complete', 'committed', 'failed'].includes(state.status || '');
     if(typeof console !== 'undefined' && console.info && state.needsQuickAnalysis && !stableCurrentState && !state.currentAnalysisComplete){
@@ -4284,6 +4352,15 @@ function queueReviewQuickChartAnalysis(record, options = {}){
         key:state.key,
         triggerSource
       });
+    }
+    if(
+      bypassQueue
+      && state.hasChart
+      && state.needsQuickAnalysis
+      && !state.currentAnalysisComplete
+      && !String(currentChartContext && currentChartContext.requestId || '')
+    ){
+      return commitVerificationRequestNotStarted('verification_request_not_started');
     }
     return state;
   }
@@ -4309,6 +4386,10 @@ function queueReviewQuickChartAnalysis(record, options = {}){
   if(bypassQueue){
     commitTickerState();
     analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});
+    const startedContext = currentReviewChartContext(liveRecord || liveItem, review);
+    if(!String(startedContext && startedContext.requestId || '')){
+      return commitVerificationRequestNotStarted('verification_request_not_started');
+    }
     return reviewQuickChartAnalysisState(liveRecord || liveItem, options);
   }
   if(typeof console !== 'undefined' && console.info){
@@ -4595,6 +4676,14 @@ function chartVerificationUiDecision(trace, ticker = ''){
       detail:unreadableReasons.length
         ? unreadableReasons.join(' ')
         : `Please confirm or reject it before AI chart analysis runs.`
+    };
+  }
+  if(status === 'verification_failed' && String(safe.reason || '').trim() === 'verification_request_not_started'){
+    return {
+      key:'verification_failed',
+      title:'Chart verification could not start',
+      summary:'The app could not start chart verification for this uploaded chart.',
+      detail:'Confirm the current chart manually or upload another chart.'
     };
   }
   if(chartVerificationSupportsNonBlockingIndicatorPartial({}, safe)){

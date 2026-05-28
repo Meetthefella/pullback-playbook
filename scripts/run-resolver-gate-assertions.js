@@ -2945,7 +2945,8 @@ function runAiContractAssertions(){
     throw new Error('Blocked verification finalize paths must materialize a terminal committed chart trace for the current request and rerender it.');
   }
   const materializeTerminalBlockedTraceSource = extractFunctionSource(appSource, 'materializeTerminalBlockedChartTrace');
-  if(!materializeTerminalBlockedTraceSource.includes("source:String((forcedFinalizeSource ? 'chart_analysis_finalize' : '')")
+  if((!materializeTerminalBlockedTraceSource.includes("source:String((forcedFinalizeSource ? 'chart_analysis_finalize' : '')")
+      && !materializeTerminalBlockedTraceSource.includes("source:String(safeContext.source || (forcedFinalizeSource ? 'chart_analysis_finalize' : '')"))
     || !materializeTerminalBlockedTraceSource.includes("status = ['unknown_chart_identity', 'insufficient_identity_evidence'].includes(rawStatus)")
     || !materializeTerminalBlockedTraceSource.includes('finalized:true')){
     throw new Error('Terminal blocked chart traces must force chart_analysis_finalize source and finalized metadata for blocked unknown identity.');
