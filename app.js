@@ -30269,6 +30269,15 @@ function bindReviewWorkspaceActions(record){
       }
     });
   }
+  const chartDetails = $('reviewChartDetails');
+  if(chartDetails){
+    chartDetails.addEventListener('toggle', () => {
+      if(!uiState.reviewChartDetailsOpen || typeof uiState.reviewChartDetailsOpen !== 'object'){
+        uiState.reviewChartDetailsOpen = {};
+      }
+      uiState.reviewChartDetailsOpen[normalizeTicker(record.ticker || '')] = chartDetails.open === true;
+    });
+  }
   const fileInput = $('reviewChartFile');
   if(fileInput) fileInput.addEventListener('change', event => handleChartSelection(record.ticker, event.target.files && event.target.files[0], 'choose_screenshot'));
   const lightboxBtn = box.querySelector('[data-act="open-chart-lightbox"]');
@@ -32587,14 +32596,37 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
     };
   }
   if(!analysis && hasChart){
+    const sourceCheckingFacts = mergeExtractedFactsWithCarryForward({
+      visible_ticker:fastPass.visibleTicker,
+      visible_timeframe:fastPass.visibleTimeframe,
+      visible_latest_price:fastPass.visiblePrice
+    });
+    const sourceCheckingHasFacts = !!(
+      String(sourceCheckingFacts.visible_ticker || '').trim()
+      || String(sourceCheckingFacts.visible_timeframe || '').trim()
+      || chartVerificationNumberOrNull(sourceCheckingFacts.visible_latest_price) !== null
+      || chartVerificationNumberOrNull(sourceCheckingFacts.visible_ma20) !== null
+      || chartVerificationNumberOrNull(sourceCheckingFacts.visible_ma50) !== null
+      || chartVerificationNumberOrNull(sourceCheckingFacts.visible_ma200) !== null
+    );
+    const sourceCheckingMissing = [];
+    if(!String(sourceCheckingFacts.visible_ticker || '').trim()) sourceCheckingMissing.push('visible ticker');
+    if(!String(sourceCheckingFacts.visible_timeframe || '').trim()) sourceCheckingMissing.push('visible timeframe');
+    if(chartVerificationNumberOrNull(sourceCheckingFacts.visible_latest_price) === null) sourceCheckingMissing.push('latest price');
+    const sourceCheckingEvidence = sourceCheckingHasFacts
+      ? []
+      : [
+        `Uploaded image ${currentChartImageId || 'n/a'} is available for ${normaliseVisibleTicker(safeRecord.ticker || '') || 'the current ticker'}.`,
+        'No extracted chart facts are available yet.'
+      ];
     return {
       visible:true,
       status:'source_checking',
       severity:'warning',
       title:'Chart uploaded - checking details',
       summary:'Chart source is valid. AI chart extraction is running.',
-      evidence:['No extracted chart facts are available yet.'],
-      missing:['extracted chart facts'],
+      evidence:sourceCheckingEvidence,
+      missing:sourceCheckingHasFacts ? sourceCheckingMissing : ['extracted chart facts'],
       initialMissingIndicators:[],
       finalMissingIndicators:[],
       summaryDerivedFromFinalState:true,
@@ -32606,21 +32638,17 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       likelyMatchedIndicators:[],
       inferredIndicators:[],
       indicatorStates:{},
-      extractedFacts:mergeExtractedFactsWithCarryForward({
-        visible_ticker:fastPass.visibleTicker,
-        visible_timeframe:fastPass.visibleTimeframe,
-        visible_latest_price:fastPass.visiblePrice
-      }),
+      extractedFacts:sourceCheckingFacts,
       trustedFacts:{
         ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
         expected_timeframe:'1D',
         latest_price:fastPass.trustedPrice
       },
-      sources:['chart_verification_fast_pass'],
+      sources:sourceCheckingHasFacts ? ['chart_value_comparison'] : ['chart_pre_ai_fast_pass'],
       chartImageSource,
       debug:{
         ticker:String(safeRecord.ticker || '').trim(),
-        source:'chart_verification_fast_pass',
+        source:sourceCheckingHasFacts ? 'chart_value_comparison' : 'chart_pre_ai_fast_pass',
         fastPass,
         deterministicStatus:'source_checking',
         chartImageSource,
@@ -32915,6 +32943,9 @@ function renderChartConsistencyTrace(trace){
   if(!safe.visible) return '';
   const facts = safe.extractedFacts && typeof safe.extractedFacts === 'object' ? safe.extractedFacts : null;
   const trusted = safe.trustedFacts && typeof safe.trustedFacts === 'object' ? safe.trustedFacts : null;
+  const detailTicker = String(safe.reviewTicker || safe.ticker || trusted && trusted.ticker || facts && facts.visible_ticker || '').trim().toUpperCase();
+  const detailsOpen = !!(uiState.reviewChartDetailsOpen && uiState.reviewChartDetailsOpen[detailTicker]);
+  const detailsOpenAttr = detailsOpen ? ' open' : '';
   const indicatorStates = safe.indicatorStates && typeof safe.indicatorStates === 'object' ? safe.indicatorStates : {};
   const statusText = {
     ma20_status:'20MA',
@@ -32985,7 +33016,7 @@ function renderChartConsistencyTrace(trace){
       ? `<div class="tiny">Sources: ${escapeHtml(safe.sources.join(', '))}</div>`
       : '';
     const details = `${extracted}${trustedFacts}${imageSource}${sources}${evidence}`;
-    return `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(uiDecision))}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}${comparisonLine}${maComparisonLine}${uiDecision.detail ? `<div class="tiny">${escapeHtml(uiDecision.detail)}</div>` : ''}${details ? `<details class="compact-details"><summary>Show details</summary>${details}</details>` : ''}</div>`;
+    return `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(uiDecision))}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}${comparisonLine}${maComparisonLine}${uiDecision.detail ? `<div class="tiny">${escapeHtml(uiDecision.detail)}</div>` : ''}${details ? `<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details>` : ''}</div>`;
   }
   const compactSummary = summaryText ? `<div>${escapeHtml(summaryText)}</div>` : '';
   const evidence = Array.isArray(safe.evidence) && safe.evidence.length
@@ -33023,7 +33054,7 @@ function renderChartConsistencyTrace(trace){
     ? `<div class="tiny badtext">${escapeHtml(`Evidence: ${safe.evidence.join(' | ')}`)}</div>`
     : '';
   const details = `${missing}${likelyMatchedIndicators}${partialIndicators}${inferredIndicators}${missingIndicators}${extracted}${trustedFacts}${imageSource}${evidence}${sources}`;
-  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}${comparisonLine}${maComparisonLine}${visibleEvidence}<details class="compact-details"><summary>Show details</summary>${details}</details></div>`;
+  return `<div class="summary tiny ai-summary-message ${escapeHtml(className)}"><strong>${escapeHtml(headingText)}</strong>${compactSummary}${comparisonLine}${maComparisonLine}${visibleEvidence}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`;
 }
 
 function logReviewChartOverflowGuard(ticker = ''){
