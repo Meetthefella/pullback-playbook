@@ -26062,6 +26062,17 @@ function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null
     allowedToRender = false;
     reason = 'no_current_chart';
   }else if(
+    currentImageId
+    && summaryImageId
+    && currentImageId === summaryImageId
+    && !currentRequestId
+    && !summaryRequestId
+    && !quickStatus
+    && !verificationStatus
+  ){
+    allowedToRender = false;
+    reason = 'verification_context_unowned';
+  }else if(
     quickStatus === 'running'
     && currentImageId
     && summaryImageId
