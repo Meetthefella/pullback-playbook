@@ -5126,6 +5126,10 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
   const hasVisibleMa50 = chartVerificationNumberOrNull(extractedFacts.visible_ma50) !== null;
   const hasVisibleMa200 = chartVerificationNumberOrNull(extractedFacts.visible_ma200) !== null;
   const hasVisibleFacts = hasVisibleTicker || hasVisibleTimeframe || hasVisiblePrice || hasVisibleMa20 || hasVisibleMa50 || hasVisibleMa200;
+  const derivedMissingLabels = [];
+  if(!hasVisibleTicker) derivedMissingLabels.push('visible ticker');
+  if(!hasVisibleTimeframe) derivedMissingLabels.push('visible timeframe');
+  if(!hasVisiblePrice) derivedMissingLabels.push('latest price');
   const normalizedMissing = Array.isArray(safeTrace.missing) ? safeTrace.missing.filter(item => {
     const label = String(item || '').trim().toLowerCase();
     if(label === 'extracted chart facts'){
@@ -5151,11 +5155,29 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
     }
     return true;
   }) : [];
-  const normalizedEvidence = Array.isArray(safeTrace.evidence) ? safeTrace.evidence.filter(item => {
+  if(!normalizedMissing.length && derivedMissingLabels.length){
+    normalizedMissing.push(...derivedMissingLabels);
+  }
+  const filteredEvidence = Array.isArray(safeTrace.evidence) ? safeTrace.evidence.filter(item => {
     const text = String(item || '').trim().toLowerCase();
     if(!hasVisibleFacts) return true;
     return text !== 'no extracted chart facts are available yet.';
   }) : [];
+  const derivedUnreadableReasons = [];
+  if(!hasVisibleTicker) derivedUnreadableReasons.push('Could not read ticker from the uploaded chart.');
+  if(!hasVisibleTimeframe) derivedUnreadableReasons.push('Could not read timeframe from the uploaded chart.');
+  if(!hasVisiblePrice) derivedUnreadableReasons.push('Could not read price from the uploaded chart.');
+  const hasLegacyIdentityUnreadableEvidence = filteredEvidence.some(item => /visible ticker, timeframe, and price could not be verified from the chart image\./i.test(String(item || '').trim()));
+  const normalizedEvidence = [
+    ...filteredEvidence.filter(item => !/visible ticker, timeframe, and price could not be verified from the chart image\./i.test(String(item || '').trim())),
+    ...((!hasVisibleTicker || !hasVisibleTimeframe || !hasVisiblePrice) && !hasLegacyIdentityUnreadableEvidence
+      ? [`Visible ${[
+        !hasVisibleTicker ? 'ticker' : '',
+        !hasVisibleTimeframe ? 'timeframe' : '',
+        !hasVisiblePrice ? 'price' : ''
+      ].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1')} could not be verified from the chart image.`]
+      : [])
+  ].filter(Boolean);
   const normalizedSources = (() => {
     const sourceList = Array.isArray(safeTrace.sources) ? safeTrace.sources.map(item => String(item || '').trim()).filter(Boolean) : [];
     if(!hasVisibleFacts) return sourceList;
@@ -5168,7 +5190,13 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
     return [...new Set(filtered)];
   })();
   const mismatchReasons = Array.isArray(safeGate.mismatchReasons) ? safeGate.mismatchReasons : (Array.isArray(safeTrace.mismatchReasons) ? safeTrace.mismatchReasons : []);
-  const unreadableReasons = Array.isArray(safeGate.unreadableReasons) ? safeGate.unreadableReasons : (Array.isArray(safeTrace.unreadableReasons) ? safeTrace.unreadableReasons : []);
+  const unreadableReasons = (() => {
+    const existing = Array.isArray(safeGate.unreadableReasons)
+      ? safeGate.unreadableReasons
+      : (Array.isArray(safeTrace.unreadableReasons) ? safeTrace.unreadableReasons : []);
+    if(!derivedUnreadableReasons.length) return existing;
+    return [...new Set(derivedUnreadableReasons)];
+  })();
   const baseDetail = String(
     safeTrace.detail
     || safeTrace.summary
