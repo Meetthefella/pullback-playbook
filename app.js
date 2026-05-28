@@ -30652,6 +30652,15 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   const priceLeakTolerance = trustedPrice !== null
     ? Number(chartVerificationToleranceDetail(visiblePrice, trustedPrice, 'price').tolerance || 0.0001)
     : 0.0001;
+  const hasTickerPricePartialTrustedMatch = !!(
+    visibleTicker
+    && expectedTicker
+    && visibleTicker === expectedTicker
+    && !visibleTimeframe
+    && visiblePrice !== null
+    && trustedPrice !== null
+    && Math.abs(visiblePrice - trustedPrice) <= priceLeakTolerance
+  );
   const initialVersion = hasExplicitChartIdentityProvenanceVersion(safeAnalysis)
     ? Number(safeAnalysis.chartIdentityProvenanceVersion)
     : null;
@@ -30718,8 +30727,8 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   }
   if(strictProvenanceRequired && visibleTicker && !hasTickerEvidence){
     if(expectedTicker && visibleTicker === expectedTicker){
-      if(hasOnlyTickerExtracted){
-        relaxedFields.push('ticker_only_partial_match');
+      if(hasOnlyTickerExtracted || hasTickerPricePartialTrustedMatch){
+        relaxedFields.push(hasOnlyTickerExtracted ? 'ticker_only_partial_match' : 'ticker_price_partial_match');
       }else{
         leakedFields.push('ticker');
         safeAnalysis.visible_ticker = '';
@@ -30733,11 +30742,15 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   }
   if(strictProvenanceRequired && visiblePrice !== null && !hasPriceEvidence){
     if(trustedPrice !== null && Math.abs(visiblePrice - trustedPrice) <= priceLeakTolerance){
-      leakedFields.push('price');
-      safeAnalysis.visible_latest_price = null;
-      safeAnalysis.visible_price_source = '';
-      safeAnalysis.price_extraction_source = '';
-      blankedFields.push('price');
+      if(hasTickerPricePartialTrustedMatch){
+        relaxedFields.push('price_partial_match');
+      }else{
+        leakedFields.push('price');
+        safeAnalysis.visible_latest_price = null;
+        safeAnalysis.visible_price_source = '';
+        safeAnalysis.price_extraction_source = '';
+        blankedFields.push('price');
+      }
     }else{
       relaxedFields.push('price');
     }
@@ -33983,10 +33996,17 @@ function renderReviewWorkspace(options = {}){
     const visibleFacts = chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.extractedFacts && typeof chartConsistencyTraceForDisplay.extractedFacts === 'object'
       ? chartConsistencyTraceForDisplay.extractedFacts
       : {};
+    const assessorVisibleFacts = chartAssessorRenderContext && typeof chartAssessorRenderContext === 'object'
+      ? chartAssessorRenderContext
+      : {};
     const hasReadableVisibleFacts = !!(
-      String(visibleFacts.visible_ticker || '').trim()
-      || String(visibleFacts.visible_timeframe || '').trim()
-      || chartVerificationNumberOrNull(visibleFacts.visible_latest_price) !== null
+      String(visibleFacts.visible_ticker || assessorVisibleFacts.visible_ticker || '').trim()
+      || String(visibleFacts.visible_timeframe || assessorVisibleFacts.visible_timeframe || '').trim()
+      || chartVerificationNumberOrNull(
+        visibleFacts.visible_latest_price !== undefined
+          ? visibleFacts.visible_latest_price
+          : assessorVisibleFacts.visible_latest_price
+      ) !== null
     );
     if(
       hasVerifiableChart
@@ -34106,9 +34126,16 @@ function renderReviewWorkspace(options = {}){
     const finalGuardVisibleFacts = chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.extractedFacts && typeof chartConsistencyTraceForDisplay.extractedFacts === 'object'
       ? chartConsistencyTraceForDisplay.extractedFacts
       : {};
-    const finalGuardVisibleTicker = String(finalGuardVisibleFacts.visible_ticker || '').trim();
-    const finalGuardVisibleTimeframe = String(finalGuardVisibleFacts.visible_timeframe || '').trim();
-    const finalGuardVisiblePrice = chartVerificationNumberOrNull(finalGuardVisibleFacts.visible_latest_price);
+    const finalGuardAssessorFacts = chartAssessorRenderContext && typeof chartAssessorRenderContext === 'object'
+      ? chartAssessorRenderContext
+      : {};
+    const finalGuardVisibleTicker = String(finalGuardVisibleFacts.visible_ticker || finalGuardAssessorFacts.visible_ticker || '').trim();
+    const finalGuardVisibleTimeframe = String(finalGuardVisibleFacts.visible_timeframe || finalGuardAssessorFacts.visible_timeframe || '').trim();
+    const finalGuardVisiblePrice = chartVerificationNumberOrNull(
+      finalGuardVisibleFacts.visible_latest_price !== undefined
+        ? finalGuardVisibleFacts.visible_latest_price
+        : finalGuardAssessorFacts.visible_latest_price
+    );
     const finalGuardTrustedTicker = normalizeTicker(
       record.ticker
       || chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.trustedFacts && chartConsistencyTraceForDisplay.trustedFacts.ticker
