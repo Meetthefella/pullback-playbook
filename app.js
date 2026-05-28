@@ -4126,6 +4126,11 @@ function chartPipelineAllowsAi(phase = ''){
   return ['verified', 'analysis_running', 'analysis_complete'].includes(String(phase || '').trim());
 }
 
+function chartPipelineHasVerifiedIdentity(pipeline = {}){
+  const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  return safe.manualConfirmed === true || safe.verifiedMatch === true;
+}
+
 function buildChartPipelineFromVerification(record = {}, options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const expected = buildChartPipelineExpectedFacts(item);
@@ -4183,7 +4188,10 @@ function buildChartPipelineFromVerification(record = {}, options = {}){
     readFacts:read,
     missing,
     evidence,
-    aiAllowed:chartPipelineAllowsAi(phase),
+    aiAllowed:chartPipelineAllowsAi(phase) && chartPipelineHasVerifiedIdentity({
+      manualConfirmed:false,
+      verifiedMatch
+    }),
     manualConfirmed:false,
     verifiedMatch,
     mismatch:tickerMismatch,
@@ -4256,8 +4264,8 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
     sources:[String(safe.source || 'chart_pipeline_quick_check')],
     source:String(safe.source || 'chart_pipeline_quick_check'),
     chartImageSource:cloneData(safe.chartImageSource || buildChartImageSourceTrace(item.review || {}), null),
-    aiAnalysisSuppressed:!chartPipelineAllowsAi(phase),
-    suppressionReason:chartPipelineAllowsAi(phase) ? '' : detailText,
+    aiAnalysisSuppressed:!(chartPipelineAllowsAi(phase) && chartPipelineHasVerifiedIdentity(safe)),
+    suppressionReason:(chartPipelineAllowsAi(phase) && chartPipelineHasVerifiedIdentity(safe)) ? '' : detailText,
     chartUserConfirmed:safe.manualConfirmed === true,
     manualConfirmed:safe.manualConfirmed === true,
     finalized:phase !== 'verifying' && phase !== 'uploading'
@@ -4269,6 +4277,7 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
   const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
   const phase = String(safe.phase || '').trim();
   const expectedTicker = normalizeTicker(record && record.ticker || trace.ticker || '');
+  const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(safe);
   if(phase === 'verifying' || phase === 'uploading'){
     return {
       key:'source_checking',
@@ -4289,7 +4298,7 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
       trace
     };
   }
-  if(chartPipelineAllowsAi(phase)){
+  if(chartPipelineAllowsAi(phase) && hasVerifiedIdentity){
     return {
       key:safe.manualConfirmed === true ? 'user_confirmed_match' : 'verified_match',
       title:`Chart matched ${expectedTicker || 'selected ticker'}`,
@@ -4483,6 +4492,10 @@ async function runSimplifiedChartFullAnalysis(record = {}, options = {}){
   const ticker = normalizeTicker(item.ticker || '');
   const pipeline = getReviewChartAnalysisPipeline(item);
   if(!ticker || !pipeline) return false;
+  if(!chartPipelineHasVerifiedIdentity(pipeline)){
+    renderReviewWorkspace({source:'chart_pipeline_analysis_blocked', requestedTicker:ticker});
+    return false;
+  }
   const imageId = String(chartImageIdForReview(item.review || {}) || '');
   upsertReviewChartAnalysisPipeline(item, {
     ...pipeline,
