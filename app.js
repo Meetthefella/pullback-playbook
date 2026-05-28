@@ -32699,16 +32699,29 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       })
     );
     if(strictSanitizedBlankIdentity){
+      const mergedIdentityFacts = mergeExtractedFactsWithCarryForward(deterministic.extractedFacts);
+      const mergedVisibleTicker = String(mergedIdentityFacts && mergedIdentityFacts.visible_ticker || '').trim();
+      const mergedVisibleTimeframe = String(mergedIdentityFacts && mergedIdentityFacts.visible_timeframe || '').trim();
+      const mergedVisiblePrice = chartVerificationNumberOrNull(mergedIdentityFacts && mergedIdentityFacts.visible_latest_price);
+      const mergedMissing = [];
+      if(!mergedVisibleTicker) mergedMissing.push('visible ticker');
+      if(!mergedVisibleTimeframe) mergedMissing.push('visible timeframe');
+      if(mergedVisiblePrice === null) mergedMissing.push('latest price');
+      const mergedUnreadableEvidenceFields = [];
+      if(!mergedVisibleTicker) mergedUnreadableEvidenceFields.push('ticker');
+      if(!mergedVisibleTimeframe) mergedUnreadableEvidenceFields.push('timeframe');
+      if(mergedVisiblePrice === null) mergedUnreadableEvidenceFields.push('price');
+      const mergedUnreadableEvidence = mergedUnreadableEvidenceFields.length
+        ? `Visible ${mergedUnreadableEvidenceFields.join(', ').replace(/, ([^,]*)$/, ' and $1')} could not be verified from the chart image.`
+        : '';
       return {
         visible:true,
         status:'unknown_chart_identity',
         severity:'warning',
         title:'Chart verification incomplete',
         summary:'Visible chart identity could not be verified from the uploaded image. Confirm manually if this is the correct chart.',
-        evidence:[
-          'Visible ticker, timeframe, and price could not be verified from the chart image.'
-        ],
-        missing:deterministic.missing,
+        evidence:mergedUnreadableEvidence ? [mergedUnreadableEvidence] : [],
+        missing:mergedMissing,
         initialMissingIndicators:deterministic.initialMissingIndicators,
         finalMissingIndicators:deterministic.finalMissingIndicators,
         summaryDerivedFromFinalState:true,
@@ -32723,7 +32736,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         pullbackZone:String((deterministic.debug && deterministic.debug.pullbackZone) || (derived && derived.pullbackZone) || '').trim().toLowerCase(),
         setupType:String((deterministic.debug && deterministic.debug.setupType) || safeRecord.setupType || safeRecord.scanSetupType || '').trim().toLowerCase(),
         indicatorStates:deterministic.indicatorStates,
-        extractedFacts:mergeExtractedFactsWithCarryForward(deterministic.extractedFacts),
+        extractedFacts:mergedIdentityFacts,
         trustedFacts:deterministic.trustedFacts,
         sources:[...new Set((deterministic.sources || []).concat(['insufficient_identity_evidence']))],
         chartImageSource,
