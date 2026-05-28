@@ -21939,6 +21939,7 @@ function reviewAnalysisUiStateForRecord(record){
 }
 
 const REVIEW_AI_RUNTIME_STALE_TIMEOUT_MS = 90 * 1000;
+const REVIEW_CHART_PRE_REQUEST_STALE_TIMEOUT_MS = 15 * 1000;
 
 function getReviewAiRuntime(){
   if(!uiState.reviewAiRuntime || typeof uiState.reviewAiRuntime !== 'object'){
@@ -21963,6 +21964,58 @@ function getReviewAiRuntime(){
 function nextReviewAiAnalysisRequestId(){
   uiState.analysisRequestSeq = Number(uiState.analysisRequestSeq || 0) + 1;
   return `analysis-${uiState.analysisRequestSeq}-${Date.now()}`;
+}
+
+function reviewChartPreRequestStore(){
+  if(!uiState.reviewChartPreRequest || typeof uiState.reviewChartPreRequest !== 'object'){
+    uiState.reviewChartPreRequest = {};
+  }
+  return uiState.reviewChartPreRequest;
+}
+
+function getReviewChartPreRequest(ticker){
+  const symbol = normalizeTicker(ticker || '');
+  if(!symbol) return null;
+  const store = reviewChartPreRequestStore();
+  const entry = store[symbol] && typeof store[symbol] === 'object'
+    ? store[symbol]
+    : null;
+  if(!entry) return null;
+  const startedAt = Number(entry.startedAt || 0);
+  if(!Number.isFinite(startedAt) || startedAt <= 0 || (Date.now() - startedAt) > REVIEW_CHART_PRE_REQUEST_STALE_TIMEOUT_MS){
+    delete store[symbol];
+    return null;
+  }
+  return entry;
+}
+
+function setReviewChartPreRequest(ticker, entry){
+  const symbol = normalizeTicker(ticker || '');
+  if(!symbol) return null;
+  const store = reviewChartPreRequestStore();
+  store[symbol] = {
+    ticker:symbol,
+    imageId:String(entry && entry.imageId || ''),
+    source:String(entry && entry.source || ''),
+    startedAt:Number(entry && entry.startedAt || Date.now())
+  };
+  return store[symbol];
+}
+
+function clearReviewChartPreRequest(ticker, options = {}){
+  const symbol = normalizeTicker(ticker || '');
+  if(!symbol) return false;
+  const store = reviewChartPreRequestStore();
+  const entry = store[symbol] && typeof store[symbol] === 'object'
+    ? store[symbol]
+    : null;
+  if(!entry) return false;
+  const onlyImageId = String(options.imageId || '');
+  if(onlyImageId && String(entry.imageId || '') && String(entry.imageId || '') !== onlyImageId){
+    return false;
+  }
+  delete store[symbol];
+  return true;
 }
 
 function beginReviewAiAnalysis(ticker, prompt, options = {}){
@@ -24435,6 +24488,44 @@ async function analyseSetup(ticker, options = {}){
   console.debug('[review-analysis] analyse_setup_click', {ticker, source:analysisSource});
   const preflightRecord = upsertTickerRecord(ticker);
   const preflightChartImageId = chartImageIdForReview(preflightRecord.review || {});
+  const autoChartVerificationStart = analysisSource === 'chart_upload' || analysisSource === 'review_render_queue';
+  let preRequestMarkerClaimed = false;
+  const emitPreRequestExit = (reason, payload = {}) => {
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_ANALYSIS_PRE_REQUEST_EXIT]', {
+        ticker,
+        source:analysisSource,
+        imageId:String(preflightChartImageId || ''),
+        reason,
+        ...payload
+      });
+    }
+  };
+  const releasePreRequestMarker = () => {
+    if(!preRequestMarkerClaimed) return;
+    clearReviewChartPreRequest(ticker, {imageId:String(preflightChartImageId || '')});
+    preRequestMarkerClaimed = false;
+  };
+  if(autoChartVerificationStart && preflightChartImageId){
+    const existingPreRequest = getReviewChartPreRequest(ticker);
+    if(
+      existingPreRequest
+      && String(existingPreRequest.imageId || '') === String(preflightChartImageId || '')
+    ){
+      emitPreRequestExit('duplicate_pre_request_inflight', {
+        existingSource:String(existingPreRequest.source || ''),
+        existingAgeMs:Math.max(0, Date.now() - Number(existingPreRequest.startedAt || Date.now()))
+      });
+      return;
+    }
+    clearReviewChartPreRequest(ticker);
+    setReviewChartPreRequest(ticker, {
+      imageId:preflightChartImageId,
+      source:analysisSource,
+      startedAt:Date.now()
+    });
+    preRequestMarkerClaimed = true;
+  }
   if(isReviewAiAnalysisStale(ticker)){
     console.warn('[review-analysis] stale_runtime_cleared_before_start', {ticker});
     clearReviewAiAnalysis(ticker);
@@ -24494,6 +24585,11 @@ async function analyseSetup(ticker, options = {}){
           runtimeRequestId:String(runtime.requestId || '')
         });
       }
+      emitPreRequestExit('duplicate_running_ignored', {
+        activeRequestId:String(activeRequest && activeRequest.id || ''),
+        runtimeRequestId:String(runtime.requestId || '')
+      });
+      releasePreRequestMarker();
       console.warn('[review-analysis] duplicate_running_click_ignored', {ticker});
       return;
     }
@@ -24582,6 +24678,13 @@ async function analyseSetup(ticker, options = {}){
         quickStatus:String(currentQuickState.status || '')
       });
     }
+    emitPreRequestExit('duplicate_image_already_committed', {
+      requestId:String(currentContext.requestId || ''),
+      priorRequestId:String(currentAnalysisState && currentAnalysisState.analysisRequestId || ''),
+      quickRequestId:String(currentQuickState && currentQuickState.requestId || ''),
+      quickStatus:String(currentQuickState && currentQuickState.status || '')
+    });
+    releasePreRequestMarker();
     return;
   }
   // 3) allocate the chart-context request id before verification so later phases share one context.
@@ -24599,6 +24702,7 @@ async function analyseSetup(ticker, options = {}){
       }
     });
   }
+  releasePreRequestMarker();
   console.debug('[review-analysis] request_started', {ticker, requestId:analysisRequestId, source:analysisSource, imageId:requestChartImageId});
   function emitChartAnalysisTerminalDiagnostic(type, payload = {}){
     if(terminalChartAnalysisDiagnosticEmitted) return;
