@@ -30636,6 +30636,38 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   const currentChartContext = currentReviewChartContext(item, item.review || {});
   const activeAnalysisRequestId = String(uiState.analysisActiveRequest && uiState.analysisActiveRequest.id || '');
   const expectedTicker = normaliseVisibleTicker(item.ticker || '');
+  const manualConfirmationTrace = item.review && item.review.chartVerificationTrace && typeof item.review.chartVerificationTrace === 'object'
+    ? item.review.chartVerificationTrace
+    : null;
+  const manualConfirmedImageId = String(
+    manualConfirmationTrace && (
+      manualConfirmationTrace.manualConfirmedImageId
+      || manualConfirmationTrace.chartImageId
+      || manualConfirmationTrace.imageId
+    ) || ''
+  );
+  const manualConfirmedTicker = normaliseVisibleTicker(
+    manualConfirmationTrace && (
+      manualConfirmationTrace.manualConfirmedTicker
+      || manualConfirmationTrace.ticker
+      || item.ticker
+    ) || ''
+  );
+  const currentReviewImageIds = new Set([
+    String(safeSource.imageId || ''),
+    String(chartImageIdForReview(item.review || {}) || ''),
+    String(item.review && item.review.chartImageOriginal && item.review.chartImageOriginal.imageId || ''),
+    String(item.review && item.review.chartRef && item.review.chartRef.imageId || ''),
+    String(item.review && item.review.chartImagePreview && item.review.chartImagePreview.imageId || '')
+  ].filter(Boolean));
+  const manualConfirmedCurrentChart = !!(
+    manualConfirmationTrace
+    && manualConfirmationTrace.manualConfirmed === true
+    && manualConfirmedTicker
+    && manualConfirmedTicker === expectedTicker
+    && manualConfirmedImageId
+    && currentReviewImageIds.has(manualConfirmedImageId)
+  );
   const trustedPrice = chartVerificationNumberOrNull(item.marketData && typeof item.marketData === 'object' ? item.marketData.price : item.price);
   const visibleTicker = normaliseVisibleTicker(safeAnalysis.visible_ticker || '');
   const visibleTimeframe = String(safeAnalysis.visible_timeframe || '').trim();
@@ -30727,7 +30759,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   }
   if(strictProvenanceRequired && visibleTicker && !hasTickerEvidence){
     if(expectedTicker && visibleTicker === expectedTicker){
-      if(hasOnlyTickerExtracted || hasTickerPricePartialTrustedMatch){
+      if(manualConfirmedCurrentChart){
+        relaxedFields.push('manual_confirmed_ticker');
+      }else if(hasOnlyTickerExtracted || hasTickerPricePartialTrustedMatch){
         relaxedFields.push(hasOnlyTickerExtracted ? 'ticker_only_partial_match' : 'ticker_price_partial_match');
       }else{
         leakedFields.push('ticker');
@@ -30742,7 +30776,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   }
   if(strictProvenanceRequired && visiblePrice !== null && !hasPriceEvidence){
     if(trustedPrice !== null && Math.abs(visiblePrice - trustedPrice) <= priceLeakTolerance){
-      if(hasTickerPricePartialTrustedMatch){
+      if(manualConfirmedCurrentChart){
+        relaxedFields.push('manual_confirmed_price');
+      }else if(hasTickerPricePartialTrustedMatch){
         relaxedFields.push('price_partial_match');
       }else{
         leakedFields.push('price');
@@ -30756,7 +30792,9 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
     }
   }
   if(strictProvenanceRequired && visibleTimeframe && !hasTimeframeEvidence){
-    if(!hasTickerEvidence && !hasPriceEvidence && isDailyTimeframe(visibleTimeframe)){
+    if(manualConfirmedCurrentChart){
+      relaxedFields.push('manual_confirmed_timeframe');
+    }else if(!hasTickerEvidence && !hasPriceEvidence && isDailyTimeframe(visibleTimeframe)){
       safeAnalysis.visible_timeframe = '';
       safeAnalysis.visible_timeframe_source = '';
       safeAnalysis.timeframe_extraction_source = '';
