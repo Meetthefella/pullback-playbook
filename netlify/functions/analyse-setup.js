@@ -349,7 +349,7 @@ exports.handler = async function handler(event){
     content.push({
       type: 'input_image',
       image_url: chartRef.dataUrl,
-      detail: 'low'
+      detail: verificationOnly ? 'high' : 'low'
     });
   }
 
@@ -359,6 +359,7 @@ exports.handler = async function handler(event){
       'Do not perform setup analysis.',
       'Do not generate coaching, entry, stop, target, or verdict content.',
       'Extract visible facts only: visible ticker, timeframe, latest price, moving average values, visible price/date range, and extraction confidence.',
+      'Prioritise readable ticker, timeframe, current price, and moving-average legend values from the screenshot chrome before any broader chart interpretation.',
       'If numeric chart labels are visible but cannot be confidently assigned to latest price or a specific moving average, include them in visible_numeric_labels.',
       'TradingView mobile/narrow screenshots may crop MA legend text or numeric labels. If an MA line is visible but its value is unreadable, report the line as visible and keep the numeric value null.',
       'Do not fabricate ticker, timeframe, price, or MA values.',
@@ -407,6 +408,18 @@ exports.handler = async function handler(event){
 
   if(!upstream.ok && upstream.status === 400 && activeContent.length > 1){
     const originalMessage = extractOpenAiErrorMessage(upstreamJson);
+
+    if(verificationOnly){
+      console.error('OpenAI API rejected verification image input; refusing text-only fallback', {
+        status: upstream.status,
+        model,
+        ticker: String(payload.ticker || ''),
+        message: originalMessage || 'OpenAI request failed.'
+      });
+      return jsonResponse(502, {
+        error: 'Chart verification image was rejected by the AI API. Verification cannot continue without the uploaded chart image.'
+      });
+    }
 
     console.error('OpenAI API rejected image input, retrying without chart', {
       status: upstream.status,
