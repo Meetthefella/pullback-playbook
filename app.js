@@ -32087,11 +32087,11 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
       readableIdentityFields,
       expectedIdentityFields,
       unreadableReasons,
-      extractedFacts:{
+      extractedFacts:mergeExtractedFactsWithCarryForward({
         visible_ticker:fastPass.visibleTicker,
         visible_timeframe:fastPass.visibleTimeframe,
         visible_latest_price:fastPass.visiblePrice
-      },
+      }),
       trustedFacts:{
         ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
         expected_timeframe:'1D',
@@ -32266,6 +32266,63 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       {caller:'build_chart_consistency_trace'}
     );
   }
+  const currentVerificationRequestId = String(
+    (analysis && (analysis.__analysisRequestId || analysis.verificationRequestId || analysis.requestId))
+    || (analysisContext && analysisContext.chartAssessorInput && (analysisContext.chartAssessorInput.verificationRequestId || analysisContext.chartAssessorInput.requestId))
+    || (review.chartVerificationLifecycle && (review.chartVerificationLifecycle.requestId || review.chartVerificationLifecycle.verificationRequestId))
+    || ''
+  );
+  const sameContextStoredTrace = (() => {
+    const candidates = [
+      review.chartVerificationCommittedTrace,
+      review.chartVerificationTrace
+    ];
+    for(const candidate of candidates){
+      const wrapped = candidate && typeof candidate === 'object' ? candidate : null;
+      const trace = wrapped && wrapped.trace && typeof wrapped.trace === 'object'
+        ? wrapped.trace
+        : wrapped;
+      if(!trace || typeof trace !== 'object') continue;
+      const traceImageId = String(trace.imageId || trace.chartImageId || wrapped && (wrapped.imageId || wrapped.chartImageId) || '');
+      const traceRequestId = String(trace.requestId || trace.verificationRequestId || wrapped && (wrapped.requestId || wrapped.verificationRequestId) || '');
+      if(currentChartImageId && traceImageId && currentChartImageId !== traceImageId) continue;
+      if(currentVerificationRequestId && traceRequestId && currentVerificationRequestId !== traceRequestId) continue;
+      return trace;
+    }
+    return null;
+  })();
+  const carryForwardExtractedFacts = sameContextStoredTrace && sameContextStoredTrace.extractedFacts && typeof sameContextStoredTrace.extractedFacts === 'object'
+    ? sameContextStoredTrace.extractedFacts
+    : {};
+  const mergeExtractedFactsWithCarryForward = facts => {
+    const safeFacts = facts && typeof facts === 'object' ? facts : {};
+    return {
+      ...carryForwardExtractedFacts,
+      ...safeFacts,
+      visible_ticker:String(safeFacts.visible_ticker || carryForwardExtractedFacts.visible_ticker || '').trim(),
+      visible_timeframe:String(safeFacts.visible_timeframe || carryForwardExtractedFacts.visible_timeframe || '').trim(),
+      visible_latest_price:chartVerificationNumberOrNull(
+        safeFacts.visible_latest_price !== undefined
+          ? safeFacts.visible_latest_price
+          : carryForwardExtractedFacts.visible_latest_price
+      ),
+      visible_ma20:chartVerificationNumberOrNull(
+        safeFacts.visible_ma20 !== undefined
+          ? safeFacts.visible_ma20
+          : carryForwardExtractedFacts.visible_ma20
+      ),
+      visible_ma50:chartVerificationNumberOrNull(
+        safeFacts.visible_ma50 !== undefined
+          ? safeFacts.visible_ma50
+          : carryForwardExtractedFacts.visible_ma50
+      ),
+      visible_ma200:chartVerificationNumberOrNull(
+        safeFacts.visible_ma200 !== undefined
+          ? safeFacts.visible_ma200
+          : carryForwardExtractedFacts.visible_ma200
+      )
+    };
+  };
   const chartRef = review.chartRef && typeof review.chartRef === 'object' ? review.chartRef : null;
   const hasChart = !!((chartRef && chartRef.dataUrl) || chartImageSource.sourceKind !== 'none');
   const chartStatus = analysis ? String(analysis.chart_match_status || '').trim().toLowerCase() : '';
@@ -32332,11 +32389,11 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         'Could not read timeframe from the uploaded chart.',
         'Could not read price from the uploaded chart.'
       ],
-      extractedFacts:{
+      extractedFacts:mergeExtractedFactsWithCarryForward({
         visible_ticker:'',
         visible_timeframe:'',
         visible_latest_price:null
-      },
+      }),
       trustedFacts:{
         ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
         expected_timeframe:'1D',
@@ -32438,11 +32495,11 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       likelyMatchedIndicators:[],
       inferredIndicators:[],
       indicatorStates:{},
-      extractedFacts:{
+      extractedFacts:mergeExtractedFactsWithCarryForward({
         visible_ticker:fastPass.visibleTicker,
         visible_timeframe:fastPass.visibleTimeframe,
         visible_latest_price:fastPass.visiblePrice
-      },
+      }),
       trustedFacts:{
         ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
         expected_timeframe:'1D',
@@ -32485,11 +32542,11 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       likelyMatchedIndicators:[],
       inferredIndicators:[],
       indicatorStates:{},
-      extractedFacts:{
+      extractedFacts:mergeExtractedFactsWithCarryForward({
         visible_ticker:fastPass.visibleTicker,
         visible_timeframe:fastPass.visibleTimeframe,
         visible_latest_price:fastPass.visiblePrice
-      },
+      }),
       trustedFacts:{
         ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
         expected_timeframe:'1D',
@@ -32532,11 +32589,11 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       likelyMatchedIndicators:[],
       inferredIndicators:[],
       indicatorStates:{},
-      extractedFacts:{
+      extractedFacts:mergeExtractedFactsWithCarryForward({
         visible_ticker:fastPass.visibleTicker,
         visible_timeframe:fastPass.visibleTimeframe,
         visible_latest_price:fastPass.visiblePrice
-      },
+      }),
       trustedFacts:{
         ticker:normaliseVisibleTicker(safeRecord.ticker || ''),
         expected_timeframe:'1D',
@@ -32602,7 +32659,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
         pullbackZone:String((deterministic.debug && deterministic.debug.pullbackZone) || (derived && derived.pullbackZone) || '').trim().toLowerCase(),
         setupType:String((deterministic.debug && deterministic.debug.setupType) || safeRecord.setupType || safeRecord.scanSetupType || '').trim().toLowerCase(),
         indicatorStates:deterministic.indicatorStates,
-        extractedFacts:deterministic.extractedFacts,
+        extractedFacts:mergeExtractedFactsWithCarryForward(deterministic.extractedFacts),
         trustedFacts:deterministic.trustedFacts,
         sources:[...new Set((deterministic.sources || []).concat(['insufficient_identity_evidence']))],
         chartImageSource,
@@ -32654,7 +32711,7 @@ function buildChartConsistencyTrace(record = {}, simplifiedState = {}, analysisC
       pullbackZone:String((deterministic.debug && deterministic.debug.pullbackZone) || (derived && derived.pullbackZone) || '').trim().toLowerCase(),
       setupType:String((deterministic.debug && deterministic.debug.setupType) || safeRecord.setupType || safeRecord.scanSetupType || '').trim().toLowerCase(),
       indicatorStates:deterministic.indicatorStates,
-      extractedFacts:deterministic.extractedFacts,
+      extractedFacts:mergeExtractedFactsWithCarryForward(deterministic.extractedFacts),
       trustedFacts:deterministic.trustedFacts,
       sources:[...new Set(deterministic.sources.concat(fallbackSources))],
       chartImageSource,
