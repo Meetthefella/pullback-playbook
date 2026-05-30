@@ -3805,7 +3805,7 @@ function chartImageDimensionsLabel(ref){
 function simpleStableHash(value){
   const text = String(value || '');
   let hash = 2166136261;
-  for(let index = 0; index < text.length; index += Math.max(1, Math.floor(text.length / 4096))){
+  for(let index = 0; index < text.length; index++){
     hash ^= text.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
@@ -26803,49 +26803,6 @@ async function analyseSetup(ticker, options = {}){
   }
 }
 
-function renderAnalysisPanel(card){
-  if(!card.lastResponse) return '<div class="tiny">No AI response saved yet.</div>';
-  if(card.lastAnalysis){
-    const analysis = normalizeAnalysisResult(card.lastAnalysis, card);
-    const aiSuppression = chartVerificationAiSuppression(card, analysis);
-    if(aiSuppression.suppressed){
-      return renderSuppressedAiAnalysisPanel(aiSuppression, card.lastResponse, {legacy:true});
-    }
-    const chartReadDisplay = finalDisplayedAnalysisChartRead(card, analysis);
-    const deterministicVerification = buildDeterministicChartVerification(card, analysis);
-    const deterministicIndependentlyVerified = deterministicVerification.available
-      && chartVerificationIsVerifiedStatus(deterministicVerification.status)
-      && deterministicVerification.debug
-      && deterministicVerification.debug.fastPass
-      && deterministicVerification.debug.fastPass.independentImageEvidence === true;
-    const allowLegacyAiChartMatch = !deterministicIndependentlyVerified;
-    // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
-    const chartMismatch = allowLegacyAiChartMatch && analysis.chart_match_status === 'mismatch';
-    const chartUnclear = allowLegacyAiChartMatch && analysis.chart_match_status === 'unclear';
-    const chartWarning = analysis.chart_match_warning || '';
-    const staleAnalysis = isAnalysisStaleForRecord(card);
-    const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No key reasons returned.</li>';
-    const risks = analysis.risks.length ? analysis.risks.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No risks returned.</li>';
-    const confidence = 'observation only';
-    const renderModel = {
-      verdict:analysis.verdict,
-      setup_type:analysis.setup_type || 'Not given',
-      entry:analysis.entry || 'Not given',
-      stop:analysis.stop || 'Not given',
-      first_target:analysis.first_target || 'Not given',
-      key_reasons:analysis.key_reasons,
-      risks:analysis.risks
-    };
-    const showPlanNumbers = savedAiPlanNumbersAllowed(card);
-    const planMarkup = showPlanNumbers
-      ? `<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div>`
-      : `<div class="analysisplanmini">${savedAiNoPlanMarkup(chartReadDisplay)}</div>`;
-    logAnalysisDebug('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
-    return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI role: ${escapeHtml(confidence)}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div>${planMarkup}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
-  }
-  return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
-}
-
 function analysisAdvisoryContextForRecord(record, analysis){
   const item = normalizeTickerRecord(record);
   const finalReviewVerdict = normalizeAnalysisVerdict(reviewHeaderVerdictForRecord(item) || displayStageForRecord(item) || '');
@@ -27052,17 +27009,51 @@ function renderSuppressedAiAnalysisPanel(suppression, rawResponse, options = {})
   return `<div class="responsegrid"><div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>AI analysis limited</strong><div>${escapeHtml(message)}</div></div>${raw ? `<details class="compact-details"><summary>Raw Response</summary><div class="mutebox scrollbox">${escapeHtml(raw)}</div></details>` : ''}</div>`;
 }
 
-function renderBlockedChartAiDetailTrace(decision, trace = {}){
-  const safeDecision = decision && typeof decision === 'object' ? decision : {};
-  const safeTrace = trace && typeof trace === 'object' ? trace : {};
-  const title = String(safeDecision.title || 'Chart identity needs confirmation').trim() || 'Chart identity needs confirmation';
-  const summary = String(safeDecision.summary || safeDecision.detail || 'AI chart analysis is blocked until you confirm or reject this chart.').trim()
-    || 'AI chart analysis is blocked until you confirm or reject this chart.';
-  const detail = String(safeDecision.detail || '').trim();
-  const traceStatus = String(safeTrace.status || safeTrace.renderedStatus || '').trim();
-  return `<div class="responsegrid"><div class="summary tiny ai-summary-message ai-summary-message--warning"><strong>${escapeHtml(title)}</strong><div>${escapeHtml(summary)}</div>${detail && detail !== summary ? `<div class="tiny" style="margin-top:6px">${escapeHtml(detail)}</div>` : ''}${traceStatus ? `<div class="tiny" style="margin-top:6px">Verification state: ${escapeHtml(traceStatus)}</div>` : ''}</div></div>`;
+// Compatibility-only helper retained for assertion coverage. No user-visible UI path renders this panel.
+function renderAnalysisPanel(card){
+  if(!card.lastResponse) return '<div class="tiny">No AI response saved yet.</div>';
+  if(card.lastAnalysis){
+    const analysis = normalizeAnalysisResult(card.lastAnalysis, card);
+    const aiSuppression = chartVerificationAiSuppression(card, analysis);
+    if(aiSuppression.suppressed){
+      return renderSuppressedAiAnalysisPanel(aiSuppression, card.lastResponse, {legacy:true});
+    }
+    const chartReadDisplay = finalDisplayedAnalysisChartRead(card, analysis);
+    const deterministicVerification = buildDeterministicChartVerification(card, analysis);
+    const deterministicIndependentlyVerified = deterministicVerification.available
+      && chartVerificationIsVerifiedStatus(deterministicVerification.status)
+      && deterministicVerification.debug
+      && deterministicVerification.debug.fastPass
+      && deterministicVerification.debug.fastPass.independentImageEvidence === true;
+    const allowLegacyAiChartMatch = !deterministicIndependentlyVerified;
+    // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
+    const chartMismatch = allowLegacyAiChartMatch && analysis.chart_match_status === 'mismatch';
+    const chartUnclear = allowLegacyAiChartMatch && analysis.chart_match_status === 'unclear';
+    const chartWarning = analysis.chart_match_warning || '';
+    const staleAnalysis = isAnalysisStaleForRecord(card);
+    const reasons = analysis.key_reasons.length ? analysis.key_reasons.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No key reasons returned.</li>';
+    const risks = analysis.risks.length ? analysis.risks.map(item => `<li>${escapeHtml(item)}</li>`).join('') : '<li>No risks returned.</li>';
+    const confidence = 'observation only';
+    const renderModel = {
+      verdict:analysis.verdict,
+      setup_type:analysis.setup_type || 'Not given',
+      entry:analysis.entry || 'Not given',
+      stop:analysis.stop || 'Not given',
+      first_target:analysis.first_target || 'Not given',
+      key_reasons:analysis.key_reasons,
+      risks:analysis.risks
+    };
+    const showPlanNumbers = savedAiPlanNumbersAllowed(card);
+    const planMarkup = showPlanNumbers
+      ? `<div class="analysisplanmini"><div class="tiny"><strong>Plan:</strong> ${escapeHtml(renderModel.entry)} / ${escapeHtml(renderModel.stop)} / ${escapeHtml(renderModel.first_target)}</div></div>`
+      : `<div class="analysisplanmini">${savedAiNoPlanMarkup(chartReadDisplay)}</div>`;
+    logAnalysisDebug('FINAL_RENDERED_ANALYSIS_CARD', renderModel);
+    return `<div class="responsegrid">${staleAnalysis ? '<div class="mutebox warntext"><strong>Saved analysis from before invalidation</strong></div>' : ''}${chartMismatch ? `<div class="mutebox badtext"><strong>Chart mismatch warning:</strong> ${escapeHtml(chartWarning || 'The uploaded chart may not match this ticker. Re-check the screenshot before acting.')}</div>` : ''}${!chartMismatch && chartUnclear ? `<div class="mutebox warntext"><strong>Chart check warning:</strong> ${escapeHtml(chartWarning || 'The AI could not confidently verify that this chart matches the ticker.')}</div>` : ''}<div class="tiny">AI role: ${escapeHtml(confidence)}</div><div><strong>Setup Type</strong><div class="tiny">${escapeHtml(renderModel.setup_type)}</div></div><div><strong>Chart Read</strong><div class="tiny">${escapeHtml(chartReadDisplay.text || 'No chart read returned.')}</div></div>${planMarkup}<div><strong>Key Reasons</strong><ul class="tiny">${reasons}</ul></div><div><strong>Risks</strong><ul class="tiny">${risks}</ul></div><details><summary>Raw Response</summary><div class="mutebox">${escapeHtml(card.lastResponse)}</div></details></div>`;
+  }
+  return `<div class="mutebox">${escapeHtml(card.lastResponse)}</div>`;
 }
 
+// Compatibility-only helper retained for assertion coverage. No user-visible UI path renders this panel.
 function renderAnalysisPanelFromRecord(record, options = {}){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
@@ -30302,7 +30293,7 @@ function legacyRenderCardsFromCardList(){
     const riskMeta = renderPlanProjectionFromRecord(record);
     const div = document.createElement('div');
     div.className = 'result';
-    div.innerHTML = `<div class="resulthead" style="${escapeHtml(cardVisualStyleAttr(view && view.setupScore, view && view.setupUiState && view.setupUiState.state))}"><div class="ticker">${escapeHtml(record.ticker)}</div><div><div>${escapeHtml(currentRuntimeSummaryForRecord(record) || savedReviewSummaryForRecord(record) || 'No review saved yet.')}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${record.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${record.review.chartRef && record.review.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${record.ticker}">Notes</label><textarea id="notes-${record.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${(analysisBusy || loading) ? 'disabled' : ''}>${analyseLabel}</button></div><details class="responsepanel" id="response-${record.ticker}" ${(((uiState.responseOpen[record.ticker] ?? !!record.review.aiAnalysisRaw) || !!record.review.lastError)) ? 'open' : ''}><summary>Analysis Result</summary>${renderAnalysisPanelFromRecord(record)}</details><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button><button class="secondary" data-act="add-watchlist">Add to Watchlist</button></div><details class="promptdetails" id="prompt-${record.ticker}" ${(uiState.promptOpen[record.ticker] ?? !!record.review.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${record.ticker}">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></div></div>`;
+    div.innerHTML = `<div class="resulthead" style="${escapeHtml(cardVisualStyleAttr(view && view.setupScore, view && view.setupUiState && view.setupUiState.state))}"><div class="ticker">${escapeHtml(record.ticker)}</div><div><div>${escapeHtml(currentRuntimeSummaryForRecord(record) || savedReviewSummaryForRecord(record) || 'No review saved yet.')}</div>${meta}${riskMeta}</div><div class="score ${scoreClass(view.setupScore || 0)}">${escapeHtml(scoreLabel)}</div><div class="inline-status resultactions" style="justify-content:flex-end"><span class="badge ${statusClass(view.displayStage)}">${escapeHtml(combinedStatus)}</span><button class="danger" data-act="remove">Remove</button></div></div><div class="resultbody"><div class="panelbox"><label>Chart Workflow</label><details class="chartworkflow"><summary class="secondary">Chart Workflow</summary><div class="workflowmenu"><button class="secondary" type="button" data-act="open-chart">Open Chart</button><button class="secondary" type="button" data-act="choose-chart">Choose Screenshot</button><button class="secondary" type="button" data-act="import-latest">Import Latest</button><button class="ghost" type="button" data-act="clear-chart">Remove Chart</button></div></details><input id="chart-${record.ticker}" data-act="file" type="file" accept="image/png,image/jpeg,image/*" hidden />${record.review.chartRef && record.review.chartRef.dataUrl ? `<div class="thumbwrap"><img class="thumb" src="${escapeHtml(record.review.chartRef.dataUrl)}" alt="Chart preview for ${escapeHtml(record.ticker)}" /><div><div class="tiny">${escapeHtml(record.review.chartRef.name || 'chart image')}</div><div class="tiny">Stored locally on this device.</div></div></div>` : '<div class="tiny" style="margin-top:10px">No chart attached yet.</div>'}</div><div class="panelbox"><label for="notes-${record.ticker}">Notes</label><textarea id="notes-${record.ticker}" data-act="notes" placeholder="Add ticker-specific notes here.">${escapeHtml(record.review.notes || '')}</textarea><div class="actions"><button class="primary" data-act="analyse" ${(analysisBusy || loading) ? 'disabled' : ''}>${analyseLabel}</button></div><div class="actions"><button class="secondary" data-act="save-trade">Save Trade</button><button class="secondary" data-act="add-watchlist">Add to Watchlist</button></div><details class="promptdetails" id="prompt-${record.ticker}" ${(uiState.promptOpen[record.ticker] ?? !!record.review.lastPrompt) ? 'open' : ''}><summary>Prompt Preview</summary><div class="mutebox">${escapeHtml(promptText)}</div></details><div class="statusline tiny" id="cardStatus-${record.ticker}">${renderCardStatusLineFromRecord(record, loading, analysisBusy)}</div></div></div>`;
     div.querySelector('[data-act="open-chart"]').onclick = () => openTickerChart(record.ticker);
     div.querySelector('[data-act="remove"]').onclick = () => removeCard(record.ticker);
     div.querySelector('[data-act="analyse"]').onclick = () => {
@@ -30886,7 +30877,11 @@ function chartVerificationNumberOrNull(value){
 }
 
 function normaliseVisibleTicker(value){
-  return String(value || '').trim().toUpperCase().replace(/^[A-Z]+:/, '').replace(/[^A-Z0-9.-]/g, '');
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/^[A-Z0-9\s]+:\s*/i, '')
+    .replace(/[^A-Z0-9.-]/g, '');
 }
 
 function normaliseVisibleTimeframe(value){
@@ -35418,11 +35413,6 @@ function renderReviewWorkspace(options = {}){
     const fallback = String(analysisState.rawAnalysis || '').trim();
     return fallback || 'No AI analysis saved yet.';
   })();
-  const aiDetailTraceMarkup = chartVerificationBlocksAiReview
-    ? renderBlockedChartAiDetailTrace(chartUiDecision, chartConsistencyTraceForDisplay)
-    : (aiAnalysisSuppressedByChartMismatch
-    ? `<div class="summary warntext">${escapeHtml(aiSuppressionText)}</div>`
-    : renderAnalysisPanelFromRecord(record, {chartConsistencyTrace:chartConsistencyTraceForDisplay}));
   if(chartVerificationBlocksAiReview && !loading && !analysisBusy){
     analyseDisabled = true;
     analyseLabel = 'Confirm chart first';
@@ -35658,10 +35648,6 @@ function renderReviewWorkspace(options = {}){
             <summary><strong>Setup Quality</strong> <span id="setupQualityText">${escapeHtml(setupQualityLabel)} (${escapeHtml(String(setupScore))}/10)</span></summary>
             <div class="summary" id="setupQualitySummary">${escapeHtml(setupQualitySummary)}</div>
             <div class="tiny" id="setupQualityEvidence">${escapeHtml(setupQualityEvidence)}</div>
-          </details>
-          <details class="compact-details">
-            <summary>AI detail trace</summary>
-            ${aiDetailTraceMarkup}
           </details>
           <details class="compact-details">
             <summary>Workspace Status</summary>
