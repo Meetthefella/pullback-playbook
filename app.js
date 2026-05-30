@@ -2651,7 +2651,8 @@ function buildRecordsLitePersistedState(sourceState){
           chartVerificationTrace:cloneData(item.review.chartVerificationTrace, null),
           chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
           chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
-          chartVerificationContext:cloneData(item.review.chartVerificationContext, null)
+          chartVerificationContext:cloneData(item.review.chartVerificationContext, null),
+          chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
         },
         plan:{
           hasValidPlan:item.plan.hasValidPlan,
@@ -2734,7 +2735,8 @@ function buildLitePersistedState(sourceState){
           chartVerificationTrace:cloneData(item.review.chartVerificationTrace, null),
           chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
           chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
-          chartVerificationContext:cloneData(item.review.chartVerificationContext, null)
+          chartVerificationContext:cloneData(item.review.chartVerificationContext, null),
+          chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
         }
       }];
     })
