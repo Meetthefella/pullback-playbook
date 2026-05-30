@@ -4423,17 +4423,37 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
     return null;
   }
   const previousTickerState = normalizeCard(card);
-  const result = await analysisService.requestAnalysisFromEndpoints({
-    endpoints,
-    timeoutMs:ANALYSIS_TIMEOUT_MS,
-    buildRequestBody:() => ({
-      payload:buildVerificationOnlyPayload(card),
-      prompt:buildVerificationOnlyPrompt(card),
-      chartRef:chartPayload.chartRef,
-      verificationOnly:true
-    }),
-    buildErrorMessage:(status, data, fallback) => buildAnalysisErrorMessage(status, data, fallback)
-  });
+  let result = null;
+  try{
+    result = await analysisService.requestAnalysisFromEndpoints({
+      endpoints,
+      timeoutMs:ANALYSIS_TIMEOUT_MS,
+      buildRequestBody:() => ({
+        payload:buildVerificationOnlyPayload(card),
+        prompt:buildVerificationOnlyPrompt(card),
+        chartRef:chartPayload.chartRef,
+        verificationOnly:true
+      }),
+      buildErrorMessage:(status, data, fallback) => buildAnalysisErrorMessage(status, data, fallback)
+    });
+  }catch(error){
+    upsertReviewChartAnalysisPipeline(item, {
+      imageId,
+      requestId,
+      source,
+      phase:'insufficient_identity',
+      expectedFacts:buildChartPipelineExpectedFacts(item),
+      readFacts:{},
+      missing:['visible ticker', 'visible timeframe', 'latest price'],
+      evidence:[String(error && error.message || 'Chart verification failed.')],
+      aiAllowed:false,
+      chartImageSource,
+      updatedAt:new Date().toISOString()
+    });
+    commitTickerState();
+    renderReviewWorkspace({source:'chart_pipeline_verify_exception', requestedTicker:ticker});
+    return getReviewChartAnalysisPipeline(item);
+  }
   const currentImageId = String(chartImageIdForReview(item.review || {}) || '');
   if(currentImageId !== imageId){
     return null;
