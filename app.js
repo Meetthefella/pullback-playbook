@@ -4477,6 +4477,24 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
     return getReviewChartAnalysisPipeline(item);
   }
   const data = result.data && typeof result.data === 'object' ? result.data : {};
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_PIPELINE_QUICK_RAW_RESULT]', {
+      ticker,
+      imageId,
+      requestId,
+      source,
+      sourceKind:String(chartImageSource.sourceKind || ''),
+      originalDimensions:String(chartImageSource.originalDimensions || ''),
+      previewDimensions:String(chartImageSource.previewDimensions || ''),
+      verificationDimensions:String(chartImageSource.verificationSourceDimensions || ''),
+      rawVisibleTicker:String((data.analysis && data.analysis.visible_ticker) || ''),
+      rawVisibleTimeframe:String((data.analysis && data.analysis.visible_timeframe) || ''),
+      rawVisiblePrice:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_latest_price),
+      rawVisibleMa20:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma20),
+      rawVisibleMa50:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma50),
+      rawVisibleMa200:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma200)
+    });
+  }
   const normalized = normalizeAnalysisResult(data.analysis && typeof data.analysis === 'object' ? data.analysis : {}, previousTickerState);
   const sanitized = sanitizeChartAssessorVisibleIdentity(
     item,
@@ -4485,6 +4503,27 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
     requestId,
     {caller:'chart_pipeline_quick'}
   );
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_PIPELINE_QUICK_SANITIZED_RESULT]', {
+      ticker,
+      imageId,
+      requestId,
+      source,
+      sourceKind:String(chartImageSource.sourceKind || ''),
+      originalDimensions:String(chartImageSource.originalDimensions || ''),
+      previewDimensions:String(chartImageSource.previewDimensions || ''),
+      verificationDimensions:String(chartImageSource.verificationSourceDimensions || ''),
+      visibleTicker:String(sanitized.visible_ticker || ''),
+      visibleTimeframe:String(sanitized.visible_timeframe || ''),
+      visiblePrice:chartVerificationNumberOrNull(sanitized.visible_latest_price),
+      visibleMa20:chartVerificationNumberOrNull(sanitized.visible_ma20),
+      visibleMa50:chartVerificationNumberOrNull(sanitized.visible_ma50),
+      visibleMa200:chartVerificationNumberOrNull(sanitized.visible_ma200),
+      chartIdentityProvenanceVersion:Number.isFinite(Number(sanitized.chartIdentityProvenanceVersion))
+        ? Number(sanitized.chartIdentityProvenanceVersion)
+        : null
+    });
+  }
   const chartAssessorInput = buildChartAssessorInput(item, sanitized, chartImageSource, requestId);
   item.review.chartVerificationContext = cloneData(chartAssessorInput, null);
   item.review.rawChartFactExtraction = cloneData({
