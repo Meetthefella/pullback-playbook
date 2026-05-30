@@ -4116,9 +4116,14 @@ function chartPipelineStatusFromPhase(phase = ''){
       return 'verified_match';
     case 'possible_mismatch':
       return 'chart_mismatch';
-    case 'insufficient_identity':
-    case 'analysis_failed':
+    case 'cant_read':
       return 'manual_confirmation_required';
+    case 'analysis_failed':
+      // Intentionally blank here. Do not use chartPipelineStatusFromPhase() alone
+      // to derive Review chart status for failed AI analysis.
+      // analysis_failed is resolved in buildSimplifiedChartPipelineTrace() so
+      // chart verification can remain matched while AI failure is shown separately.
+      return '';
     default:
       return '';
   }
@@ -4141,7 +4146,7 @@ function normalizeChartPipelineForRender(pipeline = {}){
   const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(normalized);
   if(!hasVerifiedIdentity && normalized.manualConfirmed !== true){
     if(['verified', 'analysis_running', 'analysis_complete'].includes(String(normalized.phase || '').trim())){
-      normalized.phase = 'insufficient_identity';
+      normalized.phase = 'cant_read';
       normalized.aiAllowed = false;
     }
   }
@@ -4174,11 +4179,15 @@ function buildChartPipelineFromVerification(record = {}, options = {}){
   const hasFacts = chartPipelineHasAnyReadFacts(read);
   const phase = tickerMismatch
     ? 'possible_mismatch'
-    : (verifiedMatch ? 'verified' : 'insufficient_identity');
+    : (verifiedMatch ? 'verified' : 'cant_read');
   const missing = [];
   if(!read.ticker) missing.push('visible ticker');
-  if(!read.timeframe) missing.push('visible timeframe');
-  if(chartVerificationNumberOrNull(read.price) === null) missing.push('latest price');
+  const diagnostics = [];
+  if(!read.timeframe) diagnostics.push('timeframe unreadable');
+  if(chartVerificationNumberOrNull(read.price) === null) diagnostics.push('price unreadable');
+  if(chartVerificationNumberOrNull(read.ma20) === null) diagnostics.push('20 MA unreadable');
+  if(chartVerificationNumberOrNull(read.ma50) === null) diagnostics.push('50 MA unreadable');
+  if(chartVerificationNumberOrNull(read.ma200) === null) diagnostics.push('200 MA unreadable');
   const evidence = [];
   if(phase === 'possible_mismatch'){
     evidence.push(`Expected ${expectedTicker || 'ticker'} but read ${readTicker || 'n/a'}.`);
@@ -4187,12 +4196,12 @@ function buildChartPipelineFromVerification(record = {}, options = {}){
     }
   }else if(phase === 'verified'){
     evidence.push(`Read ticker ${readTicker || expectedTicker} from the chart image.`);
-  }else if(!hasFacts){
-    evidence.push('Visible ticker, timeframe and price could not be verified from the chart image.');
   }else{
-    if(!read.ticker) evidence.push('Visible ticker could not be verified from the chart image.');
-    if(!read.timeframe) evidence.push('Visible timeframe could not be verified from the chart image.');
-    if(chartVerificationNumberOrNull(read.price) === null) evidence.push('Visible price could not be verified from the chart image.');
+    evidence.push('Unable to read the chart ticker.');
+    if(hasFacts){
+      if(!read.timeframe) evidence.push('Visible timeframe could not be verified from the chart image.');
+      if(chartVerificationNumberOrNull(read.price) === null) evidence.push('Visible price could not be verified from the chart image.');
+    }
   }
   return {
     version:1,
@@ -4204,6 +4213,7 @@ function buildChartPipelineFromVerification(record = {}, options = {}){
     expectedFacts:expected,
     readFacts:read,
     missing,
+    diagnostics,
     evidence,
     aiAllowed:chartPipelineAllowsAi(phase) && chartPipelineHasVerifiedIdentity({
       manualConfirmed:false,
@@ -4238,19 +4248,33 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
   const expected = safe.expectedFacts && typeof safe.expectedFacts === 'object' ? safe.expectedFacts : buildChartPipelineExpectedFacts(item);
   const read = safe.readFacts && typeof safe.readFacts === 'object' ? safe.readFacts : {};
   const phase = String(safe.phase || '').trim();
-  const status = chartPipelineStatusFromPhase(phase);
   const expectedTicker = normalizeTicker(item.ticker || expected.ticker || '');
+  const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(safe);
+  const status = phase === 'analysis_failed'
+    ? (hasVerifiedIdentity
+      ? (safe.manualConfirmed === true ? 'user_confirmed_match' : 'verified_match')
+      : 'manual_confirmation_required')
+    : chartPipelineStatusFromPhase(phase);
+  const diagnostics = Array.isArray(safe.diagnostics) ? safe.diagnostics.slice() : [];
   const detailText = phase === 'possible_mismatch'
     ? `AI analysis has been skipped because the uploaded chart does not appear to match ${expectedTicker || 'this review'}.`
-    : (phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete'
-      ? `Quick chart verification matched the uploaded chart to ${expectedTicker || 'the selected ticker'}.`
-      : `The app could not confirm this chart matches ${expectedTicker || 'the selected ticker'}.`);
+    : (phase === 'analysis_failed' && hasVerifiedIdentity
+      ? 'Chart verified, but AI analysis failed. Try again.'
+      : ((phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete')
+        ? `Quick chart verification matched the uploaded chart to ${expectedTicker || 'the selected ticker'}.`
+        : 'Unable to read the chart ticker. Please confirm this is the correct chart.'));
   return {
     visible:true,
     status,
     renderedStatus:status,
     mergedStatus:status,
-    title:phase === 'possible_mismatch' ? `Possible mismatch for ${expectedTicker || item.ticker || ''}` : 'Chart identity needs confirmation',
+    title:phase === 'possible_mismatch'
+      ? 'Wrong chart detected'
+      : (phase === 'analysis_failed' && hasVerifiedIdentity
+        ? `Chart matched ${expectedTicker || 'selected ticker'}`
+        : (phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete'
+          ? `Chart matched ${expectedTicker || 'selected ticker'}`
+          : 'Unable to read chart ticker')),
     summary:detailText,
     detail:detailText,
     reviewTicker:expectedTicker,
@@ -4276,6 +4300,7 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
       ma200:chartVerificationNumberOrNull(expected.ma200)
     },
     missing:Array.isArray(safe.missing) ? safe.missing.slice() : [],
+    diagnostics,
     evidence:Array.isArray(safe.evidence) ? safe.evidence.slice() : [],
     unreadableReasons:Array.isArray(safe.evidence) ? safe.evidence.slice() : [],
     sources:[String(safe.source || 'chart_pipeline_quick_check')],
@@ -4308,9 +4333,19 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
   if(phase === 'possible_mismatch'){
     return {
       key:'chart_mismatch',
-      title:`Possible mismatch for ${expectedTicker || 'chart upload'}`,
-      summary:`Expected ${expectedTicker || 'n/a'} ${chartVerificationDisplayValue(trace.trustedFacts && trace.trustedFacts.latest_price)} | Read ${trace.extractedFacts && trace.extractedFacts.visible_ticker || 'n/a'} ${chartVerificationDisplayValue(trace.extractedFacts && trace.extractedFacts.visible_latest_price)}`,
+      title:'Wrong chart detected',
+      summary:`Expected: ${expectedTicker || 'n/a'} | Found: ${trace.extractedFacts && trace.extractedFacts.visible_ticker || 'n/a'}`,
       detail:'AI analysis has been skipped because the uploaded chart does not appear to match this review.',
+      visible:true,
+      trace
+    };
+  }
+  if(phase === 'analysis_failed' && hasVerifiedIdentity){
+    return {
+      key:safe.manualConfirmed === true ? 'user_confirmed_match' : 'verified_match',
+      title:'Chart looks correct.',
+      summary:'AI analysis failed. Try again.',
+      detail:'',
       visible:true,
       trace
     };
@@ -4318,17 +4353,19 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
   if(chartPipelineAllowsAi(phase) && hasVerifiedIdentity){
     return {
       key:safe.manualConfirmed === true ? 'user_confirmed_match' : 'verified_match',
-      title:`Chart matched ${expectedTicker || 'selected ticker'}`,
-      summary:phase === 'analysis_complete' ? 'Chart verified and AI analysis is available.' : 'Chart verified. AI analysis is running.',
+      title:'Chart looks correct.',
+      summary:trace.extractedFacts && trace.extractedFacts.visible_ticker
+        ? `Ticker detected: ${trace.extractedFacts.visible_ticker}.${Array.isArray(trace.diagnostics) && trace.diagnostics.length ? ' Some chart details were not readable, but analysis can continue.' : ''}`
+        : 'Ticker detected and chart verification passed.',
       detail:'',
       visible:true,
       trace
     };
   }
   return {
-    key:'manual_confirmation_required',
-    title:'Chart identity needs confirmation',
-    summary:`The app could not confirm this chart matches ${expectedTicker || 'the selected ticker'}.`,
+    key:'cant_read',
+    title:'Unable to read the chart ticker',
+    summary:'Please confirm this is the correct chart.',
     detail:'',
     visible:true,
     trace
@@ -4343,11 +4380,15 @@ function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
   const detailsOpenAttr = detailsOpen ? ' open' : '';
   const facts = trace.extractedFacts || {};
   const trusted = trace.trustedFacts || {};
+  const diagnostics = Array.isArray(trace.diagnostics) ? trace.diagnostics : [];
   const evidenceLine = Array.isArray(trace.evidence) && trace.evidence.length
     ? `<div class="tiny badtext">${escapeHtml(`Evidence: ${trace.evidence.join(' | ')}`)}</div>`
     : '';
-  const missingLine = Array.isArray(trace.missing) && trace.missing.length
+  const missingLine = !chartPipelineHasVerifiedIdentity(normalizedPipeline) && Array.isArray(trace.missing) && trace.missing.length
     ? `<div class="tiny">Missing context: ${escapeHtml(trace.missing.join(', '))}</div>`
+    : '';
+  const diagnosticsLine = diagnostics.length
+    ? `<div class="tiny">Chart details: ${escapeHtml(diagnostics.join(' | '))}</div>`
     : '';
   const extracted = `<div class="tiny">Extracted: ticker ${escapeHtml(facts.visible_ticker || 'n/a')} | timeframe ${escapeHtml(facts.visible_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(facts.visible_latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>`;
   const trustedFacts = `<div class="tiny">Trusted: ticker ${escapeHtml(trusted.ticker || 'n/a')} | timeframe ${escapeHtml(trusted.expected_timeframe || 'n/a')} | price ${escapeHtml(chartVerificationDisplayValue(trusted.latest_price))} | 20 ${escapeHtml(chartVerificationDisplayValue(trusted.ma20))} | 50 ${escapeHtml(chartVerificationDisplayValue(trusted.ma50))} | 200 ${escapeHtml(chartVerificationDisplayValue(trusted.ma200))}</div>`;
@@ -4358,12 +4399,12 @@ function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
     ? trace.evidence.map(item => `<div class="tiny">${escapeHtml(item)}</div>`).join('')
     : '';
   const sources = `<div class="tiny">Sources: ${escapeHtml((trace.sources || []).join(', ') || 'chart_pipeline_quick_check')}</div>`;
-  const details = `${missingLine}${extracted}${trustedFacts}${imageSource}${extraEvidence}${sources}`;
+  const details = `${missingLine}${diagnosticsLine}${extracted}${trustedFacts}${imageSource}${extraEvidence}${sources}`;
   return {
     decision,
     trace,
     markup:`<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>${escapeHtml(decision.title || 'Chart verification')}</strong><div>${escapeHtml(decision.summary || '')}</div><div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([facts.visible_ticker || 'n/a', facts.visible_timeframe || 'n/a', chartVerificationDisplayValue(facts.visible_latest_price)].join(' | '))} <strong>Expected:</strong> ${escapeHtml([trusted.ticker || 'n/a', trusted.expected_timeframe || 'n/a', chartVerificationDisplayValue(trusted.latest_price)].join(' | '))}</div><div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>${evidenceLine}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`,
-    manualActionsMarkup:['possible_mismatch', 'insufficient_identity'].includes(String(normalizedPipeline && normalizedPipeline.phase || '').trim())
+    manualActionsMarkup:['possible_mismatch', 'cant_read'].includes(String(normalizedPipeline && normalizedPipeline.phase || '').trim())
       ? `<div class="actions chart-verification-actions" style="margin-top:8px">
           <button class="primary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record && record.ticker || '')}</button>
           <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">Reject and upload another chart</button>
@@ -4407,7 +4448,7 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       imageId,
       requestId,
       source,
-      phase:'insufficient_identity',
+      phase:'cant_read',
       expectedFacts:buildChartPipelineExpectedFacts(item),
       readFacts:{},
       missing:['visible ticker', 'visible timeframe', 'latest price'],
@@ -4443,7 +4484,7 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       imageId,
       requestId,
       source,
-      phase:'insufficient_identity',
+      phase:'cant_read',
       expectedFacts:buildChartPipelineExpectedFacts(item),
       readFacts:{},
       missing:['visible ticker', 'visible timeframe', 'latest price'],
@@ -4465,7 +4506,7 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       imageId,
       requestId,
       source,
-      phase:'insufficient_identity',
+      phase:'cant_read',
       expectedFacts:buildChartPipelineExpectedFacts(item),
       readFacts:{},
       missing:['visible ticker', 'visible timeframe', 'latest price'],
@@ -29723,7 +29764,7 @@ function analyseActiveReviewTicker(){
   const pipeline = record ? getReviewChartAnalysisPipeline(record) : null;
   if(record && pipeline){
     const phase = String(pipeline.phase || '').trim();
-    if(['possible_mismatch', 'insufficient_identity'].includes(phase)){
+    if(['possible_mismatch', 'cant_read'].includes(phase)){
       setStatus('reviewWorkspaceStatus', '<span class="warntext">Confirm the uploaded chart or replace it before running AI analysis.</span>');
       renderReviewWorkspace({source:'analyse_setup_blocked_by_chart_pipeline', requestedTicker:ticker});
       return;
