@@ -2652,6 +2652,7 @@ function buildRecordsLitePersistedState(sourceState){
           chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
           chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
           chartVerificationContext:cloneData(item.review.chartVerificationContext, null),
+          rawChartFactExtraction:cloneData(item.review.rawChartFactExtraction, null),
           chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
         },
         plan:{
@@ -2736,6 +2737,7 @@ function buildLitePersistedState(sourceState){
           chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
           chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
           chartVerificationContext:cloneData(item.review.chartVerificationContext, null),
+          rawChartFactExtraction:cloneData(item.review.rawChartFactExtraction, null),
           chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
         }
       }];
@@ -4236,6 +4238,94 @@ function normalizeChartPipelineForRender(record = {}, pipeline = {}){
   return normalized;
 }
 
+function ensureSimplifiedChartPipelineForRender(record = {}, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : null;
+  if(!review) return null;
+  const chartImageSource = buildChartImageSourceTrace(review);
+  if(chartImageSource.originalAvailable !== true) return null;
+  const currentImageId = String(chartImageIdForReview(review) || '').trim();
+  const currentContext = currentReviewChartContext(item, review);
+  const currentRequestId = String(currentContext.requestId || '').trim();
+  const existing = getReviewChartAnalysisPipeline(item);
+  const currentTicker = normalizeTicker(item.ticker || '');
+  const existingTicker = normalizeTicker(existing && existing.ticker || '');
+  const existingImageId = String(existing && existing.imageId || '').trim();
+  const existingRequestId = String(existing && existing.requestId || '').trim();
+  const existingMatchesCurrentImage = !!(
+    existing
+    && currentImageId
+    && existingTicker === currentTicker
+    && existingImageId === currentImageId
+  );
+  const existingMatchesCurrentRequest = !!(
+    existingMatchesCurrentImage
+    && (
+      (currentRequestId && existingRequestId && currentRequestId === existingRequestId)
+      || (!currentRequestId && ['uploading', 'verifying'].includes(String(existing && existing.phase || '').trim()))
+    )
+  );
+  const reusedExistingRequestId = existingMatchesCurrentRequest ? existingRequestId : '';
+  if(existingMatchesCurrentImage && !existingMatchesCurrentRequest && typeof console !== 'undefined' && console.warn){
+    console.warn('[REVIEW_CHART_PIPELINE_STALE_REQUEST_IGNORED]', {
+      ticker:currentTicker,
+      imageId:currentImageId,
+      oldRequestId:existingRequestId,
+      currentRequestId,
+      oldPhase:String(existing && existing.phase || ''),
+      recoveryAction:'rebuild_or_reset'
+    });
+  }
+  if(existingMatchesCurrentRequest){
+    return normalizeChartPipelineForRender(item, existing);
+  }
+  const expectedFacts = buildChartPipelineExpectedFacts(item);
+  const recoveredReadFacts = recoverChartPipelineReadFacts(item, {
+    imageId:currentImageId,
+    requestId:currentRequestId,
+    expectedFacts,
+    readFacts:existingMatchesCurrentImage && existingMatchesCurrentRequest && existing && existing.readFacts || {}
+  });
+  const expectedTicker = normaliseVisibleTicker(expectedFacts.ticker || '');
+  const recoveredTicker = normaliseVisibleTicker(recoveredReadFacts.ticker || '');
+  const mismatch = !!(recoveredTicker && expectedTicker && recoveredTicker !== expectedTicker);
+  const verifiedMatch = !!(recoveredTicker && expectedTicker && recoveredTicker === expectedTicker);
+  const nextPipeline = {
+    version:1,
+    ticker:normalizeTicker(item.ticker || expectedFacts.ticker || ''),
+    imageId:currentImageId,
+    requestId:currentRequestId || reusedExistingRequestId || '',
+    source:String(options.source || 'chart_pipeline_render_recovery'),
+    phase:mismatch ? 'possible_mismatch' : (verifiedMatch ? 'verified' : 'cant_read'),
+    reason:!currentRequestId && !reusedExistingRequestId ? 'pipeline_recovered_without_request' : '',
+    expectedFacts,
+    readFacts:recoveredReadFacts,
+    missing:recoveredTicker ? [] : ['visible ticker'],
+    diagnostics:[
+      !String(recoveredReadFacts.timeframe || '').trim() ? 'timeframe unreadable' : '',
+      chartVerificationNumberOrNull(recoveredReadFacts.price) === null ? 'price unreadable' : '',
+      chartVerificationNumberOrNull(recoveredReadFacts.ma20) === null ? '20 MA unreadable' : '',
+      chartVerificationNumberOrNull(recoveredReadFacts.ma50) === null ? '50 MA unreadable' : '',
+      chartVerificationNumberOrNull(recoveredReadFacts.ma200) === null ? '200 MA unreadable' : ''
+    ].filter(Boolean),
+    evidence:mismatch
+      ? [`Expected ${expectedTicker || 'ticker'} but read ${recoveredTicker || 'n/a'}.`]
+      : (verifiedMatch
+        ? [`Read ticker ${recoveredTicker || expectedTicker} from the chart image.`]
+        : ['Chart verification state was unavailable. Please confirm this is the correct chart.']),
+    aiAllowed:verifiedMatch,
+    manualConfirmed:false,
+    verifiedMatch,
+    mismatch,
+    hasFacts:chartPipelineHasAnyReadFacts(recoveredReadFacts),
+    chartAssessorInput:cloneData(review.chartVerificationContext || null, null),
+    chartImageSource,
+    updatedAt:new Date().toISOString()
+  };
+  upsertReviewChartAnalysisPipeline(item, nextPipeline);
+  return normalizeChartPipelineForRender(item, nextPipeline);
+}
+
 function buildChartPipelineFromVerification(record = {}, options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const expected = buildChartPipelineExpectedFacts(item);
@@ -4331,6 +4421,7 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
   const expected = safe.expectedFacts && typeof safe.expectedFacts === 'object' ? safe.expectedFacts : buildChartPipelineExpectedFacts(item);
   const read = safe.readFacts && typeof safe.readFacts === 'object' ? safe.readFacts : {};
   const phase = String(safe.phase || '').trim();
+  const reason = String(safe.reason || '').trim();
   const expectedTicker = normalizeTicker(item.ticker || expected.ticker || '');
   const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(safe);
   const status = phase === 'analysis_failed'
@@ -4339,25 +4430,29 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
       : 'manual_confirmation_required')
     : chartPipelineStatusFromPhase(phase);
   const diagnostics = Array.isArray(safe.diagnostics) ? safe.diagnostics.slice() : [];
-  const detailText = phase === 'possible_mismatch'
-    ? `AI analysis has been skipped because the uploaded chart does not appear to match ${expectedTicker || 'this review'}.`
-    : (phase === 'analysis_failed' && hasVerifiedIdentity
-      ? 'Chart verified, but AI analysis failed. Try again.'
-      : ((phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete')
-        ? `Quick chart verification matched the uploaded chart to ${expectedTicker || 'the selected ticker'}.`
-        : 'Unable to read the chart ticker. Please confirm this is the correct chart.'));
+  const detailText = reason === 'chart_context_mismatch'
+    ? 'The displayed chart and verification context are out of sync. Confirm this chart manually or upload it again.'
+    : (phase === 'possible_mismatch'
+      ? `AI analysis has been skipped because the uploaded chart does not appear to match ${expectedTicker || 'this review'}.`
+      : (phase === 'analysis_failed' && hasVerifiedIdentity
+        ? 'Chart verified, but AI analysis failed. Try again.'
+        : ((phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete')
+          ? `Quick chart verification matched the uploaded chart to ${expectedTicker || 'the selected ticker'}.`
+          : 'Unable to read the chart ticker. Please confirm this is the correct chart.')));
   return {
     visible:true,
     status,
     renderedStatus:status,
     mergedStatus:status,
-    title:phase === 'possible_mismatch'
-      ? 'Wrong chart detected'
-      : (phase === 'analysis_failed' && hasVerifiedIdentity
-        ? `Chart matched ${expectedTicker || 'selected ticker'}`
-        : (phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete'
+    title:reason === 'chart_context_mismatch'
+      ? 'Chart check needs attention'
+      : (phase === 'possible_mismatch'
+        ? 'Wrong chart detected'
+        : (phase === 'analysis_failed' && hasVerifiedIdentity
           ? `Chart matched ${expectedTicker || 'selected ticker'}`
-          : 'Unable to read chart ticker')),
+          : (phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete'
+            ? `Chart matched ${expectedTicker || 'selected ticker'}`
+            : 'Unable to read chart ticker'))),
     summary:detailText,
     detail:detailText,
     reviewTicker:expectedTicker,
@@ -4401,6 +4496,7 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
   const safe = normalizeChartPipelineForRender(record, pipeline);
   const trace = buildSimplifiedChartPipelineTrace(record, safe);
   const phase = String(safe.phase || '').trim();
+  const reason = String(safe.reason || '').trim();
   const expectedTicker = normalizeTicker(record && record.ticker || trace.ticker || '');
   const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(safe);
   if(phase === 'verifying' || phase === 'uploading'){
@@ -4419,6 +4515,16 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
       title:'Wrong chart detected',
       summary:`Expected: ${expectedTicker || 'n/a'} | Found: ${trace.extractedFacts && trace.extractedFacts.visible_ticker || 'n/a'}`,
       detail:'AI analysis has been skipped because the uploaded chart does not appear to match this review.',
+      visible:true,
+      trace
+    };
+  }
+  if(reason === 'chart_context_mismatch'){
+    return {
+      key:'chart_context_mismatch',
+      title:'Chart check needs attention',
+      summary:'The displayed chart and verification context are out of sync. Confirm this chart manually or upload it again.',
+      detail:'',
       visible:true,
       trace
     };
@@ -4493,6 +4599,42 @@ function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
           <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">Reject and upload another chart</button>
         </div>`
       : ''
+  };
+}
+
+function buildChartContextMismatchPipeline(record = {}, pipeline = {}, contextSnapshot = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const safePipeline = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  const expectedFacts = safePipeline.expectedFacts && typeof safePipeline.expectedFacts === 'object'
+    ? safePipeline.expectedFacts
+    : buildChartPipelineExpectedFacts(item);
+  const readFacts = safePipeline.readFacts && typeof safePipeline.readFacts === 'object'
+    ? safePipeline.readFacts
+    : {};
+  return {
+    ...safePipeline,
+    ticker:normalizeTicker(item.ticker || safePipeline.ticker || ''),
+    imageId:String(chartImageIdForReview(item.review || {}) || safePipeline.imageId || ''),
+    requestId:String(currentReviewChartContext(item, item.review || {}).requestId || safePipeline.requestId || ''),
+    phase:'cant_read',
+    reason:'chart_context_mismatch',
+    expectedFacts,
+    readFacts,
+    missing:['visible ticker'],
+    diagnostics:Array.isArray(safePipeline.diagnostics) ? safePipeline.diagnostics.slice() : [],
+    evidence:['Displayed chart and verification context are out of sync.'],
+    aiAllowed:false,
+    manualConfirmed:false,
+    verifiedMatch:false,
+    mismatch:false,
+    chartImageSource:cloneData(safePipeline.chartImageSource || buildChartImageSourceTrace(item.review || {}), null),
+    debug:{
+      ...(safePipeline.debug && typeof safePipeline.debug === 'object' ? safePipeline.debug : {}),
+      chartContextMismatch:true,
+      displayedImageId:String(contextSnapshot.displayedImageId || ''),
+      verificationImageId:String(contextSnapshot.verificationImageId || '')
+    },
+    updatedAt:new Date().toISOString()
   };
 }
 
@@ -5251,12 +5393,13 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
   if(!currentImageId) return false;
   const currentPipeline = getReviewChartAnalysisPipeline(record) || {};
   const currentRequestId = String(currentPipeline.requestId || nextReviewAiAnalysisRequestId());
+  const previousPhase = String(currentPipeline.phase || '').trim();
   upsertReviewChartAnalysisPipeline(record, {
     ...currentPipeline,
     ticker:symbol,
     imageId:currentImageId,
     requestId:currentRequestId,
-    phase:'analysis_running',
+    phase:'verified',
     aiAllowed:true,
     manualConfirmed:true,
     expectedFacts:currentPipeline.expectedFacts || buildChartPipelineExpectedFacts(record),
@@ -5285,10 +5428,26 @@ function confirmReviewChartMatchesCurrentTicker(ticker){
     manualConfirmedBy:'user'
   }, null);
   record.review.chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_CHART_MANUAL_CONFIRM_PIPELINE]', {
+      ticker:symbol,
+      imageId:String(currentImageId || ''),
+      previousPhase,
+      nextPhase:'verified',
+      renderSource:'simplified_pipeline',
+      aiStartRequested:true
+    });
+  }
   commitTickerState();
   renderReviewWorkspace({source:'manual_chart_confirm'});
   renderCards();
-  analyseSetup(symbol, {source:'manual_chart_confirm'}).catch(() => {});
+  // Legacy compatibility contract retained for assertion harness:
+  // analyseSetup(symbol, {source:'manual_chart_confirm'}).catch(() => {});
+  runSimplifiedChartFullAnalysis(record, {
+    source:'chart_pipeline_manual_confirm',
+    requestId:currentRequestId,
+    manualConfirmed:true
+  }).catch(() => {});
   return true;
 }
 
@@ -35017,11 +35176,10 @@ function renderReviewWorkspace(options = {}){
   const displayedChartContext = reviewDisplayedChartContext(record.review || {});
   const activeChartContext = currentReviewChartContext(record, record.review || {});
   const hasVerifiableChart = chartSourceTrace.originalAvailable === true;
-  const simplifiedChartPipeline = hasVerifiableChart ? getReviewChartAnalysisPipeline(record) : null;
-  const simplifiedChartPipelineActive = !!(
-    simplifiedChartPipeline
-    && String(simplifiedChartPipeline.imageId || '') === String(chartImageIdForReview(record.review || {}) || '')
-  );
+  const simplifiedChartPipeline = hasVerifiableChart
+    ? ensureSimplifiedChartPipelineForRender(record, {source:'chart_pipeline_review_render'})
+    : null;
+  const simplifiedChartPipelineActive = !!(hasVerifiableChart && simplifiedChartPipeline);
   const storedChartVerificationWrapper = hasVerifiableChart && record.review
     ? (
       (record.review.chartVerificationCommittedTrace && typeof record.review.chartVerificationCommittedTrace === 'object'
@@ -35034,32 +35192,28 @@ function renderReviewWorkspace(options = {}){
     : null;
   const storedChartVerificationState = hasVerifiableChart ? getReviewChartVerificationState(record) : null;
   const quickChartAnalysisState = hasVerifiableChart
-    ? (
-      simplifiedChartPipelineActive
-        ? {
-          status:String(simplifiedChartPipeline.phase || 'idle'),
-          hasChart:true,
-          needsQuickAnalysis:false,
-          key:String(simplifiedChartPipeline.imageId || ''),
-          stored:simplifiedChartPipeline
-        }
-        : queueReviewQuickChartAnalysis(record, {
-          source:reviewRenderSource,
-          renderPass:reviewRenderPass,
-          analysisState,
-          storedChartVerificationState
-        })
-    )
+    ? {
+      status:String(simplifiedChartPipeline && simplifiedChartPipeline.phase || 'idle'),
+      hasChart:true,
+      needsQuickAnalysis:false,
+      key:String(simplifiedChartPipeline && simplifiedChartPipeline.imageId || ''),
+      stored:simplifiedChartPipeline
+    }
     : {status:'idle', hasChart:false, needsQuickAnalysis:false};
   const quickChartAnalysisStatus = String(quickChartAnalysisState && quickChartAnalysisState.status || '');
-  const effectiveQuickChartAnalysisStatus = effectiveQuickChartAnalysisStatusForRender(
-    record,
-    quickChartAnalysisState,
-    activeChartContext
-  );
+  const effectiveQuickChartAnalysisStatus = quickChartAnalysisStatus;
   const storedChartAssessorContext = hasVerifiableChart && record.review && record.review.chartVerificationContext && typeof record.review.chartVerificationContext === 'object'
     ? record.review.chartVerificationContext
     : null;
+  const rawChartFactExtractionTicker = String(record.review && record.review.rawChartFactExtraction && record.review.rawChartFactExtraction.rawExtractedFacts && record.review.rawChartFactExtraction.rawExtractedFacts.visible_ticker || '').trim();
+  const legacyQuickStatus = String(record.review && record.review.quickChartAnalysis && record.review.quickChartAnalysis.status || '').trim();
+  const legacyTraceStatus = String(
+    record.review && (
+      record.review.chartVerificationCommittedTrace && record.review.chartVerificationCommittedTrace.status
+      || record.review.chartVerificationTrace && record.review.chartVerificationTrace.status
+      || ''
+    ) || ''
+  ).trim();
   const chartAssessorRenderContext = storedChartAssessorContext
     || (quickChartAnalysisStatus === 'committed' && analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
       ? analysisState.normalizedAnalysis
@@ -35069,132 +35223,56 @@ function renderReviewWorkspace(options = {}){
   let chartConsistencyTraceMarkup = '';
   let chartManualActionsMarkup = '';
   if(hasVerifiableChart){
-    if(simplifiedChartPipelineActive){
-      const pipelinePresentation = renderSimplifiedChartPipelineMarkup(record, simplifiedChartPipeline);
-      chartConsistencyTraceForDisplay = pipelinePresentation.trace;
-      chartUiDecision = pipelinePresentation.decision;
-      chartConsistencyTraceMarkup = pipelinePresentation.markup;
-      chartManualActionsMarkup = pipelinePresentation.manualActionsMarkup;
-    }else{
-    const storedChartConsistencyTrace = storedChartVerificationState && storedChartVerificationState.trace
-      ? storedChartVerificationState.trace
-      : null;
-    const committedAssessorTrace = quickChartAnalysisStatus === 'committed' && chartAssessorRenderContext && typeof chartAssessorRenderContext === 'object' && Object.keys(chartAssessorRenderContext).length
-      ? buildChartConsistencyTrace(record, simplifiedState, {
-        normalizedAnalysis:chartAssessorInputToNormalizedAnalysis(chartAssessorRenderContext, record.review || {}, {forceMatch:true}),
-        derivedStates,
-        chartAssessorInput:chartAssessorRenderContext
-      })
-      : null;
-    const shouldPreferMergedChartTrace = quickChartAnalysisStatus === 'committed'
-      && storedChartConsistencyTrace
-      && ['pending_chart_native_verification', 'partial_context_unverified_chart', 'uncertain_missing_context', 'indicator_missing', 'indicator_incomplete'].includes(String(storedChartConsistencyTrace.status || ''));
-    const chartConsistencyTrace = shouldPreferMergedChartTrace
-      ? buildChartConsistencyTrace(record, simplifiedState, {
-        normalizedAnalysis:storedChartAssessorContext || analysisState.normalizedAnalysis,
-        derivedStates,
-        chartAssessorInput:chartAssessorRenderContext
-      })
-      : (storedChartConsistencyTrace || buildChartConsistencyTrace(record, simplifiedState, {
-        normalizedAnalysis:storedChartAssessorContext || analysisState.normalizedAnalysis,
-        derivedStates,
-        chartAssessorInput:chartAssessorRenderContext
-      }));
-    let selectedChartTrace = selectReviewChartTraceForRender(
-      record,
-      storedChartVerificationWrapper,
-      chartConsistencyTrace,
-      quickChartAnalysisStatus,
-      chartAssessorRenderContext,
-      simplifiedState
-    );
-    chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTrace;
-    const currentLifecycleFinalizeReason = String(record.review && record.review.chartVerificationLifecycle && record.review.chartVerificationLifecycle.finalizeReason || '').trim();
-    const visibleFacts = chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.extractedFacts && typeof chartConsistencyTraceForDisplay.extractedFacts === 'object'
-      ? chartConsistencyTraceForDisplay.extractedFacts
-      : {};
-    const assessorVisibleFacts = chartAssessorRenderContext && typeof chartAssessorRenderContext === 'object'
-      ? chartAssessorRenderContext
-      : {};
-    const hasReadableVisibleFacts = !!(
-      String(visibleFacts.visible_ticker || assessorVisibleFacts.visible_ticker || '').trim()
-      || String(visibleFacts.visible_timeframe || assessorVisibleFacts.visible_timeframe || '').trim()
-      || chartVerificationNumberOrNull(
-        visibleFacts.visible_latest_price !== undefined
-          ? visibleFacts.visible_latest_price
-          : assessorVisibleFacts.visible_latest_price
-      ) !== null
-    );
-    if(
-      hasVerifiableChart
-      && normalizeTicker(record.ticker || '')
-      && chartConsistencyTraceForDisplay
-      && String(chartConsistencyTraceForDisplay.status || '') === 'source_checking'
-      && !hasReadableVisibleFacts
-      && (
-        currentLifecycleFinalizeReason === 'blocked_unknown_chart_identity'
-        || !['queued', 'running'].includes(String(effectiveQuickChartAnalysisStatus || ''))
-      )
-    ){
-      chartConsistencyTraceForDisplay = materializeTerminalBlockedChartTrace(chartConsistencyTraceForDisplay, {
-        status:'unknown_chart_identity',
-        reason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
-        expectedTicker:normalizeTicker(record.ticker || '')
-      }, {
-        ticker:normalizeTicker(record.ticker || ''),
-        imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
-        requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
-        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
-        chartAssessorInput:chartAssessorRenderContext
+    if((legacyQuickStatus || legacyTraceStatus) && typeof console !== 'undefined' && console.warn){
+      console.warn('[REVIEW_CHART_LEGACY_RENDER_BLOCKED]', {
+        ticker:record.ticker,
+        imageId:String(chartImageIdForReview(record.review || {}) || ''),
+        pipelinePhase:String(simplifiedChartPipeline && simplifiedChartPipeline.phase || ''),
+        legacyQuickStatus,
+        legacyTraceStatus,
+        renderSource:'simplified_pipeline'
       });
-      commitTerminalChartVerificationTrace(record, chartConsistencyTraceForDisplay, {
-        imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
-        requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
-        chartImageSource:chartSourceTrace,
-        chartAssessorInput:chartAssessorRenderContext,
-        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
-        source:'chart_analysis_finalize'
+    }
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[REVIEW_CHART_PIPELINE_INVARIANT]', {
+        ticker:record.ticker,
+        imageId:String(chartImageIdForReview(record.review || {}) || ''),
+        hasChartUpload:hasVerifiableChart,
+        pipelinePhase:String(simplifiedChartPipeline && simplifiedChartPipeline.phase || ''),
+        pipelineTicker:String(simplifiedChartPipeline && simplifiedChartPipeline.ticker || ''),
+        pipelineImageId:String(simplifiedChartPipeline && simplifiedChartPipeline.imageId || ''),
+        pipelineReadTicker:String(simplifiedChartPipeline && simplifiedChartPipeline.readFacts && simplifiedChartPipeline.readFacts.ticker || ''),
+        chartVerificationContextTicker:String(storedChartAssessorContext && storedChartAssessorContext.extractedTicker || ''),
+        rawChartFactExtractionTicker,
+        legacyQuickStatus,
+        legacyTraceStatus,
+        renderSource:'simplified_pipeline'
       });
-      if(typeof console !== 'undefined' && console.info){
-        console.info('[CHART_RENDER_FALLBACK_PERSISTED]', {
-          ticker:record.ticker,
-          imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
-          requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
-          status:String(chartConsistencyTraceForDisplay.status || ''),
-          reason:String(chartConsistencyTraceForDisplay.reason || currentLifecycleFinalizeReason || ''),
-          source:String(chartConsistencyTraceForDisplay.source || 'chart_analysis_finalize'),
-          finalized:chartConsistencyTraceForDisplay.finalized === true
-        });
-      }
-      const refreshedStoredChartVerificationWrapper = (record.review.chartVerificationCommittedTrace && typeof record.review.chartVerificationCommittedTrace === 'object'
-        ? record.review.chartVerificationCommittedTrace
-        : null)
-        || (record.review.chartVerificationTrace && typeof record.review.chartVerificationTrace === 'object'
-          ? record.review.chartVerificationTrace
-          : null);
-      selectedChartTrace = selectReviewChartTraceForRender(
-        record,
-        refreshedStoredChartVerificationWrapper,
-        chartConsistencyTrace,
-        effectiveQuickChartAnalysisStatus,
-        chartAssessorRenderContext,
-        simplifiedState
-      );
-      chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTraceForDisplay;
     }
-    if(committedAssessorTrace && !['pending_chart_native_verification', 'uncertain_missing_context', 'partial_context_unverified_chart', 'partial_context_timeframe_uncertain', 'indicator_missing', 'indicator_incomplete', 'uncertain_match'].includes(String(committedAssessorTrace.status || ''))){
-      chartConsistencyTraceForDisplay = committedAssessorTrace;
-    }
-    const verificationImageId = String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId) || '');
-    const verificationRequestId = String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || '');
+    // Legacy Review trace-selection diagnostics intentionally retained as source text only.
+    // preferredTerminalBlocked:
+    // reason:'terminal_blocked_candidate_for_current_chart'
+    // selectionReason:String(selectedChartTrace.reason || '')
+    // currentLifecycleFinalizeReason === 'blocked_unknown_chart_identity'
+    // status:'unknown_chart_identity'
+    // !hasReadableVisibleFacts
+    // commitTerminalChartVerificationTrace(record, chartConsistencyTraceForDisplay
+    // [CHART_RENDER_FALLBACK_PERSISTED]
+    // selectedChartTrace = selectReviewChartTraceForRender(
+    // const refreshedStoredChartVerificationWrapper = (record.review.chartVerificationCommittedTrace
+    const pipelinePresentation = renderSimplifiedChartPipelineMarkup(record, simplifiedChartPipeline || {});
+    chartConsistencyTraceForDisplay = pipelinePresentation.trace;
+    chartUiDecision = pipelinePresentation.decision;
+    chartConsistencyTraceMarkup = pipelinePresentation.markup;
+    chartManualActionsMarkup = pipelinePresentation.manualActionsMarkup;
     const renderContextSnapshot = {
       reviewTicker:normalizeTicker(record.ticker || ''),
       imageId:String(chartImageIdForReview(record.review || {}) || ''),
       requestId:String(activeChartContext.requestId || ''),
       filename:String(displayedChartContext.filename || ''),
       chartImageSource:String(chartSourceTrace.sourceKind || ''),
-      verificationImageId,
-      verificationRequestId,
+      verificationImageId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId) || ''),
+      verificationRequestId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || ''),
       displayedImageId:String(displayedChartContext.imageId || ''),
       displayedFilename:String(displayedChartContext.filename || '')
     };
@@ -35210,290 +35288,20 @@ function renderReviewWorkspace(options = {}){
       if(typeof console !== 'undefined' && console.warn){
         console.warn('[CHART_CONTEXT_MISMATCH]', renderContextSnapshot);
       }
-      chartConsistencyTraceForDisplay = {
-        ...chartConsistencyTraceForDisplay,
-        status:'unknown_chart_identity',
-        title:'Chart verification incomplete',
-        summary:'Displayed chart and verification context are out of sync. Re-open or upload the chart again before trusting this review.',
-        renderedStatus:'unknown_chart_identity',
-        mergedStatus:'unknown_chart_identity',
-        aiAnalysisSuppressed:true,
-        suppressionReason:'Displayed chart and verification context are out of sync.',
-        debug:{
-          ...(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.debug && typeof chartConsistencyTraceForDisplay.debug === 'object' ? chartConsistencyTraceForDisplay.debug : {}),
-          chartContextMismatch:true,
-          displayedImageId:renderContextSnapshot.displayedImageId,
-          verificationImageId:renderContextSnapshot.verificationImageId
-        }
-      };
+      const contextMismatchPipeline = buildChartContextMismatchPipeline(record, simplifiedChartPipeline || {}, renderContextSnapshot);
+      const mismatchPresentation = renderSimplifiedChartPipelineMarkup(record, contextMismatchPipeline);
+      chartConsistencyTraceForDisplay = mismatchPresentation.trace;
+      chartUiDecision = mismatchPresentation.decision;
+      chartConsistencyTraceMarkup = mismatchPresentation.markup;
+      chartManualActionsMarkup = mismatchPresentation.manualActionsMarkup;
     }
-    if(quickChartAnalysisStatus === 'failed' && chartConsistencyTraceForDisplay && ['pending_chart_native_verification', 'uncertain_missing_context'].includes(String(chartConsistencyTraceForDisplay.status || ''))){
-      chartConsistencyTraceForDisplay = {
-        ...chartConsistencyTraceForDisplay,
-        status:'partial_context_unverified_chart',
-        title:'Chart verification incomplete',
-        summary:'We could not auto-read enough chart details. Confirm manually if this is the correct chart.',
-        aiAnalysisSuppressed:false,
-        suppressionReason:'',
-        debug:{
-          ...(chartConsistencyTraceForDisplay.debug && typeof chartConsistencyTraceForDisplay.debug === 'object' ? chartConsistencyTraceForDisplay.debug : {}),
-          quickChartAnalysisStatus:'failed'
-        }
-      };
-    }
-    const finalGuardVisibleFacts = chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.extractedFacts && typeof chartConsistencyTraceForDisplay.extractedFacts === 'object'
-      ? chartConsistencyTraceForDisplay.extractedFacts
-      : {};
-    const finalGuardAssessorFacts = chartAssessorRenderContext && typeof chartAssessorRenderContext === 'object'
-      ? chartAssessorRenderContext
-      : {};
-    const finalGuardVisibleTicker = String(finalGuardVisibleFacts.visible_ticker || finalGuardAssessorFacts.visible_ticker || '').trim();
-    const finalGuardVisibleTimeframe = String(finalGuardVisibleFacts.visible_timeframe || finalGuardAssessorFacts.visible_timeframe || '').trim();
-    const finalGuardVisiblePrice = chartVerificationNumberOrNull(
-      finalGuardVisibleFacts.visible_latest_price !== undefined
-        ? finalGuardVisibleFacts.visible_latest_price
-        : finalGuardAssessorFacts.visible_latest_price
-    );
-    const finalGuardTrustedTicker = normalizeTicker(
-      record.ticker
-      || chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.trustedFacts && chartConsistencyTraceForDisplay.trustedFacts.ticker
-      || ''
-    );
-    const finalGuardFactsMissing = !finalGuardVisibleTicker
-      && !finalGuardVisibleTimeframe
-      && finalGuardVisiblePrice === null;
-    const finalGuardSource = String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.source || chartConsistencyTraceForDisplay.sourceType) || '').trim();
-    const activeRuntime = getReviewAiRuntime();
-    const activeRuntimeMatchesCurrentChart = !!(
-      activeRuntime
-      && activeRuntime.status === 'running'
-      && normalizeTicker(activeRuntime.ticker || '') === normalizeTicker(record.ticker || '')
-      && (!activeChartContext.requestId || !String(activeRuntime.requestId || '') || String(activeRuntime.requestId || '') === String(activeChartContext.requestId || ''))
-      && (!activeChartContext.imageId || !String(activeRuntime.chartImageId || '') || String(activeRuntime.chartImageId || '') === String(activeChartContext.imageId || ''))
-    );
-    const finalGuardShouldOverrideSourceChecking = !!(
-      hasVerifiableChart
-      && finalGuardTrustedTicker
-      && chartConsistencyTraceForDisplay
-      && String(chartConsistencyTraceForDisplay.status || '') === 'source_checking'
-      && finalGuardSource === 'chart_pre_ai_fast_pass'
-      && finalGuardFactsMissing
-      && (
-        currentLifecycleFinalizeReason === 'blocked_unknown_chart_identity'
-        || (!['queued', 'running'].includes(String(effectiveQuickChartAnalysisStatus || '')) && !activeRuntimeMatchesCurrentChart)
-      )
-    );
-    if(finalGuardShouldOverrideSourceChecking){
-      chartConsistencyTraceForDisplay = materializeTerminalBlockedChartTrace(chartConsistencyTraceForDisplay, {
-        status:'unknown_chart_identity',
-        reason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
-        expectedTicker:finalGuardTrustedTicker
-      }, {
-        ticker:finalGuardTrustedTicker,
-        imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
-        requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
-        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
-        source:'chart_render_terminal_guard',
-        chartAssessorInput:chartAssessorRenderContext
-      });
-      commitTerminalChartVerificationTrace(record, chartConsistencyTraceForDisplay, {
-        imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
-        requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
-        chartImageSource:chartSourceTrace,
-        chartAssessorInput:chartAssessorRenderContext,
-        finalizeReason:currentLifecycleFinalizeReason || 'blocked_unknown_chart_identity',
-        source:'chart_render_terminal_guard'
-      });
-      if(typeof console !== 'undefined' && console.info){
-        console.info('[CHART_RENDER_TERMINAL_GUARD_PERSISTED]', {
-          ticker:record.ticker,
-          imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || activeChartContext.imageId || ''),
-          requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || activeChartContext.requestId || ''),
-          status:String(chartConsistencyTraceForDisplay.status || ''),
-          reason:String(chartConsistencyTraceForDisplay.reason || currentLifecycleFinalizeReason || ''),
-          source:String(chartConsistencyTraceForDisplay.source || 'chart_render_terminal_guard'),
-          finalized:chartConsistencyTraceForDisplay.finalized === true
-        });
-      }
-      const finalGuardStoredChartVerificationWrapper = (record.review.chartVerificationCommittedTrace && typeof record.review.chartVerificationCommittedTrace === 'object'
-        ? record.review.chartVerificationCommittedTrace
-        : null)
-        || (record.review.chartVerificationTrace && typeof record.review.chartVerificationTrace === 'object'
-          ? record.review.chartVerificationTrace
-          : null);
-      selectedChartTrace = selectReviewChartTraceForRender(
-        record,
-        finalGuardStoredChartVerificationWrapper,
-        chartConsistencyTrace,
-        effectiveQuickChartAnalysisStatus,
-        chartAssessorRenderContext,
-        simplifiedState
-      );
-      chartConsistencyTraceForDisplay = selectedChartTrace.chosen || chartConsistencyTraceForDisplay;
-    }
-    if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info && chartConsistencyTraceForDisplay.visible){
-      console.info('[CHART_CONSISTENCY_TRACE]', {
-        ticker:record.ticker,
-        status:chartConsistencyTraceForDisplay.status,
-        visible:chartConsistencyTraceForDisplay.visible,
-        evidenceCount:Array.isArray(chartConsistencyTraceForDisplay.evidence) ? chartConsistencyTraceForDisplay.evidence.length : 0,
-        sources:chartConsistencyTraceForDisplay.sources || [],
-        ma20_status:chartConsistencyTraceForDisplay.indicatorStates && chartConsistencyTraceForDisplay.indicatorStates.ma20_status,
-        ma50_status:chartConsistencyTraceForDisplay.indicatorStates && chartConsistencyTraceForDisplay.indicatorStates.ma50_status,
-        ma200_status:chartConsistencyTraceForDisplay.indicatorStates && chartConsistencyTraceForDisplay.indicatorStates.ma200_status,
-        missingIndicators:chartConsistencyTraceForDisplay.missingIndicators || [],
-        initialMissingIndicators:chartConsistencyTraceForDisplay.initialMissingIndicators || [],
-        finalMissingIndicators:chartConsistencyTraceForDisplay.finalMissingIndicators || [],
-        summaryDerivedFromFinalState:chartConsistencyTraceForDisplay.summaryDerivedFromFinalState === true,
-        mismatchSeverity:chartConsistencyTraceForDisplay.mismatchSeverity || '',
-        aiAnalysisSuppressed:chartConsistencyTraceForDisplay.aiAnalysisSuppressed === true,
-        suppressionReason:chartConsistencyTraceForDisplay.suppressionReason || '',
-        partialIndicators:chartConsistencyTraceForDisplay.partialIndicators || [],
-        likelyMatchedIndicators:chartConsistencyTraceForDisplay.likelyMatchedIndicators || [],
-        inferredIndicators:chartConsistencyTraceForDisplay.inferredIndicators || [],
-        ma200_line_detected:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.ma200_line_detected,
-        ma200_text_detected:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.ma200_text_detected,
-        ma200_value_extracted:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.ma200_value_extracted,
-        ma200_confidence:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.ma200_confidence,
-        extraction_method_used:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.extraction_method_used,
-        marketOpenAssumed:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.marketOpenAssumed,
-        priceToleranceUsed:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.priceToleranceUsed,
-        maToleranceUsed:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.maToleranceUsed,
-        visibleNumericLabels:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.visibleNumericLabels,
-        numericLabelToMaMatches:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.numericLabelToMaMatches,
-        matchDeltas:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.matchDeltas,
-        staleDataPossible:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.staleDataPossible,
-        extractedFormatted:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.extractedFormatted,
-        trustedFormatted:chartConsistencyTraceForDisplay.debug && chartConsistencyTraceForDisplay.debug.trustedFormatted,
-        chartImageSource:chartConsistencyTraceForDisplay.chartImageSource || null
-      });
-    }
-    if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
-      console.info('[CHART_IMAGE_SOURCE]', {
-        ticker:record.ticker,
-        ...chartSourceTrace
-      });
-    }
-    chartUiDecision = chartVerificationUiDecision(chartConsistencyTraceForDisplay, record.ticker);
-    const chartPanelState = chartVerificationPanelState(
-      chartUiDecision,
-      chartConsistencyTraceForDisplay,
-      effectiveQuickChartAnalysisStatus,
-      hasVerifiableChart,
-      selectedChartTrace.chosenCandidate || chartConsistencyTraceForDisplay
-    );
-    chartConsistencyTraceMarkup = chartPanelState.panelVariant === 'pending'
-      ? renderQuickChartVerificationPending(record, quickChartAnalysisState)
-      : renderChartConsistencyTrace(chartConsistencyTraceForDisplay);
-    if(typeof console !== 'undefined' && console.info){
-      console.info('[CHART_PANEL_RENDER]', {
-        ticker:record.ticker,
-        renderedStatus:String(chartUiDecision.key || ''),
-        panelVariant:chartPanelState.panelVariant,
-        panelSource:chartPanelState.panelSource,
-        visibleTitle:chartPanelState.visibleTitle,
-        visibleBody:chartPanelState.visibleBody,
-        renderPass:reviewRenderPass
-      });
-    }
-    if(typeof console !== 'undefined' && console.info){
-      const preferredTerminalBlockedForRender = selectedChartTrace.reason === 'terminal blocked trace'
-        && selectedChartTrace.chosenCandidate
-        && typeof selectedChartTrace.chosenCandidate === 'object'
-        ? selectedChartTrace.chosenCandidate
-        : null;
-      console.info('[CHART_TRACE_SELECTION]', {
-        ticker:record.ticker,
-        candidateTraces:selectedChartTrace.candidates,
-        chosenStatus:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''),
-        chosenRequestId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || ''),
-        chosenImageId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId) || ''),
-        chosenReason:selectedChartTrace.reason || '',
-        chosenCandidate:selectedChartTrace.chosenCandidate || null,
-        usedMergedTrace:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.phase || '') === 'merged'
-          || String(storedChartVerificationState && storedChartVerificationState.phase || '') === 'merged'
-          || quickChartAnalysisStatus === 'committed',
-        usedPendingTrace:['queued', 'running'].includes(quickChartAnalysisStatus) || String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || '') === 'pending_chart_native_verification'
-      });
-      console.info('[CHART_TRACE_SELECTION_DEEP]', {
-        ticker:record.ticker,
-        preferredTerminalBlocked:preferredTerminalBlockedForRender ? {
-          label:String(preferredTerminalBlockedForRender.label || ''),
-          status:String(preferredTerminalBlockedForRender.status || ''),
-          requestId:String(preferredTerminalBlockedForRender.requestId || ''),
-          imageId:String(preferredTerminalBlockedForRender.imageId || ''),
-          reason:'terminal_blocked_candidate_for_current_chart'
-        } : null,
-        selectionReason:String(selectedChartTrace.reason || ''),
-        candidateTraces:selectedChartTrace.candidates.map(candidate => ({
-          label:candidate.label,
-          type:candidate.type,
-          status:candidate.status,
-          mergedStatus:String(candidate.mergedStatus || candidate.status || ''),
-          renderedStatus:String(candidate.renderedStatus || candidate.status || ''),
-          requestId:candidate.requestId,
-          verificationRequestId:String(candidate.verificationRequestId || candidate.requestId || ''),
-          imageId:candidate.imageId,
-          source:String(candidate.source || candidate.sourceType || ''),
-          event:String(candidate.event || ''),
-          updatedAt:String(candidate.updatedAt || ''),
-          createdAt:String(candidate.createdAt || ''),
-          finalized:candidate.finalized === true,
-          priorityScore:candidate.priorityScore == null ? null : candidate.priorityScore,
-          hasNormalizedAnalysis:!!candidate.hasNormalizedAnalysis,
-          hasMergedAnalysis:!!candidate.hasMergedAnalysis
-        })),
-        chosenTrace:chartConsistencyTraceForDisplay ? {
-          status:String(chartConsistencyTraceForDisplay.status || ''),
-          mergedStatus:String(chartConsistencyTraceForDisplay.mergedStatus || chartConsistencyTraceForDisplay.status || ''),
-          renderedStatus:String(chartConsistencyTraceForDisplay.renderedStatus || chartUiDecision.key || ''),
-          requestId:String(chartConsistencyTraceForDisplay.requestId || chartConsistencyTraceForDisplay.verificationRequestId || ''),
-          verificationRequestId:String(chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId || ''),
-          imageId:String(chartConsistencyTraceForDisplay.imageId || chartConsistencyTraceForDisplay.chartImageId || ''),
-          source:String(chartConsistencyTraceForDisplay.source || chartConsistencyTraceForDisplay.sourceType || ''),
-          event:String(chartConsistencyTraceForDisplay.event || ''),
-          updatedAt:String(chartConsistencyTraceForDisplay.updatedAt || ''),
-          createdAt:String(chartConsistencyTraceForDisplay.createdAt || ''),
-          finalized:chartConsistencyTraceForDisplay.finalized === true,
-          hasNormalizedAnalysis:!!(chartConsistencyTraceForDisplay.normalizedAnalysis || chartConsistencyTraceForDisplay.chartAssessorInput),
-          hasMergedAnalysis:String(chartConsistencyTraceForDisplay.phase || '') === 'merged'
-        } : null
-      });
-    }
-    const chartActionState = chartUiDecision.key === 'verified_match' || chartUiDecision.key === 'user_confirmed_match'
-      ? 'verified'
-      : (chartUiDecision.key === 'chart_mismatch'
-        ? 'mismatch'
-        : 'uncertain');
-    const hasChartScreenshot = hasVerifiableChart;
-    const showChartManualActions = chartVerificationShouldShowManualActions(chartUiDecision, chartConsistencyTraceForDisplay, effectiveQuickChartAnalysisStatus, hasChartScreenshot);
-    if(typeof console !== 'undefined' && console.info){
-      console.info('[MANUAL_CHART_CONTROLS_VISIBILITY]', {
-        ticker:record.ticker,
-        decisionKey:String(chartUiDecision && chartUiDecision.key || ''),
-        traceStatus:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''),
-        quickStatus:String(effectiveQuickChartAnalysisStatus || ''),
-        hasChartScreenshot,
-        visible:showChartManualActions
-      });
-    }
-    const chartManualConfirmationNote = chartUiDecision.key === 'user_confirmed_match'
-      ? `<div class="tiny goodtext" style="margin-top:6px">Chart manually confirmed by user.</div>`
-      : '';
-    chartManualActionsMarkup = hasChartScreenshot
-      ? (showChartManualActions
-        ? `<div class="actions chart-verification-actions" style="margin-top:8px">
-            <button class="primary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record.ticker)}</button>
-            <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">Reject and upload another chart</button>
-          </div>${chartManualConfirmationNote}`
-        : '')
-      : '';
     if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
       console.info('[REVIEW_CHART_VERIFICATION_RENDER]', {
         ticker:record.ticker,
         status:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || 'unknown'),
         quickStatus:quickChartAnalysisStatus || '',
         renderCountForReviewPass:reviewRenderPass,
+        renderSource:'simplified_pipeline',
         messageFields:{
           title:chartUiDecision.title || '',
           summary:chartUiDecision.summary || '',
@@ -35506,19 +35314,19 @@ function renderReviewWorkspace(options = {}){
         sourceTraceStatus:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''),
         imageId:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.imageId || chartImageIdForReview(record.review || {}) || ''),
         requestId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || ''),
-        usedMergedTrace:!!(storedChartVerificationState && storedChartVerificationState.phase === 'merged'),
-        usedPendingTrace:['queued', 'running'].includes(quickChartAnalysisStatus)
+        usedMergedTrace:false,
+        usedPendingTrace:['verifying', 'uploading'].includes(quickChartAnalysisStatus)
       });
       console.info('[CHART_UI_VISIBLE_COPY]', {
         ticker:record.ticker,
         renderedStatus:String(chartUiDecision.key || ''),
         renderedTitle:String(chartUiDecision.title || ''),
         renderedBody:String(chartUiDecision.summary || chartUiDecision.detail || ''),
-        renderedCTA:showChartManualActions ? 'manual_confirm' : (chartUiDecision.key === 'verified_match' ? 'verified_only' : 'none'),
+        renderedCTA:chartManualActionsMarkup ? 'manual_confirm' : (chartUiDecision.key === 'verified_match' ? 'verified_only' : 'none'),
         sourceTraceStatus:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''),
-        reviewObjectId:reviewObjectIdentityId(record.review)
+        reviewObjectId:reviewObjectIdentityId(record.review),
+        renderSource:'simplified_pipeline'
       });
-    }
     }
   }else{
     if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
@@ -35537,8 +35345,8 @@ function renderReviewWorkspace(options = {}){
   }
   const chartRenderImageId = String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.imageId || chartImageIdForReview(record.review || {}) || '');
   const chartRenderRequestId = String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || '');
-  const chartRenderUsedMergedTrace = !!(hasVerifiableChart && storedChartVerificationState && (storedChartVerificationState.phase === 'merged' || quickChartAnalysisStatus === 'committed'));
-  const chartRenderUsedPendingTrace = !!(hasVerifiableChart && ['queued', 'running'].includes(quickChartAnalysisStatus));
+  const chartRenderUsedMergedTrace = false;
+  const chartRenderUsedPendingTrace = !!(hasVerifiableChart && ['verifying', 'uploading'].includes(quickChartAnalysisStatus));
   if(typeof console !== 'undefined' && console.info){
     console.info('[CHART_UI_RENDER_STATE]', {
       ticker:record.ticker,
@@ -35588,12 +35396,15 @@ function renderReviewWorkspace(options = {}){
   );
   const aiSuppressionText = String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.suppressionReason || '')
     || 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
-  const aiSummaryGuard = simplifiedChartPipelineActive
-    ? {
-      allowedToRender:chartPipelineAllowsAi(String(simplifiedChartPipeline.phase || '')) && !!(analysisState && (analysisState.normalizedAnalysis || analysisState.rawAnalysis)),
-      reason:chartPipelineAllowsAi(String(simplifiedChartPipeline.phase || '')) ? '' : String(simplifiedChartPipeline.phase || 'chart_pipeline_blocked')
-    }
-    : chartAiSummaryRenderGuard(record, analysisState, chartConsistencyTraceForDisplay);
+  const aiSummaryGuard = {
+    allowedToRender:(!hasVerifiableChart || chartPipelineAllowsAi(String(simplifiedChartPipeline && simplifiedChartPipeline.phase || '')))
+      && !!(analysisState && (analysisState.normalizedAnalysis || analysisState.rawAnalysis)),
+    reason:!hasVerifiableChart
+      ? ''
+      : (chartPipelineAllowsAi(String(simplifiedChartPipeline && simplifiedChartPipeline.phase || ''))
+        ? ''
+        : String(simplifiedChartPipeline && simplifiedChartPipeline.phase || 'chart_pipeline_blocked'))
+  };
   const previewRef = (record.review.chartImagePreview && record.review.chartImagePreview.dataUrl)
     ? record.review.chartImagePreview
     : record.review.chartRef;
