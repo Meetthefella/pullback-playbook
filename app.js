@@ -4602,89 +4602,118 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
     renderReviewWorkspace({source:'chart_pipeline_verify_failed', requestedTicker:ticker});
     return getReviewChartAnalysisPipeline(item);
   }
-  const data = result.data && typeof result.data === 'object' ? result.data : {};
-  if(typeof console !== 'undefined' && console.info){
-    console.info('[CHART_PIPELINE_QUICK_RAW_RESULT]', {
-      ticker,
-      imageId,
-      requestId,
-      source,
-      sourceKind:String(chartImageSource.sourceKind || ''),
-      originalDimensions:String(chartImageSource.originalDimensions || ''),
-      previewDimensions:String(chartImageSource.previewDimensions || ''),
-      verificationDimensions:String(chartImageSource.verificationSourceDimensions || ''),
-      rawVisibleTicker:String((data.analysis && data.analysis.visible_ticker) || ''),
-      rawVisibleTimeframe:String((data.analysis && data.analysis.visible_timeframe) || ''),
-      rawVisiblePrice:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_latest_price),
-      rawVisibleMa20:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma20),
-      rawVisibleMa50:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma50),
-      rawVisibleMa200:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma200)
-    });
-  }
-  const normalized = normalizeAnalysisResult(data.analysis && typeof data.analysis === 'object' ? data.analysis : {}, previousTickerState);
-  const sanitized = sanitizeChartAssessorVisibleIdentity(
-    item,
-    normalized,
-    chartImageSource,
-    requestId,
-    {caller:'chart_pipeline_quick'}
-  );
-  if(typeof console !== 'undefined' && console.info){
-    console.info('[CHART_PIPELINE_QUICK_SANITIZED_RESULT]', {
-      ticker,
-      imageId,
-      requestId,
-      source,
-      sourceKind:String(chartImageSource.sourceKind || ''),
-      originalDimensions:String(chartImageSource.originalDimensions || ''),
-      previewDimensions:String(chartImageSource.previewDimensions || ''),
-      verificationDimensions:String(chartImageSource.verificationSourceDimensions || ''),
-      visibleTicker:String(sanitized.visible_ticker || ''),
-      visibleTimeframe:String(sanitized.visible_timeframe || ''),
-      visiblePrice:chartVerificationNumberOrNull(sanitized.visible_latest_price),
-      visibleMa20:chartVerificationNumberOrNull(sanitized.visible_ma20),
-      visibleMa50:chartVerificationNumberOrNull(sanitized.visible_ma50),
-      visibleMa200:chartVerificationNumberOrNull(sanitized.visible_ma200),
-      chartIdentityProvenanceVersion:Number.isFinite(Number(sanitized.chartIdentityProvenanceVersion))
-        ? Number(sanitized.chartIdentityProvenanceVersion)
-        : null
-    });
-  }
-  const chartAssessorInput = buildChartAssessorInput(item, sanitized, chartImageSource, requestId);
-  item.review.chartVerificationContext = cloneData(chartAssessorInput, null);
-  item.review.rawChartFactExtraction = cloneData({
-    ticker,
-    imageId,
-    requestId,
-    source:'chart_pipeline_quick',
-    rawExtractedFacts:{
-      visible_ticker:String((data.analysis && data.analysis.visible_ticker) || ''),
-      visible_timeframe:String((data.analysis && data.analysis.visible_timeframe) || ''),
-      visible_latest_price:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_latest_price),
-      visible_ma20:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma20),
-      visible_ma50:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma50),
-      visible_ma200:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma200)
+  try{
+    const data = result.data && typeof result.data === 'object' ? result.data : {};
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_PIPELINE_QUICK_RAW_RESULT]', {
+        ticker,
+        imageId,
+        requestId,
+        source,
+        sourceKind:String(chartImageSource.sourceKind || ''),
+        originalDimensions:String(chartImageSource.originalDimensions || ''),
+        previewDimensions:String(chartImageSource.previewDimensions || ''),
+        verificationDimensions:String(chartImageSource.verificationSourceDimensions || ''),
+        rawVisibleTicker:String((data.analysis && data.analysis.visible_ticker) || ''),
+        rawVisibleTimeframe:String((data.analysis && data.analysis.visible_timeframe) || ''),
+        rawVisiblePrice:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_latest_price),
+        rawVisibleMa20:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma20),
+        rawVisibleMa50:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma50),
+        rawVisibleMa200:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma200)
+      });
     }
-  }, null);
-  const nextPipeline = buildChartPipelineFromVerification(item, {
-    imageId,
-    requestId,
-    source:'chart_pipeline_quick_check',
-    analysis:sanitized,
-    chartAssessorInput,
-    chartImageSource
-  });
-  upsertReviewChartAnalysisPipeline(item, nextPipeline);
-  commitTickerState();
-  renderReviewWorkspace({source:'chart_pipeline_verified', requestedTicker:ticker});
-  if(nextPipeline.phase === 'verified'){
-    runSimplifiedChartFullAnalysis(item, {
-      source:'chart_pipeline_auto',
+    const normalized = normalizeAnalysisResult(data.analysis && typeof data.analysis === 'object' ? data.analysis : {}, previousTickerState);
+    const sanitized = sanitizeChartAssessorVisibleIdentity(
+      item,
+      normalized,
+      chartImageSource,
       requestId,
-      manualConfirmed:false
-    }).catch(() => {});
+      {caller:'chart_pipeline_quick'}
+    );
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_PIPELINE_QUICK_SANITIZED_RESULT]', {
+        ticker,
+        imageId,
+        requestId,
+        source,
+        sourceKind:String(chartImageSource.sourceKind || ''),
+        originalDimensions:String(chartImageSource.originalDimensions || ''),
+        previewDimensions:String(chartImageSource.previewDimensions || ''),
+        verificationDimensions:String(chartImageSource.verificationSourceDimensions || ''),
+        visibleTicker:String(sanitized.visible_ticker || ''),
+        visibleTimeframe:String(sanitized.visible_timeframe || ''),
+        visiblePrice:chartVerificationNumberOrNull(sanitized.visible_latest_price),
+        visibleMa20:chartVerificationNumberOrNull(sanitized.visible_ma20),
+        visibleMa50:chartVerificationNumberOrNull(sanitized.visible_ma50),
+        visibleMa200:chartVerificationNumberOrNull(sanitized.visible_ma200),
+        chartIdentityProvenanceVersion:Number.isFinite(Number(sanitized.chartIdentityProvenanceVersion))
+          ? Number(sanitized.chartIdentityProvenanceVersion)
+          : null
+      });
+    }
+    const chartAssessorInput = buildChartAssessorInput(item, sanitized, chartImageSource, requestId);
+    item.review.chartVerificationContext = cloneData(chartAssessorInput, null);
+    item.review.rawChartFactExtraction = cloneData({
+      ticker,
+      imageId,
+      requestId,
+      source:'chart_pipeline_quick',
+      rawExtractedFacts:{
+        visible_ticker:String((data.analysis && data.analysis.visible_ticker) || ''),
+        visible_timeframe:String((data.analysis && data.analysis.visible_timeframe) || ''),
+        visible_latest_price:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_latest_price),
+        visible_ma20:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma20),
+        visible_ma50:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma50),
+        visible_ma200:chartVerificationNumberOrNull(data.analysis && data.analysis.visible_ma200)
+      }
+    }, null);
+    const nextPipeline = buildChartPipelineFromVerification(item, {
+      imageId,
+      requestId,
+      source:'chart_pipeline_quick_check',
+      analysis:sanitized,
+      chartAssessorInput,
+      chartImageSource
+    });
+    upsertReviewChartAnalysisPipeline(item, nextPipeline);
+    commitTickerState();
+    renderReviewWorkspace({source:'chart_pipeline_verified', requestedTicker:ticker});
+    if(nextPipeline.phase === 'verified'){
+      runSimplifiedChartFullAnalysis(item, {
+        source:'chart_pipeline_auto',
+        requestId,
+        manualConfirmed:false
+      }).catch(() => {});
+    }
+    return getReviewChartAnalysisPipeline(item);
+  }catch(error){
+    if(typeof console !== 'undefined' && console.error){
+      console.error('[CHART_PIPELINE_QUICK_RESOLUTION_FAILED]', {
+        ticker,
+        imageId,
+        requestId,
+        source,
+        message:String(error && error.message || 'Chart verification resolution failed.')
+      });
+    }
+    upsertReviewChartAnalysisPipeline(item, {
+      imageId,
+      requestId,
+      source,
+      phase:'cant_read',
+      expectedFacts:buildChartPipelineExpectedFacts(item),
+      readFacts:recoverChartPipelineReadFacts(item, getReviewChartAnalysisPipeline(item) || {}),
+      missing:['visible ticker'],
+      evidence:[String(error && error.message || 'Chart verification resolution failed.')],
+      aiAllowed:false,
+      manualConfirmed:false,
+      chartImageSource,
+      updatedAt:new Date().toISOString()
+    });
+    commitTickerState();
+    renderReviewWorkspace({source:'chart_pipeline_resolution_failed', requestedTicker:ticker});
+    return getReviewChartAnalysisPipeline(item);
   }
-  return getReviewChartAnalysisPipeline(item);
 }
 
 async function runSimplifiedChartFullAnalysis(record = {}, options = {}){
