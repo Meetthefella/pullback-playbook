@@ -6,10 +6,10 @@ const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.4.18';
+const APP_VERSION = 'v4.4.19';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.4.18'
+    version:'4.4.19'
   };
 }
 const defaultAiEndpoint = '/api/analyse-setup';
