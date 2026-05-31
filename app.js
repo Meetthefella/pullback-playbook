@@ -4140,16 +4140,99 @@ function chartPipelineHasVerifiedIdentity(pipeline = {}){
   return safe.manualConfirmed === true || (!!verifiedReadTicker && safe.verifiedMatch === true);
 }
 
-function normalizeChartPipelineForRender(pipeline = {}){
+function mergeChartPipelineReadFacts(primary = {}, fallback = {}){
+  const first = primary && typeof primary === 'object' ? primary : {};
+  const second = fallback && typeof fallback === 'object' ? fallback : {};
+  return {
+    ticker:String(first.ticker || second.ticker || '').trim(),
+    timeframe:String(first.timeframe || second.timeframe || '').trim(),
+    price:chartVerificationNumberOrNull(first.price) !== null
+      ? chartVerificationNumberOrNull(first.price)
+      : chartVerificationNumberOrNull(second.price),
+    ma20:chartVerificationNumberOrNull(first.ma20) !== null
+      ? chartVerificationNumberOrNull(first.ma20)
+      : chartVerificationNumberOrNull(second.ma20),
+    ma50:chartVerificationNumberOrNull(first.ma50) !== null
+      ? chartVerificationNumberOrNull(first.ma50)
+      : chartVerificationNumberOrNull(second.ma50),
+    ma200:chartVerificationNumberOrNull(first.ma200) !== null
+      ? chartVerificationNumberOrNull(first.ma200)
+      : chartVerificationNumberOrNull(second.ma200)
+  };
+}
+
+function chartPipelineContextMatches(record = {}, pipeline = {}, source = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const safePipeline = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  const safeSource = source && typeof source === 'object' ? source : {};
+  const pipelineImageId = String(safePipeline.imageId || chartImageIdForReview(item.review || {}) || '').trim();
+  const pipelineRequestId = String(safePipeline.requestId || '').trim();
+  const sourceImageId = String(safeSource.imageId || safeSource.chartImageId || '').trim();
+  const sourceRequestId = String(safeSource.requestId || safeSource.verificationRequestId || '').trim();
+  if(pipelineImageId && sourceImageId && pipelineImageId !== sourceImageId) return false;
+  if(pipelineRequestId && sourceRequestId && pipelineRequestId !== sourceRequestId) return false;
+  return !!(pipelineImageId || sourceImageId || pipelineRequestId || sourceRequestId);
+}
+
+function recoverChartPipelineReadFacts(record = {}, pipeline = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const safePipeline = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  let recovered = buildChartPipelineReadFacts(safePipeline.readFacts || {});
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const chartVerificationContext = review.chartVerificationContext && typeof review.chartVerificationContext === 'object'
+    ? review.chartVerificationContext
+    : null;
+  if(chartVerificationContext && chartPipelineContextMatches(item, safePipeline, chartVerificationContext)){
+    recovered = mergeChartPipelineReadFacts(recovered, buildChartPipelineReadFacts(chartVerificationContext));
+  }
+  const rawChartFactExtraction = review.rawChartFactExtraction && typeof review.rawChartFactExtraction === 'object'
+    ? review.rawChartFactExtraction
+    : null;
+  const rawExtractedFacts = rawChartFactExtraction && rawChartFactExtraction.rawExtractedFacts && typeof rawChartFactExtraction.rawExtractedFacts === 'object'
+    ? {
+      ...rawChartFactExtraction.rawExtractedFacts,
+      imageId:rawChartFactExtraction.imageId,
+      requestId:rawChartFactExtraction.requestId
+    }
+    : null;
+  if(rawExtractedFacts && chartPipelineContextMatches(item, safePipeline, rawExtractedFacts)){
+    recovered = mergeChartPipelineReadFacts(recovered, buildChartPipelineReadFacts(rawExtractedFacts));
+  }
+  return recovered;
+}
+
+function normalizeChartPipelineForRender(record = {}, pipeline = {}){
   const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
   const normalized = cloneData(safe, {});
-  const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(normalized);
-  if(!hasVerifiedIdentity && normalized.manualConfirmed !== true){
-    if(['verified', 'analysis_running', 'analysis_complete'].includes(String(normalized.phase || '').trim())){
-      normalized.phase = 'cant_read';
-      normalized.aiAllowed = false;
+  normalized.readFacts = recoverChartPipelineReadFacts(record, normalized);
+  const expectedTicker = normaliseVisibleTicker(
+    normalized.expectedFacts && normalized.expectedFacts.ticker
+      || record && record.ticker
+      || ''
+  );
+  const recoveredTicker = normaliseVisibleTicker(normalized.readFacts && normalized.readFacts.ticker || '');
+  if(recoveredTicker && expectedTicker){
+    normalized.observedTicker = recoveredTicker;
+    if(recoveredTicker === expectedTicker){
+      normalized.verifiedMatch = true;
+      normalized.mismatch = false;
+      if(['cant_read', 'possible_mismatch', 'uploading', 'verifying'].includes(String(normalized.phase || '').trim())){
+        normalized.phase = 'verified';
+      }
+    }else{
+      normalized.verifiedMatch = false;
+      normalized.mismatch = true;
+      normalized.phase = 'possible_mismatch';
     }
   }
+  normalized.aiAllowed = chartPipelineAllowsAi(normalized.phase) && chartPipelineHasVerifiedIdentity(normalized);
+  const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(normalized);
+  if(!hasVerifiedIdentity && normalized.manualConfirmed !== true){
+    if(!normalized.mismatch && ['verified', 'analysis_running', 'analysis_complete'].includes(String(normalized.phase || '').trim())){
+      normalized.phase = 'cant_read';
+    }
+  }
+  normalized.aiAllowed = chartPipelineAllowsAi(normalized.phase) && chartPipelineHasVerifiedIdentity(normalized);
   return normalized;
 }
 
@@ -4244,7 +4327,7 @@ function upsertReviewChartAnalysisPipeline(record = {}, nextPipeline = {}){
 
 function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
   const item = record && typeof record === 'object' ? record : {};
-  const safe = normalizeChartPipelineForRender(pipeline);
+  const safe = normalizeChartPipelineForRender(item, pipeline);
   const expected = safe.expectedFacts && typeof safe.expectedFacts === 'object' ? safe.expectedFacts : buildChartPipelineExpectedFacts(item);
   const read = safe.readFacts && typeof safe.readFacts === 'object' ? safe.readFacts : {};
   const phase = String(safe.phase || '').trim();
@@ -4315,7 +4398,7 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
 }
 
 function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
-  const safe = normalizeChartPipelineForRender(pipeline);
+  const safe = normalizeChartPipelineForRender(record, pipeline);
   const trace = buildSimplifiedChartPipelineTrace(record, safe);
   const phase = String(safe.phase || '').trim();
   const expectedTicker = normalizeTicker(record && record.ticker || trace.ticker || '');
@@ -4373,7 +4456,7 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
 }
 
 function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
-  const normalizedPipeline = normalizeChartPipelineForRender(pipeline);
+  const normalizedPipeline = normalizeChartPipelineForRender(record, pipeline);
   const decision = buildSimplifiedChartPipelineDecision(record, normalizedPipeline);
   const trace = decision.trace;
   const detailsOpen = !!(uiState.reviewChartDetailsOpen && uiState.reviewChartDetailsOpen[normalizeTicker(record && record.ticker || '')]);
