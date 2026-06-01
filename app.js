@@ -32184,17 +32184,7 @@ function renderReviewWorkspace(options = {}){
     ? ensureSimplifiedChartPipelineForRender(record, {source:'chart_pipeline_review_render'})
     : null;
   const simplifiedChartPipelineActive = !!(hasVerifiableChart && simplifiedChartPipeline);
-  const quickChartAnalysisState = hasVerifiableChart
-    ? {
-      status:String(simplifiedChartPipeline && simplifiedChartPipeline.phase || 'idle'),
-      hasChart:true,
-      needsQuickAnalysis:false,
-      key:String(simplifiedChartPipeline && simplifiedChartPipeline.imageId || ''),
-      stored:simplifiedChartPipeline
-    }
-    : {status:'idle', hasChart:false, needsQuickAnalysis:false};
-  const quickChartAnalysisStatus = String(quickChartAnalysisState && quickChartAnalysisState.status || '');
-  const effectiveQuickChartAnalysisStatus = quickChartAnalysisStatus;
+  const pipelinePhaseForRender = String(simplifiedChartPipeline && simplifiedChartPipeline.phase || (hasVerifiableChart ? 'idle' : ''));
   let chartConsistencyTraceForDisplay = null;
   let chartUiDecision = null;
   let chartConsistencyTraceMarkup = '';
@@ -32251,7 +32241,7 @@ function renderReviewWorkspace(options = {}){
       console.info('[REVIEW_CHART_VERIFICATION_RENDER]', {
         ticker:record.ticker,
         status:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || 'unknown'),
-        quickStatus:quickChartAnalysisStatus || '',
+        pipelinePhase:pipelinePhaseForRender || '',
         renderCountForReviewPass:reviewRenderPass,
         renderSource:'simplified_pipeline',
         messageFields:{
@@ -32267,7 +32257,7 @@ function renderReviewWorkspace(options = {}){
         imageId:String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.imageId || chartImageIdForReview(record.review || {}) || ''),
         requestId:String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || ''),
         usedMergedTrace:false,
-        usedPendingTrace:['verifying', 'uploading'].includes(quickChartAnalysisStatus)
+        usedPendingTrace:['verifying', 'uploading'].includes(pipelinePhaseForRender)
       });
       console.info('[CHART_UI_VISIBLE_COPY]', {
         ticker:record.ticker,
@@ -32285,7 +32275,7 @@ function renderReviewWorkspace(options = {}){
       console.info('[REVIEW_CHART_VERIFICATION_RENDER]', {
         ticker:record.ticker,
         status:'no_chart_attached',
-        quickStatus:'',
+        pipelinePhase:'',
         renderCountForReviewPass:reviewRenderPass,
         messageFields:{
           title:'No chart uploaded yet.',
@@ -32298,7 +32288,7 @@ function renderReviewWorkspace(options = {}){
   const chartRenderImageId = String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.imageId || chartImageIdForReview(record.review || {}) || '');
   const chartRenderRequestId = String(chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.verificationRequestId || chartConsistencyTraceForDisplay.requestId) || '');
   const chartRenderUsedMergedTrace = false;
-  const chartRenderUsedPendingTrace = !!(hasVerifiableChart && ['verifying', 'uploading'].includes(quickChartAnalysisStatus));
+  const chartRenderUsedPendingTrace = !!(hasVerifiableChart && ['verifying', 'uploading'].includes(pipelinePhaseForRender));
   if(typeof console !== 'undefined' && console.info){
     console.info('[CHART_UI_RENDER_STATE]', {
       ticker:record.ticker,
@@ -32631,7 +32621,7 @@ function renderReviewWorkspace(options = {}){
             <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
             <div class="reviewactions reviewactions-secondary"><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button></div>
             ${reviewDebug}
-            <div class="statusline tiny" id="reviewWorkspaceStatus">${renderChartWorkspaceStatusLineFromDecision(chartUiDecision, chartConsistencyTraceForDisplay, effectiveQuickChartAnalysisStatus, hasVerifiableChart)}</div>
+            <div class="statusline tiny" id="reviewWorkspaceStatus">${renderChartWorkspaceStatusLineFromDecision(chartUiDecision, chartConsistencyTraceForDisplay, pipelinePhaseForRender, hasVerifiableChart)}</div>
           </details>
         </div>` : ''}
       </details>
