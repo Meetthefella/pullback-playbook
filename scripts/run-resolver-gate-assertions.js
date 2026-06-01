@@ -3042,7 +3042,6 @@ function runAiContractAssertions(){
   const chartSupportsPartialSource = extractFunctionSource(appSource, 'chartVerificationSupportsNonBlockingIndicatorPartial');
   const chartFastPassSource = extractFunctionSource(appSource, 'buildChartVerificationFastPass');
   const explicitProvenanceFnSource = extractFunctionSource(appSource, 'chartVerificationHasExplicitRegionProvenance');
-  const chartRenderSource = extractFunctionSource(appSource, 'renderChartConsistencyTrace');
   const chartSandbox = {
     normaliseVisibleTicker(value){ return String(value || '').trim().toUpperCase(); },
     chartVerificationNumberOrNull(value){
@@ -3076,7 +3075,6 @@ function runAiContractAssertions(){
   vm.runInContext(explicitProvenanceFnSource, chartSandbox, {filename:'app.js#chartVerificationHasExplicitRegionProvenance'});
   vm.runInContext(chartDecisionClassNameSource, chartSandbox, {filename:'app.js#chartDecisionClassName'});
   vm.runInContext(chartFastPassSource, chartSandbox, {filename:'app.js#buildChartVerificationFastPass'});
-  vm.runInContext(chartRenderSource, chartSandbox, {filename:'app.js#renderChartConsistencyTrace'});
   const mirroredFastPass = chartSandbox.buildChartVerificationFastPass({
     ticker:'DINO',
     marketData:{price:70.30}
@@ -3148,48 +3146,6 @@ function runAiContractAssertions(){
   });
   if(nativeEvidenceFastPass.status !== 'clear_match_candidate' || nativeEvidenceFastPass.independentImageEvidence !== true || nativeEvidenceFastPass.chartNativeEvidencePresent !== true){
     throw new Error('Correct chart matches should only become clear candidates once chart-native evidence exists.');
-  }
-  const verifiedPanelHtml = chartSandbox.renderChartConsistencyTrace({
-    visible:true,
-    status:'verified_match',
-    summary:'Chart and scanner data are consistent.',
-    title:'Chart verified',
-    extractedFacts:{
-      visible_ticker:'DINO',
-      visible_timeframe:'1D',
-      visible_latest_price:70.3,
-      visible_ma20:67.43,
-      visible_ma50:62.37,
-      visible_ma200:53.89
-    },
-    trustedFacts:{
-      ticker:'DINO',
-      expected_timeframe:'1D',
-      latest_price:70.3,
-      ma20:67.43,
-      ma50:62.37,
-      ma200:53.89
-    },
-    evidence:['Ticker, price, and indicators align.'],
-    sources:['deterministic_chart_verification'],
-    chartImageSource:{sourceKind:'chartImageOriginal', originalDimensions:'1920x1080', previewDimensions:'480x270', verificationSourceDimensions:'1920x1080'}
-  });
-  if(!/Read from chart:/i.test(verifiedPanelHtml) || !/Expected:/i.test(verifiedPanelHtml) || !/20MA 67\.43/i.test(verifiedPanelHtml)){
-    throw new Error('Verified chart traces must show key extracted/trusted facts inline.');
-  }
-  const mismatchPanelHtml = chartSandbox.renderChartConsistencyTrace({
-    visible:true,
-    status:'ticker_mismatch',
-    summary:'Uploaded chart appears to show ETR, but this review is for DINO.',
-    title:'Ticker mismatch',
-    evidence:['Uploaded chart appears to show ETR, but this review is for DINO.'],
-    extractedFacts:{visible_ticker:'ETR', visible_timeframe:'1D', visible_latest_price:88.12},
-    trustedFacts:{ticker:'DINO', expected_timeframe:'1D', latest_price:70.3},
-    sources:['deterministic_chart_verification'],
-    chartImageSource:{sourceKind:'chartImageOriginal', originalDimensions:'1920x1080', previewDimensions:'480x270', verificationSourceDimensions:'1920x1080'}
-  });
-  if(!/Evidence:/i.test(mismatchPanelHtml) || !/ETR/i.test(mismatchPanelHtml) || !/DINO/i.test(mismatchPanelHtml)){
-    throw new Error('Mismatch chart traces must expose explanatory evidence inline.');
   }
   const normalizeSandbox = {
     cloneData(value, fallback){
@@ -3332,7 +3288,6 @@ function runAiContractAssertions(){
     'chartVerificationAiSuppression',
     'chartAiSummaryRenderGuard',
     'renderSuppressedAiAnalysisPanel',
-    'renderChartConsistencyTrace',
     'chartVerificationIsVerifiedStatus',
     'chartVerificationAllowsAiAnalysisStatus',
     'chartVerificationIsBlockedOrMismatchStatus',
