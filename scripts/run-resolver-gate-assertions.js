@@ -3287,7 +3287,6 @@ function runAiContractAssertions(){
     'chartVerificationAllowsAiAnalysisStatus',
     'chartVerificationIsBlockedOrMismatchStatus',
     'chartVerificationShouldShowManualActions',
-    'getReviewChartVerificationState',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});

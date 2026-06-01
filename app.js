@@ -21897,57 +21897,6 @@ function getReviewAnalysisState(record){
   return analysisState;
 }
 
-function getReviewChartVerificationState(record){
-  const item = record && typeof record === 'object' ? record : {};
-  const review = item.review && typeof item.review === 'object' ? item.review : {};
-  if(!hasVerifiableReviewChartSource(review)) return null;
-  const normalizeReviewTicker = value => String(value || '').trim().toUpperCase().replace(/^[A-Z]+:/, '').replace(/[^A-Z0-9.-]/g, '');
-  const reviewSourceKey = sourceTrace => {
-    const safe = sourceTrace && typeof sourceTrace === 'object' ? sourceTrace : {};
-    return [
-      String(safe.sourceKind || ''),
-      String(safe.sourceField || ''),
-      String(safe.originalDimensions || ''),
-      String(safe.previewDimensions || ''),
-      String(safe.verificationSourceDimensions || ''),
-      safe.limited === true ? 'limited' : 'full'
-    ].join('|');
-  };
-  const committedState = review.chartVerificationCommittedTrace && typeof review.chartVerificationCommittedTrace === 'object'
-    ? review.chartVerificationCommittedTrace
-    : null;
-  const state = committedState || (review.chartVerificationTrace && typeof review.chartVerificationTrace === 'object'
-    ? review.chartVerificationTrace
-    : null);
-  if(!state) return null;
-  const currentTicker = normalizeReviewTicker(item.ticker || review.ticker || '');
-  const storedTicker = normalizeReviewTicker(state.reviewTicker || state.ticker || '');
-  if(currentTicker && storedTicker && currentTicker !== storedTicker){
-    return null;
-  }
-  const currentChartImageId = chartImageIdForReview(review);
-  const storedChartImageId = String(state.chartImageId || state.imageId || '');
-  if(currentChartImageId && storedChartImageId && currentChartImageId !== storedChartImageId){
-    return null;
-  }
-  const currentSourceTrace = buildChartImageSourceTrace(review);
-  const storedSourceTrace = state.chartImageSource && typeof state.chartImageSource === 'object'
-    ? state.chartImageSource
-    : null;
-  if(storedSourceTrace && currentSourceTrace){
-    if(reviewSourceKey(storedSourceTrace) !== reviewSourceKey(currentSourceTrace)){
-      return null;
-    }
-  }
-  const currentContext = currentReviewChartContext(item, review);
-  const storedRequestId = String(state.verificationRequestId || state.requestId || '');
-  const currentRequestId = String(currentContext.requestId || '');
-  if(storedRequestId && currentRequestId && storedRequestId !== currentRequestId){
-    return null;
-  }
-  return state;
-}
-
 function reviewAnalysisUiStateForRecord(record){
   const item = normalizeTickerRecord(record);
   const analysisState = getReviewAnalysisState(item);
@@ -25464,7 +25413,7 @@ async function analyseSetup(ticker, options = {}){
     renderCards();
     if(ownsActiveRequest){
       const finalAnalysisState = getReviewAnalysisState(getTickerRecord(ticker) || {});
-      const finalChartState = getReviewChartVerificationState(getTickerRecord(ticker) || {});
+      const finalChartState = getReviewChartAnalysisPipeline(getTickerRecord(ticker) || {});
       logChartVerificationLifecycle('final_merged_state_rendered', {
         reviewTicker:ticker,
         verificationRequestId:analysisRequestId,
@@ -31285,11 +31234,6 @@ function renderReviewWorkspace(options = {}){
   const canonicalLiveReview = canonicalLiveRecord && canonicalLiveRecord.review && typeof canonicalLiveRecord.review === 'object'
     ? canonicalLiveRecord.review
     : null;
-  const liveCommittedChartVerificationTrace = canonicalLiveReview
-    && canonicalLiveReview.chartVerificationCommittedTrace
-    && typeof canonicalLiveReview.chartVerificationCommittedTrace === 'object'
-    ? canonicalLiveReview.chartVerificationCommittedTrace
-    : null;
   const reviewObjectIdentityId = value => {
     if(!value || typeof value !== 'object' || typeof WeakMap !== 'function') return '';
     if(!renderReviewWorkspace._reviewObjectIdentityRegistry){
@@ -31308,27 +31252,9 @@ function renderReviewWorkspace(options = {}){
       ticker:record.ticker,
       liveReviewObjectId:reviewObjectIdentityId(canonicalLiveReview),
       renderReviewObjectId:reviewObjectIdentityId(record.review),
-      liveCommittedTrace:!!(canonicalLiveReview && canonicalLiveReview.chartVerificationCommittedTrace),
-      renderCommittedTraceBefore:!!(record.review && record.review.chartVerificationCommittedTrace),
-      liveTraceCommittedStatus:String(liveCommittedChartVerificationTrace && liveCommittedChartVerificationTrace.trace && liveCommittedChartVerificationTrace.trace.status || liveCommittedChartVerificationTrace && liveCommittedChartVerificationTrace.status || ''),
-      renderTraceCommittedStatusBefore:String(record.review && record.review.chartVerificationCommittedTrace && (record.review.chartVerificationCommittedTrace.trace && record.review.chartVerificationCommittedTrace.trace.status || record.review.chartVerificationCommittedTrace.status || ''))
+      livePipelinePhase:String(canonicalLiveReview && canonicalLiveReview.chartAnalysisPipeline && canonicalLiveReview.chartAnalysisPipeline.phase || ''),
+      renderPipelinePhaseBefore:String(record.review && record.review.chartAnalysisPipeline && record.review.chartAnalysisPipeline.phase || '')
     });
-  }
-  if(liveCommittedChartVerificationTrace){
-    const committedRenderTrace = cloneData(liveCommittedChartVerificationTrace, null);
-    record.review.chartVerificationCommittedTrace = committedRenderTrace;
-    record.review.chartVerificationTrace = committedRenderTrace;
-    record.review.chartVerificationLifecycle = cloneData(canonicalLiveReview && canonicalLiveReview.chartVerificationLifecycle || record.review.chartVerificationLifecycle, null);
-    record.review.manualReview = cloneData(canonicalLiveReview && canonicalLiveReview.manualReview || record.review.manualReview, null);
-    if(typeof console !== 'undefined' && console.info && debugFlagEnabled('PP_DEBUG_CHART_TRACE')){
-      console.info('[REVIEW_RENDER_REVIEW_OBJECT_SYNC]', {
-        ticker:record.ticker,
-        liveReviewObjectId:reviewObjectIdentityId(canonicalLiveReview),
-        renderReviewObjectId:reviewObjectIdentityId(record.review),
-        committedTraceStatus:String(committedRenderTrace && committedRenderTrace.trace && committedRenderTrace.trace.status || committedRenderTrace && committedRenderTrace.status || ''),
-        committedTraceMergedStatus:String(committedRenderTrace && (committedRenderTrace.mergedStatus || committedRenderTrace.trace && committedRenderTrace.trace.mergedStatus || ''))
-      });
-    }
   }
   const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {
     renderPass:reviewRenderPass,
