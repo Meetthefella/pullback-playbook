@@ -2728,21 +2728,11 @@ function runAiContractAssertions(){
     || !chartTraceSelectorSource.includes('inheritChartTraceRequestIdForCurrentContext(candidate.trace, currentChartContext')){
     throw new Error('Chart trace selection must block merged/post-AI traces while quick verification is still running.');
   }
-  const queueQuickSource = extractFunctionSource(appSource, 'queueReviewQuickChartAnalysis');
   const refreshTrackOnlySource = extractFunctionSource(appSource, 'refreshTrackOnly');
   const chartVerificationGateDecisionSource = extractFunctionSource(appSource, 'chartVerificationGateDecision');
   const chartVerificationAllowsAiAnalysisStatusSource = extractFunctionSource(appSource, 'chartVerificationAllowsAiAnalysisStatus');
   const confirmReviewChartMatchesCurrentTickerSource = extractFunctionSource(appSource, 'confirmReviewChartMatchesCurrentTicker');
   const analyseSetupGateSource = extractFunctionSource(appSource, 'analyseSetup');
-  if(queueQuickSource.includes("review.quickChartAnalysis.status = 'running';")
-    || !queueQuickSource.includes("analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});")){
-    throw new Error('Bypass quick-analysis uploads must not create running quick state before a request id exists.');
-  }
-  if(!queueQuickSource.includes('currentReviewChartContext(liveRecord || liveItem, review)')
-    || !queueQuickSource.includes('state.stored && state.stored.requestId')
-    || !queueQuickSource.includes('currentChartContext && currentChartContext.requestId')){
-    throw new Error('Queued quick-chart analysis state must inherit the current chart-context request id instead of defaulting to blank.');
-  }
   if(!refreshTrackOnlySource.includes('clearTrackPatchNoChangeFlags();')
     || !refreshTrackOnlySource.includes("console.info('[TrackPullRefresh]', {event:'riskRecalcSkipped', source, reason:'no_changed_inputs'});")
     || !refreshTrackOnlySource.includes('startupCoordinator.trackNeedsFullRender = false;')){
@@ -2765,20 +2755,20 @@ function runAiContractAssertions(){
     || !confirmReviewChartMatchesCurrentTickerSource.includes('runSimplifiedChartFullAnalysis(record, {')){
     throw new Error('Manual chart confirmation must promote the simplified pipeline and then start AI analysis explicitly.');
   }
-  if(!analyseSetupGateSource.includes('verificationOnly:true')
+  if(!analyseSetupGateSource.includes('ensureSimplifiedChartPipelineForRender(record, {source:\'analyse_setup_gate\'})')
+    || !analyseSetupGateSource.includes('chartPipelineAllowsAi(gatePhase)')
     || !analyseSetupGateSource.includes('[CHART_AI_ANALYSIS_BLOCKED]')
     || !analyseSetupGateSource.includes('[CHART_AI_ANALYSIS_ALLOWED]')
-    || !analyseSetupGateSource.includes('[CHART_VERIFICATION_FAILED]')
     || !analyseSetupGateSource.includes('[CHART_ANALYSIS_REQUEST_FINALIZE_REASON]')
     || !appSource.includes('[CHART_REQUEST_ID_MUTATION]')
-    || !analyseSetupGateSource.includes('chartVerificationGateDecision(')
-    || !analyseSetupGateSource.includes('if(!verificationGate.allowed)')
-    || !analyseSetupGateSource.includes('beginReviewAiAnalysis(ticker, prompt, {')){
-    throw new Error('Analyse setup must run a verification-only gate first and emit an explicit terminal/finalize reason for every started chart-analysis request.');
+    || !analyseSetupGateSource.includes('beginReviewAiAnalysis(ticker, prompt, {'))
+  {
+    throw new Error('Analyse setup must gate chart AI from the simplified pipeline and emit explicit allow/block/finalize diagnostics for every started chart-analysis request.');
   }
-  if(analyseSetupGateSource.indexOf('let lastFailureData = null;') === -1
-    || analyseSetupGateSource.indexOf('let lastFailureData = null;') > analyseSetupGateSource.indexOf('if(analysisSource !== \'manual_chart_confirm\' && options.skipVerificationGate !== true)')){
-    throw new Error('Verification-only failure handling must declare lastFailureData before the gate branch can assign to it.');
+  if(analyseSetupGateSource.includes('verificationOnly:true')
+    || analyseSetupGateSource.includes('chartVerificationGateDecision(')
+    || analyseSetupGateSource.includes('if(!verificationGate.allowed)')){
+    throw new Error('Analyse setup must not retain the legacy verification-only gate branch once the simplified chart pipeline owns Review chart analysis.');
   }
   const reviewWorkspaceSource = extractFunctionSource(appSource, 'renderReviewWorkspace');
   if(!handleWorkspaceTabChangeSource.includes("nextTab === 'review'")
@@ -2806,32 +2796,25 @@ function runAiContractAssertions(){
   const chartAssessorToNormalizedSource = extractFunctionSource(appSource, 'chartAssessorInputToNormalizedAnalysis');
   const getReviewAnalysisStateSource = extractFunctionSource(appSource, 'getReviewAnalysisState');
   const successfulSameContextSource = extractFunctionSource(appSource, 'hasSuccessfulCompletedAnalysisForCurrentChartContext');
-  const quickCommittedContextSource = extractFunctionSource(appSource, 'quickAnalysisCommittedForCurrentChartContext');
   const reviewQuickChartStateSource = extractFunctionSource(appSource, 'reviewQuickChartAnalysisState');
-  const maybeLogIncompleteSource = extractFunctionSource(appSource, 'maybeLogQuickChartAnalysisContextIncomplete');
   const aiSummaryGuardSource = extractFunctionSource(appSource, 'chartAiSummaryRenderGuard');
   const analysisPanelSource = extractFunctionSource(appSource, 'renderAnalysisPanelFromRecord');
   const savedAnalysisPanelSource = extractFunctionSource(appSource, 'renderAnalysisPanel');
-  if(appAnalyseSetupSource.indexOf('[QUICK_CHART_ANALYSIS_COMMITTED]') === -1
-    || appAnalyseSetupSource.indexOf('[AI_SUMMARY_READY]') === -1
+  if(appAnalyseSetupSource.indexOf('[AI_SUMMARY_READY]') === -1
     || !appAnalyseSetupSource.includes("const analysisSource = String(options.source || 'unknown');")
     || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_START]')
     || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_SKIPPED_DUPLICATE_IMAGE]')
-    || !appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_NOT_DEDUPED_REQUEST_MISMATCH]')
     || !appAnalyseSetupSource.includes('[CHART_CONTEXT_AT_VERIFICATION_START]')
-    || !appAnalyseSetupSource.includes('autoAnalysisSource && requestChartImageId && quickAlreadyCommittedForCurrentContext && analysisAlreadyCommittedForCurrentContext')
-    || appAnalyseSetupSource.indexOf('[QUICK_CHART_ANALYSIS_COMMITTED]') > appAnalyseSetupSource.indexOf('const aiSummaryCommitPayload = {')
-    || !appAnalyseSetupSource.includes("status:'committed'")
+    || !appAnalyseSetupSource.includes('pipelineAlreadyResolvedForCurrentContext && analysisAlreadyCommittedForCurrentContext')
     || !appAnalyseSetupSource.includes("stagePendingAiSummaryForChart(record, aiSummaryCommitPayload, 'quick_running')")
     || !appAnalyseSetupSource.includes("applyCommittedAiSummaryForChart(record, aiSummaryCommitPayload)")
     || !appAnalyseSetupSource.includes("flushPendingAiSummaryForChart(record, {source:'analyse_setup_failed'})")){
-    throw new Error('AI summary commit must remain sequenced after quick chart analysis commit in the analysis path.');
+    throw new Error('AI summary commit must remain sequenced after the simplified pipeline gate in the analysis path.');
   }
   if(!appAnalyseSetupSource.includes("requestId:analysisRequestId,")
-    || !appAnalyseSetupSource.includes("status:'running'")
-    || !appAnalyseSetupSource.includes("maybeLogQuickChartAnalysisContextIncomplete(record, record.review.quickChartAnalysis, 'analyse_setup_start');")
-    || !appAnalyseSetupSource.includes('sanitizeChartAssessorVisibleIdentity(')){
-    throw new Error('Quick chart analysis must persist request id as soon as it enters running state.');
+    || !appAnalyseSetupSource.includes('sanitizeChartAssessorVisibleIdentity(')
+    || !appAnalyseSetupSource.includes('buildChartAssessorInput(record, analysis, requestChartImageSource, analysisRequestId)')){
+    throw new Error('Live chart analysis must preserve request-aware chart assessor inputs for the simplified pipeline path.');
   }
   if(!appAnalyseSetupSource.includes('!isStrictChartIdentityProvenanceAnalysis(normalizedLiveAnalysis)')
     || !appAnalyseSetupSource.includes('normalizedLiveAnalysis.chartIdentityProvenanceVersion = 1')){
@@ -2839,7 +2822,7 @@ function runAiContractAssertions(){
   }
   if(!appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_FINALIZE_REASON]')
     || !extractFunctionSource(appSource, 'reviewQuickChartAnalysisState').includes('[QUICK_CHART_ANALYSIS_STALE_INCOMPLETE_CLEARED]')){
-    throw new Error('Legacy quick-chart state cleanup must still guard against stale incomplete reads while the remaining compatibility layer exists.');
+    throw new Error('Analysis request finalization and remaining compatibility-layer stale cleanup must both stay instrumented.');
   }
   if(/ai_supported_match[\s\S]+chartVerificationHasExplicitRegionProvenance/.test(savedAnalysisPanelSource)){
     throw new Error('Saved-analysis Review rendering must not keep an ai_supported_match verified exception outside the hard gate allowlist.');
@@ -2964,10 +2947,6 @@ function runAiContractAssertions(){
     || !successfulSameContextSource.includes('!pending')){
     throw new Error('Same-image dedupe must require full committed chart context, including request id.');
   }
-  if(!quickCommittedContextSource.includes('String(quick.requestId || \'\') === requestedRequestId')
-    || !quickCommittedContextSource.includes('String(quick.status || \'\') === \'committed\'')){
-    throw new Error('Quick-analysis dedupe must require committed quick status for the same request id.');
-  }
   if(!appSource.includes("runSimplifiedChartAnalysis(record, {")
     || !appSource.includes("runSimplifiedChartFullAnalysis(record, {")
     || !appSource.includes("analyseSetup(record.ticker, {source:'manual_button'});")){
@@ -3041,7 +3020,6 @@ function runAiContractAssertions(){
   };
   vm.createContext(sameImageDedupeSandbox);
   vm.runInContext(successfulSameContextSource, sameImageDedupeSandbox, {filename:'app.js#hasSuccessfulCompletedAnalysisForCurrentChartContext'});
-  vm.runInContext(quickCommittedContextSource, sameImageDedupeSandbox, {filename:'app.js#quickAnalysisCommittedForCurrentChartContext'});
   const dedupeSuccess = sameImageDedupeSandbox.hasSuccessfulCompletedAnalysisForCurrentChartContext({
     __analysisState:{
       normalizedAnalysis:{ verdict:'Watch' },
@@ -3098,16 +3076,8 @@ function runAiContractAssertions(){
       error:''
     }
   }, {ticker:'NVDA', imageId:'img-1', requestId:'req-B'});
-  const quickContextMatch = sameImageDedupeSandbox.quickAnalysisCommittedForCurrentChartContext({
-    ticker:'NVDA',
-    review:{ quickChartAnalysis:{ ticker:'NVDA', chartImageId:'img-1', requestId:'req-1', status:'committed' } }
-  }, {ticker:'NVDA', imageId:'img-1', requestId:'req-1'});
-  const quickContextMismatch = sameImageDedupeSandbox.quickAnalysisCommittedForCurrentChartContext({
-    ticker:'NVDA',
-    review:{ quickChartAnalysis:{ ticker:'NVDA', chartImageId:'img-1', requestId:'req-A', status:'committed' } }
-  }, {ticker:'NVDA', imageId:'img-1', requestId:'req-B'});
-  if(dedupeSuccess !== true || dedupeFailed !== false || dedupeRawOnly !== false || dedupePending !== false || dedupeRequestMismatch !== false || quickContextMatch !== true || quickContextMismatch !== false){
-    throw new Error('Same-image dedupe must only suppress matching committed chart context, not failed, raw-only, pending, or request-mismatched states.');
+  if(dedupeSuccess !== true || dedupeFailed !== false || dedupeRawOnly !== false || dedupePending !== false || dedupeRequestMismatch !== false){
+    throw new Error('Same-image dedupe must only suppress matching committed analysis context, not failed, raw-only, pending, or request-mismatched states.');
   }
   const chartUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   const chartRelevantMaRequirementSource = extractFunctionSource(appSource, 'getStrategyRelevantMaRequirement');
@@ -3391,7 +3361,6 @@ function runAiContractAssertions(){
     'chartPipelineAllowsAi',
     'chartImageForAnalysis',
     'clearReviewChartImageSources',
-    'maybeLogQuickChartAnalysisContextIncomplete',
     'reviewQuickChartAnalysisKey',
     'reviewQuickChartAnalysisState',
     'confirmReviewChartMatchesCurrentTicker',
