@@ -5413,36 +5413,6 @@ function effectiveQuickChartAnalysisStatusForRender(record, quickState = null, c
   return 'idle';
 }
 
-function chartVerificationGateDecision(trace = {}, ticker = '', requestId = '', imageId = ''){
-  const safe = trace && typeof trace === 'object' ? trace : {};
-  const status = String(safe.status || '').trim();
-  const extractedFacts = safe.extractedFacts && typeof safe.extractedFacts === 'object' ? safe.extractedFacts : {};
-  const trustedFacts = safe.trustedFacts && typeof safe.trustedFacts === 'object' ? safe.trustedFacts : {};
-  const mismatchReasons = Array.isArray(safe.mismatchReasons) ? safe.mismatchReasons : [];
-  const unreadableReasons = Array.isArray(safe.unreadableReasons) ? safe.unreadableReasons : [];
-  const observedTicker = String(extractedFacts.visible_ticker || '').trim();
-  const observedPrice = chartVerificationNumberOrNull(extractedFacts.visible_latest_price);
-  const expectedTicker = String(trustedFacts.ticker || ticker || '').trim();
-  const expectedPrice = chartVerificationNumberOrNull(trustedFacts.latest_price);
-  const allowed = chartVerificationAllowsAiAnalysisStatus(status);
-  const reason = allowed
-    ? 'verification_passed'
-    : (status || 'verification_incomplete');
-  return {
-    allowed,
-    status,
-    reason,
-    expectedTicker,
-    observedTicker,
-    expectedPrice,
-    observedPrice,
-    mismatchReasons,
-    unreadableReasons,
-    requestId:String(requestId || ''),
-    imageId:String(imageId || '')
-  };
-}
-
 function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {}){
   const safeTrace = trace && typeof trace === 'object' ? trace : {};
   const safeGate = gate && typeof gate === 'object' ? gate : {};
@@ -5728,63 +5698,6 @@ function materializeTerminalBlockedChartTrace(trace = {}, gate = {}, context = {
     updatedAt:new Date().toISOString(),
     createdAt:String(safeTrace.createdAt || new Date().toISOString())
   }, null);
-}
-
-function commitTerminalChartVerificationTrace(record, trace = {}, context = {}){
-  const item = record && typeof record === 'object' ? record : null;
-  if(!item || !item.review || typeof item.review !== 'object') return null;
-  const safeTrace = trace && typeof trace === 'object' ? trace : null;
-  if(!safeTrace) return null;
-  const safeContext = context && typeof context === 'object' ? context : {};
-  const chartImageId = String(safeContext.imageId || safeTrace.imageId || safeTrace.chartImageId || chartImageIdForReview(item.review || {}) || '');
-  const requestId = String(safeContext.requestId || safeTrace.requestId || safeTrace.verificationRequestId || '');
-  const wrappedTrace = cloneData({
-    ticker:item.ticker,
-    reviewTicker:item.ticker,
-    chartImageId,
-    imageId:chartImageId,
-    verificationRequestId:requestId,
-    requestId,
-    status:String(safeTrace.status || ''),
-    renderedStatus:String(safeTrace.renderedStatus || safeTrace.status || ''),
-    mergedStatus:String(safeTrace.mergedStatus || safeTrace.status || ''),
-    reason:String(safeTrace.reason || safeContext.finalizeReason || ''),
-    finalized:safeTrace.finalized === true,
-    phase:'merged',
-    chartImageSource:safeContext.chartImageSource || safeTrace.chartImageSource || buildChartImageSourceTrace(item.review || {}),
-    chartAssessorInput:safeContext.chartAssessorInput || item.review.chartVerificationContext || null,
-    source:String(safeTrace.source || safeContext.source || 'chart_analysis_finalize'),
-    createdAt:String(safeTrace.createdAt || new Date().toISOString()),
-    updatedAt:String(safeTrace.updatedAt || new Date().toISOString()),
-    trace:safeTrace
-  }, null);
-  item.review.chartVerificationTrace = wrappedTrace;
-  item.review.chartVerificationCommittedTrace = cloneData(wrappedTrace, null);
-  item.review.chartVerificationLifecycle = {
-    ...(item.review.chartVerificationLifecycle || {}),
-    phase:'merged',
-    ticker:item.ticker,
-    reviewTicker:item.ticker,
-    chartImageId,
-    imageId:chartImageId,
-    requestId,
-    chartImageSource:wrappedTrace.chartImageSource || null,
-    updatedAt:new Date().toISOString(),
-    finalizeReason:String(safeTrace.reason || safeContext.finalizeReason || ''),
-    finalStatus:String(safeTrace.status || '')
-  };
-  if(typeof console !== 'undefined' && console.info){
-    console.info('[CHART_TERMINAL_TRACE_COMMITTED]', {
-      ticker:item.ticker,
-      imageId:chartImageId,
-      requestId,
-      status:String(safeTrace.status || ''),
-      reason:String(safeTrace.reason || safeContext.finalizeReason || ''),
-      source:String(safeTrace.source || safeContext.source || ''),
-      finalized:safeTrace.finalized === true
-    });
-  }
-  return wrappedTrace;
 }
 
 function chartVerificationHasExplicitRegionProvenance(trace = {}){

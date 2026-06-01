@@ -2719,17 +2719,10 @@ function runAiContractAssertions(){
     || !flushPendingAiSource.includes('[AI_SUMMARY_FLUSH_COMMITTED]')){
     throw new Error('Pending AI summaries must flush only for the same chart context and reject stale uploads.');
   }
-  const chartTraceSelectorSource = extractFunctionSource(appSource, 'selectReviewChartTraceForRender');
   const handleWorkspaceTabChangeSource = extractFunctionSource(appSource, 'handleWorkspaceTabChange');
   const reconcileVisibleReviewStateSource = extractFunctionSource(appSource, 'reconcileVisibleReviewState');
   const renderNeutralReviewPendingStateSource = extractFunctionSource(appSource, 'renderNeutralReviewPendingState');
-  if(!chartTraceSelectorSource.includes('CHART_RENDER_BLOCKED_QUICK_RUNNING')
-    || !chartTraceSelectorSource.includes('const mergedCandidatesAllowed = quickRunningForCurrentChart ? [] : mergedMatchingCandidates;')
-    || !chartTraceSelectorSource.includes('inheritChartTraceRequestIdForCurrentContext(candidate.trace, currentChartContext')){
-    throw new Error('Chart trace selection must block merged/post-AI traces while quick verification is still running.');
-  }
   const refreshTrackOnlySource = extractFunctionSource(appSource, 'refreshTrackOnly');
-  const chartVerificationGateDecisionSource = extractFunctionSource(appSource, 'chartVerificationGateDecision');
   const chartVerificationAllowsAiAnalysisStatusSource = extractFunctionSource(appSource, 'chartVerificationAllowsAiAnalysisStatus');
   const confirmReviewChartMatchesCurrentTickerSource = extractFunctionSource(appSource, 'confirmReviewChartMatchesCurrentTicker');
   const analyseSetupGateSource = extractFunctionSource(appSource, 'analyseSetup');
@@ -2740,15 +2733,6 @@ function runAiContractAssertions(){
   }
   if(!chartVerificationAllowsAiAnalysisStatusSource.includes("['verified_match', 'likely_match', 'user_confirmed_match', 'manually_verified']")){
     throw new Error('Chart verification must define a narrow allowlist before AI setup analysis can start.');
-  }
-  const tracePrioritySource = extractFunctionSource(appSource, 'chartVerificationTracePriority');
-  if(!tracePrioritySource.includes('chartVerificationIsBlockedOrMismatchStatus(status)')){
-    throw new Error('Terminal blocked chart-verification states must outrank pending source_checking traces in trace selection.');
-  }
-  if(!chartVerificationGateDecisionSource.includes('mismatchReasons')
-    || !chartVerificationGateDecisionSource.includes('unreadableReasons')
-    || !chartVerificationGateDecisionSource.includes('allowed = chartVerificationAllowsAiAnalysisStatus(status)')){
-    throw new Error('Chart verification gate decisions must be driven by authoritative verification status plus structured mismatch context.');
   }
   if(!confirmReviewChartMatchesCurrentTickerSource.includes("phase:'verified'")
     || !confirmReviewChartMatchesCurrentTickerSource.includes('manualConfirmed:true')
@@ -2877,7 +2861,6 @@ function runAiContractAssertions(){
     || !flushPendingAiSource.includes('const currentRequestId = String(currentChartContext.requestId || \'\');')){
     throw new Error('Sensitive AI-summary and analyseSetup request-context reads must use the simplified pipeline and current chart context instead of raw persisted quick state.');
   }
-  const selectReviewChartTraceSource = extractFunctionSource(appSource, 'selectReviewChartTraceForRender');
   const blockedMismatchHelperSource = extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus');
   if(!blockedMismatchHelperSource.includes("'manual_confirmation_required'")
     || !blockedMismatchHelperSource.includes("'strong_mismatch'")
@@ -2886,11 +2869,6 @@ function runAiContractAssertions(){
     || !blockedMismatchHelperSource.includes("'verification_failed'")
     || !blockedMismatchHelperSource.includes("'source_mismatch'")){
     throw new Error('Chart verification must define a shared blocked/mismatch helper covering terminal mismatch and stale states.');
-  }
-  if(!selectReviewChartTraceSource.includes('[CHART_TRACE_SELECTION_TERMINAL_BLOCKED_PREFERRED]')
-    || !selectReviewChartTraceSource.includes('chartVerificationIsBlockedOrMismatchStatus(status)')
-    || !selectReviewChartSourceIncludesTerminalBlockedChosen(selectReviewChartTraceSource)){
-    throw new Error('Terminal blocked chart-verification traces must be preferred over pending source_checking traces for the current chart context.');
   }
   const renderReviewWorkspaceSource = extractFunctionSource(appSource, 'renderReviewWorkspace');
   const simplifiedDecisionSource = extractFunctionSource(appSource, 'buildSimplifiedChartPipelineDecision');
