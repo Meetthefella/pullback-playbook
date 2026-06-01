@@ -2578,9 +2578,8 @@ function runAiContractAssertions(){
   }
   if(!currentChartContextSource.includes('attachmentContext && attachmentContext.requestId')
     || !currentChartContextSource.includes('pipeline && pipeline.requestId')
-    || !currentChartContextSource.includes('lifecycle && (lifecycle.requestId || lifecycle.verificationRequestId)')
     || !currentChartContextSource.includes("requestId = String(runtime.requestId || '');")){
-    throw new Error('Current chart context must unify request ownership from attachment, pipeline, lifecycle, and runtime state.');
+    throw new Error('Current chart context must unify request ownership from attachment, pipeline, and runtime state.');
   }
   if(!sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_VISIBLE_IDENTITY]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_SANITIZER_MODE]')
@@ -2950,8 +2949,6 @@ function runAiContractAssertions(){
   if(dedupeSuccess !== true || dedupeFailed !== false || dedupeRawOnly !== false || dedupePending !== false || dedupeRequestMismatch !== false){
     throw new Error('Same-image dedupe must only suppress matching committed analysis context, not failed, raw-only, pending, or request-mismatched states.');
   }
-  const chartRelevantMaRequirementSource = extractFunctionSource(appSource, 'getStrategyRelevantMaRequirement');
-  const chartPrimaryIndicatorSupportSource = extractFunctionSource(appSource, 'chartVerificationHasPrimaryIndicatorSupport');
   const chartFastPassSource = extractFunctionSource(appSource, 'buildChartVerificationFastPass');
   const chartSandbox = {
     normaliseVisibleTicker(value){ return String(value || '').trim().toUpperCase(); },
@@ -2975,8 +2972,6 @@ function runAiContractAssertions(){
     uiState:{ reviewRenderPass:1 }
   };
   vm.createContext(chartSandbox);
-  vm.runInContext(chartRelevantMaRequirementSource, chartSandbox, {filename:'app.js#getStrategyRelevantMaRequirement'});
-  vm.runInContext(chartPrimaryIndicatorSupportSource, chartSandbox, {filename:'app.js#chartVerificationHasPrimaryIndicatorSupport'});
   vm.runInContext(chartDecisionClassNameSource, chartSandbox, {filename:'app.js#chartDecisionClassName'});
   vm.runInContext(chartFastPassSource, chartSandbox, {filename:'app.js#buildChartVerificationFastPass'});
   const mirroredFastPass = chartSandbox.buildChartVerificationFastPass({
@@ -3175,8 +3170,6 @@ function runAiContractAssertions(){
     'confirmReviewChartMatchesCurrentTicker',
     'rejectReviewChartAndUploadAnother',
     'debugFlagEnabled',
-    'getStrategyRelevantMaRequirement',
-    'chartVerificationHasPrimaryIndicatorSupport',
     'chartDecisionClassName',
     'renderReviewChartStatusLine',
     'ensureReviewChartLightboxShell',

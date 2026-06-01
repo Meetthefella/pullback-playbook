@@ -2648,7 +2648,6 @@ function buildRecordsLitePersistedState(sourceState){
           manualReview:item.review.manualReview && typeof item.review.manualReview === 'object' ? cloneData(item.review.manualReview, null) : null,
           cardOpen:!!item.review.cardOpen,
           source:item.review.source,
-          chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
           chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
         },
         plan:{
@@ -2729,7 +2728,6 @@ function buildLitePersistedState(sourceState){
           normalizedAnalysis:null,
           lastPrompt:'',
           lastError:'',
-          chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
           chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
         }
       }];
@@ -3946,18 +3944,7 @@ function clearReviewChartImageSources(review){
   }
   const currentImageId = String(chartImageIdForReview(review) || '');
   const currentTicker = normalizeTicker(review.ticker || review.expectedTicker || '');
-  const lifecycleRequestId = String(review.chartVerificationLifecycle && (review.chartVerificationLifecycle.requestId || review.chartVerificationLifecycle.verificationRequestId) || '');
   const pipelineRequestId = String(review.chartAnalysisPipeline && review.chartAnalysisPipeline.requestId || '');
-  if(lifecycleRequestId){
-    logChartRequestIdMutation({
-      oldRequestId:lifecycleRequestId,
-      newRequestId:'',
-      reason:'clear_review_chart_image_sources_lifecycle',
-      caller:'clearReviewChartImageSources',
-      ticker:currentTicker,
-      imageId:currentImageId
-    });
-  }
   if(pipelineRequestId){
     logChartRequestIdMutation({
       oldRequestId:pipelineRequestId,
@@ -3975,7 +3962,6 @@ function clearReviewChartImageSources(review){
   review.chartAttachmentContext = null;
   review.chartVerificationTrace = null;
   review.chartVerificationCommittedTrace = null;
-  review.chartVerificationLifecycle = null;
   review.chartVerificationContext = null;
   review.chartAnalysisPipeline = null;
   review.chartAvailable = false;
@@ -4007,25 +3993,20 @@ function currentReviewChartContext(record = {}, review = null){
   const attachmentContext = safeReview.chartAttachmentContext && typeof safeReview.chartAttachmentContext === 'object'
     ? safeReview.chartAttachmentContext
     : null;
-  const lifecycle = safeReview.chartVerificationLifecycle && typeof safeReview.chartVerificationLifecycle === 'object'
-    ? safeReview.chartVerificationLifecycle
-    : null;
   const pipeline = safeReview.chartAnalysisPipeline && typeof safeReview.chartAnalysisPipeline === 'object'
     ? safeReview.chartAnalysisPipeline
     : null;
   const runtime = getReviewAiRuntime();
-  const ticker = normalizeTicker(item.ticker || safeReview.ticker || attachmentContext && attachmentContext.expectedTicker || pipeline && pipeline.ticker || lifecycle && lifecycle.ticker || '');
+  const ticker = normalizeTicker(item.ticker || safeReview.ticker || attachmentContext && attachmentContext.expectedTicker || pipeline && pipeline.ticker || '');
   const imageId = String(
     chartImageIdForReview(safeReview)
     || attachmentContext && attachmentContext.imageId
     || pipeline && pipeline.imageId
-    || lifecycle && (lifecycle.imageId || lifecycle.chartImageId)
     || ''
   );
   let requestId = String(
     attachmentContext && attachmentContext.requestId
     || pipeline && pipeline.requestId
-    || lifecycle && (lifecycle.requestId || lifecycle.verificationRequestId)
     || ''
   );
   if(!requestId && runtime && normalizeTicker(runtime.ticker || '') === ticker){
@@ -4053,7 +4034,6 @@ function clearLegacyChartAnalysisState(review = {}){
   if(!safe) return;
   safe.chartVerificationTrace = null;
   safe.chartVerificationCommittedTrace = null;
-  safe.chartVerificationLifecycle = null;
   safe.chartVerificationContext = null;
   safe.pendingChartAiSummary = null;
   safe.rawChartFactExtraction = null;
@@ -5032,45 +5012,6 @@ function rejectReviewChartAndUploadAnother(ticker){
   return true;
 }
 
-function getStrategyRelevantMaRequirement(record = {}, verificationState = {}){
-  const safeRecord = record && typeof record === 'object' ? record : {};
-  const safe = verificationState && typeof verificationState === 'object' ? verificationState : {};
-  const debug = safe.debug && typeof safe.debug === 'object' ? safe.debug : {};
-  const pullbackZone = String(
-    debug.pullbackZone
-    || safe.pullbackZone
-    || (safe.derivedStates && safe.derivedStates.pullbackZone)
-    || (safeRecord.derivedStates && safeRecord.derivedStates.pullbackZone)
-    || (safeRecord.scan && safeRecord.scan.analysisProjection && (safeRecord.scan.analysisProjection.pullbackZone || safeRecord.scan.analysisProjection.pullback_zone))
-    || safeRecord.pullbackZone
-    || ''
-  ).trim().toLowerCase();
-  const setupType = String(
-    debug.setupType
-    || safe.setupType
-    || safeRecord.setupType
-    || safeRecord.scanSetupType
-    || (safeRecord.scan && (safeRecord.scan.scanSetupType || safeRecord.scan.scanType))
-    || ''
-  ).trim().toLowerCase();
-  if(['near_20ma', 'recently_left_20ma', 'at_20ma'].includes(pullbackZone)) return '20';
-  if(['near_50ma', 'recently_left_50ma', 'at_50ma'].includes(pullbackZone)) return '50';
-  if(/\b20\b/.test(setupType) && !/\b50\b/.test(setupType)) return '20';
-  if(/\b50\b/.test(setupType) && !/\b20\b/.test(setupType)) return '50';
-  return 'either';
-}
-
-function chartVerificationHasPrimaryIndicatorSupport(record = {}, verificationState = {}){
-  const safe = verificationState && typeof verificationState === 'object' ? verificationState : {};
-  const indicatorStates = safe.indicatorStates && typeof safe.indicatorStates === 'object' ? safe.indicatorStates : {};
-  const requirement = String(safe.strategyRelevantMaRequirement || getStrategyRelevantMaRequirement(record, safe) || 'either').trim().toLowerCase();
-  const ma20Ok = ['verified', 'likely_match'].includes(String(indicatorStates.ma20_status || '').trim());
-  const ma50Ok = ['verified', 'likely_match'].includes(String(indicatorStates.ma50_status || '').trim());
-  if(requirement === '20') return ma20Ok;
-  if(requirement === '50') return ma50Ok;
-  return ma20Ok || ma50Ok;
-}
-
 function chartDecisionClassName(decision){
   const key = String(decision && decision.key || '');
   if(['verified_match', 'likely_match', 'user_confirmed_match', 'manually_verified'].includes(key)) return 'ai-summary-message--success';
@@ -5587,7 +5528,6 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   };
   record.review.aiAnalysisRaw = String(card.lastResponse || record.review.aiAnalysisRaw || '');
   record.review.normalizedAnalysis = cloneData(card.lastAnalysis || record.review.normalizedAnalysis, null);
-  record.review.chartVerificationLifecycle = cloneData(card.chartVerificationLifecycle || record.review.chartVerificationLifecycle, null);
   record.review.lastReviewedAt = String(card.updatedAt || record.review.lastReviewedAt || '');
   record.review.lastPrompt = String(card.lastPrompt || record.review.lastPrompt || '');
   record.review.lastError = String(card.lastError || record.review.lastError || '');
@@ -5716,7 +5656,6 @@ function tickerRecordToLegacyCard(record){
     chartImageOriginal:cloneData(item.review.chartImageOriginal, null),
     chartImagePreview:cloneData(item.review.chartImagePreview, null),
     chartImageVerificationSource:cloneData(item.review.chartImageVerificationSource, null),
-    chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
     lastPrompt:item.review.lastPrompt || '',
     lastResponse:item.review.aiAnalysisRaw || '',
     lastError:item.review.lastError || '',
@@ -29928,22 +29867,20 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     && visiblePrice !== null
     && priceOk !== false
   );
-  const strategyRelevantMaRequirement = getStrategyRelevantMaRequirement({
-    ...safeRecord,
-    derivedStates
-  }, {
-    pullbackZone:derivedStates.pullbackZone || '',
-    setupType:safeRecord.setupType || safeRecord.scanSetupType || ''
-  });
-  const primaryIndicatorSupport = chartVerificationHasPrimaryIndicatorSupport(safeRecord, {
-    indicatorStates:{
-      ma20_status:ma20Status,
-      ma50_status:ma50Status
-    },
-    strategyRelevantMaRequirement,
-    pullbackZone:derivedStates.pullbackZone || '',
-    setupType:safeRecord.setupType || safeRecord.scanSetupType || ''
-  });
+  const pullbackZone = String(derivedStates.pullbackZone || '').trim().toLowerCase();
+  const setupType = String(safeRecord.setupType || safeRecord.scanSetupType || '').trim().toLowerCase();
+  const strategyRelevantMaRequirement = ['near_20ma', 'recently_left_20ma', 'at_20ma'].includes(pullbackZone)
+    ? '20'
+    : (['near_50ma', 'recently_left_50ma', 'at_50ma'].includes(pullbackZone)
+      ? '50'
+      : ((/\b20\b/.test(setupType) && !/\b50\b/.test(setupType))
+        ? '20'
+        : ((/\b50\b/.test(setupType) && !/\b20\b/.test(setupType)) ? '50' : 'either')));
+  const ma20SupportOk = ['verified', 'likely_match'].includes(String(ma20Status || '').trim());
+  const ma50SupportOk = ['verified', 'likely_match'].includes(String(ma50Status || '').trim());
+  const primaryIndicatorSupport = strategyRelevantMaRequirement === '20'
+    ? ma20SupportOk
+    : (strategyRelevantMaRequirement === '50' ? ma50SupportOk : (ma20SupportOk || ma50SupportOk));
   const nonBlockingPartialIndicatorState = coreIdentityMatch && primaryIndicatorSupport && !mismatchedIndicators.length;
   const readableIdentityFields = {
     ticker:visibleTicker || '',
