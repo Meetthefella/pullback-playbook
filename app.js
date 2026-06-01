@@ -25394,72 +25394,6 @@ function savedAiPlanNumbersAllowed(record){
   return simplifiedState.planVisible === true && ['entry','near_entry'].includes(verdict);
 }
 
-function chartVerificationAiSuppression(record, analysis, options = {}){
-  const trace = options.chartConsistencyTrace && typeof options.chartConsistencyTrace === 'object'
-    ? options.chartConsistencyTrace
-    : null;
-  if(trace && trace.aiAnalysisSuppressed === true){
-    return {
-      suppressed:true,
-      reason:trace.suppressionReason || 'Chart verification found a clear mismatch; technical AI commentary may be unreliable.',
-      message:'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
-    };
-  }
-  const chartImageSource = trace && trace.chartImageSource
-    ? trace.chartImageSource
-    : buildChartImageSourceTrace(record && record.review);
-  const fastPass = trace && trace.debug && trace.debug.fastPass
-    ? trace.debug.fastPass
-    : buildChartVerificationFastPass(record, analysis, chartImageSource);
-  if(fastPass.earlyExit && ['ticker_mismatch','timeframe_mismatch','strong_mismatch'].includes(fastPass.status)){
-    return {
-      suppressed:true,
-      reason:'Fast chart verification found a clear mismatch; technical AI commentary may be unreliable.',
-      message:'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
-    };
-  }
-  if(fastPass.earlyExit && ['chart_verification_untrusted','untrusted_context_mirror'].includes(fastPass.status)){
-    return {
-      suppressed:true,
-      reason:'Chart could not be independently verified from the image, so technical AI commentary may be unreliable.',
-      message:'AI analysis limited. The chart could not be independently verified, so technical analysis may be unreliable.'
-    };
-  }
-  if(fastPass.fastStatus === 'stale_state_detected' || (fastPass.fastStatus === 'insufficient_context' && fastPass.hasFastFacts)){
-    return {
-      suppressed:true,
-      reason:fastPass.suppressionReason || 'Chart context was not independently verified; technical AI commentary may be unreliable.',
-      message:'AI analysis limited. The chart could not be verified clearly enough, so technical analysis may be unreliable.'
-    };
-  }
-  const verification = buildDeterministicChartVerification(record, analysis, {
-    chartImageSource,
-    fastPass
-  });
-  const hasChart = !!(chartImageSource && chartImageSource.sourceKind && chartImageSource.sourceKind !== 'none');
-  const suppressForMismatch = verification && verification.status === 'possible_mismatch';
-  const suppressForUntrusted = verification && ['chart_verification_untrusted','untrusted_context_mirror'].includes(String(verification.status || ''));
-  if(verification && (verification.aiAnalysisSuppressed === true || suppressForMismatch)){
-    return {
-      suppressed:true,
-      reason:verification.suppressionReason || 'Chart may not match the selected ticker; technical AI commentary may be unreliable.',
-      message:'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.'
-    };
-  }
-  if(suppressForUntrusted){
-    return {
-      suppressed:true,
-      reason:'Chart could not be independently verified from the image, so technical AI commentary may be unreliable.',
-      message:'AI analysis limited. The chart could not be independently verified, so technical analysis may be unreliable.'
-    };
-  }
-  return {
-    suppressed:false,
-    reason:'',
-    message:''
-  };
-}
-
 function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null){
   const item = record && typeof record === 'object' ? record : {};
   const safeState = analysisState && typeof analysisState === 'object' ? analysisState : {};
@@ -36029,7 +35963,6 @@ installRuntimeDebugHooks();
 bindTrackPullRefreshGesture();
 registerPwa();
 scheduleNamedDeferredStartupTask('startup_application_boot', startApplication, {idle:false});
-
 
 
 

@@ -3271,7 +3271,6 @@ function runAiContractAssertions(){
     'openReviewChartLightbox',
     'clearStartupReviewSessionState',
     'buildDeterministicChartVerification',
-    'chartVerificationAiSuppression',
     'chartAiSummaryRenderGuard',
     'renderSuppressedAiAnalysisPanel',
     'chartVerificationIsVerifiedStatus',
