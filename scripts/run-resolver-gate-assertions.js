@@ -2592,14 +2592,6 @@ function runAiContractAssertions(){
     || !chartUiDecisionRenderSource.includes('AI analysis has been skipped until you confirm this chart manually.')){
     throw new Error('Partial-indicator verification must stay blocked and explicitly require manual confirmation.');
   }
-  const manualActionsSource = extractFunctionSource(appSource, 'chartVerificationShouldShowManualActions');
-  if(!manualActionsSource.includes("chartVerificationRequiresManualAction(status)")
-    || !manualActionsSource.includes("chartVerificationRequiresManualAction(key)")
-    || !manualActionsSource.includes("timeframeMissingButExpected")
-    || !manualActionsSource.includes("aiAnalysisSuppressed")
-    || !manualActionsSource.includes("['queued', 'running'].includes(normalizedQuickStatus) && !hasResolvedTrace")){
-    throw new Error('Manual chart override logic must keep resolved untrusted states visible after quick-analysis completion.');
-  }
   const manualActionHelperSource = extractFunctionSource(appSource, 'chartVerificationRequiresManualAction');
   const manualBlockedMismatchSource = extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus');
   const blockedDecisionVariantSource = extractFunctionSource(appSource, 'chartVerificationBlockedDecisionVariant');
@@ -3067,7 +3059,6 @@ function runAiContractAssertions(){
   vm.runInContext(chartSupportsPartialSource, chartSandbox, {filename:'app.js#chartVerificationSupportsNonBlockingIndicatorPartial'});
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus'), chartSandbox, {filename:'app.js#chartVerificationIsBlockedOrMismatchStatus'});
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationRequiresManualAction'), chartSandbox, {filename:'app.js#chartVerificationRequiresManualAction'});
-  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationShouldShowManualActions'), chartSandbox, {filename:'app.js#chartVerificationShouldShowManualActions'});
   vm.runInContext(chartUiDecisionRenderSource, chartSandbox, {filename:'app.js#chartVerificationUiDecision'});
   vm.runInContext(chartDecisionClassNameSource, chartSandbox, {filename:'app.js#chartDecisionClassName'});
   vm.runInContext(chartFastPassSource, chartSandbox, {filename:'app.js#buildChartVerificationFastPass'});
@@ -3286,7 +3277,6 @@ function runAiContractAssertions(){
     'chartVerificationIsVerifiedStatus',
     'chartVerificationAllowsAiAnalysisStatus',
     'chartVerificationIsBlockedOrMismatchStatus',
-    'chartVerificationShouldShowManualActions',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});

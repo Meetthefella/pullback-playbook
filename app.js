@@ -5297,57 +5297,6 @@ function chartDecisionClassName(decision){
   return 'ai-summary-message--warning';
 }
 
-function chartVerificationShouldShowManualActions(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false){
-  if(!hasChartScreenshot) return false;
-  const key = String(decision && decision.key || '');
-  const status = String(trace && trace.status || '');
-  const normalizedQuickStatus = String(quickChartAnalysisStatus || '');
-  const aiAnalysisSuppressed = !!(trace && trace.aiAnalysisSuppressed === true);
-  const visibleTimeframe = String(
-    (trace && trace.extractedFacts && trace.extractedFacts.visible_timeframe)
-    || (trace && trace.visible_timeframe)
-    || (trace && trace.extractedTimeframe)
-    || ''
-  ).trim();
-  const trustedTimeframe = String(
-    (trace && trace.trustedFacts && trace.trustedFacts.expected_timeframe)
-    || ''
-  ).trim();
-  const timeframeMissingButExpected = !!(
-    trustedTimeframe
-    && !/^n\/?a$/i.test(trustedTimeframe)
-    && (!visibleTimeframe || /^n\/?a$/i.test(visibleTimeframe))
-  );
-  const hasVerifiedTrace = chartVerificationIsVerifiedStatus(key)
-    || chartVerificationIsVerifiedStatus(status);
-  const manualHiddenStatuses = new Set([
-    'verified_match',
-    'likely_match',
-    'manually_verified',
-    'user_confirmed_match'
-  ]);
-  const manualRequestedByStatus = chartVerificationRequiresManualAction(status);
-  const manualRequestedByDecision = chartVerificationRequiresManualAction(key);
-  const missingPrimaryIndicatorSupport = ['indicator_missing', 'indicator_incomplete', 'indicator_partial', 'partial_indicator_visibility', 'mostly_verified'].includes(status)
-    && chartVerificationHasCoreIdentityMatch(trace)
-    && !chartVerificationHasPrimaryIndicatorSupport({}, trace);
-  const hasResolvedTrace = hasVerifiedTrace
-    || aiAnalysisSuppressed
-    || manualRequestedByStatus
-    || key === 'chart_mismatch';
-  if(missingPrimaryIndicatorSupport) return true;
-  if(manualHiddenStatuses.has(key) || manualHiddenStatuses.has(status)) return false;
-  if(chartVerificationSupportsNonBlockingIndicatorPartial({}, trace)) return true;
-  if((key === 'source_checking' || status === 'source_checking') && ['queued', 'running'].includes(normalizedQuickStatus)) return false;
-  if(['queued', 'running'].includes(normalizedQuickStatus) && !hasResolvedTrace) return false;
-  if(status === 'pending_chart_native_verification') return false;
-  if(key === 'source_checking' || status === 'source_checking') return true;
-  return manualRequestedByDecision
-    || manualRequestedByStatus
-    || timeframeMissingButExpected
-    || aiAnalysisSuppressed;
-}
-
 function chartVerificationIsVerifiedStatus(status = ''){
   return ['verified_match', 'likely_match', 'manually_verified', 'user_confirmed_match'].includes(String(status || ''));
 }
@@ -36080,7 +36029,6 @@ installRuntimeDebugHooks();
 bindTrackPullRefreshGesture();
 registerPwa();
 scheduleNamedDeferredStartupTask('startup_application_boot', startApplication, {idle:false});
-
 
 
 
