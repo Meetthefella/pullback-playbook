@@ -2623,11 +2623,11 @@ function runAiContractAssertions(){
     throw new Error('Chart verification panel state must use explicit blocked decision variants instead of falling back to generic review.');
   }
   const manualConfirmSource = extractFunctionSource(appSource, 'confirmReviewChartMatchesCurrentTicker');
-  if(!manualConfirmSource.includes('chartVerificationCommittedTrace = cloneData(record.review.chartVerificationTrace, null);')
-    || !manualConfirmSource.includes("aiAnalysisSuppressed:false")
-    || !manualConfirmSource.includes("suppressionReason:''")
-    || !manualConfirmSource.includes("analyseSetup(symbol, {source:'manual_chart_confirm'}).catch(() => {});")){
-    throw new Error('Manual chart confirmation must commit the verified trace and trigger a fresh AI analysis run.');
+  if(!manualConfirmSource.includes("phase:'verified'")
+    || !manualConfirmSource.includes('manualConfirmed:true')
+    || !manualConfirmSource.includes('[REVIEW_CHART_MANUAL_CONFIRM_PIPELINE]')
+    || !manualConfirmSource.includes('runSimplifiedChartFullAnalysis(record, {')){
+    throw new Error('Manual chart confirmation must promote the simplified pipeline first and then trigger a fresh AI analysis run.');
   }
   const handleChartSelectionSource = extractFunctionSource(appSource, 'handleChartSelection');
   if(!handleChartSelectionSource.includes("setActiveReviewTicker(symbol);")
@@ -2760,9 +2760,10 @@ function runAiContractAssertions(){
     || !chartVerificationGateDecisionSource.includes('allowed = chartVerificationAllowsAiAnalysisStatus(status)')){
     throw new Error('Chart verification gate decisions must be driven by authoritative verification status plus structured mismatch context.');
   }
-  if(!confirmReviewChartMatchesCurrentTickerSource.includes("status:'user_confirmed_match'")
-    || !confirmReviewChartMatchesCurrentTickerSource.includes("analyseSetup(symbol, {source:'manual_chart_confirm'}).catch(() => {});")){
-    throw new Error('Manual chart confirmation must promote the chart to user_confirmed_match and then start AI analysis explicitly.');
+  if(!confirmReviewChartMatchesCurrentTickerSource.includes("phase:'verified'")
+    || !confirmReviewChartMatchesCurrentTickerSource.includes('manualConfirmed:true')
+    || !confirmReviewChartMatchesCurrentTickerSource.includes('runSimplifiedChartFullAnalysis(record, {')){
+    throw new Error('Manual chart confirmation must promote the simplified pipeline and then start AI analysis explicitly.');
   }
   if(!analyseSetupGateSource.includes('verificationOnly:true')
     || !analyseSetupGateSource.includes('[CHART_AI_ANALYSIS_BLOCKED]')
@@ -2794,8 +2795,8 @@ function runAiContractAssertions(){
   }
   if(!reviewWorkspaceSource.includes('[CHART_CONTEXT_SNAPSHOT]')
     || !reviewWorkspaceSource.includes('[CHART_CONTEXT_MISMATCH]')
-    || !reviewWorkspaceSource.includes("status:'unknown_chart_identity'")
-    || !reviewWorkspaceSource.includes('displayedImageId !== renderContextSnapshot.verificationImageId')
+    || !reviewWorkspaceSource.includes('buildChartContextMismatchPipeline(record, simplifiedChartPipeline || {}, renderContextSnapshot)')
+    || !reviewWorkspaceSource.includes('renderContextSnapshot.displayedImageId !== renderContextSnapshot.verificationImageId')
     || !reviewWorkspaceSource.includes('box.dataset.renderedReviewTicker = normalizeTicker(record.ticker || \'\');')
     || !reviewWorkspaceSource.includes('box.dataset.renderedReviewRequestToken = String(currentRenderedReviewRequestToken() || \'\');')){
     throw new Error('Review render must snapshot displayed-vs-verification chart context and refuse verified rendering on image mismatch.');
@@ -2920,55 +2921,27 @@ function runAiContractAssertions(){
     throw new Error('Terminal blocked chart-verification traces must be preferred over pending source_checking traces for the current chart context.');
   }
   const renderReviewWorkspaceSource = extractFunctionSource(appSource, 'renderReviewWorkspace');
-  if(!renderReviewWorkspaceSource.includes('preferredTerminalBlocked:')
-    || !renderReviewWorkspaceSource.includes("reason:'terminal_blocked_candidate_for_current_chart'")
-    || !renderReviewWorkspaceSource.includes('selectionReason:String(selectedChartTrace.reason || \'\')')
-    || !renderReviewWorkspaceSource.includes('currentLifecycleFinalizeReason === \'blocked_unknown_chart_identity\'')
-    || !renderReviewWorkspaceSource.includes('status:\'unknown_chart_identity\'')
-    || !renderReviewWorkspaceSource.includes('!hasReadableVisibleFacts')
-    || !renderReviewWorkspaceSource.includes('commitTerminalChartVerificationTrace(record, chartConsistencyTraceForDisplay')
-    || !renderReviewWorkspaceSource.includes('[CHART_RENDER_FALLBACK_PERSISTED]')
-    || !renderReviewWorkspaceSource.includes('selectedChartTrace = selectReviewChartTraceForRender(')
-    || !renderReviewWorkspaceSource.includes('const refreshedStoredChartVerificationWrapper = (record.review.chartVerificationCommittedTrace')){
-    throw new Error('Deep chart trace selection diagnostics must explain when a terminal blocked trace won over source_checking.');
+  const simplifiedDecisionSource = extractFunctionSource(appSource, 'buildSimplifiedChartPipelineDecision');
+  const simplifiedRunSource = extractFunctionSource(appSource, 'runSimplifiedChartAnalysis');
+  const ensurePipelineSource = extractFunctionSource(appSource, 'ensureSimplifiedChartPipelineForRender');
+  if(!renderReviewWorkspaceSource.includes("renderSource:'simplified_pipeline'")
+    || !renderReviewWorkspaceSource.includes('renderSimplifiedChartPipelineMarkup(record, simplifiedChartPipeline || {})')){
+    throw new Error('Review chart rendering must be owned by the simplified pipeline only.');
   }
-  if(!selectReviewChartTraceSource.includes('[CHART_TRACE_SELECTION_LIFECYCLE_MANUAL_TRACE]')
-    || !selectReviewChartTraceSource.includes("action:committedTraceMatchesCurrentContext ? 'skipped_because_committed_trace_exists' : 'injected_because_committed_trace_absent'")
-    || !selectReviewChartTraceSource.includes('if(!committedTraceMatchesCurrentContext){')){
-    throw new Error('Synthetic lifecycle manual trace fallback must be skipped when a committed trace already exists for the active chart context.');
+  if(!simplifiedDecisionSource.includes("key:'chart_mismatch'")
+    || !simplifiedDecisionSource.includes("key:'cant_read'")
+    || !simplifiedDecisionSource.includes("key:'chart_context_mismatch'")
+    || !simplifiedDecisionSource.includes('Chart looks correct.')){
+    throw new Error('Simplified Review chart verification must render first-class matched, mismatch, unreadable, and context-mismatch decisions.');
   }
-  if(!appAnalyseSetupSource.includes('materializeTerminalBlockedChartTrace(verificationMergedTrace, verificationGate')
-    || !appAnalyseSetupSource.includes("requestFinalizeReason = `blocked_${verificationGate.reason || verificationGate.status || 'verification_incomplete'}`;")
-    || !appAnalyseSetupSource.includes("source:'chart_analysis_finalize'")
-    || !appAnalyseSetupSource.includes('commitTerminalChartVerificationTrace(record, committedBlockedTrace')
-    || !appAnalyseSetupSource.includes("if(activeReviewTicker() === ticker) renderReviewWorkspace({source:'chart_ai_analysis_blocked'});")){
-    throw new Error('Blocked verification finalize paths must materialize a terminal committed chart trace for the current request and rerender it.');
+  if(!simplifiedRunSource.includes('buildSimplifiedTickerGateAnalysis(')
+    || !simplifiedRunSource.includes('upsertReviewChartAnalysisPipeline(item, nextPipeline);')
+    || !simplifiedRunSource.includes("if(nextPipeline.phase === 'verified')")){
+    throw new Error('Simplified chart verification must commit a terminal pipeline result and allow AI only from verified ticker matches.');
   }
-  const materializeTerminalBlockedTraceSource = extractFunctionSource(appSource, 'materializeTerminalBlockedChartTrace');
-  if((!materializeTerminalBlockedTraceSource.includes("source:String((forcedFinalizeSource ? 'chart_analysis_finalize' : '')")
-      && !materializeTerminalBlockedTraceSource.includes("source:String(safeContext.source || (forcedFinalizeSource ? 'chart_analysis_finalize' : '')"))
-    || !materializeTerminalBlockedTraceSource.includes("status = ['unknown_chart_identity', 'insufficient_identity_evidence'].includes(rawStatus)")
-    || !materializeTerminalBlockedTraceSource.includes('finalized:true')){
-    throw new Error('Terminal blocked chart traces must force chart_analysis_finalize source and finalized metadata for blocked unknown identity.');
-  }
-  const commitTerminalChartVerificationTraceSource = extractFunctionSource(appSource, 'commitTerminalChartVerificationTrace');
-  if(!commitTerminalChartVerificationTraceSource.includes('[CHART_TERMINAL_TRACE_COMMITTED]')
-    || !commitTerminalChartVerificationTraceSource.includes("source:String(safeTrace.source || safeContext.source || 'chart_analysis_finalize')")
-    || !commitTerminalChartVerificationTraceSource.includes('item.review.chartVerificationCommittedTrace = cloneData(wrappedTrace, null);')){
-    throw new Error('Terminal chart trace commit helper must persist authoritative committed traces for blocked chart identity states.');
-  }
-  const chartVerificationUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
-  if(!chartVerificationUiDecisionSource.includes('chartVerificationIsBlockedOrMismatchStatus(status)')
-    || !chartVerificationUiDecisionSource.includes("const mismatchStatuses = new Set([")
-    || !chartVerificationUiDecisionSource.includes("const sourceOrSystemStatuses = new Set([")
-    || !chartVerificationUiDecisionSource.includes("'source_mismatch'")
-    || !chartVerificationUiDecisionSource.includes("'verification_failed'")
-    || !chartVerificationUiDecisionSource.includes("'stale_state_detected'")
-    || !chartVerificationUiDecisionSource.includes('Chart verification needs attention')
-    || !chartVerificationUiDecisionSource.includes('Chart identity needs confirmation')
-    || !chartVerificationUiDecisionSource.includes('Please confirm or reject it before AI chart analysis runs.')
-    || !chartVerificationUiDecisionSource.includes('Chart mismatch detected')){
-    throw new Error('Review chart verification UI must use the shared blocked/mismatch status helper and render explicit blocked copy for verification_failed/source_mismatch.');
+  if(!ensurePipelineSource.includes('[REVIEW_CHART_PIPELINE_STALE_REQUEST_IGNORED]')
+    || !ensurePipelineSource.includes("phase:mismatch ? 'possible_mismatch' : (verifiedMatch ? 'verified' : 'cant_read')")){
+    throw new Error('Simplified Review pipeline recovery must be request-aware and rebuild current verified/mismatch/unreadable state directly.');
   }
   if(!appAnalyseSetupSource.includes('[CHART_ANALYSIS_DUPLICATE_RUNNING_BYPASSED_FOR_REPLACEMENT]')
     || !appAnalyseSetupSource.includes('[CHART_REPLACEMENT_ANALYSIS_SUPERSEDES_RUNNING]')
@@ -2976,14 +2949,6 @@ function runAiContractAssertions(){
     || !appAnalyseSetupSource.includes("const replacementUploadSupersedesRunning = analysisSource === 'chart_upload'")
     || !appAnalyseSetupSource.includes("clearReviewAiAnalysis(ticker);")){
     throw new Error('Replacement chart uploads must supersede same-ticker running analysis, while ordinary duplicate clicks stay ignored.');
-  }
-  if(!maybeLogIncompleteSource.includes("[QUICK_CHART_ANALYSIS_CONTEXT_INCOMPLETE]")
-    || !maybeLogIncompleteSource.includes("['running', 'committed', 'failed', 'timeout'].includes(status)")
-    || !maybeLogIncompleteSource.includes("const requestIdKey = String(requestId || 'missing_request_id');")){
-    throw new Error('Incomplete quick-analysis context must be detected and logged for terminal/running states with missing request ids.');
-  }
-  if(!aiSummaryGuardSource.includes("if(!allowedToRender && reason !== 'quick_running')")){
-    throw new Error('Quick-running AI summary gating must not be classified as stale context.');
   }
   if(!analysisPanelSource.includes('shouldLogAiSummaryQuickRunningWait(item, summaryGuard)')){
     throw new Error('Quick-running AI summary wait logs must be deduplicated per chart context.');
@@ -3004,11 +2969,10 @@ function runAiContractAssertions(){
     || !quickCommittedContextSource.includes('String(quick.status || \'\') === \'committed\'')){
     throw new Error('Quick-analysis dedupe must require committed quick status for the same request id.');
   }
-  if(!appSource.includes("analyseSetup(liveItem.ticker || item.ticker, {source:'chart_upload'}).catch(() => {});")
-    || !appSource.includes("analyseSetup(symbol, {source:'review_render_queue'});")
-    || !appSource.includes("analyseSetup(record.ticker, {source:'manual_button'});")
-    || !appSource.includes("analyseSetup(symbol, {source:'manual_chart_confirm'}).catch(() => {});")){
-    throw new Error('Analyse Setup callers must pass explicit request sources for duplicate-request audits.');
+  if(!appSource.includes("runSimplifiedChartAnalysis(record, {")
+    || !appSource.includes("runSimplifiedChartFullAnalysis(record, {")
+    || !appSource.includes("analyseSetup(record.ticker, {source:'manual_button'});")){
+    throw new Error('Review chart upload/manual-confirm flows must go through the simplified chart pipeline, while manual Analyse remains an explicit AI action.');
   }
   const aiGateSandbox = {
     normalizeTicker(value){ return String(value || '').trim().toUpperCase(); },
