@@ -2711,7 +2711,10 @@ function runAiContractAssertions(){
   }
   if(!appAnalyseSetupSource.includes("requestId:analysisRequestId,")
     || !appAnalyseSetupSource.includes('sanitizeChartAssessorVisibleIdentity(')
-    || !appAnalyseSetupSource.includes('buildChartAssessorInput(record, analysis, requestChartImageSource, analysisRequestId)')){
+    || !appAnalyseSetupSource.includes('buildSimplifiedTickerGateAnalysis(')
+    || !appAnalyseSetupSource.includes('buildChartAssessorInput(record, simplifiedGateAnalysis, requestChartImageSource, analysisRequestId)')
+    || !appAnalyseSetupSource.includes('const shouldPromoteSimplifiedPipeline = !!(')
+    || !appAnalyseSetupSource.includes('upsertReviewChartAnalysisPipeline(record, promotedPipeline);')){
     throw new Error('Live chart analysis must preserve request-aware chart assessor inputs for the simplified pipeline path.');
   }
   if(!appAnalyseSetupSource.includes('!isStrictChartIdentityProvenanceAnalysis(normalizedLiveAnalysis)')

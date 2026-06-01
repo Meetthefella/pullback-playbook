@@ -24690,7 +24690,16 @@ async function analyseSetup(ticker, options = {}){
         analysisRequestId,
         {caller:'analyse_setup_live'}
       );
-      const chartAssessorInput = buildChartAssessorInput(record, analysis, requestChartImageSource, analysisRequestId);
+      const simplifiedGateAnalysis = buildSimplifiedTickerGateAnalysis(
+        record,
+        analysis,
+        data.analysis && typeof data.analysis === 'object' ? data.analysis : {},
+        {
+          requestId:analysisRequestId,
+          imageId:requestChartImageId
+        }
+      );
+      const chartAssessorInput = buildChartAssessorInput(record, simplifiedGateAnalysis, requestChartImageSource, analysisRequestId);
       if(typeof console !== 'undefined' && console.info){
         console.info('[CHART_ASSESSOR_INPUT]', chartAssessorInput);
       }
@@ -24699,25 +24708,25 @@ async function analyseSetup(ticker, options = {}){
           ticker:ticker,
           requestId:analysisRequestId,
           imageId:requestChartImageId,
-          extractedTicker:analysis && analysis.visible_ticker || '',
-          extractedTimeframe:analysis && analysis.visible_timeframe || '',
-          extractedPrice:analysis && analysis.visible_latest_price == null ? 'n/a' : analysis.visible_latest_price
+          extractedTicker:simplifiedGateAnalysis && simplifiedGateAnalysis.visible_ticker || '',
+          extractedTimeframe:simplifiedGateAnalysis && simplifiedGateAnalysis.visible_timeframe || '',
+          extractedPrice:simplifiedGateAnalysis && simplifiedGateAnalysis.visible_latest_price == null ? 'n/a' : simplifiedGateAnalysis.visible_latest_price
         });
         console.info('[QUICK_CHART_ANALYSIS_RESULT]', {
           ticker:ticker,
           requestId:analysisRequestId,
-          extractedTicker:analysis && analysis.visible_ticker || '',
-          extractedTimeframe:analysis && analysis.visible_timeframe || '',
-          extractedPrice:analysis && analysis.visible_latest_price == null ? 'n/a' : analysis.visible_latest_price,
-          ma20:analysis && analysis.visible_ma20 == null ? 'n/a' : analysis.visible_ma20,
-          ma50:analysis && analysis.visible_ma50 == null ? 'n/a' : analysis.visible_ma50,
-          ma200:analysis && analysis.visible_ma200 == null ? 'n/a' : analysis.visible_ma200,
-          confidence:analysis && analysis.extraction_confidence == null ? '' : analysis.extraction_confidence
+          extractedTicker:simplifiedGateAnalysis && simplifiedGateAnalysis.visible_ticker || '',
+          extractedTimeframe:simplifiedGateAnalysis && simplifiedGateAnalysis.visible_timeframe || '',
+          extractedPrice:simplifiedGateAnalysis && simplifiedGateAnalysis.visible_latest_price == null ? 'n/a' : simplifiedGateAnalysis.visible_latest_price,
+          ma20:simplifiedGateAnalysis && simplifiedGateAnalysis.visible_ma20 == null ? 'n/a' : simplifiedGateAnalysis.visible_ma20,
+          ma50:simplifiedGateAnalysis && simplifiedGateAnalysis.visible_ma50 == null ? 'n/a' : simplifiedGateAnalysis.visible_ma50,
+          ma200:simplifiedGateAnalysis && simplifiedGateAnalysis.visible_ma200 == null ? 'n/a' : simplifiedGateAnalysis.visible_ma200,
+          confidence:simplifiedGateAnalysis && simplifiedGateAnalysis.extraction_confidence == null ? '' : simplifiedGateAnalysis.extraction_confidence
         });
       }
-      logAnalysisDebug('NORMALIZED_ANALYSIS_OBJECT', analysis);
+      logAnalysisDebug('NORMALIZED_ANALYSIS_OBJECT', simplifiedGateAnalysis);
       if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
-        const extractedFacts = analysis || {};
+        const extractedFacts = simplifiedGateAnalysis || {};
         console.info('[CHART_EXTRACTION_RESULT]', {
           ticker:ticker,
           tickerExtracted:extractedFacts.visible_ticker || '',
@@ -24736,14 +24745,14 @@ async function analyseSetup(ticker, options = {}){
         });
       }
       card.lastResponse = JSON.stringify(data.analysis || {}, null, 2);
-      card.lastAnalysis = analysis;
+      card.lastAnalysis = simplifiedGateAnalysis;
       card.lastError = '';
       card.marketStatus = state.marketStatus;
       card.updatedAt = new Date().toISOString();
-      if(analysis){
-        card.entry = analysis.entry || '';
-        card.stop = analysis.stop || '';
-        card.target = analysis.first_target || '';
+      if(simplifiedGateAnalysis){
+        card.entry = simplifiedGateAnalysis.entry || '';
+        card.stop = simplifiedGateAnalysis.stop || '';
+        card.target = simplifiedGateAnalysis.first_target || '';
       }
       const mergedObservedTicker = normaliseVisibleTicker(chartAssessorInput.extractedTicker || '');
       const mergedExpectedTicker = normaliseVisibleTicker(record.ticker || '');
@@ -24788,6 +24797,30 @@ async function analyseSetup(ticker, options = {}){
       const canonicalReview = canonicalReviewRecord && canonicalReviewRecord.review && typeof canonicalReviewRecord.review === 'object'
         ? canonicalReviewRecord.review
         : null;
+      const shouldPromoteSimplifiedPipeline = !!(
+        requestChartImageId &&
+        currentChartImageId &&
+        requestChartImageId === currentChartImageId &&
+        currentActiveReviewTicker === ticker
+      );
+      if(shouldPromoteSimplifiedPipeline){
+        const promotedPipeline = buildChartPipelineFromVerification(record, {
+          imageId:requestChartImageId,
+          requestId:analysisRequestId,
+          source:'chart_pipeline_quick_check',
+          analysis:simplifiedGateAnalysis,
+          chartAssessorInput,
+          chartImageSource:requestChartImageSource
+        });
+        promotedPipeline.debug = {
+          promotedFrom:'analyse_setup_success',
+          rawReadFacts:buildChartPipelineReadFacts(data.analysis && typeof data.analysis === 'object' ? data.analysis : {}),
+          normalizedReadFacts:buildChartPipelineReadFacts(normalizedLiveAnalysis),
+          sanitizedReadFacts:buildChartPipelineReadFacts(analysis),
+          gatedReadFacts:buildChartPipelineReadFacts(simplifiedGateAnalysis)
+        };
+        upsertReviewChartAnalysisPipeline(record, promotedPipeline);
+      }
       const shouldCommitMergedTrace = !!(
         requestChartImageId &&
         currentChartImageId &&
