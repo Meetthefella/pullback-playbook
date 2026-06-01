@@ -2796,7 +2796,7 @@ function runAiContractAssertions(){
   const chartAssessorToNormalizedSource = extractFunctionSource(appSource, 'chartAssessorInputToNormalizedAnalysis');
   const getReviewAnalysisStateSource = extractFunctionSource(appSource, 'getReviewAnalysisState');
   const successfulSameContextSource = extractFunctionSource(appSource, 'hasSuccessfulCompletedAnalysisForCurrentChartContext');
-  const reviewQuickChartStateSource = extractFunctionSource(appSource, 'reviewQuickChartAnalysisState');
+  const queueAutoAnalysisSource = extractFunctionSource(appSource, 'queueAutoAnalysisForTicker');
   const aiSummaryGuardSource = extractFunctionSource(appSource, 'chartAiSummaryRenderGuard');
   const analysisPanelSource = extractFunctionSource(appSource, 'renderAnalysisPanelFromRecord');
   const savedAnalysisPanelSource = extractFunctionSource(appSource, 'renderAnalysisPanel');
@@ -2821,8 +2821,9 @@ function runAiContractAssertions(){
     throw new Error('Live analyseSetup results must upgrade any non-strict analysis into strict provenance mode before sanitization.');
   }
   if(!appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_FINALIZE_REASON]')
-    || !extractFunctionSource(appSource, 'reviewQuickChartAnalysisState').includes('[QUICK_CHART_ANALYSIS_STALE_INCOMPLETE_CLEARED]')){
-    throw new Error('Analysis request finalization and remaining compatibility-layer stale cleanup must both stay instrumented.');
+    || !queueAutoAnalysisSource.includes("ensureSimplifiedChartPipelineForRender(liveRecord, {source:'queue_auto_analysis'})")
+    || !queueAutoAnalysisSource.includes('chartPipelineAllowsAi(pipelinePhase)')){
+    throw new Error('Analysis request finalization and auto-analysis dispatch must both use the simplified chart pipeline.');
   }
   if(/ai_supported_match[\s\S]+chartVerificationHasExplicitRegionProvenance/.test(savedAnalysisPanelSource)){
     throw new Error('Saved-analysis Review rendering must not keep an ai_supported_match verified exception outside the hard gate allowlist.');
@@ -2868,17 +2869,6 @@ function runAiContractAssertions(){
   }
   if(normalizeAnalysisResultSource.includes(": 1,") && normalizeAnalysisResultSource.includes('chartIdentityProvenanceVersion')){
     throw new Error('Normalized analysis results must preserve absent chart provenance version instead of forcing strict mode.');
-  }
-  if(!reviewQuickChartStateSource.includes('storedMatchesCurrentContext')
-    || !reviewQuickChartStateSource.includes("String(stored.requestId || stored.verificationRequestId || '') === currentRequestId")){
-    throw new Error('Quick chart analysis state must preserve same-image/same-request committed state even when the stored key drifts.');
-  }
-  if(!reviewQuickChartStateSource.includes('[QUICK_CHART_ANALYSIS_STALE_CONTEXT_IGNORED]')
-    || !reviewQuickChartStateSource.includes('storedRequestId !== currentRequestId')
-    || !reviewQuickChartStateSource.includes('stored = null;')
-    || !reviewQuickChartStateSource.includes('clearStaleQuickChartAnalysisState(')
-    || !extractFunctionSource(appSource, 'clearStaleQuickChartAnalysisState').includes('[QUICK_CHART_ANALYSIS_STALE_CONTEXT_CLEARED]')){
-    throw new Error('Quick chart analysis state must ignore stale queued/running context from a different request for the same chart image.');
   }
   if(!aiCommitGateSource.includes('const pipeline = getReviewChartAnalysisPipeline(item);')
     || !appAnalyseSetupSource.includes('const activeChartPipeline = getReviewChartAnalysisPipeline(record);')
@@ -3361,8 +3351,7 @@ function runAiContractAssertions(){
     'chartPipelineAllowsAi',
     'chartImageForAnalysis',
     'clearReviewChartImageSources',
-    'reviewQuickChartAnalysisKey',
-    'reviewQuickChartAnalysisState',
+    'queueAutoAnalysisForTicker',
     'confirmReviewChartMatchesCurrentTicker',
     'rejectReviewChartAndUploadAnother',
     'debugFlagEnabled',
@@ -4132,30 +4121,6 @@ function runAiContractAssertions(){
     || legacySanitizedIdentity.visible_latest_price !== 215.33
     || String(legacySanitizedIdentity.visible_timeframe || '') !== '1D'){
     throw new Error('Legacy stored analyses without provenance version must remain readable and must not be blanked solely for missing source fields.');
-  }
-  const committedQuickState = evidenceSandbox.reviewQuickChartAnalysisState({
-    ticker:'NVDA',
-    review:{
-      chartRef:{dataUrl:'data:image/png;base64,chart', imageId:'img_committed_nvda', uploadedAt:'2026-05-26T10:00:00.000Z'},
-      chartImageOriginal:{dataUrl:'data:image/png;base64,chart', imageId:'img_committed_nvda', dataUrlField:'chartRef.dataUrl', uploadedAt:'2026-05-26T10:00:00.000Z'},
-      chartImagePreview:{dataUrl:'data:image/png;base64,chart', imageId:'img_committed_nvda'},
-      chartImageVerificationSource:{source:'chartImageOriginal', sourceField:'chartRef.dataUrl', imageId:'img_committed_nvda'},
-      chartAttachmentContext:{expectedTicker:'NVDA', imageId:'img_committed_nvda', requestId:'analysis-committed-1'},
-      quickChartAnalysis:{
-        key:'stale-key-value',
-        ticker:'NVDA',
-        reviewTicker:'NVDA',
-        chartImageId:'img_committed_nvda',
-        requestId:'analysis-committed-1',
-        status:'committed'
-      }
-    }
-  }, {
-    analysisState:{hasSavedAnalysis:false},
-    storedChartVerificationState:{status:'source_checking', trace:{status:'source_checking'}}
-  });
-  if(String(committedQuickState.status || '') !== 'committed' || committedQuickState.shouldQueue === true){
-    throw new Error('Committed quick analysis must remain committed for the same chart image/request context and must not fall back to queued.');
   }
   const aiSupportedMatchTrace = evidenceSandbox.buildChartConsistencyTrace(
     {ticker:'MRNA', marketData:{price:49.04, ma20:48.15, ma50:47.3, ma200:43.1}, review:{chartRef:{dataUrl:'data:image/png;base64,abc', imageId:'chart-1'}, normalizedAnalysis:{
