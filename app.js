@@ -3960,9 +3960,6 @@ function clearReviewChartImageSources(review){
   review.chartImagePreview = null;
   review.chartImageVerificationSource = null;
   review.chartAttachmentContext = null;
-  review.chartVerificationTrace = null;
-  review.chartVerificationCommittedTrace = null;
-  review.chartVerificationContext = null;
   review.chartAnalysisPipeline = null;
   review.chartAvailable = false;
 }
@@ -4032,9 +4029,6 @@ function getReviewChartAnalysisPipeline(record = {}){
 function clearLegacyChartAnalysisState(review = {}){
   const safe = review && typeof review === 'object' ? review : null;
   if(!safe) return;
-  safe.chartVerificationTrace = null;
-  safe.chartVerificationCommittedTrace = null;
-  safe.chartVerificationContext = null;
   safe.pendingChartAiSummary = null;
   safe.rawChartFactExtraction = null;
   safe.aiAnalysisRaw = '';
