@@ -2695,14 +2695,14 @@ function runAiContractAssertions(){
   }
   const chartAiSummaryGuardSource = extractFunctionSource(appSource, 'chartAiSummaryRenderGuard');
   if(!chartAiSummaryGuardSource.includes("reason = 'quick_running'")
-    || !chartAiSummaryGuardSource.includes("quickStatus === 'running'")){
-    throw new Error('AI summary guard must block current rendering while quick chart analysis is still running for the same chart.');
+    || !chartAiSummaryGuardSource.includes("pipelinePhase === 'verifying'")){
+    throw new Error('AI summary guard must block current rendering while simplified chart verification is still running for the same chart.');
   }
   const aiCommitGateSource = extractFunctionSource(appSource, 'canCommitAiSummaryForChart');
-  if(!aiCommitGateSource.includes("['committed', 'failed', 'timeout'].includes")
-    || !aiCommitGateSource.includes('requestedImageId === quickImageId')
-    || !aiCommitGateSource.includes('requestedRequestId === quickRequestId')){
-    throw new Error('AI summary commit gate must require terminal quick status for the same ticker/image/request context.');
+  if(!aiCommitGateSource.includes("!['uploading', 'verifying'].includes")
+    || !aiCommitGateSource.includes('requestedImageId === pipelineImageId')
+    || !aiCommitGateSource.includes('requestedRequestId === pipelineRequestId')){
+    throw new Error('AI summary commit gate must require a terminal simplified pipeline state for the same ticker/image/request context.');
   }
   const pendingAiStageSource = extractFunctionSource(appSource, 'stagePendingAiSummaryForChart');
   if(!pendingAiStageSource.includes('setPendingChartAiSummary(item, stagedPayload);')
@@ -2838,9 +2838,8 @@ function runAiContractAssertions(){
     throw new Error('Live analyseSetup results must upgrade any non-strict analysis into strict provenance mode before sanitization.');
   }
   if(!appAnalyseSetupSource.includes('[CHART_ANALYSIS_REQUEST_FINALIZE_REASON]')
-    || !extractFunctionSource(appSource, 'reviewQuickChartAnalysisState').includes('[QUICK_CHART_ANALYSIS_STALE_INCOMPLETE_CLEARED]')
-    || !extractFunctionSource(appSource, 'chartAiSummaryRenderGuard').includes("source:'chart_ai_summary_guard'")){
-    throw new Error('Stale running quick-chart state must be cleared on read and must not be revived by Review-focus AI-summary guards.');
+    || !extractFunctionSource(appSource, 'reviewQuickChartAnalysisState').includes('[QUICK_CHART_ANALYSIS_STALE_INCOMPLETE_CLEARED]')){
+    throw new Error('Legacy quick-chart state cleanup must still guard against stale incomplete reads while the remaining compatibility layer exists.');
   }
   if(/ai_supported_match[\s\S]+chartVerificationHasExplicitRegionProvenance/.test(savedAnalysisPanelSource)){
     throw new Error('Saved-analysis Review rendering must not keep an ai_supported_match verified exception outside the hard gate allowlist.');
@@ -2898,12 +2897,12 @@ function runAiContractAssertions(){
     || !extractFunctionSource(appSource, 'clearStaleQuickChartAnalysisState').includes('[QUICK_CHART_ANALYSIS_STALE_CONTEXT_CLEARED]')){
     throw new Error('Quick chart analysis state must ignore stale queued/running context from a different request for the same chart image.');
   }
-  if(!aiCommitGateSource.includes("reviewQuickChartAnalysisState(item, {source:'can_commit_ai_summary'})")
-    || !appAnalyseSetupSource.includes("reviewQuickChartAnalysisState(record, {source:'analyse_setup_current_context'})")
-    || !flushPendingAiSource.includes("reviewQuickChartAnalysisState(item, {source:'flush_pending_ai_summary'})")
+  if(!aiCommitGateSource.includes('const pipeline = getReviewChartAnalysisPipeline(item);')
+    || !appAnalyseSetupSource.includes('const activeChartPipeline = getReviewChartAnalysisPipeline(record);')
+    || !flushPendingAiSource.includes('const currentPipeline = getReviewChartAnalysisPipeline(item) || {};')
     || !flushPendingAiSource.includes('const currentChartContext = currentReviewChartContext(item, item.review || {});')
     || !flushPendingAiSource.includes('const currentRequestId = String(currentChartContext.requestId || \'\');')){
-    throw new Error('Sensitive AI-summary and analyseSetup request-context reads must use sanitized quick-chart state instead of raw persisted quick state.');
+    throw new Error('Sensitive AI-summary and analyseSetup request-context reads must use the simplified pipeline and current chart context instead of raw persisted quick state.');
   }
   const selectReviewChartTraceSource = extractFunctionSource(appSource, 'selectReviewChartTraceForRender');
   const blockedMismatchHelperSource = extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus');
@@ -2976,14 +2975,10 @@ function runAiContractAssertions(){
   }
   const aiGateSandbox = {
     normalizeTicker(value){ return String(value || '').trim().toUpperCase(); },
-    reviewQuickChartAnalysisState(record = {}){
-      const quick = record && record.review && record.review.quickChartAnalysis && typeof record.review.quickChartAnalysis === 'object'
-        ? record.review.quickChartAnalysis
+    getReviewChartAnalysisPipeline(record = {}){
+      return record && record.review && record.review.chartAnalysisPipeline && typeof record.review.chartAnalysisPipeline === 'object'
+        ? record.review.chartAnalysisPipeline
         : null;
-      return {
-        stored:quick,
-        matchesCurrentKey:!!quick
-      };
     }
   };
   vm.createContext(aiGateSandbox);
@@ -2992,11 +2987,11 @@ function runAiContractAssertions(){
     record:{
       ticker:'NVDA',
       review:{
-        quickChartAnalysis:{
+        chartAnalysisPipeline:{
           ticker:'NVDA',
-          chartImageId:'img-1',
+          imageId:'img-1',
           requestId:'req-1',
-          status:'running'
+          phase:'verifying'
         }
       }
     },
@@ -3008,11 +3003,11 @@ function runAiContractAssertions(){
     record:{
       ticker:'NVDA',
       review:{
-        quickChartAnalysis:{
+        chartAnalysisPipeline:{
           ticker:'NVDA',
-          chartImageId:'img-1',
+          imageId:'img-1',
           requestId:'req-1',
-          status:'committed'
+          phase:'verified'
         }
       }
     },
@@ -3024,11 +3019,11 @@ function runAiContractAssertions(){
     record:{
       ticker:'LIN',
       review:{
-        quickChartAnalysis:{
+        chartAnalysisPipeline:{
           ticker:'LIN',
-          chartImageId:'img-2',
+          imageId:'img-2',
           requestId:'req-2',
-          status:'committed'
+          phase:'verified'
         }
       }
     },
@@ -3392,6 +3387,8 @@ function runAiContractAssertions(){
     'buildChartImageSourceTrace',
     'logChartRequestIdMutation',
     'hasVerifiableReviewChartSource',
+    'getReviewChartAnalysisPipeline',
+    'chartPipelineAllowsAi',
     'chartImageForAnalysis',
     'clearReviewChartImageSources',
     'maybeLogQuickChartAnalysisContextIncomplete',
@@ -4240,7 +4237,7 @@ function runAiContractAssertions(){
     throw new Error('Legacy stored analyses must not lose visible identity solely because provenance version is absent.');
   }
   const staleSummaryGuard = evidenceSandbox.chartAiSummaryRenderGuard(
-    {ticker:'NVDA', review:{chartRef:{imageId:'img-new'}}},
+    {ticker:'NVDA', review:{chartRef:{imageId:'img-new'}, chartAnalysisPipeline:{ticker:'NVDA', imageId:'img-new', requestId:'analysis-new', phase:'verified'}}},
     {analysisChartImageId:'img-old', analysisRequestId:'analysis-old'},
     {status:'untrusted_context_mirror', imageId:'img-new', verificationRequestId:'analysis-new', requestId:'analysis-new'}
   );
@@ -4248,7 +4245,7 @@ function runAiContractAssertions(){
     throw new Error('Stale AI summaries from a previous chart image must be blocked from rendering.');
   }
   const acceptedSummaryGuard = evidenceSandbox.chartAiSummaryRenderGuard(
-    {ticker:'PSX', review:{chartRef:{imageId:'img-psx'}}},
+    {ticker:'PSX', review:{chartRef:{imageId:'img-psx'}, chartAnalysisPipeline:{ticker:'PSX', imageId:'img-psx', requestId:'analysis-psx', phase:'verified'}}},
     {ticker:'PSX', analysisChartImageId:'img-psx', analysisRequestId:'analysis-psx'},
     {status:'likely_match', imageId:'img-psx', verificationRequestId:'analysis-psx', requestId:'analysis-psx'}
   );
@@ -4256,7 +4253,7 @@ function runAiContractAssertions(){
     throw new Error('Current-image likely_match analysis must be allowed to render.');
   }
   const staleTickerSummaryGuard = evidenceSandbox.chartAiSummaryRenderGuard(
-    {ticker:'LIN', review:{chartRef:{imageId:'img-lin'}}},
+    {ticker:'LIN', review:{chartRef:{imageId:'img-lin'}, chartAnalysisPipeline:{ticker:'LIN', imageId:'img-lin', requestId:'analysis-lin', phase:'verified'}}},
     {ticker:'NVDA', analysisChartImageId:'img-lin', analysisRequestId:'analysis-lin'},
     {status:'likely_match', imageId:'img-lin', verificationRequestId:'analysis-lin', requestId:'analysis-lin'}
   );

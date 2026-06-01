@@ -22516,30 +22516,27 @@ function clearPendingChartAiSummary(record){
 
 function canCommitAiSummaryForChart({record, ticker, imageId, requestId} = {}){
   const item = record && typeof record === 'object' ? record : {};
-  const quickState = reviewQuickChartAnalysisState(item, {source:'can_commit_ai_summary'});
-  const quick = quickState && quickState.stored && quickState.matchesCurrentKey
-    ? quickState.stored
-    : null;
-  if(!quick) return false;
+  const pipeline = getReviewChartAnalysisPipeline(item);
+  if(!pipeline || typeof pipeline !== 'object') return false;
   const requestedTicker = normalizeTicker(ticker || item.ticker || '');
-  const quickTicker = normalizeTicker(quick.ticker || quick.reviewTicker || item.ticker || '');
+  const pipelineTicker = normalizeTicker(pipeline.ticker || item.ticker || '');
   const requestedImageId = String(imageId || '');
-  const quickImageId = String(quick.chartImageId || '');
+  const pipelineImageId = String(pipeline.imageId || '');
   const requestedRequestId = String(requestId || '');
-  const quickRequestId = String(quick.requestId || '');
+  const pipelineRequestId = String(pipeline.requestId || '');
   const sameContext = !!(
     requestedTicker
-    && quickTicker
-    && requestedTicker === quickTicker
+    && pipelineTicker
+    && requestedTicker === pipelineTicker
     && requestedImageId
-    && quickImageId
-    && requestedImageId === quickImageId
+    && pipelineImageId
+    && requestedImageId === pipelineImageId
     && requestedRequestId
-    && quickRequestId
-    && requestedRequestId === quickRequestId
+    && pipelineRequestId
+    && requestedRequestId === pipelineRequestId
   );
   if(!sameContext) return false;
-  return ['committed', 'failed', 'timeout'].includes(String(quick.status || '').trim());
+  return !['uploading', 'verifying'].includes(String(pipeline.phase || '').trim());
 }
 
 function applyCommittedAiSummaryForChart(record, payload = {}){
@@ -22548,178 +22545,21 @@ function applyCommittedAiSummaryForChart(record, payload = {}){
   const ticker = normalizeTicker(payload.ticker || item.ticker || '');
   const requestChartImageId = String(payload.imageId || payload.chartImageId || '');
   const analysisRequestId = String(payload.requestId || '');
-  const mergedChartTrace = payload.mergedChartTrace && typeof payload.mergedChartTrace === 'object'
-    ? payload.mergedChartTrace
-    : {};
   const analysis = payload.normalized && typeof payload.normalized === 'object'
     ? payload.normalized
-    : null;
-  const chartAssessorInput = payload.chartAssessorInput && typeof payload.chartAssessorInput === 'object'
-    ? payload.chartAssessorInput
     : null;
   const prompt = String(payload.prompt || '');
   const rawResponse = String(payload.raw || '');
   const reviewedAt = String(payload.reviewedAt || new Date().toISOString());
-  const currentActiveReviewTicker = activeReviewTicker();
-  const currentChartImageId = chartImageIdForReview(item.review || {});
-  const canonicalReviewRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
-  const canonicalReview = canonicalReviewRecord && canonicalReviewRecord.review && typeof canonicalReviewRecord.review === 'object'
-    ? canonicalReviewRecord.review
-    : null;
-  const existingVerificationState = getReviewChartVerificationState(item);
-  const existingVerificationTrace = existingVerificationState && typeof existingVerificationState === 'object'
-    ? (existingVerificationState.trace || existingVerificationState)
-    : ((item.review && item.review.chartVerificationTrace && typeof item.review.chartVerificationTrace === 'object'
-      ? (item.review.chartVerificationTrace.trace || item.review.chartVerificationTrace)
-      : null));
-  const preserveManualConfirmation = !!(
-    existingVerificationTrace
-    && (
-      existingVerificationTrace.manualConfirmed === true
-      || existingVerificationTrace.chartUserConfirmed === true
-      || ['user_confirmed_match', 'manually_verified'].includes(String(existingVerificationTrace.status || '').trim())
-    )
-  );
-  const shouldCommitMergedTrace = !!(
-    requestChartImageId &&
-    currentChartImageId &&
-    requestChartImageId === currentChartImageId &&
-    currentActiveReviewTicker === ticker &&
-    uiState.analysisActiveRequest &&
-    uiState.analysisActiveRequest.id === analysisRequestId
-  );
-  if(shouldCommitMergedTrace && canonicalReview){
-    const mergedChartImageSource = buildChartImageSourceTrace(item.review || {});
-    const committedMergedChartTrace = cloneData({
-      ...mergedChartTrace,
-      status:preserveManualConfirmation ? 'user_confirmed_match' : String(mergedChartTrace && mergedChartTrace.status || ''),
-      mergedStatus:preserveManualConfirmation ? 'user_confirmed_match' : String(mergedChartTrace && mergedChartTrace.status || ''),
-      renderedStatus:preserveManualConfirmation ? 'user_confirmed_match' : String(mergedChartTrace && mergedChartTrace.status || ''),
-      normalizedAnalysis:analysis,
-      mergedAnalysis:mergedChartTrace,
-      chartAssessorInput,
-      source:'quickChartAnalysis',
-      event:'quick_analysis_committed',
-      manualConfirmed:preserveManualConfirmation ? true : !!(mergedChartTrace && mergedChartTrace.manualConfirmed === true),
-      chartUserConfirmed:preserveManualConfirmation ? true : !!(mergedChartTrace && mergedChartTrace.chartUserConfirmed === true)
-    }, null);
-    const committedChartVerificationState = cloneData({
-      ticker:item.ticker,
-      reviewTicker:item.ticker,
-      chartImageId:requestChartImageId,
-      imageId:requestChartImageId,
-      verificationRequestId:analysisRequestId,
-      requestId:analysisRequestId,
-      phase:'merged',
-      chartImageSource:mergedChartImageSource,
-      chartAssessorInput,
-      createdAt:new Date().toISOString(),
-      trace:committedMergedChartTrace,
-      normalizedAnalysis:analysis,
-      mergedAnalysis:mergedChartTrace,
-      renderedStatus:String(mergedChartTrace && mergedChartTrace.status || ''),
-      mergedStatus:String(mergedChartTrace && mergedChartTrace.status || ''),
-      source:'quickChartAnalysis',
-      event:'quick_analysis_committed'
-    }, null);
-    canonicalReview.chartVerificationCommittedTrace = cloneData(committedChartVerificationState, null);
-    canonicalReview.chartVerificationTrace = cloneData(committedChartVerificationState, null);
-    const previousCanonicalLifecycleRequestId = String(canonicalReview.chartVerificationLifecycle && (canonicalReview.chartVerificationLifecycle.requestId || canonicalReview.chartVerificationLifecycle.verificationRequestId) || '');
-    canonicalReview.chartVerificationLifecycle = {
-      phase:'merged',
-      ticker:item.ticker,
-      reviewTicker:item.ticker,
-      chartImageId:requestChartImageId,
-      imageId:requestChartImageId,
-      requestId:analysisRequestId,
-      chartImageSource:mergedChartImageSource,
-      updatedAt:new Date().toISOString()
-    };
-    logChartRequestIdMutation({
-      oldRequestId:previousCanonicalLifecycleRequestId,
-      newRequestId:analysisRequestId,
-      reason:'apply_committed_ai_summary_canonical_lifecycle',
-      caller:'applyCommittedAiSummaryForChart',
-      ticker:item.ticker,
-      imageId:requestChartImageId
-    });
-    item.review.chartVerificationCommittedTrace = cloneData(committedChartVerificationState, null);
-    item.review.chartVerificationTrace = cloneData(committedChartVerificationState, null);
-    const previousReviewLifecycleRequestId = String(item.review.chartVerificationLifecycle && (item.review.chartVerificationLifecycle.requestId || item.review.chartVerificationLifecycle.verificationRequestId) || '');
-    item.review.chartVerificationLifecycle = {
-      phase:'merged',
-      ticker:item.ticker,
-      reviewTicker:item.ticker,
-      chartImageId:requestChartImageId,
-      imageId:requestChartImageId,
-      requestId:analysisRequestId,
-      chartImageSource:mergedChartImageSource,
-      updatedAt:new Date().toISOString()
-    };
-    logChartRequestIdMutation({
-      oldRequestId:previousReviewLifecycleRequestId,
-      newRequestId:analysisRequestId,
-      reason:'apply_committed_ai_summary_review_lifecycle',
-      caller:'applyCommittedAiSummaryForChart',
-      ticker:item.ticker,
-      imageId:requestChartImageId
-    });
-    [item.review, canonicalReview].forEach(targetReview => {
-      if(!targetReview || !targetReview.quickChartAnalysis || typeof targetReview.quickChartAnalysis !== 'object') return;
-      const previousQuickRequestId = String(targetReview.quickChartAnalysis.requestId || targetReview.quickChartAnalysis.verificationRequestId || '');
-      targetReview.quickChartAnalysis = {
-        ...targetReview.quickChartAnalysis,
-        ticker:ticker,
-        reviewTicker:ticker,
-        chartImageId:requestChartImageId,
-        requestId:analysisRequestId,
-        status:'committed',
-        updatedAt:new Date().toISOString(),
-        committedAt:new Date().toISOString(),
-        resultStatus:String(mergedChartTrace && mergedChartTrace.status || '')
-      };
-      logChartRequestIdMutation({
-        oldRequestId:previousQuickRequestId,
-        newRequestId:analysisRequestId,
-        reason:'apply_committed_ai_summary_quick',
-        caller:'applyCommittedAiSummaryForChart',
-        ticker:item.ticker,
-        imageId:requestChartImageId
-      });
-    });
-    const canonicalReadbackRecord = getTickerRecord(ticker) || canonicalReviewRecord;
-    const canonicalReadbackReview = canonicalReadbackRecord && canonicalReadbackRecord.review && typeof canonicalReadbackRecord.review === 'object'
-      ? canonicalReadbackRecord.review
-      : null;
-    const canonicalReadbackCommittedTrace = canonicalReadbackReview && canonicalReadbackReview.chartVerificationCommittedTrace
-      && typeof canonicalReadbackReview.chartVerificationCommittedTrace === 'object'
-      ? canonicalReadbackReview.chartVerificationCommittedTrace
-      : null;
-    if(typeof console !== 'undefined' && console.info){
-      console.info('[CHART_TRACE_WRITEBACK]', {
-        ticker:item.ticker,
-        requestId:analysisRequestId,
-        imageId:requestChartImageId,
-        writtenStatus:String(committedMergedChartTrace && committedMergedChartTrace.status || ''),
-        writtenStoreName:'record.review.chartVerificationCommittedTrace',
-        selectorCanReadSameStore:!!(canonicalReadbackCommittedTrace && (canonicalReadbackCommittedTrace.trace && canonicalReadbackCommittedTrace.trace.status || canonicalReadbackCommittedTrace.status || ''))
-      });
-      console.info('[CHART_TRACE_CANONICAL_READBACK]', {
-        ticker:item.ticker,
-        requestId:analysisRequestId,
-        imageId:requestChartImageId,
-        committedTraceStatus:String(canonicalReadbackCommittedTrace && (canonicalReadbackCommittedTrace.trace && canonicalReadbackCommittedTrace.trace.status || canonicalReadbackCommittedTrace.status || '') || ''),
-        sameObjectAsRenderSource:canonicalReadbackReview === canonicalReview,
-        activeReviewTicker:activeReviewTicker() || ''
-      });
-    }
-  }
-  logChartVerificationLifecycle('merged_render_committed', {
-    reviewTicker:ticker,
-    verificationRequestId:analysisRequestId,
+  const currentPipeline = getReviewChartAnalysisPipeline(item) || {};
+  upsertReviewChartAnalysisPipeline(item, {
+    ...currentPipeline,
+    ticker,
     imageId:requestChartImageId,
-    mergedStatus:mergedChartTrace.status || '',
-    renderedAt:new Date().toISOString()
+    requestId:analysisRequestId,
+    phase:'analysis_complete',
+    aiAllowed:true,
+    updatedAt:new Date().toISOString()
   });
   setReviewAnalysisState(item, {
     prompt,
@@ -22737,15 +22577,8 @@ function applyCommittedAiSummaryForChart(record, payload = {}){
       ticker,
       requestId:analysisRequestId,
       imageId:requestChartImageId,
-      verificationStatus:String(mergedChartTrace && mergedChartTrace.status || ''),
-      aiSuppressed:mergedChartTrace && mergedChartTrace.aiAnalysisSuppressed === true
-    });
-    console.info('[CHART_ANALYSIS_SEQUENCE_CHECK]', {
-      ticker,
-      requestId:analysisRequestId,
-      imageId:requestChartImageId,
-      quickStatusAtSummaryCommit:String(item.review && item.review.quickChartAnalysis && item.review.quickChartAnalysis.status || ''),
-      quickCommittedBeforeAiSummary:['committed', 'failed', 'timeout'].includes(String(item.review && item.review.quickChartAnalysis && item.review.quickChartAnalysis.status || ''))
+      pipelinePhase:String((getReviewChartAnalysisPipeline(item) || {}).phase || ''),
+      aiSuppressed:false
     });
   }
   return true;
@@ -22772,7 +22605,7 @@ function stagePendingAiSummaryForChart(record, payload = {}, reason = 'quick_run
       ticker:String(stagedPayload.ticker || item.ticker || ''),
       requestId:String(stagedPayload.requestId || ''),
       imageId:String(stagedPayload.imageId || stagedPayload.chartImageId || ''),
-      quickStatus:String(item.review && item.review.quickChartAnalysis && item.review.quickChartAnalysis.status || ''),
+      pipelinePhase:String((getReviewChartAnalysisPipeline(item) || {}).phase || ''),
       reason:String(reason || 'quick_running')
     });
   }
@@ -22796,15 +22629,12 @@ function flushPendingAiSummaryForChart(record, options = {}){
   const currentChartContext = currentReviewChartContext(item, item.review || {});
   const currentTicker = normalizeTicker(currentChartContext.ticker || item.ticker || '');
   const currentImageId = String(currentChartContext.imageId || chartImageIdForReview(item.review || {}) || '');
-  const currentQuickState = reviewQuickChartAnalysisState(item, {source:'flush_pending_ai_summary'});
-  const currentQuick = currentQuickState && currentQuickState.stored && currentQuickState.matchesCurrentKey
-    ? currentQuickState.stored
-    : null;
+  const currentPipeline = getReviewChartAnalysisPipeline(item) || {};
   const currentRequestId = String(currentChartContext.requestId || '');
-  const quickTicker = normalizeTicker(currentQuick && (currentQuick.ticker || currentQuick.reviewTicker) || '');
-  const quickImageId = String(currentQuick && currentQuick.chartImageId || '');
-  const quickRequestId = String(currentQuick && (currentQuick.requestId || currentQuick.verificationRequestId) || '');
-  const quickStatus = String(currentQuick && currentQuick.status || '');
+  const pipelineTicker = normalizeTicker(currentPipeline.ticker || item.ticker || '');
+  const pipelineImageId = String(currentPipeline.imageId || '');
+  const pipelineRequestId = String(currentPipeline.requestId || '');
+  const pipelinePhase = String(currentPipeline.phase || '');
   const pendingTicker = normalizeTicker(pending.ticker || '');
   const pendingImageId = String(pending.imageId || pending.chartImageId || '');
   const pendingRequestId = String(pending.requestId || '');
@@ -22818,10 +22648,10 @@ function flushPendingAiSummaryForChart(record, options = {}){
       ticker:currentTicker,
       currentImageId,
       currentRequestId,
-      quickTicker,
-      quickImageId,
-      quickRequestId,
-      quickStatus,
+      pipelineTicker,
+      pipelineImageId,
+      pipelineRequestId,
+      pipelinePhase,
       pendingTicker,
       pendingImageId,
       pendingRequestId,
@@ -22835,10 +22665,10 @@ function flushPendingAiSummaryForChart(record, options = {}){
         ticker:currentTicker,
         currentImageId,
         currentRequestId,
-        quickTicker,
-        quickImageId,
-        quickRequestId,
-        quickStatus,
+        pipelineTicker,
+        pipelineImageId,
+        pipelineRequestId,
+        pipelinePhase,
         pendingTicker,
         pendingImageId,
         pendingRequestId,
@@ -22872,11 +22702,11 @@ function flushPendingAiSummaryForChart(record, options = {}){
         pendingTicker,
         pendingImageId,
         pendingRequestId,
-        reason:'quick_not_terminal',
+        reason:'pipeline_not_terminal',
         source:String(options.source || '')
       });
     }
-    return {committed:false, reason:'quick_not_terminal'};
+    return {committed:false, reason:'pipeline_not_terminal'};
   }
   const committed = applyCommittedAiSummaryForChart(item, pending);
   if(typeof console !== 'undefined' && console.info){
@@ -27312,27 +27142,15 @@ function chartVerificationAiSuppression(record, analysis, options = {}){
 function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null){
   const item = record && typeof record === 'object' ? record : {};
   const safeState = analysisState && typeof analysisState === 'object' ? analysisState : {};
-  const safeTrace = chartTrace && typeof chartTrace === 'object' ? chartTrace : null;
+  const pipeline = getReviewChartAnalysisPipeline(item) || {};
   const currentTicker = normalizeTicker(item.ticker || '');
   const currentImageId = chartImageIdForReview(item.review || {});
-  const currentRequestId = String(safeTrace && (safeTrace.verificationRequestId || safeTrace.requestId) || '');
-  const quickStateSnapshot = reviewQuickChartAnalysisState(item, {
-    source:'chart_ai_summary_guard',
-    analysisState:safeState,
-    storedChartVerificationState:getReviewChartVerificationState(item)
-  });
-  const quickAnalysisState = quickStateSnapshot && quickStateSnapshot.stored && quickStateSnapshot.matchesCurrentKey
-    ? quickStateSnapshot.stored
-    : null;
-  const quickStatus = String(quickAnalysisState && quickAnalysisState.status || '').trim();
-  const quickImageId = String(quickAnalysisState && quickAnalysisState.chartImageId || '');
-  const quickRequestId = String(quickAnalysisState && quickAnalysisState.requestId || '');
-  maybeLogQuickChartAnalysisContextIncomplete(item, quickAnalysisState, 'chart_ai_summary_guard');
+  const currentRequestId = String(pipeline.requestId || '');
   const summaryTicker = normalizeTicker(safeState.ticker || '');
   const summaryImageId = String(safeState.analysisChartImageId || safeState.chartImageId || '');
   const summaryRequestId = String(safeState.analysisRequestId || '');
-  const verificationStatus = String(safeTrace && safeTrace.status || '');
-  const verificationAllowsAi = chartVerificationAllowsAiAnalysisStatus(verificationStatus);
+  const pipelinePhase = String(pipeline.phase || '').trim();
+  const verificationAllowsAi = !currentImageId || chartPipelineAllowsAi(pipelinePhase) || pipelinePhase === 'analysis_failed';
   let allowedToRender = true;
   let reason = 'accepted_current_analysis';
   if(!currentImageId){
@@ -27344,19 +27162,16 @@ function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null
     && currentImageId === summaryImageId
     && !currentRequestId
     && !summaryRequestId
-    && !quickStatus
-    && !verificationStatus
+    && !pipelinePhase
   ){
     allowedToRender = false;
     reason = 'verification_context_unowned';
   }else if(
-    quickStatus === 'running'
+    pipelinePhase === 'verifying'
     && currentImageId
     && summaryImageId
     && currentImageId === summaryImageId
     && (!currentRequestId || !summaryRequestId || currentRequestId === summaryRequestId)
-    && (!quickImageId || quickImageId === currentImageId)
-    && (!quickRequestId || !summaryRequestId || quickRequestId === summaryRequestId)
   ){
     allowedToRender = false;
     reason = 'quick_running';
@@ -27369,7 +27184,7 @@ function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null
   }else if(currentRequestId && summaryRequestId && currentRequestId !== summaryRequestId){
     allowedToRender = false;
     reason = 'request_mismatch';
-  }else if(verificationStatus && !verificationAllowsAi){
+  }else if(currentImageId && !verificationAllowsAi){
     allowedToRender = false;
     reason = 'verification_not_accepted';
   }
@@ -27378,14 +27193,11 @@ function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null
       ticker:item.ticker || '',
       currentTicker,
       summaryTicker,
-      quickStatus,
-      quickImageId,
-      quickRequestId,
+      pipelinePhase,
       currentImageId,
       summaryImageId,
       currentRequestId,
       summaryRequestId,
-      verificationStatus,
       allowedToRender,
       reason
     });
@@ -27393,14 +27205,11 @@ function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null
       console.info('[CHART_AI_SUMMARY_REJECTED_STALE_CONTEXT]', {
         currentTicker,
         summaryTicker,
-        quickStatus,
-        quickImageId,
-        quickRequestId,
+        pipelinePhase,
         currentImageId,
         summaryImageId,
         currentRequestId,
         summaryRequestId,
-        verificationStatus,
         reason
       });
     }
@@ -27408,14 +27217,14 @@ function chartAiSummaryRenderGuard(record, analysisState = {}, chartTrace = null
   return {
     currentTicker,
     summaryTicker,
-    quickStatus,
-    quickImageId,
-    quickRequestId,
+    quickStatus:pipelinePhase,
+    quickImageId:currentImageId,
+    quickRequestId:currentRequestId,
     currentImageId,
     summaryImageId,
     currentRequestId,
     summaryRequestId,
-    verificationStatus,
+    verificationStatus:pipelinePhase,
     allowedToRender,
     reason
   };
