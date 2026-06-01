@@ -2648,11 +2648,7 @@ function buildRecordsLitePersistedState(sourceState){
           manualReview:item.review.manualReview && typeof item.review.manualReview === 'object' ? cloneData(item.review.manualReview, null) : null,
           cardOpen:!!item.review.cardOpen,
           source:item.review.source,
-          chartVerificationTrace:cloneData(item.review.chartVerificationTrace, null),
-          chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
           chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
-          chartVerificationContext:cloneData(item.review.chartVerificationContext, null),
-          rawChartFactExtraction:cloneData(item.review.rawChartFactExtraction, null),
           chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
         },
         plan:{
@@ -2733,11 +2729,7 @@ function buildLitePersistedState(sourceState){
           normalizedAnalysis:null,
           lastPrompt:'',
           lastError:'',
-          chartVerificationTrace:cloneData(item.review.chartVerificationTrace, null),
-          chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
           chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
-          chartVerificationContext:cloneData(item.review.chartVerificationContext, null),
-          rawChartFactExtraction:cloneData(item.review.rawChartFactExtraction, null),
           chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
         }
       }];
@@ -3955,7 +3947,7 @@ function clearReviewChartImageSources(review){
   const currentImageId = String(chartImageIdForReview(review) || '');
   const currentTicker = normalizeTicker(review.ticker || review.expectedTicker || '');
   const lifecycleRequestId = String(review.chartVerificationLifecycle && (review.chartVerificationLifecycle.requestId || review.chartVerificationLifecycle.verificationRequestId) || '');
-  const quickRequestId = String(review.quickChartAnalysis && (review.quickChartAnalysis.requestId || review.quickChartAnalysis.verificationRequestId) || '');
+  const pipelineRequestId = String(review.chartAnalysisPipeline && review.chartAnalysisPipeline.requestId || '');
   if(lifecycleRequestId){
     logChartRequestIdMutation({
       oldRequestId:lifecycleRequestId,
@@ -3966,11 +3958,11 @@ function clearReviewChartImageSources(review){
       imageId:currentImageId
     });
   }
-  if(quickRequestId){
+  if(pipelineRequestId){
     logChartRequestIdMutation({
-      oldRequestId:quickRequestId,
+      oldRequestId:pipelineRequestId,
       newRequestId:'',
-      reason:'clear_review_chart_image_sources_quick',
+      reason:'clear_review_chart_image_sources_pipeline',
       caller:'clearReviewChartImageSources',
       ticker:currentTicker,
       imageId:currentImageId
@@ -3985,7 +3977,6 @@ function clearReviewChartImageSources(review){
   review.chartVerificationCommittedTrace = null;
   review.chartVerificationLifecycle = null;
   review.chartVerificationContext = null;
-  review.quickChartAnalysis = null;
   review.chartAnalysisPipeline = null;
   review.chartAvailable = false;
 }
@@ -4016,24 +4007,24 @@ function currentReviewChartContext(record = {}, review = null){
   const attachmentContext = safeReview.chartAttachmentContext && typeof safeReview.chartAttachmentContext === 'object'
     ? safeReview.chartAttachmentContext
     : null;
-  const quick = safeReview.quickChartAnalysis && typeof safeReview.quickChartAnalysis === 'object'
-    ? safeReview.quickChartAnalysis
-    : null;
   const lifecycle = safeReview.chartVerificationLifecycle && typeof safeReview.chartVerificationLifecycle === 'object'
     ? safeReview.chartVerificationLifecycle
     : null;
+  const pipeline = safeReview.chartAnalysisPipeline && typeof safeReview.chartAnalysisPipeline === 'object'
+    ? safeReview.chartAnalysisPipeline
+    : null;
   const runtime = getReviewAiRuntime();
-  const ticker = normalizeTicker(item.ticker || safeReview.ticker || attachmentContext && attachmentContext.expectedTicker || quick && quick.ticker || lifecycle && lifecycle.ticker || '');
+  const ticker = normalizeTicker(item.ticker || safeReview.ticker || attachmentContext && attachmentContext.expectedTicker || pipeline && pipeline.ticker || lifecycle && lifecycle.ticker || '');
   const imageId = String(
     chartImageIdForReview(safeReview)
     || attachmentContext && attachmentContext.imageId
-    || quick && quick.chartImageId
+    || pipeline && pipeline.imageId
     || lifecycle && (lifecycle.imageId || lifecycle.chartImageId)
     || ''
   );
   let requestId = String(
     attachmentContext && attachmentContext.requestId
-    || quick && (quick.requestId || quick.verificationRequestId)
+    || pipeline && pipeline.requestId
     || lifecycle && (lifecycle.requestId || lifecycle.verificationRequestId)
     || ''
   );
@@ -4064,7 +4055,6 @@ function clearLegacyChartAnalysisState(review = {}){
   safe.chartVerificationCommittedTrace = null;
   safe.chartVerificationLifecycle = null;
   safe.chartVerificationContext = null;
-  safe.quickChartAnalysis = null;
   safe.pendingChartAiSummary = null;
   safe.rawChartFactExtraction = null;
   safe.aiAnalysisRaw = '';
@@ -4304,7 +4294,7 @@ function ensureSimplifiedChartPipelineForRender(record = {}, options = {}){
     verifiedMatch,
     mismatch,
     hasFacts:chartPipelineHasAnyReadFacts(recoveredReadFacts),
-    chartAssessorInput:cloneData(review.chartVerificationContext || null, null),
+    chartAssessorInput:null,
     chartImageSource,
     updatedAt:new Date().toISOString()
   };
@@ -5598,16 +5588,12 @@ function openReviewChartLightbox(record){
   if(!shell) return false;
   const content = shell.querySelector('.review-chart-lightbox__content');
   if(content){
-    const debugFacts = debugFlagEnabled('PP_DEBUG_CHART_TRACE') && review.chartVerificationTrace
-      ? `<details class="compact-details" open><summary>Verification facts</summary>${renderChartConsistencyTrace(review.chartVerificationTrace)}</details>`
-      : '';
     content.innerHTML = `
       <div class="review-chart-lightbox__figure">
         <img class="review-chart-lightbox__image" src="${escapeHtml(source.dataUrl)}" alt="Expanded chart preview for ${escapeHtml(modalTicker || item.ticker)}" />
         <div class="review-chart-lightbox__caption">
           <strong>${escapeHtml(modalTicker || item.ticker)}</strong>
           <div class="tiny">${escapeHtml(modalName)}</div>
-          ${debugFacts}
         </div>
       </div>
     `;
@@ -6000,15 +5986,7 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   };
   record.review.aiAnalysisRaw = String(card.lastResponse || record.review.aiAnalysisRaw || '');
   record.review.normalizedAnalysis = cloneData(card.lastAnalysis || record.review.normalizedAnalysis, null);
-  record.review.chartVerificationTrace = cloneData(card.chartVerificationTrace || record.review.chartVerificationTrace, null);
-  record.review.chartVerificationCommittedTrace = cloneData(
-    card.chartVerificationCommittedTrace
-    || record.review.chartVerificationCommittedTrace
-    || null,
-    null
-  );
   record.review.chartVerificationLifecycle = cloneData(card.chartVerificationLifecycle || record.review.chartVerificationLifecycle, null);
-  record.review.chartVerificationContext = cloneData(card.chartVerificationContext || record.review.chartVerificationContext, null);
   record.review.lastReviewedAt = String(card.updatedAt || record.review.lastReviewedAt || '');
   record.review.lastPrompt = String(card.lastPrompt || record.review.lastPrompt || '');
   record.review.lastError = String(card.lastError || record.review.lastError || '');
@@ -6137,10 +6115,7 @@ function tickerRecordToLegacyCard(record){
     chartImageOriginal:cloneData(item.review.chartImageOriginal, null),
     chartImagePreview:cloneData(item.review.chartImagePreview, null),
     chartImageVerificationSource:cloneData(item.review.chartImageVerificationSource, null),
-    chartVerificationTrace:cloneData(item.review.chartVerificationTrace, null),
-    chartVerificationCommittedTrace:cloneData(item.review.chartVerificationCommittedTrace, null),
     chartVerificationLifecycle:cloneData(item.review.chartVerificationLifecycle, null),
-    chartVerificationContext:cloneData(item.review.chartVerificationContext, null),
     lastPrompt:item.review.lastPrompt || '',
     lastResponse:item.review.aiAnalysisRaw || '',
     lastError:item.review.lastError || '',

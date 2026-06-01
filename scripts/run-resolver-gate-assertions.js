@@ -2654,10 +2654,10 @@ function runAiContractAssertions(){
     throw new Error('Displayed chart context must be derived from the same attachment object used by the renderer.');
   }
   if(!currentChartContextSource.includes('attachmentContext && attachmentContext.requestId')
-    || !currentChartContextSource.includes('quick && (quick.requestId || quick.verificationRequestId)')
+    || !currentChartContextSource.includes('pipeline && pipeline.requestId')
     || !currentChartContextSource.includes('lifecycle && (lifecycle.requestId || lifecycle.verificationRequestId)')
     || !currentChartContextSource.includes("requestId = String(runtime.requestId || '');")){
-    throw new Error('Current chart context must unify request ownership from attachment, quick, lifecycle, and runtime state.');
+    throw new Error('Current chart context must unify request ownership from attachment, pipeline, lifecycle, and runtime state.');
   }
   if(!sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_VISIBLE_IDENTITY]')
     || !sanitizeChartIdentitySource.includes('[CHART_ASSESSOR_SANITIZER_MODE]')
