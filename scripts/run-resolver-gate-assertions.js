@@ -2487,130 +2487,63 @@ function runAiContractAssertions(){
   if(!/aiObservation|rawOpinion|final_verdict:''|ai_observation_only:true/i.test(normalizeSource)){
     throw new Error('AI ingestion must quarantine legacy verdict-like fields as non-authoritative observation data.');
   }
-  const verifiedStatusSource = extractFunctionSource(appSource, 'chartVerificationIsVerifiedStatus');
-  const allowsAiStatusSource = extractFunctionSource(appSource, 'chartVerificationAllowsAiAnalysisStatus');
   const chartDecisionClassNameSource = extractFunctionSource(appSource, 'chartDecisionClassName');
-  const chartUiDecisionRenderSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
-  const panelStateSource = extractFunctionSource(appSource, 'chartVerificationPanelState');
-  const panelStateSandbox = {
-    chartVerificationNumberOrNull(value){
-      if(value === null || value === undefined || value === '') return null;
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? numeric : null;
+  const chartDecisionSource = extractFunctionSource(appSource, 'buildSimplifiedChartPipelineDecision');
+  const renderReviewChartStatusLineSource = extractFunctionSource(appSource, 'renderReviewChartStatusLine');
+  const chartPipelineAllowsAiGateSource = extractFunctionSource(appSource, 'chartPipelineAllowsAi');
+  if(!chartPipelineAllowsAiGateSource.includes("'verified'")
+    || !chartPipelineAllowsAiGateSource.includes("'analysis_running'")
+    || !chartPipelineAllowsAiGateSource.includes("'analysis_complete'")){
+    throw new Error('Simplified chart pipeline must define an explicit AI-allowed phase allowlist.');
+  }
+  if(!chartDecisionSource.includes("key:'chart_mismatch'")
+    || !chartDecisionSource.includes("key:'cant_read'")
+    || !chartDecisionSource.includes("key:'chart_context_mismatch'")
+    || !chartDecisionSource.includes('Chart looks correct.')){
+    throw new Error('Simplified chart decisions must cover match, mismatch, unreadable, and context-mismatch states directly.');
+  }
+  if(!renderReviewChartStatusLineSource.includes('buildSimplifiedChartPipelineDecision(item, safePipeline)')
+    || !renderReviewChartStatusLineSource.includes("phase === 'possible_mismatch'")
+    || !renderReviewChartStatusLineSource.includes('chartPipelineHasVerifiedIdentity(safePipeline)')){
+    throw new Error('Review chart status line must render directly from the simplified pipeline decision layer.');
+  }
+  const statusLineSandbox = {
+    normalizeChartPipelineForRender(record, pipeline){ return pipeline; },
+    buildSimplifiedChartPipelineDecision(record, pipeline){
+      return pipeline.__decision || {title:'Chart verification', summary:''};
     },
-    isDailyTimeframe(value){
-      return String(value || '').trim().toUpperCase() === '1D';
+    chartPipelineHasVerifiedIdentity(pipeline){
+      return pipeline && pipeline.__verified === true;
+    },
+    escapeHtml(value){
+      return String(value || '').replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));
     }
   };
-  vm.createContext(panelStateSandbox);
-  vm.runInContext(verifiedStatusSource, panelStateSandbox, {filename:'app.js#chartVerificationIsVerifiedStatus'});
-  vm.runInContext(allowsAiStatusSource, panelStateSandbox, {filename:'app.js#chartVerificationAllowsAiAnalysisStatus'});
-  vm.runInContext(chartDecisionClassNameSource, panelStateSandbox, {filename:'app.js#chartDecisionClassName'});
-  vm.runInContext('this.chartVerificationIsVerifiedStatus = chartVerificationIsVerifiedStatus; this.chartVerificationAllowsAiAnalysisStatus = chartVerificationAllowsAiAnalysisStatus;', panelStateSandbox);
-  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationSupportsNonBlockingIndicatorPartial'), panelStateSandbox, {filename:'app.js#chartVerificationSupportsNonBlockingIndicatorPartial'});
-  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationHasCoreIdentityMatch'), panelStateSandbox, {filename:'app.js#chartVerificationHasCoreIdentityMatch'});
-  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationHasPrimaryIndicatorSupport'), panelStateSandbox, {filename:'app.js#chartVerificationHasPrimaryIndicatorSupport'});
-  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus'), panelStateSandbox, {filename:'app.js#chartVerificationIsBlockedOrMismatchStatus'});
-  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationBlockedDecisionVariant'), panelStateSandbox, {filename:'app.js#chartVerificationBlockedDecisionVariant'});
-  vm.runInContext(extractFunctionSource(appSource, 'getStrategyRelevantMaRequirement'), panelStateSandbox, {filename:'app.js#getStrategyRelevantMaRequirement'});
-  vm.runInContext(extractFunctionSource(appSource, 'normaliseVisibleTicker'), panelStateSandbox, {filename:'app.js#normaliseVisibleTicker'});
-  vm.runInContext(chartUiDecisionRenderSource, panelStateSandbox, {filename:'app.js#chartVerificationUiDecision'});
-  vm.runInContext(panelStateSource, panelStateSandbox, {filename:'app.js#chartVerificationPanelState'});
-  const verifiedPanel = panelStateSandbox.chartVerificationPanelState(
-    {key:'verified_match', title:'Chart verified', summary:'AI confirms the match.'},
-    {status:'pending_chart_native_verification'},
-    'queued',
-    true,
-    {type:'deterministic_pending'}
-  );
-  if(verifiedPanel.panelVariant !== 'verified' || verifiedPanel.visibleTitle !== 'Chart verified'){
-    throw new Error('Verified chart panels must outrank queued quick-analysis placeholders.');
+  vm.createContext(statusLineSandbox);
+  vm.runInContext(renderReviewChartStatusLineSource, statusLineSandbox, {filename:'app.js#renderReviewChartStatusLine'});
+  const statusVerified = statusLineSandbox.renderReviewChartStatusLine({ticker:'CAT'}, {
+    phase:'verified',
+    __verified:true,
+    __decision:{title:'Chart looks correct.', summary:'Ticker detected: CAT.'}
+  });
+  const statusMismatch = statusLineSandbox.renderReviewChartStatusLine({ticker:'CAT'}, {
+    phase:'possible_mismatch',
+    __verified:false,
+    __decision:{title:'Wrong chart detected', summary:'Expected: CAT | Found: LIN'}
+  });
+  const statusPending = statusLineSandbox.renderReviewChartStatusLine({ticker:'CAT'}, {
+    phase:'verifying',
+    __verified:false,
+    __decision:{title:'Chart uploaded - checking details', summary:'Quick chart verification is running.'}
+  });
+  if(!statusVerified.includes('Chart looks correct.') || !statusVerified.includes('Ticker detected: CAT.')){
+    throw new Error('Verified Review chart status must render from the simplified pipeline decision.');
   }
-  const immediateUncertainPanel = panelStateSandbox.chartVerificationPanelState(
-    {key:'source_checking', title:'Chart uploaded - checking details', summary:'Chart source is valid. AI chart extraction is running.'},
-    {status:'source_checking'},
-    'queued',
-    true,
-    {type:'deterministic_pending'}
-  );
-  if(immediateUncertainPanel.panelVariant !== 'review' || immediateUncertainPanel.visibleTitle !== 'Chart uploaded - checking details'){
-    throw new Error('Immediate source-checking states must outrank queued quick-analysis placeholders.');
+  if(!statusMismatch.includes('Wrong chart detected') || !statusMismatch.includes('Expected: CAT | Found: LIN')){
+    throw new Error('Mismatch Review chart status must render from the simplified pipeline decision.');
   }
-  const untrustedPanel = panelStateSandbox.chartVerificationPanelState(
-    {key:'uncertain_match', title:'Chart verification incomplete', summary:'Could not independently verify this chart. Please inspect the image or upload a clearer chart.'},
-    {status:'untrusted_context_mirror'},
-    'running',
-    true,
-    {type:'post_ai_merged', phase:'merged'}
-  );
-  if(untrustedPanel.panelVariant !== 'untrusted' || untrustedPanel.visibleTitle !== 'Chart verification incomplete'){
-    throw new Error('Untrusted merged chart panels must not render as verified.');
-  }
-  const unreadablePanel = panelStateSandbox.chartVerificationPanelState(
-    {key:'unknown_chart_identity', title:'Could not verify chart identity', summary:'The ticker or price could not be read from the uploaded chart.'},
-    {status:'unknown_chart_identity'},
-    'committed',
-    true,
-    {type:'post_ai_merged', phase:'merged'}
-  );
-  if(unreadablePanel.panelVariant !== 'warning' || unreadablePanel.hasVerifiedTrace !== false || unreadablePanel.visibleTitle !== 'Could not verify chart identity'){
-    throw new Error('Unreadable chart verification panels must render as warning/blocked, not generic review or verified.');
-  }
-  const staleSystemPanel = panelStateSandbox.chartVerificationPanelState(
-    {key:'stale_state_detected', title:'Chart verification needs attention', summary:'The chart check could not be trusted because the chart source or verification state was inconsistent.'},
-    {status:'stale_state_detected'},
-    'committed',
-    true,
-    {type:'post_ai_merged', phase:'merged'}
-  );
-  if(staleSystemPanel.panelVariant !== 'warning' || staleSystemPanel.visibleTitle !== 'Chart verification needs attention'){
-    throw new Error('Stale/system chart verification panels must render as warning/blocked, not generic review.');
-  }
-  const mismatchPanel = panelStateSandbox.chartVerificationPanelState(
-    {key:'chart_mismatch', title:'Chart mismatch detected', summary:'AI analysis has been skipped because the uploaded chart does not appear to match this review.'},
-    {status:'ticker_mismatch'},
-    'committed',
-    true,
-    {type:'post_ai_merged', phase:'merged'}
-  );
-  if(mismatchPanel.panelVariant !== 'mismatch' || mismatchPanel.visibleTitle !== 'Chart mismatch detected'){
-    throw new Error('Mismatch chart verification panels must stay on the mismatch variant.');
-  }
-  if(panelStateSandbox.chartVerificationIsVerifiedStatus('consistent')
-    || panelStateSandbox.chartVerificationIsVerifiedStatus('partial_indicator_visibility')
-    || panelStateSandbox.chartVerificationIsVerifiedStatus('mostly_verified')){
-    throw new Error('Blocked chart-verification statuses must not be treated as verified by the shared UI helper.');
-  }
-  if(!panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('verified_match')
-    || !panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('likely_match')
-    || !panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('user_confirmed_match')
-    || panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('consistent')
-    || panelStateSandbox.chartVerificationAllowsAiAnalysisStatus('partial_indicator_visibility')){
-    throw new Error('AI-analysis allowlist must stay narrower than general chart-review statuses.');
-  }
-  if(!chartUiDecisionRenderSource.includes("key:'partial_indicator_visibility'")
-    || !chartUiDecisionRenderSource.includes('AI analysis has been skipped until you confirm this chart manually.')){
-    throw new Error('Partial-indicator verification must stay blocked and explicitly require manual confirmation.');
-  }
-  const manualActionHelperSource = extractFunctionSource(appSource, 'chartVerificationRequiresManualAction');
-  const manualBlockedMismatchSource = extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus');
-  const blockedDecisionVariantSource = extractFunctionSource(appSource, 'chartVerificationBlockedDecisionVariant');
-  if(!manualActionHelperSource.includes("chartVerificationIsBlockedOrMismatchStatus(normalizedStatus)")
-    || !manualActionHelperSource.includes("'pending_manual_confirmation'")
-    || !manualBlockedMismatchSource.includes("'source_mismatch'")
-    || !manualBlockedMismatchSource.includes("'stale_state_detected'")
-    || !manualBlockedMismatchSource.includes("'verification_failed'")
-    || !manualBlockedMismatchSource.includes("'unknown_chart_identity'")
-    || !manualBlockedMismatchSource.includes("'insufficient_identity_evidence'")){
-    throw new Error('Manual chart controls must use the shared blocked/manual helper for mismatch, unreadable, and source/stale/system states.');
-  }
-  if(!blockedDecisionVariantSource.includes("'chart_mismatch'")
-    || !blockedDecisionVariantSource.includes("'unknown_chart_identity'")
-    || !blockedDecisionVariantSource.includes("'verification_failed'")
-    || !extractFunctionSource(appSource, 'chartVerificationPanelState').includes('const blockedDecisionVariant = chartVerificationBlockedDecisionVariant(key);')
-    || !extractFunctionSource(appSource, 'chartVerificationPanelState').includes('|| !!blockedDecisionVariant')
-    || !extractFunctionSource(appSource, 'chartVerificationPanelState').includes('panelVariant = blockedDecisionVariant;')){
-    throw new Error('Chart verification panel state must use explicit blocked decision variants instead of falling back to generic review.');
+  if(statusPending !== '<span class="warntext">Checking chart details...</span>'){
+    throw new Error('Verifying Review chart status must stay on the simplified checking copy.');
   }
   const manualConfirmSource = extractFunctionSource(appSource, 'confirmReviewChartMatchesCurrentTicker');
   if(!manualConfirmSource.includes("phase:'verified'")
@@ -2706,7 +2639,7 @@ function runAiContractAssertions(){
   const reconcileVisibleReviewStateSource = extractFunctionSource(appSource, 'reconcileVisibleReviewState');
   const renderNeutralReviewPendingStateSource = extractFunctionSource(appSource, 'renderNeutralReviewPendingState');
   const refreshTrackOnlySource = extractFunctionSource(appSource, 'refreshTrackOnly');
-  const chartVerificationAllowsAiAnalysisStatusSource = extractFunctionSource(appSource, 'chartVerificationAllowsAiAnalysisStatus');
+  const chartPipelineAllowsAiSource = extractFunctionSource(appSource, 'chartPipelineAllowsAi');
   const confirmReviewChartMatchesCurrentTickerSource = extractFunctionSource(appSource, 'confirmReviewChartMatchesCurrentTicker');
   const analyseSetupGateSource = extractFunctionSource(appSource, 'analyseSetup');
   if(!refreshTrackOnlySource.includes('clearTrackPatchNoChangeFlags();')
@@ -2714,8 +2647,8 @@ function runAiContractAssertions(){
     || !refreshTrackOnlySource.includes('startupCoordinator.trackNeedsFullRender = false;')){
     throw new Error('No-change Track refreshes must clear stale dirty/full-render flags so Track refocus does not rerun unnecessarily.');
   }
-  if(!chartVerificationAllowsAiAnalysisStatusSource.includes("['verified_match', 'likely_match', 'user_confirmed_match', 'manually_verified']")){
-    throw new Error('Chart verification must define a narrow allowlist before AI setup analysis can start.');
+  if(!chartPipelineAllowsAiGateSource.includes("['verified', 'analysis_running', 'analysis_complete']")){
+    throw new Error('Simplified chart pipeline must define the AI-allowed phase list before AI setup analysis can start.');
   }
   if(!confirmReviewChartMatchesCurrentTickerSource.includes("phase:'verified'")
     || !confirmReviewChartMatchesCurrentTickerSource.includes('manualConfirmed:true')
@@ -2839,21 +2772,13 @@ function runAiContractAssertions(){
     || !flushPendingAiSource.includes('const currentRequestId = String(currentChartContext.requestId || \'\');')){
     throw new Error('Sensitive AI-summary and analyseSetup request-context reads must use the simplified pipeline and current chart context instead of raw persisted quick state.');
   }
-  const blockedMismatchHelperSource = extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus');
-  if(!blockedMismatchHelperSource.includes("'manual_confirmation_required'")
-    || !blockedMismatchHelperSource.includes("'strong_mismatch'")
-    || !blockedMismatchHelperSource.includes("'possible_mismatch'")
-    || !blockedMismatchHelperSource.includes("'stale_state_detected'")
-    || !blockedMismatchHelperSource.includes("'verification_failed'")
-    || !blockedMismatchHelperSource.includes("'source_mismatch'")){
-    throw new Error('Chart verification must define a shared blocked/mismatch helper covering terminal mismatch and stale states.');
-  }
   const renderReviewWorkspaceSource = extractFunctionSource(appSource, 'renderReviewWorkspace');
   const simplifiedDecisionSource = extractFunctionSource(appSource, 'buildSimplifiedChartPipelineDecision');
   const simplifiedRunSource = extractFunctionSource(appSource, 'runSimplifiedChartAnalysis');
   const ensurePipelineSource = extractFunctionSource(appSource, 'ensureSimplifiedChartPipelineForRender');
   if(!renderReviewWorkspaceSource.includes("renderSource:'simplified_pipeline'")
-    || !renderReviewWorkspaceSource.includes('renderSimplifiedChartPipelineMarkup(record, simplifiedChartPipeline || {})')){
+    || !renderReviewWorkspaceSource.includes('renderSimplifiedChartPipelineMarkup(record, simplifiedChartPipeline || {})')
+    || !renderReviewWorkspaceSource.includes('renderReviewChartStatusLine(record, simplifiedChartPipeline)')){
     throw new Error('Review chart rendering must be owned by the simplified pipeline only.');
   }
   if(!simplifiedDecisionSource.includes("key:'chart_mismatch'")
@@ -3025,11 +2950,8 @@ function runAiContractAssertions(){
   if(dedupeSuccess !== true || dedupeFailed !== false || dedupeRawOnly !== false || dedupePending !== false || dedupeRequestMismatch !== false){
     throw new Error('Same-image dedupe must only suppress matching committed analysis context, not failed, raw-only, pending, or request-mismatched states.');
   }
-  const chartUiDecisionSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   const chartRelevantMaRequirementSource = extractFunctionSource(appSource, 'getStrategyRelevantMaRequirement');
-  const chartCoreIdentityMatchSource = extractFunctionSource(appSource, 'chartVerificationHasCoreIdentityMatch');
   const chartPrimaryIndicatorSupportSource = extractFunctionSource(appSource, 'chartVerificationHasPrimaryIndicatorSupport');
-  const chartSupportsPartialSource = extractFunctionSource(appSource, 'chartVerificationSupportsNonBlockingIndicatorPartial');
   const chartFastPassSource = extractFunctionSource(appSource, 'buildChartVerificationFastPass');
   const chartSandbox = {
     normaliseVisibleTicker(value){ return String(value || '').trim().toUpperCase(); },
@@ -3054,12 +2976,7 @@ function runAiContractAssertions(){
   };
   vm.createContext(chartSandbox);
   vm.runInContext(chartRelevantMaRequirementSource, chartSandbox, {filename:'app.js#getStrategyRelevantMaRequirement'});
-  vm.runInContext(chartCoreIdentityMatchSource, chartSandbox, {filename:'app.js#chartVerificationHasCoreIdentityMatch'});
   vm.runInContext(chartPrimaryIndicatorSupportSource, chartSandbox, {filename:'app.js#chartVerificationHasPrimaryIndicatorSupport'});
-  vm.runInContext(chartSupportsPartialSource, chartSandbox, {filename:'app.js#chartVerificationSupportsNonBlockingIndicatorPartial'});
-  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationIsBlockedOrMismatchStatus'), chartSandbox, {filename:'app.js#chartVerificationIsBlockedOrMismatchStatus'});
-  vm.runInContext(extractFunctionSource(appSource, 'chartVerificationRequiresManualAction'), chartSandbox, {filename:'app.js#chartVerificationRequiresManualAction'});
-  vm.runInContext(chartUiDecisionRenderSource, chartSandbox, {filename:'app.js#chartVerificationUiDecision'});
   vm.runInContext(chartDecisionClassNameSource, chartSandbox, {filename:'app.js#chartDecisionClassName'});
   vm.runInContext(chartFastPassSource, chartSandbox, {filename:'app.js#buildChartVerificationFastPass'});
   const mirroredFastPass = chartSandbox.buildChartVerificationFastPass({
@@ -3243,7 +3160,6 @@ function runAiContractAssertions(){
     'isStrictChartIdentityProvenanceAnalysis',
     'sanitizeChartAssessorVisibleIdentity',
     'buildChartAssessorInput',
-    'chartVerificationIsBlockedOrMismatchStatus',
     'currentReviewChartContext',
     'chartAssessorInputToNormalizedAnalysis',
     'chartImageDimensionsFromRef',
@@ -3260,12 +3176,9 @@ function runAiContractAssertions(){
     'rejectReviewChartAndUploadAnother',
     'debugFlagEnabled',
     'getStrategyRelevantMaRequirement',
-    'chartVerificationHasCoreIdentityMatch',
     'chartVerificationHasPrimaryIndicatorSupport',
-    'chartVerificationSupportsNonBlockingIndicatorPartial',
-    'chartVerificationUiDecision',
     'chartDecisionClassName',
-    'chartVerificationRequiresManualAction',
+    'renderReviewChartStatusLine',
     'ensureReviewChartLightboxShell',
     'closeReviewChartLightbox',
     'openReviewChartLightbox',
@@ -3273,9 +3186,6 @@ function runAiContractAssertions(){
     'buildDeterministicChartVerification',
     'chartAiSummaryRenderGuard',
     'renderSuppressedAiAnalysisPanel',
-    'chartVerificationIsVerifiedStatus',
-    'chartVerificationAllowsAiAnalysisStatus',
-    'chartVerificationIsBlockedOrMismatchStatus',
     'analysisDerivedStatesFromRecord'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), evidenceSandbox, {filename:`app.js#${functionName}`});

@@ -5032,34 +5032,6 @@ function rejectReviewChartAndUploadAnother(ticker){
   return true;
 }
 
-function chartVerificationHasCoreIdentityMatch(trace = {}){
-  const safe = trace && typeof trace === 'object' ? trace : {};
-  const comparison = safe.comparison && typeof safe.comparison === 'object' ? safe.comparison : {};
-  const extractedFacts = safe.extractedFacts && typeof safe.extractedFacts === 'object' ? safe.extractedFacts : {};
-  const trustedFacts = safe.trustedFacts && typeof safe.trustedFacts === 'object' ? safe.trustedFacts : {};
-  const visibleTicker = normaliseVisibleTicker(extractedFacts.visible_ticker || safe.visible_ticker || '');
-  const trustedTicker = normaliseVisibleTicker(trustedFacts.ticker || safe.ticker || '');
-  const visibleTimeframe = String(extractedFacts.visible_timeframe || safe.visible_timeframe || '').trim();
-  const visiblePrice = chartVerificationNumberOrNull(extractedFacts.visible_latest_price ?? safe.visible_latest_price);
-  const explicitMismatch = new Set([
-    'ticker_mismatch',
-    'timeframe_mismatch',
-    'price_mismatch',
-    'strong_mismatch',
-    'possible_mismatch',
-    'minor_drift',
-    'indicator_value_mismatch',
-    'chart_mismatch',
-    'verification_failed',
-    'unknown_chart_identity',
-    'stale_state_detected'
-  ]);
-  const tickerMatch = comparison.tickerMatch === true || (!!visibleTicker && !!trustedTicker && visibleTicker === trustedTicker);
-  const timeframeMatch = comparison.timeframeMatch === true || (!!visibleTimeframe && isDailyTimeframe(visibleTimeframe));
-  const priceMatch = comparison.priceMatch === true || (comparison.priceMatch !== false && visiblePrice !== null);
-  return tickerMatch && timeframeMatch && priceMatch && !explicitMismatch.has(String(safe.status || '').trim());
-}
-
 function getStrategyRelevantMaRequirement(record = {}, verificationState = {}){
   const safeRecord = record && typeof record === 'object' ? record : {};
   const safe = verificationState && typeof verificationState === 'object' ? verificationState : {};
@@ -5099,196 +5071,6 @@ function chartVerificationHasPrimaryIndicatorSupport(record = {}, verificationSt
   return ma20Ok || ma50Ok;
 }
 
-function chartVerificationSupportsNonBlockingIndicatorPartial(record = {}, verificationState = {}){
-  const safe = verificationState && typeof verificationState === 'object' ? verificationState : {};
-  const status = String(safe.status || '').trim();
-  if(!['indicator_partial', 'indicator_incomplete', 'indicator_missing', 'partial_indicator_visibility', 'mostly_verified'].includes(status)) return false;
-  return chartVerificationHasCoreIdentityMatch(safe) && chartVerificationHasPrimaryIndicatorSupport(record, safe);
-}
-
-function chartVerificationIsBlockedOrMismatchStatus(status = ''){
-  return [
-    'manual_confirmation_required',
-    'unknown_chart_identity',
-    'insufficient_identity_evidence',
-    'ticker_mismatch',
-    'price_mismatch',
-    'timeframe_mismatch',
-    'chart_mismatch',
-    'strong_mismatch',
-    'possible_mismatch',
-    'stale_state_detected',
-    'verification_failed',
-    'source_mismatch'
-  ].includes(String(status || '').trim());
-}
-
-function chartVerificationRequiresManualAction(status = ''){
-  const normalizedStatus = String(status || '').trim();
-  if(chartVerificationIsBlockedOrMismatchStatus(normalizedStatus)) return true;
-  return [
-    'timeframe_uncertain',
-    'minor_drift',
-    'indicator_value_mismatch',
-    'partial_context_timeframe_uncertain',
-    'partial_context_unverified_chart',
-    'uncertain_missing_context',
-    'uncertain_match',
-    'consistent',
-    'partial_indicator_visibility',
-    'mostly_verified',
-    'ai_supported_match',
-    'chart_verification_untrusted',
-    'untrusted_context_mirror',
-    'pending_manual_confirmation'
-  ].includes(normalizedStatus);
-}
-
-function chartVerificationBlockedDecisionVariant(key = ''){
-  const normalizedKey = String(key || '').trim();
-  if([
-    'chart_mismatch',
-    'ticker_mismatch',
-    'price_mismatch',
-    'timeframe_mismatch',
-    'strong_mismatch',
-    'possible_mismatch'
-  ].includes(normalizedKey)) return 'mismatch';
-  if([
-    'manual_confirmation_required',
-    'unknown_chart_identity',
-    'insufficient_identity_evidence',
-    'verification_failed',
-    'source_mismatch',
-    'stale_state_detected'
-  ].includes(normalizedKey)) return 'warning';
-  return '';
-}
-
-function chartVerificationUiDecision(trace, ticker = ''){
-  const safe = trace && typeof trace === 'object' ? trace : {};
-  const status = String(safe.status || '').trim();
-  const mismatchReasons = Array.isArray(safe.mismatchReasons) ? safe.mismatchReasons : [];
-  const unreadableReasons = Array.isArray(safe.unreadableReasons) ? safe.unreadableReasons : [];
-  const expectedTicker = normaliseVisibleTicker(ticker || (safe.trustedFacts && safe.trustedFacts.ticker) || (safe.debug && safe.debug.ticker) || '');
-  const baseMatchTitle = expectedTicker ? `Chart appears to match ${expectedTicker}.` : 'Chart appears to match this review.';
-  const baseUncertainTitle = 'Chart verification incomplete';
-  const baseMismatchTitle = expectedTicker ? `Uploaded chart does not appear to match ${expectedTicker}.` : 'Uploaded chart does not appear to match this review.';
-  const manualConfirmed = safe.manualConfirmed === true || safe.chartUserConfirmed === true || status === 'manually_verified' || status === 'user_confirmed_match';
-  if(manualConfirmed){
-    return {
-      key:'user_confirmed_match',
-      title:expectedTicker ? `Chart confirmed manually for ${expectedTicker}.` : 'Chart confirmed manually.',
-      summary:'You confirmed this chart for the current uploaded image.',
-      detail:'This confirmation only applies to the current image and ticker.'
-    };
-  }
-  const verifiedStatuses = new Set(['verified_match', 'likely_match']);
-  const untrustedStatuses = new Set(['untrusted_context_mirror', 'chart_verification_untrusted']);
-  const mismatchStatuses = new Set([
-    'ticker_mismatch',
-    'price_mismatch',
-    'timeframe_mismatch',
-    'chart_mismatch',
-    'strong_mismatch',
-    'possible_mismatch'
-  ]);
-  const sourceOrSystemStatuses = new Set([
-    'stale_state_detected',
-    'source_mismatch',
-    'verification_failed'
-  ]);
-  if(status === 'source_checking'){
-    return {
-      key:'source_checking',
-      title:'Chart uploaded - checking details',
-      summary:'Chart source is valid. AI chart extraction is running.',
-      detail:'This upload has a valid image source, but no ticker/price/timeframe facts have been extracted yet.'
-    };
-  }
-  if(status === 'likely_match'){
-    return {
-      key:'likely_match',
-      title:expectedTicker ? `Chart likely matches ${expectedTicker}.` : 'Chart likely matches this review.',
-      summary:'Ticker, timeframe, and price match. Chart-region evidence was limited, so treat this as lower confidence.',
-      detail:'No contradictions were found, but chart-native confirmation remains limited.'
-    };
-  }
-  if(['manual_confirmation_required','unknown_chart_identity','insufficient_identity_evidence'].includes(status)){
-    return {
-      key:status,
-      title:'Chart identity needs confirmation',
-      summary:`The app could not confirm this chart matches ${expectedTicker || 'this review'}.`,
-      detail:unreadableReasons.length
-        ? unreadableReasons.join(' ')
-        : `Please confirm or reject it before AI chart analysis runs.`
-    };
-  }
-  if(status === 'verification_failed' && String(safe.reason || '').trim() === 'verification_request_not_started'){
-    return {
-      key:'verification_failed',
-      title:'Chart verification could not start',
-      summary:'The app could not start chart verification for this uploaded chart.',
-      detail:'Confirm the current chart manually or upload another chart.'
-    };
-  }
-  if(chartVerificationSupportsNonBlockingIndicatorPartial({}, safe)){
-    return {
-      key:'partial_indicator_visibility',
-      title:'Chart verification incomplete',
-      summary:'Ticker, timeframe and price match, but some indicators were not clearly readable.',
-      detail:'AI analysis has been skipped until you confirm this chart manually.'
-    };
-  }
-  if(verifiedStatuses.has(status)){
-    return {
-      key:'verified_match',
-      title:baseMatchTitle,
-      summary:'Ticker, price, and chart evidence are consistent enough to continue.',
-      detail:'No major contradictions were found.'
-    };
-  }
-  if(chartVerificationIsBlockedOrMismatchStatus(status)){
-    const detail = mismatchReasons.length
-      ? mismatchReasons.map(reason => {
-        const field = String(reason && reason.field || '').trim().toLowerCase();
-        const expected = reason && reason.expected;
-        const observed = reason && reason.observed;
-        if(field === 'ticker') return `Expected ${expected}; read ${observed}.`;
-        if(field === 'price') return `Expected price near ${expected}; read ${observed}.`;
-        if(field === 'timeframe') return `Expected ${expected}; read ${observed}.`;
-        return `${field}: expected ${expected}; observed ${observed}.`;
-      }).join(' ')
-      : (mismatchStatuses.has(status)
-        ? 'AI analysis has been skipped because the uploaded chart does not appear to match this review.'
-        : 'The chart check could not be trusted because the chart source or verification state was inconsistent. Confirm the chart manually or upload it again.');
-    return {
-      key:sourceOrSystemStatuses.has(status) ? status : 'chart_mismatch',
-      title:sourceOrSystemStatuses.has(status)
-        ? 'Chart verification needs attention'
-        : 'Chart mismatch detected',
-      summary:sourceOrSystemStatuses.has(status)
-        ? 'The chart check could not be trusted because the chart source or verification state was inconsistent.'
-        : 'AI analysis has been skipped because the uploaded chart does not appear to match this review.',
-      detail
-    };
-  }
-  if(untrustedStatuses.has(status)){
-    return {
-      key:'uncertain_match',
-      title:'Chart verification incomplete',
-      summary:'Could not independently verify this chart. Please inspect the image or upload a clearer chart.',
-      detail:'Independent chart-region evidence is required before this upload can be accepted.'
-    };
-  }
-  return {
-    key:'uncertain_match',
-    title:baseUncertainTitle,
-    summary:'We could not auto-read enough chart details. Confirm manually if this is the correct chart.',
-    detail:'Technical details are available below for debugging or review.'
-  };
-}
-
 function chartDecisionClassName(decision){
   const key = String(decision && decision.key || '');
   if(['verified_match', 'likely_match', 'user_confirmed_match', 'manually_verified'].includes(key)) return 'ai-summary-message--success';
@@ -5297,99 +5079,25 @@ function chartDecisionClassName(decision){
   return 'ai-summary-message--warning';
 }
 
-function chartVerificationIsVerifiedStatus(status = ''){
-  return ['verified_match', 'likely_match', 'manually_verified', 'user_confirmed_match'].includes(String(status || ''));
-}
-
-function chartVerificationAllowsAiAnalysisStatus(status = ''){
-  return ['verified_match', 'likely_match', 'user_confirmed_match', 'manually_verified'].includes(String(status || '').trim());
-}
-
-function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false, selectedTrace = null){
-  const key = String(decision && decision.key || '');
-  const title = String(decision && decision.title || '');
-  const summary = String(decision && decision.summary || decision && decision.detail || '');
-  const status = String(trace && trace.status || '');
-  const normalizedQuickStatus = String(quickChartAnalysisStatus || '');
-  const selectedType = String(selectedTrace && (selectedTrace.type || selectedTrace.sourceType || '') || '');
-  const selectedPhase = String(selectedTrace && selectedTrace.phase || '');
-  const hasImmediateDecisionTrace = key === 'source_checking'
-    || key === 'uncertain_match'
-    || ['source_checking', 'uncertain_missing_context', 'partial_context_unverified_chart', 'partial_context_timeframe_uncertain', 'indicator_missing', 'indicator_incomplete', 'uncertain_match'].includes(status);
-  const hasVerifiedTrace = chartVerificationIsVerifiedStatus(key)
-    || chartVerificationIsVerifiedStatus(status);
-  const hasUntrustedTrace = ['untrusted_context_mirror', 'chart_verification_untrusted'].includes(status);
-  const blockedDecisionVariant = chartVerificationBlockedDecisionVariant(key);
-  const hasResolvedTrace = hasVerifiedTrace
-    || hasImmediateDecisionTrace
-    || hasUntrustedTrace
-    || !!blockedDecisionVariant
-    || chartVerificationIsBlockedOrMismatchStatus(status)
-    || selectedPhase === 'merged'
-    || selectedType === 'post_ai_merged';
-  const shouldShowPending = hasChartScreenshot
-    && ['queued', 'running'].includes(normalizedQuickStatus)
-    && !hasResolvedTrace;
-  let panelVariant = 'no_chart';
-  let visibleTitle = 'No chart attached yet.';
-  let visibleBody = '';
-  if(hasChartScreenshot){
-    if(shouldShowPending){
-      panelVariant = 'pending';
-      visibleTitle = 'Checking chart details';
-      visibleBody = 'We are checking the uploaded chart now. This usually resolves within a moment.';
-    }else if(hasUntrustedTrace){
-      panelVariant = 'untrusted';
-      visibleTitle = title || 'Chart verification incomplete';
-      visibleBody = summary || 'Could not independently verify this chart. Please inspect the image or upload a clearer chart.';
-    }else if(hasVerifiedTrace || key === 'verified_match' || key === 'user_confirmed_match'){
-      panelVariant = 'verified';
-      visibleTitle = title || 'Chart verified for this ticker.';
-      visibleBody = summary || '';
-    }else if(blockedDecisionVariant){
-      panelVariant = blockedDecisionVariant;
-      visibleTitle = title || 'Chart mismatch detected.';
-      visibleBody = summary || '';
-    }else{
-      panelVariant = 'review';
-      visibleTitle = title || 'Chart review pending.';
-      visibleBody = summary || 'Chart saved on this device for this ticker.';
-    }
-  }
-  return {
-    panelVariant,
-    panelSource: selectedType || String(trace && trace.source || trace && trace.sourceType || '') || (normalizedQuickStatus || 'direct'),
-    visibleTitle,
-    visibleBody,
-    hasVerifiedTrace,
-    shouldShowPending
-  };
-}
-
-function renderChartWorkspaceStatusLineFromDecision(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false, selectedTrace = null){
-  const status = String(trace && trace.status || '').trim();
-  const key = String(decision && decision.key || '').trim();
-  const normalizedQuickStatus = (
-    (chartVerificationRequiresManualAction(status) || chartVerificationRequiresManualAction(key))
-    && !chartVerificationAllowsAiAnalysisStatus(status)
-    && !chartVerificationAllowsAiAnalysisStatus(key)
-  )
-    ? ''
-    : quickChartAnalysisStatus;
-  const panelState = chartVerificationPanelState(decision, trace, normalizedQuickStatus, hasChartScreenshot, selectedTrace);
-  if(panelState.panelVariant === 'no_chart'){
+function renderReviewChartStatusLine(record = {}, pipeline = null){
+  const item = record && typeof record === 'object' ? record : {};
+  const safePipeline = pipeline && typeof pipeline === 'object' ? normalizeChartPipelineForRender(item, pipeline) : null;
+  if(!safePipeline){
     return '<span class="warntext">No chart attached yet.</span>';
   }
-  if(panelState.panelVariant === 'pending'){
+  const decision = buildSimplifiedChartPipelineDecision(item, safePipeline);
+  const phase = String(safePipeline.phase || '').trim();
+  const body = String(decision.summary || decision.detail || '').trim();
+  if(phase === 'verifying' || phase === 'uploading'){
     return '<span class="warntext">Checking chart details...</span>';
   }
-  if(panelState.panelVariant === 'verified'){
-    return `<span class="ok">${escapeHtml(panelState.visibleTitle || 'Chart verified for this ticker.')}${panelState.visibleBody ? ` ${escapeHtml(panelState.visibleBody)}` : ''}</span>`;
+  if(chartPipelineHasVerifiedIdentity(safePipeline)){
+    return `<span class="ok">${escapeHtml(decision.title || 'Chart looks correct.')}${body ? ` ${escapeHtml(body)}` : ''}</span>`;
   }
-  if(panelState.panelVariant === 'mismatch'){
-    return `<span class="badtext">${escapeHtml(panelState.visibleTitle || 'Chart mismatch detected.')}${panelState.visibleBody ? ` ${escapeHtml(panelState.visibleBody)}` : ''}</span>`;
+  if(phase === 'possible_mismatch'){
+    return `<span class="badtext">${escapeHtml(decision.title || 'Wrong chart detected')}${body ? ` ${escapeHtml(body)}` : ''}</span>`;
   }
-  return `<span class="warntext">${escapeHtml(panelState.visibleTitle || 'Chart review pending.')}${panelState.visibleBody ? ` ${escapeHtml(panelState.visibleBody)}` : ''}</span>`;
+  return `<span class="warntext">${escapeHtml(decision.title || 'Chart check needs attention')}${body ? ` ${escapeHtml(body)}` : ''}</span>`;
 }
 
 function ensureReviewChartLightboxShell(){
@@ -31961,16 +31669,10 @@ function renderReviewWorkspace(options = {}){
     || (chartUiDecision && chartUiDecision.key === 'chart_mismatch')
     || ['chart_mismatch', 'untrusted_context_mirror', 'chart_verification_untrusted', 'uncertain_missing_context'].includes(String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.status || ''))
   );
-  const chartVerificationStatusForReview = String(
-    (chartConsistencyTraceForDisplay && (chartConsistencyTraceForDisplay.status || chartConsistencyTraceForDisplay.renderedStatus))
-    || (chartUiDecision && chartUiDecision.key)
-    || ''
-  ).trim();
   const chartVerificationBlocksAiReview = !!(
     hasVerifiableChart
-    && chartVerificationStatusForReview
-    && !chartVerificationAllowsAiAnalysisStatus(chartVerificationStatusForReview)
-    && chartVerificationRequiresManualAction(chartVerificationStatusForReview)
+    && !chartPipelineAllowsAi(pipelinePhaseForRender)
+    && pipelinePhaseForRender !== 'analysis_failed'
   );
   const aiSuppressionText = String(chartConsistencyTraceForDisplay && chartConsistencyTraceForDisplay.suppressionReason || '')
     || 'AI analysis limited. The uploaded chart may not match the selected ticker, so technical analysis could be unreliable.';
@@ -32257,7 +31959,7 @@ function renderReviewWorkspace(options = {}){
             <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
             <div class="reviewactions reviewactions-secondary"><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button></div>
             ${reviewDebug}
-            <div class="statusline tiny" id="reviewWorkspaceStatus">${renderChartWorkspaceStatusLineFromDecision(chartUiDecision, chartConsistencyTraceForDisplay, pipelinePhaseForRender, hasVerifiableChart)}</div>
+            <div class="statusline tiny" id="reviewWorkspaceStatus">${renderReviewChartStatusLine(record, simplifiedChartPipeline)}</div>
           </details>
         </div>` : ''}
       </details>
@@ -32530,12 +32232,7 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       const liveRecord = getTickerRecord(ticker) || record;
       const currentPipeline = getReviewChartAnalysisPipeline(liveRecord);
       const currentChartDecision = currentPipeline ? buildSimplifiedChartPipelineDecision(liveRecord, currentPipeline) : null;
-      liveStatus.innerHTML = renderChartWorkspaceStatusLineFromDecision(
-        currentChartDecision || {},
-        currentChartDecision && currentChartDecision.trace || {},
-        currentPipeline && currentPipeline.phase || '',
-        true
-      );
+      liveStatus.innerHTML = renderReviewChartStatusLine(liveRecord, currentPipeline || null);
     }
   };
   reader.onerror = () => {
@@ -35963,6 +35660,3 @@ installRuntimeDebugHooks();
 bindTrackPullRefreshGesture();
 registerPwa();
 scheduleNamedDeferredStartupTask('startup_application_boot', startApplication, {idle:false});
-
-
-
