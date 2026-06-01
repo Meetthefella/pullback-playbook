@@ -29809,8 +29809,8 @@ function sanitizeChartAssessorVisibleIdentity(record = {}, analysis = null, char
   const currentChartContext = currentReviewChartContext(item, item.review || {});
   const activeAnalysisRequestId = String(uiState.analysisActiveRequest && uiState.analysisActiveRequest.id || '');
   const expectedTicker = normaliseVisibleTicker(item.ticker || '');
-  const manualConfirmationTrace = item.review && item.review.chartVerificationTrace && typeof item.review.chartVerificationTrace === 'object'
-    ? item.review.chartVerificationTrace
+  const manualConfirmationTrace = item.review && item.review.chartAnalysisPipeline && typeof item.review.chartAnalysisPipeline === 'object'
+    ? item.review.chartAnalysisPipeline
     : null;
   const manualConfirmedImageId = String(
     manualConfirmationTrace && (
@@ -30546,8 +30546,8 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
 
   extractionWarnings.forEach(item => evidence.push(item));
   const manualConfirmation = safeRecord.review && typeof safeRecord.review === 'object'
-    ? safeRecord.review.chartVerificationTrace && typeof safeRecord.review.chartVerificationTrace === 'object'
-      ? safeRecord.review.chartVerificationTrace
+    ? safeRecord.review.chartAnalysisPipeline && typeof safeRecord.review.chartAnalysisPipeline === 'object'
+      ? safeRecord.review.chartAnalysisPipeline
       : null
     : null;
   if(manualConfirmation && manualConfirmation.manualConfirmed === true){
