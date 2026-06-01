@@ -4276,9 +4276,6 @@ function ensureSimplifiedChartPipelineForRender(record = {}, options = {}){
       recoveryAction:'rebuild_or_reset'
     });
   }
-  if(existingMatchesCurrentRequest){
-    return normalizeChartPipelineForRender(item, existing);
-  }
   const expectedFacts = buildChartPipelineExpectedFacts(item);
   const recoveredReadFacts = recoverChartPipelineReadFacts(item, {
     imageId:currentImageId,
@@ -4290,6 +4287,17 @@ function ensureSimplifiedChartPipelineForRender(record = {}, options = {}){
   const recoveredTicker = normaliseVisibleTicker(recoveredReadFacts.ticker || '');
   const mismatch = !!(recoveredTicker && expectedTicker && recoveredTicker !== expectedTicker);
   const verifiedMatch = !!(recoveredTicker && expectedTicker && recoveredTicker === expectedTicker);
+  const existingPhase = String(existing && existing.phase || '').trim();
+  const shouldReuseExistingCurrentRequest = !!(
+    existingMatchesCurrentRequest
+    && !(
+      ['uploading', 'verifying'].includes(existingPhase)
+      && (verifiedMatch || mismatch)
+    )
+  );
+  if(shouldReuseExistingCurrentRequest){
+    return normalizeChartPipelineForRender(item, existing);
+  }
   const nextPipeline = {
     version:1,
     ticker:normalizeTicker(item.ticker || expectedFacts.ticker || ''),
@@ -4400,6 +4408,52 @@ function buildChartPipelineFromVerification(record = {}, options = {}){
     chartImageSource:cloneData(options.chartImageSource || null, null),
     updatedAt:new Date().toISOString()
   };
+}
+
+function buildSimplifiedTickerGateAnalysis(record = {}, sanitizedAnalysis = null, rawAnalysis = null, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const sanitized = sanitizedAnalysis && typeof sanitizedAnalysis === 'object'
+    ? {...sanitizedAnalysis}
+    : {};
+  const raw = rawAnalysis && typeof rawAnalysis === 'object'
+    ? rawAnalysis
+    : {};
+  const expectedTicker = normaliseVisibleTicker(item.ticker || '');
+  const sanitizedTicker = normaliseVisibleTicker(sanitized.visible_ticker || '');
+  const rawTicker = normaliseVisibleTicker(raw.visible_ticker || '');
+  if(sanitizedTicker || !rawTicker || !expectedTicker || rawTicker !== expectedTicker){
+    return sanitized;
+  }
+  const gateAnalysis = {
+    ...sanitized,
+    visible_ticker:rawTicker,
+    visible_ticker_source:String(
+      sanitized.visible_ticker_source
+      || sanitized.ticker_extraction_source
+      || raw.visible_ticker_source
+      || raw.ticker_extraction_source
+      || 'simplified_ticker_gate_raw_match'
+    ).trim(),
+    ticker_extraction_source:String(
+      sanitized.ticker_extraction_source
+      || sanitized.visible_ticker_source
+      || raw.ticker_extraction_source
+      || raw.visible_ticker_source
+      || 'simplified_ticker_gate_raw_match'
+    ).trim(),
+    __simplifiedTickerGateMatched:true
+  };
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[CHART_PIPELINE_TICKER_GATE_OVERRIDE]', {
+      ticker:normalizeTicker(item.ticker || ''),
+      requestId:String(options.requestId || ''),
+      imageId:String(options.imageId || ''),
+      expectedTicker,
+      rawVisibleTicker:rawTicker,
+      sanitizedTicker
+    });
+  }
+  return gateAnalysis;
 }
 
 function upsertReviewChartAnalysisPipeline(record = {}, nextPipeline = {}){
@@ -4765,6 +4819,30 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       });
     }
     const normalized = normalizeAnalysisResult(data.analysis && typeof data.analysis === 'object' ? data.analysis : {}, previousTickerState);
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[CHART_PIPELINE_QUICK_NORMALIZED_RESULT]', {
+        ticker,
+        imageId,
+        requestId,
+        source,
+        sourceKind:String(chartImageSource.sourceKind || ''),
+        originalDimensions:String(chartImageSource.originalDimensions || ''),
+        previewDimensions:String(chartImageSource.previewDimensions || ''),
+        verificationDimensions:String(chartImageSource.verificationSourceDimensions || ''),
+        normalizedVisibleTicker:String(normalized.visible_ticker || ''),
+        normalizedVisibleTimeframe:String(normalized.visible_timeframe || ''),
+        normalizedVisiblePrice:chartVerificationNumberOrNull(normalized.visible_latest_price),
+        normalizedVisibleMa20:chartVerificationNumberOrNull(normalized.visible_ma20),
+        normalizedVisibleMa50:chartVerificationNumberOrNull(normalized.visible_ma50),
+        normalizedVisibleMa200:chartVerificationNumberOrNull(normalized.visible_ma200),
+        normalizedVisibleTickerSource:String(normalized.visible_ticker_source || normalized.ticker_extraction_source || ''),
+        normalizedVisibleTimeframeSource:String(normalized.visible_timeframe_source || normalized.timeframe_extraction_source || ''),
+        normalizedVisiblePriceSource:String(normalized.visible_price_source || normalized.price_extraction_source || ''),
+        normalizedProvenanceVersion:Number.isFinite(Number(normalized.chartIdentityProvenanceVersion))
+          ? Number(normalized.chartIdentityProvenanceVersion)
+          : null
+      });
+    }
     const sanitized = sanitizeChartAssessorVisibleIdentity(
       item,
       normalized,
@@ -4793,7 +4871,13 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
           : null
       });
     }
-    const chartAssessorInput = buildChartAssessorInput(item, sanitized, chartImageSource, requestId);
+    const simplifiedGateAnalysis = buildSimplifiedTickerGateAnalysis(
+      item,
+      sanitized,
+      data.analysis && typeof data.analysis === 'object' ? data.analysis : {},
+      {requestId, imageId}
+    );
+    const chartAssessorInput = buildChartAssessorInput(item, simplifiedGateAnalysis, chartImageSource, requestId);
     item.review.chartVerificationContext = cloneData(chartAssessorInput, null);
     item.review.rawChartFactExtraction = cloneData({
       ticker,
@@ -4813,7 +4897,7 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       imageId,
       requestId,
       source:'chart_pipeline_quick_check',
-      analysis:sanitized,
+      analysis:simplifiedGateAnalysis,
       chartAssessorInput,
       chartImageSource
     });
