@@ -2489,7 +2489,6 @@ function runAiContractAssertions(){
   }
   const verifiedStatusSource = extractFunctionSource(appSource, 'chartVerificationIsVerifiedStatus');
   const allowsAiStatusSource = extractFunctionSource(appSource, 'chartVerificationAllowsAiAnalysisStatus');
-  const explicitProvenanceSource = extractFunctionSource(appSource, 'chartVerificationHasExplicitRegionProvenance');
   const chartDecisionClassNameSource = extractFunctionSource(appSource, 'chartDecisionClassName');
   const chartUiDecisionRenderSource = extractFunctionSource(appSource, 'chartVerificationUiDecision');
   const panelStateSource = extractFunctionSource(appSource, 'chartVerificationPanelState');
@@ -2506,9 +2505,8 @@ function runAiContractAssertions(){
   vm.createContext(panelStateSandbox);
   vm.runInContext(verifiedStatusSource, panelStateSandbox, {filename:'app.js#chartVerificationIsVerifiedStatus'});
   vm.runInContext(allowsAiStatusSource, panelStateSandbox, {filename:'app.js#chartVerificationAllowsAiAnalysisStatus'});
-  vm.runInContext(explicitProvenanceSource, panelStateSandbox, {filename:'app.js#chartVerificationHasExplicitRegionProvenance'});
   vm.runInContext(chartDecisionClassNameSource, panelStateSandbox, {filename:'app.js#chartDecisionClassName'});
-  vm.runInContext('this.chartVerificationIsVerifiedStatus = chartVerificationIsVerifiedStatus; this.chartVerificationAllowsAiAnalysisStatus = chartVerificationAllowsAiAnalysisStatus; this.chartVerificationHasExplicitRegionProvenance = chartVerificationHasExplicitRegionProvenance;', panelStateSandbox);
+  vm.runInContext('this.chartVerificationIsVerifiedStatus = chartVerificationIsVerifiedStatus; this.chartVerificationAllowsAiAnalysisStatus = chartVerificationAllowsAiAnalysisStatus;', panelStateSandbox);
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationSupportsNonBlockingIndicatorPartial'), panelStateSandbox, {filename:'app.js#chartVerificationSupportsNonBlockingIndicatorPartial'});
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationHasCoreIdentityMatch'), panelStateSandbox, {filename:'app.js#chartVerificationHasCoreIdentityMatch'});
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationHasPrimaryIndicatorSupport'), panelStateSandbox, {filename:'app.js#chartVerificationHasPrimaryIndicatorSupport'});
@@ -3041,7 +3039,6 @@ function runAiContractAssertions(){
   const chartPrimaryIndicatorSupportSource = extractFunctionSource(appSource, 'chartVerificationHasPrimaryIndicatorSupport');
   const chartSupportsPartialSource = extractFunctionSource(appSource, 'chartVerificationSupportsNonBlockingIndicatorPartial');
   const chartFastPassSource = extractFunctionSource(appSource, 'buildChartVerificationFastPass');
-  const explicitProvenanceFnSource = extractFunctionSource(appSource, 'chartVerificationHasExplicitRegionProvenance');
   const chartSandbox = {
     normaliseVisibleTicker(value){ return String(value || '').trim().toUpperCase(); },
     chartVerificationNumberOrNull(value){
@@ -3072,7 +3069,6 @@ function runAiContractAssertions(){
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationRequiresManualAction'), chartSandbox, {filename:'app.js#chartVerificationRequiresManualAction'});
   vm.runInContext(extractFunctionSource(appSource, 'chartVerificationShouldShowManualActions'), chartSandbox, {filename:'app.js#chartVerificationShouldShowManualActions'});
   vm.runInContext(chartUiDecisionRenderSource, chartSandbox, {filename:'app.js#chartVerificationUiDecision'});
-  vm.runInContext(explicitProvenanceFnSource, chartSandbox, {filename:'app.js#chartVerificationHasExplicitRegionProvenance'});
   vm.runInContext(chartDecisionClassNameSource, chartSandbox, {filename:'app.js#chartDecisionClassName'});
   vm.runInContext(chartFastPassSource, chartSandbox, {filename:'app.js#buildChartVerificationFastPass'});
   const mirroredFastPass = chartSandbox.buildChartVerificationFastPass({
@@ -3256,7 +3252,6 @@ function runAiContractAssertions(){
     'isStrictChartIdentityProvenanceAnalysis',
     'sanitizeChartAssessorVisibleIdentity',
     'buildChartAssessorInput',
-    'chartVerificationHasExplicitRegionProvenance',
     'chartVerificationIsBlockedOrMismatchStatus',
     'currentReviewChartContext',
     'chartAssessorInputToNormalizedAnalysis',
@@ -3291,7 +3286,6 @@ function runAiContractAssertions(){
     'chartVerificationIsVerifiedStatus',
     'chartVerificationAllowsAiAnalysisStatus',
     'chartVerificationIsBlockedOrMismatchStatus',
-    'chartVerificationHasExplicitRegionProvenance',
     'chartVerificationShouldShowManualActions',
     'getReviewChartVerificationState',
     'analysisDerivedStatesFromRecord'

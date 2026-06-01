@@ -5356,15 +5356,6 @@ function chartVerificationAllowsAiAnalysisStatus(status = ''){
   return ['verified_match', 'likely_match', 'user_confirmed_match', 'manually_verified'].includes(String(status || '').trim());
 }
 
-function chartVerificationHasExplicitRegionProvenance(trace = {}){
-  const safe = trace && typeof trace === 'object' ? trace : {};
-  return !!(
-    safe.chartRegionProvenance === true
-    || (safe.debug && safe.debug.fastPass && safe.debug.fastPass.trustedChartRegionConfirmation === true)
-    || (safe.debug && safe.debug.fastPass && safe.debug.fastPass.chartNativeEvidencePresent === true)
-  );
-}
-
 function chartVerificationPanelState(decision, trace = {}, quickChartAnalysisStatus = '', hasChartScreenshot = false, selectedTrace = null){
   const key = String(decision && decision.key || '');
   const title = String(decision && decision.title || '');
@@ -30352,11 +30343,13 @@ function buildDeterministicChartVerification(record = {}, analysis = null, optio
     && !visibleTicker
     && !visibleTimeframe
     && visiblePrice === null
-    && !chartVerificationHasExplicitRegionProvenance({
-      chart_region_confirmation:String(safeAnalysis.chart_region_confirmation || '').trim(),
-      chart_region_confirmation_source:String(safeAnalysis.chart_region_confirmation_source || '').trim(),
-      chart_match_status:String(safeAnalysis.chart_match_status || '').trim().toLowerCase()
-    })
+    && !(
+      safeAnalysis.chartRegionProvenance === true
+      || String(safeAnalysis.chart_region_confirmation || '').trim()
+      || String(safeAnalysis.chart_region_confirmation_source || '').trim()
+      || (safeAnalysis.debug && safeAnalysis.debug.fastPass && safeAnalysis.debug.fastPass.trustedChartRegionConfirmation === true)
+      || (safeAnalysis.debug && safeAnalysis.debug.fastPass && safeAnalysis.debug.fastPass.chartNativeEvidencePresent === true)
+    )
   );
   if(identityEvidenceInsufficient && typeof console !== 'undefined' && console.warn){
     console.warn('[CHART_IDENTITY_EVIDENCE_INSUFFICIENT]', {
