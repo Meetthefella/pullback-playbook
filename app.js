@@ -27464,6 +27464,10 @@ async function refreshWatchlistRecordsFromSourceOfTruth(options = {}){
 
 async function refreshTrackOnly(options = {}){
   const source = String(options.source || 'unknown');
+  const shouldRunRiskRecalc = options.forceRiskRecalc === true
+    || source === 'risk_settings_change'
+    || source.startsWith('risk_settings_change')
+    || source.includes('_risk_recalc');
   const isPullGestureRefresh = source === 'track_pull_refresh';
   const requestedWorkspace = activeWorkspaceTab?.() || uiState.activeWorkspaceTab || 'scan';
   const wasTrackActive = requestedWorkspace === 'track';
@@ -27554,6 +27558,11 @@ async function refreshTrackOnly(options = {}){
       startupCoordinator.trackNeedsFullRender = false;
       startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
       console.info('[TrackPullRefresh]', {event:'riskRecalcSkipped', source, reason:'no_changed_inputs'});
+    }else if(!shouldRunRiskRecalc){
+      clearTrackPatchNoChangeFlags();
+      startupCoordinator.trackNeedsFullRender = false;
+      startupCoordinator.lastTrackRenderVersion = Number(startupCoordinator.currentWatchlistDataVersion || 0);
+      console.info('[TrackPullRefresh]', {event:'riskRecalcSkipped', source, reason:'non_risk_refresh'});
     }else{
       console.info('[TrackPullRefresh]', {event:'riskRecalcStart', source, reason:'changed_inputs', changedTickersCount});
       try{
