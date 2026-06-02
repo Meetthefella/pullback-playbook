@@ -19451,6 +19451,153 @@ function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract})
   return tradeStatusMetricTextImpl({globalVerdict, displayedPlan, resolvedContract}, reviewPresentationBridgeDeps());
 }
 
+function reviewTechnicalStructureLabel(state){
+  const safe = String(state || '').trim().toLowerCase();
+  if(safe === 'strong') return 'Structure strong';
+  if(safe === 'intact') return 'Structure intact';
+  if(['developing_clean', 'developing'].includes(safe)) return 'Structure developing';
+  if(['weakening', 'weak', 'developing_loose'].includes(safe)) return 'Structure weakening';
+  if(['broken', 'failed', 'dead', 'invalid'].includes(safe)) return 'Structure broken';
+  return 'Structure n/a';
+}
+
+function reviewTechnicalPullbackLabel(state){
+  const safe = String(state || '').trim().toLowerCase();
+  if(!safe || ['none', 'unclear'].includes(safe)) return 'Pullback none';
+  if(safe === 'between_20_50') return 'Pullback between 20/50MA';
+  return `Pullback ${pullbackStateLabel(safe)}`;
+}
+
+function reviewTechnicalBounceLabel({
+  reviewEvidence,
+  bounceState,
+  stabilisationState
+} = {}){
+  const evidence = reviewEvidence && typeof reviewEvidence === 'object' ? reviewEvidence : {};
+  const bounce = String(bounceState || '').trim().toLowerCase();
+  const stabilisation = String(stabilisationState || '').trim().toLowerCase();
+  if(evidence.consolidating) return reviewConsolidationPresentationCopy().technicalLabel;
+  if(bounce === 'confirmed') return 'Bounce confirmed';
+  if(bounce === 'attempt') return 'Bounce attempt';
+  if(['early', 'developing'].includes(bounce) || ['clear', 'present', 'early'].includes(stabilisation)) return 'Stabilising';
+  return 'Bounce none';
+}
+
+function reviewTechnicalVolumeLabel(state){
+  const safe = String(state || '').trim().toLowerCase();
+  if(['supportive', 'strong'].includes(safe)) return 'Volume supportive';
+  if(safe === 'weak') return 'Volume weak';
+  return 'Volume normal';
+}
+
+function reviewTechnicalMarketLabel(record){
+  const marketStatus = String(
+    record && record.meta && record.meta.marketStatus
+    || state.marketStatus
+    || ''
+  ).trim().toLowerCase();
+  if(!marketStatus) return 'Market n/a';
+  if(/above\s*50|supportive|healthy|bullish/.test(marketStatus)) return 'Market supportive';
+  if(/below\s*50|weak|hostile|bearish/.test(marketStatus)) return 'Market weak';
+  return 'Market mixed';
+}
+
+function reviewAiSummaryConflictsWithResolvedState(text, resolvedDisplay = {}){
+  const safe = String(text || '').trim().toLowerCase();
+  if(!safe) return false;
+  const evidence = resolvedDisplay.reviewEvidence && typeof resolvedDisplay.reviewEvidence === 'object'
+    ? resolvedDisplay.reviewEvidence
+    : {};
+  if(evidence.consolidating && /(pullback|pulled back|bounce|stabili[sz]|rebound|20-day|20ma|50-day|50ma)/i.test(safe)){
+    return true;
+  }
+  if(evidence.noBounce && /(bounce attempt|bounce|stabili[sz]|rebound)/i.test(safe) && !/no bounce|needs stronger confirmation|not convincing/i.test(safe)){
+    return true;
+  }
+  if(resolvedDisplay.planUI && resolvedDisplay.planUI.showCapital !== true && /(actionable|entry point|considering an entry|favourable entry|position size|stop loss|first target)/i.test(safe)){
+    return true;
+  }
+  return false;
+}
+
+function buildResolvedReviewDisplayModel({
+  record,
+  simplifiedState,
+  reviewSemanticStatus,
+  derivedStates,
+  displayedPlan,
+  planRealism
+} = {}){
+  const item = normalizeTickerRecord(record || {});
+  const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  const semantic = reviewSemanticStatus && typeof reviewSemanticStatus === 'object' ? reviewSemanticStatus : {};
+  const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const realism = planRealism && typeof planRealism === 'object' ? planRealism : {};
+  const nextActionLabel = String(semantic.nextAction || simplified.actionLabel || '').trim() || 'Review setup inputs';
+  const diagnosticsMessage = String(semantic.blocker || semantic.primaryReason || simplified.mainBlocker || simplified.planStatus || 'No actionable plan yet.').trim();
+  const planUI = {
+    showPlan:semantic.showPlanFields === true,
+    showRR:semantic.showPlanMetrics === true,
+    showCapital:semantic.showCapital === true,
+    showPositionSize:semantic.showCapital === true,
+    diagnosticsMessage
+  };
+  const tradeStatus = semantic.tradeStatus || {line1:diagnosticsMessage || 'No actionable trade yet.', line2:''};
+  const reviewEvidence = reviewCopyEvidence({
+    finalVerdict:simplified.canonicalVerdict,
+    structureState:simplified.structureState || derived.structureState || '',
+    structureEligibility:simplified.structureEligibility || '',
+    pullbackState:derived.pullbackState || derived.pullbackZone || '',
+    setupLocationState:derived.setupLocationState || '',
+    priceabilityState:derived.priceabilityState || '',
+    bounceState:simplified.bounceState || derived.bounceState || '',
+    stabilisationState:derived.stabilisationState || ''
+  });
+  const rrDisplay = planUI.showRR && plan.status === 'valid' && Number.isFinite(realism.raw_rr)
+    ? `${Number(realism.raw_rr).toFixed(2)}R`
+    : (semantic.rrDisplay || 'No actionable plan yet.');
+  const positionCostVisible = planUI.showCapital === true;
+  const positionCostText = positionCostVisible && Number.isFinite(plan.capitalFit && plan.capitalFit.position_cost)
+    ? `${Number(plan.capitalFit.position_cost.toFixed(2))}${plan.capitalFit.quote_currency ? ` ${plan.capitalFit.quote_currency}` : ''}`
+    : '-';
+  const technicalContextLine = [
+    reviewTechnicalStructureLabel(simplified.structureState || derived.structureState || ''),
+    reviewTechnicalPullbackLabel(derived.pullbackZone || derived.pullbackState || ''),
+    reviewTechnicalBounceLabel({
+      reviewEvidence,
+      bounceState:simplified.bounceState || derived.bounceState || '',
+      stabilisationState:derived.stabilisationState || ''
+    }),
+    reviewTechnicalVolumeLabel(simplified.volumeState || derived.volumeState || ''),
+    reviewTechnicalMarketLabel(item)
+  ].join(' | ');
+  const resolvedNarrative = reviewEvidence.consolidating
+    ? [
+      reviewConsolidationPresentationCopy().summary,
+      reviewConsolidationPresentationCopy().blocker,
+      reviewConsolidationPresentationCopy().nextAction
+    ].filter(Boolean).join(' ')
+    : [tradeStatus.line1, tradeStatus.line2].filter(Boolean).join(' ').trim();
+  const planSummary = planUI.showPlan
+    ? (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
+    : (resolvedNarrative || diagnosticsMessage || 'No actionable plan yet.');
+  return {
+    reviewEvidence,
+    planUI,
+    tradeStatus,
+    nextActionLabel,
+    canTradeNowText:nextActionLabel,
+    diagnosticsMessage,
+    rrDisplay,
+    positionCostVisible,
+    positionCostText,
+    technicalContextLine,
+    planSummary,
+    resolvedNarrative:resolvedNarrative || nextActionLabel
+  };
+}
+
 function buildReviewSemanticStatus({
   simplifiedState,
   globalVerdict,
@@ -31673,16 +31820,18 @@ function renderReviewWorkspace(options = {}){
     finalReviewVisualBucket
   });
   const reviewAction = {label:reviewSemanticStatus.nextAction || simplifiedActionLabel || 'Review setup inputs'};
-  const reviewNextActionLabel = String(reviewSemanticStatus.nextAction || simplifiedActionLabel || '').trim() || 'Review setup inputs';
+  const resolvedReviewDisplay = buildResolvedReviewDisplayModel({
+    record,
+    simplifiedState,
+    reviewSemanticStatus,
+    derivedStates,
+    displayedPlan,
+    planRealism
+  });
+  const reviewNextActionLabel = resolvedReviewDisplay.nextActionLabel;
   const reviewBadgeLabel = effectiveReviewBadge.text;
-  const planUI = {
-    showPlan:reviewSemanticStatus.showPlanFields === true,
-    showRR:reviewSemanticStatus.showPlanMetrics === true,
-    showCapital:reviewSemanticStatus.showCapital === true,
-    showPositionSize:reviewSemanticStatus.showCapital === true,
-    diagnosticsMessage:String(reviewSemanticStatus.blocker || reviewSemanticStatus.primaryReason || simplifiedState.mainBlocker || simplifiedState.planStatus || 'No actionable plan yet.').trim()
-  };
-  const tradeStatusText = reviewSemanticStatus.tradeStatus || {line1:planUI.diagnosticsMessage || 'No actionable trade yet.', line2:''};
+  const planUI = resolvedReviewDisplay.planUI;
+  const tradeStatusText = resolvedReviewDisplay.tradeStatus;
   const modifierMarkup = '';
   const scannerPresentation = resolveEmojiPresentation(record, {
     context:'scanner',
@@ -31725,27 +31874,11 @@ function renderReviewWorkspace(options = {}){
   const analysisPanelClass = `reviewanalysispanel ${reviewPanelToneClass}`.trim();
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
-  const rawRrDisplay = planUI.showRR && displayedPlan.status === 'valid' && Number.isFinite(planRealism.raw_rr) ? `${planRealism.raw_rr.toFixed(2)}R` : reviewSemanticStatus.rrDisplay;
+  const rawRrDisplay = resolvedReviewDisplay.rrDisplay;
   const credibleRrDisplay = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
-  const planRealismSummary = planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.';
-  const primaryPlanMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary, {
-    bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
-    terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
-    avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
-    lifecycle:globalVerdict.lifecycle || '',
-    viability:globalVerdict.viability || visualState.viability || '',
-    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
-    explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || visualState.explicit_invalidation_reason || '',
-    hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
-    hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true
-  }) || '').trim();
-  const secondaryPlanMessage = String(nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
-  const dedupedPlanRealismSummary = !planUI.showPlan && primaryPlanMessage && (secondaryPlanMessage === primaryPlanMessage || secondaryPlanMessage === tradeStatusText.line1)
-    ? ''
-    : secondaryPlanMessage;
-  const calcNoteText = planUI.showPlan
-    ? 'Enter planned entry, stop, and first target to calculate size.'
-    : ((primaryPlanMessage && primaryPlanMessage === tradeStatusText.line1) ? '' : primaryPlanMessage);
+  const planRealismSummary = resolvedReviewDisplay.planSummary;
+  const dedupedPlanRealismSummary = planRealismSummary;
+  const calcNoteText = resolvedReviewDisplay.planSummary;
   const chartSourceTrace = buildChartImageSourceTrace(record.review || {});
   const displayedChartContext = reviewDisplayedChartContext(record.review || {});
   const activeChartContext = currentReviewChartContext(record, record.review || {});
@@ -31929,6 +32062,7 @@ function renderReviewWorkspace(options = {}){
   const chartControlsMarkup = hasVerifiableChart
     ? `<details class="compact-details review-chart-controls"><summary>Change chart</summary>${chartControlsFullMarkup}</details>`
     : chartControlsFullMarkup;
+  let aiSummaryConflictDetected = false;
   const aiSummaryPreview = (() => {
     const manualConfirmedMismatch = chartPipelineHasManualConfirmedMismatch(simplifiedChartPipeline || {}, record.ticker || '');
     if(manualConfirmedMismatch){
@@ -31945,11 +32079,22 @@ function renderReviewWorkspace(options = {}){
     if(analysisState.normalizedAnalysis){
       const chartRead = finalDisplayedAnalysisChartRead(record, analysisState.normalizedAnalysis);
       const text = String(chartRead && chartRead.text || '').trim();
+      if(reviewAiSummaryConflictsWithResolvedState(text, resolvedReviewDisplay)){
+        aiSummaryConflictDetected = true;
+        return resolvedReviewDisplay.resolvedNarrative || 'Resolved review state takes precedence over raw AI notes.';
+      }
       return text || 'No AI analysis saved yet.';
     }
     const fallback = String(analysisState.rawAnalysis || '').trim();
+    if(reviewAiSummaryConflictsWithResolvedState(fallback, resolvedReviewDisplay)){
+      aiSummaryConflictDetected = true;
+      return resolvedReviewDisplay.resolvedNarrative || 'Resolved review state takes precedence over raw AI notes.';
+    }
     return fallback || 'No AI analysis saved yet.';
   })();
+  const aiSummaryTitle = aiSummaryConflictDetected
+    ? 'AI Notes'
+    : 'AI Summary';
   if(chartVerificationBlocksAiReview && !loading && !analysisBusy){
     analyseDisabled = true;
     analyseLabel = 'Confirm chart first';
@@ -32034,13 +32179,7 @@ function renderReviewWorkspace(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
   });
-  const technicalContextLine = [
-    `Structure ${String(derivedStates.structureState || 'n/a')}`,
-    `Pullback ${String(derivedStates.pullbackState || derivedStates.pullbackZoneState || 'n/a')}`,
-    `Bounce ${String(derivedStates.bounceState || 'n/a')}`,
-    `Volume ${String(derivedStates.volumeState || 'n/a')}`,
-    `Market ${qualityAdjustments.weakRegimePenalty ? 'weak' : 'supportive'}`
-  ].join(' | ');
+  const technicalContextLine = resolvedReviewDisplay.technicalContextLine;
   if(typeof console !== 'undefined' && console.log){
     console.log('[REVIEW_RENDER_COMMIT]', {
       ticker:record.ticker,
@@ -32106,7 +32245,7 @@ function renderReviewWorkspace(options = {}){
         ${snapshotWarningsMarkup ? `<div class="inline-status review-warning-row">${snapshotWarningsMarkup}</div>` : ''}
         ${downgradeSummary ? `<div class="tiny review-downgrade-badge"><span class="badge avoid">${escapeHtml(downgradeSummary.label)}</span> ${escapeHtml(downgradeSummary.transition)}</div>` : ''}
         <div class="review-decision-primary decision-summary">${escapeHtml(snapshotVerdictLine)}</div>
-        <div class="tiny review-next-action-inline">Action guidance: ${escapeHtml(reviewNextActionLabel)}</div>
+        <div class="tiny review-next-action-inline" id="reviewNextActionInline">Action guidance: ${escapeHtml(reviewNextActionLabel)}</div>
       </div>
       <div class="reviewchartpanel reviewchartpanel--compact">
         ${chartGuidance}
@@ -32134,7 +32273,7 @@ function renderReviewWorkspace(options = {}){
         <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(planUI.showRR ? rrDisplayClass(planRealism.raw_rr) : '')}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
         <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)} ${planUI.showCapital ? '' : 'review-hidden'}" id="capitalFitMetric"><div>Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitMetricText(capitalComfort.label))}</div></div>
         <div class="stat ${planUI.showPositionSize ? '' : 'review-hidden'}" id="positionSizeStat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
-        <div class="stat ${planUI.showPlan ? '' : 'review-hidden'}" id="positionCostStat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(positionCostText)}</div></div>
+        <div class="stat ${resolvedReviewDisplay.positionCostVisible ? '' : 'review-hidden'}" id="positionCostStat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(resolvedReviewDisplay.positionCostText)}</div></div>
         <div class="stat review-hidden"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
         <div class="stat review-hidden"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div>
         <div class="stat review-hidden"><div>Max Loss</div><div class="big">${escapeHtml(formatGbp(currentMaxLoss()))}</div></div>
@@ -32146,11 +32285,11 @@ function renderReviewWorkspace(options = {}){
     </div>
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
       <div class="reviewsectionhead"><strong>Technical Context</strong></div>
-      <div class="summary review-technical-line">${escapeHtml(technicalContextLine)}</div>
+      <div class="summary review-technical-line" id="reviewTechnicalContextLine">${escapeHtml(technicalContextLine)}</div>
       <div class="review-action-row review-action-row--top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
       ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
       <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
-        <summary>AI Summary</summary>
+        <summary id="reviewAiSummaryTitle">${escapeHtml(aiSummaryTitle)}</summary>
         <div class="tiny review-ai-preview" id="reviewAiSummaryPreview">${escapeHtml(aiSummaryPreview)}</div>
         <div class="tiny review-ai-overflow-hint" id="reviewAiSummaryOverflowHint" hidden>Scroll for more</div>
       </details>
@@ -32200,7 +32339,7 @@ function renderReviewWorkspace(options = {}){
         <button class="secondary" id="saveReviewBtn">Save Review</button>
       </div>
       <div class="review-action-row review-action-row--watchlist" data-advanced-debug-trigger="review-watchlist"><button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button></div>
-      <div class="tiny review-next-action-primary">Can I trade this now? ${escapeHtml(reviewNextActionLabel)}</div>
+      <div class="tiny review-next-action-primary" id="reviewNextActionPrimary">Can I trade this now? ${escapeHtml(reviewNextActionLabel)}</div>
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}
       ${paperTradeHasRuntimeStatus ? `<div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>` : ''}
@@ -32898,14 +33037,15 @@ function syncPlanDisplayMeta(options = {}){
     displayedPlan,
     planRealism
   });
-  const decisionSummary = String(reviewSemanticStatus.primaryReason || metaSimplifiedState.mainBlocker || metaSimplifiedState.actionLabel || '').trim();
-  const planUI = {
-    showPlan:reviewSemanticStatus.showPlanFields === true,
-    showRR:reviewSemanticStatus.showPlanMetrics === true,
-    showCapital:reviewSemanticStatus.showCapital === true,
-    showPositionSize:reviewSemanticStatus.showCapital === true,
-    diagnosticsMessage:String(reviewSemanticStatus.blocker || reviewSemanticStatus.primaryReason || metaSimplifiedState.mainBlocker || metaSimplifiedState.planStatus || 'No actionable plan yet.').trim()
-  };
+  const resolvedReviewDisplay = buildResolvedReviewDisplayModel({
+    record,
+    simplifiedState:metaSimplifiedState,
+    reviewSemanticStatus,
+    derivedStates,
+    displayedPlan,
+    planRealism
+  });
+  const planUI = resolvedReviewDisplay.planUI;
   if(planStateBox) planStateBox.value = planUiState.label;
   const planQuality = planQualityForRr(displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null);
   if(planQualityBox) planQualityBox.value = planQuality || 'N/A';
@@ -32924,30 +33064,24 @@ function syncPlanDisplayMeta(options = {}){
       : 'Off';
   }
   if($('tradeStatusBox')){
-    const tradeStatusText = reviewSemanticStatus.tradeStatus || {line1:planUI.diagnosticsMessage || 'No actionable trade yet.', line2:''};
-    $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
+    $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(resolvedReviewDisplay.tradeStatus);
   }
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
   if($('capitalFitMetric')) $('capitalFitMetric').classList.toggle('review-hidden', !planUI.showCapital);
   if($('positionSizeStat')) $('positionSizeStat').classList.toggle('review-hidden', !planUI.showPositionSize);
-  if($('positionCostStat')) $('positionCostStat').classList.toggle('review-hidden', !planUI.showPlan);
+  if($('positionCostStat')) $('positionCostStat').classList.toggle('review-hidden', !resolvedReviewDisplay.positionCostVisible);
   if($('fxBasisBox')) $('fxBasisBox').classList.toggle('review-hidden', !planUI.showCapital);
+  if($('positionCostBox')) $('positionCostBox').textContent = resolvedReviewDisplay.positionCostText;
+  if($('reviewNextActionInline')) $('reviewNextActionInline').textContent = `Action guidance: ${resolvedReviewDisplay.nextActionLabel}`;
+  if($('reviewNextActionPrimary')) $('reviewNextActionPrimary').textContent = `Can I trade this now? ${resolvedReviewDisplay.canTradeNowText}`;
+  if($('reviewTechnicalContextLine')) $('reviewTechnicalContextLine').textContent = resolvedReviewDisplay.technicalContextLine;
+  if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
+  if($('rrValue')){
+    $('rrValue').textContent = resolvedReviewDisplay.rrDisplay || 'No actionable plan yet.';
+    $('rrValue').className = `big ${planUI.showRR ? rrDisplayClass(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
+  }
   if($('planRealismSummary')){
-    const calcMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, decisionSummary, {
-      bounce_state:derivedStates.bounceState || (record && record.setup && record.setup.bounceState),
-      terminal_avoid_applied:visualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
-      avoid_trigger_source:globalVerdict.avoid_trigger_source || visualState.avoid_trigger_source || '',
-      lifecycle:globalVerdict.lifecycle || '',
-      viability:globalVerdict.viability || visualState.viability || '',
-      rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
-      explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || visualState.explicit_invalidation_reason || '',
-      hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
-      hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true
-    }) || '').trim();
-    const realismMessage = String(nonPlanRealismSummaryText(planUI.diagnosticsMessage, decisionSummary) || '').trim();
-    $('planRealismSummary').textContent = planUI.showPlan
-      ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
-      : (calcMessage && realismMessage === calcMessage ? '' : realismMessage);
+    $('planRealismSummary').textContent = resolvedReviewDisplay.planSummary;
   }
 }
 
@@ -33122,14 +33256,15 @@ function calculate(options = {}){
     displayedPlan,
     planRealism
   });
-  const plannerDecisionSummary = String(plannerSemanticStatus.primaryReason || plannerSimplifiedState.mainBlocker || plannerSimplifiedState.actionLabel || '').trim();
-  const planUI = {
-    showPlan:plannerSemanticStatus.showPlanFields === true,
-    showRR:plannerSemanticStatus.showPlanMetrics === true,
-    showCapital:plannerSemanticStatus.showCapital === true,
-    showPositionSize:plannerSemanticStatus.showCapital === true,
-    diagnosticsMessage:String(plannerSemanticStatus.blocker || plannerSemanticStatus.primaryReason || plannerSimplifiedState.mainBlocker || plannerSimplifiedState.planStatus || 'No actionable plan yet.').trim()
-  };
+  const resolvedReviewDisplay = buildResolvedReviewDisplayModel({
+    record:activeRecord || {},
+    simplifiedState:plannerSimplifiedState,
+    reviewSemanticStatus:plannerSemanticStatus,
+    derivedStates:plannerDerivedStates,
+    displayedPlan,
+    planRealism
+  });
+  const planUI = resolvedReviewDisplay.planUI;
   $('rewardPerShareBox').textContent = Number.isFinite(displayedPlan.rewardPerShare) ? displayedPlan.rewardPerShare.toFixed(2) : '-';
   const riskFitLabel = riskStatusLabel(displayedPlan.status === 'valid' ? displayedPlan.riskFit.risk_status : (displayedPlan.status === 'invalid' ? 'invalid_plan' : 'plan_missing'));
   const capitalUsage = capitalUsageAdvisory({
@@ -33154,23 +33289,23 @@ function calculate(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalComfort.label
   });
-  const tradeStatusText = plannerSemanticStatus.tradeStatus || {line1:planUI.diagnosticsMessage || 'No actionable trade yet.', line2:''};
+  const tradeStatusText = resolvedReviewDisplay.tradeStatus;
   if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !planUI.showPlan);
   if($('capitalFitMetric')){
     $('capitalFitMetric').className = `stat stat--capital-fit ${capitalFitVisual.className}${planUI.showCapital ? '' : ' review-hidden'}`.trim();
   }
   if($('positionSizeStat')) $('positionSizeStat').classList.toggle('review-hidden', !planUI.showPositionSize);
-  if($('positionCostStat')) $('positionCostStat').classList.toggle('review-hidden', !planUI.showPlan);
+  if($('positionCostStat')) $('positionCostStat').classList.toggle('review-hidden', !resolvedReviewDisplay.positionCostVisible);
   if($('fxBasisBox')) $('fxBasisBox').classList.toggle('review-hidden', !planUI.showCapital);
   if($('capitalFitBox')) $('capitalFitBox').textContent = capitalFitMetricText(capitalComfort.label);
   if($('fxBasisBox')) $('fxBasisBox').textContent = capitalComfort.note || 'No FX conversion note.';
   if($('capitalCheckBox')) $('capitalCheckBox').textContent = capitalComfort.note || 'Clear';
-  if($('positionCostBox')){
-    $('positionCostBox').textContent = Number.isFinite(displayedPlan.capitalFit.position_cost)
-      ? `${Number(displayedPlan.capitalFit.position_cost.toFixed(2))}${displayedPlan.capitalFit.quote_currency ? ` ${displayedPlan.capitalFit.quote_currency}` : ''}`
-      : '-';
-  }
+  if($('positionCostBox')) $('positionCostBox').textContent = resolvedReviewDisplay.positionCostText;
+  if($('reviewNextActionInline')) $('reviewNextActionInline').textContent = `Action guidance: ${resolvedReviewDisplay.nextActionLabel}`;
+  if($('reviewNextActionPrimary')) $('reviewNextActionPrimary').textContent = `Can I trade this now? ${resolvedReviewDisplay.canTradeNowText}`;
+  if($('reviewTechnicalContextLine')) $('reviewTechnicalContextLine').textContent = resolvedReviewDisplay.technicalContextLine;
+  if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
   if($('targetReviewStateBox')) $('targetReviewStateBox').value = targetReviewStateLabel(executionState.targetReviewState);
   if($('targetAlertBox')){
     $('targetAlertBox').value = executionState.exitMode === 'dynamic_exit'
@@ -33182,46 +33317,17 @@ function calculate(options = {}){
   if($('optimisticTargetBox')) $('optimisticTargetBox').value = planRealism.optimistic_target_flag ? 'Yes' : 'No';
   if($('targetAssessmentBox')) $('targetAssessmentBox').value = planRealism.credible_target_assessment || 'N/A';
   if($('planRealismSummary')){
-    const calcMessage = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary, {
-      bounce_state:plannerDerivedStates.bounceState || (activeRecord && activeRecord.setup && activeRecord.setup.bounceState),
-      terminal_avoid_applied:plannerVisualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
-      avoid_trigger_source:globalVerdict.avoid_trigger_source || plannerVisualState.avoid_trigger_source || '',
-      lifecycle:globalVerdict.lifecycle || '',
-      viability:globalVerdict.viability || plannerVisualState.viability || '',
-      rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
-      explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || plannerVisualState.explicit_invalidation_reason || '',
-      hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
-      hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true
-    }) || '').trim();
-    const realismMessage = String(nonPlanRealismSummaryText(planUI.diagnosticsMessage, plannerDecisionSummary) || '').trim();
-    $('planRealismSummary').textContent = planUI.showPlan
-      ? (planRealism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
-      : (calcMessage && realismMessage === calcMessage ? '' : realismMessage);
+    $('planRealismSummary').textContent = resolvedReviewDisplay.planSummary;
   }
   if(!planUI.showPlan){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = plannerSemanticStatus.rrDisplay || 'No actionable plan yet.';
+    $('rrValue').textContent = resolvedReviewDisplay.rrDisplay || 'No actionable plan yet.';
     $('rrValue').className = 'big';
     if($('plannerBox')){
       const plannerBox = $('plannerBox');
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
       plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
-    }
-    if($('calcNote')){
-      const tradeLine = String(tradeStatusText && tradeStatusText.line1 || '').trim();
-      const calcLine = String(nonPlanCalcNoteText(planUI.diagnosticsMessage, plannerDecisionSummary, {
-        bounce_state:plannerDerivedStates.bounceState || (activeRecord && activeRecord.setup && activeRecord.setup.bounceState),
-        terminal_avoid_applied:plannerVisualState.terminal_avoid_applied === true || globalVerdict.terminal_avoid_applied === true,
-        avoid_trigger_source:globalVerdict.avoid_trigger_source || plannerVisualState.avoid_trigger_source || '',
-        lifecycle:globalVerdict.lifecycle || '',
-        viability:globalVerdict.viability || plannerVisualState.viability || '',
-        rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
-        explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason || plannerVisualState.explicit_invalidation_reason || '',
-        hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
-        hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true
-      }) || '').trim();
-      $('calcNote').textContent = (calcLine && calcLine === tradeLine) ? '' : calcLine;
     }
     return;
   }
@@ -33235,7 +33341,7 @@ function calculate(options = {}){
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
       plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
-    if($('calcNote')) $('calcNote').textContent = 'Add planned entry, stop, and first target to complete the trade plan.';
+    if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
     return;
   }
   if(displayedPlan.status === 'invalid'){
@@ -33248,31 +33354,19 @@ function calculate(options = {}){
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
       plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
-    if($('calcNote')) $('calcNote').textContent = 'Planned entry, stop, and first target must form a valid long plan.';
+    if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
     return;
   }
   $('riskPerShare').textContent = Number.isFinite(displayedPlan.riskFit.risk_per_share) ? displayedPlan.riskFit.risk_per_share.toFixed(2) : '-';
   $('positionSize').textContent = displayedPlan.riskFit.position_size > 0 ? `${displayedPlan.riskFit.position_size} shares` : '0 shares';
-  $('rrValue').textContent = planUI.showRR && displayedPlan.rewardRisk.valid && Number.isFinite(displayedPlan.rewardRisk.rrRatio) ? `${displayedPlan.rewardRisk.rrRatio.toFixed(2)}R` : (plannerSemanticStatus.rrDisplay || '-');
+  $('rrValue').textContent = resolvedReviewDisplay.rrDisplay || '-';
   $('rrValue').className = `big ${planUI.showRR ? rrDisplayClass(displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
   if($('plannerBox')){
     const plannerBox = $('plannerBox');
     const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
     plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
   }
-  if($('calcNote')){
-    $('calcNote').textContent = planRealism.plan_realism_reason || (displayedPlan.riskFit.risk_status === 'too_wide'
-      ? `Stop would be too wide for ${formatPound(state.userRiskPerTrade || currentMaxLoss())} risk.`
-      : (displayedPlan.capitalFit.capital_fit === 'too_expensive'
-        ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but the position cost is above the current account size.`
-        : (displayedPlan.capitalFit.capital_fit === 'too_heavy'
-          ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital concentration is too high for this account size.`
-          : (displayedPlan.capitalFit.capital_fit === 'heavy'
-            ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital usage is heavy for this account size.`
-            : (displayedPlan.capitalFit.capital_fit === 'unknown'
-              ? `Risk fits ${formatGbp(displayedPlan.riskFit.max_loss)}, but capital affordability is unavailable. ${displayedPlan.capitalFit.capital_note}`
-              : `Current max loss is ${formatGbp(displayedPlan.riskFit.max_loss)}. Capital usage is ${capitalFitLabel(displayedPlan.capitalFit.capital_fit).toLowerCase()}.`)))));
-  }
+  if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
 }
 
 async function copyText(text){
