@@ -2794,7 +2794,9 @@ function runAiContractAssertions(){
   if(!simplifiedRunSource.includes('buildSimplifiedTickerGateAnalysis(')
     || !simplifiedRunSource.includes('[CHART_PIPELINE_MISMATCH_GATE_OVERRIDE]')
     || !simplifiedRunSource.includes("normalizedVisibleTicker !== expectedVisibleTicker")
-    || !simplifiedRunSource.includes('upsertReviewChartAnalysisPipeline(item, nextPipeline);')
+    || !(simplifiedRunSource.includes('upsertReviewChartAnalysisPipeline(verifiedRecord, nextPipeline);')
+      || simplifiedRunSource.includes('upsertReviewChartAnalysisPipeline(currentRecord, nextPipeline);')
+      || simplifiedRunSource.includes('upsertReviewChartAnalysisPipeline(item, nextPipeline);'))
     || !simplifiedRunSource.includes("if(nextPipeline.phase === 'verified')")){
     throw new Error('Simplified chart verification must commit terminal match and mismatch results directly from the simplified quick path.');
   }

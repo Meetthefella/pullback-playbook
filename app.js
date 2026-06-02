@@ -4638,20 +4638,22 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
   const item = record && typeof record === 'object' ? record : null;
   if(!item || !item.review) return null;
   const ticker = normalizeTicker(item.ticker || '');
+  const resolveLiveRecord = () => getTickerRecord(ticker) || item;
+  const liveRecord = resolveLiveRecord();
   const imageId = String(chartImageIdForReview(item.review || {}) || '');
   if(!ticker || !imageId) return null;
-  const existing = getReviewChartAnalysisPipeline(item) || {};
+  const existing = getReviewChartAnalysisPipeline(liveRecord) || {};
   const requestId = String(options.requestId || existing.requestId || nextReviewAiAnalysisRequestId());
   const source = String(options.source || 'chart_upload');
-  const chartImageSource = buildChartImageSourceTrace(item.review || {});
-  const card = tickerRecordToLegacyCard(item);
+  const chartImageSource = buildChartImageSourceTrace(liveRecord.review || {});
+  const card = tickerRecordToLegacyCard(liveRecord);
   if(options.phase){
-    upsertReviewChartAnalysisPipeline(item, {
+    upsertReviewChartAnalysisPipeline(liveRecord, {
       imageId,
       requestId,
       source,
       phase:String(options.phase || 'verifying'),
-      expectedFacts:buildChartPipelineExpectedFacts(item),
+      expectedFacts:buildChartPipelineExpectedFacts(liveRecord),
       readFacts:existing.readFacts || {},
       evidence:Array.isArray(existing.evidence) ? existing.evidence.slice() : [],
       missing:Array.isArray(existing.missing) ? existing.missing.slice() : ['visible ticker', 'visible timeframe', 'latest price'],
@@ -4665,12 +4667,12 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
   }
   const endpoints = analysisEndpoints();
   if(!endpoints.length){
-    upsertReviewChartAnalysisPipeline(item, {
+    upsertReviewChartAnalysisPipeline(liveRecord, {
       imageId,
       requestId,
       source,
       phase:'cant_read',
-      expectedFacts:buildChartPipelineExpectedFacts(item),
+      expectedFacts:buildChartPipelineExpectedFacts(liveRecord),
       readFacts:{},
       missing:['visible ticker', 'visible timeframe', 'latest price'],
       evidence:['AI analysis endpoint is not configured.'],
@@ -4680,9 +4682,9 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
     });
     commitTickerState();
     renderReviewWorkspace({source:'chart_pipeline_no_endpoint', requestedTicker:ticker});
-    return getReviewChartAnalysisPipeline(item);
+    return getReviewChartAnalysisPipeline(resolveLiveRecord());
   }
-  const chartPayload = chartImageForAnalysis(item.review || {});
+  const chartPayload = chartImageForAnalysis(liveRecord.review || {});
   if(!chartPayload.chartRef){
     return null;
   }
@@ -4701,12 +4703,13 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       buildErrorMessage:(status, data, fallback) => buildAnalysisErrorMessage(status, data, fallback)
     });
   }catch(error){
-    upsertReviewChartAnalysisPipeline(item, {
+    const currentRecord = resolveLiveRecord();
+    upsertReviewChartAnalysisPipeline(currentRecord, {
       imageId,
       requestId,
       source,
       phase:'cant_read',
-      expectedFacts:buildChartPipelineExpectedFacts(item),
+      expectedFacts:buildChartPipelineExpectedFacts(currentRecord),
       readFacts:{},
       missing:['visible ticker', 'visible timeframe', 'latest price'],
       evidence:[String(error && error.message || 'Chart verification failed.')],
@@ -4716,19 +4719,20 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
     });
     commitTickerState();
     renderReviewWorkspace({source:'chart_pipeline_verify_exception', requestedTicker:ticker});
-    return getReviewChartAnalysisPipeline(item);
+    return getReviewChartAnalysisPipeline(resolveLiveRecord());
   }
-  const currentImageId = String(chartImageIdForReview(item.review || {}) || '');
+  const currentRecord = resolveLiveRecord();
+  const currentImageId = String(chartImageIdForReview(currentRecord.review || {}) || '');
   if(currentImageId !== imageId){
     return null;
   }
   if(result.status !== 'ok'){
-    upsertReviewChartAnalysisPipeline(item, {
+    upsertReviewChartAnalysisPipeline(currentRecord, {
       imageId,
       requestId,
       source,
       phase:'cant_read',
-      expectedFacts:buildChartPipelineExpectedFacts(item),
+      expectedFacts:buildChartPipelineExpectedFacts(currentRecord),
       readFacts:{},
       missing:['visible ticker', 'visible timeframe', 'latest price'],
       evidence:[String(result.errorMessage || 'Chart verification failed.')],
@@ -4738,9 +4742,10 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
     });
     commitTickerState();
     renderReviewWorkspace({source:'chart_pipeline_verify_failed', requestedTicker:ticker});
-    return getReviewChartAnalysisPipeline(item);
+    return getReviewChartAnalysisPipeline(resolveLiveRecord());
   }
   try{
+    const verifiedRecord = resolveLiveRecord();
     const data = result.data && typeof result.data === 'object' ? result.data : {};
     if(typeof console !== 'undefined' && console.info){
       console.info('[CHART_PIPELINE_QUICK_RAW_RESULT]', {
@@ -4786,15 +4791,15 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       });
     }
     const normalizedVisibleTicker = normaliseVisibleTicker(normalized.visible_ticker || '');
-    const expectedVisibleTicker = normaliseVisibleTicker(item.ticker || '');
+    const expectedVisibleTicker = normaliseVisibleTicker(verifiedRecord.ticker || '');
     if(normalizedVisibleTicker && expectedVisibleTicker && normalizedVisibleTicker !== expectedVisibleTicker){
       const mismatchGateAnalysis = {
         ...normalized,
         visible_ticker:normalizedVisibleTicker,
         __simplifiedTickerMismatchDetected:true
       };
-      const chartAssessorInput = buildChartAssessorInput(item, mismatchGateAnalysis, chartImageSource, requestId);
-      const nextPipeline = buildChartPipelineFromVerification(item, {
+      const chartAssessorInput = buildChartAssessorInput(verifiedRecord, mismatchGateAnalysis, chartImageSource, requestId);
+      const nextPipeline = buildChartPipelineFromVerification(verifiedRecord, {
         imageId,
         requestId,
         source:'chart_pipeline_quick_check',
@@ -4817,13 +4822,13 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
           phase:String(nextPipeline.phase || '')
         });
       }
-      upsertReviewChartAnalysisPipeline(item, nextPipeline);
+      upsertReviewChartAnalysisPipeline(verifiedRecord, nextPipeline);
       commitTickerState();
       renderReviewWorkspace({source:'chart_pipeline_mismatch_verified', requestedTicker:ticker});
-      return getReviewChartAnalysisPipeline(item);
+      return getReviewChartAnalysisPipeline(resolveLiveRecord());
     }
     const sanitized = sanitizeChartAssessorVisibleIdentity(
-      item,
+      verifiedRecord,
       normalized,
       chartImageSource,
       requestId,
@@ -4851,13 +4856,13 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       });
     }
     const simplifiedGateAnalysis = buildSimplifiedTickerGateAnalysis(
-      item,
+      verifiedRecord,
       sanitized,
       data.analysis && typeof data.analysis === 'object' ? data.analysis : {},
       {requestId, imageId}
     );
-    const chartAssessorInput = buildChartAssessorInput(item, simplifiedGateAnalysis, chartImageSource, requestId);
-    const nextPipeline = buildChartPipelineFromVerification(item, {
+    const chartAssessorInput = buildChartAssessorInput(verifiedRecord, simplifiedGateAnalysis, chartImageSource, requestId);
+    const nextPipeline = buildChartPipelineFromVerification(verifiedRecord, {
       imageId,
       requestId,
       source:'chart_pipeline_quick_check',
@@ -4873,17 +4878,17 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
         ? Number(sanitized.chartIdentityProvenanceVersion)
         : null
     };
-    upsertReviewChartAnalysisPipeline(item, nextPipeline);
+    upsertReviewChartAnalysisPipeline(verifiedRecord, nextPipeline);
     commitTickerState();
     renderReviewWorkspace({source:'chart_pipeline_verified', requestedTicker:ticker});
     if(nextPipeline.phase === 'verified'){
-      runSimplifiedChartFullAnalysis(item, {
+      runSimplifiedChartFullAnalysis(verifiedRecord, {
         source:'chart_pipeline_auto',
         requestId,
         manualConfirmed:false
       }).catch(() => {});
     }
-    return getReviewChartAnalysisPipeline(item);
+    return getReviewChartAnalysisPipeline(resolveLiveRecord());
   }catch(error){
     if(typeof console !== 'undefined' && console.error){
       console.error('[CHART_PIPELINE_QUICK_RESOLUTION_FAILED]', {
@@ -4894,13 +4899,14 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
         message:String(error && error.message || 'Chart verification resolution failed.')
       });
     }
-    upsertReviewChartAnalysisPipeline(item, {
+    const failedRecord = resolveLiveRecord();
+    upsertReviewChartAnalysisPipeline(failedRecord, {
       imageId,
       requestId,
       source,
       phase:'cant_read',
-      expectedFacts:buildChartPipelineExpectedFacts(item),
-      readFacts:recoverChartPipelineReadFacts(item, getReviewChartAnalysisPipeline(item) || {}),
+      expectedFacts:buildChartPipelineExpectedFacts(failedRecord),
+      readFacts:recoverChartPipelineReadFacts(failedRecord, getReviewChartAnalysisPipeline(failedRecord) || {}),
       missing:['visible ticker'],
       evidence:[String(error && error.message || 'Chart verification resolution failed.')],
       aiAllowed:false,
@@ -4910,7 +4916,7 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
     });
     commitTickerState();
     renderReviewWorkspace({source:'chart_pipeline_resolution_failed', requestedTicker:ticker});
-    return getReviewChartAnalysisPipeline(item);
+    return getReviewChartAnalysisPipeline(resolveLiveRecord());
   }
 }
 
@@ -4918,14 +4924,16 @@ async function runSimplifiedChartFullAnalysis(record = {}, options = {}){
   const item = record && typeof record === 'object' ? record : null;
   if(!item || !item.review) return false;
   const ticker = normalizeTicker(item.ticker || '');
-  const pipeline = getReviewChartAnalysisPipeline(item);
+  const resolveLiveRecord = () => getTickerRecord(ticker) || item;
+  const liveRecord = resolveLiveRecord();
+  const pipeline = getReviewChartAnalysisPipeline(liveRecord);
   if(!ticker || !pipeline) return false;
   if(!chartPipelineHasVerifiedIdentity(pipeline)){
     renderReviewWorkspace({source:'chart_pipeline_analysis_blocked', requestedTicker:ticker});
     return false;
   }
-  const imageId = String(chartImageIdForReview(item.review || {}) || '');
-  upsertReviewChartAnalysisPipeline(item, {
+  const imageId = String(chartImageIdForReview(liveRecord.review || {}) || '');
+  upsertReviewChartAnalysisPipeline(liveRecord, {
     ...pipeline,
     imageId,
     requestId:String(options.requestId || pipeline.requestId || ''),
@@ -4943,9 +4951,9 @@ async function runSimplifiedChartFullAnalysis(record = {}, options = {}){
       skipVerificationGate:true,
       requestId:String(options.requestId || pipeline.requestId || '')
     });
-    const liveRecord = getTickerRecord(ticker) || item;
-    const analysisState = getReviewAnalysisState(liveRecord);
-    upsertReviewChartAnalysisPipeline(liveRecord, {
+    const refreshedRecord = resolveLiveRecord();
+    const analysisState = getReviewAnalysisState(refreshedRecord);
+    upsertReviewChartAnalysisPipeline(refreshedRecord, {
       phase:analysisState && analysisState.normalizedAnalysis ? 'analysis_complete' : 'verified',
       aiAllowed:true,
       updatedAt:new Date().toISOString()
@@ -4954,7 +4962,7 @@ async function runSimplifiedChartFullAnalysis(record = {}, options = {}){
     renderReviewWorkspace({source:'chart_pipeline_analysis_complete', requestedTicker:ticker});
     return true;
   }catch(error){
-    upsertReviewChartAnalysisPipeline(item, {
+    upsertReviewChartAnalysisPipeline(resolveLiveRecord(), {
       phase:'analysis_failed',
       aiAllowed:false,
       evidence:[String(error && error.message || 'AI analysis failed.')],
