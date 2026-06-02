@@ -67,6 +67,17 @@ html.no-smooth-scroll{scroll-behavior:auto !important}
 body.track-restore-pending [data-workspace-card="track"]{
   visibility:hidden;
 }
+body.track-restore-pending .workspace-area{
+  position:relative;
+}
+body.track-restore-pending [data-workspace-card="track"].is-active-workspace{
+  position:absolute;
+  inset:0;
+  width:100%;
+  max-width:100%;
+  margin:0;
+  pointer-events:none;
+}
 body.track-restore-pending .app-workspace-card.is-visual-hold-workspace{
   position:fixed;
   inset:0;

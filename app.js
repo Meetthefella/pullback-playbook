@@ -4106,6 +4106,13 @@ function chartPipelineHasVerifiedIdentity(pipeline = {}){
   return safe.manualConfirmed === true || (!!verifiedReadTicker && safe.verifiedMatch === true);
 }
 
+function chartPipelineHasDetectedTickerMatch(pipeline = {}){
+  const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  const readFacts = safe.readFacts && typeof safe.readFacts === 'object' ? safe.readFacts : {};
+  const detectedTicker = normaliseVisibleTicker(readFacts.ticker || '');
+  return !!(detectedTicker && safe.verifiedMatch === true);
+}
+
 function mergeChartPipelineReadFacts(primary = {}, fallback = {}){
   const first = primary && typeof primary === 'object' ? primary : {};
   const second = fallback && typeof fallback === 'object' ? fallback : {};
@@ -4420,6 +4427,7 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
   const reason = String(safe.reason || '').trim();
   const expectedTicker = normalizeTicker(item.ticker || expected.ticker || '');
   const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(safe);
+  const hasDetectedTickerMatch = chartPipelineHasDetectedTickerMatch(safe);
   const status = phase === 'analysis_failed'
     ? (hasVerifiedIdentity
       ? (safe.manualConfirmed === true ? 'user_confirmed_match' : 'verified_match')
@@ -4433,7 +4441,9 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
       : (phase === 'analysis_failed' && hasVerifiedIdentity
         ? 'Chart verified, but AI analysis failed. Try again.'
         : ((phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete')
-          ? `Quick chart verification matched the uploaded chart to ${expectedTicker || 'the selected ticker'}.`
+          ? (safe.manualConfirmed === true && !hasDetectedTickerMatch
+            ? 'Chart was manually confirmed for this review. AI analysis can continue.'
+            : `Quick chart verification matched the uploaded chart to ${expectedTicker || 'the selected ticker'}.`)
           : 'Unable to read the chart ticker. Please confirm this is the correct chart.')));
   return {
     visible:true,
@@ -4445,9 +4455,13 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
       : (phase === 'possible_mismatch'
         ? 'Wrong chart detected'
         : (phase === 'analysis_failed' && hasVerifiedIdentity
-          ? `Chart matched ${expectedTicker || 'selected ticker'}`
+          ? (safe.manualConfirmed === true && !hasDetectedTickerMatch
+            ? 'Chart manually confirmed'
+            : `Chart matched ${expectedTicker || 'selected ticker'}`)
           : (phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete'
-            ? `Chart matched ${expectedTicker || 'selected ticker'}`
+            ? (safe.manualConfirmed === true && !hasDetectedTickerMatch
+              ? 'Chart manually confirmed'
+              : `Chart matched ${expectedTicker || 'selected ticker'}`)
             : 'Unable to read chart ticker'))),
     summary:detailText,
     detail:detailText,
@@ -4495,6 +4509,7 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
   const reason = String(safe.reason || '').trim();
   const expectedTicker = normalizeTicker(record && record.ticker || trace.ticker || '');
   const hasVerifiedIdentity = chartPipelineHasVerifiedIdentity(safe);
+  const hasDetectedTickerMatch = chartPipelineHasDetectedTickerMatch(safe);
   if(phase === 'verifying' || phase === 'uploading'){
     return {
       key:'source_checking',
@@ -4528,7 +4543,7 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
   if(phase === 'analysis_failed' && hasVerifiedIdentity){
     return {
       key:safe.manualConfirmed === true ? 'user_confirmed_match' : 'verified_match',
-      title:'Chart looks correct.',
+      title:safe.manualConfirmed === true && !hasDetectedTickerMatch ? 'Chart manually confirmed.' : 'Chart looks correct.',
       summary:'AI analysis failed. Try again.',
       detail:'',
       visible:true,
@@ -4536,12 +4551,15 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
     };
   }
   if(chartPipelineAllowsAi(phase) && hasVerifiedIdentity){
+    const summary = safe.manualConfirmed === true && !hasDetectedTickerMatch
+      ? 'This chart was manually confirmed. AI analysis can continue.'
+      : (trace.extractedFacts && trace.extractedFacts.visible_ticker
+        ? `Ticker detected: ${trace.extractedFacts.visible_ticker}.${Array.isArray(trace.diagnostics) && trace.diagnostics.length ? ' Some chart details were not readable, but analysis can continue.' : ''}`
+        : 'Ticker detected and chart verification passed.');
     return {
       key:safe.manualConfirmed === true ? 'user_confirmed_match' : 'verified_match',
-      title:'Chart looks correct.',
-      summary:trace.extractedFacts && trace.extractedFacts.visible_ticker
-        ? `Ticker detected: ${trace.extractedFacts.visible_ticker}.${Array.isArray(trace.diagnostics) && trace.diagnostics.length ? ' Some chart details were not readable, but analysis can continue.' : ''}`
-        : 'Ticker detected and chart verification passed.',
+      title:safe.manualConfirmed === true && !hasDetectedTickerMatch ? 'Chart manually confirmed.' : 'Chart looks correct.',
+      summary,
       detail:'',
       visible:true,
       trace
@@ -27006,7 +27024,10 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
   const source = String(options.source || 'manual_refresh');
   const suppressLiveStatus = options.suppressLiveStatus === true;
   if(!suppressLiveStatus){
-    setLiveProcessStatus('refreshing_watchlist', 'Running watchlist refresh.');
+    const liveMessage = source === 'manual_refresh'
+      ? `Running Ticker ${symbol} Refresh`
+      : 'Running watchlist refresh.';
+    setLiveProcessStatus('refreshing_watchlist', liveMessage);
   }
   if(typeof console !== 'undefined' && console.info){
     console.info('[WATCHLIST_REFRESH_START]', {
