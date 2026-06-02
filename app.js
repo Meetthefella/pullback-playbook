@@ -4134,6 +4134,27 @@ function mergeChartPipelineReadFacts(primary = {}, fallback = {}){
   };
 }
 
+function preserveManualConfirmIdentityReadFacts(existingReadFacts = {}, promotedReadFacts = {}, expectedTicker = ''){
+  const existing = existingReadFacts && typeof existingReadFacts === 'object' ? existingReadFacts : {};
+  const promoted = promotedReadFacts && typeof promotedReadFacts === 'object' ? promotedReadFacts : {};
+  const expected = normaliseVisibleTicker(expectedTicker || '');
+  const existingTicker = normaliseVisibleTicker(existing.ticker || '');
+  const promotedTicker = normaliseVisibleTicker(promoted.ticker || '');
+  const merged = mergeChartPipelineReadFacts(promoted, existing);
+  const existingMismatch = !!(existingTicker && expected && existingTicker !== expected);
+  const promotedMismatch = !!(promotedTicker && expected && promotedTicker !== expected);
+  if(existingMismatch && !promotedMismatch){
+    merged.ticker = String(existing.ticker || '').trim();
+    if(!String(merged.timeframe || '').trim() && String(existing.timeframe || '').trim()){
+      merged.timeframe = String(existing.timeframe || '').trim();
+    }
+    if(chartVerificationNumberOrNull(merged.price) === null && chartVerificationNumberOrNull(existing.price) !== null){
+      merged.price = chartVerificationNumberOrNull(existing.price);
+    }
+  }
+  return merged;
+}
+
 function chartPipelineContextMatches(record = {}, pipeline = {}, source = {}){
   const item = record && typeof record === 'object' ? record : {};
   const safePipeline = pipeline && typeof pipeline === 'object' ? pipeline : {};
@@ -24976,21 +24997,33 @@ async function analyseSetup(ticker, options = {}){
         };
         if(existingPipeline.manualConfirmed === true){
           const existingPhase = String(existingPipeline.phase || '').trim();
+          const preservedReadFacts = preserveManualConfirmIdentityReadFacts(
+            existingPipeline.readFacts || {},
+            promotedPipeline.readFacts || {},
+            record.ticker || ''
+          );
+          const preservedTicker = normaliseVisibleTicker(preservedReadFacts.ticker || '');
+          const expectedTicker = normaliseVisibleTicker(record.ticker || '');
+          const preservedMismatch = !!(preservedTicker && expectedTicker && preservedTicker !== expectedTicker);
+          const preservedVerifiedMatch = !!(preservedTicker && expectedTicker && preservedTicker === expectedTicker);
+          const preservedEvidence = preservedMismatch && Array.isArray(existingPipeline.evidence) && existingPipeline.evidence.length
+            ? existingPipeline.evidence.slice()
+            : (Array.isArray(promotedPipeline.evidence) ? promotedPipeline.evidence.slice() : []);
           upsertReviewChartAnalysisPipeline(record, {
             ...existingPipeline,
             imageId:String(requestChartImageId || existingPipeline.imageId || ''),
             requestId:String(analysisRequestId || existingPipeline.requestId || ''),
             source:String(existingPipeline.source || 'chart_pipeline_manual_confirm'),
             phase:existingPhase || 'verified',
-            readFacts:mergeChartPipelineReadFacts(promotedPipeline.readFacts || {}, existingPipeline.readFacts || {}),
+            readFacts:preservedReadFacts,
             missing:Array.isArray(promotedPipeline.missing) ? promotedPipeline.missing.slice() : [],
             diagnostics:Array.isArray(promotedPipeline.diagnostics) ? promotedPipeline.diagnostics.slice() : [],
-            evidence:Array.isArray(promotedPipeline.evidence) ? promotedPipeline.evidence.slice() : [],
+            evidence:preservedEvidence,
             chartAssessorInput:cloneData(promotedPipeline.chartAssessorInput || existingPipeline.chartAssessorInput || null, null),
             chartImageSource:cloneData(promotedPipeline.chartImageSource || existingPipeline.chartImageSource || null, null),
             hasFacts:promotedPipeline.hasFacts === true || existingPipeline.hasFacts === true,
-            mismatch:promotedPipeline.mismatch === true,
-            verifiedMatch:promotedPipeline.verifiedMatch === true,
+            mismatch:preservedMismatch,
+            verifiedMatch:preservedVerifiedMatch,
             aiAllowed:chartPipelineAllowsAi(existingPhase || 'verified'),
             manualConfirmed:true,
             updatedAt:new Date().toISOString(),
