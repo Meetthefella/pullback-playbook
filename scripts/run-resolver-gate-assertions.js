@@ -1001,8 +1001,8 @@ function runEntryConditionsSummaryAssertions(){
     displayedPlan:{}
   });
   const healthyText = [healthyMissingPlan.header, healthyMissingPlan.primary, healthyMissingPlan.definitionLine, healthyMissingPlan.footer, healthyMissingPlan.secondary && healthyMissingPlan.secondary.join(' ')].join(' ');
-  if(!healthyMissingPlan.show || !/bounce still needs to form|reliable rebound from support|clearer bounce/i.test(healthyText)){
-    throw new Error('Healthy missing-plan/no-bounce Watch long-press summary must describe confirmation, not deterioration.');
+  if(!healthyMissingPlan.show || !/bounce still needs to form|reliable rebound from support|clearer bounce|consolidating near recent highs|no low-risk entry area has formed yet|pullback into support|breakout from the current range/i.test(healthyText)){
+    throw new Error('Healthy missing-plan/no-bounce Watch long-press summary must describe confirmation or consolidation, not deterioration.');
   }
   if(/weak pullback|weakening|damaged|deteriorating|losing quality/i.test(healthyText)){
     throw new Error('Healthy Watch long-press summary must not use weak/damaged/deteriorating language.');

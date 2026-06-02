@@ -74,8 +74,15 @@
       || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
     const bounceState = String(globalVerdict && globalVerdict.bounce_state || '').toLowerCase();
     const bounceAttempt = ['attempt','early','developing'].includes(bounceState);
+    const pullbackState = String(globalVerdict && (globalVerdict.pullback_state || globalVerdict.pullback_zone) || '').trim().toLowerCase();
+    const consolidating = aliveStructure
+      && !structuralWeakness
+      && ['strong','intact','developing_clean'].includes(structureState)
+      && ['none','unconfirmed',''].includes(bounceState)
+      && ['none','','unclear'].includes(pullbackState)
+      && ['none','off_level','unclear','extended'].includes(setupLocationState);
     const aliveUnconfirmedCopy = priceabilityState === 'unpriceable' && bounceAttempt
-      ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
+      ? 'The broader uptrend is still intact, but the setup is currently untradable because no low-risk entry area has formed yet.'
       : 'Bounce attempt present, but confirmation is not strong enough yet.';
     const planStatus = String(globalVerdict && (globalVerdict.planStatus || globalVerdict.plan_status || globalVerdict.planStatusKey || globalVerdict.plan_status_key) || '').trim().toLowerCase();
     const planMathValid = planStatus === 'valid' || hasPriceablePlan;
@@ -98,15 +105,21 @@
         line2:'Buyers in control, but price is stretched away from support'
       };
     }
+    if(consolidating){
+      return {
+        line1:'Price is consolidating near recent highs.',
+        line2:'The trend remains strong, but no low-risk entry area has formed yet.'
+      };
+    }
     if(setupLocationState === 'volatile' || priceabilityState === 'unpriceable'){
       return {
-        line1:bounceAttempt ? aliveUnconfirmedCopy : 'Strong trend, but too volatile to price reliably.',
+        line1:bounceAttempt ? aliveUnconfirmedCopy : 'Strong trend, but price is too volatile to define risk safely.',
         line2:'No actionable entry yet.'
       };
     }
     if(reviewLifecycleBias === 'diminishing' || trackPresentationBucket === 'diminishing'){
       return {
-        line1:reviewLifecycleLine1 || (aliveStructure && !structuralWeakness ? 'Setup is not clean enough to price reliably yet.' : 'Trend is weakening - no reliable stop level yet.'),
+        line1:reviewLifecycleLine1 || (aliveStructure && !structuralWeakness ? 'Setup is not clean enough to define risk safely yet.' : 'Trend is weakening - no reliable stop level yet.'),
         line2:reviewLifecycleLine2 || 'Diminishing - setup quality is fading.'
       };
     }
@@ -127,7 +140,7 @@
     }
     const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
     const bouncePrimary = ['strong','intact','developing_clean','developing'].includes(structureState)
-      ? (bounceAttempt ? 'Bounce attempt present, but confirmation is not strong enough yet.' : 'Bounce is too weak to price cleanly.')
+      ? (consolidating ? 'Price is consolidating near recent highs.' : (bounceAttempt ? 'Bounce attempt present, but confirmation is not strong enough yet.' : 'Bounce is too weak to price cleanly.'))
       : 'No pullback structure to define entry yet.';
     const summary = structuralState === 'developing'
       ? 'Developing - waiting for confirmation.'

@@ -13442,8 +13442,16 @@ function scanCardTechnicalSummaryForView(view){
   }[String(derived && derived.pullbackState || '').toLowerCase()] || 'Pullback unclear');
   const bounceState = String(derived && derived.bounceState || '').toLowerCase();
   const stabilisationState = String(derived && derived.stabilisationState || '').toLowerCase();
+  const reviewEvidence = reviewCopyEvidence({
+    structureState:String(derived && derived.structureState || '').toLowerCase(),
+    bounceState,
+    stabilisationState,
+    pullbackState:String(derived && derived.pullbackState || '').toLowerCase(),
+    setupLocationState:String(derived && derived.setupLocationState || '').toLowerCase()
+  });
   let responseLabel = 'No bounce';
-  if(bounceState === 'confirmed') responseLabel = 'Bounce confirmed';
+  if(reviewEvidence.consolidating) responseLabel = reviewConsolidationPresentationCopy().technicalLabel;
+  else if(bounceState === 'confirmed') responseLabel = 'Bounce confirmed';
   else if(bounceState === 'attempt') responseLabel = 'Bounce attempt';
   else if(bounceState === 'early') responseLabel = 'Bounce early';
   else if(stabilisationState === 'clear' || stabilisationState === 'present' || stabilisationState === 'early') responseLabel = 'Stabilising';
@@ -14047,12 +14055,29 @@ function buildSummary(checks, status, context = {}){
   const above200 = !!checks.above200;
   const structureState = String(context.structureState || '').trim().toLowerCase();
   const bounceState = String(context.bounceState || '').trim().toLowerCase();
+  const stabilisationState = String(context.stabilisationState || '').trim().toLowerCase();
   const planStatus = String(context.planStatus || '').trim().toLowerCase();
   const finalVerdict = String(context.canonicalVerdict || context.finalVerdict || '').trim().toLowerCase();
   const mainBlocker = String(context.mainBlocker || '').trim();
+  const reviewEvidence = reviewCopyEvidence({
+    structureState,
+    structureEligibility:context.structureEligibility,
+    bounceState,
+    stabilisationState,
+    pullbackState:context.pullbackZone,
+    setupLocationState:context.setupLocationState,
+    priceabilityState:context.priceabilityState,
+    finalVerdict
+  });
   const nonTerminalRecoveryBlocker = context.nonTerminalRecoveryBlocker === true;
   const viabilityRejected = context.viability === 'reject' || context.rejectedByViabilityGate === true;
   const planBlocked = context.planValid === false || ['invalid','missing'].includes(planStatus) || context.planVisible === false;
+  if(reviewEvidence.consolidating){
+    const copy = reviewConsolidationPresentationCopy();
+    return planBlocked
+      ? `${copy.untradable} ${copy.summary} ${copy.nextAction}`
+      : `${copy.summary} ${copy.blocker} ${copy.nextAction}`;
+  }
   if(nonTerminalRecoveryBlocker){
     return `${mainBlocker || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.'} Entry, stop, and target cannot be priced reliably yet.`;
   }
@@ -14086,6 +14111,10 @@ function buildSummary(checks, status, context = {}){
   let text = 'Strong uptrend.';
   text += checks.near20 ? ' Pullback is near the 20 MA.' : ' Pullback is near the 50 MA.';
   if(stabilising && bounce && status === 'Entry') return `${text} Price is stabilising and a bounce is forming. Setup is close to actionable if risk stays controlled.`;
+  if(reviewEvidence.consolidating){
+    const copy = reviewConsolidationPresentationCopy();
+    return `${copy.summary} ${copy.blocker} ${copy.nextAction}`;
+  }
   if(stabilising) return `${text} Price is stabilising, but the bounce still needs confirmation.`;
   return `${text} There is no clear stabilisation or bounce yet.`;
 }
@@ -17381,6 +17410,12 @@ function buildSharedSetupNarrative({
     || resolved.bounce_state
     || ''
   ).trim().toLowerCase();
+  const stabilisationState = String(
+    derived.stabilisationState
+    || simplified.stabilisationState
+    || resolved.stabilisation_state
+    || ''
+  ).trim().toLowerCase();
   const volumeState = String(
     derived.volumeState
     || simplified.volumeState
@@ -17460,7 +17495,7 @@ function buildSharedSetupNarrative({
     nextAction = 'Wait for a stronger bounce and a clearer area of support before considering an entry.';
     pushUnique(evidence, movingAverageEvidence);
     pushUnique(evidence, 'The rebound is still developing.');
-    pushUnique(evidence, 'Trade remains unpriceable.');
+    pushUnique(evidence, 'Setup remains untradable.');
     if(weakVolume) pushUnique(cautions, 'Weak volume reduces confidence in the rebound.');
     [
       'Stronger bounce confirmation',
@@ -17524,6 +17559,23 @@ function buildSharedSetupNarrative({
     if(weakVolume) pushUnique(cautions, 'Weak volume reduces confidence in the rebound.');
   }else{
     stateLabel = monitorTone ? 'Developing Watch' : stateLabelFallback;
+    const consolidationDetected = ['strong','intact','developing_clean'].includes(structureState)
+      && (structureEligibility === 'alive' || !structureEligibility)
+      && ['none','unconfirmed',''].includes(bounceState)
+      && ['none','','unclear'].includes(pullbackZone)
+      && ['none','off_level','unclear','extended'].includes(setupLocationState);
+    if(monitorTone && consolidationDetected){
+      primaryReason = 'Price is consolidating near recent highs.';
+      blocker = 'The trend remains strong, but no low-risk entry area has formed yet.';
+      nextAction = 'Wait for either a pullback into support or a breakout from the current range.';
+      pushUnique(evidence, movingAverageEvidence);
+      pushUnique(evidence, 'Setup remains untradable.');
+      [
+        'A pullback into moving-average support',
+        'A breakout from the current range',
+        'A clearer low-risk entry area'
+      ].forEach(line => pushUnique(promotionRequirements, line));
+    }else
     if(monitorTone && aliveStructure && strongStructure && bounceAttempt){
       primaryReason = 'Buyers are starting to step in, but the move is not convincing yet.';
       blocker = invalidationExplicitlyMissing
@@ -17535,7 +17587,7 @@ function buildSharedSetupNarrative({
       pushUnique(evidence, movingAverageEvidence);
       pushUnique(evidence, 'The rebound is still developing.');
       if(priceabilityState === 'unpriceable' || !planVisible){
-        pushUnique(evidence, 'Trade remains unpriceable.');
+        pushUnique(evidence, 'Setup remains untradable.');
       }
       [
         'Stronger bounce confirmation',
@@ -17543,15 +17595,15 @@ function buildSharedSetupNarrative({
         'A reliable stop-loss location'
       ].forEach(line => pushUnique(promotionRequirements, line));
     }else if(monitorTone && aliveStructure && strongStructure){
-      primaryReason = 'Buyers have not stepped in clearly enough yet, so the bounce still needs to form.';
-      blocker = 'There is not a reliable rebound from support yet.';
-      nextAction = 'Wait for buyers to show a clearer bounce before considering an entry.';
+      primaryReason = 'The trend remains healthy, but no low-risk entry area has formed yet.';
+      blocker = 'Price is too far above support to define risk safely.';
+      nextAction = 'Wait for either a pullback into support or a breakout from the current range.';
       pushUnique(evidence, movingAverageEvidence);
-      pushUnique(evidence, 'Trade remains unpriceable.');
+      pushUnique(evidence, 'Setup remains untradable.');
       [
-        'A clear bounce from support',
-        'A more reliable low beneath price',
-        'Evidence that buyers are starting to defend the area'
+        'A pullback into support',
+        'A breakout from the current range',
+        'A clearer low-risk entry area'
       ].forEach(line => pushUnique(promotionRequirements, line));
     }else{
       primaryReason = 'The setup is not ready yet.';
@@ -18475,12 +18527,12 @@ function buildEntryConditionsSummary({
     const primary = trueWeakening
       ? 'Weakening setup - losing quality'
       : (volatileOrUnpriceable
-        ? 'Volatile setup - not priceable yet'
+        ? 'Setup currently untradable'
         : 'Setup quality is fading - wait for repair');
     const definitionLine = trueWeakening
       ? 'Quality is deteriorating - wait for structure to stabilise.'
       : (volatileOrUnpriceable
-        ? 'Volatility or stop uncertainty is too high to price reliably.'
+        ? 'Volatility or stop uncertainty is too high to define risk safely.'
         : 'Setup quality has slipped below useful watchlist quality.');
     const secondary = trueWeakening
       ? ['Structure must stabilise', 'Bounce must improve', 'Risk/reward must become realistic']
@@ -18521,7 +18573,7 @@ function buildEntryConditionsSummary({
       pattern_label:'Awaiting confirmation',
       pattern_explanation:sharedNarrative.blocker || 'Almost ready - waiting for confirmation',
       secondary:(sharedNarrative.promotionRequirements || []).slice(0, 3),
-      triggerLine:`Why is it not tradable yet? ${asSentence(sharedNarrative.blocker || 'The bounce still needs confirmation')}.`,
+      triggerLine:`Why is it not tradable yet? ${asSentence(sharedNarrative.blocker || 'No low-risk entry area has formed yet')}.`,
       futureStateLine:`What would improve the setup? ${asSentence(sharedNarrative.nextAction || 'Wait for stronger confirmation before considering an entry')}.`,
       footer:sharedNarrative.nextAction || triggerLine,
       suppressPlanBlockerInHeadline:true
@@ -18975,6 +19027,7 @@ function reviewCopyEvidence(setup = {}){
   const structureEligibility = String(item.structureEligibility || item.structure_eligibility || '').trim().toLowerCase();
   const bounceState = String(item.bounceState || item.bounce_state || '').trim().toLowerCase();
   const stabilisationState = String(item.stabilisationState || item.stabilisation_state || '').trim().toLowerCase();
+  const pullbackState = String(item.pullbackState || item.pullback_state || item.pullbackZone || item.pullback_zone || '').trim().toLowerCase();
   const setupLocationState = String(item.setupLocationState || item.setup_location_state || '').trim().toLowerCase();
   const priceabilityState = String(item.priceabilityState || item.priceability_state || '').trim().toLowerCase();
   const terminalAvoid = terminalAvoidEvidenceForReviewCopy(item) || verdict === 'avoid';
@@ -18983,21 +19036,38 @@ function reviewCopyEvidence(setup = {}){
   const aliveStructure = !terminalAvoid
     && !structuralWeakness
     && (structureEligibility === 'alive' || ['strong','intact','developing_clean','developing'].includes(structureState));
+  const consolidating = aliveStructure
+    && ['strong','intact','developing_clean'].includes(structureState)
+    && ['none','unconfirmed',''].includes(bounceState)
+    && ['none','','unclear'].includes(pullbackState)
+    && ['none','off_level','unclear','extended'].includes(setupLocationState);
   return {
     verdict,
     structureState,
     structureEligibility,
     bounceState,
     stabilisationState,
+    pullbackState,
     setupLocationState,
     priceabilityState,
     terminalAvoid,
     structuralWeakness,
     aliveStructure,
+    consolidating,
     bounceAttempt:['attempt','early','developing'].includes(bounceState),
     noBounce:['none','unconfirmed',''].includes(bounceState),
     unpriceable:priceabilityState === 'unpriceable' || setupLocationState === 'volatile',
     stabilisationUnclear:['none','early','unconfirmed',''].includes(stabilisationState)
+  };
+}
+
+function reviewConsolidationPresentationCopy(){
+  return {
+    technicalLabel:'Consolidating',
+    summary:'Price is consolidating near recent highs.',
+    blocker:'The trend remains strong, but no low-risk entry area has formed yet.',
+    nextAction:'Wait for either a pullback into support or a breakout from the current range.',
+    untradable:'Setup remains untradable.'
   };
 }
 
@@ -19009,18 +19079,24 @@ function sanitizeAliveWatchSemanticCopy(text, setup = {}){
   }
   const saysWeakOrBroken = /(?:overall\s+)?structure (?:looks |is )?(?:weak|broken|damaged|deteriorating)|trend is weakening|failed structure/i.test(original);
   const saysNoBounce = /no (?:signs? of )?(?:stabili[sz]ation|bounce)|no bounce(?: yet| confirmation)?|bounce (?:is )?not (?:present|there)/i.test(original);
+  if(evidence.consolidating){
+    const copy = reviewConsolidationPresentationCopy();
+    if(saysWeakOrBroken || saysNoBounce || evidence.unpriceable || /no valid invalidation|not clear enough to price|cannot be priced|not priceable|no actionable plan/i.test(original)){
+      return `${copy.summary} ${copy.blocker} ${copy.nextAction}`;
+    }
+  }
   if(evidence.bounceAttempt && saysNoBounce){
     return evidence.unpriceable
-      ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
+      ? 'The broader uptrend is still intact, but the setup is currently untradable because no low-risk entry area has formed yet.'
       : 'Bounce attempt present, but confirmation is not strong enough yet.';
   }
   if(saysWeakOrBroken){
     return evidence.unpriceable
-      ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
+      ? 'The broader uptrend is still intact, but the setup is currently untradable because no low-risk entry area has formed yet.'
       : 'Setup is not actionable yet. Wait for clearer stabilisation and a reliable entry/stop area.';
   }
   if(evidence.unpriceable && evidence.bounceAttempt && /no valid invalidation|not clear enough to price|cannot be priced|not priceable|no actionable plan/i.test(original)){
-    return 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.';
+    return 'The broader uptrend is still intact, but the setup is currently untradable because no low-risk entry area has formed yet.';
   }
   return original;
 }
@@ -19386,11 +19462,11 @@ function buildReviewSemanticStatus({
       ? blocker
       : 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
   }else if(aliveStructure && ['attempt','early','developing'].includes(bounceState) && priceabilityState === 'unpriceable'){
-    blocker = blocker || 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.';
+    blocker = blocker || 'The broader uptrend is still intact, but the setup is currently untradable because no low-risk entry area has formed yet.';
   }else if(aliveStructure && (setupLocationState === 'volatile' || priceabilityState === 'unpriceable')){
     blocker = rawBlocker && !staleWeakCopy
       ? rawBlocker
-      : 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
+      : 'The trend remains strong, but price is too far above support to define risk safely.';
   }else if(!blocker){
     blocker = bounceState === 'none' || stabilisationState === 'none'
       ? 'Needs confirmation before promotion.'
@@ -19409,7 +19485,7 @@ function buildReviewSemanticStatus({
   }else if(planFieldsPresent && !planMathValid){
     tradeStatus = {line1:'Plan needs work.', line2:'No actionable trade yet.'};
   }else{
-    tradeStatus = {line1:'Trade remains unpriceable.', line2:blocker || 'A safe entry point cannot be identified yet.'};
+    tradeStatus = {line1:'Setup remains untradable.', line2:blocker || 'A safe entry point cannot be identified yet.'};
   }
   const rrDisplay = actionable && Number.isFinite(rrValue)
     ? `${rrValue.toFixed(2)}R`
