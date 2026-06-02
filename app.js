@@ -4173,7 +4173,13 @@ function normalizeChartPipelineForRender(record = {}, pipeline = {}){
     }else{
       normalized.verifiedMatch = false;
       normalized.mismatch = true;
-      normalized.phase = 'possible_mismatch';
+      if(normalized.manualConfirmed === true){
+        if(!String(normalized.phase || '').trim()){
+          normalized.phase = 'verified';
+        }
+      }else{
+        normalized.phase = 'possible_mismatch';
+      }
     }
   }
   normalized.aiAllowed = chartPipelineAllowsAi(normalized.phase) && chartPipelineHasVerifiedIdentity(normalized);
@@ -24952,6 +24958,7 @@ async function analyseSetup(ticker, options = {}){
         currentActiveReviewTicker === ticker
       );
       if(shouldPromoteSimplifiedPipeline){
+        const existingPipeline = getReviewChartAnalysisPipeline(record) || {};
         const promotedPipeline = buildChartPipelineFromVerification(record, {
           imageId:requestChartImageId,
           requestId:analysisRequestId,
@@ -24967,7 +24974,31 @@ async function analyseSetup(ticker, options = {}){
           sanitizedReadFacts:buildChartPipelineReadFacts(analysis),
           gatedReadFacts:buildChartPipelineReadFacts(simplifiedGateAnalysis)
         };
-        upsertReviewChartAnalysisPipeline(record, promotedPipeline);
+        if(existingPipeline.manualConfirmed === true){
+          const existingPhase = String(existingPipeline.phase || '').trim();
+          upsertReviewChartAnalysisPipeline(record, {
+            ...existingPipeline,
+            imageId:String(requestChartImageId || existingPipeline.imageId || ''),
+            requestId:String(analysisRequestId || existingPipeline.requestId || ''),
+            source:String(existingPipeline.source || 'chart_pipeline_manual_confirm'),
+            phase:existingPhase || 'verified',
+            readFacts:mergeChartPipelineReadFacts(promotedPipeline.readFacts || {}, existingPipeline.readFacts || {}),
+            missing:Array.isArray(promotedPipeline.missing) ? promotedPipeline.missing.slice() : [],
+            diagnostics:Array.isArray(promotedPipeline.diagnostics) ? promotedPipeline.diagnostics.slice() : [],
+            evidence:Array.isArray(promotedPipeline.evidence) ? promotedPipeline.evidence.slice() : [],
+            chartAssessorInput:cloneData(promotedPipeline.chartAssessorInput || existingPipeline.chartAssessorInput || null, null),
+            chartImageSource:cloneData(promotedPipeline.chartImageSource || existingPipeline.chartImageSource || null, null),
+            hasFacts:promotedPipeline.hasFacts === true || existingPipeline.hasFacts === true,
+            mismatch:promotedPipeline.mismatch === true,
+            verifiedMatch:promotedPipeline.verifiedMatch === true,
+            aiAllowed:chartPipelineAllowsAi(existingPhase || 'verified'),
+            manualConfirmed:true,
+            updatedAt:new Date().toISOString(),
+            debug:promotedPipeline.debug
+          });
+        }else{
+          upsertReviewChartAnalysisPipeline(record, promotedPipeline);
+        }
       }
       const shouldCommitMergedTrace = !!(
         requestChartImageId &&
