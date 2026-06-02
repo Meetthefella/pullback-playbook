@@ -6847,7 +6847,7 @@ function handleWorkspaceTabChange(tab){
       requestWatchlistRender({
         source:'track_tab_activation',
         includeFocusQueue:true,
-        allowCachedReturn:false
+        allowCachedReturn:true
       });
       return;
     }
@@ -25441,8 +25441,10 @@ function maybeInvalidateActiveReviewProjectionFromTrack(ticker, nextProjectionSn
   uiState.activeReviewProjectionSource = 'track_projection_updated';
   uiState.activeReviewVerdictOverride = '';
   const liveRecord = getTickerRecord(symbol);
-  if(liveRecord && liveRecord.resolvedStateBundleCache) delete liveRecord.resolvedStateBundleCache;
-  if(liveRecord && liveRecord.resolvedStateBundle) delete liveRecord.resolvedStateBundle;
+  if(bucketChanged){
+    if(liveRecord && liveRecord.resolvedStateBundleCache) delete liveRecord.resolvedStateBundleCache;
+    if(liveRecord && liveRecord.resolvedStateBundle) delete liveRecord.resolvedStateBundle;
+  }
   if(bucketChanged){
     console.info('[ReviewProjectionInvalidated]', {
       ticker:symbol,
@@ -26949,33 +26951,6 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
     const pendingTickerNow = normalizeTicker(pendingReviewTicker() || '');
     const reviewOpenLocked = source === 'startup_refresh_full_user_open'
       && (activeTickerNow === symbol || pendingTickerNow === symbol);
-    if(reviewOpenLocked){
-      if(typeof console !== 'undefined' && console.info){
-        console.info('[WATCHLIST_REFRESH_RESULT_IGNORED_FOR_REVIEW_OPEN]', {
-          ticker:symbol,
-          source,
-          activeTicker:activeTickerNow || '',
-          pendingTicker:pendingTickerNow || '',
-          reviewRequestToken:String(options.reviewRequestToken || '')
-        });
-        console.info('[WATCHLIST_REFRESH_COMMIT_BLOCKED_FOR_ACTIVE_REVIEW]', {
-          ticker:symbol,
-          source,
-          activeTicker:activeTickerNow || '',
-          pendingTicker:pendingTickerNow || '',
-          reviewRequestToken:String(options.reviewRequestToken || '')
-        });
-      }
-      return {
-        symbol,
-        ok:true,
-        skipped:true,
-        reason:'review_open_blocked',
-        record,
-        snapshot:null,
-        verdict:null
-      };
-    }
     mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
     const refreshed = refreshTrackedTickerState(symbol, {
       source:'track',
@@ -26990,6 +26965,42 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
     if(beforeSignature !== afterSignature){
       markWatchlistDirty([symbol], `${source}_result`);
     }
+    if(reviewOpenLocked){
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[WATCHLIST_REFRESH_RESULT_IGNORED_FOR_REVIEW_OPEN]', {
+          ticker:symbol,
+          source,
+          activeTicker:activeTickerNow || '',
+          pendingTicker:pendingTickerNow || '',
+          reviewRequestToken:String(options.reviewRequestToken || ''),
+          mergedIntoWatchlistState:true
+        });
+        console.info('[WATCHLIST_REFRESH_COMMIT_BLOCKED_FOR_ACTIVE_REVIEW]', {
+          ticker:symbol,
+          source,
+          activeTicker:activeTickerNow || '',
+          pendingTicker:pendingTickerNow || '',
+          reviewRequestToken:String(options.reviewRequestToken || ''),
+          reviewRerenderDeferred:true
+        });
+      }
+      if(activeTickerNow === symbol){
+        const rerenderReview = () => {
+          if(activeReviewTicker() !== symbol) return;
+          renderReviewWorkspace({
+            source:'watchlist_refresh_deferred_review_open',
+            skipWatchlistLifecycle:true,
+            recompute:false,
+            persistDraft:false
+          });
+        };
+        if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+          window.requestAnimationFrame(() => rerenderReview());
+        }else{
+          setTimeout(rerenderReview, 0);
+        }
+      }
+    }
     appendWatchlistDebugEvent(normalizedRecord, {
       at:new Date().toISOString(),
       source:`${source}_result`,
@@ -26999,7 +27010,7 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
       symbol,
       ok:true,
       skipped:false,
-      reason:'',
+      reason:reviewOpenLocked ? 'review_open_deferred' : '',
       record:normalizedRecord,
       snapshot:refreshedSnapshot,
       verdict:refreshedVerdict
