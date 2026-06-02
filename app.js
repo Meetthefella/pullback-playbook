@@ -4561,11 +4561,16 @@ function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
   const normalizedPipeline = normalizeChartPipelineForRender(record, pipeline);
   const decision = buildSimplifiedChartPipelineDecision(record, normalizedPipeline);
   const trace = decision.trace;
+  const decisionKey = String(decision && decision.key || '').trim();
+  const isFailurePanel = ['chart_mismatch', 'cant_read', 'chart_context_mismatch'].includes(decisionKey)
+    && !chartPipelineHasVerifiedIdentity(normalizedPipeline);
   const detailsOpen = !!(uiState.reviewChartDetailsOpen && uiState.reviewChartDetailsOpen[normalizeTicker(record && record.ticker || '')]);
   const detailsOpenAttr = detailsOpen ? ' open' : '';
   const facts = trace.extractedFacts || {};
   const trusted = trace.trustedFacts || {};
   const diagnostics = Array.isArray(trace.diagnostics) ? trace.diagnostics : [];
+  const readTickerDisplay = String(facts.visible_ticker || '').trim() || 'Unknown';
+  const expectedTickerDisplay = String(trusted.ticker || '').trim() || 'n/a';
   const evidenceLine = Array.isArray(trace.evidence) && trace.evidence.length
     ? `<div class="tiny badtext">${escapeHtml(`Evidence: ${trace.evidence.join(' | ')}`)}</div>`
     : '';
@@ -4585,14 +4590,17 @@ function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
     : '';
   const sources = `<div class="tiny">Sources: ${escapeHtml((trace.sources || []).join(', ') || 'chart_pipeline_quick_check')}</div>`;
   const details = `${missingLine}${diagnosticsLine}${extracted}${trustedFacts}${imageSource}${extraEvidence}${sources}`;
+  const markup = isFailurePanel
+    ? `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>Chart Verification Failed</strong><div class="tiny"><strong>Expected:</strong> ${escapeHtml(expectedTickerDisplay)}</div><div class="tiny"><strong>Read:</strong> ${escapeHtml(readTickerDisplay)}</div><div>AI analysis is blocked until the chart is confirmed or replaced.</div><details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`
+    : `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>${escapeHtml(decision.title || 'Chart verification')}</strong><div>${escapeHtml(decision.summary || '')}</div><div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([facts.visible_ticker || 'n/a', facts.visible_timeframe || 'n/a', chartVerificationDisplayValue(facts.visible_latest_price)].join(' | '))} <strong>Expected:</strong> ${escapeHtml([trusted.ticker || 'n/a', trusted.expected_timeframe || 'n/a', chartVerificationDisplayValue(trusted.latest_price)].join(' | '))}</div><div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>${evidenceLine}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`;
   return {
     decision,
     trace,
-    markup:`<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>${escapeHtml(decision.title || 'Chart verification')}</strong><div>${escapeHtml(decision.summary || '')}</div><div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([facts.visible_ticker || 'n/a', facts.visible_timeframe || 'n/a', chartVerificationDisplayValue(facts.visible_latest_price)].join(' | '))} <strong>Expected:</strong> ${escapeHtml([trusted.ticker || 'n/a', trusted.expected_timeframe || 'n/a', chartVerificationDisplayValue(trusted.latest_price)].join(' | '))}</div><div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>${evidenceLine}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`,
+    markup,
     manualActionsMarkup:['possible_mismatch', 'cant_read'].includes(String(normalizedPipeline && normalizedPipeline.phase || '').trim())
       ? `<div class="actions chart-verification-actions" style="margin-top:8px">
-          <button class="primary compactbutton" type="button" data-act="confirm-chart-match">Confirm this chart matches ${escapeHtml(record && record.ticker || '')}</button>
-          <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">Reject and upload another chart</button>
+          <button class="primary compactbutton" type="button" data-act="confirm-chart-match">${escapeHtml(isFailurePanel ? 'Confirm Chart' : `Confirm this chart matches ${record && record.ticker || ''}`)}</button>
+          <button class="secondary compactbutton" type="button" data-act="reject-chart-upload">${escapeHtml(isFailurePanel ? 'Upload New Chart' : 'Reject and upload another chart')}</button>
         </div>`
       : ''
   };
