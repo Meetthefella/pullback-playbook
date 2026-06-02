@@ -2792,9 +2792,11 @@ function runAiContractAssertions(){
     throw new Error('Simplified Review chart verification must render first-class matched, mismatch, unreadable, and context-mismatch decisions.');
   }
   if(!simplifiedRunSource.includes('buildSimplifiedTickerGateAnalysis(')
+    || !simplifiedRunSource.includes('[CHART_PIPELINE_MISMATCH_GATE_OVERRIDE]')
+    || !simplifiedRunSource.includes("normalizedVisibleTicker !== expectedVisibleTicker")
     || !simplifiedRunSource.includes('upsertReviewChartAnalysisPipeline(item, nextPipeline);')
     || !simplifiedRunSource.includes("if(nextPipeline.phase === 'verified')")){
-    throw new Error('Simplified chart verification must commit a terminal pipeline result and allow AI only from verified ticker matches.');
+    throw new Error('Simplified chart verification must commit terminal match and mismatch results directly from the simplified quick path.');
   }
   if(!ensurePipelineSource.includes('[REVIEW_CHART_PIPELINE_STALE_REQUEST_IGNORED]')
     || !ensurePipelineSource.includes("phase:mismatch ? 'possible_mismatch' : (verifiedMatch ? 'verified' : 'cant_read')")){

@@ -4785,6 +4785,43 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
           : null
       });
     }
+    const normalizedVisibleTicker = normaliseVisibleTicker(normalized.visible_ticker || '');
+    const expectedVisibleTicker = normaliseVisibleTicker(item.ticker || '');
+    if(normalizedVisibleTicker && expectedVisibleTicker && normalizedVisibleTicker !== expectedVisibleTicker){
+      const mismatchGateAnalysis = {
+        ...normalized,
+        visible_ticker:normalizedVisibleTicker,
+        __simplifiedTickerMismatchDetected:true
+      };
+      const chartAssessorInput = buildChartAssessorInput(item, mismatchGateAnalysis, chartImageSource, requestId);
+      const nextPipeline = buildChartPipelineFromVerification(item, {
+        imageId,
+        requestId,
+        source:'chart_pipeline_quick_check',
+        analysis:mismatchGateAnalysis,
+        chartAssessorInput,
+        chartImageSource
+      });
+      nextPipeline.debug = {
+        mismatchGateOverride:true,
+        rawReadFacts:buildChartPipelineReadFacts(data.analysis && typeof data.analysis === 'object' ? data.analysis : {}),
+        normalizedReadFacts:buildChartPipelineReadFacts(normalized)
+      };
+      if(typeof console !== 'undefined' && console.info){
+        console.info('[CHART_PIPELINE_MISMATCH_GATE_OVERRIDE]', {
+          ticker,
+          imageId,
+          requestId,
+          expectedTicker:expectedVisibleTicker,
+          normalizedVisibleTicker,
+          phase:String(nextPipeline.phase || '')
+        });
+      }
+      upsertReviewChartAnalysisPipeline(item, nextPipeline);
+      commitTickerState();
+      renderReviewWorkspace({source:'chart_pipeline_mismatch_verified', requestedTicker:ticker});
+      return getReviewChartAnalysisPipeline(item);
+    }
     const sanitized = sanitizeChartAssessorVisibleIdentity(
       item,
       normalized,
