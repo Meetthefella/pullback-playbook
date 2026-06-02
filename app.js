@@ -19543,7 +19543,7 @@ function buildResolvedReviewDisplayModel({
     showPositionSize:semantic.showCapital === true,
     diagnosticsMessage
   };
-  const tradeStatus = semantic.tradeStatus || {line1:diagnosticsMessage || 'No actionable trade yet.', line2:''};
+  const rawTradeStatus = semantic.tradeStatus || {line1:diagnosticsMessage || 'No actionable trade yet.', line2:''};
   const reviewEvidence = reviewCopyEvidence({
     finalVerdict:simplified.canonicalVerdict,
     structureState:simplified.structureState || derived.structureState || '',
@@ -19572,16 +19572,25 @@ function buildResolvedReviewDisplayModel({
     reviewTechnicalVolumeLabel(simplified.volumeState || derived.volumeState || ''),
     reviewTechnicalMarketLabel(item)
   ].join(' | ');
-  const resolvedNarrative = reviewEvidence.consolidating
+  const compactTradeStatusLine = String(rawTradeStatus.line1 || diagnosticsMessage || 'No actionable trade yet.').trim();
+  let explanatoryReason = reviewEvidence.consolidating
     ? [
       reviewConsolidationPresentationCopy().summary,
       reviewConsolidationPresentationCopy().blocker,
       reviewConsolidationPresentationCopy().nextAction
     ].filter(Boolean).join(' ')
-    : [tradeStatus.line1, tradeStatus.line2].filter(Boolean).join(' ').trim();
+    : String(rawTradeStatus.line2 || semantic.blocker || semantic.primaryReason || diagnosticsMessage || '').trim();
+  if(sameVisibleCopy(explanatoryReason, compactTradeStatusLine)){
+    explanatoryReason = '';
+  }
+  const tradeStatus = {
+    line1:compactTradeStatusLine,
+    line2:''
+  };
+  const resolvedNarrative = [compactTradeStatusLine, explanatoryReason].filter(Boolean).join(' ').trim();
   const planSummary = planUI.showPlan
     ? (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
-    : (resolvedNarrative || diagnosticsMessage || 'No actionable plan yet.');
+    : (explanatoryReason || diagnosticsMessage || 'No actionable plan yet.');
   return {
     reviewEvidence,
     planUI,
@@ -19594,6 +19603,7 @@ function buildResolvedReviewDisplayModel({
     positionCostText,
     technicalContextLine,
     planSummary,
+    explanatoryReason,
     resolvedNarrative:resolvedNarrative || nextActionLabel
   };
 }
@@ -31878,7 +31888,7 @@ function renderReviewWorkspace(options = {}){
   const credibleRrDisplay = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   const planRealismSummary = resolvedReviewDisplay.planSummary;
   const dedupedPlanRealismSummary = planRealismSummary;
-  const calcNoteText = resolvedReviewDisplay.planSummary;
+  const calcNoteText = '';
   const chartSourceTrace = buildChartImageSourceTrace(record.review || {});
   const displayedChartContext = reviewDisplayedChartContext(record.review || {});
   const activeChartContext = currentReviewChartContext(record, record.review || {});
@@ -32095,6 +32105,7 @@ function renderReviewWorkspace(options = {}){
   const aiSummaryTitle = aiSummaryConflictDetected
     ? 'AI Notes'
     : 'AI Summary';
+  const aiSummaryVisible = !!String(aiSummaryPreview || '').trim() && aiSummaryPreview !== 'No AI analysis saved yet.';
   if(chartVerificationBlocksAiReview && !loading && !analysisBusy){
     analyseDisabled = true;
     analyseLabel = 'Confirm chart first';
@@ -32281,18 +32292,17 @@ function renderReviewWorkspace(options = {}){
         <div class="stat review-hidden"><div>Capital Check</div><div class="big" id="capitalCheckBox">${escapeHtml(capitalComfort.note || 'Clear')}</div></div>
       </div>
       <div class="statnote trade-plan-fx-note ${planUI.showCapital ? '' : 'review-hidden'}" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div>
-      ${calcNoteText ? `<div class="tiny" id="calcNote">${escapeHtml(calcNoteText)}</div>` : ''}
     </div>
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
       <div class="reviewsectionhead"><strong>Technical Context</strong></div>
       <div class="summary review-technical-line" id="reviewTechnicalContextLine">${escapeHtml(technicalContextLine)}</div>
       <div class="review-action-row review-action-row--top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
       ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
-      <details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
+      ${aiSummaryVisible ? `<details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
         <summary id="reviewAiSummaryTitle">${escapeHtml(aiSummaryTitle)}</summary>
         <div class="tiny review-ai-preview" id="reviewAiSummaryPreview">${escapeHtml(aiSummaryPreview)}</div>
         <div class="tiny review-ai-overflow-hint" id="reviewAiSummaryOverflowHint" hidden>Scroll for more</div>
-      </details>
+      </details>` : ''}
       <details class="compact-details review-advanced-panel advanced-debug-only" id="reviewAdvancedDetails" ${advancedOpen ? 'open' : ''}>
         <summary>Advanced details</summary>
         ${advancedOpen ? `<div class="review-diagnostics-stack">
@@ -33075,7 +33085,6 @@ function syncPlanDisplayMeta(options = {}){
   if($('reviewNextActionInline')) $('reviewNextActionInline').textContent = `Action guidance: ${resolvedReviewDisplay.nextActionLabel}`;
   if($('reviewNextActionPrimary')) $('reviewNextActionPrimary').textContent = `Can I trade this now? ${resolvedReviewDisplay.canTradeNowText}`;
   if($('reviewTechnicalContextLine')) $('reviewTechnicalContextLine').textContent = resolvedReviewDisplay.technicalContextLine;
-  if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
   if($('rrValue')){
     $('rrValue').textContent = resolvedReviewDisplay.rrDisplay || 'No actionable plan yet.';
     $('rrValue').className = `big ${planUI.showRR ? rrDisplayClass(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
@@ -33305,7 +33314,6 @@ function calculate(options = {}){
   if($('reviewNextActionInline')) $('reviewNextActionInline').textContent = `Action guidance: ${resolvedReviewDisplay.nextActionLabel}`;
   if($('reviewNextActionPrimary')) $('reviewNextActionPrimary').textContent = `Can I trade this now? ${resolvedReviewDisplay.canTradeNowText}`;
   if($('reviewTechnicalContextLine')) $('reviewTechnicalContextLine').textContent = resolvedReviewDisplay.technicalContextLine;
-  if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
   if($('targetReviewStateBox')) $('targetReviewStateBox').value = targetReviewStateLabel(executionState.targetReviewState);
   if($('targetAlertBox')){
     $('targetAlertBox').value = executionState.exitMode === 'dynamic_exit'
@@ -33341,7 +33349,6 @@ function calculate(options = {}){
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
       plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
-    if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
     return;
   }
   if(displayedPlan.status === 'invalid'){
@@ -33354,7 +33361,6 @@ function calculate(options = {}){
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
       plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
     }
-    if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
     return;
   }
   $('riskPerShare').textContent = Number.isFinite(displayedPlan.riskFit.risk_per_share) ? displayedPlan.riskFit.risk_per_share.toFixed(2) : '-';
@@ -33366,7 +33372,6 @@ function calculate(options = {}){
     const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
     plannerBox.className = `panelbox plannerbox ${reviewPanelTone}`.trim();
   }
-  if($('calcNote')) $('calcNote').textContent = resolvedReviewDisplay.planSummary;
 }
 
 async function copyText(text){
