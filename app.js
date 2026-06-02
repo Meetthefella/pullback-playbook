@@ -4113,6 +4113,19 @@ function chartPipelineHasDetectedTickerMatch(pipeline = {}){
   return !!(detectedTicker && safe.verifiedMatch === true);
 }
 
+function chartPipelineHasManualConfirmedMismatch(pipeline = {}, expectedTicker = ''){
+  const safe = pipeline && typeof pipeline === 'object' ? pipeline : {};
+  const readFacts = safe.readFacts && typeof safe.readFacts === 'object' ? safe.readFacts : {};
+  const expected = normaliseVisibleTicker(expectedTicker || safe.ticker || safe.expectedFacts && safe.expectedFacts.ticker || '');
+  const detectedTicker = normaliseVisibleTicker(readFacts.ticker || '');
+  return !!(
+    safe.manualConfirmed === true
+    && detectedTicker
+    && expected
+    && detectedTicker !== expected
+  );
+}
+
 function mergeChartPipelineReadFacts(primary = {}, fallback = {}){
   const first = primary && typeof primary === 'object' ? primary : {};
   const second = fallback && typeof fallback === 'object' ? fallback : {};
@@ -31917,6 +31930,12 @@ function renderReviewWorkspace(options = {}){
     ? `<details class="compact-details review-chart-controls"><summary>Change chart</summary>${chartControlsFullMarkup}</details>`
     : chartControlsFullMarkup;
   const aiSummaryPreview = (() => {
+    const manualConfirmedMismatch = chartPipelineHasManualConfirmedMismatch(simplifiedChartPipeline || {}, record.ticker || '');
+    if(manualConfirmedMismatch){
+      const mismatchReadTicker = normaliseVisibleTicker(simplifiedChartPipeline && simplifiedChartPipeline.readFacts && simplifiedChartPipeline.readFacts.ticker || '') || 'Unknown';
+      const mismatchExpectedTicker = normaliseVisibleTicker(record.ticker || '') || 'Unknown';
+      return `AI summary withheld: chart was manually confirmed despite a ticker mismatch (read ${mismatchReadTicker}, expected ${mismatchExpectedTicker}). Upload the correct chart for a reliable AI summary.`;
+    }
     if(chartVerificationBlocksAiReview) return String(chartUiDecision && (chartUiDecision.summary || chartUiDecision.title) || 'AI chart analysis is blocked until you confirm this chart manually.').trim();
     if(!aiSummaryGuard.allowedToRender) return 'No AI analysis saved yet.';
     if(aiAnalysisSuppressedByChartMismatch) return aiSuppressionText;
