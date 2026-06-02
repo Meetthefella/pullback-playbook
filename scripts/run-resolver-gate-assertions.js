@@ -2614,10 +2614,10 @@ function runAiContractAssertions(){
     throw new Error('AI summary guard must block current rendering while simplified chart verification is still running for the same chart.');
   }
   const aiCommitGateSource = extractFunctionSource(appSource, 'canCommitAiSummaryForChart');
-  if(!aiCommitGateSource.includes("!['uploading', 'verifying'].includes")
+  if(!aiCommitGateSource.includes('return chartPipelineAllowsAi(phase);')
     || !aiCommitGateSource.includes('requestedImageId === pipelineImageId')
     || !aiCommitGateSource.includes('requestedRequestId === pipelineRequestId')){
-    throw new Error('AI summary commit gate must require a terminal simplified pipeline state for the same ticker/image/request context.');
+    throw new Error('AI summary commit gate must require an AI-allowed simplified pipeline phase for the same ticker/image/request context.');
   }
   const pendingAiStageSource = extractFunctionSource(appSource, 'stagePendingAiSummaryForChart');
   if(!pendingAiStageSource.includes('setPendingChartAiSummary(item, stagedPayload);')
@@ -2705,6 +2705,8 @@ function runAiContractAssertions(){
     || !appAnalyseSetupSource.includes('[CHART_CONTEXT_AT_VERIFICATION_START]')
     || !appAnalyseSetupSource.includes('pipelineAlreadyResolvedForCurrentContext && analysisAlreadyCommittedForCurrentContext')
     || !appAnalyseSetupSource.includes("stagePendingAiSummaryForChart(record, aiSummaryCommitPayload, 'quick_running')")
+    || !appAnalyseSetupSource.includes("aiSummaryCommitResult = {committed:false, reason:'pipeline_blocked'};")
+    || !appAnalyseSetupSource.includes('[AI_SUMMARY_SKIPPED_PIPELINE_BLOCKED]')
     || !appAnalyseSetupSource.includes("applyCommittedAiSummaryForChart(record, aiSummaryCommitPayload)")
     || !appAnalyseSetupSource.includes("flushPendingAiSummaryForChart(record, {source:'analyse_setup_failed'})")){
     throw new Error('AI summary commit must remain sequenced after the simplified pipeline gate in the analysis path.');
@@ -2827,6 +2829,9 @@ function runAiContractAssertions(){
   }
   const aiGateSandbox = {
     normalizeTicker(value){ return String(value || '').trim().toUpperCase(); },
+    chartPipelineAllowsAi(phase = ''){
+      return ['verified', 'analysis_running', 'analysis_complete'].includes(String(phase || '').trim());
+    },
     getReviewChartAnalysisPipeline(record = {}){
       return record && record.review && record.review.chartAnalysisPipeline && typeof record.review.chartAnalysisPipeline === 'object'
         ? record.review.chartAnalysisPipeline

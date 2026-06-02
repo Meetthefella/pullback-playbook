@@ -21201,7 +21201,8 @@ function canCommitAiSummaryForChart({record, ticker, imageId, requestId} = {}){
     && requestedRequestId === pipelineRequestId
   );
   if(!sameContext) return false;
-  return !['uploading', 'verifying'].includes(String(pipeline.phase || '').trim());
+  const phase = String(pipeline.phase || '').trim();
+  return chartPipelineAllowsAi(phase);
 }
 
 function applyCommittedAiSummaryForChart(record, payload = {}){
@@ -24849,18 +24850,32 @@ async function analyseSetup(ticker, options = {}){
         normalized:analysis,
         reviewedAt:card.updatedAt
       };
-      const aiSummaryCommitResult = canCommitAiSummaryForChart({
+      const summaryPipelinePhase = String((getReviewChartAnalysisPipeline(record) || {}).phase || '').trim();
+      let aiSummaryCommitResult;
+      if(canCommitAiSummaryForChart({
         record,
         ticker,
         imageId:requestChartImageId,
         requestId:analysisRequestId
-      })
-        ? {committed:applyCommittedAiSummaryForChart(record, aiSummaryCommitPayload), reason:'quick_terminal'}
-        : (stagePendingAiSummaryForChart(record, aiSummaryCommitPayload, 'quick_running')
+      })){
+        aiSummaryCommitResult = {committed:applyCommittedAiSummaryForChart(record, aiSummaryCommitPayload), reason:'quick_terminal'};
+      }else if(['uploading', 'verifying'].includes(summaryPipelinePhase)){
+        aiSummaryCommitResult = stagePendingAiSummaryForChart(record, aiSummaryCommitPayload, 'quick_running')
           ? {committed:false, reason:'quick_running'}
-          : {committed:false, reason:'pending_stage_failed'});
-      if(!aiSummaryCommitResult.committed){
+          : {committed:false, reason:'pending_stage_failed'};
         flushPendingAiSummaryForChart(record, {source:'analyse_setup_success'});
+      }else{
+        clearPendingChartAiSummary(record);
+        aiSummaryCommitResult = {committed:false, reason:'pipeline_blocked'};
+        if(typeof console !== 'undefined' && console.info){
+          console.info('[AI_SUMMARY_SKIPPED_PIPELINE_BLOCKED]', {
+            ticker,
+            requestId:analysisRequestId,
+            imageId:requestChartImageId,
+            pipelinePhase:summaryPipelinePhase,
+            source:'analyse_setup_success'
+          });
+        }
       }
       record.review.cardOpen = true;
       record.meta.marketStatus = state.marketStatus;
