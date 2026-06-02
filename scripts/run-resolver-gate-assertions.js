@@ -342,6 +342,8 @@ function runReviewProjectionAssertions(){
     'normalizeUiCopy',
     'isDuplicatedStatusCopy',
     'nonPlanCalcNoteText',
+    'isAccepted50MaSupportTestDisplayState',
+    'review50MaSupportTestPresentationCopy',
     'buildReviewSemanticStatus',
     'reviewSetupQualitySummary',
     'clampReviewChecklistScore',
@@ -977,6 +979,8 @@ function runEntryConditionsSummaryAssertions(){
   vm.createContext(summarySandbox);
   [
     'buildSharedSetupNarrative',
+    'isAccepted50MaSupportTestDisplayState',
+    'review50MaSupportTestPresentationCopy',
     'resolveSetupPatternUi',
     'entryTriggerConditionForSummary',
     'nextUpgradeStateForSummary',
@@ -1121,6 +1125,8 @@ function runSharedNarrativeConsistencyAssertions(){
     'provisionalPlanConfirmationCopy',
     'sanitizeNonTerminalPlanCopy',
     'buildSharedSetupNarrative',
+    'isAccepted50MaSupportTestDisplayState',
+    'review50MaSupportTestPresentationCopy',
     'resolveTrackCardVisibleModel',
     'buildReviewSemanticStatus',
     'resolveSetupPatternUi',

@@ -75,6 +75,43 @@
     const bounceState = String(globalVerdict && globalVerdict.bounce_state || '').toLowerCase();
     const bounceAttempt = ['attempt','early','developing'].includes(bounceState);
     const pullbackState = String(globalVerdict && (globalVerdict.pullback_state || globalVerdict.pullback_zone) || '').trim().toLowerCase();
+    const pullbackAccepted = !!(globalVerdict && (
+      globalVerdict.nearEntryPullbackZoneAccepted === true
+      || globalVerdict.near_entry_pullback_zone_accepted === true
+      || globalVerdict.pullback_ok === true
+      || (globalVerdict.entry_gate_checks && globalVerdict.entry_gate_checks.pullback_ok === true)
+      || (globalVerdict.near_entry_gate_checks && globalVerdict.near_entry_gate_checks.pullback_ok === true)
+    ));
+    const structurallyAliveAtRefresh = String(globalVerdict && globalVerdict.structural_alive_at_refresh || '').trim().toLowerCase() === 'true';
+    const explicitInvalidationReason = String(globalVerdict && globalVerdict.explicit_invalidation_reason || '').trim().toLowerCase();
+    const hasExplicitInvalidation = !!(
+      explicitInvalidationReason
+      && explicitInvalidationReason !== '(none)'
+      && explicitInvalidationReason !== 'none'
+      && explicitInvalidationReason !== 'n/a'
+    );
+    const currentPrice = Number(globalVerdict && globalVerdict.current_price);
+    const sma50 = Number(globalVerdict && globalVerdict.sma50);
+    const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.9975;
+    const positiveAliveSignal = structurallyAliveAtRefresh
+      || structureEligibility === 'alive'
+      || ['strong','intact','developing_clean'].includes(structureState);
+    const supportFailureReason = String(globalVerdict && (
+      globalVerdict.main_blocker
+      || globalVerdict.reason
+      || globalVerdict.downgrade_reason
+      || globalVerdict.refresh_demote_reason
+      || ''
+    )).trim().toLowerCase();
+    const failedSupportTest = /lost[_\s-]?50ma|support failed|failed support|below support|structure is broken|trend is weakening|structure weakening|diminishing|remove from active focus/i.test(supportFailureReason);
+    const accepted50MaSupportTest = pullbackAccepted
+      && pullbackState === 'near_50ma'
+      && ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState)
+      && !terminalAvoidEvidence
+      && !hasExplicitInvalidation
+      && !lost50MaSupport
+      && positiveAliveSignal
+      && !failedSupportTest;
     const consolidating = aliveStructure
       && !structuralWeakness
       && ['strong','intact','developing_clean'].includes(structureState)
@@ -91,6 +128,12 @@
       return {
         line1:'Draft plan possible but weak.',
         line2:'No actionable trade yet.'
+      };
+    }
+    if(accepted50MaSupportTest){
+      return {
+        line1:'Setup not ready yet.',
+        line2:'Testing 50MA support - waiting for buyers to confirm.'
       };
     }
     if(aliveStructure && !structuralWeakness && /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(mainBlocker)){

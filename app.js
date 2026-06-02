@@ -10449,6 +10449,7 @@ function renderWatchlistCardElement(record, options = {}){
     record.watchlist.debug.holdTraceHistory = [`hold_helper.rendered | ${seededAt}`, ...history].slice(0, 8);
   }
   const entryConditionsSummary = buildEntryConditionsSummary({
+    record,
     ticker:entry.ticker,
     finalVerdict:canonicalVerdict,
     presentationState:visualBucket,
@@ -17265,6 +17266,11 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     && !explicitInvalidation
     && structureEligibility !== 'broken'
     && viability === 'reject';
+  const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
+    record:item,
+    globalVerdict:verdictSource,
+    derivedStates
+  });
   const effectiveViability = staleRejectSuppressed ? 'low_priority' : viability;
   const lowPriorityByViability = effectiveViability === 'low_priority';
   const avoidByVerdict = terminalByVerdict && avoidAllowedByStructureGuard;
@@ -17311,6 +17317,7 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     && !avoidByExplicitInvalidation;
   const diminishingTrackEligible = finalIsMonitorWatch
     && (positiveDeterioration || failedReclaimTrackEvidence)
+    && !accepted50MaSupportTest
     && !avoidByVerdict
     && !avoidByBroken
     && !avoidByExplicitInvalidation;
@@ -17368,6 +17375,8 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
     presentationBadge = 'Near Entry';
     presentationBadgeClass = 'badge--near-entry';
     presentationCardClass = 'card--near-entry';
+  }else if(accepted50MaSupportTest){
+    presentationReason = review50MaSupportTestPresentationCopy().trackReason;
   }
 
   const visualTone = {
@@ -17717,6 +17726,114 @@ function buildSharedSetupNarrative({
     evidence,
     cautions,
     promotionRequirements
+  };
+}
+
+function isAccepted50MaSupportTestDisplayState({
+  record,
+  simplifiedState,
+  globalVerdict,
+  derivedStates
+} = {}){
+  const item = typeof normalizeTickerRecord === 'function'
+    ? normalizeTickerRecord(record || {})
+    : (record && typeof record === 'object' ? record : {});
+  const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const readNumber = value => {
+    if(typeof numericOrNull === 'function') return numericOrNull(value);
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
+  const verdict = normalizeGlobalVerdictKey(
+    simplified.canonicalVerdict
+    || global.final_verdict
+    || global.finalVerdict
+    || 'watch'
+  );
+  const structureState = String(
+    derived.structureState
+    || simplified.structureState
+    || global.structure_state
+    || global.structureState
+    || ''
+  ).trim().toLowerCase();
+  const structureEligibility = String(
+    derived.structureEligibility
+    || simplified.structureEligibility
+    || global.structure_eligibility
+    || global.structureEligibility
+    || ''
+  ).trim().toLowerCase();
+  const pullbackState = String(
+    derived.pullbackZone
+    || derived.pullbackState
+    || simplified.pullbackZone
+    || global.pullback_zone
+    || global.pullback_state
+    || ''
+  ).trim().toLowerCase();
+  const bounceState = String(
+    derived.bounceState
+    || simplified.bounceState
+    || global.bounce_state
+    || ''
+  ).trim().toLowerCase();
+  const explicitInvalidationReason = String(global.explicit_invalidation_reason || '').trim().toLowerCase();
+  const hasExplicitInvalidation = !!(
+    explicitInvalidationReason
+    && explicitInvalidationReason !== '(none)'
+    && explicitInvalidationReason !== 'none'
+    && explicitInvalidationReason !== 'n/a'
+  );
+  const supportFailureReason = String(
+    global.main_blocker
+    || global.reason
+    || global.downgrade_reason
+    || global.refresh_demote_reason
+    || ''
+  ).trim().toLowerCase();
+  const terminalAvoid = verdict === 'avoid'
+    || global.terminal_avoid_applied === true
+    || global.rejected_by_viability_gate === true
+    || String(global.viability || '').trim().toLowerCase() === 'reject'
+    || ['broken','failed','dead','invalid'].includes(structureState)
+    || structureEligibility === 'broken'
+    || hasExplicitInvalidation;
+  const pullbackAccepted = global.nearEntryPullbackZoneAccepted === true
+    || global.near_entry_pullback_zone_accepted === true
+    || global.pullback_ok === true
+    || (global.entry_gate_checks && global.entry_gate_checks.pullback_ok === true)
+    || (global.near_entry_gate_checks && global.near_entry_gate_checks.pullback_ok === true);
+  const structurallyAliveAtRefresh = String(global.structural_alive_at_refresh || '').trim().toLowerCase() === 'true';
+  const currentPrice = readNumber(item.marketData && item.marketData.price);
+  const sma50 = readNumber(item.marketData && item.marketData.sma50);
+  const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.9975;
+  const bounceUnconfirmed = ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState);
+  const positiveAliveSignal = structurallyAliveAtRefresh
+    || structureEligibility === 'alive'
+    || ['strong','intact','developing_clean'].includes(structureState);
+  const failedSupportTest = /lost[_\s-]?50ma|support failed|failed support|below support|structure is broken|trend is weakening|structure weakening|diminishing|remove from active focus/i.test(supportFailureReason);
+  return pullbackAccepted
+    && pullbackState === 'near_50ma'
+    && bounceUnconfirmed
+    && positiveAliveSignal
+    && !lost50MaSupport
+    && !terminalAvoid
+    && !failedSupportTest;
+}
+
+function review50MaSupportTestPresentationCopy(){
+  return {
+    tradeStatus:'Setup not ready yet.',
+    blocker:'Price is testing the 50MA, but buyers have not confirmed support yet.',
+    monitoringReason:'Still structurally alive; monitor for a 50MA support defence.',
+    nextAction:'Watch for a bounce or reclaim before considering entry.',
+    technicalStructure:'Structure intact',
+    technicalPullback:'Pullback near 50MA',
+    technicalBounce:'Bounce not confirmed',
+    trackReason:'Testing 50MA support - waiting for buyers to confirm.'
   };
 }
 
@@ -18074,7 +18191,16 @@ function reconcileWatchlistPresentation({
   const softVerdict = normalizeVerdict(base.finalVerdict || base.final_verdict || '');
   const strictAvoidTruth = watchlistStrictAvoidTruth(item, globalVerdict, lifecycleSnapshot);
   if(simplified && simplified.visualBucket){
-    const simpleBucket = normalizeVisualBucketForPairing(simplified.visualBucket || 'monitor');
+    const simpleBucketRaw = normalizeVisualBucketForPairing(simplified.visualBucket || 'monitor');
+    const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
+      record:item,
+      simplifiedState:simplified,
+      globalVerdict,
+      derivedStates
+    });
+    const simpleBucket = accepted50MaSupportTest && simpleBucketRaw === 'diminishing'
+      ? 'monitor'
+      : simpleBucketRaw;
     const simpleTone = String(simplified.tone || simpleBucket || 'monitor').trim().toLowerCase() || 'monitor';
     const simpleVerdict = normalizeGlobalVerdictKey(simplified.canonicalVerdict || simplified.finalVerdict || simplified.final_verdict || 'watch');
     const simpleBadgeClass = simplifiedVisualBadgeClass(simpleBucket);
@@ -18466,6 +18592,7 @@ function nextUpgradeStateForSummaryLabel(verdict){
 }
 
 function buildEntryConditionsSummary({
+  record,
   ticker,
   finalVerdict,
   presentationState,
@@ -18488,6 +18615,12 @@ function buildEntryConditionsSummary({
     ? globalVerdict.entry_gate_checks
     : {};
   const entryGatePass = !!(globalVerdict && globalVerdict.entry_gate_pass);
+  const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
+    record,
+    globalVerdict,
+    derivedStates
+  });
+  const supportTestCopy = accepted50MaSupportTest ? review50MaSupportTestPresentationCopy() : null;
   const capitalFit = String(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || '').toLowerCase();
   const affordability = String(displayedPlan && displayedPlan.affordability || '').toLowerCase();
   const pattern = resolveSetupPatternUi({
@@ -18556,6 +18689,24 @@ function buildEntryConditionsSummary({
     };
   }
   if(presentation === 'diminishing'){
+    if(accepted50MaSupportTest){
+      return {
+        show:true,
+        ready:false,
+        ticker:normalizeTicker(ticker || ''),
+        header:'Monitor - testing 50MA support',
+        primary:supportTestCopy.blocker,
+        definitionLine:supportTestCopy.monitoringReason,
+        wording_tone:'support_test_waiting',
+        pattern_label:'Testing 50MA support',
+        pattern_explanation:'Awaiting buyer confirmation',
+        secondary:['Support must hold', 'Buyers must reclaim control', 'Risk/reward must become actionable'],
+        triggerLine:'Becomes actionable IF: Buyers defend the 50MA and confirm a bounce.',
+        futureStateLine:`What would improve the setup? ${asSentence(supportTestCopy.nextAction)}.`,
+        footer:supportTestCopy.nextAction,
+        suppressPlanBlockerInHeadline:true
+      };
+    }
     const structuralState = String((resolvedContract && resolvedContract.structuralState) || '').toLowerCase();
     const setupLocationState = String((globalVerdict && globalVerdict.setup_location_state) || (derivedStates && derivedStates.setupLocationState) || '').toLowerCase();
     const priceabilityState = String((globalVerdict && globalVerdict.priceability_state) || (derivedStates && derivedStates.priceabilityState) || '').toLowerCase();
@@ -18644,8 +18795,10 @@ function buildEntryConditionsSummary({
     blockers.push({id, priority, primary, secondary});
   };
 
-  if(entryChecks.structure_ok === false || ['weak','weakening','developing_loose','broken'].includes(structureState)){
+  if(!accepted50MaSupportTest && (entryChecks.structure_ok === false || ['weak','weakening','developing_loose','broken'].includes(structureState))){
     addBlocker('structure', 1, 'Trend needs to stabilise', 'Structure still weakening');
+  }else if(accepted50MaSupportTest){
+    addBlocker('support_test', 1, 'Testing 50MA support', 'Buyers have not confirmed support yet');
   }
   if(entryChecks.bounce_ok === false || ['none','attempt','early','unconfirmed'].includes(bounceState)){
     addBlocker('bounce', 2, 'Bounce is still tentative', bounceState === 'none' ? 'Bounce has not formed yet' : 'Buyers have not taken control yet');
@@ -19523,6 +19676,7 @@ function reviewAiSummaryConflictsWithResolvedState(text, resolvedDisplay = {}){
 function buildResolvedReviewDisplayModel({
   record,
   simplifiedState,
+  globalVerdict,
   reviewSemanticStatus,
   derivedStates,
   displayedPlan,
@@ -19531,9 +19685,17 @@ function buildResolvedReviewDisplayModel({
   const item = normalizeTickerRecord(record || {});
   const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const semantic = reviewSemanticStatus && typeof reviewSemanticStatus === 'object' ? reviewSemanticStatus : {};
+  const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
   const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
   const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
   const realism = planRealism && typeof planRealism === 'object' ? planRealism : {};
+  const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
+    record:item,
+    simplifiedState:simplified,
+    globalVerdict:global,
+    derivedStates:derived
+  });
+  const supportTestCopy = accepted50MaSupportTest ? review50MaSupportTestPresentationCopy() : null;
   const nextActionLabel = String(semantic.nextAction || simplified.actionLabel || '').trim() || 'Review setup inputs';
   const diagnosticsMessage = String(semantic.blocker || semantic.primaryReason || simplified.mainBlocker || simplified.planStatus || 'No actionable plan yet.').trim();
   const planUI = {
@@ -19562,9 +19724,9 @@ function buildResolvedReviewDisplayModel({
     ? `${Number(plan.capitalFit.position_cost.toFixed(2))}${plan.capitalFit.quote_currency ? ` ${plan.capitalFit.quote_currency}` : ''}`
     : '-';
   const technicalContextLine = [
-    reviewTechnicalStructureLabel(simplified.structureState || derived.structureState || ''),
-    reviewTechnicalPullbackLabel(derived.pullbackZone || derived.pullbackState || ''),
-    reviewTechnicalBounceLabel({
+    supportTestCopy ? supportTestCopy.technicalStructure : reviewTechnicalStructureLabel(simplified.structureState || derived.structureState || ''),
+    supportTestCopy ? supportTestCopy.technicalPullback : reviewTechnicalPullbackLabel(derived.pullbackZone || derived.pullbackState || ''),
+    supportTestCopy ? supportTestCopy.technicalBounce : reviewTechnicalBounceLabel({
       reviewEvidence,
       bounceState:simplified.bounceState || derived.bounceState || '',
       stabilisationState:derived.stabilisationState || ''
@@ -19572,14 +19734,18 @@ function buildResolvedReviewDisplayModel({
     reviewTechnicalVolumeLabel(simplified.volumeState || derived.volumeState || ''),
     reviewTechnicalMarketLabel(item)
   ].join(' | ');
-  const compactTradeStatusLine = String(rawTradeStatus.line1 || diagnosticsMessage || 'No actionable trade yet.').trim();
+  const compactTradeStatusLine = supportTestCopy
+    ? supportTestCopy.tradeStatus
+    : String(rawTradeStatus.line1 || diagnosticsMessage || 'No actionable trade yet.').trim();
   let explanatoryReason = reviewEvidence.consolidating
     ? [
       reviewConsolidationPresentationCopy().summary,
       reviewConsolidationPresentationCopy().blocker,
       reviewConsolidationPresentationCopy().nextAction
     ].filter(Boolean).join(' ')
-    : String(rawTradeStatus.line2 || semantic.blocker || semantic.primaryReason || diagnosticsMessage || '').trim();
+    : (supportTestCopy
+      ? supportTestCopy.blocker
+      : String(rawTradeStatus.line2 || semantic.blocker || semantic.primaryReason || diagnosticsMessage || '').trim());
   if(sameVisibleCopy(explanatoryReason, compactTradeStatusLine)){
     explanatoryReason = '';
   }
@@ -19588,9 +19754,13 @@ function buildResolvedReviewDisplayModel({
     line2:''
   };
   const resolvedNarrative = [compactTradeStatusLine, explanatoryReason].filter(Boolean).join(' ').trim();
-  const planSummary = planUI.showPlan
-    ? (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
-    : (explanatoryReason || diagnosticsMessage || 'No actionable plan yet.');
+  const planSummary = supportTestCopy
+    ? (planUI.showPlan
+      ? 'Draft plan exists, but setup is not actionable until buyers confirm support at the 50MA.'
+      : supportTestCopy.blocker)
+    : (planUI.showPlan
+      ? (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
+      : (explanatoryReason || diagnosticsMessage || 'No actionable plan yet.'));
   return {
     reviewEvidence,
     planUI,
@@ -19609,6 +19779,7 @@ function buildResolvedReviewDisplayModel({
 }
 
 function buildReviewSemanticStatus({
+  record,
   simplifiedState,
   globalVerdict,
   derivedStates,
@@ -19647,6 +19818,13 @@ function buildReviewSemanticStatus({
   const aliveStructure = structureEligibility === 'alive'
     || ['strong','intact','developing_clean'].includes(structureState);
   const staleWeakCopy = /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(rawBlocker);
+  const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
+    record,
+    simplifiedState:simplified,
+    globalVerdict:global,
+    derivedStates:derived
+  });
+  const supportTestCopy = accepted50MaSupportTest ? review50MaSupportTestPresentationCopy() : null;
   const sharedNarrative = buildSharedSetupNarrative({
     simplifiedState:simplified,
     resolvedState:global,
@@ -19670,6 +19848,8 @@ function buildReviewSemanticStatus({
   let blocker = String(sharedNarrative.blocker || '').trim();
   if(terminalAvoid && ['broken','dead','failed'].includes(structureState)){
     blocker = rawBlocker || 'Structure is broken. No trade until price rebuilds from a clean base.';
+  }else if(accepted50MaSupportTest){
+    blocker = supportTestCopy.blocker;
   }else if(structuralWeakness){
     blocker = rawBlocker || 'Trend is weakening - no reliable stop level yet.';
   }else if(aliveStructure && staleWeakCopy){
@@ -19695,6 +19875,8 @@ function buildReviewSemanticStatus({
   let tradeStatus = {line1:'No actionable trade yet.', line2:blocker};
   if(actionable){
     tradeStatus = {line1:'Actionable plan.', line2:rrAcceptable ? 'Risk/reward and gates are aligned.' : ''};
+  }else if(accepted50MaSupportTest){
+    tradeStatus = {line1:supportTestCopy.tradeStatus, line2:supportTestCopy.monitoringReason};
   }else if(draftPlan){
     tradeStatus = {line1:'Draft plan possible but weak.', line2:'No actionable trade yet.'};
   }else if(planFieldsPresent && !planMathValid){
@@ -19707,7 +19889,7 @@ function buildReviewSemanticStatus({
     : (draftPlan ? 'No actionable trade yet.' : 'No actionable plan yet.');
   return {
     stateLabel:String(sharedNarrative.stateLabel || globalVerdictLabel(verdict)).trim(),
-    primaryReason:String(sharedNarrative.primaryReason || blocker).trim(),
+    primaryReason:String(accepted50MaSupportTest ? supportTestCopy.monitoringReason : (sharedNarrative.primaryReason || blocker)).trim(),
     blocker,
     setupSummary:[sharedNarrative.primaryReason, blocker].filter((line, index, list) => {
       const text = String(line || '').trim();
@@ -19717,7 +19899,7 @@ function buildReviewSemanticStatus({
     evidence:Array.isArray(sharedNarrative.evidence) ? sharedNarrative.evidence.slice() : [],
     cautions:Array.isArray(sharedNarrative.cautions) ? sharedNarrative.cautions.slice() : [],
     promotionRequirements:Array.isArray(sharedNarrative.promotionRequirements) ? sharedNarrative.promotionRequirements.slice() : [],
-    nextAction:String(sharedNarrative.nextAction || '').trim(),
+    nextAction:String(accepted50MaSupportTest ? supportTestCopy.nextAction : (sharedNarrative.nextAction || '')).trim(),
     tradeStatus,
     planActionable:actionable,
     draftPlan,
@@ -31237,14 +31419,23 @@ function renderReviewWorkspace(options = {}){
   });
   const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
   const simplifiedVisualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
-  const simplifiedTone = String(simplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const accepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
+    record,
+    simplifiedState,
+    globalVerdict,
+    derivedStates
+  });
+  const reviewDisplayBucket = accepted50MaSupportTestDisplay && simplifiedVisualBucket === 'diminishing'
+    ? 'monitor'
+    : simplifiedVisualBucket;
+  const simplifiedTone = String(simplifiedState.tone || reviewDisplayBucket || 'monitor').trim().toLowerCase() || 'monitor';
   const simplifiedBadgeClass = ({
     entry:'badge--entry ready',
     near_entry:'badge--near-entry near',
     monitor:'badge--monitor watch',
     diminishing:'badge--diminishing',
     avoid:'badge--avoid avoid'
-  })[simplifiedVisualBucket] || 'badge--monitor watch';
+  })[reviewDisplayBucket] || 'badge--monitor watch';
   const simplifiedBadge = {
     text:String(simplifiedState.badgeLabel || globalVerdictLabel(simplifiedCanonicalVerdict) || 'Watch'),
     className:simplifiedBadgeClass
@@ -31502,14 +31693,14 @@ function renderReviewWorkspace(options = {}){
     ? `${paperTradePreviewModel.debugForced ? '<div class="tiny warntext">Simulated Entry-ready preview (debug).</div>' : ''}<div class="tiny">Ticker ${escapeHtml(paperTradePreviewModel.ticker)} | Side ${escapeHtml(paperTradePreviewModel.side)} | Qty ${escapeHtml(String(paperTradePreviewModel.quantity))}</div><div class="tiny">Entry ${escapeHtml(fmtPrice(paperTradePreviewModel.entry))} | Stop ${escapeHtml(fmtPrice(paperTradePreviewModel.stop))} | Target ${escapeHtml(fmtPrice(paperTradePreviewModel.target))}</div><div class="tiny">Max loss ${escapeHtml(Number.isFinite(paperTradePreviewModel.maxLoss) ? formatGbp(paperTradePreviewModel.maxLoss) : 'n/a')} | RR ${escapeHtml(Number.isFinite(paperTradePreviewModel.rrRatio) ? `${paperTradePreviewModel.rrRatio.toFixed(2)}R` : 'n/a')}</div><div class="tiny">Capital ${escapeHtml(paperTradePreviewModel.capitalLabel)} | Market ${escapeHtml(paperTradePreviewModel.marketStatus || '')}</div>`
     : `<div class="tiny warntext">${escapeHtml(paperTradePrimaryReason || 'Unable to build paper-trade preview for this setup.')}</div>`;
   const reviewLifecycleBias = {
-    review_lifecycle_bias:simplifiedVisualBucket,
+    review_lifecycle_bias:reviewDisplayBucket,
     review_presentation_source:'simplified_state_pipeline',
     review_lifecycle_copy_override_applied:false,
     review_lifecycle_copy_reason:'',
     decisionSummary:String(simplifiedState.mainBlocker || simplifiedActionLabel || '').trim(),
     tradeStatusLine1:String(simplifiedState.planStatus || '').trim(),
     tradeStatusLine2:'',
-    trackPresentationBucket:simplifiedVisualBucket,
+    trackPresentationBucket:reviewDisplayBucket,
     trackPresentationTone:simplifiedTone,
     terminal_avoid_applied:false,
     terminal_avoid_reason:''
@@ -31536,6 +31727,7 @@ function renderReviewWorkspace(options = {}){
     track_presentation_tone:reviewLifecycleBias.trackPresentationTone
   };
   const reviewSemanticStatus = buildReviewSemanticStatus({
+    record,
     simplifiedState,
     globalVerdict:reviewTradeStatusVerdict,
     derivedStates,
@@ -31833,6 +32025,7 @@ function renderReviewWorkspace(options = {}){
   const resolvedReviewDisplay = buildResolvedReviewDisplayModel({
     record,
     simplifiedState,
+    globalVerdict:reviewTradeStatusVerdict,
     reviewSemanticStatus,
     derivedStates,
     displayedPlan,
@@ -33010,14 +33203,24 @@ function syncPlanDisplayMeta(options = {}){
     displayedPlan,
     setupScore:setupScoreForRecord(record)
   });
+  const metaDisplayBucket = normalizeVisualBucketForPairing(metaSimplifiedState.visualBucket || 'monitor');
+  const metaAccepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
+    record,
+    simplifiedState:metaSimplifiedState,
+    globalVerdict,
+    derivedStates
+  });
+  const reviewDisplayBucket = metaAccepted50MaSupportTestDisplay && metaDisplayBucket === 'diminishing'
+    ? 'monitor'
+    : metaDisplayBucket;
   const reviewLifecycleBias = {
-    review_lifecycle_bias:normalizeVisualBucketForPairing(metaSimplifiedState.visualBucket || 'monitor'),
+    review_lifecycle_bias:reviewDisplayBucket,
     review_lifecycle_copy_override_applied:false,
     review_lifecycle_copy_reason:'',
     tradeStatusLine1:String(metaSimplifiedState.planStatus || '').trim(),
     tradeStatusLine2:'',
-    trackPresentationBucket:normalizeVisualBucketForPairing(metaSimplifiedState.visualBucket || 'monitor'),
-    trackPresentationTone:String(metaSimplifiedState.tone || metaSimplifiedState.visualBucket || 'monitor').trim().toLowerCase()
+    trackPresentationBucket:reviewDisplayBucket,
+    trackPresentationTone:String(metaSimplifiedState.tone || reviewDisplayBucket || 'monitor').trim().toLowerCase()
   };
   const reviewTradeStatusVerdict = {
     ...visualState,
@@ -33041,6 +33244,7 @@ function syncPlanDisplayMeta(options = {}){
     track_presentation_tone:reviewLifecycleBias.trackPresentationTone
   };
   const reviewSemanticStatus = buildReviewSemanticStatus({
+    record,
     simplifiedState:metaSimplifiedState,
     globalVerdict:reviewTradeStatusVerdict,
     derivedStates,
@@ -33050,6 +33254,7 @@ function syncPlanDisplayMeta(options = {}){
   const resolvedReviewDisplay = buildResolvedReviewDisplayModel({
     record,
     simplifiedState:metaSimplifiedState,
+    globalVerdict:reviewTradeStatusVerdict,
     reviewSemanticStatus,
     derivedStates,
     displayedPlan,
@@ -33255,10 +33460,29 @@ function calculate(options = {}){
     ...plannerVisualState,
     ...globalVerdict,
     main_blocker:plannerSimplifiedState.mainBlocker || globalVerdict.main_blocker || plannerVisualState.main_blocker || '',
-    review_lifecycle_bias:plannerSimplifiedState.visualBucket || plannerVisualState.visualBucket || '',
-    track_presentation_bucket:plannerSimplifiedState.visualBucket || plannerVisualState.visualBucket || ''
+    review_lifecycle_bias:(() => {
+      const bucket = normalizeVisualBucketForPairing(plannerSimplifiedState.visualBucket || plannerVisualState.visualBucket || 'monitor');
+      const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
+        record:activeRecord || {},
+        simplifiedState:plannerSimplifiedState,
+        globalVerdict,
+        derivedStates:plannerDerivedStates
+      });
+      return accepted50MaSupportTest && bucket === 'diminishing' ? 'monitor' : bucket;
+    })(),
+    track_presentation_bucket:(() => {
+      const bucket = normalizeVisualBucketForPairing(plannerSimplifiedState.visualBucket || plannerVisualState.visualBucket || 'monitor');
+      const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
+        record:activeRecord || {},
+        simplifiedState:plannerSimplifiedState,
+        globalVerdict,
+        derivedStates:plannerDerivedStates
+      });
+      return accepted50MaSupportTest && bucket === 'diminishing' ? 'monitor' : bucket;
+    })()
   };
   const plannerSemanticStatus = buildReviewSemanticStatus({
+    record:activeRecord || {},
     simplifiedState:plannerSimplifiedState,
     globalVerdict:plannerTradeStatusVerdict,
     derivedStates:plannerDerivedStates,
@@ -33268,6 +33492,7 @@ function calculate(options = {}){
   const resolvedReviewDisplay = buildResolvedReviewDisplayModel({
     record:activeRecord || {},
     simplifiedState:plannerSimplifiedState,
+    globalVerdict:plannerTradeStatusVerdict,
     reviewSemanticStatus:plannerSemanticStatus,
     derivedStates:plannerDerivedStates,
     displayedPlan,
