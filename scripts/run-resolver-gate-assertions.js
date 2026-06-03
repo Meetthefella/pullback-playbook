@@ -745,8 +745,8 @@ function runReviewProjectionAssertions(){
   if(/Trend is weakening|structure.*(?:broken|weakening)|failed/i.test(aliveVolatileText)){
     throw new Error('Alive volatile/recovery Review semantics must not use structural weakening wording.');
   }
-  if(!/Recovery attempt|stabilised|price reliably|Draft plan possible but weak|No actionable trade yet/i.test(aliveVolatileText)){
-    throw new Error('Alive volatile/recovery Review semantics must use recovery/priceability/draft-plan wording.');
+  if(!/Recovery attempt|stabilised|price reliably|Draft plan possible but weak|No actionable trade yet|The app knows the maths, but the trade isn't ready|Long-press the ticker card in Track|Priced/i.test(aliveVolatileText)){
+    throw new Error('Alive volatile/recovery Review semantics must use recovery/priceability or priced-but-not-ready wording.');
   }
 
   const tgtStyleAliveWatchSemantic = projectionSandbox.buildReviewSemanticStatus({
@@ -4124,9 +4124,244 @@ function runReviewPullbackBounceDisplayAssertions(){
   }
 }
 
+function runReviewPricedButNotReadyAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    console,
+    REVIEW_PRICED_BUT_NOT_READY_LINE1:'The app knows the maths, but the trade isn\'t ready.',
+    REVIEW_PRICED_BUT_NOT_READY_LINE2:'Long-press the ticker card in Track for more info.',
+    REVIEW_PRICED_BUT_NOT_READY_RR:'Priced',
+    reviewPricedButNotReadyCopy(){
+      return {
+        line1:'The app knows the maths, but the trade isn\'t ready.',
+        line2:'Long-press the ticker card in Track for more info.',
+        rr:'Priced'
+      };
+    },
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    currentRrThreshold(){ return 2; },
+    isAccepted50MaSupportTestDisplayState(){ return false; },
+    review50MaSupportTestPresentationCopy(){
+      return {
+        tradeStatus:'Setup not ready yet.',
+        draftTradeStatus:'Draft plan possible, but not actionable yet.',
+        blocker:'Testing 50MA support - waiting for buyers to confirm.',
+        technicalStructure:'Structure intact',
+        technicalPullback:'Pullback near 50MA',
+        technicalBounce:'Bounce not confirmed'
+      };
+    },
+    buildSharedSetupNarrative(){
+      return {
+        stateLabel:'Watch',
+        primaryReason:'Buyers need to prove support.',
+        blocker:'Buyers need to prove support.',
+        nextAction:'Wait for stronger confirmation.',
+        evidence:[],
+        cautions:[],
+        promotionRequirements:[]
+      };
+    },
+    globalVerdictLabel(){ return 'Watch'; },
+    sameVisibleCopy(a, b){
+      return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    },
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    reviewCopyEvidence(){
+      return {consolidating:false, terminalAvoid:false, structuralWeakness:false, noBounce:false};
+    },
+    resolveReviewPullbackBounceDisplayContext(){
+      return {
+        rawPullbackState:'near_20ma',
+        rawBounceState:'attempt',
+        rawStabilisationState:'none',
+        setupLocationState:'near_20ma',
+        structureState:'strong',
+        structureEligibility:'alive',
+        resolvedPullbackState:'near_20ma',
+        pullbackLabel:'Pullback Near 20MA',
+        bounceLabel:'Bounce attempt',
+        reconciliationApplied:false,
+        reconciliationReason:'',
+        price:222.82,
+        sma20:220.5,
+        sma50:208.1
+      };
+    },
+    reviewTechnicalStructureLabel(){ return 'Structure strong'; },
+    reviewTechnicalVolumeLabel(){ return 'Volume supportive'; },
+    reviewTechnicalMarketLabel(){ return 'Market supportive'; },
+    reviewConsolidationPresentationCopy(){
+      return {summary:'', blocker:'', nextAction:''};
+    }
+  };
+  vm.createContext(sandbox);
+  [
+    'buildReviewSemanticStatus',
+    'buildResolvedReviewDisplayModel'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});
+  });
+  const semantic = sandbox.buildReviewSemanticStatus({
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      entryGatePass:false,
+      mainBlocker:'Needs stronger confirmation.'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      setup_location_state:'near_20ma',
+      priceability_state:'priceable',
+      bounce_state:'attempt'
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt',
+      stabilisationState:'none'
+    },
+    displayedPlan:{
+      status:'valid',
+      entry:220,
+      stop:215,
+      target:230,
+      rewardRisk:{valid:true, rrRatio:2}
+    },
+    planRealism:{raw_rr:2}
+  });
+  if(semantic.pricedButNotReady !== true){
+    throw new Error('Review semantic status must mark valid-plan non-entry states as pricedButNotReady.');
+  }
+  if(!/The app knows the maths/i.test(String(semantic.tradeStatus && semantic.tradeStatus.line1 || '')) || !/Long-press the ticker card in Track/i.test(String(semantic.tradeStatus && semantic.tradeStatus.line2 || ''))){
+    throw new Error('Review semantic status must use the priced-but-not-ready novice copy.');
+  }
+  if(String(semantic.rrDisplay || '') !== 'Priced'){
+    throw new Error('Review semantic status must use non-numeric R:R for priced-but-not-ready states.');
+  }
+  if(semantic.showPlanFields !== false || semantic.showPlanMetrics !== false || semantic.showCapital !== false){
+    throw new Error('Review semantic status must hide priced-plan details and capital metrics when trade is not ready.');
+  }
+  const resolved = sandbox.buildResolvedReviewDisplayModel({
+    record:{ticker:'NVDA', marketData:{price:222.82}},
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      volumeState:'supportive'
+    },
+    globalVerdict:{final_verdict:'watch'},
+    reviewSemanticStatus:semantic,
+    derivedStates:{
+      structureState:'strong',
+      pullbackState:'near_20ma',
+      bounceState:'attempt',
+      stabilisationState:'none',
+      volumeState:'supportive'
+    },
+    displayedPlan:{
+      status:'valid',
+      entry:220,
+      stop:215,
+      target:230,
+      capitalFit:{position_cost:440, quote_currency:'USD'}
+    },
+    planRealism:{raw_rr:2}
+  });
+  if(resolved.planUI.showPlan !== false || resolved.planUI.showRR !== false || resolved.planUI.showCapital !== false || resolved.planUI.showPositionSize !== false){
+    throw new Error('Resolved Review display must hide plan numbers and capital metrics for priced-but-not-ready states.');
+  }
+  if(String(resolved.rrDisplay || '') !== 'Priced'){
+    throw new Error('Resolved Review display must show Priced for priced-but-not-ready states.');
+  }
+  if(String(resolved.planSummary || '').trim()){
+    throw new Error('Resolved Review display must avoid duplicating priced-but-not-ready copy in the summary box.');
+  }
+  const entrySemantic = sandbox.buildReviewSemanticStatus({
+    simplifiedState:{
+      canonicalVerdict:'entry',
+      entryGatePass:true,
+      mainBlocker:''
+    },
+    globalVerdict:{
+      final_verdict:'entry',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      setup_location_state:'near_20ma',
+      priceability_state:'priceable',
+      bounce_state:'confirmed'
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'confirmed',
+      stabilisationState:'clear'
+    },
+    displayedPlan:{
+      status:'valid',
+      entry:220,
+      stop:215,
+      target:230,
+      rewardRisk:{valid:true, rrRatio:2}
+    },
+    planRealism:{raw_rr:2}
+  });
+  if(entrySemantic.pricedButNotReady === true || String(entrySemantic.rrDisplay || '') === 'Priced'){
+    throw new Error('Entry-ready states must retain actionable numeric plan behaviour.');
+  }
+  const weakSemantic = sandbox.buildReviewSemanticStatus({
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      entryGatePass:false,
+      mainBlocker:'Trend is weakening - no reliable stop level yet.'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'weakening',
+      structure_eligibility:'damaged',
+      setup_location_state:'near_20ma',
+      priceability_state:'priceable',
+      bounce_state:'attempt'
+    },
+    derivedStates:{
+      structureState:'weakening',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt',
+      stabilisationState:'none'
+    },
+    displayedPlan:{
+      status:'valid',
+      entry:220,
+      stop:215,
+      target:230,
+      rewardRisk:{valid:true, rrRatio:2}
+    },
+    planRealism:{raw_rr:2}
+  });
+  if(weakSemantic.pricedButNotReady === true){
+    throw new Error('Structurally weak valid-plan watch states must not be classified as pricedButNotReady.');
+  }
+  if(/The app knows the maths/i.test(String(weakSemantic.tradeStatus && weakSemantic.tradeStatus.line1 || '')) || String(weakSemantic.rrDisplay || '') === 'Priced'){
+    throw new Error('Structurally weak valid-plan watch states must preserve stronger cautionary Review copy.');
+  }
+}
+
 runTrackPresentationAuthorityAssertions();
 runPlanSemanticsAssertions();
 runReviewPullbackBounceDisplayAssertions();
+runReviewPricedButNotReadyAssertions();
 
 console.log(`Resolver gate assertions passed (${results.length} cases).`);
 console.log('Review projection invariant assertions passed.');
@@ -4136,3 +4371,4 @@ console.log('AI chart-coach contract assertions passed.');
 console.log('Track presentation authority assertions passed.');
 console.log('Plan source semantics assertions passed.');
 console.log('Review pullback/bounce display assertions passed.');
+console.log('Review priced-but-not-ready assertions passed.');

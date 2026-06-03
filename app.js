@@ -19642,6 +19642,18 @@ function tradeStatusMetricText({globalVerdict, displayedPlan, resolvedContract})
   return tradeStatusMetricTextImpl({globalVerdict, displayedPlan, resolvedContract}, reviewPresentationBridgeDeps());
 }
 
+const REVIEW_PRICED_BUT_NOT_READY_LINE1 = 'The app knows the maths, but the trade isn\'t ready.';
+const REVIEW_PRICED_BUT_NOT_READY_LINE2 = 'Long-press the ticker card in Track for more info.';
+const REVIEW_PRICED_BUT_NOT_READY_RR = 'Priced';
+
+function reviewPricedButNotReadyCopy(){
+  return {
+    line1:REVIEW_PRICED_BUT_NOT_READY_LINE1,
+    line2:REVIEW_PRICED_BUT_NOT_READY_LINE2,
+    rr:REVIEW_PRICED_BUT_NOT_READY_RR
+  };
+}
+
 function reviewTechnicalStructureLabel(state){
   const safe = String(state || '').trim().toLowerCase();
   if(safe === 'strong') return 'Structure strong';
@@ -19846,13 +19858,21 @@ function buildResolvedReviewDisplayModel({
   const semanticPlanMathValid = semantic.planMathValid === true;
   const semanticDraftPlan = semantic.draftPlan === true;
   const semanticPlanActionable = semantic.planActionable === true;
+  const pricedButNotReady = semantic.pricedButNotReady === true;
+  const pricedButNotReadyCopy = typeof reviewPricedButNotReadyCopy === 'function'
+    ? reviewPricedButNotReadyCopy()
+    : {
+      line1:'The app knows the maths, but the trade isn\'t ready.',
+      line2:'Long-press the ticker card in Track for more info.',
+      rr:'Priced'
+    };
   const nextActionLabel = String(semantic.nextAction || simplified.actionLabel || '').trim() || 'Review setup inputs';
   const diagnosticsMessage = String(semantic.blocker || semantic.primaryReason || simplified.mainBlocker || simplified.planStatus || 'No actionable plan yet.').trim();
   const planUI = {
-    showPlan:semantic.showPlanFields === true,
-    showRR:semantic.showPlanMetrics === true,
-    showCapital:semantic.showCapital === true,
-    showPositionSize:semantic.showCapital === true,
+    showPlan:pricedButNotReady ? false : semantic.showPlanFields === true,
+    showRR:pricedButNotReady ? false : semantic.showPlanMetrics === true,
+    showCapital:pricedButNotReady ? false : semantic.showCapital === true,
+    showPositionSize:pricedButNotReady ? false : semantic.showCapital === true,
     diagnosticsMessage
   };
   const rawTradeStatus = semantic.tradeStatus || {line1:diagnosticsMessage || 'No actionable trade yet.', line2:''};
@@ -19873,9 +19893,11 @@ function buildResolvedReviewDisplayModel({
     derivedStates:derived,
     reviewEvidence
   });
-  const rrDisplay = planUI.showRR && plan.status === 'valid' && Number.isFinite(realism.raw_rr)
+  const rrDisplay = pricedButNotReady
+    ? pricedButNotReadyCopy.rr
+    : (planUI.showRR && plan.status === 'valid' && Number.isFinite(realism.raw_rr)
     ? `${Number(realism.raw_rr).toFixed(2)}R`
-    : (semantic.rrDisplay || 'No actionable plan yet.');
+    : (semantic.rrDisplay || 'No actionable plan yet.'));
   const positionCostVisible = planUI.showCapital === true;
   const positionCostText = positionCostVisible && Number.isFinite(plan.capitalFit && plan.capitalFit.position_cost)
     ? `${Number(plan.capitalFit.position_cost.toFixed(2))}${plan.capitalFit.quote_currency ? ` ${plan.capitalFit.quote_currency}` : ''}`
@@ -19887,7 +19909,7 @@ function buildResolvedReviewDisplayModel({
     reviewTechnicalVolumeLabel(simplified.volumeState || derived.volumeState || ''),
     reviewTechnicalMarketLabel(item)
   ].join(' | ');
-  const compactTradeStatusLine = supportTestCopy
+  const compactTradeStatusLine = (supportTestCopy && !pricedButNotReady)
     ? supportTestCopy.tradeStatus
     : String(rawTradeStatus.line1 || diagnosticsMessage || 'No actionable trade yet.').trim();
   let explanatoryReason = reviewEvidence.consolidating
@@ -19899,6 +19921,9 @@ function buildResolvedReviewDisplayModel({
     : (supportTestCopy
       ? supportTestCopy.blocker
       : String(rawTradeStatus.line2 || semantic.blocker || semantic.primaryReason || diagnosticsMessage || '').trim());
+  if(pricedButNotReady){
+    explanatoryReason = pricedButNotReadyCopy.line2;
+  }
   if(sameVisibleCopy(explanatoryReason, compactTradeStatusLine)){
     explanatoryReason = '';
   }
@@ -19911,17 +19936,19 @@ function buildResolvedReviewDisplayModel({
   const genericDraftPlanSummary = semantic.blocker
     ? `Draft plan exists, but setup is not actionable yet. ${semantic.blocker}`
     : 'Draft plan exists, but setup is not actionable yet.';
-  const planSummary = supportTestCopy
+  const planSummary = supportTestCopy && !pricedButNotReady
     ? (planUI.showPlan
       ? ((semanticDraftPlan || semanticPlanMathValid)
         ? 'Draft plan exists, but setup is not actionable until buyers confirm support at the 50MA.'
         : 'Plan is mathematically incomplete or invalid.')
       : supportTestCopy.blocker)
+    : (pricedButNotReady
+      ? ''
     : (planUI.showPlan
       ? (hasValidDraftPlanDisplay
         ? genericDraftPlanSummary
         : (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.'))
-      : (explanatoryReason || diagnosticsMessage || 'No actionable plan yet.'));
+      : (explanatoryReason || diagnosticsMessage || 'No actionable plan yet.')));
   if(typeof console !== 'undefined' && console.info){
     console.info('[REVIEW_PULLBACK_BOUNCE_RECONCILE]', {
       ticker:item.ticker || '',
@@ -20057,9 +20084,25 @@ function buildReviewSemanticStatus({
     && planMathValid
     && rrAcceptable;
   const draftPlan = planMathValid && verdict === 'watch';
+  const pricedButNotReady = planMathValid
+    && actionable !== true
+    && terminalAvoid !== true
+    && verdict !== 'avoid';
+  const constructivePricedButNotReady = pricedButNotReady
+    && aliveStructure
+    && !structuralWeakness;
+  const pricedButNotReadyCopy = typeof reviewPricedButNotReadyCopy === 'function'
+    ? reviewPricedButNotReadyCopy()
+    : {
+      line1:'The app knows the maths, but the trade isn\'t ready.',
+      line2:'Long-press the ticker card in Track for more info.',
+      rr:'Priced'
+    };
   let tradeStatus = {line1:'No actionable trade yet.', line2:blocker};
   if(actionable){
     tradeStatus = {line1:'Actionable plan.', line2:rrAcceptable ? 'Risk/reward and gates are aligned.' : ''};
+  }else if(constructivePricedButNotReady){
+    tradeStatus = {line1:pricedButNotReadyCopy.line1, line2:pricedButNotReadyCopy.line2};
   }else if(accepted50MaSupportTest){
     tradeStatus = {
       line1:draftPlan ? supportTestCopy.draftTradeStatus : supportTestCopy.tradeStatus,
@@ -20074,9 +20117,11 @@ function buildReviewSemanticStatus({
   }
   const rrDisplay = actionable && Number.isFinite(rrValue)
     ? `${rrValue.toFixed(2)}R`
+    : (constructivePricedButNotReady
+      ? pricedButNotReadyCopy.rr
     : (accepted50MaSupportTest && draftPlan && Number.isFinite(rrValue)
       ? `Draft ${rrValue.toFixed(2)}R`
-      : (draftPlan ? 'No actionable trade yet.' : 'No actionable plan yet.'));
+      : (draftPlan ? 'No actionable trade yet.' : 'No actionable plan yet.')));
   return {
     stateLabel:String(sharedNarrative.stateLabel || globalVerdictLabel(verdict)).trim(),
     primaryReason:String(accepted50MaSupportTest ? supportTestCopy.monitoringReason : (sharedNarrative.primaryReason || blocker)).trim(),
@@ -20093,11 +20138,12 @@ function buildReviewSemanticStatus({
     tradeStatus,
     planActionable:actionable,
     draftPlan,
+    pricedButNotReady:constructivePricedButNotReady,
     planMathValid,
     planFieldsPresent,
     rrDisplay,
-    showPlanFields:planMathValid || planFieldsPresent,
-    showPlanMetrics:actionable || (accepted50MaSupportTest && draftPlan),
+    showPlanFields:constructivePricedButNotReady ? false : (planMathValid || planFieldsPresent),
+    showPlanMetrics:constructivePricedButNotReady ? false : (actionable || (accepted50MaSupportTest && draftPlan)),
     showCapital:actionable
   };
 }

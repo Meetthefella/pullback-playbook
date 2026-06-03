@@ -1,4 +1,7 @@
 (function(){
+  const REVIEW_PRICED_BUT_NOT_READY_LINE1 = 'The app knows the maths, but the trade isn\'t ready.';
+  const REVIEW_PRICED_BUT_NOT_READY_LINE2 = 'Long-press the ticker card in Track for more info.';
+
   function plannerToneClass(rrValue, deps){
     const {rrDisplayClass} = deps;
     const rrClass = rrDisplayClass(rrValue);
@@ -124,16 +127,17 @@
     const planStatus = String(globalVerdict && (globalVerdict.planStatus || globalVerdict.plan_status || globalVerdict.planStatusKey || globalVerdict.plan_status_key) || '').trim().toLowerCase();
     const planMathValid = planStatus === 'valid' || hasPriceablePlan;
     const nonActionablePlan = verdict === 'watch' && planMathValid && !nearEntryGatePass;
-    if(accepted50MaSupportTest && nonActionablePlan){
+    const pricedButNotReady = planMathValid
+      && verdict !== 'entry'
+      && verdict !== 'avoid'
+      && !nearEntryGatePass
+      && !terminalAvoidEvidence
+      && aliveStructure
+      && !structuralWeakness;
+    if(pricedButNotReady){
       return {
-        line1:'Draft plan possible, but not actionable yet.',
-        line2:'Buyers have not confirmed support at the 50MA.'
-      };
-    }
-    if(nonActionablePlan && aliveStructure && !structuralWeakness){
-      return {
-        line1:'Draft plan possible but weak.',
-        line2:'No actionable trade yet.'
+        line1:REVIEW_PRICED_BUT_NOT_READY_LINE1,
+        line2:REVIEW_PRICED_BUT_NOT_READY_LINE2
       };
     }
     if(accepted50MaSupportTest){
