@@ -17859,6 +17859,17 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
   const debug = simplified.debug && typeof simplified.debug === 'object' ? simplified.debug : {};
   const resolved = debug.resolvedState && typeof debug.resolvedState === 'object' ? debug.resolvedState : {};
   const derived = debug.derivedStates && typeof debug.derivedStates === 'object' ? debug.derivedStates : {};
+  const accepted50MaSupportTest = typeof isAccepted50MaSupportTestDisplayState === 'function'
+    ? isAccepted50MaSupportTestDisplayState({
+      record:item,
+      simplifiedState:simplified,
+      globalVerdict:resolved,
+      derivedStates:derived
+    })
+    : false;
+  const supportTestCopy = accepted50MaSupportTest && typeof review50MaSupportTestPresentationCopy === 'function'
+    ? review50MaSupportTestPresentationCopy()
+    : null;
   const sharedNarrative = buildSharedSetupNarrative({
     simplifiedState:simplified,
     resolvedState:resolved,
@@ -17905,13 +17916,16 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
     && !( !weakVolume && /volume/i.test(rawLowPriorityReason))
       ? rawLowPriorityReason.replace(/\.*\s*$/, '')
       : '';
+  const normalizedInternalBucket = accepted50MaSupportTest && internalVisualBucket === 'diminishing'
+    ? 'monitor'
+    : internalVisualBucket;
   const visibleBucket = canonicalVerdict === 'entry'
     ? 'entry'
     : (canonicalVerdict === 'near_entry'
       ? 'near_entry'
       : (canonicalVerdict === 'avoid'
         ? 'avoid'
-        : (internalVisualBucket === 'diminishing' ? 'diminishing' : 'monitor')));
+        : (normalizedInternalBucket === 'diminishing' ? 'diminishing' : 'monitor')));
   const visibleToneMeta = resolvePresentationTone({
     presentationBucket:visibleBucket,
     finalVerdict:canonicalVerdict,
@@ -17962,6 +17976,11 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
     headline = headline.replace(/\s*because volume is weak\.?/ig, '').trim() || headline;
     primaryReason = primaryReason.replace(/\s*because volume is weak\.?/ig, '').trim() || primaryReason;
     nextAction = nextAction.replace(/\s*because volume is weak\.?/ig, '').trim() || nextAction;
+  }
+  if(supportTestCopy){
+    headline = supportTestCopy.tradeStatus;
+    primaryReason = supportTestCopy.monitoringReason;
+    nextAction = supportTestCopy.nextAction;
   }
 
   headline = String(headline || '').trim();
@@ -18014,7 +18033,7 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
     nextAction,
     planSummary,
     lowerPriority,
-    internalVisualBucket
+    internalVisualBucket:normalizedInternalBucket
   };
 }
 
@@ -33240,6 +33259,7 @@ function syncPlanDisplayMeta(options = {}){
     displayedPlan,
     setupScore:setupScoreForRecord(record)
   });
+  const globalVerdict = resolveGlobalVerdict(record);
   const metaDisplayBucket = normalizeVisualBucketForPairing(metaSimplifiedState.visualBucket || 'monitor');
   const metaAccepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
     record,
