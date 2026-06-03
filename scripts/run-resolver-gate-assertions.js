@@ -117,6 +117,39 @@ function runScanPresentationAssertions(){
     throw new Error('Diminishing scan card must not use generic confirmation-promotion copy.');
   }
 
+  const alive50MaSupportTest = makeView('HWM', {
+    canonicalVerdict:'watch',
+    visualBucket:'diminishing',
+    tone:'diminishing',
+    mainBlocker:'Trend is weakening - no reliable stop level yet.'
+  }, {
+    structureState:'intact',
+    structureEligibility:'alive',
+    bounceState:'none',
+    pullbackZone:'near_50ma',
+    priceabilityState:'unpriceable'
+  }, {setupScore:6});
+  alive50MaSupportTest.item.watchlist = {
+    debug:{
+      structural_alive_at_refresh:'true',
+      refresh_demote_reason:'Structurally alive; keep on monitor.'
+    }
+  };
+  alive50MaSupportTest.simplifiedState.debug = {
+    resolvedState:{
+      final_verdict:'watch',
+      pullback_ok:true,
+      structural_alive_at_refresh:'true',
+      refresh_demote_reason:'Structurally alive; keep on monitor.'
+    }
+  };
+  alive50MaSupportTest.scanPresentation = scannerView.scanPresentationForView(alive50MaSupportTest, deps);
+  if(alive50MaSupportTest.scanPresentation.scanSection !== 'monitor_watch'
+    || alive50MaSupportTest.scanPresentation.presentationBucket !== 'monitor'
+    || alive50MaSupportTest.scanPresentation.tone !== 'monitor'){
+    throw new Error('Accepted alive 50MA support tests must render as Monitor / Watch in Scan, not Monitor / Diminishing.');
+  }
+
   const avoid = makeView('ABNB', {
     canonicalVerdict:'avoid',
     visualBucket:'avoid',
@@ -1385,6 +1418,50 @@ function runSimplifiedPipelineAssertions(){
   }
   if(nearEntry.debug.nearEntryGateChecks.rr_priceable !== true){
     throw new Error('Credible provisional RR must remain sufficient for Near Entry gate priceability.');
+  }
+
+  const alive50MaSupportState = pipeline.resolveRecordState({
+    ticker:'HWM',
+    in_watchlist:true,
+    watchlist:{
+      debug:{
+        structural_alive_at_refresh:'true',
+        refresh_demote_reason:'Structurally alive; keep on monitor.'
+      }
+    },
+    plan:{entry:260.62, stop:247.09, firstTarget:287.68},
+    marketData:{price:255.22, sma50:255.8, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'intact',
+      structureEligibility:'alive',
+      trendState:'intact',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'near_50ma',
+      priceabilityState:'unpriceable',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      final_verdict:'watch',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Trend is weakening - no reliable stop level yet.',
+      reasonSummary:'Structurally alive; keep on monitor.',
+      refresh_demote_reason:'Structurally alive; keep on monitor.',
+      structural_alive_at_refresh:'true',
+      main_blocker:'Trend is weakening - no reliable stop level yet.',
+      pullback_ok:true,
+      terminal:false,
+      baseVerdict:'watch'
+    }, 6)
+  });
+  if(alive50MaSupportState.visualBucket !== 'monitor' || alive50MaSupportState.tone !== 'monitor'){
+    throw new Error('Simplified pipeline must normalize accepted alive 50MA support tests to monitor tone/bucket.');
   }
 
   const inferredProvisionalPriceability = pipeline.resolveRecordState({

@@ -257,6 +257,70 @@
     }
   }
 
+  function accepted50MaSupportTestDisplayState(record, resolvedState = {}, derivedStates = {}){
+    const item = record && typeof record === 'object' ? record : {};
+    const watchlistDebug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object'
+      ? item.watchlist.debug
+      : {};
+    const structureState = String(derivedStates.structureState || resolvedState.structure_state || '').trim().toLowerCase();
+    const structureEligibility = String(derivedStates.structureEligibility || resolvedState.structure_eligibility || '').trim().toLowerCase();
+    const pullbackState = String(derivedStates.pullbackZone || derivedStates.pullbackState || resolvedState.pullback_zone || resolvedState.pullback_state || '').trim().toLowerCase();
+    const bounceState = String(derivedStates.bounceState || resolvedState.bounce_state || '').trim().toLowerCase();
+    const pullbackAccepted = resolvedState.nearEntryPullbackZoneAccepted === true
+      || resolvedState.near_entry_pullback_zone_accepted === true
+      || resolvedState.pullback_ok === true
+      || (resolvedState.entry_gate_checks && resolvedState.entry_gate_checks.pullback_ok === true)
+      || (resolvedState.near_entry_gate_checks && resolvedState.near_entry_gate_checks.pullback_ok === true);
+    const structurallyAliveAtRefresh = String(
+      resolvedState.structural_alive_at_refresh
+      || watchlistDebug.structural_alive_at_refresh
+      || ''
+    ).trim().toLowerCase() === 'true';
+    const positiveAliveSignal = structurallyAliveAtRefresh
+      || structureEligibility === 'alive'
+      || ['strong','intact','developing_clean'].includes(structureState);
+    const explicitInvalidationReason = String(resolvedState.explicit_invalidation_reason || '').trim().toLowerCase();
+    const hasExplicitInvalidation = !!(
+      explicitInvalidationReason
+      && explicitInvalidationReason !== '(none)'
+      && explicitInvalidationReason !== 'none'
+      && explicitInvalidationReason !== 'n/a'
+    );
+    const refreshDemoteReason = String(
+      resolvedState.refresh_demote_reason
+      || watchlistDebug.refresh_demote_reason
+      || ''
+    ).trim().toLowerCase();
+    const supportFailureReason = String(
+      refreshDemoteReason
+      || resolvedState.main_blocker
+      || resolvedState.reason
+      || resolvedState.downgrade_reason
+      || ''
+    ).trim().toLowerCase();
+    const explicitAliveMonitorReason = /structurally alive;\s*keep on monitor|testing 50ma support|support defence/i.test(refreshDemoteReason);
+    const failedSupportTest = explicitAliveMonitorReason
+      ? false
+      : /lost[_\s-]?50ma|support failed|failed support|below support|structure is broken|trend is weakening|structure weakening|diminishing|remove from active focus/i.test(supportFailureReason);
+    const currentPrice = numericOrNull(item.marketData && (item.marketData.price ?? item.marketData.currentPrice ?? item.marketData.close));
+    const sma50 = numericOrNull(item.marketData && (item.marketData.sma50 ?? item.marketData.ma50));
+    const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.9975;
+    const terminalAvoid = String(resolvedState.final_verdict || '').trim().toLowerCase() === 'avoid'
+      || resolvedState.terminal_avoid_applied === true
+      || resolvedState.rejected_by_viability_gate === true
+      || String(resolvedState.viability || '').trim().toLowerCase() === 'reject'
+      || ['broken','failed','dead','invalid'].includes(structureState)
+      || structureEligibility === 'broken'
+      || hasExplicitInvalidation;
+    return pullbackAccepted
+      && pullbackState === 'near_50ma'
+      && ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState)
+      && positiveAliveSignal
+      && !lost50MaSupport
+      && !terminalAvoid
+      && !failedSupportTest;
+  }
+
   function debugFingerprint(value){
     const input = stableDebugString(value);
     let hash = 2166136261;
@@ -464,13 +528,27 @@
         resolvedState,
         visualState
       });
+      const accepted50MaSupportTest = accepted50MaSupportTestDisplayState(item, resolvedState, derivedStates);
+      if(accepted50MaSupportTest && String(result.visualBucket || '').trim().toLowerCase() === 'diminishing'){
+        result.visualBucket = 'monitor';
+      }
+      if(accepted50MaSupportTest && String(result.tone || '').trim().toLowerCase() === 'diminishing'){
+        result.tone = 'monitor';
+      }
+      if(
+        accepted50MaSupportTest
+        && /trend is weakening|structure is broken|diminishing/i.test(String(result.mainBlocker || '').trim())
+      ){
+        result.mainBlocker = 'Testing 50MA support - waiting for buyers to confirm.';
+      }
       result.debug = {
         ...(result.debug || {}),
         validation,
         derivedStates,
         originalDerivedStates:rawDerivedStates,
         effectivePlan,
-        pipeline:'record->effectivePlan->planState->validate->ResolverCore->ResolverPresentation->presentationModel'
+        pipeline:'record->effectivePlan->planState->validate->ResolverCore->ResolverPresentation->presentationModel',
+        accepted50MaSupportTestDisplay:accepted50MaSupportTest
       };
       const pipelineDiagnostics = derivePipelineDiagnostics(item, {...options, surface}, {
         effectivePlan,

@@ -99,6 +99,97 @@
     return text;
   }
 
+  function accepted50MaSupportTestDisplayState(record, resolved = {}, visual = {}){
+    const item = record && typeof record === 'object' ? record : {};
+    const watchlistDebug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object'
+      ? item.watchlist.debug
+      : {};
+    const structureState = String(
+      visual.structureState
+      || visual.structure_state
+      || resolved.structure_state
+      || resolved.structureState
+      || item.setup && (item.setup.structureState || item.setup.structure_state)
+      || ''
+    ).trim().toLowerCase();
+    const structureEligibility = String(
+      visual.structureEligibility
+      || visual.structure_eligibility
+      || resolved.structure_eligibility
+      || resolved.structureEligibility
+      || ''
+    ).trim().toLowerCase();
+    const pullbackState = String(
+      visual.pullbackState
+      || visual.pullback_zone
+      || resolved.pullback_zone
+      || resolved.pullback_state
+      || item.setup && (item.setup.pullbackZone || item.setup.pullback_zone)
+      || ''
+    ).trim().toLowerCase();
+    const bounceState = String(
+      visual.bounceState
+      || visual.bounce_state
+      || resolved.bounce_state
+      || item.setup && (item.setup.bounceState || item.setup.bounce_state)
+      || ''
+    ).trim().toLowerCase();
+    const pullbackAccepted = resolved.nearEntryPullbackZoneAccepted === true
+      || resolved.near_entry_pullback_zone_accepted === true
+      || resolved.pullback_ok === true
+      || (resolved.entry_gate_checks && resolved.entry_gate_checks.pullback_ok === true)
+      || (resolved.near_entry_gate_checks && resolved.near_entry_gate_checks.pullback_ok === true);
+    const structurallyAliveAtRefresh = String(
+      resolved.structural_alive_at_refresh
+      || watchlistDebug.structural_alive_at_refresh
+      || ''
+    ).trim().toLowerCase() === 'true';
+    const positiveAliveSignal = structurallyAliveAtRefresh
+      || structureEligibility === 'alive'
+      || ['strong','intact','developing_clean'].includes(structureState);
+    const explicitInvalidationReason = String(resolved.explicit_invalidation_reason || '').trim().toLowerCase();
+    const hasExplicitInvalidation = !!(
+      explicitInvalidationReason
+      && explicitInvalidationReason !== '(none)'
+      && explicitInvalidationReason !== 'none'
+      && explicitInvalidationReason !== 'n/a'
+    );
+    const refreshDemoteReason = String(
+      resolved.refresh_demote_reason
+      || watchlistDebug.refresh_demote_reason
+      || ''
+    ).trim().toLowerCase();
+    const supportFailureReason = String(
+      refreshDemoteReason
+      || resolved.main_blocker
+      || resolved.reason
+      || resolved.downgrade_reason
+      || ''
+    ).trim().toLowerCase();
+    const explicitAliveMonitorReason = /structurally alive;\s*keep on monitor|testing 50ma support|support defence/i.test(refreshDemoteReason);
+    const failedSupportTest = explicitAliveMonitorReason
+      ? false
+      : /lost[_\s-]?50ma|support failed|failed support|below support|structure is broken|trend is weakening|structure weakening|diminishing|remove from active focus/i.test(supportFailureReason);
+    const currentPrice = Number(item.marketData && (item.marketData.price ?? item.marketData.currentPrice ?? item.marketData.close));
+    const sma50 = Number(item.marketData && (item.marketData.sma50 ?? item.marketData.ma50));
+    const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.9975;
+    const terminalAvoid = canonicalVerdict(resolved.final_verdict || resolved.finalVerdict || 'watch') === 'avoid'
+      || resolved.terminal_avoid_applied === true
+      || resolved.rejected_by_viability_gate === true
+      || String(resolved.viability || '').trim().toLowerCase() === 'reject'
+      || ['broken','failed','dead','invalid'].includes(structureState)
+      || structureEligibility === 'broken'
+      || hasExplicitInvalidation;
+    const bounceUnconfirmed = ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState);
+    return pullbackAccepted
+      && pullbackState === 'near_50ma'
+      && bounceUnconfirmed
+      && positiveAliveSignal
+      && !lost50MaSupport
+      && !terminalAvoid
+      && !failedSupportTest;
+  }
+
   function buildPresentationModel({surface = 'scanner', record, planState, resolvedState, visualState} = {}){
     const item = record && typeof record === 'object' ? record : {};
     const resolved = resolvedState && typeof resolvedState === 'object' ? resolvedState : {};
@@ -148,12 +239,24 @@
     ){
       mainBlocker = 'Rebound attempt is not confirmed - price remains below key reclaim levels and no safe entry structure is available yet.';
     }
+    const accepted50MaSupportTest = accepted50MaSupportTestDisplayState(item, resolved, visual);
+    const normalizedVisualBucket = accepted50MaSupportTest
+      && String(visual.visualBucket || visual.presentationBucket || visual.bucket || resolved.bucket || 'monitor').trim().toLowerCase() === 'diminishing'
+        ? 'monitor'
+        : String(visual.visualBucket || visual.presentationBucket || visual.bucket || resolved.bucket || 'monitor').trim().toLowerCase() || 'monitor';
+    const normalizedTone = accepted50MaSupportTest
+      && String(visual.tone || visual.visual_tone || resolved.tone || normalizedVisualBucket).trim().toLowerCase() === 'diminishing'
+        ? 'monitor'
+        : String(visual.tone || visual.visual_tone || resolved.tone || normalizedVisualBucket).trim().toLowerCase() || 'monitor';
+    if(accepted50MaSupportTest && /trend is weakening|structure is broken|diminishing/i.test(mainBlocker)){
+      mainBlocker = 'Testing 50MA support - waiting for buyers to confirm.';
+    }
 
     return {
       ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
       canonicalVerdict:verdict,
-      visualBucket:String(visual.visualBucket || visual.presentationBucket || visual.bucket || resolved.bucket || 'monitor').trim().toLowerCase() || 'monitor',
-      tone:String(visual.tone || visual.visual_tone || resolved.tone || 'monitor').trim().toLowerCase() || 'monitor',
+      visualBucket:normalizedVisualBucket,
+      tone:normalizedTone,
       badgeLabel:String(badge.text || badge.label || resolved.badgeLabel || (global.ResolverCore && global.ResolverCore.globalVerdictLabel ? global.ResolverCore.globalVerdictLabel(verdict) : 'Watch')).trim(),
       actionLabel:String(action.label || resolved.actionLabel || visual.decision_summary || '').trim(),
       planVisible:plan.planVisible === true || String(plan.status || '').toLowerCase() === 'valid',
