@@ -4037,8 +4037,96 @@ function runTrackPresentationAuthorityAssertions(){
   }
 }
 
+function runReviewPullbackBounceDisplayAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    console,
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    reviewConsolidationPresentationCopy(){
+      return {technicalLabel:'Consolidating'};
+    }
+  };
+  vm.createContext(sandbox);
+  [
+    'pullbackStateLabel',
+    'reviewTechnicalPullbackLabel',
+    'reviewTechnicalBounceLabel',
+    'resolveReviewPullbackBounceDisplayContext'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});
+  });
+  const reconciled = sandbox.resolveReviewPullbackBounceDisplayContext({
+    record:{
+      ticker:'NVDA',
+      marketData:{price:222.82, sma20:220.5, sma50:208.1}
+    },
+    simplifiedState:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      pullback_detected:false
+    },
+    derivedStates:{
+      pullbackState:'none',
+      pullbackZone:'none',
+      bounceState:'attempt',
+      stabilisationState:'none',
+      setupLocationState:'',
+      structureState:'strong'
+    },
+    reviewEvidence:{
+      terminalAvoid:false,
+      structuralWeakness:false,
+      consolidating:false
+    }
+  });
+  if(reconciled.pullbackLabel === 'Pullback none' || reconciled.resolvedPullbackState === 'none'){
+    throw new Error('Review pullback/bounce reconciliation must not render Pullback none alongside a bounce-positive strong setup.');
+  }
+  if(reconciled.pullbackLabel !== 'Pullback Near 20MA'){
+    throw new Error(`Review pullback/bounce reconciliation should prefer Near 20MA for shallow bounce-positive pullbacks. Got: ${reconciled.pullbackLabel}`);
+  }
+  const genuinelyNoPullback = sandbox.resolveReviewPullbackBounceDisplayContext({
+    record:{
+      ticker:'MSFT',
+      marketData:{price:300, sma20:280, sma50:260}
+    },
+    simplifiedState:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'none'
+    },
+    derivedStates:{
+      pullbackState:'none',
+      pullbackZone:'none',
+      bounceState:'none',
+      stabilisationState:'none',
+      structureState:'strong'
+    },
+    reviewEvidence:{
+      terminalAvoid:false,
+      structuralWeakness:false,
+      consolidating:false
+    }
+  });
+  if(genuinelyNoPullback.pullbackLabel !== 'Pullback none'){
+    throw new Error('Review pullback/bounce reconciliation must keep Pullback none when bounce evidence is absent.');
+  }
+}
+
 runTrackPresentationAuthorityAssertions();
 runPlanSemanticsAssertions();
+runReviewPullbackBounceDisplayAssertions();
 
 console.log(`Resolver gate assertions passed (${results.length} cases).`);
 console.log('Review projection invariant assertions passed.');
@@ -4047,3 +4135,4 @@ console.log('Simplified state pipeline assertions passed.');
 console.log('AI chart-coach contract assertions passed.');
 console.log('Track presentation authority assertions passed.');
 console.log('Plan source semantics assertions passed.');
+console.log('Review pullback/bounce display assertions passed.');

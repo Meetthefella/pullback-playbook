@@ -2018,6 +2018,7 @@ function renderNeutralReviewPendingState(options = {}){
   box.dataset.reviewPresentationState = 'review_pending';
   box.dataset.reviewVisualSource = 'review_pending';
   box.innerHTML = `<div class="summary">Preparing Review</div><div class="tiny">Waiting for latest setup data</div>`;
+  // Temporary diagnostics for Review pullback/bounce reconciliation audit.
   if(typeof console !== 'undefined' && console.info){
     console.info('[REVIEW_STALE_DOM_CLEARED]', {
       activeTicker:snapshot.activeTicker || '',
@@ -19658,6 +19659,115 @@ function reviewTechnicalPullbackLabel(state){
   return `Pullback ${pullbackStateLabel(safe)}`;
 }
 
+function resolveReviewPullbackBounceDisplayContext({
+  record,
+  simplifiedState,
+  globalVerdict,
+  derivedStates,
+  reviewEvidence
+} = {}){
+  const item = normalizeTickerRecord(record || {});
+  const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const evidence = reviewEvidence && typeof reviewEvidence === 'object' ? reviewEvidence : {};
+  const rawPullbackState = String(
+    derived.pullbackZone
+    || derived.pullbackState
+    || simplified.pullbackZone
+    || simplified.pullbackState
+    || global.pullback_zone
+    || global.pullback_state
+    || ''
+  ).trim().toLowerCase();
+  const rawBounceState = String(
+    simplified.bounceState
+    || derived.bounceState
+    || global.bounce_state
+    || ''
+  ).trim().toLowerCase();
+  const rawStabilisationState = String(
+    derived.stabilisationState
+    || global.stabilisation_state
+    || ''
+  ).trim().toLowerCase();
+  const setupLocationState = String(
+    derived.setupLocationState
+    || global.setup_location_state
+    || ''
+  ).trim().toLowerCase();
+  const structureState = String(
+    simplified.structureState
+    || derived.structureState
+    || global.structure_state
+    || ''
+  ).trim().toLowerCase();
+  const structureEligibility = String(
+    simplified.structureEligibility
+    || derived.structureEligibility
+    || global.structure_eligibility
+    || ''
+  ).trim().toLowerCase();
+  const rawPullbackDetected = global.pullback_detected;
+  const price = numericOrNull(item.marketData && (item.marketData.price ?? item.marketData.currentPrice ?? item.marketData.close));
+  const sma20 = numericOrNull(item.marketData && (item.marketData.sma20 ?? item.marketData.ma20));
+  const sma50 = numericOrNull(item.marketData && (item.marketData.sma50 ?? item.marketData.ma50));
+  const near20 = Number.isFinite(price) && Number.isFinite(sma20) && sma20 > 0
+    ? price >= sma20 * 0.97 && price <= sma20 * 1.06
+    : false;
+  const near50 = Number.isFinite(price) && Number.isFinite(sma50) && sma50 > 0
+    ? price >= sma50 * 0.985 && price <= sma50 * 1.07
+    : false;
+  const bouncePositive = ['attempt','early','developing','confirmed'].includes(rawBounceState)
+    || ['clear','present','early'].includes(rawStabilisationState);
+  const aliveStructure = !evidence.terminalAvoid
+    && !evidence.structuralWeakness
+    && (structureEligibility === 'alive' || ['strong','intact','developing_clean','developing'].includes(structureState));
+  const rawPullbackNone = !rawPullbackState || ['none','unclear'].includes(rawPullbackState);
+  let resolvedPullbackState = rawPullbackState;
+  let reconciliationReason = '';
+  if(rawPullbackNone && bouncePositive && aliveStructure){
+    if(near20 || ['near_20ma','at_20ma'].includes(setupLocationState)){
+      resolvedPullbackState = 'near_20ma';
+      reconciliationReason = 'bounce_positive_near_20ma';
+    }else if(near50 || ['near_50ma','at_50ma'].includes(setupLocationState)){
+      resolvedPullbackState = 'near_50ma';
+      reconciliationReason = 'bounce_positive_near_50ma';
+    }else if(['supportive','support_band','pullback_zone','usable_pullback'].includes(setupLocationState)){
+      resolvedPullbackState = 'shallow';
+      reconciliationReason = 'bounce_positive_supportive_location';
+    }else{
+      resolvedPullbackState = 'shallow';
+      reconciliationReason = 'bounce_positive_pullback_present';
+    }
+  }
+  const pullbackLabel = reviewTechnicalPullbackLabel(resolvedPullbackState);
+  const bounceLabel = reviewTechnicalBounceLabel({
+    reviewEvidence:evidence,
+    bounceState:rawBounceState,
+    stabilisationState:rawStabilisationState
+  });
+  return {
+    rawPullbackState:rawPullbackState || 'none',
+    rawPullbackDetected:rawPullbackDetected === true ? true : (rawPullbackDetected === false ? false : null),
+    rawBounceState:rawBounceState || 'none',
+    rawStabilisationState:rawStabilisationState || 'none',
+    resolvedPullbackState:resolvedPullbackState || 'none',
+    pullbackLabel,
+    bounceLabel,
+    reconciliationApplied:resolvedPullbackState !== rawPullbackState,
+    reconciliationReason,
+    setupLocationState:setupLocationState || 'none',
+    structureState:structureState || 'none',
+    structureEligibility:structureEligibility || 'none',
+    near20,
+    near50,
+    price,
+    sma20,
+    sma50
+  };
+}
+
 function reviewTechnicalBounceLabel({
   reviewEvidence,
   bounceState,
@@ -19756,6 +19866,13 @@ function buildResolvedReviewDisplayModel({
     bounceState:simplified.bounceState || derived.bounceState || '',
     stabilisationState:derived.stabilisationState || ''
   });
+  const pullbackBounceDisplay = resolveReviewPullbackBounceDisplayContext({
+    record:item,
+    simplifiedState:simplified,
+    globalVerdict:global,
+    derivedStates:derived,
+    reviewEvidence
+  });
   const rrDisplay = planUI.showRR && plan.status === 'valid' && Number.isFinite(realism.raw_rr)
     ? `${Number(realism.raw_rr).toFixed(2)}R`
     : (semantic.rrDisplay || 'No actionable plan yet.');
@@ -19765,12 +19882,8 @@ function buildResolvedReviewDisplayModel({
     : '-';
   const technicalContextLine = [
     supportTestCopy ? supportTestCopy.technicalStructure : reviewTechnicalStructureLabel(simplified.structureState || derived.structureState || ''),
-    supportTestCopy ? supportTestCopy.technicalPullback : reviewTechnicalPullbackLabel(derived.pullbackZone || derived.pullbackState || ''),
-    supportTestCopy ? supportTestCopy.technicalBounce : reviewTechnicalBounceLabel({
-      reviewEvidence,
-      bounceState:simplified.bounceState || derived.bounceState || '',
-      stabilisationState:derived.stabilisationState || ''
-    }),
+    supportTestCopy ? supportTestCopy.technicalPullback : pullbackBounceDisplay.pullbackLabel,
+    supportTestCopy ? supportTestCopy.technicalBounce : pullbackBounceDisplay.bounceLabel,
     reviewTechnicalVolumeLabel(simplified.volumeState || derived.volumeState || ''),
     reviewTechnicalMarketLabel(item)
   ].join(' | ');
@@ -19809,6 +19922,29 @@ function buildResolvedReviewDisplayModel({
         ? genericDraftPlanSummary
         : (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.'))
       : (explanatoryReason || diagnosticsMessage || 'No actionable plan yet.'));
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_PULLBACK_BOUNCE_RECONCILE]', {
+      ticker:item.ticker || '',
+      rawPullbackDetected:pullbackBounceDisplay.rawPullbackDetected,
+      rawPullbackState:pullbackBounceDisplay.rawPullbackState,
+      rawBounceState:pullbackBounceDisplay.rawBounceState,
+      rawStabilisationState:pullbackBounceDisplay.rawStabilisationState,
+      setupLocationState:pullbackBounceDisplay.setupLocationState,
+      structureState:pullbackBounceDisplay.structureState,
+      structureEligibility:pullbackBounceDisplay.structureEligibility,
+      price:pullbackBounceDisplay.price,
+      sma20:pullbackBounceDisplay.sma20,
+      sma50:pullbackBounceDisplay.sma50,
+      resolvedPullbackState:pullbackBounceDisplay.resolvedPullbackState,
+      pullbackLabel:pullbackBounceDisplay.pullbackLabel,
+      bounceLabel:pullbackBounceDisplay.bounceLabel,
+      reconciliationApplied:pullbackBounceDisplay.reconciliationApplied,
+      reconciliationReason:pullbackBounceDisplay.reconciliationReason,
+      finalTradeStatus:String((semantic.tradeStatus && semantic.tradeStatus.line1) || rawTradeStatus.line1 || '').trim(),
+      rrDisplay,
+      planSummary
+    });
+  }
   return {
     reviewEvidence,
     planUI,
@@ -19820,6 +19956,7 @@ function buildResolvedReviewDisplayModel({
     positionCostVisible,
     positionCostText,
     technicalContextLine,
+    pullbackBounceDisplay,
     planSummary,
     explanatoryReason,
     resolvedNarrative:resolvedNarrative || nextActionLabel
