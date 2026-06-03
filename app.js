@@ -17741,6 +17741,9 @@ function isAccepted50MaSupportTestDisplayState({
   const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
   const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const watchlistDebug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object'
+    ? item.watchlist.debug
+    : {};
   const readNumber = value => {
     if(typeof numericOrNull === 'function') return numericOrNull(value);
     const numeric = Number(value);
@@ -17787,11 +17790,16 @@ function isAccepted50MaSupportTestDisplayState({
     && explicitInvalidationReason !== 'none'
     && explicitInvalidationReason !== 'n/a'
   );
+  const refreshDemoteReason = String(
+    global.refresh_demote_reason
+    || watchlistDebug.refresh_demote_reason
+    || ''
+  ).trim().toLowerCase();
   const supportFailureReason = String(
-    global.main_blocker
+    refreshDemoteReason
+    || global.main_blocker
     || global.reason
     || global.downgrade_reason
-    || global.refresh_demote_reason
     || ''
   ).trim().toLowerCase();
   const terminalAvoid = verdict === 'avoid'
@@ -17806,7 +17814,11 @@ function isAccepted50MaSupportTestDisplayState({
     || global.pullback_ok === true
     || (global.entry_gate_checks && global.entry_gate_checks.pullback_ok === true)
     || (global.near_entry_gate_checks && global.near_entry_gate_checks.pullback_ok === true);
-  const structurallyAliveAtRefresh = String(global.structural_alive_at_refresh || '').trim().toLowerCase() === 'true';
+  const structurallyAliveAtRefresh = String(
+    global.structural_alive_at_refresh
+    || watchlistDebug.structural_alive_at_refresh
+    || ''
+  ).trim().toLowerCase() === 'true';
   const currentPrice = readNumber(item.marketData && item.marketData.price);
   const sma50 = readNumber(item.marketData && item.marketData.sma50);
   const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.9975;
@@ -17814,7 +17826,10 @@ function isAccepted50MaSupportTestDisplayState({
   const positiveAliveSignal = structurallyAliveAtRefresh
     || structureEligibility === 'alive'
     || ['strong','intact','developing_clean'].includes(structureState);
-  const failedSupportTest = /lost[_\s-]?50ma|support failed|failed support|below support|structure is broken|trend is weakening|structure weakening|diminishing|remove from active focus/i.test(supportFailureReason);
+  const explicitAliveMonitorReason = /structurally alive;\s*keep on monitor|testing 50ma support|support defence/i.test(refreshDemoteReason);
+  const failedSupportTest = explicitAliveMonitorReason
+    ? false
+    : /lost[_\s-]?50ma|support failed|failed support|below support|structure is broken|trend is weakening|structure weakening|diminishing|remove from active focus/i.test(supportFailureReason);
   return pullbackAccepted
     && pullbackState === 'near_50ma'
     && bounceUnconfirmed
@@ -19701,6 +19716,7 @@ function buildResolvedReviewDisplayModel({
   const supportTestCopy = accepted50MaSupportTest ? review50MaSupportTestPresentationCopy() : null;
   const semanticPlanMathValid = semantic.planMathValid === true;
   const semanticDraftPlan = semantic.draftPlan === true;
+  const semanticPlanActionable = semantic.planActionable === true;
   const nextActionLabel = String(semantic.nextAction || simplified.actionLabel || '').trim() || 'Review setup inputs';
   const diagnosticsMessage = String(semantic.blocker || semantic.primaryReason || simplified.mainBlocker || simplified.planStatus || 'No actionable plan yet.').trim();
   const planUI = {
@@ -19759,6 +19775,10 @@ function buildResolvedReviewDisplayModel({
     line2:''
   };
   const resolvedNarrative = [compactTradeStatusLine, explanatoryReason].filter(Boolean).join(' ').trim();
+  const hasValidDraftPlanDisplay = !semanticPlanActionable && (semanticDraftPlan || semanticPlanMathValid);
+  const genericDraftPlanSummary = semantic.blocker
+    ? `Draft plan exists, but setup is not actionable yet. ${semantic.blocker}`
+    : 'Draft plan exists, but setup is not actionable yet.';
   const planSummary = supportTestCopy
     ? (planUI.showPlan
       ? ((semanticDraftPlan || semanticPlanMathValid)
@@ -19766,7 +19786,9 @@ function buildResolvedReviewDisplayModel({
         : 'Plan is mathematically incomplete or invalid.')
       : supportTestCopy.blocker)
     : (planUI.showPlan
-      ? (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')
+      ? (hasValidDraftPlanDisplay
+        ? genericDraftPlanSummary
+        : (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.'))
       : (explanatoryReason || diagnosticsMessage || 'No actionable plan yet.'));
   return {
     reviewEvidence,
