@@ -31417,6 +31417,8 @@ function renderReviewWorkspace(options = {}){
     source:reviewRenderSource,
     mutationSource:reviewRenderSource
   });
+  const derivedStates = refreshBundle.derivedStates || analysisDerivedStatesFromRecord(record);
+  const globalVerdict = bundleValid ? refreshBundle.globalVerdict : resolveGlobalVerdict(record);
   const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
   const simplifiedVisualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
   const accepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
@@ -31483,7 +31485,6 @@ function renderReviewWorkspace(options = {}){
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
   const rrRatio = displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null;
   const rewardPerShare = displayedPlan.rewardPerShare;
-  const derivedStates = refreshBundle.derivedStates || analysisDerivedStatesFromRecord(record);
   const reviewChecklistContext = reviewChecklistContextForRecord(record, {
     derivedStates,
     effectivePlan,
@@ -31565,7 +31566,6 @@ function renderReviewWorkspace(options = {}){
   const simulatedFinalVerdict = capitalSimulationState.simulation
     ? (simulatedExecutionVerdict || displayStage)
     : '';
-  const globalVerdict = bundleValid ? refreshBundle.globalVerdict : {final_verdict:'watch'};
   const watchlistEligibility = watchlistEligibilityForRecord(record);
   const visualState = bundleValid
     ? refreshBundle.visualState
@@ -33196,7 +33196,6 @@ function syncPlanDisplayMeta(options = {}){
     avoidSubtype,
     emojiPresentation
   });
-  const globalVerdict = resolveGlobalVerdict(record);
   const visualState = resolveVisualState(record, 'review', {
     resolvedContract,
     derivedStates,
