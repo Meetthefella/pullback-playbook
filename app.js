@@ -17822,7 +17822,7 @@ function isAccepted50MaSupportTestDisplayState({
   ).trim().toLowerCase() === 'true';
   const currentPrice = readNumber(item.marketData && item.marketData.price);
   const sma50 = readNumber(item.marketData && item.marketData.sma50);
-  const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.9975;
+  const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.99;
   const bounceUnconfirmed = ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState);
   const positiveAliveSignal = structurallyAliveAtRefresh
     || structureEligibility === 'alive'

@@ -4358,10 +4358,88 @@ function runReviewPricedButNotReadyAssertions(){
   }
 }
 
+function runAccepted50MaSupportThresholdAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const domainSource = fs.readFileSync(path.join(root, 'js/domain/simplified-trade-state.js'), 'utf8');
+  const scannerSource = fs.readFileSync(path.join(root, 'js/scanner-view.js'), 'utf8');
+  const baseSandbox = {
+    console,
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    readNumber(value){
+      if(value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid','monitor'].includes(safe)) return safe === 'monitor' ? 'watch' : safe;
+      return 'watch';
+    },
+    canonicalVerdict(value){
+      const safe = String(value || '').trim().toLowerCase();
+      return safe === 'avoid' ? 'avoid' : 'watch';
+    }
+  };
+  const appSandbox = {...baseSandbox};
+  vm.createContext(appSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'isAccepted50MaSupportTestDisplayState'), appSandbox, {filename:'app.js#isAccepted50MaSupportTestDisplayState'});
+  const domainSandbox = {...baseSandbox};
+  vm.createContext(domainSandbox);
+  vm.runInContext(extractFunctionSource(domainSource, 'accepted50MaSupportTestDisplayState'), domainSandbox, {filename:'simplified-trade-state.js#accepted50MaSupportTestDisplayState'});
+  const scannerSandbox = {...baseSandbox};
+  vm.createContext(scannerSandbox);
+  vm.runInContext(extractFunctionSource(scannerSource, 'accepted50MaSupportTestForScan'), scannerSandbox, {filename:'scanner-view.js#accepted50MaSupportTestForScan'});
+  const hwmRecord = {
+    ticker:'HWM',
+    marketData:{price:248.63, sma50:250.23},
+    watchlist:{debug:{structural_alive_at_refresh:'true', refresh_demote_reason:'Structurally alive; keep on monitor.'}}
+  };
+  const resolved = {
+    final_verdict:'watch',
+    structure_eligibility:'alive',
+    structure_state:'weak',
+    pullback_ok:true,
+    near_entry_pullback_zone_accepted:true,
+    pullback_zone:'near_50ma',
+    bounce_state:'none',
+    refresh_demote_reason:'Structurally alive; keep on monitor.'
+  };
+  const derived = {
+    structureState:'weak',
+    structureEligibility:'alive',
+    pullbackZone:'near_50ma',
+    bounceState:'none'
+  };
+  if(appSandbox.isAccepted50MaSupportTestDisplayState({record:hwmRecord, globalVerdict:resolved, derivedStates:derived}) !== true){
+    throw new Error('App Review/Track helper must keep slight below-50MA alive support tests in the accepted support-test display state.');
+  }
+  if(domainSandbox.accepted50MaSupportTestDisplayState(hwmRecord, resolved, derived) !== true){
+    throw new Error('Simplified state source must keep slight below-50MA alive support tests in the accepted support-test display state.');
+  }
+  if(scannerSandbox.accepted50MaSupportTestForScan(hwmRecord, {canonicalVerdict:'watch'}, resolved, derived) !== true){
+    throw new Error('Scanner helper must keep slight below-50MA alive support tests in the accepted support-test display state.');
+  }
+  const brokenRecord = {
+    ticker:'HWM',
+    marketData:{price:246, sma50:250.23},
+    watchlist:{debug:{structural_alive_at_refresh:'true', refresh_demote_reason:'Structurally alive; keep on monitor.'}}
+  };
+  if(domainSandbox.accepted50MaSupportTestDisplayState(brokenRecord, resolved, derived) !== false){
+    throw new Error('Accepted 50MA support-test display must still reject a more decisive break below the 50MA.');
+  }
+}
+
 runTrackPresentationAuthorityAssertions();
 runPlanSemanticsAssertions();
 runReviewPullbackBounceDisplayAssertions();
 runReviewPricedButNotReadyAssertions();
+runAccepted50MaSupportThresholdAssertions();
 
 console.log(`Resolver gate assertions passed (${results.length} cases).`);
 console.log('Review projection invariant assertions passed.');
@@ -4372,3 +4450,4 @@ console.log('Track presentation authority assertions passed.');
 console.log('Plan source semantics assertions passed.');
 console.log('Review pullback/bounce display assertions passed.');
 console.log('Review priced-but-not-ready assertions passed.');
+console.log('Accepted 50MA support threshold assertions passed.');

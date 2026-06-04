@@ -164,7 +164,7 @@
       : /lost[_\s-]?50ma|support failed|failed support|below support|structure is broken|trend is weakening|structure weakening|diminishing|remove from active focus/i.test(supportFailureReason);
     const currentPrice = Number(item && item.marketData && (item.marketData.price ?? item.marketData.currentPrice ?? item.marketData.close));
     const sma50 = Number(item && item.marketData && (item.marketData.sma50 ?? item.marketData.ma50));
-    const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.9975;
+    const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.99;
     const terminalAvoid = String(resolvedState.final_verdict || '').trim().toLowerCase() === 'avoid'
       || resolvedState.terminal_avoid_applied === true
       || resolvedState.rejected_by_viability_gate === true
