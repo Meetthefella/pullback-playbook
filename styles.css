@@ -89,6 +89,7 @@ body.track-restore-pending .app-workspace-card.is-visual-hold-workspace{
   overflow:hidden;
   background:#0b1326;
   pointer-events:none;
+  transform:translateY(var(--visual-hold-offset-y, 0px));
 }
 body{
   margin:0;

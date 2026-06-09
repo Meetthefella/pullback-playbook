@@ -320,6 +320,7 @@
         document.body.setAttribute('data-pending-workspace', 'track');
       }else{
         document.body.removeAttribute('data-pending-workspace');
+        uiState.reviewVisualHoldScrollY = null;
         uiState.visibleWorkspaceTab = normalizeTab(uiState.activeWorkspaceTab || 'track');
         syncWorkspaceVisibility(uiState.activeWorkspaceTab || 'track', '');
         syncWorkspaceTabs(uiState.activeWorkspaceTab || 'track');
@@ -980,6 +981,7 @@
       const heldTab = allowedTabs.has(String(visualHoldTab || '').trim().toLowerCase())
         ? normalizeTab(visualHoldTab)
         : '';
+      const holdScrollY = Number(uiState.reviewVisualHoldScrollY);
       uiState.activeWorkspaceTab = nextTab;
       uiState.visibleWorkspaceTab = heldTab || nextTab;
       document.body.setAttribute('data-active-workspace', nextTab);
@@ -1003,6 +1005,11 @@
         }
         card.classList.toggle('is-active-workspace', active);
         card.classList.toggle('is-visual-hold-workspace', visualHold);
+        if(visualHold && heldTab === 'review' && Number.isFinite(holdScrollY) && holdScrollY > 0){
+          card.style.setProperty('--visual-hold-offset-y', `${-holdScrollY}px`);
+        }else{
+          card.style.removeProperty('--visual-hold-offset-y');
+        }
       });
     }
 
@@ -1038,6 +1045,9 @@
         if(Number.isFinite(restoreTarget) && restoreTarget > 24){
           uiState.pendingTrackRestoreY = restoreTarget;
           if(typeof window !== 'undefined') window.__ppPendingTrackRestoreY = restoreTarget;
+          if(previousTab === 'review'){
+            uiState.reviewVisualHoldScrollY = currentScrollY();
+          }
           setTrackRevealPending(true, 'track_tab_activation_prepare');
         }
       }else{
