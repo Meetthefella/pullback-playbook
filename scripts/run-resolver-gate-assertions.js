@@ -4030,6 +4030,11 @@ function runTrackPresentationAuthorityAssertions(){
     || !/const derivedStates = simplifiedDebug\.derivedStates && typeof simplifiedDebug\.derivedStates === 'object'\s*\?\s*simplifiedDebug\.derivedStates\s*:\s*analysisDerivedStatesFromRecord\(record\);/s.test(appSource)){
     throw new Error('Track watchlist card render must reuse cached simplified state and derived-state debug payload before recomputing analysis state.');
   }
+  if(!/const activeCapitalSimulation = capitalSimulationState && capitalSimulationState\.simulation\s*\?\s*capitalSimulationState\.simulation\s*:\s*null;/.test(appSource)
+    || !/Simulation active: \$\{escapeHtml\(activeCapitalSimulation\.label \|\| 'custom'\)\} of account/.test(appSource)
+    || !/No capital simulation active\./.test(appSource)){
+    throw new Error('Review capital simulation controls must expose visible debug feedback for active and cleared simulation states.');
+  }
   if(!/function trackCardRenderSignatureSnapshot\(record\)\{\s*const item = normalizeTickerRecord\(record \|\| \{\}\);\s*const passCache = null;[\s\S]*const simplifiedState = resolveSimplifiedStateForWatchlistPresentation\(item, \{\s*surface:'track',\s*source:'track_card_render_signature_snapshot',\s*reason:'trackCardRenderSignatureSnapshot',\s*passCache\s*\}\);/s.test(appSource)){
     throw new Error('Track card render signature snapshot must initialize simplifiedState before using it during watchlist refresh diffing.');
   }

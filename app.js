@@ -32522,8 +32522,20 @@ function renderReviewWorkspace(options = {}){
   syncAdvancedDebugVisibilityClass();
   const advancedDebugVisible = isAdvancedDebugVisible();
   const advancedOpen = advancedDebugVisible && isReviewAdvancedOpen(record.ticker);
+  const activeCapitalSimulation = capitalSimulationState && capitalSimulationState.simulation
+    ? capitalSimulationState.simulation
+    : null;
+  const capitalSimulationButtonClass = targetPercent => {
+    const activePercent = activeCapitalSimulation && Number.isFinite(Number(activeCapitalSimulation.usagePercent))
+      ? Number(activeCapitalSimulation.usagePercent)
+      : null;
+    return activePercent === targetPercent ? 'primary' : 'secondary';
+  };
+  const capitalSimulationSummary = activeCapitalSimulation
+    ? `<div class="tiny" style="margin-top:8px">Simulation active: ${escapeHtml(activeCapitalSimulation.label || 'custom')} of account | Capital fit: ${escapeHtml(String(activeCapitalSimulation.capitalFit || 'n/a'))} | Affordability: ${escapeHtml(String(activeCapitalSimulation.affordability || 'n/a'))} | Tradeability: ${escapeHtml(String(activeCapitalSimulation.tradeability || 'n/a'))}${simulatedFinalVerdict ? ` | Verdict impact: ${escapeHtml(String(simulatedFinalVerdict))}` : ''}</div>`
+    : `<div class="tiny" style="margin-top:8px">No capital simulation active.</div>`;
   const capitalSimulationControls = advancedOpen
-    ? `<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" type="button" data-act="capital-sim-50">Simulate 50%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-65">Simulate 65%</button><button class="secondary compactbutton" type="button" data-act="capital-sim-85">Simulate 85%</button><button class="ghost compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>`
+    ? `<div class="actions" style="margin-top:8px"><button class="${capitalSimulationButtonClass(0.5)} compactbutton" type="button" data-act="capital-sim-50" aria-pressed="${activeCapitalSimulation && Number(activeCapitalSimulation.usagePercent) === 0.5 ? 'true' : 'false'}">Simulate 50%</button><button class="${capitalSimulationButtonClass(0.65)} compactbutton" type="button" data-act="capital-sim-65" aria-pressed="${activeCapitalSimulation && Number(activeCapitalSimulation.usagePercent) === 0.65 ? 'true' : 'false'}">Simulate 65%</button><button class="${capitalSimulationButtonClass(0.85)} compactbutton" type="button" data-act="capital-sim-85" aria-pressed="${activeCapitalSimulation && Number(activeCapitalSimulation.usagePercent) === 0.85 ? 'true' : 'false'}">Simulate 85%</button><button class="${activeCapitalSimulation ? 'secondary' : 'ghost'} compactbutton" type="button" data-act="capital-sim-clear">Clear simulation</button></div>${capitalSimulationSummary}`
     : '';
   const reviewDebugCompact = renderDebugSectionMarkup('State Health', [
     {label:'UI State Source', value:'simplified_state_pipeline'},
