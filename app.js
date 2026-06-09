@@ -10254,7 +10254,18 @@ function renderWatchlistCardElement(record, options = {}){
   const expired = lifecycleSnapshot.state === 'expired' || record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
   const expiryDate = record.lifecycle.expiresAt || 'Not set';
   const priority = watchlistPriorityForRecord(record, {lifecycleSnapshot, passCache});
-  const derivedStates = analysisDerivedStatesFromRecord(record);
+  const simplifiedState = resolveSimplifiedStateForWatchlistPresentation(record, {
+    surface:'track',
+    source:'renderWatchlistCardElement',
+    reason:'renderWatchlistCardElement',
+    passCache
+  });
+  const simplifiedDebug = simplifiedState && simplifiedState.debug && typeof simplifiedState.debug === 'object'
+    ? simplifiedState.debug
+    : {};
+  const derivedStates = simplifiedDebug.derivedStates && typeof simplifiedDebug.derivedStates === 'object'
+    ? simplifiedDebug.derivedStates
+    : analysisDerivedStatesFromRecord(record);
   const displayedPlan = applySetupConfirmationPlanGate(record, deriveCurrentPlanState(
     record.plan && record.plan.entry,
     record.plan && record.plan.stop,
@@ -10263,47 +10274,8 @@ function renderWatchlistCardElement(record, options = {}){
   ), derivedStates);
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
   const rrResolution = resolveScannerStateWithTrace(record);
-  const simplifiedState = window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'
-    ? window.SimplifiedTradeState.resolveRecordState(record, {
-      surface:'watchlist',
-      deps:{
-        effectivePlanForRecord,
-        riskSettingsProvider:currentRiskSettings,
-        analysisDerivedStatesFromRecord,
-        applySetupConfirmationPlanGate,
-        baseVerdictFromResolvedContract,
-        resolvePreLifecycleStateContract,
-        resolveFinalStateContract,
-        evaluatePlanRealism,
-        setupScoreForRecord,
-        isHostileMarketStatus,
-        scannerScoreGradientClass,
-        state,
-        normalizeGlobalVerdictKey,
-        normalizeVerdict,
-        getBadge,
-        getActions,
-        deriveTradeability,
-        evaluateRiskFit
-      }
-    })
-    : {
-      ticker:entry.ticker,
-      canonicalVerdict:'watch',
-      visualBucket:'monitor',
-      tone:'monitor',
-      badgeLabel:'Watch',
-      actionLabel:'WATCH',
-      planVisible:false,
-      planStatus:'missing',
-      mainBlocker:'Simplified pipeline unavailable.',
-      entryGatePass:false,
-      nearEntryGatePass:false,
-      blockers:['Simplified pipeline unavailable.'],
-      debug:{safeFallback:true}
-    };
-  const globalVerdict = simplifiedState.debug && simplifiedState.debug.resolvedState
-    ? simplifiedState.debug.resolvedState
+  const globalVerdict = simplifiedDebug.resolvedState
+    ? simplifiedDebug.resolvedState
     : null;
   const trackVisibleModel = resolveTrackCardVisibleModel(record, simplifiedState);
   const canonicalVerdict = normalizeGlobalVerdictKey(trackVisibleModel.canonicalVerdict || 'watch');
