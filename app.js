@@ -10554,7 +10554,7 @@ function renderWatchlistCardElement(record, options = {}){
     const history = Array.isArray(record.watchlist.debug.holdTraceHistory) ? record.watchlist.debug.holdTraceHistory : [];
     record.watchlist.debug.holdTraceHistory = [`hold_helper.rendered | ${seededAt}`, ...history].slice(0, 8);
   }
-  const entryConditionsSummary = buildEntryConditionsSummary({
+  const entryConditionsSummary = buildTrackTickerSpecificEntryConditionsSummary({
     record,
     ticker:entry.ticker,
     finalVerdict:canonicalVerdict,
@@ -19364,6 +19364,255 @@ function buildEntryConditionsSummary({
   };
 }
 
+function buildTrackLongPressContract(options = {}){
+  const base = buildEntryConditionsSummary(options);
+  const record = options && typeof options.record === 'object' ? options.record : {};
+  const globalVerdict = options && typeof options.globalVerdict === 'object' ? options.globalVerdict : {};
+  const derivedStates = options && typeof options.derivedStates === 'object' ? options.derivedStates : {};
+  const displayedPlan = options && typeof options.displayedPlan === 'object' ? options.displayedPlan : {};
+  const resolvedContract = options && typeof options.resolvedContract === 'object' ? options.resolvedContract : {};
+  const verdict = normalizeVerdict(options.finalVerdict || globalVerdict.final_verdict || '');
+  const presentation = String(options.presentationState || '').trim().toLowerCase();
+  const structureState = String(derivedStates.structureState || globalVerdict.structure_state || '').trim().toLowerCase();
+  const structureEligibility = String(derivedStates.structureEligibility || globalVerdict.structure_eligibility || '').trim().toLowerCase();
+  const pullbackState = String(derivedStates.pullbackZone || globalVerdict.pullback_zone || '').trim().toLowerCase();
+  const setupLocationState = String(derivedStates.setupLocationState || globalVerdict.setup_location_state || '').trim().toLowerCase();
+  const bounceState = String(derivedStates.bounceState || globalVerdict.bounce_state || '').trim().toLowerCase();
+  const priceabilityState = String(derivedStates.priceabilityState || globalVerdict.priceability_state || '').trim().toLowerCase();
+  const planStatus = String(resolvedContract.planStatusKey || '').trim().toLowerCase();
+  const entryGatePass = globalVerdict.entry_gate_pass === true;
+  const supportTestCopy = isAccepted50MaSupportTestDisplayState({
+    record,
+    globalVerdict,
+    derivedStates
+  }) ? review50MaSupportTestPresentationCopy() : null;
+  const resolvedRR = numericOrNull(
+    (globalVerdict.resolvedRR ?? globalVerdict.resolved_rr)
+    ?? (displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio)
+    ?? resolvedContract.resolvedRR
+  );
+  const latestTickerSummary = String(
+    resolvedContract.latestTickerSummary
+    || ((typeof currentRuntimeSummaryForRecord === 'function') ? currentRuntimeSummaryForRecord(record) : '')
+    || ((typeof savedReviewSummaryForRecord === 'function') ? savedReviewSummaryForRecord(record) : '')
+    || ''
+  ).trim();
+  const traceSources = globalVerdict.cumulativePenaltyTrace && Array.isArray(globalVerdict.cumulativePenaltyTrace.sources)
+    ? globalVerdict.cumulativePenaltyTrace.sources
+    : [];
+  const bucket = verdict === 'entry'
+    ? 'entry'
+    : (verdict === 'near_entry'
+      ? 'near_entry'
+      : (verdict === 'avoid'
+        ? 'avoid'
+        : (presentation === 'diminishing' ? 'diminishing' : 'monitor')));
+  const hasTickerSpecificContext = [
+    structureState,
+    structureEligibility,
+    pullbackState,
+    setupLocationState,
+    bounceState,
+    priceabilityState,
+    planStatus,
+    Number.isFinite(resolvedRR) ? 'rr' : '',
+    latestTickerSummary
+  ].filter(Boolean).length >= 3;
+  const asSentence = value => String(value || '').trim().replace(/[.]+$/,'');
+  const joinReasonParts = parts => {
+    const cleaned = parts.map(part => String(part || '').trim()).filter(Boolean);
+    if(!cleaned.length) return '';
+    if(cleaned.length === 1) return cleaned[0];
+    if(cleaned.length === 2) return `${cleaned[0]} and ${cleaned[1]}`;
+    return `${cleaned.slice(0, -1).join(', ')}, and ${cleaned[cleaned.length - 1]}`;
+  };
+  const uniqueSignals = values => values
+    .map(value => String(value || '').trim())
+    .filter(Boolean)
+    .filter((value, index, list) => list.findIndex(other => sameVisibleCopy(other, value)) === index)
+    .slice(0, 3);
+  const cautionReason = (() => {
+    const preferred = traceSources.find(entry => entry && entry.present === true && entry.terminal !== true && Array.isArray(entry.appliedWhere) && entry.appliedWhere.length);
+    if(!preferred) return '';
+    if(preferred.id === 'weak_market_tape') return 'weak market tape could delay confirmation';
+    if(preferred.id === 'weak_volume') return 'weak volume could stall the rebound';
+    if(preferred.id === 'no_bounce_confirmation' || preferred.id === 'bounce_unconfirmed') return 'failed bounce confirmation would drag it back';
+    if(preferred.id === 'early_stabilisation') return 'early stabilisation can still fail';
+    return '';
+  })();
+  const structureWhy = ['strong','intact','developing_clean'].includes(structureState)
+    ? 'structure is strong'
+    : (structureEligibility === 'alive'
+      ? 'structure is still intact'
+      : (['developing','developing_loose'].includes(structureState)
+        ? 'structure is still developing'
+        : (['weak','weakening'].includes(structureState) ? 'structure is weakening' : '')));
+  const locationWhy = pullbackState === 'near_20ma'
+    ? 'price is near the 20MA'
+    : (pullbackState === 'near_50ma'
+      ? 'price is near the 50MA'
+      : (pullbackState === 'between_20_50ma'
+        ? 'price is between the 20MA and 50MA'
+        : (['supportive','support_band','pullback_zone'].includes(setupLocationState)
+          ? 'price is back in a constructive pullback area'
+          : (['extended','off_level','deep'].includes(pullbackState) ? 'price is not in a clean pullback area yet' : ''))));
+  const bounceWhy = bounceState === 'confirmed'
+    ? 'bounce confirmation has passed'
+    : (['attempt','early','developing','improving'].includes(bounceState)
+      ? 'bounce is improving'
+      : (['none','unconfirmed'].includes(bounceState) ? 'bounce confirmation has not passed yet' : ''));
+  const planWhy = planStatus === 'valid' && Number.isFinite(resolvedRR)
+    ? `the plan is valid at ${resolvedRR.toFixed(1)}R`
+    : (planStatus === 'valid'
+      ? 'the trade plan is valid'
+      : (['missing','invalid'].includes(planStatus)
+        ? 'a valid trade plan is not ready yet'
+        : (priceabilityState === 'unpriceable' ? 'risk cannot be priced cleanly yet' : '')));
+  const primaryBlocker = String(
+    globalVerdict.explicit_invalidation_reason
+    || globalVerdict.main_blocker
+    || globalVerdict.reason
+    || globalVerdict.downgrade_reason
+    || resolvedContract.blockerReason
+    || resolvedContract.reasonSummary
+    || ''
+  ).trim();
+  const toContract = ({
+    show = base.show === true,
+    ready = base.ready === true,
+    source,
+    specialCase = null,
+    why = '',
+    stillMissing = '',
+    upgrade = '',
+    downgrade = '',
+    signals = [],
+    fallbackSummary = ''
+  } = {}) => ({
+    show,
+    ready,
+    source,
+    bucket,
+    canonicalVerdict:verdict === 'watch' ? 'watch' : verdict,
+    specialCase,
+    why:String(why || '').trim(),
+    stillMissing:String(stillMissing || '').trim(),
+    upgrade:String(upgrade || '').trim(),
+    downgrade:String(downgrade || '').trim(),
+    signals:uniqueSignals(signals),
+    fallbackSummary:String(fallbackSummary || '').trim(),
+    diagnostics:{
+      hasTickerSpecificContext,
+      usedSavedSummary:source === 'saved_summary_fallback',
+      accepted50MaSupportTest:specialCase === 'accepted_50ma_support_test'
+    },
+    ticker:normalizeTicker(base.ticker || options.ticker || ''),
+    header:String(base.header || '').trim(),
+    pattern_label:base.pattern_label,
+    pattern_explanation:base.pattern_explanation,
+    wording_tone:base.wording_tone,
+    secondary:Array.isArray(base.secondary) ? base.secondary.slice(0, 3) : [],
+    footer:String(base.footer || '').trim(),
+    primary:String(why || '').trim(),
+    definitionLine:String(stillMissing || '').trim(),
+    triggerLine:String(upgrade || '').trim(),
+    futureStateLine:String(downgrade || '').trim()
+  });
+
+  if(!hasTickerSpecificContext){
+    if(latestTickerSummary){
+      return toContract({
+        source:'saved_summary_fallback',
+        why:latestTickerSummary,
+        stillMissing:'more ticker-specific review data is needed',
+        upgrade:'refresh the latest review to show the current setup reason',
+        downgrade:'stale chart context can hide whether quality is improving or fading',
+        fallbackSummary:latestTickerSummary
+      });
+    }
+    return toContract({
+      source:'generic_fallback',
+      why:'This ticker still needs a fresh review before Track can explain the current bucket.',
+      stillMissing:'no current ticker-specific review state is available',
+      upgrade:'refresh or save a review to capture the setup reason',
+      downgrade:'stale or missing chart context can hide whether quality is improving or fading'
+    });
+  }
+  if(supportTestCopy){
+    return toContract({
+      source:'ticker_specific',
+      specialCase:'accepted_50ma_support_test',
+      why:`This ticker is still on Monitor because ${asSentence(supportTestCopy.blocker).toLowerCase()}.`,
+      stillMissing:'buyers have not confirmed that the 50MA is holding',
+      upgrade:'buyers defend the 50MA and confirm a bounce',
+      downgrade:'loss of 50MA support would push this toward Avoid',
+      signals:['Price is near the 50MA.', 'Structure is still alive.', 'Bounce is not confirmed yet.']
+    });
+  }
+  if(verdict === 'avoid'){
+    return toContract({
+      source:'ticker_specific',
+      why:primaryBlocker
+        ? `This setup is Avoid because ${asSentence(primaryBlocker).toLowerCase()}.`
+        : 'This setup is Avoid because a terminal blocker is still active.',
+      stillMissing:'structure must repair before the setup can be reviewed constructively',
+      upgrade:'rebuild from a clean base and reclaim support before reviewing again',
+      downgrade:'continued structural failure keeps this in Avoid',
+      signals:base.secondary
+    });
+  }
+  if(verdict === 'entry' && entryGatePass){
+    return toContract({
+      show:true,
+      ready:true,
+      source:'ticker_specific',
+      why:`This setup is Entry because ${joinReasonParts([
+        structureWhy || 'structure is intact',
+        locationWhy || 'price is in the right area',
+        bounceWhy || 'buyers have confirmed the bounce',
+        planWhy || 'the plan is actionable',
+        'the entry trigger has passed'
+      ])}.`,
+      stillMissing:'nothing material is missing while the trigger remains valid',
+      upgrade:'keep the trigger valid on close and execute only within the saved plan',
+      downgrade:asSentence(cautionReason || 'failed support, a lost trigger, or plan invalidation would move it back to Monitor'),
+      signals:[locationWhy, bounceWhy, planWhy]
+    });
+  }
+  if(verdict === 'near_entry'){
+    return toContract({
+      source:'ticker_specific',
+      why:`This setup is Near Entry because ${joinReasonParts([
+        structureWhy || 'structure is still constructive',
+        locationWhy || 'price is in a constructive pullback area',
+        ['attempt','early','developing','improving'].includes(bounceState) ? 'bounce is improving' : bounceWhy,
+        planWhy || 'the trade plan is constructive'
+      ])}.`,
+      stillMissing:asSentence(base.pattern_explanation || base.definitionLine || 'entry confirmation has not passed yet').toLowerCase(),
+      upgrade:asSentence(base.footer || base.triggerLine || 'wait for stronger confirmation before considering an entry'),
+      downgrade:asSentence(primaryBlocker || cautionReason || 'failed support or weaker structure would drop it back to Monitor'),
+      signals:[locationWhy, bounceWhy, planWhy]
+    });
+  }
+  return toContract({
+    source:'ticker_specific',
+    why:`This setup is ${(structureState === 'developing' || structureState === 'developing_loose') ? 'Developing' : 'Monitor'} because ${asSentence(base.primary || joinReasonParts([
+      structureWhy || (structureEligibility === 'alive' ? 'structure remains constructive' : ''),
+      locationWhy,
+      bounceWhy,
+      planWhy
+    ]) || 'the setup is still forming').toLowerCase()}.`,
+    stillMissing:asSentence(base.pattern_explanation || base.definitionLine || 'the setup still needs clearer confirmation').toLowerCase(),
+    upgrade:asSentence(base.footer || base.triggerLine || 'wait for a cleaner pullback and stronger confirmation'),
+    downgrade:asSentence(primaryBlocker || cautionReason || 'failed support or weaker structure would drag it back'),
+    signals:[locationWhy, bounceWhy, planWhy]
+  });
+}
+
+function buildTrackTickerSpecificEntryConditionsSummary(options = {}){
+  return buildTrackLongPressContract(options);
+}
+
 function entryConditionsPanelId(scope, ticker){
   const safeScope = String(scope || 'review').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   const safeTicker = String(ticker || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '_') || 'TICKER';
@@ -19374,34 +19623,36 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
   const details = summary && typeof summary === 'object' ? summary : null;
   if(!details || !details.show) return '';
   const panelId = entryConditionsPanelId(scope, ticker || details.ticker || '');
-  const secondaryMarkup = (details.secondary || [])
+  const secondaryMarkup = ((details.signals && details.signals.length ? details.signals : details.secondary) || [])
     .slice(0, 3)
     .map(line => `<li>${escapeHtml(String(line || ''))}</li>`)
     .join('');
-  const triggerLine = String(details.triggerLine || '').trim();
-  const futureStateLine = String(details.futureStateLine || '').trim();
-  const fallbackFooter = String(details.footer || 'When these conditions improve, the app can price entry, stop, and risk.').trim();
+  const whyLine = String(details.why || details.primary || '').trim();
+  const stillMissingLine = String(details.stillMissing || details.definitionLine || '').trim();
+  const upgradeLine = String(details.upgrade || details.triggerLine || '').trim();
+  const downgradeLine = String(details.downgrade || details.futureStateLine || '').trim();
+  const fallbackFooter = String(details.fallbackSummary || details.footer || 'When these conditions improve, the app can price entry, stop, and risk.').trim();
   if(options.mode === 'card'){
     return `<div class="entry-conditions-panel entry-conditions-panel--card no-card-click" id="${escapeHtml(panelId)}" hidden>
       <div class="entry-conditions-header"><strong>Status:</strong> ${escapeHtml(details.header || 'Monitor - Not ready')}</div>
-      <div class="entry-conditions-pattern"><strong>Core Problem:</strong> ${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
-      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Needs:</strong></div>` : ''}
+      <div class="entry-conditions-pattern"><strong>Why:</strong> ${escapeHtml(whyLine || 'No clean setup - price action is too messy')}</div>
+      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Signals:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
-      ${details.definitionLine ? `<div class="entry-conditions-footer">${escapeHtml(String(details.definitionLine || ''))}</div>` : ''}
-      ${triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(triggerLine)}</div>` : ''}
-      ${futureStateLine ? `<div class="entry-conditions-footer">${escapeHtml(futureStateLine)}</div>` : (!triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
+      ${stillMissingLine ? `<div class="entry-conditions-footer"><strong>Still Missing:</strong> ${escapeHtml(stillMissingLine)}</div>` : ''}
+      ${upgradeLine ? `<div class="entry-conditions-footer"><strong>Upgrade:</strong> ${escapeHtml(upgradeLine)}</div>` : ''}
+      ${downgradeLine ? `<div class="entry-conditions-footer"><strong>Downgrade:</strong> ${escapeHtml(downgradeLine)}</div>` : (!upgradeLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
     </div>`;
   }
   return `<div class="entry-conditions-helper no-card-click" data-entry-hold-helper>
     <button class="secondary compactbutton entry-conditions-trigger no-card-click" type="button" data-hold-entry-helper data-panel-id="${escapeHtml(panelId)}" data-hold-ms="650">Hold for Entry Conditions</button>
     <div class="entry-conditions-panel no-card-click" id="${escapeHtml(panelId)}" hidden>
       <div class="entry-conditions-header"><strong>Status:</strong> ${escapeHtml(details.header || 'Monitor - Not ready')}</div>
-      <div class="entry-conditions-pattern"><strong>Core Problem:</strong> ${escapeHtml(details.primary || 'No clean setup - price action is too messy')}</div>
-      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Needs:</strong></div>` : ''}
+      <div class="entry-conditions-pattern"><strong>Why:</strong> ${escapeHtml(whyLine || 'No clean setup - price action is too messy')}</div>
+      ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Signals:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
-      ${details.definitionLine ? `<div class="entry-conditions-footer">${escapeHtml(String(details.definitionLine || ''))}</div>` : ''}
-      ${triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(triggerLine)}</div>` : ''}
-      ${futureStateLine ? `<div class="entry-conditions-footer">${escapeHtml(futureStateLine)}</div>` : (!triggerLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
+      ${stillMissingLine ? `<div class="entry-conditions-footer"><strong>Still Missing:</strong> ${escapeHtml(stillMissingLine)}</div>` : ''}
+      ${upgradeLine ? `<div class="entry-conditions-footer"><strong>Upgrade:</strong> ${escapeHtml(upgradeLine)}</div>` : ''}
+      ${downgradeLine ? `<div class="entry-conditions-footer"><strong>Downgrade:</strong> ${escapeHtml(downgradeLine)}</div>` : (!upgradeLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
     </div>
   </div>`;
 }

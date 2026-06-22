@@ -1007,10 +1007,18 @@ function runEntryConditionsSummaryAssertions(){
     },
     normalizeTicker(value){
       return String(value || '').trim().toUpperCase();
+    },
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
     }
   };
   vm.createContext(summarySandbox);
   [
+    'savedReviewSummaryForRecord',
+    'currentRuntimeSummaryForRecord',
     'buildSharedSetupNarrative',
     'isAccepted50MaSupportTestDisplayState',
     'review50MaSupportTestPresentationCopy',
@@ -1018,12 +1026,14 @@ function runEntryConditionsSummaryAssertions(){
     'entryTriggerConditionForSummary',
     'nextUpgradeStateForSummary',
     'nextUpgradeStateForSummaryLabel',
-    'buildEntryConditionsSummary'
+    'buildEntryConditionsSummary',
+    'buildTrackLongPressContract',
+    'buildTrackTickerSpecificEntryConditionsSummary'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), summarySandbox, {filename:`app.js#${functionName}`});
   });
 
-  const healthyMissingPlan = summarySandbox.buildEntryConditionsSummary({
+  const healthyMissingPlan = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
     ticker:'MAR',
     finalVerdict:'watch',
     presentationState:'monitor',
@@ -1045,7 +1055,7 @@ function runEntryConditionsSummaryAssertions(){
     throw new Error('Healthy Watch long-press summary must not use weak/damaged/deteriorating language.');
   }
 
-  const missingPlanOnly = summarySandbox.buildEntryConditionsSummary({
+  const missingPlanOnly = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
     ticker:'BK',
     finalVerdict:'watch',
     presentationState:'monitor',
@@ -1066,7 +1076,7 @@ function runEntryConditionsSummaryAssertions(){
     throw new Error('Missing plan alone must not produce Diminishing long-press wording.');
   }
 
-  const trueDiminishing = summarySandbox.buildEntryConditionsSummary({
+  const trueDiminishing = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
     ticker:'DOW',
     finalVerdict:'watch',
     presentationState:'diminishing',
@@ -1086,7 +1096,7 @@ function runEntryConditionsSummaryAssertions(){
     throw new Error('True Diminishing long-press summary must retain weakening/fading language.');
   }
 
-  const terminalAvoid = summarySandbox.buildEntryConditionsSummary({
+  const terminalAvoid = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
     ticker:'AVD',
     finalVerdict:'avoid',
     presentationState:'avoid',
@@ -1098,6 +1108,85 @@ function runEntryConditionsSummaryAssertions(){
   const terminalAvoidText = [terminalAvoid.header, terminalAvoid.primary, terminalAvoid.definitionLine, terminalAvoid.secondary && terminalAvoid.secondary.join(' ')].join(' ');
   if(terminalAvoid.show !== true || !/avoid|blocked|broken|repair/i.test(terminalAvoidText)){
     throw new Error('Terminal Avoid long-press summary must remain clearly blocked/avoid.');
+  }
+
+  const nearEntrySpecific = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
+    ticker:'NVDA',
+    finalVerdict:'near_entry',
+    presentationState:'near_entry',
+    resolvedContract:{planStatusKey:'valid', structuralState:'monitor'},
+    globalVerdict:{
+      final_verdict:'near_entry',
+      entry_gate_pass:false,
+      resolved_rr:2,
+      cumulativePenaltyTrace:{sources:[{id:'bounce_unconfirmed', present:true, terminal:false, appliedWhere:['warning_state']}]}
+    },
+    derivedStates:{structureState:'strong', structureEligibility:'alive', bounceState:'improving', pullbackZone:'near_20ma'},
+    displayedPlan:{rewardRisk:{rrRatio:2}}
+  });
+  const nearEntryText = [nearEntrySpecific.primary, nearEntrySpecific.definitionLine, nearEntrySpecific.triggerLine, nearEntrySpecific.futureStateLine].join(' ');
+  if(!/Near Entry/i.test(nearEntrySpecific.header || '') || !/structure is strong/i.test(nearEntryText) || !/20MA/i.test(nearEntryText) || !/2\.0R/i.test(nearEntryText) || !/confirmation/i.test(nearEntryText)){
+    throw new Error('Near Entry Track long-press must explain the constructive setup, valid plan, and missing confirmation.');
+  }
+
+  const entryReady = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
+    ticker:'ANET',
+    finalVerdict:'entry',
+    presentationState:'entry',
+    resolvedContract:{planStatusKey:'valid'},
+    globalVerdict:{final_verdict:'entry', entry_gate_pass:true, resolved_rr:2.4},
+    derivedStates:{structureState:'intact', bounceState:'confirmed', pullbackZone:'near_20ma'},
+    displayedPlan:{rewardRisk:{rrRatio:2.4}}
+  });
+  if(entryReady.show !== true || entryReady.ready !== true || !/entry trigger has passed/i.test(String(entryReady.primary || ''))){
+    throw new Error('Entry Track long-press must stay visible and explain why the setup is actionable.');
+  }
+
+  const fallbackGeneric = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
+    record:{review:{savedSummary:'Last review: waiting for fresh chart context.'}},
+    ticker:'MSFT',
+    finalVerdict:'watch',
+    presentationState:'monitor',
+    resolvedContract:{},
+    globalVerdict:{final_verdict:'watch'},
+    derivedStates:{},
+    displayedPlan:{}
+  });
+  if(!/fresh chart context|review data/i.test([fallbackGeneric.primary, fallbackGeneric.definitionLine, fallbackGeneric.triggerLine].join(' '))){
+    throw new Error('Track long-press must fall back to record-specific saved summary before generic bucket copy when structured state is missing.');
+  }
+  if(fallbackGeneric.source !== 'saved_summary_fallback' || fallbackGeneric.fallbackSummary !== 'Last review: waiting for fresh chart context.'){
+    throw new Error('Saved-summary fallback must be explicit in the Track long-press contract.');
+  }
+
+  const emptyFallback = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
+    ticker:'SHOP',
+    finalVerdict:'watch',
+    presentationState:'monitor',
+    resolvedContract:{},
+    globalVerdict:{final_verdict:'watch'},
+    derivedStates:{},
+    displayedPlan:{}
+  });
+  if(emptyFallback.source !== 'generic_fallback' || !emptyFallback.why || !emptyFallback.stillMissing || !emptyFallback.upgrade || !emptyFallback.downgrade){
+    throw new Error('Generic Track fallback must populate normalized why/stillMissing/upgrade/downgrade fields.');
+  }
+
+  const supportTest = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
+    ticker:'HWM',
+    finalVerdict:'watch',
+    presentationState:'monitor',
+    resolvedContract:{planStatusKey:'missing'},
+    globalVerdict:{final_verdict:'watch', pullback_ok:true},
+    derivedStates:{structureState:'weak', structureEligibility:'alive', bounceState:'none', pullbackZone:'near_50ma'},
+    displayedPlan:{},
+    record:{
+      marketData:{price:248.63, sma50:250.23},
+      watchlist:{debug:{structural_alive_at_refresh:'true', refresh_demote_reason:'Structurally alive; keep on monitor.'}}
+    }
+  });
+  if(supportTest.specialCase !== 'accepted_50ma_support_test' || supportTest.source !== 'ticker_specific' || !/50MA/.test([supportTest.why, supportTest.stillMissing, supportTest.upgrade].join(' '))){
+    throw new Error('Accepted 50MA support tests must be captured explicitly in the Track long-press contract.');
   }
 }
 
@@ -1150,6 +1239,8 @@ function runSharedNarrativeConsistencyAssertions(){
   };
   vm.createContext(narrativeSandbox);
   [
+    'savedReviewSummaryForRecord',
+    'currentRuntimeSummaryForRecord',
     'normalizeUiCopy',
     'resolvePresentationTone',
     'terminalAvoidEvidenceForReviewCopy',
@@ -1166,7 +1257,9 @@ function runSharedNarrativeConsistencyAssertions(){
     'entryTriggerConditionForSummary',
     'nextUpgradeStateForSummary',
     'nextUpgradeStateForSummaryLabel',
-    'buildEntryConditionsSummary'
+    'buildEntryConditionsSummary',
+    'buildTrackLongPressContract',
+    'buildTrackTickerSpecificEntryConditionsSummary'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), narrativeSandbox, {filename:`app.js#${functionName}`});
   });
@@ -1244,7 +1337,7 @@ function runSharedNarrativeConsistencyAssertions(){
     throw new Error('Review narrative must align with the shared developing-watch narrative.');
   }
 
-  const holdModel = narrativeSandbox.buildEntryConditionsSummary({
+  const holdModel = narrativeSandbox.buildTrackTickerSpecificEntryConditionsSummary({
     ticker:'ADI',
     finalVerdict:'watch',
     presentationState:'monitor',
@@ -1307,6 +1400,9 @@ function runSharedNarrativeConsistencyAssertions(){
     || !/buildReviewSemanticStatus[\s\S]*buildSharedSetupNarrative/.test(appSource)
     || !/buildEntryConditionsSummary[\s\S]*buildSharedSetupNarrative/.test(appSource)){
     throw new Error('Scan, Review, and Track long-press surfaces must consume the shared narrative builder.');
+  }
+  if(!/const entryConditionsSummary = buildTrackTickerSpecificEntryConditionsSummary\(\{/.test(appSource)){
+    throw new Error('Track card render must use the ticker-specific long-press summary wrapper.');
   }
   if(/const decisionSummary = String\(reviewSemanticStatus\.primaryReason[\s\S]{0,120}const reviewSemanticStatus = buildReviewSemanticStatus\(/.test(appSource)){
     throw new Error('Review semantic status must be initialized before any decisionSummary reads to avoid a TDZ runtime error.');
