@@ -2521,12 +2521,13 @@ function classifyCapitalUsage({position_cost_gbp, account_size_gbp}){
 }
 
 function persistState(){
-  const fullSaved = safeStorageSet(key, state);
+  const persistedAt = new Date().toISOString();
+  const fullSaved = safeStorageSet(key, buildFullPersistedState(state, {persistedAt}));
   if(fullSaved) return;
 
-  const settingsSaved = safeStorageSet(settingsKey, buildSettingsPersistedState(state));
-  const recordsSaved = safeStorageSet(recordsLiteKey, buildRecordsLitePersistedState(state));
-  const liteSaved = safeStorageSet(liteKey, buildLitePersistedState(state));
+  const settingsSaved = safeStorageSet(settingsKey, buildSettingsPersistedState(state, {persistedAt}));
+  const recordsSaved = safeStorageSet(recordsLiteKey, buildRecordsLitePersistedState(state, {persistedAt}));
+  const liteSaved = safeStorageSet(liteKey, buildLitePersistedState(state, {persistedAt}));
 
   if(!liteSaved && !settingsSaved && !recordsSaved){
     console.warn('STATE_PERSIST_FAILED', {key, liteKey, settingsKey, recordsLiteKey});
@@ -2572,12 +2573,113 @@ function summarizeStartupTrace(trace){
   const market = String(info.restoredMarketStatus || 'n/a');
   const mode = String(info.restoredUniverseMode || 'n/a');
   const setup = String(info.restoredSetupType || 'Unknown');
-  return `Startup restore: watchlist ${watchlist} | market ${market} | mode ${mode} | setup ${setup}`;
+  const winner = info.winningPersistenceSource && typeof info.winningPersistenceSource === 'object'
+    ? `${String(info.winningPersistenceSource.format || info.winningPersistenceSource.name || 'unknown')}@${String(info.winningPersistenceSource.persistedAt || 'n/a')}`
+    : 'unknown';
+  return `Startup restore: watchlist ${watchlist} | market ${market} | mode ${mode} | setup ${setup} | source ${winner}`;
 }
 
-function buildSettingsPersistedState(sourceState){
-  const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
+function withPersistMeta(snapshot, meta = {}){
+  const baseSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const persistedAt = String(meta.persistedAt || new Date().toISOString());
+  const persistedFormat = String(meta.persistedFormat || '').trim() || 'unknown';
   return {
+    ...baseSnapshot,
+    __persistedAt:persistedAt,
+    __persistedFormat:persistedFormat
+  };
+}
+
+function stripPersistMeta(snapshot){
+  const baseSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const {
+    __persistedAt,
+    __persistedFormat,
+    ...cleaned
+  } = baseSnapshot;
+  return cleaned;
+}
+
+function persistedAtMs(snapshot){
+  const persistedAt = snapshot && typeof snapshot === 'object' ? snapshot.__persistedAt : '';
+  const parsed = Date.parse(String(persistedAt || ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function persistedFormatLabel(snapshot){
+  return snapshot && typeof snapshot === 'object'
+    ? String(snapshot.__persistedFormat || '').trim()
+    : '';
+}
+
+function persistLayerSummary(name, snapshot, info = {}){
+  const persistedAt = snapshot && typeof snapshot === 'object' ? String(snapshot.__persistedAt || '') : '';
+  return {
+    name:String(name || ''),
+    format:persistedFormatLabel(snapshot) || String(name || ''),
+    persistedAt,
+    persistedAtMs:persistedAtMs(snapshot),
+    present:info && info.present === true,
+    bytes:Number.isFinite(Number(info && info.bytes)) ? Number(info.bytes) : 0,
+    error:String(info && info.error || '')
+  };
+}
+
+function buildFullPersistedState(sourceState, meta = {}){
+  const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
+  return withPersistMeta({
+    ...baseState,
+    tickerRecords:normalizeTickerRecordsMap(baseState.tickerRecords || {}),
+    cards:[],
+    scannerResults:[],
+    watchlist:[],
+    tradeDiary:[],
+    scannerDebug:[],
+    lastImportRaw:''
+  }, {
+    ...meta,
+    persistedFormat:'full'
+  });
+}
+
+function mergePersistedStateLayers(layers){
+  const entries = Array.isArray(layers) ? layers.filter(layer => layer && typeof layer === 'object') : [];
+  const hasTimestampedLayer = entries.some(layer => Number.isFinite(persistedAtMs(layer.data)));
+  if(!hasTimestampedLayer){
+    return entries.reduce((acc, layer) => Object.assign(acc, stripPersistMeta(layer.data)), {});
+  }
+  const ordered = [...entries].sort((a, b) => {
+    const leftTime = persistedAtMs(a.data);
+    const rightTime = persistedAtMs(b.data);
+    const safeLeft = Number.isFinite(leftTime) ? leftTime : -1;
+    const safeRight = Number.isFinite(rightTime) ? rightTime : -1;
+    if(safeLeft !== safeRight) return safeLeft - safeRight;
+    return Number(a.priority || 0) - Number(b.priority || 0);
+  });
+  return ordered.reduce((acc, layer) => Object.assign(acc, stripPersistMeta(layer.data)), {});
+}
+
+function orderedPersistedLayerSummaries(layers){
+  const entries = Array.isArray(layers) ? layers.filter(layer => layer && typeof layer === 'object') : [];
+  const ordered = [...entries].sort((a, b) => {
+    const leftTime = persistedAtMs(a.data);
+    const rightTime = persistedAtMs(b.data);
+    const safeLeft = Number.isFinite(leftTime) ? leftTime : -1;
+    const safeRight = Number.isFinite(rightTime) ? rightTime : -1;
+    if(safeLeft !== safeRight) return safeLeft - safeRight;
+    return Number(a.priority || 0) - Number(b.priority || 0);
+  });
+  return ordered.map(layer => ({
+    name:String(layer.name || ''),
+    format:persistedFormatLabel(layer.data) || String(layer.name || ''),
+    persistedAt:String(layer.data && layer.data.__persistedAt || ''),
+    priority:Number(layer.priority || 0)
+  }));
+}
+
+function buildSettingsPersistedState(sourceState, meta = {}){
+  const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
+  return withPersistMeta({
     accountSize:baseState.accountSize,
     maxRisk:baseState.maxRisk,
     userRiskPerTrade:baseState.userRiskPerTrade,
@@ -2596,10 +2698,13 @@ function buildSettingsPersistedState(sourceState){
     aiEndpoint:baseState.aiEndpoint,
     marketDataEndpoint:baseState.marketDataEndpoint,
     showExpiredWatchlist:!!baseState.showExpiredWatchlist
-  };
+  }, {
+    ...meta,
+    persistedFormat:'settings'
+  });
 }
 
-function buildRecordsLitePersistedState(sourceState){
+function buildRecordsLitePersistedState(sourceState, meta = {}){
   const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
   const liteTickerRecords = Object.fromEntries(
     Object.entries(normalizeTickerRecordsMap(baseState.tickerRecords || {})).map(([ticker, record]) => {
@@ -2699,15 +2804,18 @@ function buildRecordsLitePersistedState(sourceState){
       }];
     })
   );
-  return {
+  return withPersistMeta({
     tickerRecords:liteTickerRecords,
     watchlist:Array.isArray(baseState.watchlist) ? cloneData(baseState.watchlist, []) : [],
     tradeDiary:Array.isArray(baseState.tradeDiary) ? cloneData(baseState.tradeDiary, []) : [],
     symbolMeta:baseState.symbolMeta && typeof baseState.symbolMeta === 'object' ? cloneData(baseState.symbolMeta, {}) : {}
-  };
+  }, {
+    ...meta,
+    persistedFormat:'records_lite'
+  });
 }
 
-function buildLitePersistedState(sourceState){
+function buildLitePersistedState(sourceState, meta = {}){
   const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
   const liteTickerRecords = Object.fromEntries(
     Object.entries(normalizeTickerRecordsMap(baseState.tickerRecords || {})).map(([ticker, record]) => {
@@ -2734,7 +2842,7 @@ function buildLitePersistedState(sourceState){
       }];
     })
   );
-  return {
+  return withPersistMeta({
     accountSize:baseState.accountSize,
     maxRisk:baseState.maxRisk,
     userRiskPerTrade:baseState.userRiskPerTrade,
@@ -2766,7 +2874,10 @@ function buildLitePersistedState(sourceState){
     apiPlan:baseState.apiPlan,
     aiEndpoint:baseState.aiEndpoint,
     marketDataEndpoint:baseState.marketDataEndpoint
-  };
+  }, {
+    ...meta,
+    persistedFormat:'lite'
+  });
 }
 
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = APP_FETCH_TIMEOUT_MS, maxAttempts = 2){
@@ -6474,7 +6585,19 @@ function loadState(){
   const recordsLiteState = safeStorageGet(recordsLiteKey, {}) || {};
   const liteState = safeStorageGet(liteKey, {}) || {};
   const fullState = safeStorageGet(key, {}) || {};
-  Object.assign(state, createDefaultState(), settingsState, recordsLiteState, liteState, fullState);
+  const persistedLayers = [
+    {name:'settings', priority:1, data:settingsState, info:settingsStorageInfo},
+    {name:'recordsLite', priority:2, data:recordsLiteState, info:recordsLiteStorageInfo},
+    {name:'lite', priority:3, data:liteState, info:liteStorageInfo},
+    {name:'full', priority:4, data:fullState, info:fullStorageInfo}
+  ];
+  const mergedPersistedState = mergePersistedStateLayers(persistedLayers);
+  const orderedPersistenceSources = orderedPersistedLayerSummaries(persistedLayers);
+  const winningPersistenceSource = orderedPersistenceSources.length
+    ? orderedPersistenceSources[orderedPersistenceSources.length - 1]
+    : null;
+  uiState.lastStartupPersistenceSource = winningPersistenceSource;
+  Object.assign(state, createDefaultState(), mergedPersistedState);
   // Keep risk/account controls resilient when full-state persists lag behind
   // quick settings writes (for example immediate reload after a risk change).
   if(Object.prototype.hasOwnProperty.call(settingsState, 'accountSize')) state.accountSize = settingsState.accountSize;
@@ -6535,6 +6658,9 @@ function loadState(){
       settings:settingsStorageInfo,
       recordsLite:recordsLiteStorageInfo
     },
+    persistenceSources:persistedLayers.map(layer => persistLayerSummary(layer.name, layer.data, layer.info)),
+    persistenceMergeOrder:orderedPersistenceSources,
+    winningPersistenceSource,
     restoredMarketStatus:String(state.marketStatus || ''),
     restoredUniverseMode:String(state.universeMode || ''),
     restoredSetupType:String(state.setupType || ''),
@@ -6581,9 +6707,14 @@ function loadState(){
   setResetStatus(summarizeStartupTrace(startupTrace), startupTrace.postSyncCanonicalWatchlistCount < startupTrace.preSyncCanonicalWatchlistCount ? 'warntext' : 'ok');
   uiState.runtimeDebugContext = 'startup';
   uiState.runtimeDebugEntries = [{
+    type:'startup_restore',
     source:'startup_restore',
     message:summarizeStartupTrace(startupTrace),
     context:'startup',
+    extra:{
+      winningPersistenceSource,
+      persistenceMergeOrder:orderedPersistenceSources
+    },
     details:startupTrace
   }, ...(uiState.runtimeDebugEntries || [])].slice(0, 12);
   updateProviderStatusNote();
@@ -7438,7 +7569,9 @@ function syncRiskSettingsFromDom(){
 
 function persistRiskSettingsQuick(){
   const startedAt = nowPerfMs();
-  safeStorageSet(settingsKey, buildSettingsPersistedState(state));
+  safeStorageSet(settingsKey, buildSettingsPersistedState(state, {
+    persistedAt:new Date().toISOString()
+  }));
   const durationMs = Number((nowPerfMs() - startedAt).toFixed(1));
   logRiskPerf('risk_settings_storage_write', {
     durationMs,
@@ -11947,6 +12080,23 @@ function stopStartupStatusContextCycle(){
   renderLiveProcessStatusBanner();
 }
 
+function compactPersistenceSourceLabel(source){
+  const safe = source && typeof source === 'object' ? source : null;
+  if(!safe) return '';
+  const format = String(safe.format || safe.name || '').trim();
+  if(!format) return '';
+  if(format === 'records_lite') return 'records-lite';
+  return format.replace(/_/g, '-');
+}
+
+function liveProcessPersistenceHint(){
+  const source = uiState.lastStartupPersistenceSource && typeof uiState.lastStartupPersistenceSource === 'object'
+    ? uiState.lastStartupPersistenceSource
+    : null;
+  const label = compactPersistenceSourceLabel(source);
+  return label ? `Save: ${label}` : '';
+}
+
 function renderLiveProcessStatusBanner(){
   const banner = $('liveProcessStatusBanner');
   const text = $('liveProcessStatusText');
@@ -11960,6 +12110,16 @@ function renderLiveProcessStatusBanner(){
   if(startupActive && statusState === 'idle'){
     displayState = 'startup';
     displayMessage = startupStatusContextMessage();
+  }
+  const persistenceHint = liveProcessPersistenceHint();
+  const shouldAppendPersistenceHint = !!(
+    persistenceHint
+    && !isLiveProcessBusyState(displayState)
+    && ['startup', 'idle', 'action'].includes(displayState)
+    && displayMessage.indexOf(persistenceHint) === -1
+  );
+  if(shouldAppendPersistenceHint){
+    displayMessage = `${displayMessage} | ${persistenceHint}`;
   }
   if(banner){
     banner.setAttribute('data-live-process', displayState);
@@ -14665,6 +14825,300 @@ function practicalSizeFlagForPlan(plan){
   return '';
 }
 
+function penaltyTraceSources(trace){
+  return trace && typeof trace === 'object' && Array.isArray(trace.sources)
+    ? trace.sources
+    : [];
+}
+
+function appendCumulativePenaltyTrace(trace, entry){
+  if(!trace || typeof trace !== 'object' || !entry || typeof entry !== 'object') return;
+  trace.sources = Array.isArray(trace.sources) ? trace.sources : [];
+  const sourceId = String(entry.sourceId || entry.id || '').trim();
+  if(!sourceId) return;
+  const existing = trace.sources.find(item => item && item.id === sourceId);
+  if(existing){
+    const mergedPossibleWhere = new Set([].concat(existing.possibleWhere || [], entry.possibleWhere || []).filter(Boolean));
+    existing.category = existing.category || entry.category || 'soft_caution';
+    existing.severity = existing.severity || entry.severity || 'low';
+    existing.terminal = existing.terminal === true || entry.terminal === true;
+    existing.present = existing.present !== false;
+    existing.possibleWhere = Array.from(mergedPossibleWhere);
+    existing.appliedWhere = Array.isArray(existing.appliedWhere) ? existing.appliedWhere : [];
+    if(existing.skippedReason == null && entry.skippedReason) existing.skippedReason = entry.skippedReason;
+    return;
+  }
+  trace.sources.push({
+    id:sourceId,
+    category:entry.category || 'soft_caution',
+    severity:entry.severity || 'low',
+    terminal:entry.terminal === true,
+    present:entry.present !== false,
+    possibleWhere:[].concat(entry.possibleWhere || []).filter(Boolean),
+    appliedWhere:[].concat(entry.appliedWhere || []).filter(Boolean),
+    canonicalImpact:entry.canonicalImpact === true,
+    displayImpact:entry.displayImpact === true,
+    skippedReason:entry.skippedReason || null
+  });
+}
+
+function markPenaltyTraceApplied(trace, sourceId, where, options = {}){
+  const entry = penaltyTraceSources(trace).find(item => item && item.id === sourceId);
+  if(!entry || !where) return;
+  entry.appliedWhere = Array.isArray(entry.appliedWhere) ? entry.appliedWhere : [];
+  if(!entry.appliedWhere.includes(where)) entry.appliedWhere.push(where);
+  if(options.canonicalImpact === true) entry.canonicalImpact = true;
+  if(options.displayImpact === true) entry.displayImpact = true;
+  if(options.clearSkippedReason === true) entry.skippedReason = null;
+}
+
+function markPenaltyTraceSkipped(trace, sourceId, reason){
+  const entry = penaltyTraceSources(trace).find(item => item && item.id === sourceId);
+  if(!entry || !reason) return;
+  if(reason === 'terminal_short_circuit'){
+    if(entry.canonicalImpact !== true) entry.skippedReason = reason;
+    return;
+  }
+  if(reason === 'not_used_by_score_path'){
+    if(entry.displayImpact !== true) entry.skippedReason = reason;
+    return;
+  }
+  if(!entry.appliedWhere.length) entry.skippedReason = reason;
+}
+
+function penaltyReasonLabelFromSource(sourceId, options = {}){
+  const practicalSizeFlag = String(options.practicalSizeFlag || '').toLowerCase();
+  switch(String(sourceId || '').trim()){
+    case 'broken_structure':
+      return 'Structure broken';
+    case 'broken_trend':
+      return 'Trend broken';
+    case 'stop_breach':
+      return 'Price below stop';
+    case 'no_bounce_confirmation':
+      return 'No bounce';
+    case 'bounce_unconfirmed':
+      return 'Bounce unconfirmed';
+    case 'early_stabilisation':
+      return 'Early stabilisation only';
+    case 'weak_volume':
+      return 'Weak volume';
+    case 'weak_market_tape':
+      return options.emphasizeWeakRegime ? 'Weak market needs stronger confirmation' : 'Hostile market';
+    case 'tiny_size':
+      return 'Tiny size';
+    case 'low_impact':
+      return 'Low impact';
+    case 'execution_quality':
+      return practicalSizeFlag === 'tiny_size'
+        ? 'Tiny size'
+        : (options.tooWideForQualityPullback ? 'Wide stop for account size' : 'Lower control setup');
+    case 'paper_rr_vs_confirmation':
+      return 'Paper R:R looks better than confirmation';
+    case 'borderline_setup_weak_market':
+      return 'Borderline setup in weak market';
+    default:
+      return '';
+  }
+}
+
+function cumulativePenaltyTraceForRecord(record, options = {}){
+  const rawRecord = record && typeof record === 'object' ? record : {};
+  const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    rawRecord.plan && rawRecord.plan.entry,
+    rawRecord.plan && rawRecord.plan.stop,
+    rawRecord.plan && rawRecord.plan.firstTarget,
+    rawRecord.marketData && rawRecord.marketData.currency
+  );
+  const baseVerdict = normalizeAnalysisVerdict(
+    options.baseVerdict
+    || options.displayStage
+    || options.rawVerdict
+    || resolverSeedVerdictForRecord(rawRecord)
+  );
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(rawRecord, {
+    derivedStates:derived,
+    displayedPlan,
+    displayStage:baseVerdict,
+    baseVerdict
+  });
+  const safeAnalysis = options.analysis && typeof options.analysis === 'object' ? options.analysis : null;
+  const trace = {sources:[]};
+  const structureState = String(derived.structureState || '').toLowerCase();
+  const trendState = String(derived.trendState || '').toLowerCase();
+  const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
+  const bounceState = String(derived.bounceState || '').toLowerCase();
+  const volumeState = String(derived.volumeState || '').toLowerCase();
+  const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
+  const practicalSizeFlag = practicalSizeFlagForPlan(rawRecord.plan);
+  const rrRatio = numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
+  const currentPrice = numericOrNull(rawRecord.marketData && rawRecord.marketData.price);
+  const stopPrice = numericOrNull(rawRecord.plan && rawRecord.plan.stop);
+  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
+  const emphasizeWeakRegime = qualityAdjustments.weakRegimePenalty === true;
+
+  if(structureState === 'broken'){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'broken_structure',
+      category:'terminal_blocker',
+      severity:'high',
+      terminal:true,
+      possibleWhere:['terminal_dead_check', 'canonical_verdict', 'display_setup_score']
+    });
+  }
+  if(trendState === 'broken'){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'broken_trend',
+      category:'terminal_blocker',
+      severity:'high',
+      terminal:true,
+      possibleWhere:['terminal_dead_check', 'canonical_verdict']
+    });
+  }
+  if(brokenBelowStop){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'stop_breach',
+      category:'terminal_blocker',
+      severity:'high',
+      terminal:true,
+      possibleWhere:['terminal_dead_check', 'canonical_verdict']
+    });
+  }
+  if(bounceState !== 'confirmed'){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:bounceState === 'none' ? 'no_bounce_confirmation' : 'bounce_unconfirmed',
+      category:'soft_caution',
+      severity:bounceState === 'none' ? 'medium' : 'low',
+      terminal:false,
+      possibleWhere:['warning_state', 'display_setup_score', 'canonical_verdict', 'entry_eligibility', 'near_entry_eligibility']
+    });
+  }
+  if(stabilisationState === 'early'){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'early_stabilisation',
+      category:'soft_caution',
+      severity:'low',
+      terminal:false,
+      possibleWhere:['warning_state', 'display_setup_score', 'canonical_verdict', 'near_entry_eligibility']
+    });
+  }
+  if(volumeState === 'weak'){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'weak_volume',
+      category:'soft_caution',
+      severity:'medium',
+      terminal:false,
+      possibleWhere:['warning_state', 'display_setup_score', 'canonical_verdict', 'entry_eligibility', 'near_entry_eligibility', 'display_tone']
+    });
+  }
+  if(hostileMarket || emphasizeWeakRegime){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'weak_market_tape',
+      category:'soft_caution',
+      severity:emphasizeWeakRegime ? 'high' : 'medium',
+      terminal:false,
+      possibleWhere:['quality_adjustments', 'warning_state', 'display_setup_score', 'canonical_verdict', 'display_tone']
+    });
+  }
+  if(practicalSizeFlag === 'tiny_size'){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'tiny_size',
+      category:'soft_caution',
+      severity:'high',
+      terminal:false,
+      possibleWhere:['warning_state', 'display_setup_score', 'trade_quality_score']
+    });
+  }else if(practicalSizeFlag === 'low_impact'){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'low_impact',
+      category:'soft_caution',
+      severity:'low',
+      terminal:false,
+      possibleWhere:['warning_state', 'display_setup_score', 'trade_quality_score']
+    });
+  }
+  if(qualityAdjustments.lowControlSetup || qualityAdjustments.tooWideForQualityPullback){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'execution_quality',
+      category:'soft_caution',
+      severity:qualityAdjustments.tooWideForQualityPullback ? 'high' : 'medium',
+      terminal:false,
+      possibleWhere:['quality_adjustments', 'warning_state', 'display_setup_score', 'trade_quality_score', 'display_tone']
+    });
+  }
+  if(Number.isFinite(rrRatio) && rrRatio >= 3 && (bounceState !== 'confirmed' || ['weak','weakening','broken'].includes(structureState))){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'paper_rr_vs_confirmation',
+      category:'display_only',
+      severity:'low',
+      terminal:false,
+      possibleWhere:['warning_state', 'review_copy']
+    });
+  }
+  if(
+    safeAnalysis
+    && normalizeAnalysisVerdict(safeAnalysis.final_verdict || safeAnalysis.verdict) !== 'Avoid'
+    && hostileMarket
+    && stabilisationState === 'early'
+  ){
+    appendCumulativePenaltyTrace(trace, {
+      sourceId:'borderline_setup_weak_market',
+      category:'display_only',
+      severity:'low',
+      terminal:false,
+      possibleWhere:['warning_state', 'review_copy']
+    });
+  }
+  const terminalSourceIds = penaltyTraceSources(trace)
+    .filter(entry => entry && entry.terminal === true)
+    .map(entry => entry.id);
+  const canonicalSoftShortCircuited = terminalSourceIds.length > 0;
+  penaltyTraceSources(trace).forEach(entry => {
+    if(!entry || entry.present !== true) return;
+    const id = entry.id;
+    if(entry.terminal === true){
+      markPenaltyTraceApplied(trace, id, 'terminal_dead_check', {clearSkippedReason:true});
+      markPenaltyTraceApplied(trace, id, 'canonical_verdict', {canonicalImpact:true, clearSkippedReason:true});
+      if(id === 'broken_structure'){
+        markPenaltyTraceApplied(trace, id, 'display_setup_score', {displayImpact:true, clearSkippedReason:true});
+      }
+      return;
+    }
+    markPenaltyTraceApplied(trace, id, 'warning_state', {clearSkippedReason:true});
+    if(['weak_market_tape', 'weak_volume', 'no_bounce_confirmation', 'bounce_unconfirmed', 'early_stabilisation', 'execution_quality', 'tiny_size', 'low_impact'].includes(id)){
+      markPenaltyTraceApplied(trace, id, 'display_setup_score', {displayImpact:true, clearSkippedReason:true});
+    }else{
+      markPenaltyTraceSkipped(trace, id, 'not_used_by_score_path');
+    }
+    if(id === 'weak_market_tape'){
+      markPenaltyTraceApplied(trace, id, 'quality_adjustments', {clearSkippedReason:true});
+      if(canonicalSoftShortCircuited){
+        markPenaltyTraceSkipped(trace, id, 'terminal_short_circuit');
+      }else{
+        markPenaltyTraceApplied(trace, id, 'canonical_verdict', {canonicalImpact:true, clearSkippedReason:true});
+      }
+      return;
+    }
+    if(['weak_volume', 'no_bounce_confirmation', 'bounce_unconfirmed', 'early_stabilisation'].includes(id)){
+      if(canonicalSoftShortCircuited){
+        markPenaltyTraceSkipped(trace, id, 'terminal_short_circuit');
+      }else{
+        markPenaltyTraceApplied(trace, id, 'canonical_verdict', {canonicalImpact:true, clearSkippedReason:true});
+      }
+      return;
+    }
+    if(['execution_quality', 'tiny_size', 'low_impact'].includes(id)){
+      if(id === 'execution_quality') markPenaltyTraceApplied(trace, id, 'trade_quality_score', {clearSkippedReason:true});
+      return;
+    }
+    if(['paper_rr_vs_confirmation', 'borderline_setup_weak_market'].includes(id)){
+      markPenaltyTraceApplied(trace, id, 'review_copy', {clearSkippedReason:true});
+    }
+  });
+  return trace;
+}
+
 function downgradeVerdict(verdict, steps = 1){
   const ladder = ['Entry','Near Entry','Watch','Avoid'];
   const start = ladder.indexOf(normalizeAnalysisVerdict(verdict));
@@ -15213,47 +15667,42 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : null;
   const derived = derivedStates || analysisDerivedStatesFromRecord(rawRecord);
-  const plan = rawRecord.plan && typeof rawRecord.plan === 'object' ? rawRecord.plan : {};
   const seedVerdict = resolverSeedVerdictForRecord(rawRecord);
   const qualityAdjustments = evaluateSetupQualityAdjustments(rawRecord, {
     derivedStates:derived,
     baseVerdict:seedVerdict,
     displayStage:seedVerdict
   });
-  const rrRatio = numericOrNull(plan.plannedRR);
+  const practicalSizeFlag = practicalSizeFlagForPlan(rawRecord.plan);
   const structureState = String(derived.structureState || '').toLowerCase();
-  const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
-  const bounceState = String(derived.bounceState || '').toLowerCase();
-  const volumeState = String(derived.volumeState || '').toLowerCase();
-  const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
-  const practicalSizeFlag = practicalSizeFlagForPlan(plan);
-  const cautionReasons = [];
-  const pushReason = reason => {
-    if(reason && !cautionReasons.includes(reason)) cautionReasons.push(reason);
-  };
-
   const displayStage = seedVerdict;
+  const trace = cumulativePenaltyTraceForRecord(rawRecord, {
+    analysis:safeAnalysis,
+    derivedStates:derived,
+    qualityAdjustments,
+    baseVerdict:seedVerdict,
+    displayStage
+  });
+  const cautionReasons = [];
   const structureLabel = structureLabelForRecord(rawRecord, derived, {displayStage});
-  if(structureLabel) pushReason(structureLabel);
-  if(bounceState !== 'confirmed') pushReason(bounceState === 'none' ? 'No bounce' : 'Bounce unconfirmed');
-  if(stabilisationState === 'early') pushReason('Early stabilisation only');
-  if(volumeState === 'weak') pushReason('Weak volume');
-  if(hostileMarket) pushReason('Hostile market');
-  if(practicalSizeFlag === 'tiny_size') pushReason('Tiny size');
-  if(practicalSizeFlag === 'low_impact') pushReason('Low impact');
-  if(qualityAdjustments.lowControlSetup) pushReason('Lower control setup');
-  if(qualityAdjustments.weakRegimePenalty) pushReason('Weak market needs stronger confirmation');
-  if(Number.isFinite(rrRatio) && rrRatio >= 3 && (bounceState !== 'confirmed' || ['weak','weakening','broken'].includes(structureState))){
-    pushReason('Paper R:R looks better than confirmation');
-  }
-  if(safeAnalysis && normalizeAnalysisVerdict(safeAnalysis.final_verdict || safeAnalysis.verdict) !== 'Avoid' && hostileMarket && stabilisationState === 'early'){
-    pushReason('Borderline setup in weak market');
+  if(structureLabel) cautionReasons.push(structureLabel);
+  penaltyTraceSources(trace).forEach(entry => {
+    const reason = penaltyReasonLabelFromSource(entry.id, {
+      practicalSizeFlag,
+      emphasizeWeakRegime:qualityAdjustments.weakRegimePenalty === true,
+      tooWideForQualityPullback:qualityAdjustments.tooWideForQualityPullback === true
+    });
+    if(reason && !cautionReasons.includes(reason)) cautionReasons.push(reason);
+  });
+  if(qualityAdjustments.lowControlSetup && !cautionReasons.includes('Lower control setup')){
+    cautionReasons.push('Lower control setup');
   }
 
   const majorCaution = ['weak','weakening','broken'].includes(structureState) || practicalSizeFlag === 'tiny_size';
   return {
     showWarning:majorCaution || cautionReasons.length >= 2,
-    reasons:cautionReasons.slice(0, 4)
+    reasons:cautionReasons.slice(0, 4),
+    cumulativePenaltyTrace:trace
   };
 }
 
@@ -15270,34 +15719,35 @@ function deriveDisplaySetupScore(record, options = {}){
   });
   const hardFail = isTrueHardFailForRecord(rawRecord, derived, {displayedPlan:options.displayedPlan});
   const structureState = String(derived.structureState || '').toLowerCase();
-  const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
   const bounceState = String(derived.bounceState || '').toLowerCase();
-  const volumeState = String(derived.volumeState || '').toLowerCase();
-  const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
-  const practicalSizeFlag = practicalSizeFlagForPlan(rawRecord.plan);
   const noBounce = bounceState === 'none';
   const confirmedBounce = bounceState === 'confirmed';
+  const trace = options.cumulativePenaltyTrace || warningState.cumulativePenaltyTrace || cumulativePenaltyTraceForRecord(rawRecord, {
+    analysis:options.analysis || null,
+    derivedStates:derived,
+    qualityAdjustments,
+    displayStage,
+    baseVerdict:displayStage
+  });
+  const traceSources = penaltyTraceSources(trace);
+  const hasTerminalStructure = traceSources.some(entry => entry && entry.id === 'broken_structure' && entry.appliedWhere.includes('display_setup_score'));
+  const marketTrace = traceSources.find(entry => entry && entry.id === 'weak_market_tape' && entry.appliedWhere.includes('display_setup_score'));
+  const volumeTrace = traceSources.find(entry => entry && entry.id === 'weak_volume' && entry.appliedWhere.includes('display_setup_score'));
+  const noBounceTrace = traceSources.find(entry => entry && entry.id === 'no_bounce_confirmation' && entry.appliedWhere.includes('display_setup_score'));
+  const bounceTrace = noBounceTrace || traceSources.find(entry => entry && ['bounce_unconfirmed','early_stabilisation'].includes(entry.id) && entry.appliedWhere.includes('display_setup_score'));
+  const executionTrace = traceSources.find(entry => entry && ['execution_quality','tiny_size','low_impact'].includes(entry.id) && entry.appliedWhere.includes('display_setup_score'));
   let adjusted = rawScore;
 
-  if(warningState.showWarning) adjusted -= 1;
-  if(volumeState === 'weak') adjusted -= 1;
-  if(hostileMarket) adjusted -= 0.5;
-  if(structureState === 'broken') adjusted -= 4;
-  if(!confirmedBounce && stabilisationState === 'early') adjusted -= 1;
+  if(hasTerminalStructure || structureState === 'broken') adjusted -= 4;
+  if(marketTrace) adjusted -= marketTrace.severity === 'high' ? 1 : 0.5;
+  if(volumeTrace) adjusted -= 1;
+  if(bounceTrace) adjusted -= 1;
   if(confirmedBounce) adjusted += 1;
-  if(practicalSizeFlag === 'tiny_size') adjusted -= 2;
-  if(practicalSizeFlag === 'low_impact') adjusted -= 1;
-  if(qualityAdjustments.widthPenalty > 0) adjusted -= qualityAdjustments.widthPenalty;
-  if(qualityAdjustments.weakRegimePenalty) adjusted -= 1;
+  if(executionTrace) adjusted -= executionTrace.severity === 'high' ? 2 : 1;
 
-  if(warningState.showWarning) adjusted = Math.min(adjusted, 9);
-  if(volumeState === 'weak') adjusted = Math.min(adjusted, 8);
-  if(hostileMarket) adjusted = Math.min(adjusted, 8);
-  if(volumeState === 'weak' && hostileMarket) adjusted = Math.min(adjusted, 7);
-  if(practicalSizeFlag === 'tiny_size') adjusted = Math.min(adjusted, 7);
-  if(qualityAdjustments.widthPenalty >= 1) adjusted = Math.min(adjusted, 7);
-  if(qualityAdjustments.widthPenalty >= 2) adjusted = Math.min(adjusted, 6);
-  if(qualityAdjustments.weakRegimePenalty) adjusted = Math.min(adjusted, 6);
+  if(volumeTrace) adjusted = Math.min(adjusted, 8);
+  if(marketTrace) adjusted = Math.min(adjusted, marketTrace.severity === 'high' ? 6 : 8);
+  if(executionTrace) adjusted = Math.min(adjusted, executionTrace.severity === 'high' ? 6 : 7);
   if(noBounce && !confirmedBounce) adjusted = Math.min(adjusted, 4);
   if(confirmedBounce){
     adjusted = Math.max(adjusted, 5);
@@ -36014,6 +36464,8 @@ function resolveGlobalVerdict(record){
     deriveCurrentPlanState,
     evaluatePlanRealism,
     setupScoreForRecord,
+    canonicalSetupScoreForRecord:rawSetupScoreForRecord,
+    buildCumulativePenaltyTrace:cumulativePenaltyTraceForRecord,
     isHostileMarketStatus,
     state,
     scannerScoreGradientClass
@@ -36042,6 +36494,14 @@ function resolveGlobalVerdict(record){
     resolvedContract,
     derivedStates
   });
+  if(!verdict.cumulativePenaltyTrace || !Array.isArray(verdict.cumulativePenaltyTrace.sources)){
+    verdict.cumulativePenaltyTrace = cumulativePenaltyTraceForRecord(item, {
+      analysis:resolvedContract,
+      derivedStates,
+      displayedPlan,
+      displayStage:globalVerdictLabel(verdict.final_verdict || '')
+    });
+  }
   return verdict;
 }
 
@@ -36210,46 +36670,41 @@ function warningStateFromInputs(record, analysis = null, derivedStates = null){
   const rawRecord = record && typeof record === 'object' ? record : {};
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : null;
   const derived = derivedStates || analysisDerivedStatesFromRecord(rawRecord);
-  const plan = rawRecord.plan && typeof rawRecord.plan === 'object' ? rawRecord.plan : {};
   const seedVerdict = resolverSeedVerdictForRecord(rawRecord);
   const qualityAdjustments = evaluateSetupQualityAdjustments(rawRecord, {
     derivedStates:derived,
     baseVerdict:seedVerdict,
     displayStage:seedVerdict
   });
-  const rrRatio = numericOrNull(plan.plannedRR);
   const structureState = String(derived.structureState || '').toLowerCase();
-  const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
-  const bounceState = String(derived.bounceState || '').toLowerCase();
-  const volumeState = String(derived.volumeState || '').toLowerCase();
-  const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
-  const practicalSizeFlag = practicalSizeFlagForPlan(plan);
+  const practicalSizeFlag = practicalSizeFlagForPlan(rawRecord.plan);
+  const trace = cumulativePenaltyTraceForRecord(rawRecord, {
+    analysis:safeAnalysis,
+    derivedStates:derived,
+    qualityAdjustments,
+    baseVerdict:seedVerdict,
+    displayStage:seedVerdict
+  });
   const cautionReasons = [];
-  const pushReason = reason => {
-    if(reason && !cautionReasons.includes(reason)) cautionReasons.push(reason);
-  };
-
   const structureLabel = structureLabelForRecord(rawRecord, derived, {displayStage:seedVerdict});
-  if(structureLabel) pushReason(structureLabel);
-  if(bounceState !== 'confirmed') pushReason(bounceState === 'none' ? 'No bounce' : 'Bounce unconfirmed');
-  if(stabilisationState === 'early') pushReason('Early stabilisation only');
-  if(volumeState === 'weak') pushReason('Weak volume');
-  if(hostileMarket) pushReason('Hostile market');
-  if(practicalSizeFlag === 'tiny_size') pushReason('Tiny size');
-  if(practicalSizeFlag === 'low_impact') pushReason('Low impact');
-  if(qualityAdjustments.lowControlSetup) pushReason('Lower control setup');
-  if(qualityAdjustments.weakRegimePenalty) pushReason('Weak market needs stronger confirmation');
-  if(Number.isFinite(rrRatio) && rrRatio >= 3 && (bounceState !== 'confirmed' || ['weak','weakening','broken'].includes(structureState))){
-    pushReason('Paper R:R looks better than confirmation');
-  }
-  if(safeAnalysis && normalizeAnalysisVerdict(safeAnalysis.final_verdict || safeAnalysis.verdict) !== 'Avoid' && hostileMarket && stabilisationState === 'early'){
-    pushReason('Borderline setup in weak market');
+  if(structureLabel) cautionReasons.push(structureLabel);
+  penaltyTraceSources(trace).forEach(entry => {
+    const reason = penaltyReasonLabelFromSource(entry.id, {
+      practicalSizeFlag,
+      emphasizeWeakRegime:qualityAdjustments.weakRegimePenalty === true,
+      tooWideForQualityPullback:qualityAdjustments.tooWideForQualityPullback === true
+    });
+    if(reason && !cautionReasons.includes(reason)) cautionReasons.push(reason);
+  });
+  if(qualityAdjustments.lowControlSetup && !cautionReasons.includes('Lower control setup')){
+    cautionReasons.push('Lower control setup');
   }
 
   const majorCaution = ['weak','weakening','broken'].includes(structureState) || practicalSizeFlag === 'tiny_size';
   return {
     showWarning:majorCaution || cautionReasons.length >= 2,
-    reasons:cautionReasons.slice(0, 4)
+    reasons:cautionReasons.slice(0, 4),
+    cumulativePenaltyTrace:trace
   };
 }
 
@@ -36266,34 +36721,35 @@ function deriveDisplaySetupScore(record, options = {}){
   });
   const hardFail = isTrueHardFailForRecord(rawRecord, derived, {displayedPlan:options.displayedPlan});
   const structureState = String(derived.structureState || '').toLowerCase();
-  const stabilisationState = String(derived.stabilisationState || '').toLowerCase();
   const bounceState = String(derived.bounceState || '').toLowerCase();
-  const volumeState = String(derived.volumeState || '').toLowerCase();
-  const hostileMarket = isHostileMarketStatus((rawRecord.meta && rawRecord.meta.marketStatus) || state.marketStatus);
-  const practicalSizeFlag = practicalSizeFlagForPlan(rawRecord.plan);
   const noBounce = bounceState === 'none';
   const confirmedBounce = bounceState === 'confirmed';
+  const trace = options.cumulativePenaltyTrace || warningState.cumulativePenaltyTrace || cumulativePenaltyTraceForRecord(rawRecord, {
+    analysis:options.analysis || null,
+    derivedStates:derived,
+    qualityAdjustments,
+    displayStage,
+    baseVerdict:displayStage
+  });
+  const traceSources = penaltyTraceSources(trace);
+  const hasTerminalStructure = traceSources.some(entry => entry && entry.id === 'broken_structure' && entry.appliedWhere.includes('display_setup_score'));
+  const marketTrace = traceSources.find(entry => entry && entry.id === 'weak_market_tape' && entry.appliedWhere.includes('display_setup_score'));
+  const volumeTrace = traceSources.find(entry => entry && entry.id === 'weak_volume' && entry.appliedWhere.includes('display_setup_score'));
+  const noBounceTrace = traceSources.find(entry => entry && entry.id === 'no_bounce_confirmation' && entry.appliedWhere.includes('display_setup_score'));
+  const bounceTrace = noBounceTrace || traceSources.find(entry => entry && ['bounce_unconfirmed','early_stabilisation'].includes(entry.id) && entry.appliedWhere.includes('display_setup_score'));
+  const executionTrace = traceSources.find(entry => entry && ['execution_quality','tiny_size','low_impact'].includes(entry.id) && entry.appliedWhere.includes('display_setup_score'));
   let adjusted = rawScore;
 
-  if(warningState.showWarning) adjusted -= 1;
-  if(volumeState === 'weak') adjusted -= 1;
-  if(hostileMarket) adjusted -= 0.5;
-  if(structureState === 'broken') adjusted -= 4;
-  if(!confirmedBounce && stabilisationState === 'early') adjusted -= 1;
+  if(hasTerminalStructure || structureState === 'broken') adjusted -= 4;
+  if(marketTrace) adjusted -= marketTrace.severity === 'high' ? 1 : 0.5;
+  if(volumeTrace) adjusted -= 1;
+  if(bounceTrace) adjusted -= 1;
   if(confirmedBounce) adjusted += 1;
-  if(practicalSizeFlag === 'tiny_size') adjusted -= 2;
-  if(practicalSizeFlag === 'low_impact') adjusted -= 1;
-  if(qualityAdjustments.widthPenalty > 0) adjusted -= qualityAdjustments.widthPenalty;
-  if(qualityAdjustments.weakRegimePenalty) adjusted -= 1;
+  if(executionTrace) adjusted -= executionTrace.severity === 'high' ? 2 : 1;
 
-  if(warningState.showWarning) adjusted = Math.min(adjusted, 9);
-  if(volumeState === 'weak') adjusted = Math.min(adjusted, 8);
-  if(hostileMarket) adjusted = Math.min(adjusted, 8);
-  if(volumeState === 'weak' && hostileMarket) adjusted = Math.min(adjusted, 7);
-  if(practicalSizeFlag === 'tiny_size') adjusted = Math.min(adjusted, 7);
-  if(qualityAdjustments.widthPenalty >= 1) adjusted = Math.min(adjusted, 7);
-  if(qualityAdjustments.widthPenalty >= 2) adjusted = Math.min(adjusted, 6);
-  if(qualityAdjustments.weakRegimePenalty) adjusted = Math.min(adjusted, 6);
+  if(volumeTrace) adjusted = Math.min(adjusted, 8);
+  if(marketTrace) adjusted = Math.min(adjusted, marketTrace.severity === 'high' ? 6 : 8);
+  if(executionTrace) adjusted = Math.min(adjusted, executionTrace.severity === 'high' ? 6 : 7);
   if(noBounce && !confirmedBounce) adjusted = Math.min(adjusted, 4);
   if(confirmedBounce) adjusted = Math.max(adjusted, 5);
 

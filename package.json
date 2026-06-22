@@ -3,6 +3,7 @@
   "version": "4.4.0",
   "private": true,
   "scripts": {
+    "test:storage-persistence": "node scripts/run-storage-persistence-assertions.js",
     "test:resolver-gates": "node scripts/run-resolver-gate-assertions.js"
   },
   "dependencies": {

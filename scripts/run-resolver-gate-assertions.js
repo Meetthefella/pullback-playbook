@@ -4367,6 +4367,296 @@ function runReviewPricedButNotReadyAssertions(){
   }
 }
 
+function runCumulativePenaltyDisplayAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    console,
+    state:{marketStatus:'S&P above 50 MA'},
+    currentMaxLoss(){ return 40; },
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    normalizeAnalysisVerdict(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near entry' || safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    },
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid'].includes(safe)) return safe;
+      return 'watch';
+    },
+    resolverSeedVerdictForRecord(record){
+      return record && record.seedVerdict || 'Watch';
+    },
+    baseVerdictForRecord(){
+      return 'Watch';
+    },
+    analysisDerivedStatesFromRecord(record){
+      return record && record.derivedStates || {};
+    },
+    deriveCurrentPlanState(entry, stop, target, currency){
+      const safeEntry = sandbox.numericOrNull(entry);
+      const safeStop = sandbox.numericOrNull(stop);
+      const safeTarget = sandbox.numericOrNull(target);
+      const rrRatio = Number.isFinite(safeEntry) && Number.isFinite(safeStop) && Number.isFinite(safeTarget) && safeEntry > safeStop
+        ? (safeTarget - safeEntry) / (safeEntry - safeStop)
+        : null;
+      const riskPerShare = Number.isFinite(safeEntry) && Number.isFinite(safeStop)
+        ? Math.abs(safeEntry - safeStop)
+        : null;
+      const positionSize = Number.isFinite(riskPerShare) && riskPerShare > 0
+        ? Math.max(1, Math.floor(40 / riskPerShare))
+        : null;
+      return {
+        status:Number.isFinite(safeEntry) && Number.isFinite(safeStop) && Number.isFinite(safeTarget) ? 'valid' : 'missing',
+        entry:safeEntry,
+        stop:safeStop,
+        target:safeTarget,
+        rewardRisk:{rrRatio},
+        riskFit:{
+          risk_status:'acceptable',
+          position_size:positionSize
+        },
+        affordability:'acceptable',
+        capitalFit:{
+          capital_fit:'acceptable',
+          position_cost:Number.isFinite(positionSize) && Number.isFinite(safeEntry) ? positionSize * safeEntry : null,
+          quote_currency:currency || 'USD'
+        },
+        tradeability:Number.isFinite(rrRatio) && rrRatio >= 2 ? 'watch' : 'invalid'
+      };
+    },
+    isHostileMarketStatus(status){
+      const safe = String(status || '').trim().toLowerCase();
+      return safe.includes('below 50') || safe.includes('weak') || safe.includes('hostile');
+    },
+    structureLabelForRecord(){
+      return '';
+    },
+    isTrueHardFailForRecord(record, derivedStates){
+      const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+      const structureState = String(derived.structureState || '').toLowerCase();
+      const trendState = String(derived.trendState || '').toLowerCase();
+      return structureState === 'broken' || trendState === 'broken' || !!(record && record.hardFail);
+    },
+    rawSetupScoreForRecord(record){
+      const rawScore = sandbox.numericOrNull(record && (record.rawScore ?? record.baseScore ?? (record.setup && record.setup.baseScore)));
+      return rawScore == null ? 0 : rawScore;
+    },
+    reviewPricedButNotReadyCopy(){
+      return {
+        line1:'The app knows the maths, but the trade isn\'t ready.',
+        line2:'Long-press the ticker card in Track for more info.',
+        rr:'Priced'
+      };
+    },
+    review50MaSupportTestPresentationCopy(){
+      return {
+        tradeStatus:'Setup not ready yet.',
+        draftTradeStatus:'Draft plan possible, but not actionable yet.',
+        blocker:'Testing 50MA support - waiting for buyers to confirm.',
+        technicalStructure:'Structure intact',
+        technicalPullback:'Pullback near 50MA',
+        technicalBounce:'Bounce not confirmed'
+      };
+    },
+    reviewCopyEvidence(){
+      return {consolidating:false, terminalAvoid:false, structuralWeakness:false, noBounce:false};
+    },
+    resolveReviewPullbackBounceDisplayContext(){
+      return {
+        rawPullbackState:'near_50ma',
+        rawBounceState:'none',
+        rawStabilisationState:'none',
+        resolvedPullbackState:'near_50ma',
+        pullbackLabel:'Pullback Near 50MA',
+        bounceLabel:'Bounce none',
+        setupLocationState:'near_50ma',
+        structureState:'weak',
+        structureEligibility:'alive',
+        reconciliationApplied:false,
+        reconciliationReason:''
+      };
+    },
+    reviewTechnicalStructureLabel(){ return 'Structure intact'; },
+    reviewTechnicalVolumeLabel(){ return 'Volume normal'; },
+    reviewTechnicalMarketLabel(){ return 'Market weak'; },
+    reviewConsolidationPresentationCopy(){
+      return {summary:'', blocker:'', nextAction:''};
+    },
+    sameVisibleCopy(a, b){
+      return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    }
+  };
+  vm.createContext(sandbox);
+  [
+    'practicalSizeFlagForPlan',
+    'penaltyTraceSources',
+    'appendCumulativePenaltyTrace',
+    'markPenaltyTraceApplied',
+    'markPenaltyTraceSkipped',
+    'penaltyReasonLabelFromSource',
+    'evaluateSetupQualityAdjustments',
+    'cumulativePenaltyTraceForRecord',
+    'warningStateFromInputs',
+    'deriveDisplaySetupScore',
+    'isAccepted50MaSupportTestDisplayState',
+    'buildResolvedReviewDisplayModel'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});
+  });
+
+  const weakMarketRecord = {
+    ticker:'HWM',
+    rawScore:7,
+    seedVerdict:'Watch',
+    meta:{marketStatus:'weak'},
+    marketData:{price:99, sma50:100, currency:'USD'},
+    plan:{entry:100, stop:97, firstTarget:106},
+    derivedStates:{
+      structureState:'intact',
+      trendState:'intact',
+      bounceState:'attempt',
+      stabilisationState:'early',
+      volumeState:'normal',
+      pullbackZone:'near_50ma'
+    }
+  };
+  const weakWarning = sandbox.warningStateFromInputs(weakMarketRecord, null, weakMarketRecord.derivedStates);
+  const weakTraceSources = sandbox.penaltyTraceSources(weakWarning.cumulativePenaltyTrace);
+  const weakMarketTrace = weakTraceSources.find(entry => entry && entry.id === 'weak_market_tape');
+  if(!weakMarketTrace){
+    throw new Error('Weak market trace source must be present for weak-market setups.');
+  }
+  if(weakWarning.reasons.filter(reason => /weak market needs stronger confirmation|hostile market/i.test(String(reason || ''))).length !== 1){
+    throw new Error('Weak market caution should appear once in warning reasons.');
+  }
+  if(weakTraceSources.filter(entry => entry && entry.id === 'weak_market_tape').length !== 1){
+    throw new Error('Weak market caution must have a single trace source entry.');
+  }
+  const autoDisplayScore = sandbox.deriveDisplaySetupScore(weakMarketRecord, {
+    derivedStates:weakMarketRecord.derivedStates,
+    warningState:weakWarning
+  });
+  const manualWarningState = {
+    ...weakWarning,
+    showWarning:true,
+    reasons:[...weakWarning.reasons, 'Manual review warning']
+  };
+  const manualDisplayScore = sandbox.deriveDisplaySetupScore(weakMarketRecord, {
+    derivedStates:weakMarketRecord.derivedStates,
+    warningState:manualWarningState
+  });
+  if(autoDisplayScore !== manualDisplayScore){
+    throw new Error('Display score must not take an extra weak-market hit from warningState after the trace path already consumed it.');
+  }
+  const supportiveScore = sandbox.deriveDisplaySetupScore({
+    ...weakMarketRecord,
+    meta:{marketStatus:'S&P above 50 MA'}
+  }, {
+    derivedStates:weakMarketRecord.derivedStates
+  });
+  if(supportiveScore - autoDisplayScore > 1){
+    throw new Error('Weak market caution should not stack into more than a single display-score step relative to the supportive baseline.');
+  }
+  if(!weakMarketTrace.appliedWhere.includes('warning_state') || !weakMarketTrace.appliedWhere.includes('display_setup_score')){
+    throw new Error('Weak market trace must report actual consumption by warning_state and display_setup_score.');
+  }
+
+  const terminalRecord = {
+    ticker:'ABNB',
+    rawScore:6,
+    seedVerdict:'Watch',
+    meta:{marketStatus:'weak'},
+    marketData:{price:90, sma50:100, currency:'USD'},
+    plan:{entry:100, stop:97, firstTarget:106},
+    derivedStates:{
+      structureState:'broken',
+      trendState:'intact',
+      bounceState:'attempt',
+      stabilisationState:'early',
+      volumeState:'normal',
+      pullbackZone:'near_50ma'
+    }
+  };
+  const terminalTrace = sandbox.cumulativePenaltyTraceForRecord(terminalRecord, {derivedStates:terminalRecord.derivedStates});
+  const terminalSources = sandbox.penaltyTraceSources(terminalTrace);
+  const brokenStructureTrace = terminalSources.find(entry => entry && entry.id === 'broken_structure');
+  const bounceTrace = terminalSources.find(entry => entry && entry.id === 'bounce_unconfirmed');
+  if(!brokenStructureTrace || !brokenStructureTrace.appliedWhere.includes('canonical_verdict') || brokenStructureTrace.canonicalImpact !== true){
+    throw new Error('Terminal blockers must still report canonical application and win.');
+  }
+  if(!bounceTrace || bounceTrace.appliedWhere.includes('canonical_verdict') || bounceTrace.canonicalImpact === true || bounceTrace.skippedReason !== 'terminal_short_circuit'){
+    throw new Error('Bounce soft cautions must not claim canonical impact after a terminal blocker short-circuits the canonical path.');
+  }
+  const terminalDisplayScore = sandbox.deriveDisplaySetupScore(terminalRecord, {
+    derivedStates:terminalRecord.derivedStates,
+    displayStage:'Avoid'
+  });
+  if(terminalDisplayScore > 3){
+    throw new Error('Terminal blockers must still keep the display score in the avoid/dead range.');
+  }
+
+  const accepted50Record = {
+    ticker:'HWM',
+    marketData:{price:248.63, sma50:250.23, currency:'USD'},
+    watchlist:{debug:{structural_alive_at_refresh:'true', refresh_demote_reason:'Structurally alive; keep on monitor.'}}
+  };
+  const accepted50Resolved = sandbox.buildResolvedReviewDisplayModel({
+    record:accepted50Record,
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      structureState:'weak',
+      structureEligibility:'alive',
+      bounceState:'none',
+      volumeState:'normal'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      structure_state:'weak',
+      pullback_ok:true,
+      near_entry_pullback_zone_accepted:true,
+      pullback_zone:'near_50ma',
+      bounce_state:'none',
+      refresh_demote_reason:'Structurally alive; keep on monitor.'
+    },
+    reviewSemanticStatus:{
+      tradeStatus:{line1:'Watch patiently', line2:'Wait for confirmation.'},
+      blocker:'Watch patiently',
+      primaryReason:'Watch patiently',
+      showPlanFields:false,
+      showPlanMetrics:false,
+      showCapital:false,
+      rrDisplay:'No actionable plan yet.'
+    },
+    derivedStates:{
+      structureState:'weak',
+      structureEligibility:'alive',
+      pullbackZone:'near_50ma',
+      bounceState:'none'
+    },
+    displayedPlan:{status:'missing'},
+    planRealism:{}
+  });
+  if(String(accepted50Resolved.tradeStatus.line1 || '') !== 'Setup not ready yet.'){
+    throw new Error('Accepted 50MA support-test Review wrapper must keep the protected support-test trade status copy.');
+  }
+  if(!/Pullback near 50MA/i.test(String(accepted50Resolved.technicalContextLine || ''))){
+    throw new Error('Accepted 50MA support-test Review wrapper must keep the support-test technical pullback copy.');
+  }
+}
+
 function runAccepted50MaSupportThresholdAssertions(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const domainSource = fs.readFileSync(path.join(root, 'js/domain/simplified-trade-state.js'), 'utf8');
@@ -4448,6 +4738,7 @@ runTrackPresentationAuthorityAssertions();
 runPlanSemanticsAssertions();
 runReviewPullbackBounceDisplayAssertions();
 runReviewPricedButNotReadyAssertions();
+runCumulativePenaltyDisplayAssertions();
 runAccepted50MaSupportThresholdAssertions();
 
 console.log(`Resolver gate assertions passed (${results.length} cases).`);
@@ -4459,4 +4750,5 @@ console.log('Track presentation authority assertions passed.');
 console.log('Plan source semantics assertions passed.');
 console.log('Review pullback/bounce display assertions passed.');
 console.log('Review priced-but-not-ready assertions passed.');
+console.log('Cumulative penalty display assertions passed.');
 console.log('Accepted 50MA support threshold assertions passed.');

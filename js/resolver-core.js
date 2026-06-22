@@ -1013,7 +1013,12 @@
     const displayedPlan = typeof deps.applySetupConfirmationPlanGate === 'function'
       ? deps.applySetupConfirmationPlanGate(item, rawDisplayedPlan, derivedStates)
       : rawDisplayedPlan;
-    const setupScore = deps.setupScoreForRecord(item);
+    const canonicalSetupScore = typeof deps.canonicalSetupScoreForRecord === 'function'
+      ? numericValueOrNull(deps.canonicalSetupScoreForRecord(item))
+      : null;
+    const setupScore = canonicalSetupScore !== null
+      ? canonicalSetupScore
+      : deps.setupScoreForRecord(item);
     const structureState = String(derivedStates.structureState || '').toLowerCase();
     const trendState = String(derivedStates.trendState || '').toLowerCase();
     const bounceState = String(derivedStates.bounceState || '').toLowerCase();
@@ -1204,6 +1209,14 @@
       reason = resolved.reasonSummary || resolved.blockerReason || `${structureReasonLabel(structureState)}. Alive setup downgraded to monitoring.`;
     }
 
+    const cumulativePenaltyTrace = typeof deps.buildCumulativePenaltyTrace === 'function'
+      ? deps.buildCumulativePenaltyTrace(item, {
+        derivedStates,
+        displayedPlan,
+        resolvedContract:resolved,
+        displayStage:globalVerdictLabel(finalVerdict)
+      })
+      : [];
     const requestedBeforeGuards = normalizeVerdict(finalVerdict);
     const guardedVerdict = applyPromotionGuards({
       final_verdict:finalVerdict,
@@ -1587,6 +1600,7 @@
         (guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.rr_known)
         || (guardedVerdict.entry_gate_checks && guardedVerdict.entry_gate_checks.rr_known)
       ),
+      cumulativePenaltyTrace,
       tracked:isTracked,
       source:'resolver',
       debugToneSource:({
@@ -1795,6 +1809,298 @@
         expect:{near:false, entry:false}
       }
     ];
+    const buildResolverDepsForAssertions = () => ({
+      resolveFinalStateContract(item){
+        return item && item.resolvedContract || {
+          finalVerdict:'Watch',
+          structuralState:'developing',
+          actionStateKey:'wait_for_confirmation',
+          planStatusKey:'valid',
+          tradeabilityVerdict:'Watch',
+          blockerReason:'Needs stronger confirmation',
+          reasonSummary:'Needs stronger confirmation',
+          terminal:false,
+          baseVerdict:'watch'
+        };
+      },
+      resolvePreLifecycleStateContract(item){
+        return item && item.preLifecycleResolved || item && item.resolvedContract || {
+          finalVerdict:'Watch',
+          structuralState:'developing',
+          actionStateKey:'wait_for_confirmation',
+          planStatusKey:'valid',
+          tradeabilityVerdict:'Watch',
+          blockerReason:'Needs stronger confirmation',
+          reasonSummary:'Needs stronger confirmation',
+          terminal:false,
+          baseVerdict:'watch'
+        };
+      },
+      baseVerdictFromResolvedContract(resolved){
+        return normalizeVerdict(resolved && (resolved.baseVerdict || resolved.finalVerdict || resolved.tradeabilityVerdict || 'watch'));
+      },
+      analysisDerivedStatesFromRecord(item){
+        return item && item.derivedStates || {};
+      },
+      effectivePlanForRecord(item){
+        return item && item.effectivePlan || item && item.plan || {};
+      },
+      applySetupConfirmationPlanGate(item, displayedPlan){
+        return item && item.displayedPlan || displayedPlan || {};
+      },
+      deriveCurrentPlanState(entry, stop, target){
+        const safeEntry = numericValueOrNull(entry);
+        const safeStop = numericValueOrNull(stop);
+        const safeTarget = numericValueOrNull(target);
+        const rrRatio = Number.isFinite(safeEntry) && Number.isFinite(safeStop) && Number.isFinite(safeTarget) && safeEntry > safeStop
+          ? (safeTarget - safeEntry) / (safeEntry - safeStop)
+          : null;
+        return {
+          status:Number.isFinite(safeEntry) && Number.isFinite(safeStop) && Number.isFinite(safeTarget) ? 'valid' : 'missing',
+          entry:safeEntry,
+          stop:safeStop,
+          target:safeTarget,
+          tradeability:Number.isFinite(rrRatio) && rrRatio >= 2 ? 'tradable' : 'watch',
+          rewardRisk:{rrRatio},
+          riskFit:{risk_status:'acceptable'},
+          affordability:'acceptable',
+          capitalFit:{capital_fit:'acceptable'}
+        };
+      },
+      evaluatePlanRealism(){
+        return null;
+      },
+      setupScoreForRecord(item){
+        const displayScore = numericValueOrNull(item && item.displayScore);
+        const setupScore = numericValueOrNull(item && item.setupScore);
+        return displayScore !== null ? displayScore : (setupScore !== null ? setupScore : 0);
+      },
+      canonicalSetupScoreForRecord(item){
+        const baseScore = numericValueOrNull(item && item.baseScore);
+        const setupScore = numericValueOrNull(item && item.setupScore);
+        return baseScore !== null ? baseScore : (setupScore !== null ? setupScore : 0);
+      },
+      buildCumulativePenaltyTrace(item){
+        return item && item.cumulativePenaltyTrace && Array.isArray(item.cumulativePenaltyTrace.sources)
+          ? item.cumulativePenaltyTrace
+          : {sources:[]};
+      },
+      isHostileMarketStatus(status){
+        const safe = String(status || '').trim().toLowerCase();
+        return safe === 'weak' || safe === 'hostile' || safe.includes('below 50');
+      },
+      state:{marketStatus:'supportive'},
+      scannerScoreGradientClass(){
+        return '';
+      }
+    });
+    const resolverCases = [
+      {
+        id:'soft-caution-alone-cannot-force-terminal-avoid',
+        record:{
+          setupScore:7,
+          baseScore:7,
+          displayScore:5,
+          meta:{marketStatus:'weak'},
+          derivedStates:{
+            structureState:'intact',
+            trendState:'intact',
+            bounceState:'attempt',
+            stabilisationState:'early',
+            volumeState:'normal',
+            pullbackZone:'near_50ma',
+            setupLocationState:'constructive',
+            priceabilityState:'provisional'
+          },
+          effectivePlan:{entry:100, stop:97, firstTarget:106},
+          displayedPlan:{
+            status:'valid',
+            entry:100,
+            stop:97,
+            target:106,
+            tradeability:'watch',
+            rewardRisk:{rrRatio:2},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'acceptable',
+            capitalFit:{capital_fit:'acceptable'}
+          },
+          resolvedContract:{
+            finalVerdict:'Watch',
+            structuralState:'developing',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Watch',
+            blockerReason:'Needs stronger confirmation',
+            reasonSummary:'Needs stronger confirmation',
+            terminal:false,
+            baseVerdict:'watch'
+          },
+          cumulativePenaltyTrace:{sources:[
+            {id:'weak_market_tape', category:'soft_caution', severity:'medium', terminal:false, present:true, possibleWhere:['canonical_verdict'], appliedWhere:['canonical_verdict'], canonicalImpact:true, displayImpact:false, skippedReason:null},
+            {id:'bounce_unconfirmed', category:'soft_caution', severity:'low', terminal:false, present:true, possibleWhere:['canonical_verdict'], appliedWhere:['canonical_verdict'], canonicalImpact:true, displayImpact:false, skippedReason:null}
+          ]}
+        },
+        assert(result){
+          return result.final_verdict !== 'avoid'
+            && result.final_verdict !== 'dead'
+            && result.structure_eligibility === 'alive'
+            && result.viability !== 'reject';
+        }
+      },
+      {
+        id:'multiple-soft-cautions-cannot-kill-intact-setup',
+        record:{
+          setupScore:6,
+          baseScore:6,
+          displayScore:3,
+          meta:{marketStatus:'weak'},
+          derivedStates:{
+            structureState:'intact',
+            trendState:'intact',
+            bounceState:'none',
+            stabilisationState:'early',
+            volumeState:'weak',
+            pullbackZone:'near_50ma',
+            setupLocationState:'constructive',
+            priceabilityState:'unpriceable'
+          },
+          effectivePlan:{entry:100, stop:97, firstTarget:106},
+          displayedPlan:{
+            status:'valid',
+            entry:100,
+            stop:97,
+            target:106,
+            tradeability:'watch',
+            rewardRisk:{rrRatio:2},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'acceptable',
+            capitalFit:{capital_fit:'acceptable'}
+          },
+          resolvedContract:{
+            finalVerdict:'Watch',
+            structuralState:'developing',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Watch',
+            blockerReason:'Needs stronger confirmation',
+            reasonSummary:'Needs stronger confirmation',
+            terminal:false,
+            baseVerdict:'watch'
+          },
+          cumulativePenaltyTrace:{sources:[
+            {id:'weak_market_tape', category:'soft_caution', severity:'medium', terminal:false, present:true, possibleWhere:['canonical_verdict'], appliedWhere:['canonical_verdict'], canonicalImpact:true, displayImpact:false, skippedReason:null},
+            {id:'weak_volume', category:'soft_caution', severity:'medium', terminal:false, present:true, possibleWhere:['canonical_verdict'], appliedWhere:['canonical_verdict'], canonicalImpact:true, displayImpact:false, skippedReason:null},
+            {id:'no_bounce_confirmation', category:'soft_caution', severity:'medium', terminal:false, present:true, possibleWhere:['canonical_verdict'], appliedWhere:['canonical_verdict'], canonicalImpact:true, displayImpact:false, skippedReason:null},
+            {id:'early_stabilisation', category:'soft_caution', severity:'low', terminal:false, present:true, possibleWhere:['canonical_verdict'], appliedWhere:['canonical_verdict'], canonicalImpact:true, displayImpact:false, skippedReason:null}
+          ]}
+        },
+        assert(result){
+          const marketTraceCount = (((result.cumulativePenaltyTrace || {}).sources) || []).filter(entry => entry && entry.id === 'weak_market_tape').length;
+          return result.final_verdict !== 'avoid'
+            && result.final_verdict !== 'dead'
+            && result.structure_eligibility === 'alive'
+            && result.viability !== 'reject'
+            && marketTraceCount === 1;
+        }
+      },
+      {
+        id:'valid-maths-intact-structure-remains-monitor-floor',
+        record:{
+          setupScore:5,
+          baseScore:5,
+          displayScore:2,
+          derivedStates:{
+            structureState:'intact',
+            trendState:'intact',
+            bounceState:'attempt',
+            stabilisationState:'early',
+            volumeState:'normal',
+            pullbackZone:'near_20ma',
+            setupLocationState:'constructive',
+            priceabilityState:'priceable'
+          },
+          effectivePlan:{entry:50, stop:48, firstTarget:55},
+          displayedPlan:{
+            status:'valid',
+            entry:50,
+            stop:48,
+            target:55,
+            tradeability:'watch',
+            rewardRisk:{rrRatio:2.5},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'acceptable',
+            capitalFit:{capital_fit:'acceptable'}
+          },
+          resolvedContract:{
+            finalVerdict:'Watch',
+            structuralState:'developing',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Watch',
+            blockerReason:'Needs stronger confirmation',
+            reasonSummary:'Needs stronger confirmation',
+            terminal:false,
+            baseVerdict:'watch'
+          }
+        },
+        assert(result){
+          return ['watch', 'monitor'].includes(result.final_verdict)
+            && result.final_verdict !== 'avoid'
+            && result.final_verdict !== 'dead';
+        }
+      },
+      {
+        id:'constructive-support-test-can-stay-near-entry-with-soft-cautions',
+        record:{
+          setupScore:7,
+          baseScore:7,
+          displayScore:5,
+          meta:{marketStatus:'weak'},
+          derivedStates:{
+            structureState:'developing_clean',
+            trendState:'intact',
+            bounceState:'attempt',
+            stabilisationState:'early',
+            volumeState:'normal',
+            pullbackZone:'near_50ma',
+            setupLocationState:'constructive',
+            priceabilityState:'provisional'
+          },
+          effectivePlan:{entry:100, stop:97, firstTarget:106},
+          displayedPlan:{
+            status:'valid',
+            entry:100,
+            stop:97,
+            target:106,
+            tradeability:'watch',
+            rewardRisk:{rrRatio:2},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'acceptable',
+            capitalFit:{capital_fit:'acceptable'}
+          },
+          resolvedContract:{
+            finalVerdict:'Near Entry',
+            structuralState:'near_entry',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'needs_adjustment',
+            tradeabilityVerdict:'Near Entry',
+            blockerReason:'Bounce is not clear enough to price yet.',
+            reasonSummary:'Close to trigger.',
+            terminal:false,
+            baseVerdict:'near_entry'
+          },
+          cumulativePenaltyTrace:{sources:[
+            {id:'weak_market_tape', category:'soft_caution', severity:'medium', terminal:false, present:true, possibleWhere:['canonical_verdict'], appliedWhere:['canonical_verdict'], canonicalImpact:true, displayImpact:false, skippedReason:null}
+          ]}
+        },
+        assert(result){
+          return result.final_verdict === 'near_entry'
+            && result.structure_eligibility === 'alive'
+            && result.near_entry_gate_pass === true
+            && result.final_verdict !== 'avoid';
+        }
+      }
+    ];
     const results = cases.map(testCase => {
       if(testCase.viability){
         const viability = resolveWatchlistViability(testCase.viability);
@@ -1813,6 +2119,19 @@
       const entry = canPromoteToEntry(testCase.ctx);
       const pass = near.pass === testCase.expect.near && (testCase.expect.entry === undefined || entry.pass === testCase.expect.entry);
       return {id:testCase.id, pass, near:near.pass, entry:entry.pass, nearReasons:near.reasons, entryReasons:entry.reasons};
+    });
+    resolverCases.forEach(testCase => {
+      const resolved = resolveGlobalVerdict(testCase.record, buildResolverDepsForAssertions());
+      const pass = testCase.assert(resolved) === true;
+      results.push({
+        id:testCase.id,
+        pass,
+        finalVerdict:resolved.final_verdict,
+        viability:resolved.viability,
+        structureEligibility:resolved.structure_eligibility,
+        nearEntryGatePass:resolved.near_entry_gate_pass,
+        cumulativePenaltyTrace:resolved.cumulativePenaltyTrace
+      });
     });
     results.forEach(result => {
       if(!result.pass){
