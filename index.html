@@ -140,6 +140,38 @@
             <button class="secondary compactbutton" type="button" id="testerSetupOpenScannerBtn">Open Advanced Overrides</button>
           </div>
         </div>
+        <div class="panelbox" style="margin-top:10px">
+          <strong>Tester Identity & Backup</strong>
+          <div class="tiny" id="testerIdentityStatusLabel" style="margin-top:8px">Anonymous tester profile loading...</div>
+          <div class="tiny" id="testerIdentityStatusDetail">This device uses a local anonymous tester ID for backend isolation. Trading 212 paper credentials are never included in tester exports or reports.</div>
+          <div class="actions" style="margin-top:10px">
+            <button class="secondary compactbutton" type="button" id="exportTesterBackupBtn">Export Tester Backup</button>
+            <button class="secondary compactbutton" type="button" id="resetTesterProfileBtn">Start New Tester Profile</button>
+          </div>
+        </div>
+        <div class="panelbox" style="margin-top:10px">
+          <strong>Report Issue / Send Feedback</strong>
+          <div style="margin-top:10px">
+            <label>Category</label>
+            <select id="testerReportCategory">
+              <option>Bad verdict</option>
+              <option>Chart mismatch</option>
+              <option>Paper trade problem</option>
+              <option>UI problem</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div style="margin-top:10px">
+            <label>Tester Notes</label>
+            <textarea id="testerReportNotes" placeholder="What happened, what you expected, and any steps to reproduce."></textarea>
+          </div>
+          <div class="tiny" id="testerReportSnapshotStatus" style="margin-top:8px">Reports attach the current sanitized diagnostic snapshot automatically. Use any Copy button first if you want to lock the report to a specific panel snapshot.</div>
+          <div class="actions" style="margin-top:10px">
+            <button class="secondary compactbutton" type="button" id="copyTesterSnapshotBtn">Copy Current Snapshot</button>
+            <button class="primary compactbutton" type="button" id="submitTesterReportBtn">Submit Report</button>
+          </div>
+          <div class="tiny" id="testerReportStatus" style="margin-top:8px">No tester report submitted yet.</div>
+        </div>
       </div>
       </div>
       <select id="marketStatus" hidden>
@@ -216,6 +248,9 @@
       <summary><strong>Advanced Scanner Settings</strong></summary>
       <div class="panelbox scanner-settings-panel" style="margin-top:12px">
         <strong>Scanner Universe Controls</strong>
+        <div class="actions" style="margin-top:10px">
+          <button class="secondary compactbutton" id="copyScannerPolicyDiagnosticsBtn" type="button">Copy Scanner Diagnostics</button>
+        </div>
         <div class="row" style="margin-top:10px">
           <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
           <div class="tiny" style="align-self:end">Max loss uses the override if set, otherwise account size x risk %.</div>
@@ -380,6 +415,9 @@
         </div>
         <div class="panelbox">
           <strong>Runtime Debug</strong>
+          <div class="actions" style="margin-top:10px">
+            <button class="secondary compactbutton" id="copyRuntimeDebugBtn" type="button">Copy Runtime Debug</button>
+          </div>
           <div id="runtimeDebugStatus" class="tiny" style="margin-top:10px">No runtime errors captured yet.</div>
           <div id="runtimeDebugOutput" class="mutebox scrollbox" style="margin-top:10px; white-space:pre-wrap; max-height:240px">No runtime debug output yet.</div>
           <div class="actions">

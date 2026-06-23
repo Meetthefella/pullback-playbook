@@ -55,6 +55,15 @@
       return deps.defaultTrackedStateEndpoint;
     }
 
+    function trackedStateHeaders(){
+      const headers = {'Content-Type':'application/json'};
+      const testerId = typeof deps.currentTesterId === 'function'
+        ? String(deps.currentTesterId() || '').trim()
+        : '';
+      if(testerId) headers['X-Pullback-Tester-Id'] = testerId;
+      return headers;
+    }
+
     function clearPersistIdleHandle(){
       if(persistIdleHandle == null) return;
       if(typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function'){
@@ -230,7 +239,7 @@
       try{
         const response = await deps.fetchJsonWithTimeout(trackedStateEndpoint(), {
           method:'POST',
-          headers:{'Content-Type':'application/json'},
+          headers:trackedStateHeaders(),
           body:JSON.stringify(payload)
         });
         const body = await response.json().catch(() => ({}));
@@ -355,7 +364,10 @@
       }
       trackedStatePullInFlightPromise = (async () => {
         try{
-        const response = await deps.fetchJsonWithTimeout(trackedStateEndpoint(), {method:'GET'});
+        const response = await deps.fetchJsonWithTimeout(trackedStateEndpoint(), {
+          method:'GET',
+          headers:trackedStateHeaders()
+        });
         if(response.status === 403 || response.status === 401){
           updateTrackedStateBackendAvailability(true, {status:response.status, source:'pull'});
           return false;
@@ -439,6 +451,7 @@
 
     return {
       trackedStateEndpoint,
+      trackedStateHeaders,
       scheduleTrackedRecordsSync,
       requestTrackedStatePersist,
       pullTrackedRecordsFromBackend,

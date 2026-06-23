@@ -5,9 +5,17 @@ const vm = require('vm');
 const root = path.resolve(__dirname, '..');
 const sandbox = {
   window: {},
-  console
+  console,
+  setTimeout,
+  clearTimeout,
+  setInterval,
+  clearInterval
 };
 sandbox.globalThis = sandbox.window;
+sandbox.window.setTimeout = setTimeout;
+sandbox.window.clearTimeout = clearTimeout;
+sandbox.window.setInterval = setInterval;
+sandbox.window.clearInterval = clearInterval;
 
 function runBrowserModule(relativePath){
   const filePath = path.join(root, relativePath);
@@ -27,6 +35,7 @@ runBrowserModule('js/presentation/simplified-presentation-model.js');
 runBrowserModule('js/domain/simplified-trade-state.js');
 runBrowserModule('js/scanner-view.js');
 runBrowserModule('js/scanner-results-support.js');
+runBrowserModule('js/services/tracked-state-service.js');
 
 const resolverCore = sandbox.window.ResolverCore;
 const resolverPresentation = sandbox.window.ResolverPresentation;
@@ -303,6 +312,496 @@ function extractFunctionSource(source, functionName){
     }
   }
   throw new Error(`Unable to extract ${functionName} from app.js.`);
+}
+
+function runTrackedStateTesterIsolationAssertions(){
+  const trackedStorePath = path.join(root, 'netlify/functions/lib/tracked-store.js');
+  const trackedStateHandlerPath = path.join(root, 'netlify/functions/tracked-state.js');
+  const trackedServiceSource = fs.readFileSync(path.join(root, 'js/services/tracked-state-service.js'), 'utf8');
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const Module = require('module');
+  const originalLoad = Module._load;
+  const storeData = new Map();
+  const fakeStore = {
+    async getJSON(key){
+      return storeData.has(key) ? JSON.parse(JSON.stringify(storeData.get(key))) : null;
+    },
+    async setJSON(key, value){
+      storeData.set(key, JSON.parse(JSON.stringify(value)));
+    }
+  };
+  delete require.cache[trackedStorePath];
+  delete require.cache[trackedStateHandlerPath];
+  Module._load = function patchedLoad(request, parent, isMain){
+    if(request === '@netlify/blobs'){
+      return {
+        getStore(){
+          return fakeStore;
+        }
+      };
+    }
+    return originalLoad.apply(this, arguments);
+  };
+  let trackedStore;
+  let trackedStateHandler;
+  try{
+    trackedStore = require(trackedStorePath);
+    trackedStateHandler = require(trackedStateHandlerPath);
+  }finally{
+    Module._load = originalLoad;
+  }
+
+  if(trackedStore.validateTesterId('bad/escape') !== false){
+    throw new Error('Tracked-store testerId validation must reject unsafe path characters.');
+  }
+  if(trackedStore.validateTesterId('1234') !== false){
+    throw new Error('Tracked-store testerId validation must reject too-short tester IDs.');
+  }
+  const testerA = '11111111-1111-4111-8111-111111111111';
+  const testerB = '22222222-2222-4222-8222-222222222222';
+  if(trackedStore.trackedRecordsKey(testerA) !== `tracked-records/${testerA}`){
+    throw new Error('Tracked-store must namespace records by testerId.');
+  }
+
+  return (async () => {
+    await trackedStore.saveTrackedState(testerA, {
+      updatedAt:'',
+      settings:{marketStatus:'A'},
+      records:{AAPL:{ticker:'AAPL', meta:{updatedAt:'2026-06-23T12:00:00.000Z'}}}
+    });
+    await trackedStore.saveTrackedState(testerB, {
+      updatedAt:'',
+      settings:{marketStatus:'B'},
+      records:{MSFT:{ticker:'MSFT', meta:{updatedAt:'2026-06-23T12:01:00.000Z'}}}
+    });
+    const testerAState = await trackedStore.loadTrackedState(testerA);
+    const testerBState = await trackedStore.loadTrackedState(testerB);
+    if(!testerAState.records.AAPL || testerAState.records.MSFT){
+      throw new Error('Different testerIds must not share tracked-state records.');
+    }
+    if(!testerBState.records.MSFT || testerBState.records.AAPL){
+      throw new Error('Tracked-state reload must stay isolated per testerId.');
+    }
+
+    const missingTesterResponse = await trackedStateHandler.handler({
+      httpMethod:'GET',
+      headers:{origin:'http://localhost:8888'}
+    });
+    if(missingTesterResponse.statusCode !== 400){
+      throw new Error('Tracked-state handler must reject missing testerId.');
+    }
+    const invalidTesterResponse = await trackedStateHandler.handler({
+      httpMethod:'GET',
+      headers:{
+        origin:'http://localhost:8888',
+        'x-pullback-tester-id':'../escape'
+      }
+    });
+    if(invalidTesterResponse.statusCode !== 400){
+      throw new Error('Tracked-state handler must reject invalid testerId.');
+    }
+
+    const createTrackedStateService = sandbox.window.TrackedStateService && sandbox.window.TrackedStateService.createTrackedStateService;
+    if(typeof createTrackedStateService !== 'function'){
+      throw new Error('Tracked-state service factory is unavailable.');
+    }
+    const fetchCalls = [];
+    const serviceState = {
+      tickerRecords:{},
+      backendTrackedVersions:{},
+      backendLocalTrackedTickers:[],
+      riskPercent:1,
+      maxLossOverride:'',
+      wholeSharesOnly:true,
+      marketStatus:'S&P above 50 MA',
+      dataProvider:'fmp',
+      apiPlan:'free'
+    };
+    const service = createTrackedStateService({
+      state:serviceState,
+      defaultTrackedStateEndpoint:'/api/tracked-state',
+      DEFAULT_API_PLAN:'free',
+      currentTesterId:() => testerA,
+      normalizeTicker(value){ return String(value || '').trim().toUpperCase(); },
+      normalizeTickerRecord(record){ return record; },
+      normalizeTickerRecordsMap(map){ return map && typeof map === 'object' ? map : {}; },
+      uniqueTickers(values){ return Array.from(new Set(Array.isArray(values) ? values : [])); },
+      currentAccountSizeGbp(){ return 4000; },
+      numericOrNull(value){
+        if(value === null || value === undefined || value === '') return null;
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : null;
+      },
+      normalizeDataProvider(value){ return String(value || ''); },
+      trackedStatePersistSignature(payload){ return JSON.stringify(payload); },
+      async fetchJsonWithTimeout(url, options){
+        fetchCalls.push({url, options});
+        return {
+          ok:true,
+          status:200,
+          async json(){
+            return {
+              ok:true,
+              trackedState:{
+                updatedAt:'',
+                settings:{},
+                records:{}
+              }
+            };
+          }
+        };
+      },
+      persistState(){},
+      logDebug(){},
+      logDebugWarn(){},
+      getTickerRecord(){ return null; },
+      syncLegacyCollectionsFromTickerRecords(){},
+      renderScannerResults(){},
+      renderWatchlist(){},
+      renderFocusQueue(){},
+      renderReviewWorkspace(){},
+      isTrackRefreshInFlight(){ return false; },
+      isPersistBurstActive(){ return false; }
+    });
+    await service.pullTrackedRecordsFromBackend({force:true});
+    const headerValue = fetchCalls[0] && fetchCalls[0].options && fetchCalls[0].options.headers
+      ? fetchCalls[0].options.headers['X-Pullback-Tester-Id']
+      : '';
+    if(headerValue !== testerA){
+      throw new Error('Tracked-state service must send testerId on backend calls.');
+    }
+    service.requestTrackedStatePersist({force:true, reason:'tester_id_consistency_check'});
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const pushHeaderValue = fetchCalls[1] && fetchCalls[1].options && fetchCalls[1].options.headers
+      ? fetchCalls[1].options.headers['X-Pullback-Tester-Id']
+      : '';
+    if(pushHeaderValue !== testerA || pushHeaderValue !== headerValue){
+      throw new Error('Tracked-state pull and push must use the same testerId within a session.');
+    }
+
+    if(/paperTradeApiKey\s*:\s*baseState\.paperTradeApiKey/.test(trackedServiceSource) || /paperTradeApiSecret\s*:\s*baseState\.paperTradeApiSecret/.test(trackedServiceSource)){
+      throw new Error('Tracked-state service payload must not include Trading 212 paper credentials.');
+    }
+    if(!/function currentTesterId\(/.test(appSource) || !/pullbackPlaybookTesterIdV1/.test(appSource)){
+      throw new Error('App must generate and persist a local anonymous testerId.');
+    }
+
+    const testerHelperSandbox = {
+      crypto:{randomUUID:() => '33333333-3333-4333-8333-333333333333'},
+      Math,
+      localStorage:{
+        storage:new Map([[ 'pullbackPlaybookTesterIdV1', testerA ]]),
+        getItem(key){
+          return this.storage.has(key) ? this.storage.get(key) : null;
+        },
+        setItem(key, value){
+          this.storage.set(key, String(value));
+        }
+      }
+    };
+    vm.createContext(testerHelperSandbox);
+    vm.runInContext(`
+      const testerIdStorageKey = 'pullbackPlaybookTesterIdV1';
+      const testerIdPattern = /^[a-f0-9-]{16,64}$/;
+      let memoizedTesterId = null;
+      ${extractFunctionSource(appSource, 'fallbackRandomTesterId')}
+      ${extractFunctionSource(appSource, 'generateAnonymousTesterId')}
+      ${extractFunctionSource(appSource, 'validTesterId')}
+      ${extractFunctionSource(appSource, 'currentTesterId')}
+    `, testerHelperSandbox, {filename:'app.js#testerIdHelpers'});
+    if(vm.runInContext('currentTesterId()', testerHelperSandbox) !== testerA){
+      throw new Error('Valid stored testerId must be reused.');
+    }
+    testerHelperSandbox.localStorage.storage.set('pullbackPlaybookTesterIdV1', '../tampered');
+    vm.runInContext('memoizedTesterId = null;', testerHelperSandbox);
+    const replacedTesterId = vm.runInContext('currentTesterId()', testerHelperSandbox);
+    if(replacedTesterId === '../tampered' || !/^[a-f0-9-]{16,64}$/.test(replacedTesterId)){
+      throw new Error('Invalid stored testerId must be replaced with a new valid testerId.');
+    }
+    if(testerHelperSandbox.localStorage.storage.get('pullbackPlaybookTesterIdV1') !== replacedTesterId){
+      throw new Error('Replacement testerId must be written back to localStorage when available.');
+    }
+
+    const storageFailureSandbox = {
+      crypto:{randomUUID:() => '44444444-4444-4444-8444-444444444444'},
+      Math,
+      localStorage:{
+        getItem(){
+          throw new Error('storage unavailable');
+        },
+        setItem(){
+          throw new Error('storage unavailable');
+        }
+      }
+    };
+    vm.createContext(storageFailureSandbox);
+    vm.runInContext(`
+      const testerIdStorageKey = 'pullbackPlaybookTesterIdV1';
+      const testerIdPattern = /^[a-f0-9-]{16,64}$/;
+      let memoizedTesterId = null;
+      ${extractFunctionSource(appSource, 'fallbackRandomTesterId')}
+      ${extractFunctionSource(appSource, 'generateAnonymousTesterId')}
+      ${extractFunctionSource(appSource, 'validTesterId')}
+      ${extractFunctionSource(appSource, 'currentTesterId')}
+    `, storageFailureSandbox, {filename:'app.js#testerIdHelpersStorageFailure'});
+    const storageFailureFirst = vm.runInContext('currentTesterId()', storageFailureSandbox);
+    const storageFailureSecond = vm.runInContext('currentTesterId()', storageFailureSandbox);
+    if(storageFailureFirst !== storageFailureSecond){
+      throw new Error('localStorage-unavailable sessions must reuse the same memoized testerId.');
+    }
+  })();
+}
+
+function runTesterReportAssertions(){
+  const testerReportPath = path.join(root, 'netlify/functions/tester-report.js');
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const indexSource = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const scannerDebugSource = fs.readFileSync(path.join(root, 'js/scanner-debug.js'), 'utf8');
+  const Module = require('module');
+  const originalLoad = Module._load;
+  const storeData = new Map();
+  delete require.cache[testerReportPath];
+  Module._load = function patchedLoad(request, parent, isMain){
+    if(request === '@netlify/blobs'){
+      return {
+        getStore(){
+          return {
+            async getJSON(key){
+              return storeData.has(key) ? JSON.parse(JSON.stringify(storeData.get(key))) : null;
+            },
+            async setJSON(key, value){
+              storeData.set(key, JSON.parse(JSON.stringify(value)));
+            },
+            async list(options = {}){
+              const prefix = String(options.prefix || '');
+              const limit = Number(options.limit) || 20;
+              return [...storeData.keys()]
+                .filter(key => key.startsWith(prefix))
+                .slice(0, limit)
+                .map(key => ({
+                  key,
+                  modified:String(storeData.get(key) && storeData.get(key).receivedAt || '')
+                }));
+            }
+          };
+        }
+      };
+    }
+    return originalLoad.apply(this, arguments);
+  };
+  let testerReport;
+  try{
+    testerReport = require(testerReportPath);
+  }finally{
+    Module._load = originalLoad;
+  }
+  if(typeof testerReport.manualBlobsClientOptions !== 'function'){
+    throw new Error('Tester report endpoint must expose the manual Netlify Blobs bootstrap helper.');
+  }
+
+  return (async () => {
+    const testerA = '11111111-1111-4111-8111-111111111111';
+    const testerB = '22222222-2222-4222-8222-222222222222';
+    const eventFor = (testerId, body) => ({
+      httpMethod:'POST',
+      headers:{
+        origin:'http://localhost:8888',
+        'x-pullback-tester-id':testerId
+      },
+      body:JSON.stringify(body)
+    });
+    const successA = await testerReport.handler(eventFor(testerA, {
+      category:'UI problem',
+      notes:'Button did nothing.',
+      snapshot:{
+        ticker:'AAPL',
+        buildVersion:'v-test',
+        paperTradeApiKey:'should-not-leak',
+        nested:{Authorization:'Basic abc', paperTradeApiSecret:'should-not-leak'}
+      }
+    }));
+    if(successA.statusCode !== 200){
+      throw new Error('Tester report endpoint must accept a valid tester-scoped report.');
+    }
+    const successB = await testerReport.handler(eventFor(testerB, {
+      category:'Bad verdict',
+      notes:'Resolver demoted a valid setup.',
+      snapshot:{ticker:'MSFT', buildVersion:'v-test'}
+    }));
+    if(successB.statusCode !== 200){
+      throw new Error('Tester report endpoint must store reports for a second tester.');
+    }
+    const storedKeys = [...storeData.keys()];
+    if(!storedKeys.some(key => key.startsWith(`tester-reports/${testerA}/`)) || !storedKeys.some(key => key.startsWith(`tester-reports/${testerB}/`))){
+      throw new Error('Tester reports must be namespaced by testerId.');
+    }
+    const storedA = storeData.get(storedKeys.find(key => key.startsWith(`tester-reports/${testerA}/`)));
+    if(storedA.snapshot.paperTradeApiKey !== '[REDACTED]' || storedA.snapshot.nested.paperTradeApiSecret !== '[REDACTED]' || storedA.snapshot.nested.Authorization !== '[REDACTED]'){
+      throw new Error('Tester report endpoint must redact credential-like fields server-side.');
+    }
+    const listedForbidden = await testerReport.handler({
+      httpMethod:'GET',
+      headers:{origin:'http://localhost:8888'},
+      queryStringParameters:{mode:'list', limit:'10'}
+    });
+    if(listedForbidden.statusCode !== 403){
+      throw new Error('Tester report endpoint must reject list mode without admin token.');
+    }
+    process.env.TESTER_REPORT_ADMIN_TOKEN = 'admin-secret';
+    const listed = await testerReport.handler({
+      httpMethod:'GET',
+      headers:{origin:'http://localhost:8888', 'x-admin-token':'admin-secret'},
+      queryStringParameters:{mode:'list', limit:'10'}
+    });
+    const listedBody = JSON.parse(String(listed.body || '{}'));
+    if(listed.statusCode !== 200 || !listedBody.ok || !Array.isArray(listedBody.reports) || listedBody.reports.length < 2){
+      throw new Error('Tester report endpoint must support admin triage list mode only with admin token.');
+    }
+    const readKey = storedKeys[0];
+    const readForbidden = await testerReport.handler({
+      httpMethod:'GET',
+      headers:{origin:'http://localhost:8888'},
+      queryStringParameters:{mode:'read', key:readKey}
+    });
+    if(readForbidden.statusCode !== 403){
+      throw new Error('Tester report endpoint must reject read mode without admin token.');
+    }
+    const readResponse = await testerReport.handler({
+      httpMethod:'GET',
+      headers:{origin:'http://localhost:8888', 'x-admin-token':'admin-secret'},
+      queryStringParameters:{mode:'read', key:readKey}
+    });
+    const readBody = JSON.parse(String(readResponse.body || '{}'));
+    if(readResponse.statusCode !== 200 || !readBody.ok || !readBody.report){
+      throw new Error('Tester report endpoint must support admin triage read mode only with admin token.');
+    }
+    const missingTester = await testerReport.handler({
+      httpMethod:'POST',
+      headers:{origin:'http://localhost:8888'},
+      body:JSON.stringify({category:'Other', notes:'Missing tester', snapshot:{}})
+    });
+    if(missingTester.statusCode !== 400){
+      throw new Error('Tester report endpoint must reject missing testerId.');
+    }
+    const invalidTester = await testerReport.handler(eventFor('../escape', {
+      category:'Other',
+      notes:'Invalid tester',
+      snapshot:{}
+    }));
+    if(invalidTester.statusCode !== 400){
+      throw new Error('Tester report endpoint must reject invalid testerId.');
+    }
+    const oversized = await testerReport.handler(eventFor(testerA, {
+      category:'Other',
+      notes:'x'.repeat(1000),
+      snapshot:{payload:'y'.repeat(60000)}
+    }));
+    if(oversized.statusCode !== 413){
+      throw new Error('Tester report endpoint must reject oversized payloads.');
+    }
+
+    const redactionSandbox = {console};
+    vm.createContext(redactionSandbox);
+    vm.runInContext(extractFunctionSource(appSource, 'redactDiagnosticPayload'), redactionSandbox, {filename:'app.js#redactDiagnosticPayload'});
+    const clientRedacted = vm.runInContext(`redactDiagnosticPayload({
+      paperTradeApiKey:'abc',
+      paperTradeApiSecret:'def',
+      nested:{Authorization:'Basic token', ok:'yes'}
+    })`, redactionSandbox);
+    if(clientRedacted.paperTradeApiKey !== '[REDACTED]' || clientRedacted.paperTradeApiSecret !== '[REDACTED]' || clientRedacted.nested.Authorization !== '[REDACTED]'){
+      throw new Error('Client-side diagnostic snapshots must redact paper credentials and authorization headers.');
+    }
+
+    if(!/id="copyRuntimeDebugBtn"/.test(indexSource)
+      || !/id="copyTesterSnapshotBtn"/.test(indexSource)
+      || !/id="copyScannerPolicyDiagnosticsBtn"/.test(indexSource)
+      || !/id="submitTesterReportBtn"/.test(indexSource)
+      || !/data-act="copy-diagnostic-panel"/.test(scannerDebugSource)
+      || !/data-act="copy-diagnostic-panel"/.test(appSource)){
+      throw new Error('Tester reporting UI must expose copy controls for debug panels and report submission controls.');
+    }
+    if(/refreshTesterReportsBtn/.test(indexSource) || /testerReportsList/.test(indexSource) || /testerReportDetail/.test(indexSource)){
+      throw new Error('Normal app UI must not expose global tester report browsing.');
+    }
+    if(!/panelTitle:'Resolver Trace'/.test(appSource) || !/copyTesterDiagnosticSnapshot\(\{[\s\S]*panelTitle:'Resolver Trace'/.test(appSource)){
+      throw new Error('Resolver trace Copy button must use the sanitized diagnostic snapshot flow.');
+    }
+    if(/const traceText = traceContent \? \(traceContent\.textContent \|\| traceContent\.innerText \|\| ''\)\.trim\(\) : '';\s*const copied = traceText \? await copyText\(traceText\) : false;/.test(appSource)){
+      throw new Error('Resolver trace Copy button must not use raw panel text copying.');
+    }
+  })();
+}
+
+function runTesterProfileResetAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  if(!/safeStorageRemove\(savedScannerUniverseKey\)/.test(appSource)
+    || !/safeStorageRemove\(savedScannerUniverseMetaKey\)/.test(appSource)){
+    throw new Error('Start New Tester Profile must clear saved scanner universe snapshot keys.');
+  }
+  if(/const preservedSettings = \{[\s\S]*dataProvider[\s\S]*apiPlan[\s\S]*aiEndpoint[\s\S]*marketDataEndpoint[\s\S]*\};/.test(appSource)){
+    throw new Error('Start New Tester Profile must not preserve provider/app settings for a full shared-device handoff.');
+  }
+
+  const resetSandbox = {
+    console,
+    window:{confirm:() => true},
+    state:{
+      dataProvider:'fmp',
+      apiPlan:'scanner',
+      aiEndpoint:'/api/analyse-setup',
+      marketDataEndpoint:'/api/market-data'
+    },
+    uiState:{},
+    key:'pullbackPlaybookV3',
+    liteKey:'pullbackPlaybookV3Lite',
+    settingsKey:'pullbackPlaybookSettingsV1',
+    recordsLiteKey:'pullbackPlaybookRecordsLiteV1',
+    savedScannerUniverseKey:'pp_scanner_universe_saved',
+    savedScannerUniverseMetaKey:'pp_scanner_universe_saved_meta',
+    trackSectionStateKey:'pp_track_section_state_v1',
+    removedKeys:[],
+    rotateTesterId(){
+      resetSandbox.__testerId = '55555555-5555-4555-8555-555555555555';
+      return resetSandbox.__testerId;
+    },
+    safeStorageRemove(storageKey){
+      resetSandbox.removedKeys.push(storageKey);
+    },
+    createDefaultState(){
+      return {
+        paperTradeApiKey:'',
+        paperTradeApiSecret:'',
+        paperTradeTesterSetupCompletedAt:'',
+        tickerRecords:{},
+        tradeDiary:[],
+        watchlist:[]
+      };
+    },
+    clearTransientSessionState(){},
+    persistState(){},
+    renderAppFromState(){},
+    renderTradeGatewayHealth(){},
+    renderTesterSetupPanel(){},
+    renderTesterIdentityPanel(){},
+    setStatus(){},
+    escapeHtml(value){ return String(value || ''); },
+    currentTesterId(){ return resetSandbox.__testerId || '55555555-5555-4555-8555-555555555555'; }
+  };
+  vm.createContext(resetSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'resetTesterProfile'), resetSandbox, {filename:'app.js#resetTesterProfile'});
+  const result = vm.runInContext('resetTesterProfile()', resetSandbox);
+  if(result !== true){
+    throw new Error('resetTesterProfile must complete successfully in the happy path.');
+  }
+  const removed = new Set(resetSandbox.removedKeys);
+  ['pullbackPlaybookV3', 'pullbackPlaybookV3Lite', 'pullbackPlaybookSettingsV1', 'pullbackPlaybookRecordsLiteV1', 'pp_scanner_universe_saved', 'pp_scanner_universe_saved_meta', 'pp_track_section_state_v1'].forEach(storageKey => {
+    if(!removed.has(storageKey)){
+      throw new Error(`resetTesterProfile must clear ${storageKey}.`);
+    }
+  });
+  if(!/^[a-f0-9-]{16,64}$/.test(String(resetSandbox.__testerId || ''))){
+    throw new Error('resetTesterProfile must leave a valid testerId in place.');
+  }
 }
 
 function runScannerPolicyCompatibilityAssertions(){
@@ -5784,31 +6283,44 @@ function runAccepted50MaSupportThresholdAssertions(){
   }
 }
 
-runTrackPresentationAuthorityAssertions();
-runScannerPolicyCompatibilityAssertions();
-runTesterSetupPersistenceFallbackAssertions();
-runTesterSetupUiGateAssertions();
-runAdvancedScannerUiConsistencyAssertions();
-runTradeExecutionRoutingAssertions();
-runPlanSemanticsAssertions();
-runReviewPullbackBounceDisplayAssertions();
-runReviewPricedButNotReadyAssertions();
-runCumulativePenaltyDisplayAssertions();
-runAccepted50MaSupportThresholdAssertions();
+async function runAllAssertions(){
+  runTrackPresentationAuthorityAssertions();
+  runScannerPolicyCompatibilityAssertions();
+  runTesterSetupPersistenceFallbackAssertions();
+  runTesterSetupUiGateAssertions();
+  runAdvancedScannerUiConsistencyAssertions();
+  runTradeExecutionRoutingAssertions();
+  runPlanSemanticsAssertions();
+  runReviewPullbackBounceDisplayAssertions();
+  runReviewPricedButNotReadyAssertions();
+  runCumulativePenaltyDisplayAssertions();
+  runAccepted50MaSupportThresholdAssertions();
+  runTesterProfileResetAssertions();
+  await runTrackedStateTesterIsolationAssertions();
+  await runTesterReportAssertions();
 
-console.log(`Resolver gate assertions passed (${results.length} cases).`);
-console.log('Review projection invariant assertions passed.');
-console.log('Watchlist long-press summary assertions passed.');
-console.log('Simplified state pipeline assertions passed.');
-console.log('AI chart-coach contract assertions passed.');
-console.log('Track presentation authority assertions passed.');
-console.log('Scanner policy compatibility assertions passed.');
-console.log('Tester setup fallback persistence assertions passed.');
-console.log('Tester setup UI gate assertions passed.');
-console.log('Advanced scanner UI consistency assertions passed.');
-console.log('Trade execution routing assertions passed.');
-console.log('Plan source semantics assertions passed.');
-console.log('Review pullback/bounce display assertions passed.');
-console.log('Review priced-but-not-ready assertions passed.');
-console.log('Cumulative penalty display assertions passed.');
-console.log('Accepted 50MA support threshold assertions passed.');
+  console.log(`Resolver gate assertions passed (${results.length} cases).`);
+  console.log('Review projection invariant assertions passed.');
+  console.log('Watchlist long-press summary assertions passed.');
+  console.log('Simplified state pipeline assertions passed.');
+  console.log('AI chart-coach contract assertions passed.');
+  console.log('Track presentation authority assertions passed.');
+  console.log('Scanner policy compatibility assertions passed.');
+  console.log('Tester setup fallback persistence assertions passed.');
+  console.log('Tester setup UI gate assertions passed.');
+  console.log('Advanced scanner UI consistency assertions passed.');
+  console.log('Trade execution routing assertions passed.');
+  console.log('Plan source semantics assertions passed.');
+  console.log('Review pullback/bounce display assertions passed.');
+  console.log('Review priced-but-not-ready assertions passed.');
+  console.log('Cumulative penalty display assertions passed.');
+  console.log('Accepted 50MA support threshold assertions passed.');
+  console.log('Tester profile reset assertions passed.');
+  console.log('Tracked-state tester isolation assertions passed.');
+  console.log('Tester report assertions passed.');
+}
+
+runAllAssertions().catch(error => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});

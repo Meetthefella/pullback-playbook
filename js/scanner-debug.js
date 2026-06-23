@@ -336,13 +336,15 @@
   }
 
   function renderDebugSectionMarkup(title, rows, deps = {}){
-    return `<div class="watchlist-debug-block tiny"><strong>${deps.escapeHtml(String(title || 'Debug'))}</strong>${renderDebugKeyValueGrid(rows, deps)}</div>`;
+    const safeTitle = deps.escapeHtml(String(title || 'Debug'));
+    return `<details class="compact-details watchlist-debug-block" data-diagnostic-panel="${safeTitle}"><summary>${safeTitle}<button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="${safeTitle}">Copy</button></summary>${renderDebugKeyValueGrid(rows, deps)}</details>`;
   }
 
   function renderAdvancedDebugMarkup(rows, title = 'Advanced Debug (Internal)', deps = {}){
     const safeRows = Array.isArray(rows) ? rows.filter(row => row && row.label) : [];
     if(!safeRows.length) return '';
-    return `<details class="compact-details"><summary>${deps.escapeHtml(String(title))}</summary>${renderDebugKeyValueGrid(safeRows, deps)}</details>`;
+    const safeTitle = deps.escapeHtml(String(title));
+    return `<details class="compact-details" data-diagnostic-panel="${safeTitle}"><summary>${safeTitle}<button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="${safeTitle}">Copy</button></summary>${renderDebugKeyValueGrid(safeRows, deps)}</details>`;
   }
 
   function renderScannerDecisionTraceContent(view, deps = {}){

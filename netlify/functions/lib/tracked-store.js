@@ -1,8 +1,9 @@
 const { getStore } = require('@netlify/blobs');
 
 const STORE_NAME = 'pullback-playbook';
-const RECORDS_KEY = 'tracked-records';
+const TRACKED_RECORDS_PREFIX = 'tracked-records';
 const SUBSCRIPTIONS_KEY = 'push-subscriptions';
+const TESTER_ID_PATTERN = /^[a-f0-9-]{16,64}$/;
 
 function manualBlobsClientOptions(){
   const siteID = String(
@@ -73,18 +74,35 @@ function normalizeSubscriptionList(value){
   return Array.isArray(value) ? value.filter(item => item && typeof item === 'object' && item.endpoint) : [];
 }
 
-async function loadTrackedState(){
-  return normalizeTrackedState(await getJson(RECORDS_KEY, {
+function normalizeTesterId(value){
+  return String(value || '').trim().toLowerCase();
+}
+
+function validateTesterId(value){
+  const testerId = normalizeTesterId(value);
+  return TESTER_ID_PATTERN.test(testerId);
+}
+
+function trackedRecordsKey(testerId){
+  const normalized = normalizeTesterId(testerId);
+  if(!validateTesterId(normalized)){
+    throw new Error('invalid_tester_id');
+  }
+  return `${TRACKED_RECORDS_PREFIX}/${normalized}`;
+}
+
+async function loadTrackedState(testerId){
+  return normalizeTrackedState(await getJson(trackedRecordsKey(testerId), {
     updatedAt:'',
     settings:{},
     records:{}
   }));
 }
 
-async function saveTrackedState(value){
+async function saveTrackedState(testerId, value){
   const payload = normalizeTrackedState(value);
   payload.updatedAt = new Date().toISOString();
-  await setJson(RECORDS_KEY, payload);
+  await setJson(trackedRecordsKey(testerId), payload);
   return payload;
 }
 
@@ -102,5 +120,8 @@ module.exports = {
   loadTrackedState,
   saveTrackedState,
   loadPushSubscriptions,
-  savePushSubscriptions
+  savePushSubscriptions,
+  normalizeTesterId,
+  validateTesterId,
+  trackedRecordsKey
 };

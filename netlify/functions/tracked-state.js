@@ -1,4 +1,4 @@
-const { loadTrackedState, saveTrackedState } = require('./lib/tracked-store');
+const { loadTrackedState, saveTrackedState, normalizeTesterId, validateTesterId } = require('./lib/tracked-store');
 const { corsHeadersForEvent, guardTrustedOrigin } = require('./lib/request-guard');
 
 function jsonResponse(event, statusCode, body){
@@ -13,6 +13,18 @@ function jsonResponse(event, statusCode, body){
     headers:corsHeadersForEvent(event, 'GET, POST, OPTIONS'),
     body:JSON.stringify(body)
   };
+}
+
+function testerIdFromEvent(event){
+  const headers = event && event.headers && typeof event.headers === 'object' ? event.headers : {};
+  const query = event && event.queryStringParameters && typeof event.queryStringParameters === 'object'
+    ? event.queryStringParameters
+    : {};
+  return normalizeTesterId(
+    headers['x-pullback-tester-id']
+    || headers['X-Pullback-Tester-Id']
+    || query.testerId
+  );
 }
 
 function compactChartRef(chartRef){
@@ -150,9 +162,12 @@ function applyExplicitRemovals(records = {}, removedRecords = {}){
 exports.handler = async function handler(event){
  
   if(event.httpMethod === 'OPTIONS') return jsonResponse(event, 200, {ok:true});
- if(!guardTrustedOrigin(event)) return jsonResponse(event, 403, {error:'Forbidden'});
+  if(!guardTrustedOrigin(event)) return jsonResponse(event, 403, {error:'Forbidden'});
+  const testerId = testerIdFromEvent(event);
+  if(!testerId) return jsonResponse(event, 400, {error:'Missing testerId.'});
+  if(!validateTesterId(testerId)) return jsonResponse(event, 400, {error:'Invalid testerId.'});
   if(event.httpMethod === 'GET'){
-    const state = await loadTrackedState();
+    const state = await loadTrackedState(testerId);
     return jsonResponse(event, 200, {ok:true, trackedState:compactTrackedStateForResponse(state)});
   }
   if(event.httpMethod !== 'POST'){
@@ -164,7 +179,7 @@ exports.handler = async function handler(event){
   }catch(error){
     return jsonResponse(event, 400, {error:'Invalid JSON body.'});
   }
-  const existing = await loadTrackedState();
+  const existing = await loadTrackedState(testerId);
   const nextState = {
     updatedAt:new Date().toISOString(),
     settings:body.settings && typeof body.settings === 'object'
@@ -175,6 +190,6 @@ exports.handler = async function handler(event){
       body.removedRecords && typeof body.removedRecords === 'object' ? body.removedRecords : {}
     )
   };
-  const saved = await saveTrackedState(nextState);
+  const saved = await saveTrackedState(testerId, nextState);
   return jsonResponse(event, 200, {ok:true, trackedState:trackedStateAckForResponse(saved)});
 };

@@ -45,7 +45,7 @@ function corsHeadersForEvent(event, methods){
   const headers = {
     'Content-Type':'application/json',
     'Cache-Control':'no-store',
-    'Access-Control-Allow-Headers':'Content-Type',
+    'Access-Control-Allow-Headers':'Content-Type, X-Pullback-Tester-Id',
     'Access-Control-Allow-Methods':methods
   };
   const origin = requestOrigin(event);

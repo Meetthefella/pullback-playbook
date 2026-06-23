@@ -1500,6 +1500,11 @@ const {
 // ---------------------------------------------------------------------------
 
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
+const testerIdStorageKey = 'pullbackPlaybookTesterIdV1';
+const testerIdPattern = /^[a-f0-9-]{16,64}$/;
+const defaultTesterReportEndpoint = '/api/tester-report';
+const testerReportCategories = ['Bad verdict', 'Chart mismatch', 'Paper trade problem', 'UI problem', 'Other'];
+let memoizedTesterId = null;
 const checklistLabels = {
   trendStrong:'Strong uptrend',
   above50:'Above 50 MA',
@@ -1562,6 +1567,69 @@ const DEFAULT_STATE = {
 function createDefaultState(){
   return safeJsonParse(JSON.stringify(DEFAULT_STATE), DEFAULT_STATE);
 }
+
+function fallbackRandomTesterId(){
+  const segments = [8, 4, 4, 4, 12];
+  const chars = '0123456789abcdef';
+  return segments.map(length => {
+    let chunk = '';
+    for(let index = 0; index < length; index += 1){
+      chunk += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return chunk;
+  }).join('-');
+}
+
+function generateAnonymousTesterId(){
+  try{
+    if(typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function'){
+      const generated = String(crypto.randomUUID() || '').trim().toLowerCase();
+      if(generated) return generated;
+    }
+  }catch(error){}
+  return fallbackRandomTesterId();
+}
+
+function validTesterId(value){
+  return testerIdPattern.test(String(value || '').trim().toLowerCase());
+}
+
+function currentTesterId(){
+  if(validTesterId(memoizedTesterId)) return String(memoizedTesterId).trim().toLowerCase();
+  try{
+    const existing = String(localStorage.getItem(testerIdStorageKey) || '').trim().toLowerCase();
+    if(validTesterId(existing)){
+      memoizedTesterId = existing;
+      return existing;
+    }
+    const generated = generateAnonymousTesterId();
+    memoizedTesterId = generated;
+    localStorage.setItem(testerIdStorageKey, generated);
+    return generated;
+  }catch(error){
+    if(validTesterId(memoizedTesterId)) return String(memoizedTesterId).trim().toLowerCase();
+    memoizedTesterId = generateAnonymousTesterId();
+    return memoizedTesterId;
+  }
+}
+
+function writeTesterId(value){
+  const normalized = String(value || '').trim().toLowerCase();
+  if(!validTesterId(normalized)) return false;
+  memoizedTesterId = normalized;
+  try{
+    localStorage.setItem(testerIdStorageKey, normalized);
+  }catch(error){}
+  return true;
+}
+
+function rotateTesterId(){
+  const nextTesterId = generateAnonymousTesterId();
+  writeTesterId(nextTesterId);
+  return nextTesterId;
+}
+
+currentTesterId();
 
 const {state, uiState} = createAppState({
   defaultState:DEFAULT_STATE,
@@ -2977,6 +3045,7 @@ const trackedStateService = createTrackedStateService({
   state,
   defaultTrackedStateEndpoint,
   DEFAULT_API_PLAN,
+  currentTesterId,
   normalizeTicker,
   normalizeTickerRecord,
   normalizeTickerRecordsMap,
@@ -3324,6 +3393,240 @@ function renderTesterSetupPanel(){
   }
 }
 
+function redactDiagnosticPayload(value, parentKey = ''){
+  const key = String(parentKey || '').trim().toLowerCase();
+  const credentialKey = /(papertradeapikey|papertradeapisecret|authorization|credentials|secret|api[_-]?key)/i.test(key);
+  if(value == null) return value;
+  if(credentialKey) return '[REDACTED]';
+  if(Array.isArray(value)) return value.map(item => redactDiagnosticPayload(item, parentKey));
+  if(typeof value === 'object'){
+    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [
+      childKey,
+      redactDiagnosticPayload(childValue, childKey)
+    ]));
+  }
+  if(typeof value === 'string'){
+    if(/^basic\s+/i.test(value)) return '[REDACTED]';
+    return value;
+  }
+  return value;
+}
+
+function currentBuildVersion(){
+  if(typeof window !== 'undefined' && window && window.__BUILD_VERSION__) return String(window.__BUILD_VERSION__);
+  const meta = typeof document !== 'undefined'
+    ? document.querySelector('meta[name="build-version"]')
+    : null;
+  return String(meta && meta.getAttribute('content') || 'unknown');
+}
+
+function currentReviewDiagnosticRecord(){
+  const ticker = activeReviewTicker();
+  if(!ticker) return null;
+  return getTickerRecord(ticker) || null;
+}
+
+function currentPolicyDiagnostics(){
+  const finalUniverse = typeof finalScanUniverse === 'function' ? finalScanUniverse() : [];
+  return {
+    setupType:{
+      current:typeof currentSetupType === 'function' ? currentSetupType() : '',
+      selectedQuickScanType:typeof selectedQuickScanType === 'function' ? selectedQuickScanType() : '',
+      stored:String(state.setupType || '')
+    },
+    universePolicy:{
+      effectiveMode:typeof effectiveUniverseMode === 'function' ? effectiveUniverseMode() : '',
+      selectedMode:typeof selectedUniverseMode === 'function' ? selectedUniverseMode() : '',
+      tickers:Array.isArray(state.tickers) ? [...state.tickers] : [],
+      finalUniversePreview:Array.isArray(finalUniverse) ? finalUniverse.slice(0, 25) : []
+    }
+  };
+}
+
+function currentPaperGatewayDiagnostics(){
+  const health = tradeGatewayHealthModel();
+  return {
+    state:health.state,
+    label:health.label,
+    detail:health.detail,
+    testerSetup:testerSetupHealthModel(),
+    supported:trading212PaperSupported === true,
+    checked:trading212PaperAvailabilityChecked === true,
+    enabled:trading212PaperEnabled === true
+  };
+}
+
+function currentVisibleReviewDiagnostics(record){
+  const workspace = $('reviewWorkspace');
+  const shell = workspace ? workspace.querySelector('.reviewworkspace-shell') : null;
+  const chartPipeline = record ? getReviewChartAnalysisPipeline(record) : null;
+  return {
+    currentVerdict:shell ? String(shell.dataset.visualState || '') : '',
+    currentTone:shell ? String(shell.dataset.visualTone || '') : '',
+    visibleReviewStatus:String(($('tradeStatusBox') && $('tradeStatusBox').textContent) || '').trim(),
+    reviewWorkspaceStatus:String(($('reviewWorkspaceStatus') && $('reviewWorkspaceStatus').textContent) || '').trim(),
+    chartVerificationStatus:chartPipeline && typeof chartPipeline === 'object'
+      ? {
+        phase:String(chartPipeline.phase || ''),
+        status:String(chartPipeline.status || ''),
+        requestId:String(chartPipeline.requestId || ''),
+        imageId:String(chartPipeline.imageId || '')
+      }
+      : null
+  };
+}
+
+function buildTesterDiagnosticSnapshot(options = {}){
+  const panelTitle = String(options.panelTitle || 'General diagnostics').trim();
+  const panelElement = options.panelElement || null;
+  const record = currentReviewDiagnosticRecord();
+  const rawSnapshot = {
+    timestamp:new Date().toISOString(),
+    testerId:currentTesterId(),
+    buildVersion:currentBuildVersion(),
+    activeWorkspace:String(activeWorkspaceTab() || ''),
+    panelTitle,
+    ticker:String(record && record.ticker || activeReviewTicker() || 'general'),
+    review:currentVisibleReviewDiagnostics(record),
+    resolverTrace:record ? {
+      scan:cloneData(record.scan || {}, {}),
+      setup:cloneData(record.setup || {}, {}),
+      watchlistDebug:cloneData(record.watchlist && record.watchlist.debug || {}, {}),
+      lifecycle:cloneData(record.lifecycle || {}, {}),
+      plan:cloneData(record.plan || {}, {})
+    } : null,
+    policyDiagnostics:currentPolicyDiagnostics(),
+    gateway:currentPaperGatewayDiagnostics(),
+    panelText:panelElement ? String(panelElement.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000) : ''
+  };
+  return redactDiagnosticPayload(rawSnapshot);
+}
+
+async function copyTextToClipboard(text){
+  const value = String(text || '');
+  if(typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function'){
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'readonly');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  let copied = false;
+  try{
+    copied = document.execCommand('copy');
+  }catch(error){
+    copied = false;
+  }
+  textarea.remove();
+  return copied;
+}
+
+async function copyTesterDiagnosticSnapshot(options = {}){
+  const snapshot = buildTesterDiagnosticSnapshot(options);
+  const copied = await copyTextToClipboard(JSON.stringify(snapshot, null, 2));
+  if(copied){
+    uiState.lastTesterDiagnosticSnapshot = snapshot;
+    const status = $('testerReportSnapshotStatus');
+    if(status) status.textContent = `Snapshot copied: ${snapshot.panelTitle} | ${formatLocalTimestamp(snapshot.timestamp) || snapshot.timestamp}`;
+  }
+  return copied;
+}
+
+function exportTesterBackup(){
+  const testerId = currentTesterId();
+  const exportedAt = new Date().toISOString();
+  const payload = redactDiagnosticPayload({
+    exportedAt,
+    testerId,
+    buildVersion:currentBuildVersion(),
+    state:cloneData({
+      ...cloneData(state, {}),
+      paperTradeApiKey:'',
+      paperTradeApiSecret:''
+    }, {})
+  });
+  const ok = downloadJsonFile(`pullback-playbook-tester-backup-${testerId}-${todayIsoDate()}.json`, payload);
+  if(ok){
+    setStatus('testerReportStatus', '<span class="ok">Tester backup exported without Trading 212 credentials.</span>');
+  }else{
+    setStatus('testerReportStatus', '<span class="badtext">Tester backup export failed.</span>');
+  }
+  return ok;
+}
+
+function resetTesterProfile(){
+  const ok = window.confirm('Start a new tester profile on this device? This rotates the anonymous tester ID and clears local watchlist, diary, onboarding, paper credentials, and local app/provider settings for a clean shared-device handoff.');
+  if(!ok) return false;
+  rotateTesterId();
+  safeStorageRemove(key);
+  safeStorageRemove(liteKey);
+  safeStorageRemove(settingsKey);
+  safeStorageRemove(recordsLiteKey);
+  safeStorageRemove(savedScannerUniverseKey);
+  safeStorageRemove(savedScannerUniverseMetaKey);
+  safeStorageRemove(trackSectionStateKey);
+  Object.assign(state, createDefaultState());
+  uiState.lastTesterDiagnosticSnapshot = null;
+  uiState.tradeGatewayHealthHistory = [];
+  clearTransientSessionState({persist:false, clearScannerCache:true, clearPersistedShortlistState:true});
+  persistState();
+  renderAppFromState();
+  renderTradeGatewayHealth();
+  renderTesterSetupPanel();
+  renderTesterIdentityPanel();
+  setStatus('testerReportStatus', `<span class="ok">New tester profile ready. Current tester ID: ${escapeHtml(currentTesterId())}</span>`);
+  setStatus('inputStatus', '<span class="ok">Started a fresh local tester profile on this device.</span>');
+  return true;
+}
+
+function renderTesterIdentityPanel(){
+  const label = $('testerIdentityStatusLabel');
+  const detail = $('testerIdentityStatusDetail');
+  const testerId = currentTesterId();
+  if(label) label.textContent = `Anonymous tester ID: ${testerId}`;
+  if(detail) detail.textContent = 'Use Export Tester Backup before handing the device to someone else. Start New Tester Profile rotates the local tester ID and clears local tester workflow data, paper credentials, and local app/provider settings.';
+}
+
+async function submitTesterReport(){
+  const category = String(($('testerReportCategory') && $('testerReportCategory').value) || '').trim();
+  const notes = String(($('testerReportNotes') && $('testerReportNotes').value) || '').trim();
+  const snapshot = uiState.lastTesterDiagnosticSnapshot || buildTesterDiagnosticSnapshot({panelTitle:'General diagnostics'});
+  if(!testerReportCategories.includes(category)){
+    setStatus('testerReportStatus', '<span class="badtext">Choose a valid tester report category.</span>');
+    return false;
+  }
+  const payload = redactDiagnosticPayload({
+    category,
+    notes,
+    snapshot
+  });
+  setStatus('testerReportStatus', '<span class="warntext">Submitting tester report...</span>');
+  try{
+    const response = await fetchJsonWithTimeout(defaultTesterReportEndpoint, {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'X-Pullback-Tester-Id':currentTesterId()
+      },
+      body:JSON.stringify(payload)
+    });
+    const body = await response.json().catch(() => ({}));
+    if(!response.ok || !body || body.ok === false){
+      throw new Error(body && body.error ? body.error : 'tester_report_failed');
+    }
+    if($('testerReportNotes')) $('testerReportNotes').value = '';
+    setStatus('testerReportStatus', `<span class="ok">Tester report submitted${body.reportKey ? ` | ${escapeHtml(body.reportKey)}` : ''}</span>`);
+    return true;
+  }catch(error){
+    setStatus('testerReportStatus', `<span class="badtext">${escapeHtml(String(error && error.message || 'Tester report failed.'))}</span>`);
+    return false;
+  }
+}
+
 function completeTesterSetup(){
   if(!storedPaperTradeCredentialsReady()){
     renderTesterSetupPanel();
@@ -3415,6 +3718,7 @@ async function refreshTrading212PaperAvailability(options = {}){
     });
     renderTradeGatewayHealth();
     renderTesterSetupPanel();
+    renderTesterIdentityPanel();
     return {ok:false, code:'unsupported_broker', message:trading212PaperAvailabilityMessage};
   }
   if(options.force !== true && trading212PaperAvailabilityRequest){
@@ -3468,6 +3772,7 @@ async function refreshTrading212PaperAvailability(options = {}){
     trading212PaperAvailabilityRequest = null;
     renderTradeGatewayHealth();
     renderTesterSetupPanel();
+    renderTesterIdentityPanel();
     if(options.render !== false && typeof renderReviewWorkspace === 'function' && activeReviewTicker()){
       renderReviewWorkspace({source:'trade_gateway_availability_ready'});
     }
@@ -5204,8 +5509,8 @@ function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
   const sources = `<div class="tiny">Sources: ${escapeHtml((trace.sources || []).join(', ') || 'chart_pipeline_quick_check')}</div>`;
   const details = `${missingLine}${diagnosticsLine}${extracted}${trustedFacts}${imageSource}${extraEvidence}${sources}`;
   const markup = isFailurePanel
-    ? `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>Chart Verification Failed</strong><div class="tiny"><strong>Expected:</strong> ${escapeHtml(expectedTickerDisplay)}</div><div class="tiny"><strong>Read:</strong> ${escapeHtml(readTickerDisplay)}</div><div>AI analysis is blocked until the chart is confirmed or replaced.</div><details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`
-    : `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>${escapeHtml(decision.title || 'Chart verification')}</strong><div>${escapeHtml(decision.summary || '')}</div><div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([facts.visible_ticker || 'n/a', facts.visible_timeframe || 'n/a', chartVerificationDisplayValue(facts.visible_latest_price)].join(' | '))} <strong>Expected:</strong> ${escapeHtml([trusted.ticker || 'n/a', trusted.expected_timeframe || 'n/a', chartVerificationDisplayValue(trusted.latest_price)].join(' | '))}</div><div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>${evidenceLine}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`;
+    ? `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>Chart Verification Failed</strong><div class="tiny"><strong>Expected:</strong> ${escapeHtml(expectedTickerDisplay)}</div><div class="tiny"><strong>Read:</strong> ${escapeHtml(readTickerDisplay)}</div><div>AI analysis is blocked until the chart is confirmed or replaced.</div><details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details<button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Chart Verification">Copy</button></summary>${details}</details></div>`
+    : `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>${escapeHtml(decision.title || 'Chart verification')}</strong><div>${escapeHtml(decision.summary || '')}</div><div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([facts.visible_ticker || 'n/a', facts.visible_timeframe || 'n/a', chartVerificationDisplayValue(facts.visible_latest_price)].join(' | '))} <strong>Expected:</strong> ${escapeHtml([trusted.ticker || 'n/a', trusted.expected_timeframe || 'n/a', chartVerificationDisplayValue(trusted.latest_price)].join(' | '))}</div><div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>${evidenceLine}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details<button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Chart Verification">Copy</button></summary>${details}</details></div>`;
   return {
     decision,
     trace,
@@ -22528,6 +22833,7 @@ function refreshMarketContextWidgets(displayModel = buildMarketContextDisplayMod
   renderMarketCalendarWidget();
   renderTradeGatewayHealth();
   renderTesterSetupPanel();
+  renderTesterIdentityPanel();
 }
 
 function currentQueueCycleKey(now = new Date()){
@@ -30552,8 +30858,10 @@ function renderScannerResults(){
             event.stopPropagation();
             const traceContent = node.querySelector('[data-scan-decision-trace-content]');
             const statusNode = node.querySelector('[data-copy-decision-trace-status]');
-            const traceText = traceContent ? (traceContent.textContent || traceContent.innerText || '').trim() : '';
-            const copied = traceText ? await copyText(traceText) : false;
+            const copied = await copyTesterDiagnosticSnapshot({
+              panelTitle:'Resolver Trace',
+              panelElement:traceContent || node
+            });
             if(statusNode){
               statusNode.textContent = copied ? 'Copied.' : 'Copy failed.';
             }
@@ -34178,7 +34486,7 @@ function renderReviewWorkspace(options = {}){
     ], 'Legacy / Internal', {})
     : '';
   const reviewGatewayTrace = advancedOpen
-    ? `<details class="compact-details"><summary>Trade Gateway Trace</summary>${renderTradeGatewayHistoryMarkup()}</details>`
+    ? `<details class="compact-details"><summary>Trade Gateway Trace<button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Trade Gateway Trace">Copy</button></summary>${renderTradeGatewayHistoryMarkup()}</details>`
     : '';
   const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDebugCompact}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
   const headerContextChip = resolvedContract.marketRegimeWeak
@@ -36141,12 +36449,62 @@ click('resetAllBtn', () => {
   if(!window.confirm('This clears the main local app save and market cache. Some fallback data may still restore. Continue?')) return;
   resetAllData();
 });
+click('exportTesterBackupBtn', exportTesterBackup);
+click('resetTesterProfileBtn', resetTesterProfile);
+click('copyTesterSnapshotBtn', () => {
+  copyTesterDiagnosticSnapshot({panelTitle:'General diagnostics'}).then(copied => {
+    setStatus('testerReportStatus', copied
+      ? '<span class="ok">Current tester snapshot copied.</span>'
+      : '<span class="badtext">Could not copy the tester snapshot.</span>');
+  }).catch(() => {
+    setStatus('testerReportStatus', '<span class="badtext">Could not copy the tester snapshot.</span>');
+  });
+});
+click('copyRuntimeDebugBtn', () => {
+  const panel = $('runtimeDebugOutput');
+  copyTesterDiagnosticSnapshot({panelTitle:'Runtime Debug', panelElement:panel}).then(copied => {
+    setStatus('testerReportStatus', copied
+      ? '<span class="ok">Runtime debug snapshot copied.</span>'
+      : '<span class="badtext">Could not copy runtime debug.</span>');
+  }).catch(() => {
+    setStatus('testerReportStatus', '<span class="badtext">Could not copy runtime debug.</span>');
+  });
+});
+click('copyScannerPolicyDiagnosticsBtn', () => {
+  const panel = $('scannerSettings') || $('advancedScannerTools');
+  copyTesterDiagnosticSnapshot({panelTitle:'Scanner Policy Diagnostics', panelElement:panel}).then(copied => {
+    setStatus('testerReportStatus', copied
+      ? '<span class="ok">Scanner diagnostics copied.</span>'
+      : '<span class="badtext">Could not copy scanner diagnostics.</span>');
+  }).catch(() => {
+    setStatus('testerReportStatus', '<span class="badtext">Could not copy scanner diagnostics.</span>');
+  });
+});
+click('submitTesterReportBtn', () => { submitTesterReport().catch(() => {}); });
 click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
 click('clearRuntimeDebugBtn', clearRuntimeDebugLog);
 click('contextSettingsToggle', () => setContextSettingsPanelOpen(!(uiState.contextSettingsOpen === true)));
 click('contextSettingsCloseBtn', () => setContextSettingsPanelOpen(false));
 click('contextSettingsBackdrop', () => setContextSettingsPanelOpen(false));
+document.addEventListener('click', event => {
+  const button = event.target && event.target.closest ? event.target.closest('[data-act="copy-diagnostic-panel"]') : null;
+  if(!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const panel = button.closest('.compact-details, .watchlist-debug-block, .panelbox');
+  const panelTitle = String(button.getAttribute('data-panel-title') || '').trim() || String(panel && panel.getAttribute && panel.getAttribute('data-diagnostic-panel') || 'Diagnostics');
+  copyTesterDiagnosticSnapshot({panelTitle, panelElement:panel}).then(copied => {
+    const statusTarget = $('testerReportStatus');
+    if(statusTarget){
+      setStatus('testerReportStatus', copied
+        ? `<span class="ok">${escapeHtml(panelTitle)} copied.</span>`
+        : `<span class="badtext">Could not copy ${escapeHtml(panelTitle)}.</span>`);
+    }
+  }).catch(() => {
+    setStatus('testerReportStatus', `<span class="badtext">Could not copy ${escapeHtml(panelTitle)}.</span>`);
+  });
+}, true);
 click('marketTimingLedger', openMarketCalendarShortcut);
 click('accountRiskLedger', () => openContextSettings('account'));
 click('scannerModeLedger', () => openAdvancedScannerSettings('mode'));
