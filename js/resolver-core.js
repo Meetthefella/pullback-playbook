@@ -202,6 +202,37 @@
     ].includes(zone);
   }
 
+  function independentEntryTriggerHit(ctx = {}){
+    const structureState = String(ctx.structure_state || '').trim().toLowerCase();
+    const trendState = String(ctx.trend_state || '').trim().toLowerCase();
+    const pullbackZone = String(ctx.pullback_zone || '').trim().toLowerCase();
+    const stabilisationState = String(ctx.stabilisation_state || '').trim().toLowerCase();
+    const bounceState = String(ctx.bounce_state || '').trim().toLowerCase();
+    const currentPrice = numericValueOrNull(ctx.current_price);
+    const entry = numericValueOrNull(ctx.entry);
+    const planStatus = String(ctx.plan_status || '').trim().toLowerCase();
+    const pullbackValid = ['near_20ma','near_50ma'].includes(pullbackZone);
+    const structureIntact = !['weak','weakening','broken'].includes(structureState);
+    const trendValid = !['weak','broken'].includes(trendState);
+    const confirmedBounce = bounceState === 'confirmed';
+    const clearStabilisation = stabilisationState === 'clear';
+    const hasReviewedPlan = planStatus === 'valid' && entry !== null;
+    const breakAboveTrigger = hasReviewedPlan && currentPrice !== null && currentPrice >= entry;
+    const strongReversal = pullbackValid && trendValid && structureIntact && confirmedBounce && clearStabilisation;
+    const reclaimFollowThrough = strongReversal && breakAboveTrigger;
+    return !!(
+      ctx.breaks_local_high === true
+      || ctx.breaksLocalHigh === true
+      || ctx.reclaims_level === true
+      || ctx.reclaimsLevel === true
+      || ctx.strong_bullish_continuation === true
+      || ctx.strongBullishContinuation === true
+      || breakAboveTrigger
+      || strongReversal
+      || reclaimFollowThrough
+    );
+  }
+
   function provisionalNumericValue(ctx, primaryKey, fallbackKey){
     const primary = numericValueOrNull(ctx[primaryKey]);
     if(primary !== null) return primary;
@@ -1095,8 +1126,19 @@
     const ma50Below200MA = Number.isFinite(ma50) && Number.isFinite(ma200)
       ? ma50 < ma200
       : false;
-    const entryTriggerHit = ['entry', 'ready_to_act'].includes(String(resolved.actionStateKey || '').toLowerCase())
-      || String(resolved.structuralState || '').toLowerCase() === 'entry';
+    const entryTriggerHit = independentEntryTriggerHit({
+      structure_state:structureState,
+      trend_state:trendState,
+      stabilisation_state:String(derivedStates.stabilisationState || '').toLowerCase(),
+      bounce_state:bounceState,
+      pullback_zone:pullbackZone,
+      current_price:currentPrice,
+      entry:planEntry,
+      plan_status:planStatusKey,
+      breaksLocalHigh:item && item.breaksLocalHigh === true,
+      reclaimsLevel:item && item.reclaimsLevel === true,
+      strongBullishContinuation:item && item.strongBullishContinuation === true
+    });
     const stopPrice = numericValueOrNull(item && item.plan && item.plan.stop);
     const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
     const planRealism = typeof deps.evaluatePlanRealism === 'function'
@@ -2098,6 +2140,50 @@
             && result.structure_eligibility === 'alive'
             && result.near_entry_gate_pass === true
             && result.final_verdict !== 'avoid';
+        }
+      },
+      {
+        id:'independent-trigger-can-promote-entry-without-circular-ready-state',
+        record:{
+          ticker:'SHOP',
+          watchlist_entry_exists:true,
+          reclaimsLevel:true,
+          derivedStates:{
+            structureState:'intact',
+            trendState:'intact',
+            stabilisationState:'clear',
+            bounceState:'confirmed',
+            volumeState:'normal',
+            pullbackZone:'near_20ma'
+          },
+          effectivePlan:{entry:100, stop:97, firstTarget:106},
+          displayedPlan:{
+            status:'valid',
+            entry:100,
+            stop:97,
+            target:106,
+            tradeability:'entry',
+            rewardRisk:{rrRatio:2.1},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'acceptable',
+            capitalFit:{capital_fit:'acceptable'}
+          },
+          marketData:{price:101, ma20:98, ma50:95, ma200:90},
+          resolvedContract:{
+            finalVerdict:'Near Entry',
+            structuralState:'near_entry',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Near Entry',
+            blockerReason:'Needs stronger confirmation',
+            reasonSummary:'Close to trigger.',
+            terminal:false,
+            baseVerdict:'near_entry'
+          }
+        },
+        assert(result){
+          return result.entry_gate_pass === true
+            && result.final_verdict === 'entry';
         }
       }
     ];
