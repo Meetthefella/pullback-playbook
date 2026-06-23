@@ -254,6 +254,10 @@
         expiryReason: '',
         history: []
       },
+      entryPromotionAudit: {
+        latest: null,
+        history: []
+      },
       meta: {
         createdAt,
         updatedAt: createdAt,
@@ -614,6 +618,60 @@
       reason: String(entry && entry.reason || ''),
       source: String(entry && entry.source || '')
     })).filter(entry => entry.stage || entry.status) : [];
+    merged.entryPromotionAudit = merged.entryPromotionAudit && typeof merged.entryPromotionAudit === 'object'
+      ? merged.entryPromotionAudit
+      : {};
+    merged.entryPromotionAudit.latest = merged.entryPromotionAudit.latest && typeof merged.entryPromotionAudit.latest === 'object'
+      ? merged.entryPromotionAudit.latest
+      : null;
+    merged.entryPromotionAudit.history = Array.isArray(merged.entryPromotionAudit.history)
+      ? merged.entryPromotionAudit.history
+        .filter(entry => entry && typeof entry === 'object')
+        .map(entry => ({
+          ticker: String(entry.ticker || merged.ticker || '').trim().toUpperCase(),
+          timestamp: String(entry.timestamp || ''),
+          source: String(entry.source || ''),
+          currentVerdict: String(entry.currentVerdict || ''),
+          visualBucket: String(entry.visualBucket || ''),
+          entryGatePass: entry.entryGatePass === true,
+          nearEntryGatePass: entry.nearEntryGatePass === true,
+          terminalBlockerExists: entry.terminalBlockerExists === true,
+          staleDataPreventedFreshPromotionPass: entry.staleDataPreventedFreshPromotionPass === true,
+          circularTriggerSuspected: entry.circularTriggerSuspected === true,
+          failedEntryChecks: Array.isArray(entry.failedEntryChecks)
+            ? entry.failedEntryChecks.filter(item => item && typeof item === 'object').map(item => ({
+              id: String(item.id || ''),
+              label: String(item.label || ''),
+              classification: String(item.classification || ''),
+              temporary: item.temporary !== false
+            }))
+            : [],
+          passedEntryChecks: Array.isArray(entry.passedEntryChecks)
+            ? entry.passedEntryChecks.filter(item => item && typeof item === 'object').map(item => ({
+              id: String(item.id || ''),
+              label: String(item.label || '')
+            }))
+            : [],
+          firstFailedEntryCheck: entry.firstFailedEntryCheck && typeof entry.firstFailedEntryCheck === 'object'
+            ? {
+              id: String(entry.firstFailedEntryCheck.id || ''),
+              label: String(entry.firstFailedEntryCheck.label || ''),
+              classification: String(entry.firstFailedEntryCheck.classification || ''),
+              temporary: entry.firstFailedEntryCheck.temporary !== false
+            }
+            : null,
+          triggerAudit: entry.triggerAudit && typeof entry.triggerAudit === 'object'
+            ? {
+              entryTriggerHit: entry.triggerAudit.entryTriggerHit === true,
+              source: String(entry.triggerAudit.source || ''),
+              dependedOnReadyToAct: entry.triggerAudit.dependedOnReadyToAct === true,
+              dependedOnEntryLikeState: entry.triggerAudit.dependedOnEntryLikeState === true,
+              independentTriggerSignalExists: entry.triggerAudit.independentTriggerSignalExists === true
+            }
+            : null
+        }))
+        .slice(0, 10)
+      : [];
     merged.meta.tags = Array.isArray(merged.meta.tags) ? merged.meta.tags.map(item => String(item || '')).filter(Boolean) : [];
     merged.meta.dataVersion = 2;
     merged.meta.updatedAt = String(merged.meta.updatedAt || merged.meta.createdAt || new Date().toISOString());

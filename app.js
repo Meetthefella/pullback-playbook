@@ -9376,6 +9376,19 @@ function runWatchlistLifecycleEvaluation(options = {}){
         const simplifiedState = typeof resolveSimplifiedStateForSurface === 'function'
           ? resolveSimplifiedStateForSurface(record, 'track', {source:'watchlist_lifecycle', reason:'lifecycle_guidance'})
           : null;
+        updateEntryPromotionAudit(record, {
+          source,
+          timestamp:new Date().toISOString(),
+          globalVerdict:settledGlobalVerdict,
+          derivedStates,
+          displayedPlan,
+          resolvedContract:simplifiedState && simplifiedState.debug && simplifiedState.debug.resolvedState
+            ? simplifiedState.debug.resolvedState
+            : null,
+          simplifiedState,
+          visualBucket:simplifiedState && simplifiedState.visualBucket,
+          staleDataPreventedFreshPromotionPass:false
+        });
         const nextStep = watchlistNextStateGuidance(record, snapshot, {
           derivedStates,
           displayedPlan,
@@ -9430,6 +9443,12 @@ function runWatchlistLifecycleEvaluation(options = {}){
             result:`${changeType}: ${snapshot.state}`
           });
         }
+      }else{
+        updateEntryPromotionAudit(record, {
+          source,
+          timestamp:new Date().toISOString(),
+          staleDataPreventedFreshPromotionPass:true
+        });
       }
       maybeExpireTickerRecord(record);
       const after = watchlistLifecycleStateSignature(record);
@@ -9801,6 +9820,12 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const auditTrail = Array.isArray(debug.auditTrail) ? debug.auditTrail : [];
   const warnings = Array.isArray(debug.warnings) ? debug.warnings : [];
   const holdTraceHistory = Array.isArray(debug.holdTraceHistory) ? debug.holdTraceHistory : [];
+  const entryPromotionAudit = item.entryPromotionAudit && typeof item.entryPromotionAudit === 'object'
+    ? item.entryPromotionAudit
+    : {};
+  const latestEntryAudit = entryPromotionAudit.latest && typeof entryPromotionAudit.latest === 'object'
+    ? entryPromotionAudit.latest
+    : null;
   const debugPlanUI = resolvePlanVisibility({
     state:globalVisual.finalVerdict || globalVisual.final_verdict,
     bounce_state:globalVerdict.bounce_state || (record && record.setup && record.setup.bounceState),
@@ -9825,7 +9850,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const safeViabilityBranchReason = staleViabilityBranchReason
     ? 'Low-priority watch - confirmation still required. (stale branch reason suppressed)'
     : String(resolverTrace.viabilityBranchReason || '(none)');
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Track Debug | visibleModel', [
+  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-block tiny"><button class="secondary compactbutton" type="button" onclick="exportEntryPromotionAuditJson()">Export Entry Audit JSON</button></div>${renderDebugSectionMarkup('Track Debug | visibleModel', [
     {label:'canonicalVerdict', value:visibleModel.canonicalVerdict || '(none)'},
     {label:'visibleBucket', value:visualBucketLabel(visibleModel.visibleBucket || 'monitor', visibleModel.canonicalVerdict || '')},
     {label:'tone', value:visibleModel.tone || '(none)'},
@@ -9939,6 +9964,11 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Alert Triggered This Cycle', value:debug.alertTriggeredThisCycle || 'false'},
     {label:'Legacy Scanner Verdict', value:String(item.scan.verdict || '').trim() || '(none)'},
     {label:'Resolved Scanner Verdict', value:String(item.scan.resolvedVerdict || '').trim() || '(none)'},
+    {label:'Entry Audit Snapshots', value:Array.isArray(entryPromotionAudit.history) ? String(entryPromotionAudit.history.length) : '0'},
+    {label:'Latest Entry Audit', value:latestEntryAudit && latestEntryAudit.timestamp ? `${latestEntryAudit.timestamp} | ${latestEntryAudit.currentVerdict || 'n/a'}` : '(none)'},
+    {label:'Why Not Entry', value:latestEntryAudit && Array.isArray(latestEntryAudit.whyNotEntry) && latestEntryAudit.whyNotEntry.length ? latestEntryAudit.whyNotEntry.join(' | ') : '(none)'},
+    {label:'Circular Trigger Suspected', value:latestEntryAudit && latestEntryAudit.circularTriggerSuspected === true ? 'true' : 'false'},
+    {label:'Stale Data Prevented Pass', value:latestEntryAudit && latestEntryAudit.staleDataPreventedFreshPromotionPass === true ? 'true' : 'false'},
     {label:'Base Resolver Verdict', value:resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || 'n/a'},
     {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'},
     {label:'Control', value:qualityAdjustments.controlQuality || 'n/a'},
@@ -16893,9 +16923,210 @@ function evaluateEntryTrigger(record, options = {}){
     hostileMarket,
     extendedFromEntry,
     clearlyMissed,
+    breakAboveTrigger,
+    strongReversal,
+    reclaimFollowThrough,
     bouncePriceabilityGuardApplied:bounceGuard.bouncePriceabilityGuardApplied,
     bouncePriceabilityGuardReason:bounceGuard.bouncePriceabilityGuardReason
   };
+}
+
+function entryPromotionAuditCheckDefinitions(){
+  return [
+    {id:'structure_ok', label:'Structure intact/strong', classification:'structural', temporary:false, mode:'positive'},
+    {id:'bounce_ok', label:'Bounce confirmed and priceable', classification:'temporary', temporary:true, mode:'positive'},
+    {id:'pullback_ok', label:'Pullback near 20MA/50MA', classification:'structural', temporary:false, mode:'positive'},
+    {id:'market_ok', label:'Market supportive', classification:'market', temporary:true, mode:'positive'},
+    {id:'volume_ok', label:'Volume at least normal', classification:'volume', temporary:true, mode:'positive'},
+    {id:'plan_visible', label:'Actionable plan visible', classification:'pricing', temporary:true, mode:'positive'},
+    {id:'has_entry', label:'Entry price defined', classification:'pricing', temporary:true, mode:'positive'},
+    {id:'has_stop', label:'Stop price defined', classification:'pricing', temporary:true, mode:'positive'},
+    {id:'plan_ok', label:'Plan valid and unblocked', classification:'pricing', temporary:true, mode:'positive'},
+    {id:'risk_width_ok', label:'Risk width usable', classification:'risk', temporary:true, mode:'positive'},
+    {id:'pullback_valid', label:'Pullback context valid', classification:'structural', temporary:false, mode:'positive'},
+    {id:'rr_ok', label:'R:R at least 2.0', classification:'risk', temporary:true, mode:'positive'},
+    {id:'entry_trigger_hit', label:'Entry trigger hit', classification:'trigger', temporary:true, mode:'positive'},
+    {id:'tradeability_ok', label:'Tradeability priceable', classification:'pricing', temporary:true, mode:'positive'},
+    {id:'capital_ok', label:'Capital fit acceptable', classification:'risk', temporary:true, mode:'positive'},
+    {id:'has_clear_invalidation_level', label:'Clear invalidation level', classification:'pricing', temporary:true, mode:'positive'},
+    {id:'has_priceable_plan', label:'Priceable plan available', classification:'pricing', temporary:true, mode:'positive'},
+    {id:'reclaim_confirmed_independent', label:'Independent reclaim confirmation', classification:'trigger', temporary:true, mode:'positive'},
+    {id:'unpriceable_block', label:'No unpriceable block', classification:'pricing', temporary:true, mode:'negative'},
+    {id:'below_50_without_reclaim', label:'Not below 50MA without reclaim', classification:'structural', temporary:false, mode:'negative'}
+  ];
+}
+
+function entryPromotionAuditEligible(snapshot = {}){
+  const verdict = normalizeGlobalVerdictKey(snapshot.currentVerdict || snapshot.final_verdict || '');
+  return verdict === 'near_entry'
+    || verdict === 'entry'
+    || snapshot.nearEntryGatePass === true
+    || snapshot.entryGatePass === true
+    || snapshot.circularTriggerSuspected === true;
+}
+
+function entryPromotionAuditCheckResult(definition, checks = {}){
+  if(!definition || !definition.id) return null;
+  const rawValue = checks[definition.id];
+  const present = typeof rawValue === 'boolean';
+  const passed = definition.mode === 'negative'
+    ? rawValue === false
+    : rawValue === true;
+  return {
+    id:definition.id,
+    label:definition.label,
+    classification:definition.classification,
+    temporary:definition.temporary !== false,
+    present,
+    passed
+  };
+}
+
+function entryPromotionAuditTriggerSource(record, globalVerdict = {}, resolvedContract = {}, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const trigger = options.trigger || evaluateEntryTrigger(item, {derivedStates, displayedPlan});
+  const dependedOnReadyToAct = ['entry','ready_to_act'].includes(String(resolvedContract.actionStateKey || '').trim().toLowerCase());
+  const dependedOnEntryLikeState = String(resolvedContract.structuralState || '').trim().toLowerCase() === 'entry';
+  const independentSignals = {
+    breakAboveTrigger:trigger.breakAboveTrigger === true,
+    strongReversal:trigger.strongReversal === true,
+    reclaimFollowThrough:trigger.reclaimFollowThrough === true,
+    entryTriggerReady:trigger.entryTriggerReady === true,
+    nearReady:trigger.nearReady === true,
+    currentPriceAtOrAboveEntry:(() => {
+      const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+      const entry = numericOrNull(displayedPlan && displayedPlan.entry);
+      return Number.isFinite(currentPrice) && Number.isFinite(entry) && currentPrice >= entry;
+    })(),
+    recordReclaimsLevel:item.reclaimsLevel === true,
+    recordStrongBullishContinuation:item.strongBullishContinuation === true,
+    recordBreaksLocalHigh:item.breaksLocalHigh === true
+  };
+  const independentTriggerSignalExists = Object.values(independentSignals).some(value => value === true);
+  const resolverDerived = globalVerdict && globalVerdict.entry_gate_checks && globalVerdict.entry_gate_checks.entry_trigger_hit === true;
+  const source = resolverDerived
+    ? (dependedOnReadyToAct || dependedOnEntryLikeState ? 'resolver_state_derived' : 'resolver_gate_pass')
+    : (independentTriggerSignalExists ? 'independent_signal' : 'not_hit');
+  return {
+    entryTriggerHit:globalVerdict && globalVerdict.entry_gate_checks && globalVerdict.entry_gate_checks.entry_trigger_hit === true,
+    source,
+    dependedOnReadyToAct,
+    dependedOnEntryLikeState,
+    independentSignals,
+    independentTriggerSignalExists,
+    circularTriggerSuspected:!independentTriggerSignalExists && (dependedOnReadyToAct || dependedOnEntryLikeState)
+  };
+}
+
+function buildEntryPromotionAuditSnapshot(record, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : resolveGlobalVerdict(item);
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const resolvedContract = options.resolvedContract && typeof options.resolvedContract === 'object'
+    ? options.resolvedContract
+    : resolveFinalStateContract(item, {
+      finalVerdict:globalVerdictLabel(globalVerdict.final_verdict || ''),
+      derivedStates,
+      displayedPlan
+    });
+  const visualBucket = normalizeVisualBucketForPairing(
+    options.visualBucket
+    || options.presentationBucket
+    || (options.simplifiedState && options.simplifiedState.visualBucket)
+    || ''
+  ) || normalizeVisualBucketForPairing(resolveTrackCardVisibleModel(item, options.simplifiedState || {}).visibleBucket || 'monitor');
+  const entryChecks = globalVerdict.entry_gate_checks && typeof globalVerdict.entry_gate_checks === 'object'
+    ? globalVerdict.entry_gate_checks
+    : {};
+  const triggerAudit = entryPromotionAuditTriggerSource(item, globalVerdict, resolvedContract, {
+    derivedStates,
+    displayedPlan,
+    trigger:options.trigger
+  });
+  const checkResults = entryPromotionAuditCheckDefinitions()
+    .map(definition => entryPromotionAuditCheckResult(definition, entryChecks))
+    .filter(Boolean);
+  const passedEntryChecks = checkResults.filter(check => check.passed === true);
+  const failedEntryChecks = checkResults.filter(check => check.present && check.passed === false);
+  const deadCheck = options.deadCheck || isTerminalDeadSetup(item, {derivedStates, displayedPlan});
+  const terminalBlockerExists = deadCheck.dead === true
+    || ['avoid','dead'].includes(normalizeGlobalVerdictKey(globalVerdict.final_verdict || ''))
+    || globalVerdict.terminal_avoid_applied === true
+    || item.terminal_avoid_applied === true;
+  const staleDataPreventedFreshPromotionPass = options.staleDataPreventedFreshPromotionPass === true;
+  const source = String(options.source || 'unknown').trim().toLowerCase() || 'unknown';
+  const snapshot = {
+    ticker:normalizeTicker(item.ticker || ''),
+    timestamp:String(options.timestamp || new Date().toISOString()),
+    source,
+    currentVerdict:normalizeGlobalVerdictKey(globalVerdict.final_verdict || 'watch'),
+    visualBucket,
+    entryGatePass:globalVerdict.entry_gate_pass === true,
+    nearEntryGatePass:globalVerdict.near_entry_gate_pass === true,
+    passedEntryChecks,
+    failedEntryChecks,
+    firstFailedEntryCheck:failedEntryChecks[0] || null,
+    allFailedEntryChecks:failedEntryChecks,
+    terminalBlockerExists,
+    staleDataPreventedFreshPromotionPass,
+    triggerAudit,
+    circularTriggerSuspected:triggerAudit.circularTriggerSuspected === true,
+    currentActionState:String(resolvedContract.actionStateKey || '').trim().toLowerCase(),
+    currentStructuralState:String(resolvedContract.structuralState || '').trim().toLowerCase(),
+    whyNotEntry:failedEntryChecks.slice(0, 3).map(check => check.label),
+    nextRequiredAction:failedEntryChecks.length
+      ? failedEntryChecks[0].label
+      : (globalVerdict.entry_gate_pass === true ? 'Entry gate passed.' : 'Await next confirmation pass.')
+  };
+  return snapshot;
+}
+
+function updateEntryPromotionAudit(record, options = {}){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item) return null;
+  const snapshot = buildEntryPromotionAuditSnapshot(item, options);
+  if(!entryPromotionAuditEligible(snapshot)) return null;
+  item.entryPromotionAudit = item.entryPromotionAudit && typeof item.entryPromotionAudit === 'object'
+    ? item.entryPromotionAudit
+    : {latest:null, history:[]};
+  const history = Array.isArray(item.entryPromotionAudit.history) ? item.entryPromotionAudit.history : [];
+  item.entryPromotionAudit.latest = snapshot;
+  item.entryPromotionAudit.history = [snapshot, ...history]
+    .filter(entry => entry && typeof entry === 'object')
+    .slice(0, 10);
+  return snapshot;
+}
+
+function entryPromotionAuditExportRecords(){
+  return allTickerRecords()
+    .map(record => normalizeTickerRecord(record))
+    .filter(record => record && record.entryPromotionAudit && Array.isArray(record.entryPromotionAudit.history) && record.entryPromotionAudit.history.length)
+    .map(record => ({
+      ticker:normalizeTicker(record.ticker || ''),
+      latest:record.entryPromotionAudit.latest || null,
+      history:Array.isArray(record.entryPromotionAudit.history) ? record.entryPromotionAudit.history.slice(0, 10) : []
+    }));
+}
+
+function exportEntryPromotionAuditJson(){
+  const payload = {
+    exportedAt:new Date().toISOString(),
+    records:entryPromotionAuditExportRecords()
+  };
+  return downloadJsonFile(`pullback-playbook-entry-promotion-audit-${todayIsoDate()}.json`, payload);
 }
 
 // validateCurrentPlan is defined once later in this file as the canonical runtime path.
@@ -19397,6 +19628,9 @@ function buildTrackLongPressContract(options = {}){
     || ((typeof savedReviewSummaryForRecord === 'function') ? savedReviewSummaryForRecord(record) : '')
     || ''
   ).trim();
+  const latestEntryAudit = record && record.entryPromotionAudit && record.entryPromotionAudit.latest && typeof record.entryPromotionAudit.latest === 'object'
+    ? record.entryPromotionAudit.latest
+    : null;
   const traceSources = globalVerdict.cumulativePenaltyTrace && Array.isArray(globalVerdict.cumulativePenaltyTrace.sources)
     ? globalVerdict.cumulativePenaltyTrace.sources
     : [];
@@ -19487,7 +19721,9 @@ function buildTrackLongPressContract(options = {}){
     upgrade = '',
     downgrade = '',
     signals = [],
-    fallbackSummary = ''
+    fallbackSummary = '',
+    whyNotEntry = '',
+    nextRequiredAction = ''
   } = {}) => ({
     show,
     ready,
@@ -19499,6 +19735,8 @@ function buildTrackLongPressContract(options = {}){
     stillMissing:String(stillMissing || '').trim(),
     upgrade:String(upgrade || '').trim(),
     downgrade:String(downgrade || '').trim(),
+    whyNotEntry:String(whyNotEntry || '').trim(),
+    nextRequiredAction:String(nextRequiredAction || '').trim(),
     signals:uniqueSignals(signals),
     fallbackSummary:String(fallbackSummary || '').trim(),
     diagnostics:{
@@ -19546,6 +19784,8 @@ function buildTrackLongPressContract(options = {}){
       stillMissing:'buyers have not confirmed that the 50MA is holding',
       upgrade:'buyers defend the 50MA and confirm a bounce',
       downgrade:'loss of 50MA support would push this toward Avoid',
+      whyNotEntry:'Entry is blocked until buyers confirm the 50MA support test.',
+      nextRequiredAction:'Watch for a confirmed bounce off the 50MA.',
       signals:['Price is near the 50MA.', 'Structure is still alive.', 'Bounce is not confirmed yet.']
     });
   }
@@ -19558,6 +19798,8 @@ function buildTrackLongPressContract(options = {}){
       stillMissing:'structure must repair before the setup can be reviewed constructively',
       upgrade:'rebuild from a clean base and reclaim support before reviewing again',
       downgrade:'continued structural failure keeps this in Avoid',
+      whyNotEntry:'Entry is blocked by a terminal technical failure.',
+      nextRequiredAction:'Do not plan an entry until the structure rebuilds.',
       signals:base.secondary
     });
   }
@@ -19576,10 +19818,26 @@ function buildTrackLongPressContract(options = {}){
       stillMissing:'nothing material is missing while the trigger remains valid',
       upgrade:'keep the trigger valid on close and execute only within the saved plan',
       downgrade:asSentence(cautionReason || 'failed support, a lost trigger, or plan invalidation would move it back to Monitor'),
+      whyNotEntry:'Entry gate is already passing.',
+      nextRequiredAction:'Execute only while the saved trigger and risk plan remain valid.',
       signals:[locationWhy, bounceWhy, planWhy]
     });
   }
   if(verdict === 'near_entry'){
+    const conciseFailures = latestEntryAudit && Array.isArray(latestEntryAudit.failedEntryChecks)
+      ? latestEntryAudit.failedEntryChecks.slice(0, 3).map(check => {
+        const label = String(check && check.label || '').trim();
+        const classification = String(check && check.classification || '').trim();
+        if(!label) return '';
+        return classification ? `${label} (${classification})` : label;
+      }).filter(Boolean)
+      : [];
+    const firstFailure = latestEntryAudit && latestEntryAudit.firstFailedEntryCheck && latestEntryAudit.firstFailedEntryCheck.label
+      ? String(latestEntryAudit.firstFailedEntryCheck.label).trim()
+      : '';
+    const nextRequiredAction = latestEntryAudit && latestEntryAudit.nextRequiredAction
+      ? String(latestEntryAudit.nextRequiredAction).trim()
+      : '';
     return toContract({
       source:'ticker_specific',
       why:`This setup is Near Entry because ${joinReasonParts([
@@ -19591,6 +19849,10 @@ function buildTrackLongPressContract(options = {}){
       stillMissing:asSentence(base.pattern_explanation || base.definitionLine || 'entry confirmation has not passed yet').toLowerCase(),
       upgrade:asSentence(base.footer || base.triggerLine || 'wait for stronger confirmation before considering an entry'),
       downgrade:asSentence(primaryBlocker || cautionReason || 'failed support or weaker structure would drop it back to Monitor'),
+      whyNotEntry:conciseFailures.length
+        ? `${conciseFailures.join(' | ')}.`
+        : (firstFailure ? `${firstFailure}.` : 'Entry confirmation has not passed yet.'),
+      nextRequiredAction:nextRequiredAction || 'Wait for the missing Entry gate to confirm.',
       signals:[locationWhy, bounceWhy, planWhy]
     });
   }
@@ -19605,6 +19867,12 @@ function buildTrackLongPressContract(options = {}){
     stillMissing:asSentence(base.pattern_explanation || base.definitionLine || 'the setup still needs clearer confirmation').toLowerCase(),
     upgrade:asSentence(base.footer || base.triggerLine || 'wait for a cleaner pullback and stronger confirmation'),
     downgrade:asSentence(primaryBlocker || cautionReason || 'failed support or weaker structure would drag it back'),
+    whyNotEntry:latestEntryAudit && Array.isArray(latestEntryAudit.failedEntryChecks) && latestEntryAudit.failedEntryChecks.length
+      ? `${latestEntryAudit.failedEntryChecks.slice(0, 2).map(check => String(check && check.label || '').trim()).filter(Boolean).join(' | ')}.`
+      : '',
+    nextRequiredAction:latestEntryAudit && latestEntryAudit.nextRequiredAction
+      ? `${String(latestEntryAudit.nextRequiredAction).trim()}.`
+      : '',
     signals:[locationWhy, bounceWhy, planWhy]
   });
 }
@@ -19631,6 +19899,8 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
   const stillMissingLine = String(details.stillMissing || details.definitionLine || '').trim();
   const upgradeLine = String(details.upgrade || details.triggerLine || '').trim();
   const downgradeLine = String(details.downgrade || details.futureStateLine || '').trim();
+  const whyNotEntryLine = String(details.whyNotEntry || '').trim();
+  const nextRequiredActionLine = String(details.nextRequiredAction || '').trim();
   const fallbackFooter = String(details.fallbackSummary || details.footer || 'When these conditions improve, the app can price entry, stop, and risk.').trim();
   if(options.mode === 'card'){
     return `<div class="entry-conditions-panel entry-conditions-panel--card no-card-click" id="${escapeHtml(panelId)}" hidden>
@@ -19638,8 +19908,10 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
       <div class="entry-conditions-pattern"><strong>Why:</strong> ${escapeHtml(whyLine || 'No clean setup - price action is too messy')}</div>
       ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Signals:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
+      ${whyNotEntryLine ? `<div class="entry-conditions-footer"><strong>Why not Entry:</strong> ${escapeHtml(whyNotEntryLine)}</div>` : ''}
       ${stillMissingLine ? `<div class="entry-conditions-footer"><strong>Still Missing:</strong> ${escapeHtml(stillMissingLine)}</div>` : ''}
       ${upgradeLine ? `<div class="entry-conditions-footer"><strong>Upgrade:</strong> ${escapeHtml(upgradeLine)}</div>` : ''}
+      ${nextRequiredActionLine ? `<div class="entry-conditions-footer"><strong>Next Action:</strong> ${escapeHtml(nextRequiredActionLine)}</div>` : ''}
       ${downgradeLine ? `<div class="entry-conditions-footer"><strong>Downgrade:</strong> ${escapeHtml(downgradeLine)}</div>` : (!upgradeLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
     </div>`;
   }
@@ -19650,8 +19922,10 @@ function renderEntryConditionsHoldHelper(summary, scope, ticker, options = {}){
       <div class="entry-conditions-pattern"><strong>Why:</strong> ${escapeHtml(whyLine || 'No clean setup - price action is too messy')}</div>
       ${secondaryMarkup ? `<div class="entry-conditions-footer"><strong>Signals:</strong></div>` : ''}
       ${secondaryMarkup ? `<ul class="entry-conditions-list">${secondaryMarkup}</ul>` : ''}
+      ${whyNotEntryLine ? `<div class="entry-conditions-footer"><strong>Why not Entry:</strong> ${escapeHtml(whyNotEntryLine)}</div>` : ''}
       ${stillMissingLine ? `<div class="entry-conditions-footer"><strong>Still Missing:</strong> ${escapeHtml(stillMissingLine)}</div>` : ''}
       ${upgradeLine ? `<div class="entry-conditions-footer"><strong>Upgrade:</strong> ${escapeHtml(upgradeLine)}</div>` : ''}
+      ${nextRequiredActionLine ? `<div class="entry-conditions-footer"><strong>Next Action:</strong> ${escapeHtml(nextRequiredActionLine)}</div>` : ''}
       ${downgradeLine ? `<div class="entry-conditions-footer"><strong>Downgrade:</strong> ${escapeHtml(downgradeLine)}</div>` : (!upgradeLine ? `<div class="entry-conditions-footer">${escapeHtml(fallbackFooter)}</div>` : '')}
     </div>
   </div>`;

@@ -1111,6 +1111,17 @@ function runEntryConditionsSummaryAssertions(){
   }
 
   const nearEntrySpecific = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
+    record:{
+      entryPromotionAudit:{
+        latest:{
+          failedEntryChecks:[
+            {id:'entry_trigger_hit', label:'Entry trigger hit', classification:'trigger'},
+            {id:'bounce_ok', label:'Bounce confirmed and priceable', classification:'temporary'}
+          ],
+          nextRequiredAction:'Entry trigger hit'
+        }
+      }
+    },
     ticker:'NVDA',
     finalVerdict:'near_entry',
     presentationState:'near_entry',
@@ -1127,6 +1138,9 @@ function runEntryConditionsSummaryAssertions(){
   const nearEntryText = [nearEntrySpecific.primary, nearEntrySpecific.definitionLine, nearEntrySpecific.triggerLine, nearEntrySpecific.futureStateLine].join(' ');
   if(!/Near Entry/i.test(nearEntrySpecific.header || '') || !/structure is strong/i.test(nearEntryText) || !/20MA/i.test(nearEntryText) || !/2\.0R/i.test(nearEntryText) || !/confirmation/i.test(nearEntryText)){
     throw new Error('Near Entry Track long-press must explain the constructive setup, valid plan, and missing confirmation.');
+  }
+  if(!/Entry trigger hit/i.test(String(nearEntrySpecific.whyNotEntry || ''))){
+    throw new Error('Near Entry Track long-press must expose the latest failed Entry checks.');
   }
 
   const entryReady = summarySandbox.buildTrackTickerSpecificEntryConditionsSummary({
@@ -4590,6 +4604,31 @@ function runCumulativePenaltyDisplayAssertions(){
     reviewConsolidationPresentationCopy(){
       return {summary:'', blocker:'', nextAction:''};
     },
+    normalizeVisualBucketForPairing(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(['entry','near_entry','monitor','diminishing','avoid'].includes(safe)) return safe;
+      return 'monitor';
+    },
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    todayIsoDate(){
+      return '2026-06-23';
+    },
+    downloadJsonFile(filename, data){
+      sandbox.__lastDownload = {filename, data};
+      return true;
+    },
+    allTickerRecords(){
+      return Array.isArray(sandbox.__allTickerRecords) ? sandbox.__allTickerRecords : [];
+    },
+    isTerminalDeadSetup(record, options = {}){
+      const derived = options.derivedStates || (record && record.derivedStates) || {};
+      return {dead:String(derived.structureState || '').trim().toLowerCase() === 'broken'};
+    },
     sameVisibleCopy(a, b){
       return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
     }
@@ -4603,6 +4642,14 @@ function runCumulativePenaltyDisplayAssertions(){
     'markPenaltyTraceSkipped',
     'penaltyReasonLabelFromSource',
     'evaluateSetupQualityAdjustments',
+    'entryPromotionAuditCheckDefinitions',
+    'entryPromotionAuditEligible',
+    'entryPromotionAuditCheckResult',
+    'entryPromotionAuditTriggerSource',
+    'buildEntryPromotionAuditSnapshot',
+    'updateEntryPromotionAudit',
+    'entryPromotionAuditExportRecords',
+    'exportEntryPromotionAuditJson',
     'cumulativePenaltyTraceForRecord',
     'warningStateFromInputs',
     'deriveDisplaySetupScore',
@@ -4701,6 +4748,252 @@ function runCumulativePenaltyDisplayAssertions(){
   });
   if(terminalDisplayScore > 3){
     throw new Error('Terminal blockers must still keep the display score in the avoid/dead range.');
+  }
+
+  const nearEntryAuditRecord = {
+    ticker:'NVDA',
+    marketData:{price:100, currency:'USD'},
+    meta:{marketStatus:'supportive'},
+    plan:{entry:102, stop:98, firstTarget:110},
+    entryPromotionAudit:{history:[]},
+    derivedStates:{
+      structureState:'strong',
+      trendState:'intact',
+      bounceState:'improving',
+      stabilisationState:'early',
+      volumeState:'normal',
+      pullbackZone:'near_20ma'
+    }
+  };
+  const nearEntryAudit = sandbox.buildEntryPromotionAuditSnapshot(nearEntryAuditRecord, {
+    source:'review_save',
+    timestamp:'2026-06-23T12:00:00.000Z',
+    globalVerdict:{
+      final_verdict:'near_entry',
+      entry_gate_pass:false,
+      near_entry_gate_pass:true,
+      entry_gate_checks:{
+        structure_ok:true,
+        bounce_ok:false,
+        pullback_ok:true,
+        market_ok:true,
+        volume_ok:true,
+        plan_visible:true,
+        has_entry:true,
+        has_stop:true,
+        plan_ok:true,
+        risk_width_ok:true,
+        pullback_valid:true,
+        rr_ok:true,
+        entry_trigger_hit:false,
+        tradeability_ok:true,
+        capital_ok:true,
+        has_clear_invalidation_level:true,
+        has_priceable_plan:true,
+        reclaim_confirmed_independent:false,
+        unpriceable_block:false,
+        below_50_without_reclaim:false
+      }
+    },
+    derivedStates:nearEntryAuditRecord.derivedStates,
+    displayedPlan:{
+      entry:102,
+      stop:98,
+      target:110,
+      status:'valid',
+      rewardRisk:{rrRatio:2}
+    },
+    resolvedContract:{
+      actionStateKey:'wait_for_confirmation',
+      structuralState:'near_entry'
+    },
+    visualBucket:'near_entry',
+    trigger:{
+      breakAboveTrigger:false,
+      strongReversal:false,
+      reclaimFollowThrough:false,
+      entryTriggerReady:false,
+      nearReady:true
+    }
+  });
+  if(nearEntryAudit.currentVerdict !== 'near_entry' || nearEntryAudit.failedEntryChecks.length < 1 || nearEntryAudit.firstFailedEntryCheck.id !== 'bounce_ok'){
+    throw new Error('Near Entry ticker audit must record the failed Entry checks in order.');
+  }
+
+  const circularAudit = sandbox.buildEntryPromotionAuditSnapshot(nearEntryAuditRecord, {
+    source:'watchlist_lifecycle',
+    timestamp:'2026-06-23T12:05:00.000Z',
+    globalVerdict:{
+      final_verdict:'near_entry',
+      entry_gate_pass:false,
+      near_entry_gate_pass:true,
+      entry_gate_checks:{
+        structure_ok:true,
+        bounce_ok:true,
+        pullback_ok:true,
+        market_ok:true,
+        volume_ok:true,
+        plan_visible:true,
+        has_entry:true,
+        has_stop:true,
+        plan_ok:true,
+        risk_width_ok:true,
+        pullback_valid:true,
+        rr_ok:true,
+        entry_trigger_hit:true,
+        tradeability_ok:true,
+        capital_ok:true,
+        has_clear_invalidation_level:true,
+        has_priceable_plan:true,
+        reclaim_confirmed_independent:true,
+        unpriceable_block:false,
+        below_50_without_reclaim:false
+      }
+    },
+    derivedStates:nearEntryAuditRecord.derivedStates,
+    displayedPlan:{
+      entry:102,
+      stop:98,
+      target:110,
+      status:'valid',
+      rewardRisk:{rrRatio:2}
+    },
+    resolvedContract:{
+      actionStateKey:'ready_to_act',
+      structuralState:'entry'
+    },
+    visualBucket:'near_entry',
+    trigger:{
+      breakAboveTrigger:false,
+      strongReversal:false,
+      reclaimFollowThrough:false,
+      entryTriggerReady:false,
+      nearReady:false
+    }
+  });
+  if(circularAudit.triggerAudit.source !== 'resolver_state_derived' || circularAudit.circularTriggerSuspected !== true){
+    throw new Error('Circular trigger suspicion must be flagged when entry_trigger_hit depends on Entry-like resolver state.');
+  }
+
+  const staleAudit = sandbox.buildEntryPromotionAuditSnapshot(nearEntryAuditRecord, {
+    source:'system',
+    timestamp:'2026-06-23T12:10:00.000Z',
+    globalVerdict:{
+      final_verdict:'near_entry',
+      entry_gate_pass:false,
+      near_entry_gate_pass:true,
+      entry_gate_checks:{
+        structure_ok:true,
+        bounce_ok:false,
+        pullback_ok:true,
+        market_ok:true,
+        volume_ok:true,
+        plan_visible:true,
+        has_entry:true,
+        has_stop:true,
+        plan_ok:true,
+        risk_width_ok:true,
+        pullback_valid:true,
+        rr_ok:true,
+        entry_trigger_hit:false,
+        tradeability_ok:true,
+        capital_ok:true,
+        has_clear_invalidation_level:true,
+        has_priceable_plan:true,
+        reclaim_confirmed_independent:false,
+        unpriceable_block:false,
+        below_50_without_reclaim:false
+      }
+    },
+    derivedStates:nearEntryAuditRecord.derivedStates,
+    displayedPlan:{
+      entry:102,
+      stop:98,
+      target:110,
+      status:'valid',
+      rewardRisk:{rrRatio:2}
+    },
+    resolvedContract:{
+      actionStateKey:'wait_for_confirmation',
+      structuralState:'near_entry'
+    },
+    visualBucket:'near_entry',
+    staleDataPreventedFreshPromotionPass:true,
+    trigger:{
+      breakAboveTrigger:false,
+      strongReversal:false,
+      reclaimFollowThrough:false,
+      entryTriggerReady:false,
+      nearReady:true
+    }
+  });
+  if(staleAudit.staleDataPreventedFreshPromotionPass !== true){
+    throw new Error('Entry audit must flag when stale data prevented a fresh promotion pass.');
+  }
+
+  const historyRecord = {
+    ticker:'CRM',
+    entryPromotionAudit:{history:[]}
+  };
+  for(let index = 0; index < 12; index += 1){
+    sandbox.updateEntryPromotionAudit(historyRecord, {
+      source:'review_save',
+      timestamp:`2026-06-23T12:${String(index).padStart(2, '0')}:00.000Z`,
+      globalVerdict:{
+        final_verdict:'near_entry',
+        entry_gate_pass:false,
+        near_entry_gate_pass:true,
+        entry_gate_checks:{
+          structure_ok:true,
+          bounce_ok:false,
+          pullback_ok:true,
+          market_ok:true,
+          volume_ok:true,
+          plan_visible:true,
+          has_entry:true,
+          has_stop:true,
+          plan_ok:true,
+          risk_width_ok:true,
+          pullback_valid:true,
+          rr_ok:true,
+          entry_trigger_hit:false,
+          tradeability_ok:true,
+          capital_ok:true,
+          has_clear_invalidation_level:true,
+          has_priceable_plan:true,
+          reclaim_confirmed_independent:false,
+          unpriceable_block:false,
+          below_50_without_reclaim:false
+        }
+      },
+      derivedStates:nearEntryAuditRecord.derivedStates,
+      displayedPlan:{
+        entry:102,
+        stop:98,
+        target:110,
+        status:'valid',
+        rewardRisk:{rrRatio:2}
+      },
+      resolvedContract:{
+        actionStateKey:'wait_for_confirmation',
+        structuralState:'near_entry'
+      },
+      visualBucket:'near_entry',
+      trigger:{
+        breakAboveTrigger:false,
+        strongReversal:false,
+        reclaimFollowThrough:false,
+        entryTriggerReady:false,
+        nearReady:true
+      }
+    });
+  }
+  if(!historyRecord.entryPromotionAudit || historyRecord.entryPromotionAudit.history.length !== 10){
+    throw new Error('Entry promotion audit history must keep the latest 10 snapshots.');
+  }
+  sandbox.__allTickerRecords = [historyRecord];
+  if(sandbox.exportEntryPromotionAuditJson() !== true || !sandbox.__lastDownload || !Array.isArray(sandbox.__lastDownload.data.records) || sandbox.__lastDownload.data.records.length !== 1){
+    throw new Error('Entry promotion audit export must emit JSON for audited tickers.');
   }
 
   const accepted50Record = {
