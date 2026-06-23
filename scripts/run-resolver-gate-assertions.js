@@ -639,6 +639,7 @@ function runTesterSetupPersistenceFallbackAssertions(){
       listName:'Focus',
       universeMode:'tradingview_only',
       paperTradeApiKey:'tester-local-key',
+      paperTradeApiSecret:'tester-local-secret',
       paperTradeTesterSetupCompletedAt:'2026-06-23T12:34:56.000Z',
       tickers:['AAPL'],
       recentTickers:['AAPL'],
@@ -695,6 +696,8 @@ function runTesterSetupPersistenceFallbackAssertions(){
     'mergePersistedStateLayers',
     'persistState',
     'storedPaperTradeApiKey',
+    'storedPaperTradeApiSecret',
+    'storedPaperTradeCredentialsReady',
     'paperTradeTesterSetupComplete',
     'testerSetupHealthModel',
     'completeTesterSetup'
@@ -735,22 +738,23 @@ function runTesterSetupPersistenceFallbackAssertions(){
     throw new Error('Tester setup should remain completed when the local key exists and the gateway is ready.');
   }
   persistSandbox.state.paperTradeApiKey = '';
+  persistSandbox.state.paperTradeApiSecret = '';
   if(persistSandbox.paperTradeTesterSetupComplete() !== false){
-    throw new Error('Deleting the local API key must make the shared tester setup completion predicate false.');
+    throw new Error('Deleting the local API credentials must make the shared tester setup completion predicate false.');
   }
   const resetModel = persistSandbox.testerSetupHealthModel();
-  if(resetModel.complete !== false || !/local paper key/i.test(String(resetModel.label || '') + String(resetModel.detail || ''))){
-    throw new Error('Deleting the local API key must reset visible tester setup status.');
+  if(resetModel.complete !== false || !/local paper credentials/i.test(String(resetModel.label || '') + String(resetModel.detail || ''))){
+    throw new Error('Deleting the local API credentials must reset visible tester setup status.');
   }
   persistSandbox.completeTesterSetup();
   if(persistSandbox.state.paperTradeTesterSetupCompletedAt !== '2026-06-23T12:34:56.000Z'){
-    throw new Error('completeTesterSetup must not overwrite completion when the local paper key is missing.');
+    throw new Error('completeTesterSetup must not overwrite completion when the local paper credentials are missing.');
   }
   if(persistSandbox.renderTesterSetupPanelCalls < 1){
-    throw new Error('completeTesterSetup must re-render tester setup state when the local paper key is missing.');
+    throw new Error('completeTesterSetup must re-render tester setup state when the local paper credentials are missing.');
   }
-  if(!persistSandbox.statusCalls.some(entry => /local Trading 212 paper API key/i.test(entry.message))){
-    throw new Error('completeTesterSetup must explain that a local paper API key is required.');
+  if(!persistSandbox.statusCalls.some(entry => /local Trading 212 paper API key and API secret/i.test(entry.message))){
+    throw new Error('completeTesterSetup must explain that local paper credentials are required.');
   }
   if(!/state\.paperTradeTesterSetupCompletedAt = String\(state\.paperTradeTesterSetupCompletedAt \|\| ''\);/.test(appSource)){
     throw new Error('loadState must continue to normalize paperTradeTesterSetupCompletedAt safely.');
@@ -764,6 +768,7 @@ function runTesterSetupUiGateAssertions(){
     console,
     state:{
       paperTradeApiKey:'',
+      paperTradeApiSecret:'',
       paperTradeTesterSetupCompletedAt:'',
       marketStatus:'S&P above 50 MA'
     },
@@ -787,6 +792,8 @@ function runTesterSetupUiGateAssertions(){
   vm.createContext(uiSandbox);
   [
     'storedPaperTradeApiKey',
+    'storedPaperTradeApiSecret',
+    'storedPaperTradeCredentialsReady',
     'paperTradeTesterSetupComplete',
     'testerSetupHealthModel',
     'renderTesterSetupPanel'
@@ -800,6 +807,7 @@ function runTesterSetupUiGateAssertions(){
   }
 
   uiSandbox.state.paperTradeApiKey = 'tester-local-key';
+  uiSandbox.state.paperTradeApiSecret = 'tester-local-secret';
   uiSandbox.renderTesterSetupPanel();
   if(uiSandbox.elements.testerSetupConfirmBtn.disabled !== false){
     throw new Error('Local key plus ready gateway must allow tester setup completion.');
@@ -943,6 +951,7 @@ function runTradeExecutionRoutingAssertions(){
   }
   if(!/Tester Onboarding/.test(indexSource)
     || !/id="paperTradeApiKey"/.test(indexSource)
+    || !/id="paperTradeApiSecret"/.test(indexSource)
     || !/stored only on this device/i.test(indexSource)
     || !/Paper-trading-only status: tester mode supports paper submissions only after this setup is confirmed/.test(indexSource)
     || !/Live-trading lockout: live execution is disabled in this build/.test(indexSource)

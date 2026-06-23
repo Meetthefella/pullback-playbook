@@ -2,7 +2,7 @@ const corsHeaders = {
   'Content-Type':'application/json',
   'Cache-Control':'no-store',
   'Access-Control-Allow-Origin':'*',
-  'Access-Control-Allow-Headers':'Content-Type, x-pp-auth, x-trading212-paper-api-key',
+  'Access-Control-Allow-Headers':'Content-Type, x-pp-auth, x-trading212-paper-api-key, x-trading212-paper-api-secret',
   'Access-Control-Allow-Methods':'POST, OPTIONS'
 };
 
@@ -58,7 +58,6 @@ function buildTrading212PaperRequest(body = {}){
       limitPrice:body.limitPrice || body.entry,
       stopLoss:body.stopLoss || body.stop,
       takeProfit:body.takeProfit || body.target,
-      side:body.side,
       clientOrderId:body.clientOrderId,
       note:body.note
     } : {});
@@ -67,18 +66,23 @@ function buildTrading212PaperRequest(body = {}){
   const limitPrice = numberOrNull(request.limitPrice);
   const stopLoss = numberOrNull(request.stopLoss);
   const takeProfit = numberOrNull(request.takeProfit);
-  const side = String(request.side || 'BUY').trim().toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
   const clientOrderId = String(request.clientOrderId || `pbp-${Date.now()}`);
   const note = String(request.note || '').trim();
-  return {request, symbol, quantity, limitPrice, stopLoss, takeProfit, side, clientOrderId, note};
+  const signedQuantity = Number.isFinite(quantity)
+    ? (String(request.side || '').trim().toUpperCase() === 'SELL'
+      ? -Math.abs(quantity)
+      : quantity)
+    : quantity;
+  return {request, symbol, quantity:signedQuantity, limitPrice, stopLoss, takeProfit, clientOrderId, note};
 }
 
 const TRADING212_PAPER_BASE_URL_ALLOWLIST = Object.freeze([
   'https://demo.trading212.com'
 ]);
 const TRADING212_PAPER_ORDER_PATH_ALLOWLIST = Object.freeze([
-  '/orders'
+  '/api/v0/equity/orders/limit'
 ]);
+const TRADING212_PAPER_READINESS_PATH = '/api/v0/equity/account/summary';
 
 function allowlistedTrading212PaperBaseUrl(env = process.env){
   const configured = String(env.T212_PAPER_BASE_URL || '').trim().replace(/\/$/, '');
@@ -98,6 +102,9 @@ function rejectClientCredentialOverrides(body = {}){
   if(credentials.apiKey != null){
     return jsonResponse(400, {code:'invalid_request', error:'Client credentials.apiKey is not allowed.'});
   }
+  if(credentials.apiSecret != null){
+    return jsonResponse(400, {code:'invalid_request', error:'Client credentials.apiSecret is not allowed.'});
+  }
   if(credentials.baseUrl != null){
     return jsonResponse(400, {code:'invalid_request', error:'Client credentials.baseUrl override is not allowed.'});
   }
@@ -115,22 +122,72 @@ function trading212PaperRuntimeConfig(event = {}, env = process.env){
     || env.T212_PAPER_API_KEY
     || ''
   ).trim();
+  const apiSecret = String(
+    headers['x-trading212-paper-api-secret']
+    || headers['X-TRADING212-PAPER-API-SECRET']
+    || env.T212_PAPER_API_SECRET
+    || ''
+  ).trim();
   const baseUrl = allowlistedTrading212PaperBaseUrl(env);
   const orderPath = allowlistedTrading212PaperOrderPath(env);
-  return {apiKey, baseUrl, orderPath};
+  return {apiKey, apiSecret, baseUrl, orderPath};
+}
+
+function trading212BasicAuthHeader(apiKey, apiSecret){
+  return `Basic ${Buffer.from(`${apiKey}:${apiSecret}`, 'utf8').toString('base64')}`;
+}
+
+async function probeTrading212PaperConnection(event = {}, env = process.env){
+  const {apiKey, apiSecret, baseUrl} = trading212PaperRuntimeConfig(event, env);
+  if(!apiKey || !apiSecret){
+    return {ok:false, statusCode:503, code:'paper_trade_not_configured', message:'Trading 212 paper trading needs a tester paper API key and API secret.'};
+  }
+  const readinessUrl = `${baseUrl.replace(/\/$/, '')}${TRADING212_PAPER_READINESS_PATH}`;
+  try{
+    const upstream = await fetch(readinessUrl, {
+      method:'GET',
+      headers:{
+        Authorization:trading212BasicAuthHeader(apiKey, apiSecret)
+      }
+    });
+    const data = await upstream.json().catch(() => ({}));
+    if(!upstream.ok){
+      return {
+        ok:false,
+        statusCode:upstream.status || 502,
+        code:String(data && data.code || (upstream.status === 401 ? 'paper_trade_auth_failed' : 'paper_trade_probe_failed')),
+        message:String(data && (data.error || data.message) || (upstream.status === 401 ? 'Trading 212 paper credentials were rejected.' : 'Trading 212 paper readiness probe failed.'))
+      };
+    }
+    return {
+      ok:true,
+      statusCode:200,
+      status:'ready',
+      message:'Trading 212 paper trading is ready.',
+      source:String(process.env.T212_PAPER_API_KEY || '').trim() ? 'server_or_local_ready' : 'local_key_ready',
+      raw:data
+    };
+  }catch(_error){
+    return {
+      ok:false,
+      statusCode:502,
+      code:'paper_trade_unreachable',
+      message:'Trading 212 paper service is currently unavailable.'
+    };
+  }
 }
 
 async function submitTrading212PaperOrder(body = {}, env = process.env, event = {}){
   const overrideFailure = rejectClientCredentialOverrides(body);
   if(overrideFailure) return overrideFailure;
-  const {symbol, quantity, limitPrice, stopLoss, takeProfit, side, clientOrderId, note} = buildTrading212PaperRequest(body);
+  const {symbol, quantity, limitPrice, stopLoss, takeProfit, clientOrderId, note} = buildTrading212PaperRequest(body);
   const mockRequested = body && body.mock === true;
   const envMock = String(env.T212_PAPER_MOCK || '').trim().toLowerCase() === 'true';
 
   if(!symbol){
     return jsonResponse(400, {code:'invalid_request', error:'Ticker is required.'});
   }
-  if(!Number.isFinite(quantity) || quantity <= 0){
+  if(!Number.isFinite(quantity) || quantity === 0){
     return jsonResponse(400, {code:'invalid_request', error:'Quantity is required.'});
   }
   if(!Number.isFinite(limitPrice) || limitPrice <= 0){
@@ -145,8 +202,8 @@ async function submitTrading212PaperOrder(body = {}, env = process.env, event = 
         status:'submitted',
         submittedAt:new Date().toISOString(),
         symbol,
-        side,
-        quantity:Math.floor(quantity),
+        side:quantity < 0 ? 'SELL' : 'BUY',
+        quantity:Math.trunc(quantity),
         price:limitPrice,
         stopLoss,
         takeProfit,
@@ -157,27 +214,22 @@ async function submitTrading212PaperOrder(body = {}, env = process.env, event = 
     });
   }
 
-  const {apiKey, baseUrl, orderPath} = trading212PaperRuntimeConfig(event, env);
+  const {apiKey, apiSecret, baseUrl, orderPath} = trading212PaperRuntimeConfig(event, env);
 
-  if(!apiKey){
+  if(!apiKey || !apiSecret){
     return jsonResponse(503, {
       code:'paper_trade_not_configured',
-      error:'Trading 212 paper trading needs a tester paper API key.'
+      error:'Trading 212 paper trading needs a tester paper API key and API secret.'
     });
   }
 
   const upstreamUrl = `${baseUrl.replace(/\/$/, '')}${orderPath.startsWith('/') ? orderPath : `/${orderPath}`}`;
   const upstreamBody = {
     instrument:symbol,
-    side,
-    quantity:Math.floor(quantity),
-    orderType:'LIMIT',
-    timeInForce:'DAY',
+    quantity:Number.isInteger(quantity) ? quantity : Number(quantity.toFixed(6)),
     limitPrice,
     stopLoss,
-    takeProfit,
-    clientOrderId,
-    note
+    takeProfit
   };
 
   try{
@@ -185,7 +237,7 @@ async function submitTrading212PaperOrder(body = {}, env = process.env, event = 
       method:'POST',
       headers:{
         'Content-Type':'application/json',
-        Authorization:`Bearer ${apiKey}`
+        Authorization:trading212BasicAuthHeader(apiKey, apiSecret)
       },
       body:JSON.stringify(upstreamBody)
     });
@@ -203,8 +255,8 @@ async function submitTrading212PaperOrder(body = {}, env = process.env, event = 
         status:String(data.status || 'submitted'),
         submittedAt:String(data.submittedAt || data.createdAt || new Date().toISOString()),
         symbol,
-        side,
-        quantity:Math.floor(quantity),
+        side:quantity < 0 ? 'SELL' : 'BUY',
+        quantity:Number.isInteger(quantity) ? quantity : Number(quantity.toFixed(6)),
         price:limitPrice,
         stopLoss,
         takeProfit,
@@ -245,19 +297,15 @@ async function handleTradeExecution(event){
     if(broker !== 'trading212'){
       return jsonResponse(400, {code:'unsupported_broker', error:`Unsupported broker: ${broker || 'unknown'}.`});
     }
-    const config = trading212PaperRuntimeConfig(event, process.env);
-    const configured = !!config.apiKey;
     const mockEnabled = String(process.env.T212_PAPER_MOCK || '').trim().toLowerCase() === 'true';
     if(mockEnabled){
       return jsonResponse(200, {ok:true, status:'mock_ready', message:'Trading 212 paper mock mode is enabled.'});
     }
-    if(configured){
-      const source = String(process.env.T212_PAPER_API_KEY || '').trim()
-        ? 'server_or_local_ready'
-        : 'local_key_ready';
-      return jsonResponse(200, {ok:true, status:'ready', message:'Trading 212 paper trading is ready.', source});
+    const probe = await probeTrading212PaperConnection(event, process.env);
+    if(probe.ok === true){
+      return jsonResponse(200, {ok:true, status:String(probe.status || 'ready'), message:String(probe.message || 'Trading 212 paper trading is ready.'), source:String(probe.source || 'local_key_ready')});
     }
-    return jsonResponse(503, {code:'paper_trade_not_configured', error:'Add your Trading 212 paper API key on this device, or configure the server paper-trade route.'});
+    return jsonResponse(Number(probe.statusCode || 502), {code:String(probe.code || 'paper_trade_probe_failed'), error:String(probe.message || 'Trading 212 paper readiness probe failed.')});
   }
 
   if(action !== 'submit_order'){
@@ -274,6 +322,8 @@ module.exports = {
   jsonResponse,
   handleTradeExecution,
   submitTrading212PaperOrder,
+  probeTrading212PaperConnection,
+  trading212BasicAuthHeader,
   trading212PaperRuntimeConfig,
   allowlistedTrading212PaperBaseUrl,
   allowlistedTrading212PaperOrderPath,

@@ -53,7 +53,15 @@
         || (typeof window !== 'undefined' && window.__pp && window.__pp.trading212PaperApiKey)
         || ''
       ).trim();
-      return apiKey ? {'x-trading212-paper-api-key':apiKey} : {};
+      const apiSecret = String(
+        options.trading212PaperApiSecret
+        || (typeof window !== 'undefined' && window.__pp && window.__pp.trading212PaperApiSecret)
+        || ''
+      ).trim();
+      const headers = {};
+      if(apiKey) headers['x-trading212-paper-api-key'] = apiKey;
+      if(apiSecret) headers['x-trading212-paper-api-secret'] = apiSecret;
+      return headers;
     }
 
     function brokerAdapter(brokerId){
