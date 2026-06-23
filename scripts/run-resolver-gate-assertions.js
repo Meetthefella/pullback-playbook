@@ -542,6 +542,177 @@ function runScannerPolicyCompatibilityAssertions(){
     || JSON.stringify(throwingUniverseFinal) !== JSON.stringify(policySandbox.legacyFinalScanUniverseValue(policySandbox.state, policySandbox.currentMaxScanTickers()))){
     throw new Error('Throwing ScannerUniversePolicy must preserve legacy effective/final universe behaviour.');
   }
+
+  let setupFallbackCalls = 0;
+  policySandbox.legacyCurrentSetupTypeValue = function(value){
+    setupFallbackCalls += 1;
+    return `legacy:${String(value || '') || 'unknown'}`;
+  };
+  policySandbox.state.setupType = '20MA';
+  policySandbox.window.SetupBasisPolicy = {
+    currentSetupType(){
+      return 'policy:20MA';
+    }
+  };
+  if(policySandbox.currentSetupType() !== 'policy:20MA'){
+    throw new Error('Setup policy success path must still use the policy result.');
+  }
+  if(setupFallbackCalls !== 0){
+    throw new Error('Setup policy success path must not evaluate the legacy fallback eagerly.');
+  }
+
+  setupFallbackCalls = 0;
+  policySandbox.window.SetupBasisPolicy = null;
+  if(policySandbox.currentSetupType() !== 'legacy:20MA' || setupFallbackCalls !== 1){
+    throw new Error('Setup policy unavailable path must evaluate the legacy fallback exactly once.');
+  }
+
+  setupFallbackCalls = 0;
+  policySandbox.window.SetupBasisPolicy = {
+    currentSetupType(){
+      throw new Error('setup policy failed');
+    }
+  };
+  if(policySandbox.currentSetupType() !== 'legacy:20MA' || setupFallbackCalls !== 1){
+    throw new Error('Setup policy throw path must evaluate the legacy fallback exactly once.');
+  }
+
+  let universeFallbackCalls = 0;
+  policySandbox.legacyFinalScanUniverseValue = function(){
+    universeFallbackCalls += 1;
+    return ['LEGACY'];
+  };
+  policySandbox.window.ScannerUniversePolicy = {
+    finalUniverse(){
+      return ['POLICY'];
+    }
+  };
+  if(JSON.stringify(policySandbox.finalScanUniverse()) !== JSON.stringify(['POLICY'])){
+    throw new Error('Scanner universe policy success path must still use the policy result.');
+  }
+  if(universeFallbackCalls !== 0){
+    throw new Error('Scanner universe policy success path must not evaluate the legacy fallback eagerly.');
+  }
+
+  universeFallbackCalls = 0;
+  policySandbox.window.ScannerUniversePolicy = null;
+  if(JSON.stringify(policySandbox.finalScanUniverse()) !== JSON.stringify(['LEGACY']) || universeFallbackCalls !== 1){
+    throw new Error('Scanner universe policy unavailable path must evaluate the legacy fallback exactly once.');
+  }
+
+  universeFallbackCalls = 0;
+  policySandbox.window.ScannerUniversePolicy = {
+    finalUniverse(){
+      throw new Error('universe policy failed');
+    }
+  };
+  if(JSON.stringify(policySandbox.finalScanUniverse()) !== JSON.stringify(['LEGACY']) || universeFallbackCalls !== 1){
+    throw new Error('Scanner universe policy throw path must evaluate the legacy fallback exactly once.');
+  }
+}
+
+function runTesterSetupPersistenceFallbackAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const persistSandbox = {
+    console:{
+      ...console,
+      warn(){},
+      debug(){},
+      info(){},
+      log(){}
+    },
+    Date,
+    key:'pullbackPlaybookV3',
+    liteKey:'pullbackPlaybookV3Lite',
+    settingsKey:'pullbackPlaybookSettingsV1',
+    recordsLiteKey:'pullbackPlaybookRecordsLiteV1',
+    state:{
+      accountSize:4000,
+      maxRisk:40,
+      userRiskPerTrade:40,
+      riskPercent:1,
+      maxLossOverride:'',
+      wholeSharesOnly:true,
+      marketStatus:'S&P above 50 MA',
+      marketStatusMode:'manual',
+      setupType:'20MA',
+      listName:'Focus',
+      universeMode:'tradingview_only',
+      paperTradeTesterSetupCompletedAt:'2026-06-23T12:34:56.000Z',
+      tickers:['AAPL'],
+      recentTickers:['AAPL'],
+      tickerRecords:{},
+      tradeDiary:[],
+      watchlist:[],
+      symbolMeta:{},
+      backendTrackedVersions:{},
+      backendLocalTrackedTickers:[]
+    },
+    stored:new Map(),
+    cloneData(value, fallback){
+      if(value === undefined) return fallback;
+      return JSON.parse(JSON.stringify(value));
+    },
+    normalizeTickerRecordsMap(value){
+      return value && typeof value === 'object' ? value : {};
+    },
+    normalizeTickerRecord(value){
+      return value;
+    },
+    logDebugWarn(){},
+    safeStorageSet(storageKey, value){
+      if(storageKey === 'pullbackPlaybookV3') return false;
+      persistSandbox.stored.set(storageKey, value);
+      return true;
+    }
+  };
+  persistSandbox.globalThis = persistSandbox;
+  vm.createContext(persistSandbox);
+  [
+    'withPersistMeta',
+    'stripPersistMeta',
+    'persistedAtMs',
+    'buildFullPersistedState',
+    'buildSettingsPersistedState',
+    'buildRecordsLitePersistedState',
+    'buildLitePersistedState',
+    'mergePersistedStateLayers',
+    'persistState'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), persistSandbox, {filename:`app.js#${functionName}`});
+  });
+
+  persistSandbox.persistState();
+
+  const settingsSnapshot = persistSandbox.stored.get('pullbackPlaybookSettingsV1');
+  const recordsLiteSnapshot = persistSandbox.stored.get('pullbackPlaybookRecordsLiteV1');
+  const liteSnapshot = persistSandbox.stored.get('pullbackPlaybookV3Lite');
+
+  if(!settingsSnapshot || settingsSnapshot.paperTradeTesterSetupCompletedAt !== '2026-06-23T12:34:56.000Z'){
+    throw new Error('Settings fallback persistence must include paperTradeTesterSetupCompletedAt.');
+  }
+  if(!recordsLiteSnapshot || recordsLiteSnapshot.paperTradeTesterSetupCompletedAt !== '2026-06-23T12:34:56.000Z'){
+    throw new Error('Records-lite fallback persistence must include paperTradeTesterSetupCompletedAt.');
+  }
+  if(!liteSnapshot || liteSnapshot.paperTradeTesterSetupCompletedAt !== '2026-06-23T12:34:56.000Z'){
+    throw new Error('Lite fallback persistence must include paperTradeTesterSetupCompletedAt.');
+  }
+
+  const mergedPersistedState = persistSandbox.mergePersistedStateLayers([
+    {name:'settings', priority:1, data:settingsSnapshot},
+    {name:'recordsLite', priority:2, data:recordsLiteSnapshot},
+    {name:'lite', priority:3, data:liteSnapshot},
+    {name:'full', priority:4, data:{}}
+  ]);
+  const restoredState = {paperTradeTesterSetupCompletedAt:''};
+  Object.assign(restoredState, mergedPersistedState);
+  restoredState.paperTradeTesterSetupCompletedAt = String(restoredState.paperTradeTesterSetupCompletedAt || '');
+  if(restoredState.paperTradeTesterSetupCompletedAt !== '2026-06-23T12:34:56.000Z'){
+    throw new Error('Merged fallback reload must preserve paperTradeTesterSetupCompletedAt.');
+  }
+  if(!/state\.paperTradeTesterSetupCompletedAt = String\(state\.paperTradeTesterSetupCompletedAt \|\| ''\);/.test(appSource)){
+    throw new Error('loadState must continue to normalize paperTradeTesterSetupCompletedAt safely.');
+  }
 }
 
 function runAdvancedScannerUiConsistencyAssertions(){
@@ -5513,6 +5684,7 @@ function runAccepted50MaSupportThresholdAssertions(){
 
 runTrackPresentationAuthorityAssertions();
 runScannerPolicyCompatibilityAssertions();
+runTesterSetupPersistenceFallbackAssertions();
 runAdvancedScannerUiConsistencyAssertions();
 runTradeExecutionRoutingAssertions();
 runPlanSemanticsAssertions();
@@ -5528,6 +5700,7 @@ console.log('Simplified state pipeline assertions passed.');
 console.log('AI chart-coach contract assertions passed.');
 console.log('Track presentation authority assertions passed.');
 console.log('Scanner policy compatibility assertions passed.');
+console.log('Tester setup fallback persistence assertions passed.');
 console.log('Advanced scanner UI consistency assertions passed.');
 console.log('Trade execution routing assertions passed.');
 console.log('Plan source semantics assertions passed.');

@@ -1878,22 +1878,22 @@ function scannerUniversePolicy(){
     || null;
 }
 
-function callSetupBasisPolicy(methodName, fallbackValue, argsBuilder){
+function callSetupBasisPolicy(methodName, fallbackFn, argsBuilder){
   const policy = setupBasisPolicy();
   try{
     const method = policy && typeof policy[methodName] === 'function' ? policy[methodName] : null;
     if(method) return method(...argsBuilder());
   }catch(_error){}
-  return fallbackValue;
+  return typeof fallbackFn === 'function' ? fallbackFn() : fallbackFn;
 }
 
-function callScannerUniversePolicy(methodName, fallbackValue, argsBuilder){
+function callScannerUniversePolicy(methodName, fallbackFn, argsBuilder){
   const policy = scannerUniversePolicy();
   try{
     const method = policy && typeof policy[methodName] === 'function' ? policy[methodName] : null;
     if(method) return method(...argsBuilder());
   }catch(_error){}
-  return fallbackValue;
+  return typeof fallbackFn === 'function' ? fallbackFn() : fallbackFn;
 }
 
 function legacyNormalizeStoredSetupType(value){
@@ -1903,7 +1903,7 @@ function legacyNormalizeStoredSetupType(value){
 function normalizedStoredSetupType(value){
   return legacyNormalizeStoredSetupType(callSetupBasisPolicy(
     'normalizeStoredSetupType',
-    value,
+    () => value,
     () => [{value}, {normalizeScanType}]
   ));
 }
@@ -1915,7 +1915,7 @@ function legacyCurrentSetupTypeValue(value){
 function currentSetupType(){
   return callSetupBasisPolicy(
     'currentSetupType',
-    legacyCurrentSetupTypeValue(state.setupType),
+    () => legacyCurrentSetupTypeValue(state.setupType),
     () => [{state}, {normalizeScanType}]
   );
 }
@@ -2749,6 +2749,7 @@ function buildSettingsPersistedState(sourceState, meta = {}){
     setupType:baseState.setupType,
     listName:baseState.listName,
     universeMode:baseState.universeMode,
+    paperTradeTesterSetupCompletedAt:baseState.paperTradeTesterSetupCompletedAt,
     tickers:Array.isArray(baseState.tickers) ? [...baseState.tickers] : [],
     recentTickers:Array.isArray(baseState.recentTickers) ? [...baseState.recentTickers] : [],
     dataProvider:baseState.dataProvider,
@@ -2866,7 +2867,8 @@ function buildRecordsLitePersistedState(sourceState, meta = {}){
     tickerRecords:liteTickerRecords,
     watchlist:Array.isArray(baseState.watchlist) ? cloneData(baseState.watchlist, []) : [],
     tradeDiary:Array.isArray(baseState.tradeDiary) ? cloneData(baseState.tradeDiary, []) : [],
-    symbolMeta:baseState.symbolMeta && typeof baseState.symbolMeta === 'object' ? cloneData(baseState.symbolMeta, {}) : {}
+    symbolMeta:baseState.symbolMeta && typeof baseState.symbolMeta === 'object' ? cloneData(baseState.symbolMeta, {}) : {},
+    paperTradeTesterSetupCompletedAt:baseState.paperTradeTesterSetupCompletedAt
   }, {
     ...meta,
     persistedFormat:'records_lite'
@@ -2911,6 +2913,7 @@ function buildLitePersistedState(sourceState, meta = {}){
     setupType:baseState.setupType,
     listName:baseState.listName,
     universeMode:baseState.universeMode,
+    paperTradeTesterSetupCompletedAt:baseState.paperTradeTesterSetupCompletedAt,
     tickers:Array.isArray(baseState.tickers) ? [...baseState.tickers] : [],
     recentTickers:Array.isArray(baseState.recentTickers) ? [...baseState.recentTickers] : [],
     tickerRecords:liteTickerRecords,
@@ -3440,7 +3443,7 @@ function legacySelectedQuickScanTypeValue(value){
 function selectedQuickScanType(){
   return callSetupBasisPolicy(
     'selectedQuickScanType',
-    legacySelectedQuickScanTypeValue($('scannerSetupType') && $('scannerSetupType').value),
+    () => legacySelectedQuickScanTypeValue($('scannerSetupType') && $('scannerSetupType').value),
     () => [{
       getElementValue(id){
         const element = $(id);
@@ -3476,7 +3479,7 @@ function legacyDefaultUniverseModeForTickers(tickers){
 function defaultUniverseModeForTickers(tickers){
   return callScannerUniversePolicy(
     'defaultModeForTickers',
-    legacyDefaultUniverseModeForTickers(tickers),
+    () => legacyDefaultUniverseModeForTickers(tickers),
     () => [tickers || [], {uniqueTickers}]
   );
 }
@@ -3488,7 +3491,7 @@ function normalizeUniverseMode(value){
 function normalizedStoredUniverseMode(value){
   return normalizeUniverseMode(callScannerUniversePolicy(
     'normalizeStoredMode',
-    value,
+    () => value,
     () => [{value}, {normalizeUniverseMode}]
   ));
 }
@@ -3496,7 +3499,7 @@ function normalizedStoredUniverseMode(value){
 function selectedUniverseMode(){
   return callScannerUniversePolicy(
     'selectedMode',
-    normalizeUniverseMode($('universeMode') && $('universeMode').value),
+    () => normalizeUniverseMode($('universeMode') && $('universeMode').value),
     () => [{
       getElementValue(id){
         const element = $(id);
@@ -3537,7 +3540,7 @@ function legacyEffectiveUniverseModeValue(universeMode, tickers){
 function effectiveUniverseMode(){
   return callScannerUniversePolicy(
     'effectiveMode',
-    legacyEffectiveUniverseModeValue(state.universeMode, state.tickers),
+    () => legacyEffectiveUniverseModeValue(state.universeMode, state.tickers),
     () => [{state}, {
       normalizeUniverseMode,
       uniqueTickers
@@ -3560,7 +3563,7 @@ function finalScanUniverse(){
   const limit = currentMaxScanTickers();
   return callScannerUniversePolicy(
     'finalUniverse',
-    legacyFinalScanUniverseValue(state, limit),
+    () => legacyFinalScanUniverseValue(state, limit),
     () => [{
       state,
       defaultAutoUniverse:DEFAULT_AUTO_UNIVERSE,
@@ -23085,7 +23088,7 @@ function legacyScanTypeForEvaluationValue(scanType){
 function scanTypeForEvaluation(scanType){
   return callSetupBasisPolicy(
     'scanTypeForEvaluation',
-    legacyScanTypeForEvaluationValue(scanType),
+    () => legacyScanTypeForEvaluationValue(scanType),
     () => [scanType, {normalizeScanType}]
   );
 }
@@ -25166,7 +25169,7 @@ function legacyResolveSetupTypeWithOverlap(card, data, checks){
 function resolveSetupTypeWithOverlap(card, data, checks){
   return callSetupBasisPolicy(
     'resolveSetupTypeWithOverlap',
-    legacyResolveSetupTypeWithOverlap(card, data, checks),
+    () => legacyResolveSetupTypeWithOverlap(card, data, checks),
     () => [{
       card,
       data,
@@ -25186,7 +25189,7 @@ function legacyResolveScanType(card, data, checks){
 function resolveScanType(card, data, checks){
   return callSetupBasisPolicy(
     'resolveScanType',
-    legacyResolveScanType(card, data, checks),
+    () => legacyResolveScanType(card, data, checks),
     () => [{
       card,
       data,
