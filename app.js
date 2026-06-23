@@ -1548,6 +1548,7 @@ const DEFAULT_STATE = {
   cards:[],
   tradeDiary:[],
   apiKey:'',
+  paperTradeApiKey:'',
   dataProvider:DEFAULT_PROVIDER,
   apiPlan:DEFAULT_API_PLAN,
   aiEndpoint:defaultAiEndpoint,
@@ -2756,6 +2757,7 @@ function buildSettingsPersistedState(sourceState, meta = {}){
     apiPlan:baseState.apiPlan,
     aiEndpoint:baseState.aiEndpoint,
     marketDataEndpoint:baseState.marketDataEndpoint,
+    paperTradeApiKey:baseState.paperTradeApiKey,
     showExpiredWatchlist:!!baseState.showExpiredWatchlist
   }, {
     ...meta,
@@ -2934,7 +2936,8 @@ function buildLitePersistedState(sourceState, meta = {}){
     dataProvider:baseState.dataProvider,
     apiPlan:baseState.apiPlan,
     aiEndpoint:baseState.aiEndpoint,
-    marketDataEndpoint:baseState.marketDataEndpoint
+    marketDataEndpoint:baseState.marketDataEndpoint,
+    paperTradeApiKey:baseState.paperTradeApiKey
   }, {
     ...meta,
     persistedFormat:'lite'
@@ -3217,13 +3220,19 @@ function tradeGatewayHealthModel(){
   };
 }
 
+function storedPaperTradeApiKey(){
+  return String(state.paperTradeApiKey || '').trim();
+}
+
 function paperTradeTesterSetupComplete(){
-  return !!String(state.paperTradeTesterSetupCompletedAt || '').trim();
+  return !!(String(state.paperTradeTesterSetupCompletedAt || '').trim() && storedPaperTradeApiKey());
 }
 
 function testerSetupHealthModel(){
   const completedAt = String(state.paperTradeTesterSetupCompletedAt || '').trim();
-  if(completedAt){
+  const hasStoredKey = !!storedPaperTradeApiKey();
+  const gatewayReadyOrPending = trading212PaperAvailabilityChecked !== true || trading212PaperEnabled === true;
+  if(completedAt && hasStoredKey && gatewayReadyOrPending){
     return {
       complete:true,
       label:'Tester setup completed',
@@ -3236,6 +3245,14 @@ function testerSetupHealthModel(){
       complete:false,
       label:'Tester setup blocked',
       detail:'Paper routing is unavailable in this build, so tester setup cannot complete.',
+      className:'warntext'
+    };
+  }
+  if(!storedPaperTradeApiKey()){
+    return {
+      complete:false,
+      label:'Tester setup waiting on local paper key',
+      detail:'Add your Trading 212 paper API key in Context Settings. It is stored only on this device.',
       className:'warntext'
     };
   }
@@ -3289,12 +3306,19 @@ function renderTesterSetupPanel(){
   }
   if(detail) detail.textContent = model.detail;
   if(confirm){
-    confirm.disabled = model.complete === true || !(trading212PaperAvailabilityChecked === true && trading212PaperEnabled === true);
+    confirm.disabled = model.complete === true
+      || !storedPaperTradeApiKey()
+      || !(trading212PaperAvailabilityChecked === true && trading212PaperEnabled === true);
     confirm.textContent = model.complete === true ? 'Tester Setup Complete' : 'Complete Tester Setup';
   }
 }
 
 function completeTesterSetup(){
+  if(!storedPaperTradeApiKey()){
+    renderTesterSetupPanel();
+    setStatus('inputStatus', 'Add your local Trading 212 paper API key before completing tester setup.');
+    return;
+  }
   if(!(trading212PaperAvailabilityChecked === true && trading212PaperEnabled === true)){
     renderTesterSetupPanel();
     setStatus('inputStatus', 'Paper gateway must be ready before tester setup can be completed.');
@@ -3379,6 +3403,7 @@ async function refreshTrading212PaperAvailability(options = {}){
       message:trading212PaperAvailabilityMessage
     });
     renderTradeGatewayHealth();
+    renderTesterSetupPanel();
     return {ok:false, code:'unsupported_broker', message:trading212PaperAvailabilityMessage};
   }
   if(options.force !== true && trading212PaperAvailabilityRequest){
@@ -3402,7 +3427,8 @@ async function refreshTrading212PaperAvailability(options = {}){
   }
   trading212PaperAvailabilityRequest = tradingGatewayService.testConnection({
     broker:'trading212',
-    endpoint:defaultTradeExecutionEndpoint
+    endpoint:defaultTradeExecutionEndpoint,
+    trading212PaperApiKey:storedPaperTradeApiKey()
   }).then(result => {
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = !!(result && result.ok === true);
@@ -3429,6 +3455,7 @@ async function refreshTrading212PaperAvailability(options = {}){
   }).finally(() => {
     trading212PaperAvailabilityRequest = null;
     renderTradeGatewayHealth();
+    renderTesterSetupPanel();
     if(options.render !== false && typeof renderReviewWorkspace === 'function' && activeReviewTicker()){
       renderReviewWorkspace({source:'trade_gateway_availability_ready'});
     }
@@ -6947,6 +6974,7 @@ function syncStateFromDom(){
   state.listName = $('listName').value || "Today's Scan";
   if($('universeMode')) state.universeMode = selectedUniverseMode() || defaultUniverseModeForTickers(state.tickers);
   if($('apiKey')) state.apiKey = $('apiKey').readOnly ? '' : $('apiKey').value.trim();
+  if($('paperTradeApiKey')) state.paperTradeApiKey = $('paperTradeApiKey').value.trim();
   if($('dataProvider')) state.dataProvider = normalizeDataProvider($('dataProvider').value);
   if($('apiPlan')) state.apiPlan = String($('apiPlan').value || DEFAULT_API_PLAN);
   state.aiEndpoint = $('aiEndpoint').value.trim() || defaultAiEndpoint;
@@ -7018,6 +7046,7 @@ function loadState(){
   state.marketDataEndpoint = defaultMarketDataEndpoint;
   state.dataProvider = normalizeDataProvider(state.dataProvider);
   state.apiPlan = String(state.apiPlan || DEFAULT_API_PLAN);
+  state.paperTradeApiKey = String(state.paperTradeApiKey || '');
   state.riskPercent = Number.isFinite(Number(state.riskPercent)) && Number(state.riskPercent) > 0
     ? normalizeRiskPercentInput(state.riskPercent, 1)
     : ((Number(state.accountSize) > 0 && Number(state.maxRisk) > 0)
@@ -7105,6 +7134,7 @@ function loadState(){
   if($('tvImportInput')) $('tvImportInput').value = '';
   if($('ocrReviewInput')) $('ocrReviewInput').value = '';
   if($('apiKey') && !$('apiKey').readOnly) $('apiKey').value = state.apiKey || '';
+  if($('paperTradeApiKey')) $('paperTradeApiKey').value = state.paperTradeApiKey || '';
   if($('dataProvider')) $('dataProvider').value = state.dataProvider || DEFAULT_PROVIDER;
   if($('apiPlan')) $('apiPlan').value = state.apiPlan || DEFAULT_API_PLAN;
   $('aiEndpoint').value = state.aiEndpoint || defaultAiEndpoint;
@@ -31026,7 +31056,8 @@ async function submitPaperTradeFromReview(ticker){
   }, {
     broker:'trading212',
     endpoint:defaultTradeExecutionEndpoint,
-    mock:mockMode
+    mock:mockMode,
+    trading212PaperApiKey:storedPaperTradeApiKey()
   });
   if(!result || result.ok !== true){
     recordTradeGatewayEvent('submit_failed', {
@@ -36367,7 +36398,10 @@ on('advancedScannerSetupType', 'change', event => {
 on('wholeSharesOnly', 'change', () => {
   handleRiskSettingsChange('whole_shares_change');
 });
-['listName','apiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
+['listName','apiKey','paperTradeApiKey','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
+on('paperTradeApiKey', 'change', () => {
+  refreshTrading212PaperAvailability({force:true}).catch(() => {});
+});
 on('dataProvider', 'change', () => {
   renderTickerSuggestions([]);
   renderFinalUniversePreview();

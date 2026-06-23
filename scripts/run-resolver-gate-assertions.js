@@ -638,6 +638,7 @@ function runTesterSetupPersistenceFallbackAssertions(){
       setupType:'20MA',
       listName:'Focus',
       universeMode:'tradingview_only',
+      paperTradeApiKey:'tester-local-key',
       paperTradeTesterSetupCompletedAt:'2026-06-23T12:34:56.000Z',
       tickers:['AAPL'],
       recentTickers:['AAPL'],
@@ -659,6 +660,21 @@ function runTesterSetupPersistenceFallbackAssertions(){
     normalizeTickerRecord(value){
       return value;
     },
+    trading212PaperSupported:true,
+    trading212PaperAvailabilityChecked:true,
+    trading212PaperEnabled:true,
+    trading212PaperAvailabilityMessage:'Trading 212 paper trading is ready.',
+    formatLocalTimestamp(value){
+      return String(value || '');
+    },
+    statusCalls:[],
+    renderTesterSetupPanelCalls:0,
+    setStatus(target, message){
+      persistSandbox.statusCalls.push({target, message:String(message || '')});
+    },
+    renderTesterSetupPanel(){
+      persistSandbox.renderTesterSetupPanelCalls += 1;
+    },
     logDebugWarn(){},
     safeStorageSet(storageKey, value){
       if(storageKey === 'pullbackPlaybookV3') return false;
@@ -677,7 +693,11 @@ function runTesterSetupPersistenceFallbackAssertions(){
     'buildRecordsLitePersistedState',
     'buildLitePersistedState',
     'mergePersistedStateLayers',
-    'persistState'
+    'persistState',
+    'storedPaperTradeApiKey',
+    'paperTradeTesterSetupComplete',
+    'testerSetupHealthModel',
+    'completeTesterSetup'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), persistSandbox, {filename:`app.js#${functionName}`});
   });
@@ -710,8 +730,79 @@ function runTesterSetupPersistenceFallbackAssertions(){
   if(restoredState.paperTradeTesterSetupCompletedAt !== '2026-06-23T12:34:56.000Z'){
     throw new Error('Merged fallback reload must preserve paperTradeTesterSetupCompletedAt.');
   }
+  const completedModel = persistSandbox.testerSetupHealthModel();
+  if(completedModel.complete !== true){
+    throw new Error('Tester setup should remain completed when the local key exists and the gateway is ready.');
+  }
+  persistSandbox.state.paperTradeApiKey = '';
+  if(persistSandbox.paperTradeTesterSetupComplete() !== false){
+    throw new Error('Deleting the local API key must make the shared tester setup completion predicate false.');
+  }
+  const resetModel = persistSandbox.testerSetupHealthModel();
+  if(resetModel.complete !== false || !/local paper key/i.test(String(resetModel.label || '') + String(resetModel.detail || ''))){
+    throw new Error('Deleting the local API key must reset visible tester setup status.');
+  }
+  persistSandbox.completeTesterSetup();
+  if(persistSandbox.state.paperTradeTesterSetupCompletedAt !== '2026-06-23T12:34:56.000Z'){
+    throw new Error('completeTesterSetup must not overwrite completion when the local paper key is missing.');
+  }
+  if(persistSandbox.renderTesterSetupPanelCalls < 1){
+    throw new Error('completeTesterSetup must re-render tester setup state when the local paper key is missing.');
+  }
+  if(!persistSandbox.statusCalls.some(entry => /local Trading 212 paper API key/i.test(entry.message))){
+    throw new Error('completeTesterSetup must explain that a local paper API key is required.');
+  }
   if(!/state\.paperTradeTesterSetupCompletedAt = String\(state\.paperTradeTesterSetupCompletedAt \|\| ''\);/.test(appSource)){
     throw new Error('loadState must continue to normalize paperTradeTesterSetupCompletedAt safely.');
+  }
+}
+
+function runTesterSetupUiGateAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const uiSandbox = {
+    window:{},
+    console,
+    state:{
+      paperTradeApiKey:'',
+      paperTradeTesterSetupCompletedAt:'',
+      marketStatus:'S&P above 50 MA'
+    },
+    trading212PaperSupported:true,
+    trading212PaperAvailabilityChecked:true,
+    trading212PaperEnabled:true,
+    trading212PaperAvailabilityMessage:'Trading 212 paper trading is ready.',
+    formatLocalTimestamp(value){
+      return String(value || '');
+    },
+    elements:{
+      testerSetupStatusLabel:{textContent:'', className:''},
+      testerSetupStatusDetail:{textContent:''},
+      testerSetupConfirmBtn:{disabled:false, textContent:''}
+    },
+    $(id){
+      return uiSandbox.elements[id] || null;
+    }
+  };
+  uiSandbox.globalThis = uiSandbox.window;
+  vm.createContext(uiSandbox);
+  [
+    'storedPaperTradeApiKey',
+    'paperTradeTesterSetupComplete',
+    'testerSetupHealthModel',
+    'renderTesterSetupPanel'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), uiSandbox, {filename:`app.js#${functionName}`});
+  });
+
+  uiSandbox.renderTesterSetupPanel();
+  if(uiSandbox.elements.testerSetupConfirmBtn.disabled !== true){
+    throw new Error('Server-side gateway readiness alone must not enable tester setup completion without a local key.');
+  }
+
+  uiSandbox.state.paperTradeApiKey = 'tester-local-key';
+  uiSandbox.renderTesterSetupPanel();
+  if(uiSandbox.elements.testerSetupConfirmBtn.disabled !== false){
+    throw new Error('Local key plus ready gateway must allow tester setup completion.');
   }
 }
 
@@ -851,6 +942,8 @@ function runTradeExecutionRoutingAssertions(){
     throw new Error('Trade gateway health and trace must remain visible in Settings and Review diagnostics.');
   }
   if(!/Tester Onboarding/.test(indexSource)
+    || !/id="paperTradeApiKey"/.test(indexSource)
+    || !/stored only on this device/i.test(indexSource)
     || !/Paper-trading-only status: tester mode supports paper submissions only after this setup is confirmed/.test(indexSource)
     || !/Live-trading lockout: live execution is disabled in this build/.test(indexSource)
     || !/id="testerSetupConfirmBtn"/.test(indexSource)
@@ -5685,6 +5778,7 @@ function runAccepted50MaSupportThresholdAssertions(){
 runTrackPresentationAuthorityAssertions();
 runScannerPolicyCompatibilityAssertions();
 runTesterSetupPersistenceFallbackAssertions();
+runTesterSetupUiGateAssertions();
 runAdvancedScannerUiConsistencyAssertions();
 runTradeExecutionRoutingAssertions();
 runPlanSemanticsAssertions();
@@ -5701,6 +5795,7 @@ console.log('AI chart-coach contract assertions passed.');
 console.log('Track presentation authority assertions passed.');
 console.log('Scanner policy compatibility assertions passed.');
 console.log('Tester setup fallback persistence assertions passed.');
+console.log('Tester setup UI gate assertions passed.');
 console.log('Advanced scanner UI consistency assertions passed.');
 console.log('Trade execution routing assertions passed.');
 console.log('Plan source semantics assertions passed.');

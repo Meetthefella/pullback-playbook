@@ -47,6 +47,15 @@
       }
     }
 
+    function trading212PaperHeaders(options = {}){
+      const apiKey = String(
+        options.trading212PaperApiKey
+        || (typeof window !== 'undefined' && window.__pp && window.__pp.trading212PaperApiKey)
+        || ''
+      ).trim();
+      return apiKey ? {'x-trading212-paper-api-key':apiKey} : {};
+    }
+
     function brokerAdapter(brokerId){
       return adapters[String(brokerId || '').trim().toLowerCase()] || null;
     }
@@ -96,7 +105,10 @@
           || (typeof window !== 'undefined' && window.__pp && window.__pp.paperTradeSecret)
           || ''
         );
-        const {response, data} = await postJsonWithTimeout(endpoint, built.payload, timeoutMs, {'x-pp-auth': sharedSecret});
+        const {response, data} = await postJsonWithTimeout(endpoint, built.payload, timeoutMs, {
+          'x-pp-auth': sharedSecret,
+          ...trading212PaperHeaders(options)
+        });
         if(!response.ok){
           return normalizeError({
             code:String(data && data.code || `http_${response.status}`),
@@ -139,7 +151,10 @@
           action:'test_connection',
           broker,
           mode
-        }, timeoutMs, {'x-pp-auth': sharedSecret});
+        }, timeoutMs, {
+          'x-pp-auth': sharedSecret,
+          ...trading212PaperHeaders(options)
+        });
         if(!response.ok){
           return normalizeError({
             code:String(data && data.code || `http_${response.status}`),

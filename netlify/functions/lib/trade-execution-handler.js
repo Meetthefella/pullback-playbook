@@ -2,7 +2,7 @@ const corsHeaders = {
   'Content-Type':'application/json',
   'Cache-Control':'no-store',
   'Access-Control-Allow-Origin':'*',
-  'Access-Control-Allow-Headers':'Content-Type, x-pp-auth',
+  'Access-Control-Allow-Headers':'Content-Type, x-pp-auth, x-trading212-paper-api-key',
   'Access-Control-Allow-Methods':'POST, OPTIONS'
 };
 
@@ -73,7 +73,56 @@ function buildTrading212PaperRequest(body = {}){
   return {request, symbol, quantity, limitPrice, stopLoss, takeProfit, side, clientOrderId, note};
 }
 
-async function submitTrading212PaperOrder(body = {}, env = process.env){
+const TRADING212_PAPER_BASE_URL_ALLOWLIST = Object.freeze([
+  'https://demo.trading212.com'
+]);
+const TRADING212_PAPER_ORDER_PATH_ALLOWLIST = Object.freeze([
+  '/orders'
+]);
+
+function allowlistedTrading212PaperBaseUrl(env = process.env){
+  const configured = String(env.T212_PAPER_BASE_URL || '').trim().replace(/\/$/, '');
+  if(configured && TRADING212_PAPER_BASE_URL_ALLOWLIST.includes(configured)) return configured;
+  return TRADING212_PAPER_BASE_URL_ALLOWLIST[0];
+}
+
+function allowlistedTrading212PaperOrderPath(env = process.env){
+  const configured = String(env.T212_PAPER_ORDER_PATH || '').trim();
+  if(configured && TRADING212_PAPER_ORDER_PATH_ALLOWLIST.includes(configured)) return configured;
+  return TRADING212_PAPER_ORDER_PATH_ALLOWLIST[0];
+}
+
+function rejectClientCredentialOverrides(body = {}){
+  const credentials = body && body.credentials && typeof body.credentials === 'object' ? body.credentials : null;
+  if(!credentials) return null;
+  if(credentials.apiKey != null){
+    return jsonResponse(400, {code:'invalid_request', error:'Client credentials.apiKey is not allowed.'});
+  }
+  if(credentials.baseUrl != null){
+    return jsonResponse(400, {code:'invalid_request', error:'Client credentials.baseUrl override is not allowed.'});
+  }
+  if(credentials.orderPath != null){
+    return jsonResponse(400, {code:'invalid_request', error:'Client credentials.orderPath override is not allowed.'});
+  }
+  return null;
+}
+
+function trading212PaperRuntimeConfig(event = {}, env = process.env){
+  const headers = event && event.headers && typeof event.headers === 'object' ? event.headers : {};
+  const apiKey = String(
+    headers['x-trading212-paper-api-key']
+    || headers['X-TRADING212-PAPER-API-KEY']
+    || env.T212_PAPER_API_KEY
+    || ''
+  ).trim();
+  const baseUrl = allowlistedTrading212PaperBaseUrl(env);
+  const orderPath = allowlistedTrading212PaperOrderPath(env);
+  return {apiKey, baseUrl, orderPath};
+}
+
+async function submitTrading212PaperOrder(body = {}, env = process.env, event = {}){
+  const overrideFailure = rejectClientCredentialOverrides(body);
+  if(overrideFailure) return overrideFailure;
   const {symbol, quantity, limitPrice, stopLoss, takeProfit, side, clientOrderId, note} = buildTrading212PaperRequest(body);
   const mockRequested = body && body.mock === true;
   const envMock = String(env.T212_PAPER_MOCK || '').trim().toLowerCase() === 'true';
@@ -108,14 +157,12 @@ async function submitTrading212PaperOrder(body = {}, env = process.env){
     });
   }
 
-  const apiKey = String(env.T212_PAPER_API_KEY || '').trim();
-  const baseUrl = String(env.T212_PAPER_BASE_URL || '').trim();
-  const orderPath = String(env.T212_PAPER_ORDER_PATH || '/orders').trim();
+  const {apiKey, baseUrl, orderPath} = trading212PaperRuntimeConfig(event, env);
 
-  if(!apiKey || !baseUrl){
+  if(!apiKey){
     return jsonResponse(503, {
       code:'paper_trade_not_configured',
-      error:'Trading 212 paper-trade endpoint is not configured on the server.'
+      error:'Trading 212 paper trading needs a tester paper API key.'
     });
   }
 
@@ -191,20 +238,26 @@ async function handleTradeExecution(event){
   const mode = String(body.mode || 'paper').trim().toLowerCase();
 
   if(mode !== 'paper') return liveTradingLockedResponse();
+  const overrideFailure = rejectClientCredentialOverrides(body);
+  if(overrideFailure) return overrideFailure;
 
   if(action === 'test_connection'){
     if(broker !== 'trading212'){
       return jsonResponse(400, {code:'unsupported_broker', error:`Unsupported broker: ${broker || 'unknown'}.`});
     }
-    const configured = !!(String(process.env.T212_PAPER_API_KEY || '').trim() && String(process.env.T212_PAPER_BASE_URL || '').trim());
+    const config = trading212PaperRuntimeConfig(event, process.env);
+    const configured = !!config.apiKey;
     const mockEnabled = String(process.env.T212_PAPER_MOCK || '').trim().toLowerCase() === 'true';
     if(mockEnabled){
       return jsonResponse(200, {ok:true, status:'mock_ready', message:'Trading 212 paper mock mode is enabled.'});
     }
     if(configured){
-      return jsonResponse(200, {ok:true, status:'ready', message:'Trading 212 paper trading is configured.'});
+      const source = String(process.env.T212_PAPER_API_KEY || '').trim()
+        ? 'server_or_local_ready'
+        : 'local_key_ready';
+      return jsonResponse(200, {ok:true, status:'ready', message:'Trading 212 paper trading is ready.', source});
     }
-    return jsonResponse(503, {code:'paper_trade_not_configured', error:'Trading 212 paper trading is not configured on the server.'});
+    return jsonResponse(503, {code:'paper_trade_not_configured', error:'Add your Trading 212 paper API key on this device, or configure the server paper-trade route.'});
   }
 
   if(action !== 'submit_order'){
@@ -213,12 +266,16 @@ async function handleTradeExecution(event){
   if(broker !== 'trading212'){
     return jsonResponse(400, {code:'unsupported_broker', error:`Unsupported broker: ${broker || 'unknown'}.`});
   }
-  return submitTrading212PaperOrder(body, process.env);
+  return submitTrading212PaperOrder(body, process.env, event);
 }
 
 module.exports = {
   corsHeaders,
   jsonResponse,
   handleTradeExecution,
-  submitTrading212PaperOrder
+  submitTrading212PaperOrder,
+  trading212PaperRuntimeConfig,
+  allowlistedTrading212PaperBaseUrl,
+  allowlistedTrading212PaperOrderPath,
+  rejectClientCredentialOverrides
 };

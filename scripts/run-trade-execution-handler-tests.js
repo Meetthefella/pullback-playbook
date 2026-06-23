@@ -120,11 +120,30 @@ async function testConnectionConfiguredReady(){
   await withEnv({
     T212_PAPER_MOCK:'false',
     T212_PAPER_API_KEY:'api-key',
-    T212_PAPER_BASE_URL:'https://example.test'
+    T212_PAPER_BASE_URL:'https://demo.trading212.com'
   }, async () => {
     const result = parseJsonResponse(await handlerModule.handleTradeExecution({
       httpMethod:'POST',
       headers:{},
+      body:JSON.stringify({action:'test_connection', broker:'trading212', mode:'paper'})
+    }));
+    assert.strictEqual(result.statusCode, 200);
+    assert.strictEqual(result.json.ok, true);
+    assert.strictEqual(result.json.status, 'ready');
+  });
+}
+
+async function testConnectionLocalTesterKeyReady(){
+  await withEnv({
+    T212_PAPER_MOCK:'false',
+    T212_PAPER_API_KEY:null,
+    T212_PAPER_BASE_URL:null
+  }, async () => {
+    const result = parseJsonResponse(await handlerModule.handleTradeExecution({
+      httpMethod:'POST',
+      headers:{
+        'x-trading212-paper-api-key':'tester-local-key'
+      },
       body:JSON.stringify({action:'test_connection', broker:'trading212', mode:'paper'})
     }));
     assert.strictEqual(result.statusCode, 200);
@@ -147,6 +166,57 @@ async function testConnectionNotConfigured(){
     assert.strictEqual(result.statusCode, 503);
     assert.strictEqual(result.json.code, 'paper_trade_not_configured');
   });
+}
+
+async function testRejectClientCredentialsApiKeyOverride(){
+  const result = parseJsonResponse(await handlerModule.handleTradeExecution({
+    httpMethod:'POST',
+    headers:{},
+    body:JSON.stringify({
+      action:'test_connection',
+      broker:'trading212',
+      mode:'paper',
+      credentials:{apiKey:'attacker-key'}
+    })
+  }));
+  assert.strictEqual(result.statusCode, 400);
+  assert.strictEqual(result.json.code, 'invalid_request');
+}
+
+async function testRejectClientCredentialsBaseUrlOverride(){
+  const result = parseJsonResponse(await handlerModule.handleTradeExecution({
+    httpMethod:'POST',
+    headers:{
+      'x-trading212-paper-api-key':'tester-local-key'
+    },
+    body:JSON.stringify({
+      action:'submit_order',
+      broker:'trading212',
+      mode:'paper',
+      credentials:{baseUrl:'https://evil.test'},
+      request:{symbol:'AAPL', quantity:1, limitPrice:200}
+    })
+  }));
+  assert.strictEqual(result.statusCode, 400);
+  assert.strictEqual(result.json.code, 'invalid_request');
+}
+
+async function testRejectClientCredentialsOrderPathOverride(){
+  const result = parseJsonResponse(await handlerModule.handleTradeExecution({
+    httpMethod:'POST',
+    headers:{
+      'x-trading212-paper-api-key':'tester-local-key'
+    },
+    body:JSON.stringify({
+      action:'submit_order',
+      broker:'trading212',
+      mode:'paper',
+      credentials:{orderPath:'/evil'},
+      request:{symbol:'AAPL', quantity:1, limitPrice:200}
+    })
+  }));
+  assert.strictEqual(result.statusCode, 400);
+  assert.strictEqual(result.json.code, 'invalid_request');
 }
 
 async function testUnsupportedBroker(){
@@ -190,11 +260,11 @@ async function testConfiguredUpstreamSubmit(){
   await withEnv({
     T212_PAPER_MOCK:'false',
     T212_PAPER_API_KEY:'api-key',
-    T212_PAPER_BASE_URL:'https://broker.test',
+    T212_PAPER_BASE_URL:'https://demo.trading212.com',
     T212_PAPER_ORDER_PATH:'/orders'
   }, async () => {
     await withMockFetch(async (url, options) => {
-      assert.strictEqual(url, 'https://broker.test/orders');
+      assert.strictEqual(url, 'https://demo.trading212.com/orders');
       const payload = JSON.parse(String(options.body || '{}'));
       assert.strictEqual(payload.instrument, 'AAPL');
       return {
@@ -227,11 +297,93 @@ async function testConfiguredUpstreamSubmit(){
   });
 }
 
+async function testLocalTesterKeyUpstreamSubmit(){
+  await withEnv({
+    T212_PAPER_MOCK:'false',
+    T212_PAPER_API_KEY:null,
+    T212_PAPER_BASE_URL:null,
+    T212_PAPER_ORDER_PATH:null
+  }, async () => {
+    await withMockFetch(async (url, options) => {
+      assert.strictEqual(url, 'https://demo.trading212.com/orders');
+      assert.strictEqual(options.headers.Authorization, 'Bearer tester-local-key');
+      const payload = JSON.parse(String(options.body || '{}'));
+      assert.strictEqual(payload.instrument, 'TSLA');
+      return {
+        ok:true,
+        json:async () => ({
+          id:'local-upstream-456',
+          status:'submitted',
+          submittedAt:'2026-06-23T10:30:00.000Z'
+        })
+      };
+    }, async () => {
+      const result = parseJsonResponse(await handlerModule.handleTradeExecution({
+        httpMethod:'POST',
+        headers:{
+          'x-trading212-paper-api-key':'tester-local-key'
+        },
+        body:JSON.stringify({
+          action:'submit_order',
+          broker:'trading212',
+          mode:'paper',
+          request:{
+            symbol:'TSLA',
+            quantity:3,
+            limitPrice:300.25
+          }
+        })
+      }));
+      assert.strictEqual(result.statusCode, 200);
+      assert.strictEqual(result.json.result.orderId, 'local-upstream-456');
+      assert.strictEqual(result.json.result.symbol, 'TSLA');
+    });
+  });
+}
+
+async function testEnvOverrideOutsideAllowlistFallsBackToDefaultEndpoint(){
+  await withEnv({
+    T212_PAPER_MOCK:'false',
+    T212_PAPER_API_KEY:'api-key',
+    T212_PAPER_BASE_URL:'https://evil.test',
+    T212_PAPER_ORDER_PATH:'/malicious'
+  }, async () => {
+    await withMockFetch(async (url) => {
+      assert.strictEqual(url, 'https://demo.trading212.com/orders');
+      return {
+        ok:true,
+        json:async () => ({
+          id:'allowlist-fallback-789',
+          status:'submitted',
+          submittedAt:'2026-06-23T11:00:00.000Z'
+        })
+      };
+    }, async () => {
+      const result = parseJsonResponse(await handlerModule.handleTradeExecution({
+        httpMethod:'POST',
+        headers:{},
+        body:JSON.stringify({
+          action:'submit_order',
+          broker:'trading212',
+          mode:'paper',
+          request:{
+            symbol:'NVDA',
+            quantity:2,
+            limitPrice:150
+          }
+        })
+      }));
+      assert.strictEqual(result.statusCode, 200);
+      assert.strictEqual(result.json.result.orderId, 'allowlist-fallback-789');
+    });
+  });
+}
+
 async function testUpstreamFailure(){
   await withEnv({
     T212_PAPER_MOCK:'false',
     T212_PAPER_API_KEY:'api-key',
-    T212_PAPER_BASE_URL:'https://broker.test'
+    T212_PAPER_BASE_URL:'https://demo.trading212.com'
   }, async () => {
     await withMockFetch(async () => ({
       ok:false,
@@ -286,10 +438,16 @@ async function main(){
     ['Live trading locked', testLiveTradingLocked],
     ['Connection mock ready', testConnectionMockReady],
     ['Connection configured ready', testConnectionConfiguredReady],
+    ['Connection local tester key ready', testConnectionLocalTesterKeyReady],
     ['Connection not configured', testConnectionNotConfigured],
+    ['Reject client credentials apiKey override', testRejectClientCredentialsApiKeyOverride],
+    ['Reject client credentials baseUrl override', testRejectClientCredentialsBaseUrlOverride],
+    ['Reject client credentials orderPath override', testRejectClientCredentialsOrderPathOverride],
     ['Unsupported broker', testUnsupportedBroker],
     ['Mock paper order', testMockPaperOrder],
     ['Configured upstream submit', testConfiguredUpstreamSubmit],
+    ['Local tester key upstream submit', testLocalTesterKeyUpstreamSubmit],
+    ['Env override outside allowlist falls back to default endpoint', testEnvOverrideOutsideAllowlistFallsBackToDefaultEndpoint],
     ['Upstream failure', testUpstreamFailure],
     ['Invalid request', testInvalidRequest]
   ];
