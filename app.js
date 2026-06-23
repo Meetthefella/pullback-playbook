@@ -1877,18 +1877,34 @@ function scannerUniversePolicy(){
     || null;
 }
 
+function callSetupBasisPolicy(methodName, fallbackValue, argsBuilder){
+  const policy = setupBasisPolicy();
+  try{
+    const method = policy && typeof policy[methodName] === 'function' ? policy[methodName] : null;
+    if(method) return method(...argsBuilder());
+  }catch(_error){}
+  return fallbackValue;
+}
+
+function callScannerUniversePolicy(methodName, fallbackValue, argsBuilder){
+  const policy = scannerUniversePolicy();
+  try{
+    const method = policy && typeof policy[methodName] === 'function' ? policy[methodName] : null;
+    if(method) return method(...argsBuilder());
+  }catch(_error){}
+  return fallbackValue;
+}
+
 function legacyNormalizeStoredSetupType(value){
   return normalizeScanType(value);
 }
 
 function normalizedStoredSetupType(value){
-  const policy = setupBasisPolicy();
-  try{
-    if(policy && typeof policy.normalizeStoredSetupType === 'function'){
-      return legacyNormalizeStoredSetupType(policy.normalizeStoredSetupType({value}, {normalizeScanType}));
-    }
-  }catch(_error){}
-  return legacyNormalizeStoredSetupType(value);
+  return legacyNormalizeStoredSetupType(callSetupBasisPolicy(
+    'normalizeStoredSetupType',
+    value,
+    () => [{value}, {normalizeScanType}]
+  ));
 }
 
 function legacyCurrentSetupTypeValue(value){
@@ -1896,13 +1912,11 @@ function legacyCurrentSetupTypeValue(value){
 }
 
 function currentSetupType(){
-  const policy = setupBasisPolicy();
-  try{
-    if(policy && typeof policy.currentSetupType === 'function'){
-      return policy.currentSetupType({state}, {normalizeScanType});
-    }
-  }catch(_error){}
-  return legacyCurrentSetupTypeValue(state.setupType);
+  return callSetupBasisPolicy(
+    'currentSetupType',
+    legacyCurrentSetupTypeValue(state.setupType),
+    () => [{state}, {normalizeScanType}]
+  );
 }
 
 function activeReviewTicker(){
@@ -3329,18 +3343,16 @@ function legacySelectedQuickScanTypeValue(value){
 }
 
 function selectedQuickScanType(){
-  const policy = setupBasisPolicy();
-  try{
-    if(policy && typeof policy.selectedQuickScanType === 'function'){
-      return policy.selectedQuickScanType({
-        getElementValue(id){
-          const element = $(id);
-          return element ? element.value : '';
-        }
-      }, {normalizeScanType});
-    }
-  }catch(_error){}
-  return legacySelectedQuickScanTypeValue($('scannerSetupType') && $('scannerSetupType').value);
+  return callSetupBasisPolicy(
+    'selectedQuickScanType',
+    legacySelectedQuickScanTypeValue($('scannerSetupType') && $('scannerSetupType').value),
+    () => [{
+      getElementValue(id){
+        const element = $(id);
+        return element ? element.value : '';
+      }
+    }, {normalizeScanType}]
+  );
 }
 
 function renderTickerListWithScanTypes(tickers){
@@ -3367,13 +3379,11 @@ function legacyDefaultUniverseModeForTickers(tickers){
 }
 
 function defaultUniverseModeForTickers(tickers){
-  const policy = scannerUniversePolicy();
-  try{
-    if(policy && typeof policy.defaultModeForTickers === 'function'){
-      return policy.defaultModeForTickers(tickers || [], {uniqueTickers});
-    }
-  }catch(_error){}
-  return legacyDefaultUniverseModeForTickers(tickers);
+  return callScannerUniversePolicy(
+    'defaultModeForTickers',
+    legacyDefaultUniverseModeForTickers(tickers),
+    () => [tickers || [], {uniqueTickers}]
+  );
 }
 
 function normalizeUniverseMode(value){
@@ -3381,28 +3391,24 @@ function normalizeUniverseMode(value){
 }
 
 function normalizedStoredUniverseMode(value){
-  const policy = scannerUniversePolicy();
-  try{
-    if(policy && typeof policy.normalizeStoredMode === 'function'){
-      return normalizeUniverseMode(policy.normalizeStoredMode({value}, {normalizeUniverseMode}));
-    }
-  }catch(_error){}
-  return normalizeUniverseMode(value);
+  return normalizeUniverseMode(callScannerUniversePolicy(
+    'normalizeStoredMode',
+    value,
+    () => [{value}, {normalizeUniverseMode}]
+  ));
 }
 
 function selectedUniverseMode(){
-  const policy = scannerUniversePolicy();
-  try{
-    if(policy && typeof policy.selectedMode === 'function'){
-      return policy.selectedMode({
-        getElementValue(id){
-          const element = $(id);
-          return element ? element.value : '';
-        }
-      }, {normalizeUniverseMode});
-    }
-  }catch(_error){}
-  return normalizeUniverseMode($('universeMode') && $('universeMode').value);
+  return callScannerUniversePolicy(
+    'selectedMode',
+    normalizeUniverseMode($('universeMode') && $('universeMode').value),
+    () => [{
+      getElementValue(id){
+        const element = $(id);
+        return element ? element.value : '';
+      }
+    }, {normalizeUniverseMode}]
+  );
 }
 
 function normalizeDataProvider(value){
@@ -3434,16 +3440,14 @@ function legacyEffectiveUniverseModeValue(universeMode, tickers){
 }
 
 function effectiveUniverseMode(){
-  const policy = scannerUniversePolicy();
-  try{
-    if(policy && typeof policy.effectiveMode === 'function'){
-      return policy.effectiveMode({state}, {
-        normalizeUniverseMode,
-        uniqueTickers
-      });
-    }
-  }catch(_error){}
-  return legacyEffectiveUniverseModeValue(state.universeMode, state.tickers);
+  return callScannerUniversePolicy(
+    'effectiveMode',
+    legacyEffectiveUniverseModeValue(state.universeMode, state.tickers),
+    () => [{state}, {
+      normalizeUniverseMode,
+      uniqueTickers
+    }]
+  );
 }
 
 function legacyFinalScanUniverseValue(safeState, limit){
@@ -3458,21 +3462,19 @@ function legacyFinalScanUniverseValue(safeState, limit){
 }
 
 function finalScanUniverse(){
-  const policy = scannerUniversePolicy();
   const limit = currentMaxScanTickers();
-  try{
-    if(policy && typeof policy.finalUniverse === 'function'){
-      return policy.finalUniverse({
-        state,
-        defaultAutoUniverse:DEFAULT_AUTO_UNIVERSE,
-        maxScanTickers:limit
-      }, {
-        normalizeUniverseMode,
-        uniqueTickers
-      });
-    }
-  }catch(_error){}
-  return legacyFinalScanUniverseValue(state, limit);
+  return callScannerUniversePolicy(
+    'finalUniverse',
+    legacyFinalScanUniverseValue(state, limit),
+    () => [{
+      state,
+      defaultAutoUniverse:DEFAULT_AUTO_UNIVERSE,
+      maxScanTickers:limit
+    }, {
+      normalizeUniverseMode,
+      uniqueTickers
+    }]
+  );
 }
 
 function renderFinalUniversePreview(){
@@ -22984,13 +22986,11 @@ function legacyScanTypeForEvaluationValue(scanType){
 }
 
 function scanTypeForEvaluation(scanType){
-  const policy = setupBasisPolicy();
-  try{
-    if(policy && typeof policy.scanTypeForEvaluation === 'function'){
-      return policy.scanTypeForEvaluation(scanType, {normalizeScanType});
-    }
-  }catch(_error){}
-  return legacyScanTypeForEvaluationValue(scanType);
+  return callSetupBasisPolicy(
+    'scanTypeForEvaluation',
+    legacyScanTypeForEvaluationValue(scanType),
+    () => [scanType, {normalizeScanType}]
+  );
 }
 
 function hardListFromScan(scan){
@@ -25067,21 +25067,19 @@ function legacyResolveSetupTypeWithOverlap(card, data, checks){
 }
 
 function resolveSetupTypeWithOverlap(card, data, checks){
-  const policy = setupBasisPolicy();
-  try{
-    if(policy && typeof policy.resolveSetupTypeWithOverlap === 'function'){
-      return policy.resolveSetupTypeWithOverlap({
-        card,
-        data,
-        checks,
-        state
-      }, {
-        normalizeScanType,
-        numericOrNull
-      });
-    }
-  }catch(_error){}
-  return legacyResolveSetupTypeWithOverlap(card, data, checks);
+  return callSetupBasisPolicy(
+    'resolveSetupTypeWithOverlap',
+    legacyResolveSetupTypeWithOverlap(card, data, checks),
+    () => [{
+      card,
+      data,
+      checks,
+      state
+    }, {
+      normalizeScanType,
+      numericOrNull
+    }]
+  );
 }
 
 function legacyResolveScanType(card, data, checks){
@@ -25089,21 +25087,19 @@ function legacyResolveScanType(card, data, checks){
 }
 
 function resolveScanType(card, data, checks){
-  const policy = setupBasisPolicy();
-  try{
-    if(policy && typeof policy.resolveScanType === 'function'){
-      return policy.resolveScanType({
-        card,
-        data,
-        checks,
-        state
-      }, {
-        normalizeScanType,
-        numericOrNull
-      });
-    }
-  }catch(_error){}
-  return legacyResolveScanType(card, data, checks);
+  return callSetupBasisPolicy(
+    'resolveScanType',
+    legacyResolveScanType(card, data, checks),
+    () => [{
+      card,
+      data,
+      checks,
+      state
+    }, {
+      normalizeScanType,
+      numericOrNull
+    }]
+  );
 }
 
 function resolveSetupTypeDebug(card, data, checks){

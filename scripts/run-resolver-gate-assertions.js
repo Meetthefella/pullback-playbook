@@ -359,6 +359,8 @@ function runScannerPolicyCompatibilityAssertions(){
   [
     'setupBasisPolicy',
     'scannerUniversePolicy',
+    'callSetupBasisPolicy',
+    'callScannerUniversePolicy',
     'legacyNormalizeStoredSetupType',
     'normalizedStoredSetupType',
     'legacyCurrentSetupTypeValue',
@@ -596,6 +598,8 @@ function runAdvancedScannerUiConsistencyAssertions(){
   [
     'setupBasisPolicy',
     'scannerUniversePolicy',
+    'callSetupBasisPolicy',
+    'callScannerUniversePolicy',
     'legacyNormalizeStoredSetupType',
     'normalizedStoredSetupType',
     'legacyCurrentSetupTypeValue',
