@@ -357,6 +357,8 @@ function runScannerPolicyCompatibilityAssertions(){
   policySandbox.globalThis = policySandbox.window;
   vm.createContext(policySandbox);
   [
+    'setupBasisPolicy',
+    'scannerUniversePolicy',
     'legacyNormalizeStoredSetupType',
     'normalizedStoredSetupType',
     'legacyCurrentSetupTypeValue',
@@ -592,6 +594,8 @@ function runAdvancedScannerUiConsistencyAssertions(){
   uiSandbox.globalThis = uiSandbox.window;
   vm.createContext(uiSandbox);
   [
+    'setupBasisPolicy',
+    'scannerUniversePolicy',
     'legacyNormalizeStoredSetupType',
     'normalizedStoredSetupType',
     'legacyCurrentSetupTypeValue',

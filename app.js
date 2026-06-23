@@ -1865,12 +1865,24 @@ function calculateMaxLossFromRiskPercent(accountSize, riskPercent){
   return account * fraction;
 }
 
+function setupBasisPolicy(){
+  return (typeof window !== 'undefined' && window.SetupBasisPolicy)
+    || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy)
+    || null;
+}
+
+function scannerUniversePolicy(){
+  return (typeof window !== 'undefined' && window.ScannerUniversePolicy)
+    || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy)
+    || null;
+}
+
 function legacyNormalizeStoredSetupType(value){
   return normalizeScanType(value);
 }
 
 function normalizedStoredSetupType(value){
-  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  const policy = setupBasisPolicy();
   try{
     if(policy && typeof policy.normalizeStoredSetupType === 'function'){
       return legacyNormalizeStoredSetupType(policy.normalizeStoredSetupType({value}, {normalizeScanType}));
@@ -1884,7 +1896,7 @@ function legacyCurrentSetupTypeValue(value){
 }
 
 function currentSetupType(){
-  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  const policy = setupBasisPolicy();
   try{
     if(policy && typeof policy.currentSetupType === 'function'){
       return policy.currentSetupType({state}, {normalizeScanType});
@@ -3317,7 +3329,7 @@ function legacySelectedQuickScanTypeValue(value){
 }
 
 function selectedQuickScanType(){
-  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  const policy = setupBasisPolicy();
   try{
     if(policy && typeof policy.selectedQuickScanType === 'function'){
       return policy.selectedQuickScanType({
@@ -3355,7 +3367,7 @@ function legacyDefaultUniverseModeForTickers(tickers){
 }
 
 function defaultUniverseModeForTickers(tickers){
-  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  const policy = scannerUniversePolicy();
   try{
     if(policy && typeof policy.defaultModeForTickers === 'function'){
       return policy.defaultModeForTickers(tickers || [], {uniqueTickers});
@@ -3369,7 +3381,7 @@ function normalizeUniverseMode(value){
 }
 
 function normalizedStoredUniverseMode(value){
-  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  const policy = scannerUniversePolicy();
   try{
     if(policy && typeof policy.normalizeStoredMode === 'function'){
       return normalizeUniverseMode(policy.normalizeStoredMode({value}, {normalizeUniverseMode}));
@@ -3379,7 +3391,7 @@ function normalizedStoredUniverseMode(value){
 }
 
 function selectedUniverseMode(){
-  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  const policy = scannerUniversePolicy();
   try{
     if(policy && typeof policy.selectedMode === 'function'){
       return policy.selectedMode({
@@ -3422,7 +3434,7 @@ function legacyEffectiveUniverseModeValue(universeMode, tickers){
 }
 
 function effectiveUniverseMode(){
-  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  const policy = scannerUniversePolicy();
   try{
     if(policy && typeof policy.effectiveMode === 'function'){
       return policy.effectiveMode({state}, {
@@ -3446,7 +3458,7 @@ function legacyFinalScanUniverseValue(safeState, limit){
 }
 
 function finalScanUniverse(){
-  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  const policy = scannerUniversePolicy();
   const limit = currentMaxScanTickers();
   try{
     if(policy && typeof policy.finalUniverse === 'function'){
@@ -22972,7 +22984,7 @@ function legacyScanTypeForEvaluationValue(scanType){
 }
 
 function scanTypeForEvaluation(scanType){
-  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  const policy = setupBasisPolicy();
   try{
     if(policy && typeof policy.scanTypeForEvaluation === 'function'){
       return policy.scanTypeForEvaluation(scanType, {normalizeScanType});
@@ -25055,7 +25067,7 @@ function legacyResolveSetupTypeWithOverlap(card, data, checks){
 }
 
 function resolveSetupTypeWithOverlap(card, data, checks){
-  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  const policy = setupBasisPolicy();
   try{
     if(policy && typeof policy.resolveSetupTypeWithOverlap === 'function'){
       return policy.resolveSetupTypeWithOverlap({
@@ -25077,7 +25089,7 @@ function legacyResolveScanType(card, data, checks){
 }
 
 function resolveScanType(card, data, checks){
-  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  const policy = setupBasisPolicy();
   try{
     if(policy && typeof policy.resolveScanType === 'function'){
       return policy.resolveScanType({
