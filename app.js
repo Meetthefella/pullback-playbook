@@ -15,7 +15,7 @@ if(typeof window !== 'undefined'){
 const defaultAiEndpoint = '/api/analyse-setup';
 const defaultMarketDataEndpoint = '/api/market-data';
 const defaultTrackedStateEndpoint = '/api/tracked-state';
-const defaultPaperTradeEndpoint = '/api/paper-trade';
+const defaultTradeExecutionEndpoint = '/api/trade-execution';
 const defaultPushConfigEndpoint = '/api/push-config';
 const defaultPushSubscribeEndpoint = '/api/push-subscribe';
 const marketCacheKey = 'pullbackPlaybookMarketCacheV1';
@@ -1295,6 +1295,7 @@ if(!window.AnalysisService) throw new Error('AnalysisService failed to load.');
 if(!window.TrackedStateService) throw new Error('TrackedStateService failed to load.');
 if(!window.DiaryService) throw new Error('DiaryService failed to load.');
 if(!window.Trading212Service) throw new Error('Trading212Service failed to load.');
+if(!window.TradingGatewayService) throw new Error('TradingGatewayService failed to load.');
 if(!window.ReviewAnalysisFeature) throw new Error('ReviewAnalysisFeature failed to load.');
 if(!window.TrackWatchlistFeature) throw new Error('TrackWatchlistFeature failed to load.');
 if(!window.DiaryFeature) throw new Error('DiaryFeature failed to load.');
@@ -1479,8 +1480,11 @@ const {
   createDiaryService
 } = window.DiaryService;
 const {
-  createTrading212Service
+  createTrading212PaperAdapter
 } = window.Trading212Service;
+const {
+  createTradingGatewayService
+} = window.TradingGatewayService;
 const {
   createReviewAnalysisFeature
 } = window.ReviewAnalysisFeature;
@@ -1858,8 +1862,32 @@ function calculateMaxLossFromRiskPercent(accountSize, riskPercent){
   return account * fraction;
 }
 
+function legacyNormalizeStoredSetupType(value){
+  return normalizeScanType(value);
+}
+
+function normalizedStoredSetupType(value){
+  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  try{
+    if(policy && typeof policy.normalizeStoredSetupType === 'function'){
+      return legacyNormalizeStoredSetupType(policy.normalizeStoredSetupType({value}, {normalizeScanType}));
+    }
+  }catch(_error){}
+  return legacyNormalizeStoredSetupType(value);
+}
+
+function legacyCurrentSetupTypeValue(value){
+  return legacyNormalizeStoredSetupType(value) || 'unknown';
+}
+
 function currentSetupType(){
-  return normalizeScanType(state.setupType) || 'unknown';
+  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  try{
+    if(policy && typeof policy.currentSetupType === 'function'){
+      return policy.currentSetupType({state}, {normalizeScanType});
+    }
+  }catch(_error){}
+  return legacyCurrentSetupTypeValue(state.setupType);
 }
 
 function activeReviewTicker(){
@@ -2979,10 +3007,26 @@ const trackWatchlistFeature = createTrackWatchlistFeature({
   renderFocusQueue
 });
 const paperTradeEligibility = createPaperTradeEligibility({numericOrNull});
-const trading212Service = createTrading212Service({
-  defaultEndpoint:defaultPaperTradeEndpoint,
-  timeoutMs:20000
+const tradingGatewayService = createTradingGatewayService({
+  defaultEndpoint:defaultTradeExecutionEndpoint,
+  timeoutMs:20000,
+  adapterFactories:{
+    trading212:() => createTrading212PaperAdapter({
+      timeoutMs:20000
+    })
+  }
 });
+const tradingGatewayCapabilities = tradingGatewayService.getCapabilities();
+const trading212PaperEnabled = !!(
+  tradingGatewayCapabilities
+  && tradingGatewayCapabilities.paperTradingEnabled === true
+  && Array.isArray(tradingGatewayCapabilities.supportedBrokers)
+  && tradingGatewayCapabilities.supportedBrokers.includes('trading212')
+);
+const tradingGatewayPaperOnly = !!(
+  tradingGatewayCapabilities
+  && tradingGatewayCapabilities.liveTradingEnabled !== true
+);
 const diaryService = createDiaryService({
   allTickerRecords,
   upsertTickerRecord,
@@ -3101,8 +3145,23 @@ function bootstrapMarketStatusClock(){
   }, MARKET_STATUS_REFRESH_MS);
 }
 
+function legacySelectedQuickScanTypeValue(value){
+  return legacyNormalizeStoredSetupType(value);
+}
+
 function selectedQuickScanType(){
-  return normalizeScanType($('scannerSetupType') && $('scannerSetupType').value);
+  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  try{
+    if(policy && typeof policy.selectedQuickScanType === 'function'){
+      return policy.selectedQuickScanType({
+        getElementValue(id){
+          const element = $(id);
+          return element ? element.value : '';
+        }
+      }, {normalizeScanType});
+    }
+  }catch(_error){}
+  return legacySelectedQuickScanTypeValue($('scannerSetupType') && $('scannerSetupType').value);
 }
 
 function renderTickerListWithScanTypes(tickers){
@@ -3124,12 +3183,47 @@ function syncUniverseFromInputs(preferExisting = false){
   return {...parsed, valid:nextTickers};
 }
 
-function defaultUniverseModeForTickers(tickers){
+function legacyDefaultUniverseModeForTickers(tickers){
   return uniqueTickers(tickers || []).length ? 'tradingview_only' : 'core8';
+}
+
+function defaultUniverseModeForTickers(tickers){
+  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  try{
+    if(policy && typeof policy.defaultModeForTickers === 'function'){
+      return policy.defaultModeForTickers(tickers || [], {uniqueTickers});
+    }
+  }catch(_error){}
+  return legacyDefaultUniverseModeForTickers(tickers);
 }
 
 function normalizeUniverseMode(value){
   return ['tradingview_only','core8','combined'].includes(String(value || '')) ? String(value) : '';
+}
+
+function normalizedStoredUniverseMode(value){
+  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  try{
+    if(policy && typeof policy.normalizeStoredMode === 'function'){
+      return normalizeUniverseMode(policy.normalizeStoredMode({value}, {normalizeUniverseMode}));
+    }
+  }catch(_error){}
+  return normalizeUniverseMode(value);
+}
+
+function selectedUniverseMode(){
+  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  try{
+    if(policy && typeof policy.selectedMode === 'function'){
+      return policy.selectedMode({
+        getElementValue(id){
+          const element = $(id);
+          return element ? element.value : '';
+        }
+      }, {normalizeUniverseMode});
+    }
+  }catch(_error){}
+  return normalizeUniverseMode($('universeMode') && $('universeMode').value);
 }
 
 function normalizeDataProvider(value){
@@ -3156,20 +3250,50 @@ function updateProviderStatusNote(){
   note.textContent = 'FMP: search + snapshot. MarketData.app: snapshot only for now.';
 }
 
-function effectiveUniverseMode(){
-  return normalizeUniverseMode(state.universeMode) || defaultUniverseModeForTickers(state.tickers);
+function legacyEffectiveUniverseModeValue(universeMode, tickers){
+  return normalizeUniverseMode(universeMode) || legacyDefaultUniverseModeForTickers(tickers);
 }
 
-function finalScanUniverse(){
-  const imported = uniqueTickers(state.tickers || []);
-  const mode = effectiveUniverseMode();
-  const limit = currentMaxScanTickers();
+function effectiveUniverseMode(){
+  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  try{
+    if(policy && typeof policy.effectiveMode === 'function'){
+      return policy.effectiveMode({state}, {
+        normalizeUniverseMode,
+        uniqueTickers
+      });
+    }
+  }catch(_error){}
+  return legacyEffectiveUniverseModeValue(state.universeMode, state.tickers);
+}
+
+function legacyFinalScanUniverseValue(safeState, limit){
+  const imported = uniqueTickers(safeState.tickers || []);
+  const mode = legacyEffectiveUniverseModeValue(safeState.universeMode, safeState.tickers);
   if(mode === 'tradingview_only') return imported;
   if(mode === 'combined'){
     const merged = uniqueTickers([...imported, ...DEFAULT_AUTO_UNIVERSE]);
     return Number.isFinite(limit) ? merged.slice(0, limit) : merged;
   }
   return DEFAULT_AUTO_UNIVERSE.slice();
+}
+
+function finalScanUniverse(){
+  const policy = (typeof window !== 'undefined' && window.ScannerUniversePolicy) || (typeof globalThis !== 'undefined' && globalThis.ScannerUniversePolicy);
+  const limit = currentMaxScanTickers();
+  try{
+    if(policy && typeof policy.finalUniverse === 'function'){
+      return policy.finalUniverse({
+        state,
+        defaultAutoUniverse:DEFAULT_AUTO_UNIVERSE,
+        maxScanTickers:limit
+      }, {
+        normalizeUniverseMode,
+        uniqueTickers
+      });
+    }
+  }catch(_error){}
+  return legacyFinalScanUniverseValue(state, limit);
 }
 
 function renderFinalUniversePreview(){
@@ -3247,6 +3371,7 @@ function applyManualUniverseTickers(tickers, metaMap = {}){
   updateRecentTickers(clean);
   updateTickerInputFromState();
   if($('universeMode')) $('universeMode').value = effectiveUniverseMode();
+  syncAdvancedScannerOverrideControls();
   commitTickerState();
   renderTickerQuickLists();
   renderTvImportPreview(clean, clean.length ? 'manual' : 'default');
@@ -6539,9 +6664,9 @@ function syncStateFromDom(){
   state.maxRisk = state.userRiskPerTrade;
   state.marketStatus = $('marketStatus').value;
   state.marketStatusMode = normalizeMarketStatusMode($('marketStatusMode') ? $('marketStatusMode').value : state.marketStatusMode);
-  state.setupType = $('scannerSetupType') ? normalizeScanType($('scannerSetupType').value) : '';
+  state.setupType = selectedQuickScanType() || '';
   state.listName = $('listName').value || "Today's Scan";
-  if($('universeMode')) state.universeMode = normalizeUniverseMode($('universeMode').value) || defaultUniverseModeForTickers(state.tickers);
+  if($('universeMode')) state.universeMode = selectedUniverseMode() || defaultUniverseModeForTickers(state.tickers);
   if($('apiKey')) state.apiKey = $('apiKey').readOnly ? '' : $('apiKey').value.trim();
   if($('dataProvider')) state.dataProvider = normalizeDataProvider($('dataProvider').value);
   if($('apiPlan')) state.apiPlan = String($('apiPlan').value || DEFAULT_API_PLAN);
@@ -6625,11 +6750,11 @@ function loadState(){
     : 0;
   state.wholeSharesOnly = state.wholeSharesOnly !== false;
   state.marketStatusMode = normalizeMarketStatusMode(state.marketStatusMode);
-  state.setupType = normalizeScanType(state.setupType);
+  state.setupType = normalizedStoredSetupType(state.setupType) || '';
   state.userRiskPerTrade = currentMaxLoss();
   state.maxRisk = state.userRiskPerTrade;
   state.tickers = parseTickers((state.tickers || []).join('\n'));
-  state.universeMode = normalizeUniverseMode(state.universeMode) || defaultUniverseModeForTickers(state.tickers);
+  state.universeMode = normalizedStoredUniverseMode(state.universeMode) || defaultUniverseModeForTickers(state.tickers);
   state.recentTickers = uniqueTickers(state.recentTickers || []);
   state.tickerRecords = normalizeTickerRecordsMap(state.tickerRecords);
   state.lastAlertsSeenAt = String(state.lastAlertsSeenAt || '');
@@ -6695,6 +6820,7 @@ function loadState(){
   if($('scannerSetupType')) $('scannerSetupType').value = state.setupType || '';
   $('listName').value = state.listName || "Today's Scan";
   if($('universeMode')) $('universeMode').value = effectiveUniverseMode();
+  syncAdvancedScannerOverrideControls();
   $('tickerInput').value = (state.tickers || []).join('\n');
   if($('tvImportInput')) $('tvImportInput').value = '';
   if($('ocrReviewInput')) $('ocrReviewInput').value = '';
@@ -7362,8 +7488,37 @@ function marketCardSessionDetail(session){
   return hours || 'Market timing unavailable';
 }
 
+function syncAdvancedScannerOverrideControls(){
+  const universeMode = effectiveUniverseMode();
+  const setupType = currentSetupType();
+  if($('advancedUniverseMode')) $('advancedUniverseMode').value = universeMode;
+  if($('advancedScannerSetupType')) $('advancedScannerSetupType').value = setupType === 'unknown' ? '' : setupType;
+}
+
+function applyAdvancedUniverseModeSelection(value, options = {}){
+  const normalized = normalizedStoredUniverseMode(value) || defaultUniverseModeForTickers(state.tickers);
+  if($('universeMode')) $('universeMode').value = normalized;
+  state.universeMode = normalized;
+  syncAdvancedScannerOverrideControls();
+  if(options.save !== false) saveState();
+  renderFinalUniversePreview();
+}
+
+function applyAdvancedSetupTypeSelection(value, options = {}){
+  const normalized = normalizedStoredSetupType(value) || '';
+  if($('scannerSetupType')) $('scannerSetupType').value = normalized;
+  state.setupType = normalized;
+  syncAdvancedScannerOverrideControls();
+  if(options.save !== false) saveState();
+  renderFinalUniversePreview();
+  if(options.status !== false){
+    setStatus('inputStatus', 'Setup mode updated for future scans only. Existing results keep their stored scan context until rescanned.');
+  }
+}
+
 function buildMarketContextDisplayModel(session = getMarketSessionStatus(new Date())){
   const resolvedSession = session || getMarketSessionStatus(new Date());
+  const resolvedSetupType = currentSetupType();
   return {
     regimeLabel: marketStatusDisplayValue(),
     sessionLabel: String(resolvedSession.label || 'Market Closed'),
@@ -7371,7 +7526,7 @@ function buildMarketContextDisplayModel(session = getMarketSessionStatus(new Dat
     detailLabel: marketCardSessionDetail(resolvedSession),
     accountLabel: `${formatGbp(state.accountSize)} | ${formatPound(state.userRiskPerTrade || currentMaxLoss())}`,
     universeLabel: scannerModeChipLabel(effectiveUniverseMode()),
-    setupLabel: setupTypeChipLabel(state.setupType),
+    setupLabel: setupTypeChipLabel(resolvedSetupType === 'unknown' ? '' : resolvedSetupType),
     session: resolvedSession
   };
 }
@@ -7409,9 +7564,53 @@ function highlightContextSettingsSection(target){
   }, 1400);
 }
 
+function openAdvancedScannerSettings(focusField = ''){
+  setActiveWorkspaceTab('scan', {focusTop:false, focusWorkspace:false});
+  const scannerSettings = $('scannerSettings');
+  if(scannerSettings) scannerSettings.open = true;
+  syncAdvancedScannerOverrideControls();
+  const target = focusField === 'setup'
+    ? ($('advancedScannerSetupType') || $('advancedUniverseMode') || scannerSettings)
+    : ($('advancedUniverseMode') || $('advancedScannerSetupType') || scannerSettings);
+  if(!target) return;
+  traceScrollEvent('delayed-scroll:scheduled', {
+    caller:'openAdvancedScannerSettings',
+    label:'scrollIntoView',
+    target:target.id || 'advanced_scanner_settings'
+  });
+  requestAnimationFrame(() => {
+    if(isTrackRestoreOrRevealPending()){
+      traceScrollDriver('scroll-driver:scrollIntoView', {
+        caller:'openAdvancedScannerSettings',
+        target:target.id || 'advanced_scanner_settings',
+        behavior:'smooth',
+        blocked:true
+      });
+      return;
+    }
+    traceScrollEvent('scrollIntoView:before', {
+      caller:'openAdvancedScannerSettings',
+      target:target.id || 'advanced_scanner_settings',
+      options:{behavior:'smooth', block:'nearest'}
+    });
+    suppressScrollMemoryForAppScroll('scroll_into_view_open_advanced_scanner_settings', 1000);
+    target.scrollIntoView({behavior:'smooth', block:'nearest'});
+    if(typeof target.focus === 'function') target.focus({preventScroll:true});
+    traceScrollEvent('scrollIntoView:after', {
+      caller:'openAdvancedScannerSettings',
+      target:target.id || 'advanced_scanner_settings'
+    });
+  });
+}
+
 function openContextSettings(sectionKey = 'market'){
-  const nextSection = ['market','account','mode','setup'].includes(String(sectionKey || ''))
-    ? String(sectionKey)
+  const requestedSection = String(sectionKey || '');
+  if(requestedSection === 'mode' || requestedSection === 'setup'){
+    openAdvancedScannerSettings(requestedSection);
+    return;
+  }
+  const nextSection = ['market','account'].includes(requestedSection)
+    ? requestedSection
     : 'market';
   setContextSettingsPanelOpen(true);
   setControlFocus(nextSection, {scroll:false, instant:true});
@@ -8357,9 +8556,10 @@ function controlFocusConfig(focusKey){
     };
   }
   if(focusKey === 'setup'){
+    const resolvedSetupType = currentSetupType();
     return {
       label:'Setup Type',
-      selected:normalizeScanType(state.setupType),
+      selected:resolvedSetupType === 'unknown' ? '' : resolvedSetupType,
       options:[
         {value:'', label:'Setup not set'},
         {value:'20MA', label:'20MA'},
@@ -8396,21 +8596,16 @@ function setControlFocusSelection(focusKey, value){
     return;
   }
   if(focusKey === 'mode'){
-    if($('universeMode')) $('universeMode').value = value;
-    saveState();
-    renderFinalUniversePreview();
+    applyAdvancedUniverseModeSelection(value);
     return;
   }
   if(focusKey === 'setup'){
-    if($('scannerSetupType')) $('scannerSetupType').value = value;
-    saveState();
-    renderFinalUniversePreview();
-    setStatus('inputStatus', 'Setup mode updated for future scans only. Existing results keep their stored scan context until rescanned.');
+    applyAdvancedSetupTypeSelection(value);
   }
 }
 
 function ensureControlFocusDefault(){
-  if(!['market','account','mode','setup'].includes(String(uiState.controlStripPanel || ''))){
+  if(!['market','account'].includes(String(uiState.controlStripPanel || ''))){
     uiState.controlStripPanel = 'market';
   }
   if(!Number.isFinite(uiState.controlRailActiveIndex)){
@@ -8421,8 +8616,6 @@ function ensureControlFocusDefault(){
 function focusRailButtonForKey(focusKey){
   if(focusKey === 'market') return $('marketStatusPill');
   if(focusKey === 'account') return $('accountRiskPill');
-  if(focusKey === 'mode') return $('scannerModePill');
-  if(focusKey === 'setup') return $('setupTypePill');
   return null;
 }
 
@@ -8538,7 +8731,7 @@ function snapControlFocusRail(container, options = {}){
 
 function setControlFocus(focusKey, options = {}){
   if(uiState.riskQuickOpen) closeRiskQuickPanel();
-  const nextFocus = ['market','account','mode','setup'].includes(String(focusKey || '')) ? String(focusKey) : 'market';
+  const nextFocus = ['market','account'].includes(String(focusKey || '')) ? String(focusKey) : 'market';
   applyRailFocus(controlFocusIndexForKey(nextFocus), options);
 }
 
@@ -8556,7 +8749,7 @@ function renderControlStripSelector(){
   const label = $('controlStripSelectorLabel');
   const optionsBox = $('controlStripSelectorOptions');
   const rail = $('controlFocusRail');
-  ['marketStatusPill','accountRiskPill','scannerModePill','setupTypePill'].forEach(id => {
+  ['marketStatusPill','accountRiskPill'].forEach(id => {
     const button = $(id);
     if(button) button.classList.remove('is-active');
   });
@@ -12091,7 +12284,8 @@ function logAnalysisDebug(label, payload){
 
 function startupStatusContextMessage(){
   const parts = [];
-  const setup = String(setupTypeChipLabel(state.setupType || '') || '').trim();
+  const resolvedSetupType = currentSetupType();
+  const setup = String(setupTypeChipLabel(resolvedSetupType === 'unknown' ? '' : resolvedSetupType) || '').trim();
   const risk = String(formatPound(state.userRiskPerTrade || currentMaxLoss()) || '').trim();
   const universe = String(scannerModeChipLabel(effectiveUniverseMode()) || '').trim();
   if(setup) parts.push(`Setup: ${setup}`);
@@ -22601,11 +22795,21 @@ function buildScannerSummary(result){
   return result.reason || 'Trend structure looks broken for this workflow.';
 }
 
-function scanTypeForEvaluation(scanType){
+function legacyScanTypeForEvaluationValue(scanType){
   const normalized = normalizeScanType(scanType);
   if(normalized === '50MA' || normalized === 'ambiguous') return '50MA';
   if(normalized === '20MA') return '20MA';
   return '20MA';
+}
+
+function scanTypeForEvaluation(scanType){
+  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  try{
+    if(policy && typeof policy.scanTypeForEvaluation === 'function'){
+      return policy.scanTypeForEvaluation(scanType, {normalizeScanType});
+    }
+  }catch(_error){}
+  return legacyScanTypeForEvaluationValue(scanType);
 }
 
 function hardListFromScan(scan){
@@ -24542,12 +24746,12 @@ function compactChecklistText(checks){
   ].join(', ');
 }
 
-function resolveSetupTypeWithOverlap(card, data, checks){
+function legacyResolveSetupTypeWithOverlap(card, data, checks){
   const explicit = normalizeScanType(
     (card && (card.scanSetupType || card.scanType || card.setupType))
     || (data && (data.scanSetupType || data.scanType || data.setupType))
   );
-  const globalType = currentSetupType();
+  const globalType = legacyCurrentSetupTypeValue(state.setupType);
   const price = numericOrNull(data && (data.price ?? (card && card.price)));
   const sma20 = numericOrNull(data && (data.sma20 ?? (card && card.sma20)));
   const sma50 = numericOrNull(data && (data.sma50 ?? (card && card.sma50)));
@@ -24681,8 +24885,44 @@ function resolveSetupTypeWithOverlap(card, data, checks){
   };
 }
 
+function resolveSetupTypeWithOverlap(card, data, checks){
+  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  try{
+    if(policy && typeof policy.resolveSetupTypeWithOverlap === 'function'){
+      return policy.resolveSetupTypeWithOverlap({
+        card,
+        data,
+        checks,
+        state
+      }, {
+        normalizeScanType,
+        numericOrNull
+      });
+    }
+  }catch(_error){}
+  return legacyResolveSetupTypeWithOverlap(card, data, checks);
+}
+
+function legacyResolveScanType(card, data, checks){
+  return legacyResolveSetupTypeWithOverlap(card, data, checks).resolvedScanType;
+}
+
 function resolveScanType(card, data, checks){
-  return resolveSetupTypeWithOverlap(card, data, checks).resolvedScanType;
+  const policy = (typeof window !== 'undefined' && window.SetupBasisPolicy) || (typeof globalThis !== 'undefined' && globalThis.SetupBasisPolicy);
+  try{
+    if(policy && typeof policy.resolveScanType === 'function'){
+      return policy.resolveScanType({
+        card,
+        data,
+        checks,
+        state
+      }, {
+        normalizeScanType,
+        numericOrNull
+      });
+    }
+  }catch(_error){}
+  return legacyResolveScanType(card, data, checks);
 }
 
 function resolveSetupTypeDebug(card, data, checks){
@@ -30482,8 +30722,12 @@ async function submitPaperTradeFromReview(ticker){
     clientOrderId:`pbp-${context.ticker}-${Date.now()}`,
     note:`Pullback Playbook paper trade | ${context.finalVerdict}`
   };
-  const result = await trading212Service.submitPaperTrade(request, {
-    endpoint:defaultPaperTradeEndpoint,
+  const result = await tradingGatewayService.submitPaperTrade({
+    ...request,
+    broker:'trading212'
+  }, {
+    broker:'trading212',
+    endpoint:defaultTradeExecutionEndpoint,
     mock:mockMode
   });
   if(!result || result.ok !== true){
@@ -30498,7 +30742,7 @@ async function submitPaperTradeFromReview(ticker){
   }
   const entry = createDiaryEntryFromPaperTradePayload({
     ticker:context.ticker,
-    sourceContext:frozenSnapshot.sourceContext || 'trading212_paper_trade',
+    sourceContext:frozenSnapshot.sourceContext || 'trade_gateway_paper_trade',
     status:'submitted',
     sourceRef:String(result.orderId || result.clientOrderId || ''),
     date:todayIsoDate(),
@@ -30530,10 +30774,11 @@ async function submitPaperTradeFromReview(ticker){
     plannedMaxLoss:Number.isFinite(Number(frozenSnapshot.maxLoss))
       ? String(frozenSnapshot.maxLoss)
       : '',
-    notes:`Paper trade submitted via Trading 212 (${result.status || 'submitted'}).`,
+    notes:`Paper trade submitted via ${String(result.broker || 'paper gateway')} (${result.status || 'submitted'}).`,
     executionMeta:{
-      broker:'trading212',
-      mode:'paper',
+      gateway:'trade_execution',
+      broker:String(result.broker || 'trading212'),
+      mode:String(result.mode || 'paper'),
       orderId:result.orderId || '',
       clientOrderId:result.clientOrderId || '',
       status:result.status || 'submitted',
@@ -32781,7 +33026,7 @@ function renderReviewWorkspace(options = {}){
     marketStatus:record.meta.marketStatus || state.marketStatus || ''
   });
   const paperTradeUi = paperTradeUiStateForTicker(record.ticker);
-  const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true;
+  const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true && trading212PaperEnabled === true;
   const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
   if(!paperTradeEligible && paperTradeUi.previewOpen === true){
     setPaperTradeUiState(record.ticker, {previewOpen:false, snapshot:null});
@@ -32794,13 +33039,15 @@ function renderReviewWorkspace(options = {}){
   const paperTradePanelOpen = paperTradeEligible && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
   const paperTradePreviewVisible = paperTradePanelOpen;
   const paperTradePrimaryReason = mergedPaperTradeEligibilityState.reasons[0] || '';
-  const paperTradeDisabledReason = !paperTradeEligible
+  const paperTradeDisabledReason = trading212PaperEnabled !== true
+    ? 'Paper trading gateway is unavailable.'
+    : (!paperTradeEligible
     ? (
       String(reviewFinalVerdictForPaperTrade || '').trim().toLowerCase() !== 'entry'
         ? 'Not actionable - setup is not Entry-ready'
         : 'Trade plan not valid'
     )
-    : '';
+    : '');
   const paperTradeHasRuntimeStatus = !!paperTradeUi.message
     || paperTradeUi.state === 'submitting'
     || paperTradeUi.state === 'submit_success'
@@ -32873,7 +33120,7 @@ function renderReviewWorkspace(options = {}){
     : null;
   const paperTradeDebugLabel = paperTradeDebugForced
     ? `<div class="tiny warntext" id="paperTradeDebugModeLabel">Debug paper-trade test mode enabled. Simulated Entry-ready preview.</div>`
-    : '';
+    : (tradingGatewayPaperOnly ? '<div class="tiny" id="paperTradeGatewayModeLabel">Tester mode: paper trading only. Live execution stays locked.</div>' : '');
   const paperTradePreviewMarkup = paperTradePreviewModel
     ? `${paperTradePreviewModel.debugForced ? '<div class="tiny warntext">Simulated Entry-ready preview (debug).</div>' : ''}<div class="tiny">Ticker ${escapeHtml(paperTradePreviewModel.ticker)} | Side ${escapeHtml(paperTradePreviewModel.side)} | Qty ${escapeHtml(String(paperTradePreviewModel.quantity))}</div><div class="tiny">Entry ${escapeHtml(fmtPrice(paperTradePreviewModel.entry))} | Stop ${escapeHtml(fmtPrice(paperTradePreviewModel.stop))} | Target ${escapeHtml(fmtPrice(paperTradePreviewModel.target))}</div><div class="tiny">Max loss ${escapeHtml(Number.isFinite(paperTradePreviewModel.maxLoss) ? formatGbp(paperTradePreviewModel.maxLoss) : 'n/a')} | RR ${escapeHtml(Number.isFinite(paperTradePreviewModel.rrRatio) ? `${paperTradePreviewModel.rrRatio.toFixed(2)}R` : 'n/a')}</div><div class="tiny">Capital ${escapeHtml(paperTradePreviewModel.capitalLabel)} | Market ${escapeHtml(paperTradePreviewModel.marketStatus || '')}</div>`
     : `<div class="tiny warntext">${escapeHtml(paperTradePrimaryReason || 'Unable to build paper-trade preview for this setup.')}</div>`;
@@ -35524,12 +35771,8 @@ click('contextSettingsCloseBtn', () => setContextSettingsPanelOpen(false));
 click('contextSettingsBackdrop', () => setContextSettingsPanelOpen(false));
 click('marketTimingLedger', openMarketCalendarShortcut);
 click('accountRiskLedger', () => openContextSettings('account'));
-click('scannerModeLedger', () => openContextSettings('mode'));
-click('setupTypeLedger', () => openContextSettings('setup'));
 click('marketStatusPill', () => setControlFocus('market'));
 click('accountRiskPill', () => setControlFocus('account'));
-click('scannerModePill', () => setControlFocus('mode'));
-click('setupTypePill', () => setControlFocus('setup'));
 document.addEventListener('keydown', event => {
   if(event.key === 'Escape' && uiState.contextSettingsOpen === true){
     setContextSettingsPanelOpen(false);
@@ -35716,6 +35959,7 @@ on('tickerInput', 'input', () => {
     state.universeMode = 'core8';
     if($('universeMode')) $('universeMode').value = 'core8';
   }
+  syncAdvancedScannerOverrideControls();
   commitTickerState();
   renderTickerQuickLists();
   renderTvImportPreview(state.tickers && state.tickers.length ? state.tickers : [], state.tickers && state.tickers.length ? 'manual' : 'default');
@@ -35744,6 +35988,9 @@ on('showExpiredWatchlist', 'change', () => {
 on('universeMode', 'change', () => {
   saveState();
   renderFinalUniversePreview();
+});
+on('advancedUniverseMode', 'change', event => {
+  applyAdvancedUniverseModeSelection(event && event.target ? event.target.value : '');
 });
 
 ['accountSize','riskPercent','maxLossOverride'].forEach(id => on(id, 'change', () => {
@@ -35776,6 +36023,9 @@ on('scannerSetupType', 'change', () => {
   saveState();
   renderFinalUniversePreview();
   setStatus('inputStatus', 'Setup mode updated for future scans only. Existing results keep their stored scan context until rescanned.');
+});
+on('advancedScannerSetupType', 'change', event => {
+  applyAdvancedSetupTypeSelection(event && event.target ? event.target.value : '');
 });
 on('wholeSharesOnly', 'change', () => {
   handleRiskSettingsChange('whole_shares_change');

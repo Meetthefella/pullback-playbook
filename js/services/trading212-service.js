@@ -1,32 +1,31 @@
 (function(global){
-  function createTrading212Service(options = {}){
-    const defaultEndpoint = String(options.defaultEndpoint || '/api/paper-trade');
-    const defaultTimeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Math.max(2000, Number(options.timeoutMs)) : 20000;
+  function normalizeError(error, fallbackMessage = 'Paper trade submission failed.'){
+    const message = String(error && error.message || fallbackMessage).trim() || fallbackMessage;
+    const code = String(error && error.code || '').trim() || 'paper_trade_error';
+    return {ok:false, code, message};
+  }
 
-    function normalizeError(error, fallbackMessage = 'Paper trade submission failed.'){
-      const message = String(error && error.message || fallbackMessage).trim() || fallbackMessage;
-      const code = String(error && error.code || '').trim() || 'paper_trade_error';
-      return {ok:false, code, message};
-    }
+  function normalizePaperTradeResult(payload = {}, fallback = {}){
+    return {
+      ok:true,
+      broker:'trading212',
+      mode:'paper',
+      orderId:String(payload.orderId || payload.id || fallback.orderId || ''),
+      clientOrderId:String(payload.clientOrderId || payload.client_order_id || fallback.clientOrderId || ''),
+      status:String(payload.status || fallback.status || 'submitted'),
+      submittedAt:String(payload.submittedAt || payload.submitted_at || fallback.submittedAt || new Date().toISOString()),
+      symbol:String(payload.symbol || fallback.symbol || ''),
+      side:String(payload.side || fallback.side || 'BUY'),
+      quantity:Number.isFinite(Number(payload.quantity)) ? Number(payload.quantity) : (Number.isFinite(Number(fallback.quantity)) ? Number(fallback.quantity) : null),
+      price:Number.isFinite(Number(payload.price)) ? Number(payload.price) : (Number.isFinite(Number(fallback.price)) ? Number(fallback.price) : null),
+      stopLoss:Number.isFinite(Number(payload.stopLoss)) ? Number(payload.stopLoss) : (Number.isFinite(Number(fallback.stopLoss)) ? Number(fallback.stopLoss) : null),
+      takeProfit:Number.isFinite(Number(payload.takeProfit)) ? Number(payload.takeProfit) : (Number.isFinite(Number(fallback.takeProfit)) ? Number(fallback.takeProfit) : null),
+      raw:payload
+    };
+  }
 
-    function normalizePaperTradeResult(payload = {}, fallback = {}){
-      return {
-        ok:true,
-        broker:'trading212',
-        mode:'paper',
-        orderId:String(payload.orderId || payload.id || fallback.orderId || ''),
-        clientOrderId:String(payload.clientOrderId || payload.client_order_id || fallback.clientOrderId || ''),
-        status:String(payload.status || fallback.status || 'submitted'),
-        submittedAt:String(payload.submittedAt || payload.submitted_at || fallback.submittedAt || new Date().toISOString()),
-        symbol:String(payload.symbol || fallback.symbol || ''),
-        side:String(payload.side || fallback.side || 'BUY'),
-        quantity:Number.isFinite(Number(payload.quantity)) ? Number(payload.quantity) : (Number.isFinite(Number(fallback.quantity)) ? Number(fallback.quantity) : null),
-        price:Number.isFinite(Number(payload.price)) ? Number(payload.price) : (Number.isFinite(Number(fallback.price)) ? Number(fallback.price) : null),
-        stopLoss:Number.isFinite(Number(payload.stopLoss)) ? Number(payload.stopLoss) : (Number.isFinite(Number(fallback.stopLoss)) ? Number(fallback.stopLoss) : null),
-        takeProfit:Number.isFinite(Number(payload.takeProfit)) ? Number(payload.takeProfit) : (Number.isFinite(Number(fallback.takeProfit)) ? Number(fallback.takeProfit) : null),
-        raw:payload
-      };
-    }
+    function createTrading212PaperAdapter(options = {}){
+      const defaultTimeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Math.max(2000, Number(options.timeoutMs)) : 20000;
 
     async function postJsonWithTimeout(url, body, timeoutMs, extraHeaders = {}){
       const controller = new AbortController();
@@ -45,9 +44,7 @@
       }
     }
 
-    async function submitPaperTrade(request = {}, options = {}){
-      const endpoint = String(options.endpoint || defaultEndpoint).trim() || defaultEndpoint;
-      const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Math.max(2000, Number(options.timeoutMs)) : defaultTimeoutMs;
+    function normalizePaperTradeRequest(request = {}){
       const payload = request && typeof request === 'object' ? request : {};
       const symbol = String(payload.symbol || payload.ticker || '').trim().toUpperCase();
       const side = String(payload.side || 'BUY').trim().toUpperCase();
@@ -61,8 +58,11 @@
       if(!Number.isFinite(quantity) || quantity <= 0) return normalizeError({code:'invalid_request', message:'Valid quantity is required for paper trade.'});
       if(!Number.isFinite(limitPrice) || limitPrice <= 0) return normalizeError({code:'invalid_request', message:'Valid entry price is required for paper trade.'});
 
-      const normalizedRequest = {
+      return {
+        ok:true,
+        request:{
         mode:'paper',
+        broker:'trading212',
         symbol,
         side:side === 'SELL' ? 'SELL' : 'BUY',
         quantity:Math.max(1, Math.floor(quantity)),
@@ -73,9 +73,34 @@
         timeInForce:'DAY',
         clientOrderId,
         note:String(payload.note || '').trim()
+        }
       };
+    }
 
-      const useMock = options.mock === true || payload.mock === true || endpoint.toLowerCase().startsWith('mock:');
+    function buildGatewayPayload(request = {}, context = {}){
+      const normalized = normalizePaperTradeRequest(request);
+      if(!normalized || normalized.ok !== true) return normalized;
+      return {
+        ok:true,
+        payload:{
+          action:'submit_order',
+          broker:'trading212',
+          mode:'paper',
+          request:{
+            ...normalized.request
+          },
+          mock:context.mock === true
+        }
+      };
+    }
+
+    async function submitPaperTrade(request = {}, options = {}){
+      const endpoint = String(options.endpoint || '/api/paper-trade').trim() || '/api/paper-trade';
+      const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Math.max(2000, Number(options.timeoutMs)) : defaultTimeoutMs;
+      const normalized = normalizePaperTradeRequest(request);
+      if(!normalized || normalized.ok !== true) return normalized;
+      const normalizedRequest = normalized.request;
+      const useMock = options.mock === true || endpoint.toLowerCase().startsWith('mock:');
       if(useMock){
         return normalizePaperTradeResult({
           orderId:`mock-${Date.now()}`,
@@ -119,11 +144,22 @@
     }
 
     return {
+      brokerId:'trading212',
+      displayName:'Trading 212',
+      buildGatewayPayload,
+      normalizePaperTradeRequest,
+      normalizePaperTradeResult,
+      normalizeError,
       submitPaperTrade
     };
   }
 
+  function createTrading212Service(options = {}){
+    return createTrading212PaperAdapter(options);
+  }
+
   global.Trading212Service = Object.assign({}, global.Trading212Service, {
+    createTrading212PaperAdapter,
     createTrading212Service
   });
 })(window);

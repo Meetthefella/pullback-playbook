@@ -18,6 +18,8 @@ function runBrowserModule(relativePath){
 runBrowserModule('js/bounce-priceability.js');
 runBrowserModule('js/plan-math.js');
 runBrowserModule('js/tradeability.js');
+runBrowserModule('js/scanner-universe-policy.js');
+runBrowserModule('js/setup-basis-policy.js');
 runBrowserModule('js/resolver-core.js');
 runBrowserModule('js/resolver-presentation.js');
 runBrowserModule('js/domain/simplified-plan-state.js');
@@ -301,6 +303,337 @@ function extractFunctionSource(source, functionName){
     }
   }
   throw new Error(`Unable to extract ${functionName} from app.js.`);
+}
+
+function runScannerPolicyCompatibilityAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const browserWindow = sandbox.window;
+  const policySandbox = {
+    window:{
+      ScannerUniversePolicy:browserWindow.ScannerUniversePolicy,
+      SetupBasisPolicy:browserWindow.SetupBasisPolicy
+    },
+    console,
+    state:{
+      tickers:[],
+      universeMode:'',
+      setupType:'',
+      marketStatus:'S&P above 50 MA'
+    },
+    DEFAULT_AUTO_UNIVERSE:['AAPL', 'MSFT', 'NVDA', 'META'],
+    currentMaxScanTickers(){
+      return null;
+    },
+    normalizeScanType(value){
+      const safe = String(value || '').trim().toUpperCase();
+      if(['20MA', '50MA'].includes(safe)) return safe;
+      if(safe === 'AMBIGUOUS') return 'ambiguous';
+      return '';
+    },
+    numericOrNull(value){
+      if(value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    uniqueTickers(values){
+      const seen = new Set();
+      return (Array.isArray(values) ? values : []).reduce((list, value) => {
+        const safe = String(value || '').trim().toUpperCase();
+        if(!safe || seen.has(safe)) return list;
+        seen.add(safe);
+        list.push(safe);
+        return list;
+      }, []);
+    },
+    normalizeUniverseMode(value){
+      return ['tradingview_only', 'core8', 'combined'].includes(String(value || '')) ? String(value || '') : '';
+    },
+    $(id){
+      if(id === 'scannerSetupType') return {value:policySandbox.state.setupType || ''};
+      if(id === 'universeMode') return {value:policySandbox.state.universeMode || ''};
+      return null;
+    }
+  };
+  policySandbox.globalThis = policySandbox.window;
+  vm.createContext(policySandbox);
+  [
+    'legacyNormalizeStoredSetupType',
+    'normalizedStoredSetupType',
+    'legacyCurrentSetupTypeValue',
+    'currentSetupType',
+    'legacySelectedQuickScanTypeValue',
+    'selectedQuickScanType',
+    'legacyDefaultUniverseModeForTickers',
+    'defaultUniverseModeForTickers',
+    'effectiveUniverseMode',
+    'legacyEffectiveUniverseModeValue',
+    'normalizedStoredUniverseMode',
+    'selectedUniverseMode',
+    'legacyFinalScanUniverseValue',
+    'finalScanUniverse',
+    'legacyScanTypeForEvaluationValue',
+    'scanTypeForEvaluation',
+    'legacyResolveSetupTypeWithOverlap',
+    'resolveSetupTypeWithOverlap',
+    'legacyResolveScanType',
+    'resolveScanType'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), policySandbox, {filename:`app.js#${functionName}`});
+  });
+
+  const explicit20Args = [
+    {},
+    {
+      price:100,
+      sma20:99,
+      sma50:95,
+      perf1w:3
+    },
+    {
+      near20:true,
+      near50:false,
+      trendStrong:true,
+      bounce:true
+    }
+  ];
+  const explicit50Args = [
+    {},
+    {
+      price:100,
+      sma20:102,
+      sma50:99.5,
+      perf1w:1
+    },
+    {
+      near20:false,
+      near50:true,
+      trendStrong:true,
+      stabilising:true
+    }
+  ];
+  const accepted50Args = [
+    {},
+    {
+      price:248.63,
+      sma20:260,
+      sma50:250.23,
+      perf1w:0.4
+    },
+    {
+      near20:false,
+      near50:true,
+      trendStrong:false,
+      stabilising:false
+    }
+  ];
+
+  if(policySandbox.selectedQuickScanType() !== ''){
+    throw new Error('Blank setup selection must remain blank at the policy read layer.');
+  }
+  if(policySandbox.scanTypeForEvaluation('') !== '20MA'){
+    throw new Error('Blank setup must preserve the current 20MA evaluation baseline.');
+  }
+  policySandbox.state.setupType = '20MA';
+  if(policySandbox.currentSetupType() !== '20MA' || policySandbox.selectedQuickScanType() !== '20MA'){
+    throw new Error('Explicit 20MA selection must still read through the wrapper path unchanged.');
+  }
+  const explicit20 = policySandbox.resolveSetupTypeWithOverlap(...explicit20Args);
+  if(explicit20.resolvedScanType !== '20MA'){
+    throw new Error('Explicit 20MA setup must still resolve as 20MA.');
+  }
+
+  policySandbox.state.setupType = '50MA';
+  if(policySandbox.currentSetupType() !== '50MA' || policySandbox.selectedQuickScanType() !== '50MA'){
+    throw new Error('Explicit 50MA selection must still read through the wrapper path unchanged.');
+  }
+  const explicit50 = policySandbox.resolveSetupTypeWithOverlap(...explicit50Args);
+  if(explicit50.resolvedScanType !== '50MA'){
+    throw new Error('Explicit 50MA setup must still resolve as 50MA.');
+  }
+
+  policySandbox.state.setupType = '';
+  const inferred50 = policySandbox.resolveSetupTypeWithOverlap({}, {
+    price:99.8,
+    sma20:103,
+    sma50:100,
+    perf1w:0.5
+  }, {
+    near20:false,
+    near50:true,
+    trendStrong:true,
+    stabilising:true
+  });
+  if(inferred50.resolvedScanType !== '50MA'){
+    throw new Error('Blank setup must not silently drift away from a clear 50MA-only context.');
+  }
+  if(policySandbox.currentSetupType() !== 'unknown'){
+    throw new Error('Blank setup must not silently become a fake explicit setup type.');
+  }
+
+  policySandbox.state.tickers = ['NVDA', 'AAPL'];
+  policySandbox.state.universeMode = '';
+  const importedFirst = policySandbox.finalScanUniverse();
+  if(JSON.stringify(importedFirst) !== JSON.stringify(['NVDA', 'AAPL']) || policySandbox.effectiveUniverseMode() !== 'tradingview_only'){
+    throw new Error('Imported/manual tickers must still take precedence through the universe policy wrapper.');
+  }
+
+  policySandbox.state.tickers = [];
+  policySandbox.state.universeMode = '';
+  const curatedFallback = policySandbox.finalScanUniverse();
+  if(JSON.stringify(curatedFallback) !== JSON.stringify(policySandbox.DEFAULT_AUTO_UNIVERSE) || policySandbox.effectiveUniverseMode() !== 'core8'){
+    throw new Error('Curated fallback must still work through the universe policy wrapper.');
+  }
+
+  policySandbox.state.tickers = ['NVDA', 'AAPL'];
+  policySandbox.state.universeMode = 'combined';
+  policySandbox.currentMaxScanTickers = () => 3;
+  const combined = policySandbox.finalScanUniverse();
+  if(JSON.stringify(combined) !== JSON.stringify(['NVDA', 'AAPL', 'MSFT'])){
+    throw new Error('Combined universe mode must still preserve imported tickers first and then curated fallback.');
+  }
+
+  const missingPolicyLegacy50 = policySandbox.legacyResolveSetupTypeWithOverlap(...accepted50Args);
+  policySandbox.window.SetupBasisPolicy = null;
+  const missingPolicyWrapped50 = policySandbox.resolveSetupTypeWithOverlap(...accepted50Args);
+  if(JSON.stringify(missingPolicyWrapped50) !== JSON.stringify(missingPolicyLegacy50)){
+    throw new Error('Missing SetupBasisPolicy must preserve legacy setup-resolution behaviour exactly.');
+  }
+  if(missingPolicyWrapped50.resolvedScanType !== '50MA'){
+    throw new Error('Accepted 50MA support-test path must still resolve as 50MA when SetupBasisPolicy is unavailable.');
+  }
+  const missingUniverseMode = policySandbox.effectiveUniverseMode();
+  const missingUniverseFinal = policySandbox.finalScanUniverse();
+  if(missingUniverseMode !== policySandbox.legacyEffectiveUniverseModeValue(policySandbox.state.universeMode, policySandbox.state.tickers)
+    || JSON.stringify(missingUniverseFinal) !== JSON.stringify(policySandbox.legacyFinalScanUniverseValue(policySandbox.state, policySandbox.currentMaxScanTickers()))){
+    throw new Error('Missing ScannerUniversePolicy must preserve legacy effective/final universe behaviour.');
+  }
+
+  policySandbox.window.SetupBasisPolicy = {
+    currentSetupType(){ throw new Error('boom'); },
+    selectedQuickScanType(){ throw new Error('boom'); },
+    normalizeStoredSetupType(){ throw new Error('boom'); },
+    scanTypeForEvaluation(){ throw new Error('boom'); },
+    resolveSetupTypeWithOverlap(){ throw new Error('boom'); },
+    resolveScanType(){ throw new Error('boom'); }
+  };
+  policySandbox.window.ScannerUniversePolicy = {
+    normalizeStoredMode(){ throw new Error('boom'); },
+    selectedMode(){ throw new Error('boom'); },
+    defaultModeForTickers(){ throw new Error('boom'); },
+    effectiveMode(){ throw new Error('boom'); },
+    finalUniverse(){ throw new Error('boom'); }
+  };
+  policySandbox.state.setupType = '50MA';
+  const throwingPolicy50 = policySandbox.resolveSetupTypeWithOverlap(...explicit50Args);
+  const legacyExplicit50 = policySandbox.legacyResolveSetupTypeWithOverlap(...explicit50Args);
+  if(JSON.stringify(throwingPolicy50) !== JSON.stringify(legacyExplicit50)){
+    throw new Error('Throwing SetupBasisPolicy must preserve legacy setup-resolution behaviour exactly.');
+  }
+  if(policySandbox.selectedQuickScanType() !== '50MA' || policySandbox.currentSetupType() !== '50MA' || policySandbox.scanTypeForEvaluation('ambiguous') !== '50MA'){
+    throw new Error('Throwing setup-basis wrapper methods must fall back to legacy setup reads and evaluation.');
+  }
+  const throwingUniverseMode = policySandbox.effectiveUniverseMode();
+  const throwingUniverseFinal = policySandbox.finalScanUniverse();
+  if(throwingUniverseMode !== policySandbox.legacyEffectiveUniverseModeValue(policySandbox.state.universeMode, policySandbox.state.tickers)
+    || JSON.stringify(throwingUniverseFinal) !== JSON.stringify(policySandbox.legacyFinalScanUniverseValue(policySandbox.state, policySandbox.currentMaxScanTickers()))){
+    throw new Error('Throwing ScannerUniversePolicy must preserve legacy effective/final universe behaviour.');
+  }
+}
+
+function runAdvancedScannerUiConsistencyAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const indexSource = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const uiSandbox = {
+    window:{},
+    console,
+    state:{
+      tickers:['NVDA', 'AAPL'],
+      universeMode:'',
+      setupType:'',
+      marketStatus:'S&P above 50 MA'
+    },
+    uiState:{},
+    elements:{
+      advancedUniverseMode:{value:'', focus(){}, scrollIntoView(){}},
+      advancedScannerSetupType:{value:'', focus(){}, scrollIntoView(){}},
+      universeMode:{value:''},
+      scannerSetupType:{value:''},
+      scannerSettings:{open:false, id:'scannerSettings', scrollIntoView(){}, focus(){}}
+    },
+    setActiveWorkspaceTab(){},
+    requestAnimationFrame(callback){ callback(); },
+    isTrackRestoreOrRevealPending(){ return false; },
+    traceScrollEvent(){},
+    traceScrollDriver(){},
+    suppressScrollMemoryForAppScroll(){},
+    uniqueTickers(values){
+      const seen = new Set();
+      return (Array.isArray(values) ? values : []).reduce((list, value) => {
+        const safe = String(value || '').trim().toUpperCase();
+        if(!safe || seen.has(safe)) return list;
+        seen.add(safe);
+        list.push(safe);
+        return list;
+      }, []);
+    },
+    normalizeUniverseMode(value){
+      return ['tradingview_only', 'core8', 'combined'].includes(String(value || '')) ? String(value || '') : '';
+    },
+    normalizeScanType(value){
+      const safe = String(value || '').trim().toUpperCase();
+      if(['20MA', '50MA'].includes(safe)) return safe;
+      if(safe === 'AMBIGUOUS') return 'ambiguous';
+      return '';
+    },
+    $(id){
+      return uiSandbox.elements[id] || null;
+    }
+  };
+  uiSandbox.globalThis = uiSandbox.window;
+  vm.createContext(uiSandbox);
+  [
+    'legacyNormalizeStoredSetupType',
+    'normalizedStoredSetupType',
+    'legacyCurrentSetupTypeValue',
+    'currentSetupType',
+    'legacyDefaultUniverseModeForTickers',
+    'defaultUniverseModeForTickers',
+    'normalizedStoredUniverseMode',
+    'legacyEffectiveUniverseModeValue',
+    'effectiveUniverseMode',
+    'syncAdvancedScannerOverrideControls',
+    'applyAdvancedUniverseModeSelection',
+    'applyAdvancedSetupTypeSelection',
+    'openAdvancedScannerSettings',
+    'openContextSettings'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), uiSandbox, {filename:`app.js#${functionName}`});
+  });
+
+  uiSandbox.syncAdvancedScannerOverrideControls();
+  if(uiSandbox.elements.advancedUniverseMode.value !== 'tradingview_only' || uiSandbox.elements.advancedScannerSetupType.value !== ''){
+    throw new Error('Advanced scanner overrides must reflect imported-ticker precedence and blank setup state.');
+  }
+
+  uiSandbox.state.tickers = [];
+  uiSandbox.state.universeMode = 'core8';
+  uiSandbox.state.setupType = '50MA';
+  uiSandbox.syncAdvancedScannerOverrideControls();
+  if(uiSandbox.elements.advancedUniverseMode.value !== 'core8' || uiSandbox.elements.advancedScannerSetupType.value !== '50MA'){
+    throw new Error('Advanced scanner overrides must reflect curated fallback and explicit setup overrides.');
+  }
+
+  uiSandbox.openContextSettings('mode');
+  if(uiSandbox.elements.scannerSettings.open !== true){
+    throw new Error('Deprecated mode context requests must route to Advanced Scanner Settings.');
+  }
+
+  if(!/Adjust market, account\/risk, and advanced scanner settings\./.test(indexSource)){
+    throw new Error('Context settings copy must no longer advertise scanner mode/setup controls in the header panel.');
+  }
+  if(/Adjust market, account\/risk, scanner mode, and setup defaults\./.test(indexSource)){
+    throw new Error('Stale context settings copy still advertises scanner mode/setup in the header panel.');
+  }
 }
 
 function selectReviewChartSourceIncludesTerminalBlockedChosen(source){
@@ -5124,6 +5457,8 @@ function runAccepted50MaSupportThresholdAssertions(){
 }
 
 runTrackPresentationAuthorityAssertions();
+runScannerPolicyCompatibilityAssertions();
+runAdvancedScannerUiConsistencyAssertions();
 runPlanSemanticsAssertions();
 runReviewPullbackBounceDisplayAssertions();
 runReviewPricedButNotReadyAssertions();
@@ -5136,6 +5471,8 @@ console.log('Watchlist long-press summary assertions passed.');
 console.log('Simplified state pipeline assertions passed.');
 console.log('AI chart-coach contract assertions passed.');
 console.log('Track presentation authority assertions passed.');
+console.log('Scanner policy compatibility assertions passed.');
+console.log('Advanced scanner UI consistency assertions passed.');
 console.log('Plan source semantics assertions passed.');
 console.log('Review pullback/bounce display assertions passed.');
 console.log('Review priced-but-not-ready assertions passed.');

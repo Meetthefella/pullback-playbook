@@ -50,8 +50,8 @@
           <div class="ledger-strip__meta">
             <button class="ledger-meta-item ledger-meta-button" type="button" id="marketTimingLedger" aria-label="Open US market calendar">Opens 14:30 UK</button>
             <button class="ledger-meta-item ledger-meta-button" type="button" id="accountRiskLedger" aria-label="Edit account and risk">GBP 4,000 | &pound;40</button>
-            <button class="ledger-meta-item ledger-meta-button" type="button" id="scannerModeLedger" aria-label="Edit scanner mode">Curated Core</button>
-            <button class="ledger-meta-item ledger-meta-button" type="button" id="setupTypeLedger" aria-label="Edit setup type">Setup not set</button>
+            <span class="ledger-meta-item" id="scannerModeLedger">Curated Core</span>
+            <span class="ledger-meta-item" id="setupTypeLedger">Setup not set</span>
           </div>
         </div>
       </div>
@@ -61,7 +61,7 @@
             <strong>Context Settings</strong>
             <button class="context-settings-close" type="button" id="contextSettingsCloseBtn" aria-label="Close context settings">&times;</button>
           </div>
-          <span class="tiny">Adjust market, account/risk, scanner mode, and setup defaults.</span>
+          <span class="tiny">Adjust market, account/risk, and advanced scanner settings.</span>
         </div>
       <div class="context-panel-section" id="contextSectionMarket">
         <div class="context-panel-section__title">Market</div>
@@ -75,14 +75,14 @@
           <span class="focus-rail-label">Account</span>
           <strong class="focus-rail-value" id="accountRiskStrip">GBP 4,000 | £--</strong>
         </button>
-        <button class="focus-rail-item" id="scannerModePill" type="button" data-control-strip="mode">
+        <div class="focus-rail-item" id="scannerModePill" aria-hidden="true">
           <span class="focus-rail-label">Mode</span>
           <strong class="focus-rail-value" id="scannerModeStrip">Curated Core</strong>
-        </button>
-        <button class="focus-rail-item" id="setupTypePill" type="button" data-control-strip="setup">
+        </div>
+        <div class="focus-rail-item" id="setupTypePill" aria-hidden="true">
           <span class="focus-rail-label">Setup</span>
           <strong class="focus-rail-value" id="setupTypeStrip">Setup not set</strong>
-        </button>
+        </div>
       </div>
       <div class="control-focus-tray" id="controlStripSelector">
         <div class="control-focus-tray__label" id="controlStripSelectorLabel">Market</div>
@@ -193,6 +193,26 @@
         <div class="row" style="margin-top:10px">
           <div><label>List Name</label><input id="listName" placeholder="Today's Scan" /></div>
           <div class="tiny" style="align-self:end">Max loss uses the override if set, otherwise account size x risk %.</div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>Source Preference</label>
+            <select id="advancedUniverseMode">
+              <option value="tradingview_only">TradingView</option>
+              <option value="core8">Curated Core</option>
+              <option value="combined">Combined</option>
+            </select>
+            <div class="tiny" style="margin-top:8px">Default flow uses imported/manual tickers when present, otherwise the curated fallback. Override only when needed.</div>
+          </div>
+          <div>
+            <label>Pullback Basis</label>
+            <select id="advancedScannerSetupType">
+              <option value="">Auto / not set</option>
+              <option value="20MA">20MA</option>
+              <option value="50MA">50MA</option>
+            </select>
+            <div class="tiny" style="margin-top:8px">Leave unset to preserve inferred setup basis. Use an override only for deliberate advanced review.</div>
+          </div>
         </div>
         <div id="finalUniversePreview" class="mutebox" style="margin-top:10px">Final scan universe will appear here.</div>
         <div class="quicklisthead" style="margin-top:12px">
@@ -359,6 +379,8 @@
 <script defer src="./js/storage.js?v=4.4.19"></script>
 <script defer src="./js/state.js?v=4.4.19"></script>
 <script defer src="./js/records.js?v=4.4.19"></script>
+<script defer src="./js/scanner-universe-policy.js?v=4.4.19"></script>
+<script defer src="./js/setup-basis-policy.js?v=4.4.19"></script>
 <script defer src="./js/plan-math.js?v=4.4.19"></script>
 <script defer src="./js/tradeability.js?v=4.4.19"></script>
 <script defer src="./js/bounce-priceability.js?v=4.4.19"></script>
@@ -384,6 +406,7 @@
 <script defer src="./js/services/tracked-state-service.js?v=4.4.19"></script>
 <script defer src="./js/services/diary-service.js?v=4.4.19"></script>
 <script defer src="./js/services/trading212-service.js?v=4.4.19"></script>
+<script defer src="./js/services/trading-gateway-service.js?v=4.4.19"></script>
 <script defer src="./js/features/review/review-analysis-feature.js?v=4.4.19"></script>
 <script defer src="./js/features/track/track-watchlist-feature.js?v=4.4.19"></script>
 <script defer src="./js/features/diary/diary-feature.js?v=4.4.19"></script>
