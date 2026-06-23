@@ -1616,6 +1616,9 @@ uiState.reviewAdvancedDebugTap = uiState.reviewAdvancedDebugTap && typeof uiStat
 uiState.paperTradeStateByTicker = uiState.paperTradeStateByTicker && typeof uiState.paperTradeStateByTicker === 'object'
   ? uiState.paperTradeStateByTicker
   : {};
+uiState.tradeGatewayHealthHistory = Array.isArray(uiState.tradeGatewayHealthHistory)
+  ? uiState.tradeGatewayHealthHistory
+  : [];
 uiState.trackedStateBackendUnavailable = uiState.trackedStateBackendUnavailable === true;
 uiState.trackedStateBackendUnavailableNotified = uiState.trackedStateBackendUnavailableNotified === true;
 uiState.watchlistDirtyEpoch = Number.isFinite(Number(uiState.watchlistDirtyEpoch)) ? Number(uiState.watchlistDirtyEpoch) : 0;
@@ -3199,11 +3202,58 @@ function renderTradeGatewayHealth(){
   }
 }
 
+function recordTradeGatewayEvent(type, details = {}){
+  const entry = {
+    at:new Date().toISOString(),
+    type:String(type || 'gateway_event'),
+    state:String(details.state || '').trim(),
+    message:String(details.message || '').trim(),
+    ticker:String(details.ticker || '').trim(),
+    extra:details.extra && typeof details.extra === 'object'
+      ? cloneData(details.extra, {})
+      : {}
+  };
+  const previous = Array.isArray(uiState.tradeGatewayHealthHistory) ? uiState.tradeGatewayHealthHistory : [];
+  const latest = previous[0] || null;
+  if(latest
+    && latest.type === entry.type
+    && latest.state === entry.state
+    && latest.message === entry.message
+    && latest.ticker === entry.ticker){
+    return;
+  }
+  uiState.tradeGatewayHealthHistory = [entry, ...previous].slice(0, 12);
+  pushRuntimeDebugEntry(`gateway.${entry.type}`, {
+    message:entry.message || entry.state || entry.type,
+    extra:{
+      state:entry.state,
+      ticker:entry.ticker,
+      ...entry.extra
+    }
+  });
+}
+
+function renderTradeGatewayHistoryMarkup(){
+  const history = Array.isArray(uiState.tradeGatewayHealthHistory) ? uiState.tradeGatewayHealthHistory : [];
+  if(!history.length) return '<div class="tiny">No gateway events captured yet.</div>';
+  return `<div class="tiny">${history.map(entry => {
+    const when = formatLocalTimestamp(entry.at) || entry.at || 'n/a';
+    const state = entry.state ? ` | ${entry.state}` : '';
+    const ticker = entry.ticker ? ` | ${entry.ticker}` : '';
+    const message = entry.message || entry.type || 'gateway_event';
+    return `<div>${escapeHtml(when)} | ${escapeHtml(entry.type || 'gateway_event')}${escapeHtml(state)}${escapeHtml(ticker)} | ${escapeHtml(message)}</div>`;
+  }).join('')}</div>`;
+}
+
 async function refreshTrading212PaperAvailability(options = {}){
   if(trading212PaperSupported !== true){
     trading212PaperEnabled = false;
     trading212PaperAvailabilityChecked = true;
     trading212PaperAvailabilityMessage = 'Paper trading gateway is unavailable.';
+    recordTradeGatewayEvent('availability', {
+      state:'unavailable',
+      message:trading212PaperAvailabilityMessage
+    });
     renderTradeGatewayHealth();
     return {ok:false, code:'unsupported_broker', message:trading212PaperAvailabilityMessage};
   }
@@ -3218,6 +3268,10 @@ async function refreshTrading212PaperAvailability(options = {}){
   trading212PaperEnabled = false;
   trading212PaperAvailabilityChecked = false;
   trading212PaperAvailabilityMessage = 'Checking paper trading gateway...';
+  recordTradeGatewayEvent('availability', {
+    state:'checking',
+    message:trading212PaperAvailabilityMessage
+  });
   renderTradeGatewayHealth();
   if(options.render !== false && typeof renderReviewWorkspace === 'function' && activeReviewTicker()){
     renderReviewWorkspace({source:'trade_gateway_availability_check'});
@@ -3231,6 +3285,11 @@ async function refreshTrading212PaperAvailability(options = {}){
     trading212PaperAvailabilityMessage = trading212PaperEnabled
       ? String(result.message || 'Paper trading gateway ready.')
       : String(result && result.message || 'Paper trading gateway is unavailable.');
+    recordTradeGatewayEvent('availability', {
+      state:trading212PaperEnabled ? 'ready' : 'unavailable',
+      message:trading212PaperAvailabilityMessage,
+      extra:{status:String(result && result.status || '')}
+    });
     return trading212PaperEnabled
       ? {ok:true, status:String(result.status || 'ready'), message:trading212PaperAvailabilityMessage}
       : {ok:false, code:String(result && result.code || 'paper_trade_unavailable'), message:trading212PaperAvailabilityMessage};
@@ -3238,6 +3297,10 @@ async function refreshTrading212PaperAvailability(options = {}){
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = false;
     trading212PaperAvailabilityMessage = 'Paper trading gateway is unavailable.';
+    recordTradeGatewayEvent('availability', {
+      state:'unavailable',
+      message:trading212PaperAvailabilityMessage
+    });
     return {ok:false, code:'paper_trade_unavailable', message:trading212PaperAvailabilityMessage};
   }).finally(() => {
     trading212PaperAvailabilityRequest = null;
@@ -30817,6 +30880,11 @@ async function submitPaperTradeFromReview(ticker){
   }
   const gatewayAvailability = await refreshTrading212PaperAvailability({force:true, render:false});
   if(!gatewayAvailability || gatewayAvailability.ok !== true){
+    recordTradeGatewayEvent('submit_blocked', {
+      state:'blocked',
+      ticker:context.ticker,
+      message:gatewayAvailability && gatewayAvailability.message ? gatewayAvailability.message : 'Paper trading gateway is unavailable.'
+    });
     setPaperTradeUiState(context.ticker, {
       state:'submit_error',
       previewOpen:true,
@@ -30826,6 +30894,11 @@ async function submitPaperTradeFromReview(ticker){
     renderReviewWorkspace();
     return;
   }
+  recordTradeGatewayEvent('submit_start', {
+    state:'submitting',
+    ticker:context.ticker,
+    message:'Submitting paper trade request.'
+  });
   setPaperTradeUiState(context.ticker, {state:'submitting', previewOpen:true, snapshot:frozenSnapshot, message:'Submitting paper trade...'});
   renderReviewWorkspace();
   const request = {
@@ -30848,6 +30921,11 @@ async function submitPaperTradeFromReview(ticker){
     mock:mockMode
   });
   if(!result || result.ok !== true){
+    recordTradeGatewayEvent('submit_failed', {
+      state:'failed',
+      ticker:context.ticker,
+      message:result && result.message ? result.message : 'Paper trade submission failed.'
+    });
     setPaperTradeUiState(context.ticker, {
       state:'submit_error',
       previewOpen:true,
@@ -30857,6 +30935,15 @@ async function submitPaperTradeFromReview(ticker){
     renderReviewWorkspace();
     return;
   }
+  recordTradeGatewayEvent('submit_success', {
+    state:'submitted',
+    ticker:context.ticker,
+    message:`Paper trade submitted via ${String(result.broker || 'paper gateway')}.`,
+    extra:{
+      broker:String(result.broker || ''),
+      orderId:String(result.orderId || result.clientOrderId || '')
+    }
+  });
   const entry = createDiaryEntryFromPaperTradePayload({
     ticker:context.ticker,
     sourceContext:frozenSnapshot.sourceContext || 'trade_gateway_paper_trade',
@@ -33929,7 +34016,10 @@ function renderReviewWorkspace(options = {}){
       }, null, 0) || '(none)'}
     ], 'Legacy / Internal', {})
     : '';
-  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDebugCompact}${reviewDebugInternal}${capitalSimulationControls}</details>` : '';
+  const reviewGatewayTrace = advancedOpen
+    ? `<details class="compact-details"><summary>Trade Gateway Trace</summary>${renderTradeGatewayHistoryMarkup()}</details>`
+    : '';
+  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDebugCompact}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',

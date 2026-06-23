@@ -654,6 +654,9 @@ function runTradeExecutionRoutingAssertions(){
   if(!/function tradeGatewayHealthModel\(/.test(appSource) || !/function renderTradeGatewayHealth\(/.test(appSource)){
     throw new Error('App must expose a shared trade gateway health model for Review and Settings.');
   }
+  if(!/function recordTradeGatewayEvent\(/.test(appSource) || !/function renderTradeGatewayHistoryMarkup\(/.test(appSource)){
+    throw new Error('App must keep a lightweight trade gateway event trail for diagnostics.');
+  }
   if(!/click\('scannerModeLedger', \(\) => openAdvancedScannerSettings\('mode'\)\);/.test(appSource)
     || !/click\('setupTypeLedger', \(\) => openAdvancedScannerSettings\('setup'\)\);/.test(appSource)){
     throw new Error('Advanced scanner shortcuts must remain available from the header ledger.');
@@ -662,8 +665,8 @@ function runTradeExecutionRoutingAssertions(){
     || !/<button class="focus-rail-item" id="scannerModePill" type="button">/.test(indexSource)){
     throw new Error('Scanner mode shortcuts must remain interactive in the header and focus rail.');
   }
-  if(!/id="tradeGatewayHealthLabel"/.test(indexSource) || !/id="paperTradeGatewayHealth"/.test(appSource)){
-    throw new Error('Trade gateway health must remain visible in Settings and Review.');
+  if(!/id="tradeGatewayHealthLabel"/.test(indexSource) || !/id="paperTradeGatewayHealth"/.test(appSource) || !/Trade Gateway Trace/.test(appSource)){
+    throw new Error('Trade gateway health and trace must remain visible in Settings and Review diagnostics.');
   }
   if(!/function handleTradeExecution\(event\)/.test(handlerSource) || !/if\(action === 'test_connection'\)/.test(handlerSource)){
     throw new Error('Trade execution handler must support runtime connection tests.');
