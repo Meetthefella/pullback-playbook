@@ -636,6 +636,34 @@ function runAdvancedScannerUiConsistencyAssertions(){
   }
 }
 
+function runTradeExecutionRoutingAssertions(){
+  const netlifyConfig = fs.readFileSync(path.join(root, 'netlify.toml'), 'utf8');
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const indexSource = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const handlerSource = fs.readFileSync(path.join(root, 'netlify', 'functions', 'lib', 'trade-execution-handler.js'), 'utf8');
+
+  if(!/from = "\/api\/trade-execution"[\s\S]*to = "\/\.netlify\/functions\/trade-execution"/.test(netlifyConfig)){
+    throw new Error('Netlify routing must expose /api/trade-execution.');
+  }
+  if(!/const defaultTradeExecutionEndpoint = '\/api\/trade-execution';/.test(appSource)){
+    throw new Error('App must default paper trading to /api/trade-execution.');
+  }
+  if(!/function refreshTrading212PaperAvailability\(/.test(appSource)){
+    throw new Error('App must probe trade gateway availability before enabling paper trading.');
+  }
+  if(!/click\('scannerModeLedger', \(\) => openAdvancedScannerSettings\('mode'\)\);/.test(appSource)
+    || !/click\('setupTypeLedger', \(\) => openAdvancedScannerSettings\('setup'\)\);/.test(appSource)){
+    throw new Error('Advanced scanner shortcuts must remain available from the header ledger.');
+  }
+  if(!/<button class="ledger-meta-item ledger-meta-button" type="button" id="scannerModeLedger"/.test(indexSource)
+    || !/<button class="focus-rail-item" id="scannerModePill" type="button">/.test(indexSource)){
+    throw new Error('Scanner mode shortcuts must remain interactive in the header and focus rail.');
+  }
+  if(!/function handleTradeExecution\(event\)/.test(handlerSource) || !/if\(action === 'test_connection'\)/.test(handlerSource)){
+    throw new Error('Trade execution handler must support runtime connection tests.');
+  }
+}
+
 function selectReviewChartSourceIncludesTerminalBlockedChosen(source){
   return source.includes('const preferredTerminalBlocked = terminalBlockedCandidates[0] || null;')
     && source.includes('const chosen = (preferredTerminalBlocked || mergedCandidatesAllowed[0] || nonPendingMatchingCandidates[0] || matchingCandidates[0] || ranked[0] || null);')
@@ -5459,6 +5487,7 @@ function runAccepted50MaSupportThresholdAssertions(){
 runTrackPresentationAuthorityAssertions();
 runScannerPolicyCompatibilityAssertions();
 runAdvancedScannerUiConsistencyAssertions();
+runTradeExecutionRoutingAssertions();
 runPlanSemanticsAssertions();
 runReviewPullbackBounceDisplayAssertions();
 runReviewPricedButNotReadyAssertions();
@@ -5473,6 +5502,7 @@ console.log('AI chart-coach contract assertions passed.');
 console.log('Track presentation authority assertions passed.');
 console.log('Scanner policy compatibility assertions passed.');
 console.log('Advanced scanner UI consistency assertions passed.');
+console.log('Trade execution routing assertions passed.');
 console.log('Plan source semantics assertions passed.');
 console.log('Review pullback/bounce display assertions passed.');
 console.log('Review priced-but-not-ready assertions passed.');

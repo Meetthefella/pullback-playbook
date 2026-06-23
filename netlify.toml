@@ -48,6 +48,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/trade-execution"
+  to = "/.netlify/functions/trade-execution"
+  status = 200
+
+[[redirects]]
   from = "/api/paper-trade"
   to = "/.netlify/functions/paper-trade"
   status = 200

@@ -3017,7 +3017,7 @@ const tradingGatewayService = createTradingGatewayService({
   }
 });
 const tradingGatewayCapabilities = tradingGatewayService.getCapabilities();
-const trading212PaperEnabled = !!(
+const trading212PaperSupported = !!(
   tradingGatewayCapabilities
   && tradingGatewayCapabilities.paperTradingEnabled === true
   && Array.isArray(tradingGatewayCapabilities.supportedBrokers)
@@ -3027,6 +3027,12 @@ const tradingGatewayPaperOnly = !!(
   tradingGatewayCapabilities
   && tradingGatewayCapabilities.liveTradingEnabled !== true
 );
+let trading212PaperEnabled = false;
+let trading212PaperAvailabilityChecked = false;
+let trading212PaperAvailabilityMessage = trading212PaperSupported
+  ? 'Checking paper trading gateway...'
+  : 'Paper trading gateway is unavailable.';
+let trading212PaperAvailabilityRequest = null;
 const diaryService = createDiaryService({
   allTickerRecords,
   upsertTickerRecord,
@@ -3143,6 +3149,53 @@ function bootstrapMarketStatusClock(){
     refreshMarketContextWidgets();
     refreshAutomaticMarketStatus().catch(() => {});
   }, MARKET_STATUS_REFRESH_MS);
+}
+
+async function refreshTrading212PaperAvailability(options = {}){
+  if(trading212PaperSupported !== true){
+    trading212PaperEnabled = false;
+    trading212PaperAvailabilityChecked = true;
+    trading212PaperAvailabilityMessage = 'Paper trading gateway is unavailable.';
+    return {ok:false, code:'unsupported_broker', message:trading212PaperAvailabilityMessage};
+  }
+  if(options.force !== true && trading212PaperAvailabilityRequest){
+    return trading212PaperAvailabilityRequest;
+  }
+  if(options.force !== true && trading212PaperAvailabilityChecked === true){
+    return trading212PaperEnabled
+      ? {ok:true, status:'ready', message:trading212PaperAvailabilityMessage}
+      : {ok:false, code:'paper_trade_unavailable', message:trading212PaperAvailabilityMessage};
+  }
+  trading212PaperEnabled = false;
+  trading212PaperAvailabilityChecked = false;
+  trading212PaperAvailabilityMessage = 'Checking paper trading gateway...';
+  if(options.render !== false && typeof renderReviewWorkspace === 'function' && activeReviewTicker()){
+    renderReviewWorkspace({source:'trade_gateway_availability_check'});
+  }
+  trading212PaperAvailabilityRequest = tradingGatewayService.testConnection({
+    broker:'trading212',
+    endpoint:defaultTradeExecutionEndpoint
+  }).then(result => {
+    trading212PaperAvailabilityChecked = true;
+    trading212PaperEnabled = !!(result && result.ok === true);
+    trading212PaperAvailabilityMessage = trading212PaperEnabled
+      ? String(result.message || 'Paper trading gateway ready.')
+      : String(result && result.message || 'Paper trading gateway is unavailable.');
+    return trading212PaperEnabled
+      ? {ok:true, status:String(result.status || 'ready'), message:trading212PaperAvailabilityMessage}
+      : {ok:false, code:String(result && result.code || 'paper_trade_unavailable'), message:trading212PaperAvailabilityMessage};
+  }).catch(() => {
+    trading212PaperAvailabilityChecked = true;
+    trading212PaperEnabled = false;
+    trading212PaperAvailabilityMessage = 'Paper trading gateway is unavailable.';
+    return {ok:false, code:'paper_trade_unavailable', message:trading212PaperAvailabilityMessage};
+  }).finally(() => {
+    trading212PaperAvailabilityRequest = null;
+    if(options.render !== false && typeof renderReviewWorkspace === 'function' && activeReviewTicker()){
+      renderReviewWorkspace({source:'trade_gateway_availability_ready'});
+    }
+  });
+  return trading212PaperAvailabilityRequest;
 }
 
 function legacySelectedQuickScanTypeValue(value){
@@ -7438,6 +7491,7 @@ function startApplication(){
     bootstrapWatchlistLifecycleAutomation();
     updateTickerSearchStatus();
     updateProviderStatusNote();
+    refreshTrading212PaperAvailability({render:false}).catch(() => {});
   }, {delayMs:120, idle:false});
 }
 
@@ -30709,6 +30763,17 @@ async function submitPaperTradeFromReview(ticker){
     renderReviewWorkspace();
     return;
   }
+  const gatewayAvailability = await refreshTrading212PaperAvailability({force:true, render:false});
+  if(!gatewayAvailability || gatewayAvailability.ok !== true){
+    setPaperTradeUiState(context.ticker, {
+      state:'submit_error',
+      previewOpen:true,
+      snapshot:frozenSnapshot,
+      message:gatewayAvailability && gatewayAvailability.message ? gatewayAvailability.message : 'Paper trading gateway is unavailable.'
+    });
+    renderReviewWorkspace();
+    return;
+  }
   setPaperTradeUiState(context.ticker, {state:'submitting', previewOpen:true, snapshot:frozenSnapshot, message:'Submitting paper trade...'});
   renderReviewWorkspace();
   const request = {
@@ -33026,7 +33091,10 @@ function renderReviewWorkspace(options = {}){
     marketStatus:record.meta.marketStatus || state.marketStatus || ''
   });
   const paperTradeUi = paperTradeUiStateForTicker(record.ticker);
-  const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true && trading212PaperEnabled === true;
+  const paperTradeGatewayReady = trading212PaperSupported === true
+    && trading212PaperAvailabilityChecked === true
+    && trading212PaperEnabled === true;
+  const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true && paperTradeGatewayReady === true;
   const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
   if(!paperTradeEligible && paperTradeUi.previewOpen === true){
     setPaperTradeUiState(record.ticker, {previewOpen:false, snapshot:null});
@@ -33039,15 +33107,19 @@ function renderReviewWorkspace(options = {}){
   const paperTradePanelOpen = paperTradeEligible && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
   const paperTradePreviewVisible = paperTradePanelOpen;
   const paperTradePrimaryReason = mergedPaperTradeEligibilityState.reasons[0] || '';
-  const paperTradeDisabledReason = trading212PaperEnabled !== true
+  const paperTradeDisabledReason = trading212PaperSupported !== true
     ? 'Paper trading gateway is unavailable.'
+    : (trading212PaperAvailabilityChecked !== true
+    ? 'Checking paper trading gateway...'
+    : (trading212PaperEnabled !== true
+    ? trading212PaperAvailabilityMessage
     : (!paperTradeEligible
     ? (
       String(reviewFinalVerdictForPaperTrade || '').trim().toLowerCase() !== 'entry'
         ? 'Not actionable - setup is not Entry-ready'
         : 'Trade plan not valid'
     )
-    : '');
+    : '')));
   const paperTradeHasRuntimeStatus = !!paperTradeUi.message
     || paperTradeUi.state === 'submitting'
     || paperTradeUi.state === 'submit_success'
@@ -35771,8 +35843,12 @@ click('contextSettingsCloseBtn', () => setContextSettingsPanelOpen(false));
 click('contextSettingsBackdrop', () => setContextSettingsPanelOpen(false));
 click('marketTimingLedger', openMarketCalendarShortcut);
 click('accountRiskLedger', () => openContextSettings('account'));
+click('scannerModeLedger', () => openAdvancedScannerSettings('mode'));
+click('setupTypeLedger', () => openAdvancedScannerSettings('setup'));
 click('marketStatusPill', () => setControlFocus('market'));
 click('accountRiskPill', () => setControlFocus('account'));
+click('scannerModePill', () => openAdvancedScannerSettings('mode'));
+click('setupTypePill', () => openAdvancedScannerSettings('setup'));
 document.addEventListener('keydown', event => {
   if(event.key === 'Escape' && uiState.contextSettingsOpen === true){
     setContextSettingsPanelOpen(false);
