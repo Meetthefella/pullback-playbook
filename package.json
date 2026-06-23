@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "test:storage-persistence": "node scripts/run-storage-persistence-assertions.js",
-    "test:resolver-gates": "node scripts/run-resolver-gate-assertions.js"
+    "test:resolver-gates": "node scripts/run-resolver-gate-assertions.js",
+    "test:trade-execution": "node scripts/run-trade-execution-handler-tests.js"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",

@@ -3151,11 +3151,60 @@ function bootstrapMarketStatusClock(){
   }, MARKET_STATUS_REFRESH_MS);
 }
 
+function tradeGatewayHealthModel(){
+  if(trading212PaperSupported !== true){
+    return {
+      state:'unavailable',
+      label:'Paper gateway unavailable',
+      detail:'Trading 212 paper routing is not available in this build.',
+      className:'warntext'
+    };
+  }
+  if(trading212PaperAvailabilityChecked !== true){
+    return {
+      state:'checking',
+      label:'Paper gateway checking',
+      detail:'Review will enable paper-trade actions after the connection check finishes.',
+      className:'tiny'
+    };
+  }
+  if(trading212PaperEnabled === true){
+    return {
+      state:'ready',
+      label:'Paper gateway ready',
+      detail:String(trading212PaperAvailabilityMessage || 'Trading 212 paper trading is configured.'),
+      className:'ok'
+    };
+  }
+  return {
+    state:'offline',
+    label:'Paper gateway unavailable',
+    detail:String(trading212PaperAvailabilityMessage || 'Paper trading gateway is unavailable.'),
+    className:'warntext'
+  };
+}
+
+function renderTradeGatewayHealth(){
+  const model = tradeGatewayHealthModel();
+  const label = $('tradeGatewayHealthLabel');
+  const detail = $('tradeGatewayHealthDetail');
+  if(label){
+    label.textContent = model.label;
+    label.className = `tiny ${model.className}`.trim();
+    label.setAttribute('data-gateway-state', model.state);
+  }
+  if(detail){
+    detail.textContent = model.detail;
+    detail.setAttribute('data-gateway-state', model.state);
+  }
+}
+
 async function refreshTrading212PaperAvailability(options = {}){
   if(trading212PaperSupported !== true){
     trading212PaperEnabled = false;
     trading212PaperAvailabilityChecked = true;
     trading212PaperAvailabilityMessage = 'Paper trading gateway is unavailable.';
+    renderTradeGatewayHealth();
     return {ok:false, code:'unsupported_broker', message:trading212PaperAvailabilityMessage};
   }
   if(options.force !== true && trading212PaperAvailabilityRequest){
@@ -3169,6 +3218,7 @@ async function refreshTrading212PaperAvailability(options = {}){
   trading212PaperEnabled = false;
   trading212PaperAvailabilityChecked = false;
   trading212PaperAvailabilityMessage = 'Checking paper trading gateway...';
+  renderTradeGatewayHealth();
   if(options.render !== false && typeof renderReviewWorkspace === 'function' && activeReviewTicker()){
     renderReviewWorkspace({source:'trade_gateway_availability_check'});
   }
@@ -3191,6 +3241,7 @@ async function refreshTrading212PaperAvailability(options = {}){
     return {ok:false, code:'paper_trade_unavailable', message:trading212PaperAvailabilityMessage};
   }).finally(() => {
     trading212PaperAvailabilityRequest = null;
+    renderTradeGatewayHealth();
     if(options.render !== false && typeof renderReviewWorkspace === 'function' && activeReviewTicker()){
       renderReviewWorkspace({source:'trade_gateway_availability_ready'});
     }
@@ -22254,6 +22305,7 @@ function renderMarketCalendarWidget(){
 function refreshMarketContextWidgets(displayModel = buildMarketContextDisplayModel()){
   renderMarketSessionStatus(displayModel);
   renderMarketCalendarWidget();
+  renderTradeGatewayHealth();
 }
 
 function currentQueueCycleKey(now = new Date()){
@@ -33094,6 +33146,7 @@ function renderReviewWorkspace(options = {}){
   const paperTradeGatewayReady = trading212PaperSupported === true
     && trading212PaperAvailabilityChecked === true
     && trading212PaperEnabled === true;
+  const tradeGatewayHealth = tradeGatewayHealthModel();
   const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true && paperTradeGatewayReady === true;
   const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
   if(!paperTradeEligible && paperTradeUi.previewOpen === true){
@@ -34061,6 +34114,7 @@ function renderReviewWorkspace(options = {}){
       </div>
       <div class="review-action-row review-action-row--watchlist" data-advanced-debug-trigger="review-watchlist"><button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button></div>
       <div class="tiny review-next-action-primary" id="reviewNextActionPrimary">Can I trade this now? ${escapeHtml(reviewNextActionLabel)}</div>
+      <div class="tiny ${escapeHtml(tradeGatewayHealth.className)}" id="paperTradeGatewayHealth">Paper Gateway: ${escapeHtml(tradeGatewayHealth.label)}${tradeGatewayHealth.detail ? ` | ${escapeHtml(tradeGatewayHealth.detail)}` : ''}</div>
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}
       ${paperTradeHasRuntimeStatus ? `<div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>` : ''}

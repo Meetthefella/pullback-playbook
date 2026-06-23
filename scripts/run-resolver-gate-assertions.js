@@ -651,6 +651,9 @@ function runTradeExecutionRoutingAssertions(){
   if(!/function refreshTrading212PaperAvailability\(/.test(appSource)){
     throw new Error('App must probe trade gateway availability before enabling paper trading.');
   }
+  if(!/function tradeGatewayHealthModel\(/.test(appSource) || !/function renderTradeGatewayHealth\(/.test(appSource)){
+    throw new Error('App must expose a shared trade gateway health model for Review and Settings.');
+  }
   if(!/click\('scannerModeLedger', \(\) => openAdvancedScannerSettings\('mode'\)\);/.test(appSource)
     || !/click\('setupTypeLedger', \(\) => openAdvancedScannerSettings\('setup'\)\);/.test(appSource)){
     throw new Error('Advanced scanner shortcuts must remain available from the header ledger.');
@@ -658,6 +661,9 @@ function runTradeExecutionRoutingAssertions(){
   if(!/<button class="ledger-meta-item ledger-meta-button" type="button" id="scannerModeLedger"/.test(indexSource)
     || !/<button class="focus-rail-item" id="scannerModePill" type="button">/.test(indexSource)){
     throw new Error('Scanner mode shortcuts must remain interactive in the header and focus rail.');
+  }
+  if(!/id="tradeGatewayHealthLabel"/.test(indexSource) || !/id="paperTradeGatewayHealth"/.test(appSource)){
+    throw new Error('Trade gateway health must remain visible in Settings and Review.');
   }
   if(!/function handleTradeExecution\(event\)/.test(handlerSource) || !/if\(action === 'test_connection'\)/.test(handlerSource)){
     throw new Error('Trade execution handler must support runtime connection tests.');
