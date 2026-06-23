@@ -1525,6 +1525,7 @@ const DEFAULT_STATE = {
   marketStatus:'S&P above 50 MA',
   marketStatusMode:'auto',
   marketStatusAutoUpdatedAt:'',
+  paperTradeTesterSetupCompletedAt:'',
   setupType:'',
   listName:"Today's Scan",
   universeMode:'core8',
@@ -3213,6 +3214,52 @@ function tradeGatewayHealthModel(){
   };
 }
 
+function paperTradeTesterSetupComplete(){
+  return !!String(state.paperTradeTesterSetupCompletedAt || '').trim();
+}
+
+function testerSetupHealthModel(){
+  const completedAt = String(state.paperTradeTesterSetupCompletedAt || '').trim();
+  if(completedAt){
+    return {
+      complete:true,
+      label:'Tester setup completed',
+      detail:`Completed ${formatLocalTimestamp(completedAt) || completedAt}. Paper trading stays paper-only and still depends on gateway readiness.`,
+      className:'ok'
+    };
+  }
+  if(trading212PaperSupported !== true){
+    return {
+      complete:false,
+      label:'Tester setup blocked',
+      detail:'Paper routing is unavailable in this build, so tester setup cannot complete.',
+      className:'warntext'
+    };
+  }
+  if(trading212PaperAvailabilityChecked !== true){
+    return {
+      complete:false,
+      label:'Tester setup waiting on gateway check',
+      detail:'Read the guidance now. Complete setup after the paper gateway finishes checking.',
+      className:'tiny'
+    };
+  }
+  if(trading212PaperEnabled !== true){
+    return {
+      complete:false,
+      label:'Tester setup waiting on paper gateway',
+      detail:String(trading212PaperAvailabilityMessage || 'Paper gateway is unavailable.'),
+      className:'warntext'
+    };
+  }
+  return {
+    complete:false,
+    label:'Tester setup ready to confirm',
+    detail:'Paper gateway is ready. Complete tester setup to unlock paper-trade actions in Review.',
+    className:'tiny'
+  };
+}
+
 function renderTradeGatewayHealth(){
   const model = tradeGatewayHealthModel();
   const label = $('tradeGatewayHealthLabel');
@@ -3225,6 +3272,54 @@ function renderTradeGatewayHealth(){
   if(detail){
     detail.textContent = model.detail;
     detail.setAttribute('data-gateway-state', model.state);
+  }
+}
+
+function renderTesterSetupPanel(){
+  const model = testerSetupHealthModel();
+  const label = $('testerSetupStatusLabel');
+  const detail = $('testerSetupStatusDetail');
+  const confirm = $('testerSetupConfirmBtn');
+  if(label){
+    label.textContent = model.label;
+    label.className = `tiny ${model.className}`.trim();
+  }
+  if(detail) detail.textContent = model.detail;
+  if(confirm){
+    confirm.disabled = model.complete === true || !(trading212PaperAvailabilityChecked === true && trading212PaperEnabled === true);
+    confirm.textContent = model.complete === true ? 'Tester Setup Complete' : 'Complete Tester Setup';
+  }
+}
+
+function completeTesterSetup(){
+  if(!(trading212PaperAvailabilityChecked === true && trading212PaperEnabled === true)){
+    renderTesterSetupPanel();
+    setStatus('inputStatus', 'Paper gateway must be ready before tester setup can be completed.');
+    return;
+  }
+  state.paperTradeTesterSetupCompletedAt = new Date().toISOString();
+  recordTradeGatewayEvent('tester_setup_complete', {
+    state:'ready',
+    message:'Tester setup completed. Paper-only workflow unlocked.'
+  });
+  saveState();
+  renderTesterSetupPanel();
+  if(activeReviewTicker() || activeWorkspaceTab() === 'review'){
+    renderReviewWorkspace({source:'tester_setup_complete'});
+  }
+  setStatus('inputStatus', 'Tester setup completed. Review can now unlock paper-trade actions when the setup qualifies.');
+}
+
+function openTesterSetupGuide(){
+  setContextSettingsPanelOpen(true);
+  renderContextHeaderMode();
+  const target = $('contextSectionGateway') || $('tradeGatewayHealthLabel') || $('headerControlSurface');
+  highlightContextSettingsSection(target);
+  if(target && typeof target.scrollIntoView === 'function'){
+    requestAnimationFrame(() => {
+      suppressScrollMemoryForAppScroll('scroll_into_view_open_tester_setup', 1000);
+      target.scrollIntoView({behavior:'smooth', block:'nearest'});
+    });
   }
 }
 
@@ -6931,6 +7026,7 @@ function loadState(){
     : 0;
   state.wholeSharesOnly = state.wholeSharesOnly !== false;
   state.marketStatusMode = normalizeMarketStatusMode(state.marketStatusMode);
+  state.paperTradeTesterSetupCompletedAt = String(state.paperTradeTesterSetupCompletedAt || '');
   state.setupType = normalizedStoredSetupType(state.setupType) || '';
   state.userRiskPerTrade = currentMaxLoss();
   state.maxRisk = state.userRiskPerTrade;
@@ -22383,6 +22479,7 @@ function refreshMarketContextWidgets(displayModel = buildMarketContextDisplayMod
   renderMarketSessionStatus(displayModel);
   renderMarketCalendarWidget();
   renderTradeGatewayHealth();
+  renderTesterSetupPanel();
 }
 
 function currentQueueCycleKey(now = new Date()){
@@ -31083,6 +31180,7 @@ function bindReviewWorkspaceActions(record){
   click('paperTradeBtn', () => openPaperTradePreview(record.ticker));
   click('paperTradeConfirmBtn', () => { submitPaperTradeFromReview(record.ticker).catch(() => {}); });
   click('paperTradeCancelBtn', () => closePaperTradePreview(record.ticker));
+  click('paperTradeSetupBtn', openTesterSetupGuide);
   click('saveReviewBtn', saveReview);
   click('addWatchlistActiveBtn', addActiveReviewTickerToWatchlist);
   click('resetReviewBtn', resetReview);
@@ -33242,7 +33340,10 @@ function renderReviewWorkspace(options = {}){
     && trading212PaperAvailabilityChecked === true
     && trading212PaperEnabled === true;
   const tradeGatewayHealth = tradeGatewayHealthModel();
-  const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true && paperTradeGatewayReady === true;
+  const testerSetupComplete = paperTradeTesterSetupComplete();
+  const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true
+    && paperTradeGatewayReady === true
+    && testerSetupComplete === true;
   const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
   if(!paperTradeEligible && paperTradeUi.previewOpen === true){
     setPaperTradeUiState(record.ticker, {previewOpen:false, snapshot:null});
@@ -33255,7 +33356,9 @@ function renderReviewWorkspace(options = {}){
   const paperTradePanelOpen = paperTradeEligible && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
   const paperTradePreviewVisible = paperTradePanelOpen;
   const paperTradePrimaryReason = mergedPaperTradeEligibilityState.reasons[0] || '';
-  const paperTradeDisabledReason = trading212PaperSupported !== true
+  const paperTradeDisabledReason = testerSetupComplete !== true
+    ? 'Complete tester setup in Context Settings before using paper trading.'
+    : (trading212PaperSupported !== true
     ? 'Paper trading gateway is unavailable.'
     : (trading212PaperAvailabilityChecked !== true
     ? 'Checking paper trading gateway...'
@@ -33267,7 +33370,7 @@ function renderReviewWorkspace(options = {}){
         ? 'Not actionable - setup is not Entry-ready'
         : 'Trade plan not valid'
     )
-    : '')));
+    : ''))));
   const paperTradeHasRuntimeStatus = !!paperTradeUi.message
     || paperTradeUi.state === 'submitting'
     || paperTradeUi.state === 'submit_success'
@@ -34213,6 +34316,7 @@ function renderReviewWorkspace(options = {}){
       <div class="review-action-row review-action-row--watchlist" data-advanced-debug-trigger="review-watchlist"><button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button></div>
       <div class="tiny review-next-action-primary" id="reviewNextActionPrimary">Can I trade this now? ${escapeHtml(reviewNextActionLabel)}</div>
       <div class="tiny ${escapeHtml(tradeGatewayHealth.className)}" id="paperTradeGatewayHealth">Paper Gateway: ${escapeHtml(tradeGatewayHealth.label)}${tradeGatewayHealth.detail ? ` | ${escapeHtml(tradeGatewayHealth.detail)}` : ''}</div>
+      ${testerSetupComplete !== true ? '<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" id="paperTradeSetupBtn" type="button">Open Tester Setup</button></div>' : ''}
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}
       ${paperTradeHasRuntimeStatus ? `<div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>` : ''}
@@ -35997,6 +36101,8 @@ click('marketTimingLedger', openMarketCalendarShortcut);
 click('accountRiskLedger', () => openContextSettings('account'));
 click('scannerModeLedger', () => openAdvancedScannerSettings('mode'));
 click('setupTypeLedger', () => openAdvancedScannerSettings('setup'));
+click('testerSetupConfirmBtn', completeTesterSetup);
+click('testerSetupOpenScannerBtn', () => openAdvancedScannerSettings('mode'));
 click('marketStatusPill', () => setControlFocus('market'));
 click('accountRiskPill', () => setControlFocus('account'));
 click('scannerModePill', () => openAdvancedScannerSettings('mode'));

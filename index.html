@@ -121,6 +121,19 @@
           <div class="tiny" id="tradeGatewayHealthLabel">Paper gateway status loading...</div>
           <div class="tiny" id="tradeGatewayHealthDetail">Review will enable paper-trade actions only after the gateway is confirmed.</div>
         </div>
+        <div class="panelbox" style="margin-top:10px">
+          <strong>Tester Onboarding</strong>
+          <div class="tiny" style="margin-top:8px">Inferred defaults: market status stays on auto unless you change it, imported/manual tickers take priority over the curated fallback, pullback basis stays inferred unless you override it, and risk uses account size x risk % unless you set a max-loss override.</div>
+          <div class="tiny" style="margin-top:8px">Advanced overrides: use Source Preference and Pullback Basis in Advanced Scanner Settings only when you want to override the inferred scan context deliberately.</div>
+          <div class="tiny" style="margin-top:8px">Paper-trading-only status: tester mode supports paper submissions only after this setup is confirmed and the paper gateway is ready.</div>
+          <div class="tiny" style="margin-top:8px">Live-trading lockout: live execution is disabled in this build and no live-trading action is exposed.</div>
+          <div class="tiny" id="testerSetupStatusLabel" style="margin-top:10px">Tester setup not completed yet.</div>
+          <div class="tiny" id="testerSetupStatusDetail">Complete this after reviewing the defaults and confirming the paper gateway is ready.</div>
+          <div class="actions" style="margin-top:10px">
+            <button class="primary compactbutton" type="button" id="testerSetupConfirmBtn">Complete Tester Setup</button>
+            <button class="secondary compactbutton" type="button" id="testerSetupOpenScannerBtn">Open Advanced Overrides</button>
+          </div>
+        </div>
       </div>
       </div>
       <select id="marketStatus" hidden>
