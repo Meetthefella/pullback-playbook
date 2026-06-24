@@ -5180,6 +5180,10 @@ function runAiContractAssertions(){
   if(!/source:'scanner_estimate'/.test(mergeLegacySource) || !/currentPlanSource === 'scanner_estimate'/.test(mergeLegacySource)){
     throw new Error('Legacy card merge must persist scanner estimates only as refreshable non-authoritative scanner_estimate plans.');
   }
+  const applyGlobalVerdictGatesSource = extractFunctionSource(appSource, 'applyGlobalVerdictGates');
+  if(!/preserveScannerEstimatePlan/.test(applyGlobalVerdictGatesSource) || !/planSource === 'scanner_estimate'/.test(applyGlobalVerdictGatesSource)){
+    throw new Error('Global verdict gates must preserve concrete scanner_estimate plan inputs for later resolver passes.');
+  }
   const analysisVerdictSource = extractFunctionSource(appSource, 'analysisVerdictForRecord');
   if(/normalizedAnalysis|aiVerdict|final_verdict \|\| normalizedAnalysis\.verdict/.test(analysisVerdictSource)){
     throw new Error('AI verdict fields must not participate in canonical/display verdict selection.');
@@ -5584,6 +5588,20 @@ function runPlanSemanticsAssertions(){
     deriveAffordability:() => 'affordable',
     scanTypeForEvaluation:value => String(value || '20MA'),
     analysisDerivedStatesFromRecord:() => ({structureState:'intact', trendState:'uptrend', bounceState:'none', pullbackZone:'near_50ma', stabilisationState:'none', volumeState:'neutral'}),
+    resolveGlobalVerdict:() => ({allow_plan:false, allow_watchlist:true, final_verdict:'watch', reason:'Wait', downgrade_reason:'Wait'}),
+    watchlistRefreshStructureGate:() => ({
+      refresh_demote_reason:'Structurally alive; keep on monitor.',
+      structural_alive_at_refresh:true,
+      avoid_allowed_by_structure_gate:false,
+      explicit_invalidation_reason:'(none)',
+      lifecycle_drop_reason:'(none)'
+    }),
+    appendWatchlistDebugEvent:() => {},
+    globalVerdictLabel:value => String(value || ''),
+    setStatus:() => {},
+    activeReviewTicker:() => '',
+    escapeHtml:value => String(value || ''),
+    uiState:{watchlistLifecycleRunning:false},
     actionableRrValueForPlan:plan => plan && plan.status === 'valid' && plan.rewardRisk && plan.rewardRisk.valid ? plan.rewardRisk.rrRatio : null,
     evaluateSetupQualityAdjustments:() => ({weakRegimePenalty:false, lowControlSetup:false, tooWideForQualityPullback:false}),
     normalizeAnalysisVerdict:value => String(value || 'Watch'),
@@ -5598,6 +5616,7 @@ function runPlanSemanticsAssertions(){
     'hasAnyPlanFields',
     'effectivePlanForRecord',
     'planSourceForDiagnostics',
+    'applyGlobalVerdictGates',
     'deriveCurrentPlanState',
     'planUiClass',
     'getPlanUiState',
@@ -5640,6 +5659,19 @@ function runPlanSemanticsAssertions(){
   const validState = sandbox.deriveCurrentPlanState(validEffective.entry, validEffective.stop, validEffective.firstTarget, 'USD');
   if(sandbox.planSourceForDiagnostics(validManualRecord, validEffective) !== 'manual' || validState.status !== 'valid'){
     throw new Error('Complete manual plan must remain manual and use normal validation math.');
+  }
+
+  const scannerEstimatePlanRecord = {
+    ticker:'SCANNERKEEP',
+    plan:{entry:100, stop:95, firstTarget:115, source:'scanner_estimate', hasValidPlan:true, riskStatus:'fits_risk', blockedReason:''},
+    watchlist:{debug:{}, inWatchlist:false}
+  };
+  sandbox.applyGlobalVerdictGates(scannerEstimatePlanRecord, {source:'scan'});
+  if(scannerEstimatePlanRecord.plan.entry !== 100 || scannerEstimatePlanRecord.plan.stop !== 95 || scannerEstimatePlanRecord.plan.firstTarget !== 115){
+    throw new Error('Global verdict gates must not strip concrete scanner_estimate plan fields during monitor/watch states.');
+  }
+  if(scannerEstimatePlanRecord.plan.hasValidPlan !== true || scannerEstimatePlanRecord.plan.riskStatus !== 'fits_risk'){
+    throw new Error('Global verdict gates must not corrupt scanner_estimate plan validity metadata during monitor/watch states.');
   }
 
   const targetHistory = [

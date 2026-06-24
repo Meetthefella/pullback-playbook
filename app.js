@@ -38710,8 +38710,11 @@ function applyGlobalVerdictGates(record, options = {}){
     changed = true;
   }
   if(item.plan && !globalVerdict.allow_plan){
+    const planSource = String(item.plan.source || '').trim().toLowerCase();
+    const preserveScannerEstimatePlan = planSource === 'scanner_estimate'
+      && [item.plan.entry, item.plan.stop, item.plan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
     const hadPlan = !!(item.plan.entry || item.plan.stop || item.plan.firstTarget);
-    if(hadPlan){
+    if(hadPlan && !preserveScannerEstimatePlan){
       item.plan.entry = '';
       item.plan.stop = '';
       item.plan.firstTarget = '';
