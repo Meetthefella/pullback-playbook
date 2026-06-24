@@ -734,7 +734,7 @@ function buildReplayRecord(snapshot, sandbox){
   };
 }
 
-function promotionBlockers(globalVerdict){
+function promotionBlockers(globalVerdict, derivedStates = {}){
   const blockers = [];
   const push = value => {
     const text = String(value || '').trim();
@@ -749,7 +749,16 @@ function promotionBlockers(globalVerdict){
   push(globalVerdict.downgrade_reason);
   push(globalVerdict.main_blocker);
   push(globalVerdict.viabilityReason);
-  return blockers.slice(0, 4);
+  const structureState = String(
+    derivedStates.structureState
+    || derivedStates.structure_state
+    || globalVerdict.structure_state
+    || ''
+  ).trim().toLowerCase();
+  const constructiveStructure = ['strong', 'intact', 'developing_clean'].includes(structureState);
+  return blockers
+    .filter(blocker => !(constructiveStructure && blocker === 'Structure is not strong/intact/developing clean.'))
+    .slice(0, 4);
 }
 
 function derivedStateValue(derivedStates, camelKey, snakeKey){
@@ -886,7 +895,7 @@ async function main(){
         realisticRr:replayBase.record.planRealism.realistic_rr,
         targetStretchPct:replayBase.record.planRealism.target_stretch_pct,
         targetCapReason:replayBase.record.planRealism.target_cap_reason,
-        blockers:promotionBlockers(globalVerdict),
+        blockers:promotionBlockers(globalVerdict, replayBase.record.derivedStates),
         watchToDiminishingReason:visualState.weakWatchDiminishingReason || scannerResolution.remapReason || ''
       }
     };
