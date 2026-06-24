@@ -3540,8 +3540,10 @@ function buildTesterDiagnosticSnapshot(options = {}){
 async function copyTextToClipboard(text){
   const value = String(text || '');
   if(typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function'){
-    await navigator.clipboard.writeText(value);
-    return true;
+    try{
+      await navigator.clipboard.writeText(value);
+      return true;
+    }catch(error){}
   }
   const textarea = document.createElement('textarea');
   textarea.value = value;
