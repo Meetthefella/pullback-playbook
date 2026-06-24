@@ -1,11 +1,15 @@
 const {getProviderConfig, normalizePlanId, normalizeProviderId} = require('../netlify/functions/lib/scan-config');
 const fmpProvider = require('../netlify/functions/lib/providers/fmp');
 const marketDataProvider = require('../netlify/functions/lib/providers/marketdata');
+const {spawnSync} = require('child_process');
+const path = require('path');
+const {classifyShortlistCandidate} = require('./lib/shortlist-classifier');
 
 const PROVIDERS = {
   fmp:fmpProvider,
   marketdata:marketDataProvider
 };
+const root = path.resolve(__dirname, '..');
 
 function usage(){
   console.log('Usage: node scripts/debug-near-entry-shortlist.js <TICKER...> [--provider=fmp] [--top=5] [--tickers-only]');
@@ -22,114 +26,75 @@ function normalizeTicker(value){
   return String(value || '').trim().toUpperCase();
 }
 
-function safeNumber(value, digits = 4){
-  const number = Number(value);
-  return Number.isFinite(number) ? Number(number.toFixed(digits)) : null;
-}
-
-function pctDistance(price, average){
-  const safePrice = Number(price);
-  const safeAverage = Number(average);
-  if(!Number.isFinite(safePrice) || !Number.isFinite(safeAverage) || safeAverage === 0) return null;
-  return (safePrice - safeAverage) / safeAverage;
-}
-
-function roundPct(value){
-  return Number.isFinite(value) ? Number((value * 100).toFixed(2)) : null;
-}
-
-function classifyCandidate(snapshot){
-  const price = Number(snapshot.price);
-  const sma20 = Number(snapshot.sma20);
-  const sma50 = Number(snapshot.sma50);
-  const sma200 = Number(snapshot.sma200);
-  const rsi14 = Number(snapshot.rsi14);
-  const volume = Number(snapshot.volume);
-  const avgVolume30 = Number(snapshot.avgVolume30);
-
-  const above50 = Number.isFinite(price) && Number.isFinite(sma50) ? price >= sma50 : false;
-  const above200 = Number.isFinite(price) && Number.isFinite(sma200) ? price >= sma200 : false;
-  const ma50gt200 = Number.isFinite(sma50) && Number.isFinite(sma200) ? sma50 >= sma200 : false;
-  const distance20 = pctDistance(price, sma20);
-  const distance50 = pctDistance(price, sma50);
-  const near20 = Number.isFinite(distance20) && Math.abs(distance20) <= 0.03;
-  const near50 = Number.isFinite(distance50) && Math.abs(distance50) <= 0.04;
-  const extended = Number.isFinite(distance20) && distance20 > 0.08;
-  const volumeSupportive = Number.isFinite(volume) && Number.isFinite(avgVolume30) && avgVolume30 > 0
-    ? volume >= avgVolume30 * 0.9
-    : null;
-  const rsiHealthy = Number.isFinite(rsi14) ? rsi14 >= 45 && rsi14 <= 68 : null;
-
-  let score = 0;
-  const reasons = [];
-  const blockers = [];
-
-  if(above200){
-    score += 2;
-    reasons.push('price above 200MA');
-  }else{
-    blockers.push('price below 200MA');
-  }
-  if(ma50gt200){
-    score += 2;
-    reasons.push('50MA above 200MA');
-  }else{
-    blockers.push('50MA below 200MA');
-  }
-  if(above50){
-    score += 1;
-    reasons.push('price above 50MA');
-  }else{
-    blockers.push('price below 50MA');
-  }
-  if(near20){
-    score += 3;
-    reasons.push('pullback near 20MA');
-  }
-  if(near50){
-    score += 2;
-    reasons.push('pullback near 50MA');
-  }
-  if(extended){
-    score -= 3;
-    blockers.push('too extended above 20MA');
-  }
-  if(volumeSupportive === true){
-    score += 1;
-    reasons.push('volume roughly supportive');
-  }
-  if(rsiHealthy === true){
-    score += 1;
-    reasons.push('RSI in a workable range');
-  }else if(rsiHealthy === false){
-    blockers.push('RSI not in a clean pullback range');
-  }
-
-  let verdict = 'Watch';
-  if(blockers.includes('price below 200MA') || blockers.includes('50MA below 200MA')){
-    verdict = 'Avoid';
-  }else if((near20 || near50) && score >= 7){
-    verdict = 'Near Entry';
-  }
-
-  return {
-    verdict,
-    score,
-    reasons,
-    blockers,
-    metrics:{
-      price:safeNumber(price),
-      sma20:safeNumber(sma20),
-      sma50:safeNumber(sma50),
-      sma200:safeNumber(sma200),
-      distance20Pct:roundPct(distance20),
-      distance50Pct:roundPct(distance50),
-      rsi14:safeNumber(rsi14, 2),
-      volumeRatio:Number.isFinite(volume) && Number.isFinite(avgVolume30) && avgVolume30 > 0
-        ? Number((volume / avgVolume30).toFixed(2))
-        : null
+function parseJsonPrefix(output){
+  const trimmed = String(output || '').trim();
+  if(!trimmed) return null;
+  const start = trimmed.indexOf('{');
+  if(start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for(let index = start; index < trimmed.length; index += 1){
+    const char = trimmed[index];
+    if(inString){
+      if(escaped){
+        escaped = false;
+        continue;
+      }
+      if(char === '\\'){
+        escaped = true;
+        continue;
+      }
+      if(char === '"') inString = false;
+      continue;
     }
-  };
+    if(char === '"'){
+      inString = true;
+      continue;
+    }
+    if(char === '{'){
+      depth += 1;
+      continue;
+    }
+    if(char === '}'){
+      depth -= 1;
+      if(depth === 0){
+        try{
+          return JSON.parse(trimmed.slice(start, index + 1));
+        }catch(_error){
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function resolverVerdictLabel(value){
+  const safe = String(value || '').trim().toLowerCase();
+  if(safe === 'entry') return 'Entry';
+  if(safe === 'near_entry' || safe === 'near entry' || safe === 'nearentry') return 'Near Entry';
+  if(safe === 'avoid') return 'Avoid';
+  return 'Watch';
+}
+
+function runReplayForTickers(tickers, providerArg){
+  const replayScript = path.join(root, 'scripts', 'replay-resolver-snapshot.js');
+  const args = [replayScript].concat(tickers);
+  if(providerArg) args.push(providerArg);
+  const result = spawnSync(process.execPath, args, {
+    cwd:root,
+    env:process.env,
+    encoding:'utf8'
+  });
+  if(result.status !== 0){
+    throw new Error(String(result.stderr || result.stdout || 'Resolver replay failed.'));
+  }
+  const parsed = parseJsonPrefix(result.stdout);
+  if(!parsed || !Array.isArray(parsed.results)){
+    throw new Error('Unable to parse replay results.');
+  }
+  return parsed.results;
 }
 
 function printRankedSummary(results = []){
@@ -147,17 +112,31 @@ function printRankedSummary(results = []){
       return;
     }
     const metrics = result.metrics || {};
-    const reasons = Array.isArray(result.reasons) && result.reasons.length
-      ? result.reasons.join(', ')
-      : 'no positive signals';
-    const blockers = Array.isArray(result.blockers) && result.blockers.length
-      ? result.blockers.join(', ')
+    const resolverLabel = result.verdict || 'Watch';
+    const bucketLabel = result.visualBucket || 'unknown';
+    const setupScore = Number.isFinite(Number(result.score)) ? Number(result.score) : 'n/a';
+    const activeBlockers = Array.isArray(result.topBlockers) && result.topBlockers.length
+      ? result.topBlockers.join(', ')
       : 'none';
+    const proxyReasons = Array.isArray(result.proxyReasons) && result.proxyReasons.length
+      ? result.proxyReasons.join(', ')
+      : 'none';
+    const proxyBlockers = Array.isArray(result.proxyBlockers) && result.proxyBlockers.length
+      ? result.proxyBlockers.join(', ')
+      : 'none';
+    lines.push(`${index + 1}. ${result.ticker}: ${resolverLabel} | bucket ${bucketLabel} | score ${setupScore}`);
     lines.push(
-      `${index + 1}. ${result.ticker}: ${result.verdict} | score ${result.score} | ` +
-      `20MA ${metrics.distance20Pct ?? 'n/a'}% | 50MA ${metrics.distance50Pct ?? 'n/a'}% | ` +
-      `RSI ${metrics.rsi14 ?? 'n/a'} | reasons: ${reasons} | blockers: ${blockers}`
+      `   app: 20MA ${metrics.distance20Pct ?? 'n/a'}% | 50MA ${metrics.distance50Pct ?? 'n/a'}% | ` +
+      `RSI ${metrics.rsi14 ?? 'n/a'} | structure ${result.structureState || 'n/a'}/${result.structureEligibility || 'n/a'} | ` +
+      `bounce ${result.bounceState || 'n/a'} | stabilisation ${result.stabilisationState || 'n/a'} | ` +
+      `priceability ${result.priceabilityState || 'n/a'} | RR ${Number.isFinite(Number(result.realisticRr)) ? Number(result.realisticRr).toFixed(2) : 'n/a'}R`
     );
+    if(Array.isArray(result.topBlockers) && result.topBlockers.length){
+      lines.push(`   app blockers: ${activeBlockers}`);
+    }else if(result.promotionDiagnostics){
+      lines.push(`   app diagnostics: ${result.promotionDiagnostics.promotionBlocker || 'n/a'}${result.promotionDiagnostics.failingGate ? ` | gate ${result.promotionDiagnostics.failingGate}` : ''}`);
+    }
+    lines.push(`   raw proxy context: verdict ${result.proxyVerdict || 'n/a'} | reasons ${proxyReasons} | blockers ${proxyBlockers}`);
   });
   console.log(lines.join('\n'));
 }
@@ -223,14 +202,15 @@ async function main(){
   for(const ticker of tickers){
     try{
       const {snapshot, logs} = await fetchSnapshot(adapter, providerConfig, ticker);
-      const ranked = classifyCandidate(snapshot);
+      const ranked = classifyShortlistCandidate(snapshot);
       results.push({
         ticker,
         ok:true,
         verdict:ranked.verdict,
         score:ranked.score,
-        reasons:ranked.reasons,
-        blockers:ranked.blockers,
+        proxyVerdict:ranked.verdict,
+        proxyReasons:ranked.reasons,
+        proxyBlockers:ranked.blockers,
         metrics:ranked.metrics,
         providerTrace:logs
       });
@@ -243,11 +223,43 @@ async function main(){
     }
   }
 
+  const replayResults = runReplayForTickers(
+    results.filter(result => result.ok === true).map(result => result.ticker),
+    providerArg
+  );
+  const replayByTicker = new Map(replayResults.map(result => [String(result.ticker || '').trim().toUpperCase(), result]));
+  results.forEach(result => {
+    if(result.ok !== true) return;
+    const replay = replayByTicker.get(result.ticker);
+    if(!replay) return;
+    const replayVerdict = resolverVerdictLabel(replay.resolverVerdict);
+    result.verdict = replayVerdict;
+    result.score = Number.isFinite(Number(replay.setupScore)) ? Number(replay.setupScore) : result.score;
+    result.resolverVerdict = replay.resolverVerdict;
+    result.visualBucket = replay.visualBucket;
+    result.structureState = replay.structureState;
+    result.structureEligibility = replay.structureEligibility;
+    result.bounceState = replay.bounceState;
+    result.stabilisationState = replay.stabilisationState;
+    result.priceabilityState = replay.priceabilityState;
+    result.realisticRr = replay.realisticRr;
+    result.blockerCopy = String(replay.blockerCopy || '');
+    result.promotionDiagnostics = replay.promotionDiagnostics || null;
+    result.topBlockers = Array.isArray(replay.blockers) ? replay.blockers.slice() : [];
+    if(result.blockerCopy && !['Entry', 'Near Entry'].includes(result.verdict) && !result.topBlockers.includes(result.blockerCopy)){
+      result.topBlockers.unshift(result.blockerCopy);
+    }
+    if(['Entry', 'Near Entry'].includes(result.verdict)){
+      result.topBlockers = [];
+    }
+  });
+
   const rankedResults = results.slice().sort((left, right) => {
     const leftOk = left.ok === true ? 1 : 0;
     const rightOk = right.ok === true ? 1 : 0;
     if(rightOk !== leftOk) return rightOk - leftOk;
     const verdictRank = value => ({
+      'Entry':4,
       'Near Entry':3,
       'Watch':2,
       'Avoid':1
@@ -258,8 +270,10 @@ async function main(){
   });
 
   const selectedResults = topArg
-    ? rankedResults.filter(result => result.ok === true).slice(0, topCount)
-    : rankedResults;
+    ? rankedResults
+      .filter(result => result.ok === true && ['Entry', 'Near Entry'].includes(result.verdict))
+      .slice(0, topCount)
+    : rankedResults.filter(result => result.ok === true && ['Entry', 'Near Entry'].includes(result.verdict));
   const selectedTickers = selectedResults
     .filter(result => result.ok === true)
     .map(result => result.ticker);
@@ -274,7 +288,29 @@ async function main(){
     requestedAt:new Date().toISOString(),
     provider:providerConfig.id,
     tickers,
-    rankedResults,
+    rankedResults:rankedResults.map(result => result.ok === true ? ({
+      ticker:result.ticker,
+      ok:true,
+      verdict:result.verdict,
+      visualBucket:result.visualBucket,
+      score:result.score,
+      structureState:result.structureState,
+      structureEligibility:result.structureEligibility,
+      bounceState:result.bounceState,
+      stabilisationState:result.stabilisationState,
+      priceabilityState:result.priceabilityState,
+      realisticRr:result.realisticRr,
+      blockerCopy:['Entry', 'Near Entry'].includes(result.verdict) ? '' : (result.blockerCopy || ''),
+      topBlockers:['Entry', 'Near Entry'].includes(result.verdict) ? [] : (result.topBlockers || []),
+      promotionDiagnostics:['Entry', 'Near Entry'].includes(result.verdict) ? null : (result.promotionDiagnostics || null),
+      metrics:result.metrics,
+      providerTrace:result.providerTrace,
+      rawProxyContext:{
+        verdict:result.proxyVerdict,
+        reasons:result.proxyReasons,
+        blockers:result.proxyBlockers
+      }
+    }) : result),
     selectedTickers
   }, null, 2));
   printRankedSummary(rankedResults);

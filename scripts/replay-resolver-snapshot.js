@@ -5,6 +5,7 @@ const vm = require('vm');
 const {getProviderConfig, normalizePlanId, normalizeProviderId} = require('../netlify/functions/lib/scan-config');
 const fmpProvider = require('../netlify/functions/lib/providers/fmp');
 const marketDataProvider = require('../netlify/functions/lib/providers/marketdata');
+const {classifyShortlistCandidate} = require('./lib/shortlist-classifier');
 
 const root = path.resolve(__dirname, '..');
 const PROVIDERS = {
@@ -236,82 +237,6 @@ function loadReplayRuntime(){
   });
 
   return sandbox;
-}
-
-function classifyShortlistCandidate(snapshot){
-  const price = numericOrNull(snapshot.price);
-  const sma20 = numericOrNull(snapshot.sma20);
-  const sma50 = numericOrNull(snapshot.sma50);
-  const sma200 = numericOrNull(snapshot.sma200);
-  const rsi14 = numericOrNull(snapshot.rsi14);
-  const volume = numericOrNull(snapshot.volume);
-  const avgVolume30 = numericOrNull(snapshot.avgVolume30d ?? snapshot.avgVolume30);
-
-  const above50 = Number.isFinite(price) && Number.isFinite(sma50) ? price >= sma50 : false;
-  const above200 = Number.isFinite(price) && Number.isFinite(sma200) ? price >= sma200 : false;
-  const ma50gt200 = Number.isFinite(sma50) && Number.isFinite(sma200) ? sma50 >= sma200 : false;
-  const distance20 = pctDistance(price, sma20);
-  const distance50 = pctDistance(price, sma50);
-  const near20 = Number.isFinite(distance20) && Math.abs(distance20) <= 0.03;
-  const near50 = Number.isFinite(distance50) && Math.abs(distance50) <= 0.04;
-  const extended = Number.isFinite(distance20) && distance20 > 0.08;
-  const volumeSupportive = Number.isFinite(volume) && Number.isFinite(avgVolume30) && avgVolume30 > 0
-    ? volume >= avgVolume30 * 0.9
-    : null;
-  const rsiHealthy = Number.isFinite(rsi14) ? rsi14 >= 45 && rsi14 <= 68 : null;
-
-  let score = 0;
-  const reasons = [];
-  const blockers = [];
-  if(above200){
-    score += 2;
-    reasons.push('price above 200MA');
-  }else{
-    blockers.push('price below 200MA');
-  }
-  if(ma50gt200){
-    score += 2;
-    reasons.push('50MA above 200MA');
-  }else{
-    blockers.push('50MA below 200MA');
-  }
-  if(above50){
-    score += 1;
-    reasons.push('price above 50MA');
-  }else{
-    blockers.push('price below 50MA');
-  }
-  if(near20){
-    score += 3;
-    reasons.push('pullback near 20MA');
-  }
-  if(near50){
-    score += 2;
-    reasons.push('pullback near 50MA');
-  }
-  if(extended){
-    score -= 3;
-    blockers.push('too extended above 20MA');
-  }
-  if(volumeSupportive === true){
-    score += 1;
-    reasons.push('volume roughly supportive');
-  }
-  if(rsiHealthy === true){
-    score += 1;
-    reasons.push('RSI in a workable range');
-  }else if(rsiHealthy === false){
-    blockers.push('RSI not in a clean pullback range');
-  }
-
-  let verdict = 'Watch';
-  if(blockers.includes('price below 200MA') || blockers.includes('50MA below 200MA')){
-    verdict = 'Avoid';
-  }else if((near20 || near50) && score >= 7){
-    verdict = 'Near Entry';
-  }
-
-  return {verdict, score, reasons, blockers};
 }
 
 function normalizeSnapshotInput(payload, fallbackTicker = ''){
@@ -823,16 +748,16 @@ function derivedStateValue(derivedStates, camelKey, snakeKey){
 }
 
 function printTickerReport(result){
-  const {ticker, snapshot, shortlist, replay} = result;
-  const mismatch = shortlist.verdict !== replay.canonicalVerdictLabel;
-  const mismatchLabel = mismatch ? `MISMATCH shortlist=${shortlist.verdict} resolver=${replay.canonicalVerdictLabel}/${replay.visualBucket}` : 'MATCH';
+  const {ticker, snapshot, proxy, replay} = result;
+  const mismatch = proxy.verdict !== replay.canonicalVerdictLabel;
+  const mismatchLabel = mismatch ? `MISMATCH proxy=${proxy.verdict} resolver=${replay.canonicalVerdictLabel}/${replay.visualBucket}` : 'MATCH';
   const lines = [
     '',
     `${ticker} | ${mismatchLabel}`,
     `  price/ma: price ${fmtPrice(snapshot.price)} | 20MA ${fmtPrice(snapshot.sma20)} | 50MA ${fmtPrice(snapshot.sma50)} | 200MA ${fmtPrice(snapshot.sma200)}`,
     `  distances: 20MA ${fmtPct(pctDistance(snapshot.price, snapshot.sma20))} | 50MA ${fmtPct(pctDistance(snapshot.price, snapshot.sma50))}`,
     `  tape: RSI ${safeNumber(snapshot.rsi14, 2) ?? 'n/a'} | volume ratio ${safeNumber((numericOrNull(snapshot.volume) && numericOrNull(snapshot.avgVolume30d)) ? numericOrNull(snapshot.volume) / numericOrNull(snapshot.avgVolume30d) : null, 2) ?? 'n/a'}`,
-    `  shortlist: ${shortlist.verdict} | score ${shortlist.score}`,
+    `  proxy: ${proxy.verdict} | score ${proxy.score}`,
     `  resolver: canonical ${replay.canonicalVerdictLabel} | bucket ${replay.visualBucket} | simulated lifecycle ${replay.simulatedLifecycleFromWatch} | setup score ${replay.setupScore}`,
     `  states: structure ${replay.structureState} | eligibility ${replay.structureEligibility} | bounce ${replay.bounceState} | stabilisation ${replay.stabilisationState} | priceability ${replay.priceabilityState}`,
     `  target profile: first ${fmtPrice(replay.realisticTarget)} | extended ${Number.isFinite(numericOrNull(replay.extendedTarget)) ? `${fmtPrice(replay.extendedTarget)} (context only)` : 'n/a'} | firstRR ${fmtRatio(replay.realisticRr)} | stretch ${fmtPct(replay.targetStretchPct, 1)}`,
@@ -909,7 +834,7 @@ async function main(){
   }
 
   const results = snapshots.map(snapshot => {
-    const shortlist = classifyShortlistCandidate(snapshot);
+    const proxy = classifyShortlistCandidate(snapshot);
     const replayBase = buildReplayRecord(snapshot, sandbox);
     const globalVerdict = resolveGlobalVerdict(replayBase.record);
     replayBase.record.resolvedContract = {
@@ -1014,7 +939,7 @@ async function main(){
     return {
       ticker:snapshot.ticker,
       snapshot,
-      shortlist,
+      proxy,
       replay:{
         canonicalVerdict:globalVerdict.final_verdict,
         canonicalVerdictLabel:sandbox.window.ResolverCore.globalVerdictLabel(globalVerdict.final_verdict),
@@ -1064,7 +989,7 @@ async function main(){
     tickers:results.map(result => result.ticker),
     results:results.map(result => ({
       ticker:result.ticker,
-      shortlistVerdict:result.shortlist.verdict,
+      proxyVerdict:result.proxy.verdict,
       resolverVerdict:result.replay.canonicalVerdict,
       visualBucket:result.replay.visualBucket,
       simulatedLifecycleFromWatch:result.replay.simulatedLifecycleFromWatch,
