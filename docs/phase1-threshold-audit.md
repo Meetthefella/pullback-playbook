@@ -242,6 +242,10 @@ The audit above remains the reasoning checkpoint. Phase 1 code work is now imple
    - recent pre-pullback swing high
    - prior high context
    - realistic RR clipping when a displayed target stretches beyond local resistance on an early or weak repair
+5. Runtime resolver alignment now preserves scanner-estimate plans through watchlist and review state:
+   - scanner-estimate plans are no longer stripped during watch gating
+   - `risk_only` no longer implies `unpriceable`
+   - provisional near-50MA repair setups can now reach `Near Entry` before a full reclaim print if structure, bounce attempt, and plan math are already constructive
 
 ### Net Phase 1 outcome
 
@@ -249,6 +253,7 @@ The audit above remains the reasoning checkpoint. Phase 1 code work is now imple
 - genuinely damaged or deteriorating setups can still fall into `diminishing` or worse.
 - alive or messy repair attempts near support can remain monitor/watch while they stabilise.
 - target realism is less likely to be distorted by a generic cap or by a target that ignores nearby resistance.
+- the app is now materially better at recognising genuine in-dip candidates as `Near Entry` instead of collapsing them back to generic `Watch` because of plan-handoff or provisional-gating inconsistencies.
 
 ## Safe point for context compaction
 

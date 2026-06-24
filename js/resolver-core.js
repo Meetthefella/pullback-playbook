@@ -1278,7 +1278,9 @@
     }else if(setupScore >= 3 && !structurallyBroken){
       finalVerdict = 'monitor';
       reason = invalidPlan
-        ? `${structureReasonLabel(structureState)}. Plan is not ready yet.`
+        ? ((structureLayer.structureEligibility === 'alive' && ['strong','intact','developing_clean'].includes(structureState))
+          ? 'Valid plan math exists, but confirmation is still pending.'
+          : `${structureReasonLabel(structureState)}. Plan is not ready yet.`)
         : (marketWeak
           ? 'Weak market caution.'
           : (tentativeBounce
@@ -1434,6 +1436,12 @@
         trackedReason = 'Strong trend, but too volatile to price reliably.';
       }else if(weakRewardPotential){
         trackedReason = 'Nearby resistance limits current reward potential.';
+      }else if(
+        trackedVerdict === 'near_entry'
+        && structureLayer.structureEligibility === 'alive'
+        && ['strong','intact','developing_clean'].includes(structureState)
+      ){
+        trackedReason = 'Valid plan math exists, but confirmation is still pending.';
       }else{
         trackedReason = viability.mainBlocker || viability.viabilityReason || trackedReason;
       }
