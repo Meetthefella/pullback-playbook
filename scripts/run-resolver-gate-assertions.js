@@ -1,5 +1,7 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const {spawnSync} = require('child_process');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
@@ -5610,6 +5612,53 @@ function runPlanSemanticsAssertions(){
   const caseCGuarded = resolverCore.applyPromotionGuards({final_verdict:'watch', reason:''}, validPricesWithoutConfirmation);
   if(caseCEntryGate.pass === true || caseCNearEntryGate.pass === true || caseCGuarded.final_verdict === 'entry' || caseCGuarded.final_verdict === 'near_entry'){
     throw new Error('Valid manual prices alone must not promote without bounce/stabilisation confirmation gates.');
+  }
+
+  const frozenReplaySnapshotPath = path.join(os.tmpdir(), `pullback-playbook-frozen-replay-${Date.now()}.json`);
+  fs.writeFileSync(frozenReplaySnapshotPath, JSON.stringify({
+    snapshots:[
+      {
+        ticker:'FROZEN',
+        price:100.9,
+        previousClose:100.2,
+        sma20:100.1,
+        sma50:98.7,
+        sma200:92,
+        rsi14:52.4,
+        volume:1200000,
+        avgVolume30d:1050000,
+        perf1w:0.4,
+        perf1m:1.8,
+        perf3m:11,
+        perf6m:16,
+        perfYtd:9,
+        exchange:'NASDAQ',
+        currency:'USD',
+        history:dualResistanceHistory
+      }
+    ]
+  }, null, 2));
+  const frozenReplayRun = spawnSync(process.execPath, [
+    path.join(root, 'scripts', 'replay-resolver-snapshot.js'),
+    '--snapshot',
+    frozenReplaySnapshotPath
+  ], {
+    cwd:root,
+    encoding:'utf8'
+  });
+  try{
+    if(frozenReplayRun.status !== 0){
+      throw new Error(`Frozen replay snapshot path must run successfully, got: ${frozenReplayRun.stderr || frozenReplayRun.stdout}`);
+    }
+    const frozenReplayOutput = String(frozenReplayRun.stdout || '');
+    if(!/\"ticker\":\s*\"FROZEN\"/.test(frozenReplayOutput) || !/\"simulatedLifecycleFromWatch\":/.test(frozenReplayOutput) || !/\"blockerCopy\":/.test(frozenReplayOutput)){
+      throw new Error('Frozen replay snapshot output must include ticker, simulatedLifecycleFromWatch, and blockerCopy fields.');
+    }
+    if(!/FROZEN \|/.test(frozenReplayOutput)){
+      throw new Error('Frozen replay snapshot output must include the compact per-ticker report.');
+    }
+  }finally{
+    try{ fs.unlinkSync(frozenReplaySnapshotPath); }catch(_error){}
   }
 }
 

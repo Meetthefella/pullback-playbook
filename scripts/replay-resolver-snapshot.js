@@ -17,6 +17,7 @@ function usage(){
   console.log('  node scripts/replay-resolver-snapshot.js EMR ANET MOD');
   console.log('  node scripts/replay-resolver-snapshot.js EMR ANET MOD --provider=fmp');
   console.log('  node scripts/replay-resolver-snapshot.js --snapshot snapshots/phase1-anet-old.json');
+  console.log('  node scripts/replay-resolver-snapshot.js EMR ANET MOD --save-snapshot snapshots/phase1-live.json');
 }
 
 function normalizeTicker(value){
@@ -226,7 +227,10 @@ function loadReplayRuntime(){
     'deriveCurrentPlanState',
     'actionableRrValueForPlan',
     'evaluatePlanRealism',
-    'evaluateBouncePriceabilityGuard'
+    'evaluateBouncePriceabilityGuard',
+    'canonicalLifecycleState',
+    'resolveLifecycleTransition',
+    'watchlistLifecycleStateRank'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});
   });
@@ -351,6 +355,11 @@ function normalizeSnapshotInput(payload, fallbackTicker = ''){
   };
 }
 
+function ensureDirectoryForFile(filePath){
+  const directory = path.dirname(filePath);
+  fs.mkdirSync(directory, {recursive:true});
+}
+
 function loadSnapshotsFromFile(snapshotPath){
   const filePath = path.resolve(process.cwd(), snapshotPath);
   const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -358,7 +367,10 @@ function loadSnapshotsFromFile(snapshotPath){
     return parsed.map((entry, index) => normalizeSnapshotInput(entry, `SNAPSHOT_${index + 1}`));
   }
   if(Array.isArray(parsed.snapshots)){
-    return parsed.snapshots.map((entry, index) => normalizeSnapshotInput(entry, `SNAPSHOT_${index + 1}`));
+    return parsed.snapshots.map((entry, index) => normalizeSnapshotInput(
+      entry && entry.snapshot ? entry.snapshot : entry,
+      entry && entry.ticker ? entry.ticker : `SNAPSHOT_${index + 1}`
+    ));
   }
   if(parsed.rankedResults && Array.isArray(parsed.rankedResults)){
     return parsed.rankedResults
@@ -781,11 +793,12 @@ function printTickerReport(result){
     `  distances: 20MA ${fmtPct(pctDistance(snapshot.price, snapshot.sma20))} | 50MA ${fmtPct(pctDistance(snapshot.price, snapshot.sma50))}`,
     `  tape: RSI ${safeNumber(snapshot.rsi14, 2) ?? 'n/a'} | volume ratio ${safeNumber((numericOrNull(snapshot.volume) && numericOrNull(snapshot.avgVolume30d)) ? numericOrNull(snapshot.volume) / numericOrNull(snapshot.avgVolume30d) : null, 2) ?? 'n/a'}`,
     `  shortlist: ${shortlist.verdict} | score ${shortlist.score}`,
-    `  resolver: canonical ${replay.canonicalVerdictLabel} | bucket ${replay.visualBucket} | setup score ${replay.setupScore}`,
+    `  resolver: canonical ${replay.canonicalVerdictLabel} | bucket ${replay.visualBucket} | simulated lifecycle ${replay.simulatedLifecycleFromWatch} | setup score ${replay.setupScore}`,
     `  states: structure ${replay.structureState} | eligibility ${replay.structureEligibility} | bounce ${replay.bounceState} | stabilisation ${replay.stabilisationState} | priceability ${replay.priceabilityState}`,
     `  target profile: first ${fmtPrice(replay.realisticTarget)} | extended ${Number.isFinite(numericOrNull(replay.extendedTarget)) ? `${fmtPrice(replay.extendedTarget)} (context only)` : 'n/a'} | firstRR ${fmtRatio(replay.realisticRr)} | stretch ${fmtPct(replay.targetStretchPct, 1)}`,
     `  target cap: ${replay.targetCapReason || 'n/a'}`,
     `  blockers: ${(replay.blockers.length ? replay.blockers.join(' | ') : 'none')}`,
+    `  blocker copy: ${replay.blockerCopy || 'n/a'}`,
     `  diminishing: ${replay.watchToDiminishingReason || 'n/a'}`
   ];
   console.log(lines.join('\n'));
@@ -795,12 +808,16 @@ async function main(){
   const args = process.argv.slice(2);
   const snapshotFlagIndex = args.findIndex(arg => arg === '--snapshot');
   const snapshotPath = snapshotFlagIndex >= 0 ? args[snapshotFlagIndex + 1] : '';
+  const saveSnapshotFlagIndex = args.findIndex(arg => arg === '--save-snapshot');
+  const saveSnapshotPath = saveSnapshotFlagIndex >= 0 ? args[saveSnapshotFlagIndex + 1] : '';
   const providerArg = args.find(arg => arg.startsWith('--provider='));
   const requestedProvider = normalizeProviderId((providerArg && providerArg.split('=')[1]) || 'fmp');
   const tickerArgs = args.filter((arg, index) => {
     if(arg.startsWith('--provider=')) return false;
     if(arg === '--snapshot') return false;
+    if(arg === '--save-snapshot') return false;
     if(snapshotFlagIndex >= 0 && index === snapshotFlagIndex + 1) return false;
+    if(saveSnapshotFlagIndex >= 0 && index === saveSnapshotFlagIndex + 1) return false;
     return !arg.startsWith('--');
   });
 
@@ -820,6 +837,7 @@ async function main(){
   );
 
   let snapshots = [];
+  const liveSnapshotPayloads = [];
   if(snapshotPath){
     snapshots = loadSnapshotsFromFile(snapshotPath);
   }else{
@@ -834,8 +852,14 @@ async function main(){
     }
     for(const rawTicker of tickerArgs){
       const ticker = normalizeTicker(rawTicker);
-      const {snapshot} = await fetchSnapshot(adapter, providerConfig, ticker);
-      snapshots.push(normalizeSnapshotInput(snapshot, ticker));
+      const {snapshot, logs} = await fetchSnapshot(adapter, providerConfig, ticker);
+      const normalizedSnapshot = normalizeSnapshotInput(snapshot, ticker);
+      snapshots.push(normalizedSnapshot);
+      liveSnapshotPayloads.push({
+        ticker,
+        snapshot:normalizedSnapshot,
+        providerTrace:logs
+      });
     }
   }
 
@@ -876,6 +900,23 @@ async function main(){
       rrCategory:scannerDebugDeps.rrCategoryForView(baseView),
       structureQuality:scannerDebugDeps.finalStructureQualityForView({...baseView, setupStates:replayBase.record.derivedStates})
     }, scannerDebugDeps);
+    const simulatedLifecycleFromWatch = typeof sandbox.resolveLifecycleTransition === 'function'
+      ? sandbox.resolveLifecycleTransition('watch', {
+        structure_state:derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
+        bounce_state:derivedStateValue(replayBase.record.derivedStates, 'bounceState', 'bounce_state'),
+        plan_status:replayBase.record.displayedPlan && replayBase.record.displayedPlan.status,
+        rr_confidence:replayBase.record.planRealism && replayBase.record.planRealism.rr_confidence_label,
+        market_regime:globalVerdict.market_regime || '',
+        final_verdict:globalVerdict.final_verdict
+      })
+      : sandbox.window.ResolverCore.normalizeGlobalVerdictKey(globalVerdict.final_verdict);
+    const blockerCopy = String(
+      globalVerdict.main_blocker
+      || globalVerdict.reason
+      || replayBase.record.resolvedContract.blockerReason
+      || replayBase.record.resolvedContract.reasonSummary
+      || ''
+    ).trim();
     return {
       ticker:snapshot.ticker,
       snapshot,
@@ -884,6 +925,7 @@ async function main(){
         canonicalVerdict:globalVerdict.final_verdict,
         canonicalVerdictLabel:sandbox.window.ResolverCore.globalVerdictLabel(globalVerdict.final_verdict),
         visualBucket:visualState.visualBucket,
+        simulatedLifecycleFromWatch:String(simulatedLifecycleFromWatch || ''),
         structureState:derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
         structureEligibility:globalVerdict.structure_eligibility || visualState.structureEligibility || 'unknown',
         bounceState:derivedStateValue(replayBase.record.derivedStates, 'bounceState', 'bounce_state'),
@@ -896,10 +938,24 @@ async function main(){
         targetStretchPct:replayBase.record.planRealism.target_stretch_pct,
         targetCapReason:replayBase.record.planRealism.target_cap_reason,
         blockers:promotionBlockers(globalVerdict, replayBase.record.derivedStates),
+        blockerCopy,
         watchToDiminishingReason:visualState.weakWatchDiminishingReason || scannerResolution.remapReason || ''
       }
     };
   });
+
+  if(saveSnapshotPath && !snapshotPath){
+    const outputPath = path.resolve(process.cwd(), saveSnapshotPath);
+    ensureDirectoryForFile(outputPath);
+    fs.writeFileSync(outputPath, JSON.stringify({
+      ok:true,
+      requestedAt:new Date().toISOString(),
+      source:'live_provider',
+      provider:requestedProvider,
+      tickers:snapshots.map(snapshot => snapshot.ticker),
+      snapshots:liveSnapshotPayloads
+    }, null, 2));
+  }
 
   console.log(JSON.stringify({
     ok:true,
@@ -912,6 +968,7 @@ async function main(){
       shortlistVerdict:result.shortlist.verdict,
       resolverVerdict:result.replay.canonicalVerdict,
       visualBucket:result.replay.visualBucket,
+      simulatedLifecycleFromWatch:result.replay.simulatedLifecycleFromWatch,
       structureState:result.replay.structureState,
       structureEligibility:result.replay.structureEligibility,
       bounceState:result.replay.bounceState,
@@ -924,6 +981,7 @@ async function main(){
       targetStretchPct:result.replay.targetStretchPct,
       targetCapReason:result.replay.targetCapReason,
       blockers:result.replay.blockers,
+      blockerCopy:result.replay.blockerCopy,
       watchToDiminishingReason:result.replay.watchToDiminishingReason
     }))
   }, null, 2));

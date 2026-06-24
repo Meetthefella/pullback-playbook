@@ -7,6 +7,8 @@ function usage(){
   console.log('Usage:');
   console.log('  node scripts/audit-live-candidates.js EMR ANET MOD');
   console.log('  node scripts/audit-live-candidates.js EMR ANET MOD --provider=fmp --top=3');
+  console.log('  node scripts/audit-live-candidates.js --snapshot snapshots/phase1-live.json');
+  console.log('  node scripts/audit-live-candidates.js EMR ANET MOD --save-replay-snapshot snapshots/phase1-live.json');
 }
 
 function normalizeTicker(value){
@@ -87,17 +89,40 @@ function parseJsonPrefix(output){
 
 function main(){
   const args = process.argv.slice(2);
+  const snapshotFlagIndex = args.findIndex(arg => arg === '--snapshot');
+  const snapshotPath = snapshotFlagIndex >= 0 ? args[snapshotFlagIndex + 1] : '';
+  const saveSnapshotFlagIndex = args.findIndex(arg => arg === '--save-replay-snapshot');
+  const saveSnapshotPath = saveSnapshotFlagIndex >= 0 ? args[saveSnapshotFlagIndex + 1] : '';
   const providerArg = args.find(arg => arg.startsWith('--provider='));
   const topArg = args.find(arg => arg.startsWith('--top='));
   const requestedTop = Math.max(1, Number.parseInt((topArg && topArg.split('=')[1]) || '', 10) || 5);
   const tickers = args
-    .filter(arg => !arg.startsWith('--'))
+    .filter((arg, index) => {
+      if(arg.startsWith('--')) return false;
+      if(snapshotFlagIndex >= 0 && index === snapshotFlagIndex + 1) return false;
+      if(saveSnapshotFlagIndex >= 0 && index === saveSnapshotFlagIndex + 1) return false;
+      return true;
+    })
     .map(normalizeTicker)
     .filter(Boolean);
 
-  if(!tickers.length){
+  if(!snapshotPath && !tickers.length){
     usage();
     process.exitCode = 1;
+    return;
+  }
+
+  if(snapshotPath){
+    const replayArgs = ['--snapshot', snapshotPath];
+    const replayRun = runNodeScript('replay-resolver-snapshot.js', replayArgs);
+    if(replayRun.status !== 0){
+      process.stderr.write(replayRun.stderr || replayRun.stdout || 'Resolver replay failed.\n');
+      process.exitCode = replayRun.status || 1;
+      return;
+    }
+    console.log('Frozen snapshot replay');
+    console.log('----------------------');
+    console.log(replayRun.stdout.trim());
     return;
   }
 
@@ -131,6 +156,7 @@ function main(){
 
   const replayArgs = shortlistPayload.selectedTickers.slice();
   if(providerArg) replayArgs.push(providerArg);
+  if(saveSnapshotPath) replayArgs.push('--save-snapshot', saveSnapshotPath);
   const replayRun = runNodeScript('replay-resolver-snapshot.js', replayArgs);
   if(replayRun.status !== 0){
     process.stderr.write(replayRun.stderr || replayRun.stdout || 'Resolver replay failed.\n');
@@ -139,6 +165,9 @@ function main(){
   }
 
   console.log(`Shortlist selected: ${shortlistPayload.selectedTickers.join(', ')}`);
+  if(saveSnapshotPath){
+    console.log('Saved replay snapshot only for selected replay tickers.');
+  }
   console.log(shortlistRun.stdout.trim());
   console.log('');
   console.log('Full resolver replay');
