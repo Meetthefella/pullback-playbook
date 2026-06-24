@@ -439,7 +439,9 @@
       risk_width_ok:ctx.stop_distance_too_wide !== true,
       rr_priceable:rrPriceable,
       tradeability_ok:validTradeability || hasProvisionalPlan,
-      below_50_without_reclaim:ctx.price_below_50ma === true && ctx.reclaim_attempt !== true,
+      below_50_without_reclaim:ctx.price_below_50ma === true
+        && ctx.reclaim_attempt !== true
+        && !(hasProvisionalPlan && provisionalPlan.nearEntryProvisionalBounceApplied === true),
       below_200ma:ctx.price_below_200ma === true,
       ma50_below_200ma:ctx.ma50_below_200ma === true,
       volume_blocked:ctx.volume_required === true && String(ctx.volume_state || '').trim().toLowerCase() === 'weak',
