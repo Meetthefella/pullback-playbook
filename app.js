@@ -3514,27 +3514,40 @@ function buildTesterDiagnosticSnapshot(options = {}){
   const panelTitle = String(options.panelTitle || 'General diagnostics').trim();
   const panelElement = options.panelElement || null;
   const record = currentReviewDiagnosticRecord();
-  const rawSnapshot = {
-    timestamp:new Date().toISOString(),
-    testerId:currentTesterId(),
-    buildVersion:currentBuildVersion(),
-    activeWorkspace:String(activeWorkspaceTab() || ''),
-    panelTitle,
-    ticker:String(record && record.ticker || activeReviewTicker() || 'general'),
-    review:currentVisibleReviewDiagnostics(record),
-    stateHealth:currentReviewStateHealthSnapshot(record),
-    resolverTrace:record ? {
-      scan:cloneData(record.scan || {}, {}),
-      setup:cloneData(record.setup || {}, {}),
-      watchlistDebug:cloneData(record.watchlist && record.watchlist.debug || {}, {}),
-      lifecycle:cloneData(record.lifecycle || {}, {}),
-      plan:cloneData(record.plan || {}, {})
-    } : null,
-    policyDiagnostics:currentPolicyDiagnostics(),
-    gateway:currentPaperGatewayDiagnostics(),
-    panelText:panelElement ? String(panelElement.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000) : ''
-  };
-  return redactDiagnosticPayload(rawSnapshot);
+  try{
+    const rawSnapshot = {
+      timestamp:new Date().toISOString(),
+      testerId:currentTesterId(),
+      buildVersion:currentBuildVersion(),
+      activeWorkspace:String(activeWorkspaceTab() || ''),
+      panelTitle,
+      ticker:String(record && record.ticker || activeReviewTicker() || 'general'),
+      review:currentVisibleReviewDiagnostics(record),
+      stateHealth:currentReviewStateHealthSnapshot(record),
+      resolverTrace:record ? {
+        scan:safeDiagnosticClone(record.scan || {}, {}),
+        setup:safeDiagnosticClone(record.setup || {}, {}),
+        watchlistDebug:safeDiagnosticClone(record.watchlist && record.watchlist.debug || {}, {}),
+        lifecycle:safeDiagnosticClone(record.lifecycle || {}, {}),
+        plan:safeDiagnosticClone(record.plan || {}, {})
+      } : null,
+      policyDiagnostics:currentPolicyDiagnostics(),
+      gateway:currentPaperGatewayDiagnostics(),
+      panelText:panelElement ? String(panelElement.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000) : ''
+    };
+    return redactDiagnosticPayload(rawSnapshot);
+  }catch(error){
+    return redactDiagnosticPayload({
+      timestamp:new Date().toISOString(),
+      testerId:currentTesterId(),
+      buildVersion:currentBuildVersion(),
+      activeWorkspace:String(activeWorkspaceTab() || ''),
+      panelTitle,
+      ticker:String(record && record.ticker || activeReviewTicker() || 'general'),
+      snapshotError:String(error && error.message || 'snapshot_build_failed'),
+      panelText:panelElement ? String(panelElement.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000) : ''
+    });
+  }
 }
 
 async function copyTextToClipboard(text){
@@ -3579,8 +3592,20 @@ function showManualSnapshotCopyText(text){
 }
 
 async function copyTesterDiagnosticSnapshot(options = {}){
-  const snapshot = buildTesterDiagnosticSnapshot(options);
-  const snapshotText = JSON.stringify(snapshot, null, 2);
+  let snapshot;
+  let snapshotText = '';
+  try{
+    snapshot = buildTesterDiagnosticSnapshot(options);
+    snapshotText = JSON.stringify(snapshot, null, 2);
+  }catch(error){
+    snapshot = {
+      timestamp:new Date().toISOString(),
+      panelTitle:String(options && options.panelTitle || 'General diagnostics'),
+      ticker:String(activeReviewTicker() || 'general'),
+      snapshotError:String(error && error.message || 'snapshot_stringify_failed')
+    };
+    snapshotText = JSON.stringify(snapshot, null, 2);
+  }
   uiState.lastTesterDiagnosticSnapshot = snapshot;
   showManualSnapshotCopyText(snapshotText);
   const copied = await copyTextToClipboard(snapshotText);
@@ -4717,6 +4742,24 @@ function normalizeTickerRecordsMap(records){
 
 function cloneData(value, fallback = null){
   return safeJsonParse(JSON.stringify(value == null ? fallback : value), fallback);
+}
+
+function safeDiagnosticClone(value, fallback = null){
+  const seen = new WeakSet();
+  try{
+    const json = JSON.stringify(value == null ? fallback : value, (key, currentValue) => {
+      if(typeof currentValue === 'bigint') return Number(currentValue);
+      if(typeof currentValue === 'function') return '[Function]';
+      if(currentValue && typeof currentValue === 'object'){
+        if(seen.has(currentValue)) return '[Circular]';
+        seen.add(currentValue);
+      }
+      return currentValue;
+    });
+    return safeJsonParse(json, fallback);
+  }catch(error){
+    return fallback;
+  }
 }
 
 function chartImageDimensionsFromRef(ref){
