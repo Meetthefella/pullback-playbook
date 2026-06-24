@@ -6619,6 +6619,19 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
     record.scan.estimatedStopArea = numericOrNull(estimate.stop);
     record.scan.estimatedTargetArea = numericOrNull(estimate.target);
     record.scan.estimatedRR = numericOrNull(estimate.rr);
+    const hasExistingPlanFields = hasAnyPlanFields(record);
+    const currentPlanSource = String(record.plan && record.plan.source || '').trim().toLowerCase();
+    if(!hasExistingPlanFields || currentPlanSource === 'scanner_estimate'){
+      applyPlanCandidateToRecord(record, {
+        entry:estimate.entry,
+        stop:estimate.stop,
+        firstTarget:estimate.target
+      }, {
+        source:'scanner_estimate',
+        updatedAt:card.scannerUpdatedAt || card.updatedAt || new Date().toISOString(),
+        lastPlannedAt:card.scannerUpdatedAt || card.updatedAt || new Date().toISOString()
+      });
+    }
   }
   record.scan.score = Number.isFinite(card.score) ? card.score : record.scan.score;
   record.scan.verdict = String(card.chartVerdict || card.status || record.scan.verdict || '');

@@ -5177,6 +5177,9 @@ function runAiContractAssertions(){
   if(/source:'analysis'/.test(mergeLegacySource) || !/rawPlanOpinion|nonAuthoritative/.test(mergeLegacySource)){
     throw new Error('Legacy card merge must quarantine lastAnalysis plan levels instead of writing canonical record.plan.');
   }
+  if(!/source:'scanner_estimate'/.test(mergeLegacySource) || !/currentPlanSource === 'scanner_estimate'/.test(mergeLegacySource)){
+    throw new Error('Legacy card merge must persist scanner estimates only as refreshable non-authoritative scanner_estimate plans.');
+  }
   const analysisVerdictSource = extractFunctionSource(appSource, 'analysisVerdictForRecord');
   if(/normalizedAnalysis|aiVerdict|final_verdict \|\| normalizedAnalysis\.verdict/.test(analysisVerdictSource)){
     throw new Error('AI verdict fields must not participate in canonical/display verdict selection.');
