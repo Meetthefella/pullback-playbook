@@ -16851,14 +16851,7 @@ function currentRuntimeVerdictForRecord(record){
 }
 
 function runtimeFallbackVerdictForRecord(record){
-  const item = record && typeof record === 'object' ? record : {};
-  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
-  const review = item.review && typeof item.review === 'object' ? item.review : {};
-  const reviewVerdict = String(review.savedVerdict || '').trim();
-  const rawVerdict = reviewVerdict
-    ? ''
-    : String(scan.resolvedVerdict || scan.verdict || '').trim();
-  return rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
+  return savedReviewVerdictForRecord(record);
 }
 
 function verdictPresentationLabelForKey(key){
@@ -22575,7 +22568,7 @@ function renderPlanProjectionFromRecord(record, options = {}){
     const targetWarning = !!view.item.plan.firstTargetTooClose;
     return `<div class="tiny">Planned Entry: ${escapeHtml(fmtPrice(view.displayedPlan.entry))} | Planned Stop: ${escapeHtml(fmtPrice(view.displayedPlan.stop))} | Planned First Target: ${escapeHtml(fmtPrice(view.displayedPlan.target))}</div><div class="tiny">Risk: ${escapeHtml(formatPound(state.userRiskPerTrade || currentMaxLoss()))} | Risk ${escapeHtml(riskStatusLabel(view.displayedPlan.riskFit.risk_status || 'plan_missing'))} | Max Loss ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.max_loss) ? formatPound(view.displayedPlan.riskFit.max_loss) : formatPound(currentMaxLoss()))} | Planned Risk/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardRisk.riskPerShare) ? view.displayedPlan.rewardRisk.riskPerShare.toFixed(2) : 'N/A')} | Planned Reward/Share ${escapeHtml(Number.isFinite(view.displayedPlan.rewardPerShare) ? view.displayedPlan.rewardPerShare.toFixed(2) : 'N/A')} | Planned Position ${escapeHtml(Number.isFinite(view.displayedPlan.riskFit.position_size) ? String(view.displayedPlan.riskFit.position_size) : 'N/A')}</div><div class="inline-status"><span class="badge ${view.planUiState.className}">${escapeHtml(view.planUiState.label)}</span><span class="tiny">Planned R:R ${escapeHtml(Number.isFinite(view.planUiState.rrRatio) ? view.planUiState.rrRatio.toFixed(2) : 'N/A')}</span>${targetWarning ? '<span class="badge avoid">Target Too Close</span>' : ''}</div>`;
   }
-  return `<div class="inline-status"><span class="badge watch">Scan Estimate</span><span class="tiny">Use this card to review charts and define a real plan before acting on scanner estimates.</span></div>${renderEstimatedScannerPlanFromRecord(view.item)}`;
+  return `<div class="inline-status"><span class="badge watch">Plan Needed</span><span class="tiny">No active trade plan yet. Scanner estimates are diagnostic only and should be reviewed in debug before acting.</span></div>`;
 }
 
 function formatScoreStage(scoreStage){

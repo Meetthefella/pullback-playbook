@@ -5,6 +5,7 @@
   "scripts": {
     "debug:compare-review-snapshots": "node scripts/compare-review-snapshots.js",
     "debug:compare-review-snapshot": "node scripts/compare-review-snapshot.js",
+    "debug:near-entry-shortlist": "node scripts/debug-near-entry-shortlist.js",
     "debug:market-snapshot": "node scripts/debug-market-snapshot.js",
     "test:storage-persistence": "node scripts/run-storage-persistence-assertions.js",
     "test:resolver-gates": "node scripts/run-resolver-gate-assertions.js",
