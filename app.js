@@ -3476,6 +3476,40 @@ function currentVisibleReviewDiagnostics(record){
   };
 }
 
+function currentReviewStateHealthSnapshot(record){
+  const item = record || currentReviewDiagnosticRecord();
+  if(!item) return null;
+  const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {
+    renderPass:0,
+    source:'diagnostic_snapshot',
+    mutationSource:'diagnostic_snapshot'
+  });
+  const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  const simplifiedVisualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
+  const derivedTone = String(simplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  return {
+    sourceOfTruth:'simplified_state_pipeline',
+    ticker:String(item.ticker || ''),
+    canonicalVerdict:simplifiedCanonicalVerdict,
+    visualBucket:simplifiedVisualBucket,
+    tone:derivedTone,
+    structureEligibility:String(simplifiedState.structureEligibility || ''),
+    structureState:String(simplifiedState.structureState || ''),
+    setupLocationState:String(simplifiedState.setupLocationState || ''),
+    priceabilityState:String(simplifiedState.priceabilityState || ''),
+    bounceState:String(simplifiedState.bounceState || ''),
+    planStatus:String(simplifiedState.planStatus || ''),
+    resolvedRR:Number.isFinite(Number(simplifiedState.resolvedRR)) ? Number(simplifiedState.resolvedRR) : null,
+    entryGatePass:simplifiedState.entryGatePass === true,
+    nearEntryGatePass:simplifiedState.nearEntryGatePass === true,
+    primaryBlockerReason:String(simplifiedState.mainBlocker || ''),
+    avoidTriggerSource:String(simplifiedState.avoidTriggerSource || ''),
+    terminalAvoidApplied:simplifiedState.terminalAvoidApplied === true,
+    divergenceDetected:reviewStateDivergenceForRecord(item).detected === true,
+    lastReviewedAt:String(item.review && item.review.lastReviewedAt || '')
+  };
+}
+
 function buildTesterDiagnosticSnapshot(options = {}){
   const panelTitle = String(options.panelTitle || 'General diagnostics').trim();
   const panelElement = options.panelElement || null;
@@ -3488,6 +3522,7 @@ function buildTesterDiagnosticSnapshot(options = {}){
     panelTitle,
     ticker:String(record && record.ticker || activeReviewTicker() || 'general'),
     review:currentVisibleReviewDiagnostics(record),
+    stateHealth:currentReviewStateHealthSnapshot(record),
     resolverTrace:record ? {
       scan:cloneData(record.scan || {}, {}),
       setup:cloneData(record.setup || {}, {}),

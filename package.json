@@ -3,6 +3,7 @@
   "version": "4.4.0",
   "private": true,
   "scripts": {
+    "debug:compare-review-snapshots": "node scripts/compare-review-snapshots.js",
     "debug:compare-review-snapshot": "node scripts/compare-review-snapshot.js",
     "debug:market-snapshot": "node scripts/debug-market-snapshot.js",
     "test:storage-persistence": "node scripts/run-storage-persistence-assertions.js",

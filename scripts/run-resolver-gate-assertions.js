@@ -804,6 +804,106 @@ function runTesterProfileResetAssertions(){
   }
 }
 
+function runCanonicalDecisionInvariantAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  if(!/stateHealth:currentReviewStateHealthSnapshot\(record\)/.test(appSource)){
+    throw new Error('Diagnostic snapshots must export structured stateHealth for canonical decision comparison.');
+  }
+  if(!/function currentReviewStateHealthSnapshot\(record\)/.test(appSource)){
+    throw new Error('App must expose a structured currentReviewStateHealthSnapshot helper.');
+  }
+
+  function normalizeCanonical(value){
+    const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+    if(safe === 'monitor') return 'watch';
+    return ['entry','near_entry','watch','avoid','dead'].includes(safe) ? safe : 'watch';
+  }
+  function normalizeBucket(value){
+    const safe = String(value || '').trim().toLowerCase();
+    return ['entry','near_entry','monitor','diminishing','avoid','dead'].includes(safe) ? safe : 'monitor';
+  }
+  function isAllowedPair(canonicalVerdict, visualBucket){
+    const canonical = normalizeCanonical(canonicalVerdict);
+    const bucket = normalizeBucket(visualBucket);
+    if(canonical === 'entry') return bucket === 'entry';
+    if(canonical === 'near_entry') return ['near_entry', 'monitor'].includes(bucket);
+    if(canonical === 'watch') return ['monitor', 'diminishing'].includes(bucket);
+    if(canonical === 'avoid') return ['avoid', 'diminishing', 'dead'].includes(bucket);
+    return true;
+  }
+  function assertInvariant(state, message){
+    const verdict = normalizeCanonical(state.canonicalVerdict);
+    const bucket = normalizeBucket(state.visualBucket);
+    const planStatus = String(state.planStatus || '').trim().toLowerCase();
+    const priceability = String(state.priceabilityState || '').trim().toLowerCase();
+    const structureEligibility = String(state.structureEligibility || '').trim().toLowerCase();
+
+    if(!isAllowedPair(verdict, bucket)){
+      throw new Error(`${message}: invalid canonical/bucket pair ${verdict}/${bucket}.`);
+    }
+    if(verdict === 'entry' && state.entryGatePass !== true){
+      throw new Error(`${message}: entry verdict requires entryGatePass=true.`);
+    }
+    if(verdict === 'near_entry' && state.nearEntryGatePass !== true){
+      throw new Error(`${message}: near_entry verdict requires nearEntryGatePass=true.`);
+    }
+    if(verdict === 'watch' && ['entry','near_entry'].includes(bucket)){
+      throw new Error(`${message}: watch verdict cannot render entry-like bucket.`);
+    }
+    if(['entry','near_entry'].includes(verdict) && ['missing','invalid','blocked'].includes(planStatus)){
+      throw new Error(`${message}: actionable verdict cannot coexist with ${planStatus} plan status.`);
+    }
+    if(['entry','near_entry'].includes(verdict) && priceability === 'unpriceable'){
+      throw new Error(`${message}: actionable verdict cannot coexist with unpriceable state.`);
+    }
+    if(verdict === 'avoid' && structureEligibility === 'alive' && state.terminalAvoidApplied !== true && !String(state.avoidTriggerSource || '').trim()){
+      throw new Error(`${message}: avoid verdict on alive structure requires terminal avoid or explicit avoid trigger source.`);
+    }
+  }
+
+  assertInvariant({
+    canonicalVerdict:'entry',
+    visualBucket:'entry',
+    entryGatePass:true,
+    nearEntryGatePass:true,
+    planStatus:'valid',
+    priceabilityState:'priceable',
+    structureEligibility:'alive',
+    terminalAvoidApplied:false
+  }, 'Valid entry state');
+  assertInvariant({
+    canonicalVerdict:'near_entry',
+    visualBucket:'near_entry',
+    entryGatePass:false,
+    nearEntryGatePass:true,
+    planStatus:'valid',
+    priceabilityState:'priceable',
+    structureEligibility:'alive',
+    terminalAvoidApplied:false
+  }, 'Valid near-entry state');
+  assertInvariant({
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    entryGatePass:false,
+    nearEntryGatePass:false,
+    planStatus:'missing',
+    priceabilityState:'unpriceable',
+    structureEligibility:'alive',
+    terminalAvoidApplied:false
+  }, 'Valid watch state');
+  assertInvariant({
+    canonicalVerdict:'avoid',
+    visualBucket:'avoid',
+    entryGatePass:false,
+    nearEntryGatePass:false,
+    planStatus:'invalid',
+    priceabilityState:'unpriceable',
+    structureEligibility:'alive',
+    terminalAvoidApplied:true,
+    avoidTriggerSource:'terminal_breakdown'
+  }, 'Valid avoid state');
+}
+
 function runScannerPolicyCompatibilityAssertions(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const browserWindow = sandbox.window;
@@ -6296,6 +6396,7 @@ async function runAllAssertions(){
   runCumulativePenaltyDisplayAssertions();
   runAccepted50MaSupportThresholdAssertions();
   runTesterProfileResetAssertions();
+  runCanonicalDecisionInvariantAssertions();
   await runTrackedStateTesterIsolationAssertions();
   await runTesterReportAssertions();
 
@@ -6316,6 +6417,7 @@ async function runAllAssertions(){
   console.log('Cumulative penalty display assertions passed.');
   console.log('Accepted 50MA support threshold assertions passed.');
   console.log('Tester profile reset assertions passed.');
+  console.log('Canonical decision invariant assertions passed.');
   console.log('Tracked-state tester isolation assertions passed.');
   console.log('Tester report assertions passed.');
 }
