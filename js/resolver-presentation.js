@@ -114,7 +114,6 @@
       && priceabilityState === 'unpriceable'
       && !below50WithoutReclaim
       && reclaimSignalCount !== 0
-      && planStatus !== 'missing'
       && hasClearInvalidationLevel !== false
       && (setupScore === null || setupScore >= 4);
     const structureAllowsDevelopingWatch = aliveStructure;
