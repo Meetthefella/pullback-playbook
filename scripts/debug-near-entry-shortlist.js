@@ -8,8 +8,8 @@ const PROVIDERS = {
 };
 
 function usage(){
-  console.log('Usage: node scripts/debug-near-entry-shortlist.js <TICKER...> [--provider=fmp]');
-  console.log('Example: node scripts/debug-near-entry-shortlist.js LSCC CDNS MOD BWA ANET --provider=fmp');
+  console.log('Usage: node scripts/debug-near-entry-shortlist.js <TICKER...> [--provider=fmp] [--top=5] [--tickers-only]');
+  console.log('Example: node scripts/debug-near-entry-shortlist.js LSCC CDNS MOD BWA ANET --provider=fmp --top=3');
 }
 
 function providerApiKey(providerId){
@@ -184,7 +184,10 @@ async function fetchSnapshot(adapter, providerConfig, ticker){
 async function main(){
   const args = process.argv.slice(2);
   const providerArg = args.find(arg => arg.startsWith('--provider='));
+  const topArg = args.find(arg => arg.startsWith('--top='));
+  const tickersOnly = args.includes('--tickers-only');
   const requestedProvider = normalizeProviderId((providerArg && providerArg.split('=')[1]) || 'fmp');
+  const topCount = Math.max(1, Number.parseInt((topArg && topArg.split('=')[1]) || '', 10) || 0);
   const tickers = args
     .filter(arg => !arg.startsWith('--'))
     .map(normalizeTicker)
@@ -254,12 +257,25 @@ async function main(){
     return Number(right.score || 0) - Number(left.score || 0);
   });
 
+  const selectedResults = topArg
+    ? rankedResults.filter(result => result.ok === true).slice(0, topCount)
+    : rankedResults;
+  const selectedTickers = selectedResults
+    .filter(result => result.ok === true)
+    .map(result => result.ticker);
+
+  if(tickersOnly){
+    console.log(selectedTickers.join(' '));
+    return;
+  }
+
   console.log(JSON.stringify({
     ok:true,
     requestedAt:new Date().toISOString(),
     provider:providerConfig.id,
     tickers,
-    rankedResults
+    rankedResults,
+    selectedTickers
   }, null, 2));
   printRankedSummary(rankedResults);
 }
