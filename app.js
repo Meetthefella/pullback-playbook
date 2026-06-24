@@ -3487,6 +3487,43 @@ function currentReviewStateHealthSnapshot(record){
   const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
   const simplifiedVisualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
   const derivedTone = String(simplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  let divergenceDetected = false;
+  try{
+    const globalVerdict = resolveGlobalVerdict(item);
+    const derivedStates = analysisDerivedStatesFromRecord(item);
+    const reviewLegacyState = {
+      canonicalVerdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || '',
+      visualBucket:globalVerdict.bucket || '',
+      tone:derivedTone,
+      badgeLabel:simplifiedState.badgeLabel || '',
+      mainBlocker:globalVerdict.main_blocker || globalVerdict.reason || '',
+      planStatus:globalVerdict.plan_status || simplifiedState.planStatus || '',
+      entryGatePass:globalVerdict.entry_gate_pass,
+      nearEntryGatePass:globalVerdict.near_entry_gate_pass,
+      structureEligibility:globalVerdict.structure_eligibility || '',
+      structureState:globalVerdict.structure_state || derivedStates.structureState || '',
+      setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState || '',
+      priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
+      bounceState:globalVerdict.bounce_state || derivedStates.bounceState || ''
+    };
+    divergenceDetected = collectStateDivergence(item, 'review.snapshot', simplifiedState, reviewLegacyState, [
+      'canonicalVerdict',
+      'visualBucket',
+      'tone',
+      'badgeLabel',
+      'mainBlocker',
+      'planStatus',
+      'entryGatePass',
+      'nearEntryGatePass',
+      'structureEligibility',
+      'structureState',
+      'setupLocationState',
+      'priceabilityState',
+      'bounceState'
+    ]).detected === true;
+  }catch(error){
+    divergenceDetected = false;
+  }
   return {
     sourceOfTruth:'simplified_state_pipeline',
     ticker:String(item.ticker || ''),
@@ -3505,7 +3542,7 @@ function currentReviewStateHealthSnapshot(record){
     primaryBlockerReason:String(simplifiedState.mainBlocker || ''),
     avoidTriggerSource:String(simplifiedState.avoidTriggerSource || ''),
     terminalAvoidApplied:simplifiedState.terminalAvoidApplied === true,
-    divergenceDetected:reviewStateDivergenceForRecord(item).detected === true,
+    divergenceDetected,
     lastReviewedAt:String(item.review && item.review.lastReviewedAt || '')
   };
 }
