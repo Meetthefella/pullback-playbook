@@ -23159,9 +23159,9 @@ function uniqueStrings(values){
 
 function marketDataEndpoints(){
   return uniqueStrings([
+    '/.netlify/functions/market-data',
     state.marketDataEndpoint,
-    defaultMarketDataEndpoint,
-    '/.netlify/functions/market-data'
+    defaultMarketDataEndpoint
   ]);
 }
 
@@ -23414,16 +23414,16 @@ async function fetchMarketData(symbol, options = {}){
       if(!response.ok){
         throw new Error(payload && payload.error ? payload.error : `Market data request failed for ${ticker}.`);
       }
+      if(payload && payload.ok === false){
+        throw new Error(payload.error || `Market data is unavailable for ${ticker}.`);
+      }
       const safeData = payload && payload.data && typeof payload.data === 'object' ? payload.data : null;
       if(!safeData){
         throw new Error(payload && payload.error ? payload.error : `Market data request returned no usable data for ${ticker}.`);
       }
       const normalized = normalizeMarketSnapshot(safeData, payload && payload.provider || provider);
-      if(payload && payload.ok !== false) setCachedMarketData(ticker, normalized);
+      setCachedMarketData(ticker, normalized);
       rememberTickerMeta(normalized);
-      if(payload && payload.ok === false){
-        normalized.__error = String(payload.error || `Market data is incomplete for ${ticker}.`);
-      }
       return normalized;
     }catch(error){
       lastError = String(error && error.message || 'Market data request failed.');
@@ -23468,6 +23468,9 @@ async function fetchMarketDataBatch(symbols, options = {}){
         if(!response.ok){
           throw new Error(payload && payload.error ? payload.error : 'Batch market-data request failed.');
         }
+        if(payload && payload.ok === false){
+          throw new Error(payload.error || 'Batch market data is unavailable.');
+        }
         const rows = Array.isArray(payload && payload.results) ? payload.results : [];
         if(!rows.length){
           throw new Error(payload && payload.error ? payload.error : 'Batch market-data request returned no usable data.');
@@ -23476,13 +23479,12 @@ async function fetchMarketDataBatch(symbols, options = {}){
           const ticker = normalizeTicker(row && (row.symbol || row.ticker));
           if(!ticker) return;
           const safeData = row && row.data && typeof row.data === 'object' ? row.data : {symbol:ticker, ticker};
+          if(row && row.ok === false){
+            throw new Error(String(row.error || `Market data is unavailable for ${ticker}.`));
+          }
           const normalized = normalizeMarketSnapshot(safeData, payload && payload.provider || provider);
           rememberTickerMeta(normalized);
-          if(row && row.ok !== false){
-            setCachedMarketData(ticker, normalized);
-          }else{
-            normalized.__error = String(row && row.error || `Market data is incomplete for ${ticker}.`);
-          }
+          setCachedMarketData(ticker, normalized);
           resultByTicker[ticker] = normalized;
         });
         missing.forEach(ticker => {
@@ -23524,6 +23526,7 @@ async function fetchTickerSuggestions(query){
       const response = await fetchJsonWithTimeout(`${endpoint}?${params.toString()}`);
       const payload = await response.json().catch(() => ({}));
       if(!response.ok) throw new Error(payload && payload.error ? payload.error : 'Search request failed.');
+      if(payload && payload.ok === false) throw new Error(payload.error || 'Search request failed.');
       return Array.isArray(payload.results) ? payload.results : [];
     }catch(error){
       lastError = String(error && error.message || 'Search request failed.');
