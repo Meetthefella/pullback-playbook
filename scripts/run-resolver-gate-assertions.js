@@ -4150,6 +4150,171 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('Strong high-score missing-plan Watch must still fail Entry/Near Entry gates.');
   }
 
+  const intactProvisionalPriceability = pipeline.resolveRecordState({
+    ticker:'INTACTP',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:102, ma20:101, ma50:98, ma200:84, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'intact',
+      trendState:'intact',
+      setupLocationState:'near_20ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Needs stronger confirmation',
+      reasonSummary:'Waiting for confirmation.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 8)
+  });
+  if(!/not priceable yet|untradable|price reliably/i.test(String(intactProvisionalPriceability.mainBlocker || '')) || /weakening|broken/i.test(String(intactProvisionalPriceability.mainBlocker || ''))){
+    throw new Error('Intact structure + provisional priceability must blame priceability, not structure.');
+  }
+
+  const intactWeakRr = pipeline.resolveRecordState({
+    ticker:'INTACTRR',
+    in_watchlist:true,
+    plan:{entry:100, stop:97, firstTarget:103.6},
+    marketData:{price:100.2, ma20:99.8, ma50:97.6, ma200:82, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'intact',
+      trendState:'intact',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      stabilisationState:'clear',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Needs stronger confirmation',
+      reasonSummary:'Waiting for confirmation.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 8)
+  });
+  if(!/reward potential|resistance/i.test(String(intactWeakRr.mainBlocker || '')) || /weakening|broken/i.test(String(intactWeakRr.mainBlocker || ''))){
+    throw new Error('Intact structure + weak RR must blame nearby resistance/reward potential, not structure.');
+  }
+
+  const aliveBounceAttempt = pipeline.resolveRecordState({
+    ticker:'ALIVEBA',
+    in_watchlist:true,
+    plan:{entry:100, stop:97, firstTarget:108},
+    marketData:{price:100.4, ma20:99.9, ma50:97.8, ma200:83, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'strong',
+      trendState:'intact',
+      setupLocationState:'near_20ma',
+      priceabilityState:'provisional',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Needs stronger confirmation',
+      reasonSummary:'Waiting for confirmation.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 8)
+  });
+  if(/weakening|broken|damaged/i.test(String(aliveBounceAttempt.mainBlocker || ''))){
+    throw new Error('Alive structure + bounce attempt must not inherit structure-failure wording.');
+  }
+
+  const damagedStructure = pipeline.resolveRecordState({
+    ticker:'DAMAGEDX',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:44, ma20:45, ma50:46, ma200:41, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'weakening',
+      trendState:'weak',
+      setupLocationState:'off_level',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'none',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Trend is weakening - no reliable stop level yet.',
+      reasonSummary:'Weakening setup - wait for recovery.',
+      terminal:false,
+      baseVerdict:'watch'
+    }, 4)
+  });
+  if(!/weakening|no reliable stop/i.test(String(damagedStructure.mainBlocker || ''))){
+    throw new Error('Damaged structure must retain weakening/no reliable stop wording.');
+  }
+
+  const brokenStructure = pipeline.resolveRecordState({
+    ticker:'BROKENB',
+    in_watchlist:true,
+    plan:{},
+    marketData:{price:18, ma20:21, ma50:24, ma200:30, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'broken',
+      trendState:'broken',
+      setupLocationState:'off_level',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'none',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Avoid',
+      structuralState:'dead',
+      actionStateKey:'rebuild_setup',
+      planStatusKey:'missing',
+      tradeabilityVerdict:'Avoid',
+      blockerReason:'Structure is broken.',
+      reasonSummary:'Structure is broken.',
+      terminal:true,
+      baseVerdict:'avoid'
+    }, 1)
+  });
+  if(!/structure is broken/i.test(String(brokenStructure.mainBlocker || ''))){
+    throw new Error('Broken structure must retain broken-structure wording.');
+  }
+
   const weakeningWatch = pipeline.resolveRecordState({
     ticker:'DOWX',
     in_watchlist:true,
@@ -5659,6 +5824,67 @@ function runPlanSemanticsAssertions(){
     }
   }finally{
     try{ fs.unlinkSync(frozenReplaySnapshotPath); }catch(_error){}
+  }
+
+  const replayModuleSource = fs.readFileSync(path.join(root, 'scripts', 'replay-resolver-snapshot.js'), 'utf8');
+  const replaySandbox = {
+    console,
+    numericOrNull(value){
+      if(value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    }
+  };
+  vm.createContext(replaySandbox);
+  [
+    'function structureContradictionForPromotionText',
+    'function fallbackPromotionDiagnostic'
+  ].forEach(marker => {
+    const functionName = marker.replace('function ', '');
+    vm.runInContext(extractFunctionSource(replayModuleSource, functionName), replaySandbox, {filename:`scripts/replay-resolver-snapshot.js#${functionName}`});
+  });
+  if(replaySandbox.structureContradictionForPromotionText('Structure is not strong/intact/developing clean.', 'intact', 'alive') !== true){
+    throw new Error('Replay promotion diagnostics must flag stale structure blockers on intact/alive setups.');
+  }
+  const repairedFallback = replaySandbox.fallbackPromotionDiagnostic({
+    globalVerdict:{promotionBlockedReason:'Structure is not strong/intact/developing clean.', promotionBlockedBy:'gates'},
+    replayBase:{record:{planRealism:{realistic_rr:1.2}, derivedStates:{bounceState:'attempt', priceabilityState:'provisional'}}},
+    structureState:'intact',
+    structureEligibility:'alive'
+  });
+  if(!/not priceable yet/i.test(String(repairedFallback.promotionBlocker || '')) || repairedFallback.failingGate !== 'bounce'){
+    throw new Error('Replay promotion diagnostics must blame priceability/repair rather than structure on intact provisional setups.');
+  }
+  const weakRrFallback = replaySandbox.fallbackPromotionDiagnostic({
+    globalVerdict:{promotionBlockedReason:'Structure is not strong/intact/developing clean.', promotionBlockedBy:'gates'},
+    replayBase:{record:{planRealism:{realistic_rr:1.1}, derivedStates:{bounceState:'confirmed', priceabilityState:'priceable'}}},
+    structureState:'strong',
+    structureEligibility:'alive'
+  });
+  if(!/reward potential|resistance/i.test(String(weakRrFallback.promotionBlocker || '')) || weakRrFallback.failingGate !== 'rr'){
+    throw new Error('Replay promotion diagnostics must blame nearby resistance/weak RR on strong alive setups.');
+  }
+
+  const promotedVerdict = 'entry';
+  const promotedBucket = 'entry';
+  const promotedDiagnosticsActive = !['entry', 'near_entry'].includes(promotedVerdict)
+    && !['entry', 'near_entry'].includes(promotedBucket);
+  const promotedBlockerCopy = promotedDiagnosticsActive ? 'Needs confirmation before promotion.' : '';
+  const promotedBlockers = promotedDiagnosticsActive ? ['Bounce must be confirmed.'] : [];
+  const promotedDiminishingReason = promotedVerdict === 'watch' && promotedBucket === 'diminishing'
+    ? 'invalid_rr_promotion_blocked'
+    : '';
+  if(promotedDiagnosticsActive || promotedBlockerCopy || promotedBlockers.length || promotedDiminishingReason){
+    throw new Error('Promoted replay results must not surface active blocker or diminishing diagnostics.');
+  }
+
+  const diminishedVerdict = 'watch';
+  const diminishedBucket = 'diminishing';
+  const diminishedReason = diminishedVerdict === 'watch' && diminishedBucket === 'diminishing'
+    ? 'invalid_rr_promotion_blocked'
+    : '';
+  if(diminishedReason !== 'invalid_rr_promotion_blocked'){
+    throw new Error('Watch/diminishing replay results must retain active diminishing diagnostics.');
   }
 }
 

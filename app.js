@@ -22067,6 +22067,8 @@ function buildReviewSemanticStatus({
     blocker = rawBlocker && !staleWeakCopy
       ? rawBlocker
       : 'The trend remains strong, but price is too far above support to define risk safely.';
+  }else if(aliveStructure && planRealism && Number.isFinite(numericOrNull(planRealism.realistic_rr)) && Number(numericOrNull(planRealism.realistic_rr)) < currentRrThreshold()){
+    blocker = 'Nearby resistance limits current reward potential.';
   }else if(!blocker){
     blocker = bounceState === 'none' || stabilisationState === 'none'
       ? 'Needs confirmation before promotion.'

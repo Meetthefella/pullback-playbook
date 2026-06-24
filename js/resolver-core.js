@@ -1402,6 +1402,14 @@
       }else{
         trackedVerdict = 'monitor';
       }
+      const constructiveAliveStructure = structureLayer.structureEligibility === 'alive'
+        && ['strong', 'intact', 'developing_clean'].includes(structureState);
+      const repairingButUnpriceable = constructiveAliveStructure
+        && ['attempt', 'early', 'developing', 'improving'].includes(bounceState)
+        && priceabilityState === 'unpriceable';
+      const weakRewardPotential = constructiveAliveStructure
+        && Number.isFinite(Number(entryGateChecks.resolved_rr))
+        && Number(entryGateChecks.resolved_rr) < 2;
       const alivePoorLocation = structureLayer.structureEligibility === 'alive'
         && ['none','off_level','unclear'].includes(setupLocationState)
         && (priceabilityState === 'unpriceable' || String(viability.viabilityBranchId || '').includes('low_score') || setupScore < 5 || invalidPlan);
@@ -1413,10 +1421,14 @@
         trackedReason = 'Trend is weakening - no reliable stop level yet.';
       }else if(isExtended && ['strong','intact'].includes(structureState)){
         trackedReason = 'Trend is strong but extended beyond a safe entry zone. No low-risk entry is available yet.';
+      }else if(repairingButUnpriceable){
+        trackedReason = 'Repair is forming but the setup is not priceable yet.';
       }else if(alivePoorLocation){
         trackedReason = 'Strong trend, but no usable pullback setup yet. Wait for a cleaner reset near support.';
       }else if(structureLayer.structureEligibility === 'alive' && priceabilityState === 'unpriceable' && !priceabilityInferred){
         trackedReason = 'Strong trend, but too volatile to price reliably.';
+      }else if(weakRewardPotential){
+        trackedReason = 'Nearby resistance limits current reward potential.';
       }else{
         trackedReason = viability.mainBlocker || viability.viabilityReason || trackedReason;
       }

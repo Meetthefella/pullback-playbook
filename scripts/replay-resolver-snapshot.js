@@ -752,14 +752,16 @@ function promotionBlockers(globalVerdict, derivedStates = {}){
     const text = String(value || '').trim();
     if(text && !blockers.includes(text)) blockers.push(text);
   };
+  push(globalVerdict.semantic_blocker_reason);
+  push(globalVerdict.main_blocker);
+  push(globalVerdict.promotionBlockedReason);
+  push(globalVerdict.downgrade_reason);
   if(globalVerdict.entry_gate_pass !== true){
     (globalVerdict.entry_gate_reasons || []).forEach(push);
   }
   if(globalVerdict.near_entry_gate_pass !== true){
     (globalVerdict.near_entry_gate_reasons || []).forEach(push);
   }
-  push(globalVerdict.downgrade_reason);
-  push(globalVerdict.main_blocker);
   push(globalVerdict.viabilityReason);
   const structureState = String(
     derivedStates.structureState
@@ -771,6 +773,44 @@ function promotionBlockers(globalVerdict, derivedStates = {}){
   return blockers
     .filter(blocker => !(constructiveStructure && blocker === 'Structure is not strong/intact/developing clean.'))
     .slice(0, 4);
+}
+
+function structureContradictionForPromotionText(text, structureState, structureEligibility){
+  const safeText = String(text || '').trim();
+  if(!safeText) return false;
+  const safeStructure = String(structureState || '').trim().toLowerCase();
+  const safeEligibility = String(structureEligibility || '').trim().toLowerCase();
+  const healthyStructure = ['strong', 'intact', 'developing_clean'].includes(safeStructure);
+  const aliveEligibility = ['alive', 'messy'].includes(safeEligibility);
+  return (healthyStructure || aliveEligibility) && /structure is not strong\/intact\/developing clean/i.test(safeText);
+}
+
+function fallbackPromotionDiagnostic({globalVerdict, replayBase, structureState, structureEligibility}){
+  const safeStructure = String(structureState || '').trim().toLowerCase();
+  const safeEligibility = String(structureEligibility || '').trim().toLowerCase();
+  const healthyStructure = ['strong', 'intact', 'developing_clean'].includes(safeStructure);
+  const aliveEligibility = ['alive', 'messy'].includes(safeEligibility);
+  const planRealism = replayBase && replayBase.record ? replayBase.record.planRealism || {} : {};
+  const derivedStates = replayBase && replayBase.record ? replayBase.record.derivedStates || {} : {};
+  const bounceState = String(derivedStates.bounceState || '').trim().toLowerCase();
+  const priceabilityState = String(derivedStates.priceabilityState || '').trim().toLowerCase();
+  const realisticRr = numericOrNull(planRealism.realistic_rr);
+  if((healthyStructure || aliveEligibility) && ['attempt', 'early', 'developing', 'improving'].includes(bounceState) && ['unpriceable', 'provisional'].includes(priceabilityState)){
+    return {
+      promotionBlocker:'Repair is forming but the setup is not priceable yet.',
+      failingGate:'bounce'
+    };
+  }
+  if((healthyStructure || aliveEligibility) && Number.isFinite(realisticRr) && realisticRr < 2){
+    return {
+      promotionBlocker:'Nearby resistance limits current reward potential.',
+      failingGate:'rr'
+    };
+  }
+  return {
+    promotionBlocker:String(globalVerdict.promotionBlockedReason || globalVerdict.downgrade_reason || '').trim(),
+    failingGate:String(globalVerdict.promotionBlockedBy || '').trim()
+  };
 }
 
 function derivedStateValue(derivedStates, camelKey, snakeKey){
@@ -796,11 +836,16 @@ function printTickerReport(result){
     `  resolver: canonical ${replay.canonicalVerdictLabel} | bucket ${replay.visualBucket} | simulated lifecycle ${replay.simulatedLifecycleFromWatch} | setup score ${replay.setupScore}`,
     `  states: structure ${replay.structureState} | eligibility ${replay.structureEligibility} | bounce ${replay.bounceState} | stabilisation ${replay.stabilisationState} | priceability ${replay.priceabilityState}`,
     `  target profile: first ${fmtPrice(replay.realisticTarget)} | extended ${Number.isFinite(numericOrNull(replay.extendedTarget)) ? `${fmtPrice(replay.extendedTarget)} (context only)` : 'n/a'} | firstRR ${fmtRatio(replay.realisticRr)} | stretch ${fmtPct(replay.targetStretchPct, 1)}`,
-    `  target cap: ${replay.targetCapReason || 'n/a'}`,
-    `  blockers: ${(replay.blockers.length ? replay.blockers.join(' | ') : 'none')}`,
-    `  blocker copy: ${replay.blockerCopy || 'n/a'}`,
-    `  diminishing: ${replay.watchToDiminishingReason || 'n/a'}`
+    `  target cap: ${replay.targetCapReason || 'n/a'}`
   ];
+  if(replay.promotionDiagnosticsActive){
+    lines.push(`  blockers: ${(replay.blockers.length ? replay.blockers.join(' | ') : 'none')}`);
+    lines.push(`  promotion diagnostics: source ${replay.blockerSource || 'n/a'} | blocker ${replay.promotionBlocker || 'n/a'} | gate ${replay.failingGate || 'n/a'}`);
+    lines.push(`  blocker copy: ${replay.blockerCopy || 'n/a'}`);
+  }
+  if(replay.diminishingReasonActive){
+    lines.push(`  diminishing: ${replay.watchToDiminishingReason || 'n/a'}`);
+  }
   console.log(lines.join('\n'));
 }
 
@@ -910,13 +955,62 @@ async function main(){
         final_verdict:globalVerdict.final_verdict
       })
       : sandbox.window.ResolverCore.normalizeGlobalVerdictKey(globalVerdict.final_verdict);
-    const blockerCopy = String(
+    const rawBlockerCopy = String(
       globalVerdict.main_blocker
       || globalVerdict.reason
       || replayBase.record.resolvedContract.blockerReason
       || replayBase.record.resolvedContract.reasonSummary
       || ''
     ).trim();
+    const blockerSource = String(
+      globalVerdict.primary_blocker_source
+      || globalVerdict.semantic_blocker_code
+      || ''
+    ).trim();
+    const finalResolvedVerdict = String(globalVerdict.final_verdict || '').trim().toLowerCase();
+    const finalVisualBucket = String(visualState.visualBucket || '').trim().toLowerCase();
+    const promotionDiagnosticsActive = !['entry', 'near_entry'].includes(finalResolvedVerdict)
+      && !['entry', 'near_entry'].includes(finalVisualBucket);
+    const rawWatchToDiminishingReason = String(
+      visualState.weakWatchDiminishingReason
+      || scannerResolution.remapReason
+      || ''
+    ).trim();
+    const diminishingReasonActive = finalResolvedVerdict === 'watch'
+      && finalVisualBucket === 'diminishing'
+      && !!rawWatchToDiminishingReason;
+    let promotionBlocker = '';
+    let failingGate = '';
+    if(promotionDiagnosticsActive){
+      const fallbackDiagnostic = fallbackPromotionDiagnostic({
+        globalVerdict,
+        replayBase,
+        structureState:derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
+        structureEligibility:globalVerdict.structure_eligibility || visualState.structureEligibility || 'unknown'
+      });
+      promotionBlocker = String(
+        globalVerdict.promotionBlockedReason
+        || globalVerdict.downgrade_reason
+        || fallbackDiagnostic.promotionBlocker
+        || ''
+      ).trim();
+      failingGate = String(
+        globalVerdict.promotionBlockedBy
+        || fallbackDiagnostic.failingGate
+        || ''
+      ).trim();
+      if(structureContradictionForPromotionText(
+        promotionBlocker,
+        derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
+        globalVerdict.structure_eligibility || visualState.structureEligibility || 'unknown'
+      )){
+        promotionBlocker = fallbackDiagnostic.promotionBlocker;
+        failingGate = fallbackDiagnostic.failingGate;
+      }
+    }
+    const blockerCopy = promotionDiagnosticsActive ? rawBlockerCopy : '';
+    const blockers = promotionDiagnosticsActive ? promotionBlockers(globalVerdict, replayBase.record.derivedStates) : [];
+    const watchToDiminishingReason = diminishingReasonActive ? rawWatchToDiminishingReason : '';
     return {
       ticker:snapshot.ticker,
       snapshot,
@@ -937,9 +1031,14 @@ async function main(){
         realisticRr:replayBase.record.planRealism.realistic_rr,
         targetStretchPct:replayBase.record.planRealism.target_stretch_pct,
         targetCapReason:replayBase.record.planRealism.target_cap_reason,
-        blockers:promotionBlockers(globalVerdict, replayBase.record.derivedStates),
+        blockers,
+        blockerSource,
+        promotionDiagnosticsActive,
+        promotionBlocker,
+        failingGate,
         blockerCopy,
-        watchToDiminishingReason:visualState.weakWatchDiminishingReason || scannerResolution.remapReason || ''
+        watchToDiminishingReason,
+        diminishingReasonActive
       }
     };
   });
@@ -982,7 +1081,14 @@ async function main(){
       targetCapReason:result.replay.targetCapReason,
       blockers:result.replay.blockers,
       blockerCopy:result.replay.blockerCopy,
-      watchToDiminishingReason:result.replay.watchToDiminishingReason
+      watchToDiminishingReason:result.replay.watchToDiminishingReason,
+      promotionDiagnostics:result.replay.promotionDiagnosticsActive
+        ? {
+          blockerSource:result.replay.blockerSource,
+          promotionBlocker:result.replay.promotionBlocker,
+          failingGate:result.replay.failingGate
+        }
+        : null
     }))
   }, null, 2));
 
