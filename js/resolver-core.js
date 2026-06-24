@@ -358,8 +358,8 @@
       pullback_valid:ctx.pullback_valid !== false,
       rr_ok:credibleRrValue !== null ? credibleRrValue >= 2 : (rrValue !== null && rrValue >= 2),
       entry_trigger_hit:ctx.entry_trigger_hit === true,
-      tradeability_ok:['tradable', 'entry', 'ready', 'action_now'].includes(tradeability),
-      unpriceable_block:!['tradable', 'entry', 'ready', 'action_now'].includes(tradeability) || !!bouncePriceability.unpriceableBlockReason,
+      tradeability_ok:['tradable', 'entry', 'ready', 'action_now', 'risk_only'].includes(tradeability),
+      unpriceable_block:!['tradable', 'entry', 'ready', 'action_now', 'risk_only'].includes(tradeability) || !!bouncePriceability.unpriceableBlockReason,
       below_50_without_reclaim:ctx.price_below_50ma === true && ctx.reclaim_attempt !== true,
       capital_ok:(() => {
         const capitalFit = String(ctx.capital_fit || '').trim().toLowerCase();
@@ -415,7 +415,7 @@
     const tradeability = String(ctx.tradeability || '').trim().toLowerCase();
     const planStatus = String(ctx.plan_status || '').trim().toLowerCase();
     const planText = String(ctx.plan_status_text || '').trim().toLowerCase();
-    const validTradeability = ['tradable', 'entry', 'ready', 'action_now'].includes(tradeability);
+    const validTradeability = ['tradable', 'entry', 'ready', 'action_now', 'risk_only'].includes(tradeability);
     const hasProvisionalPlan = provisionalPlan.hasProvisionalPriceablePlan === true && !provisionalPlan.provisionalPlanBlockReason;
     const rrPriceable = credibleRrValue !== null
       ? credibleRrValue >= 2
@@ -465,6 +465,9 @@
       resolved_rr:bouncePriceability.resolvedRR,
       rr_known:bouncePriceability.rrKnown === true
     };
+    checks.unpriceable_block = !hasProvisionalPlan && (
+      !validTradeability || !!bouncePriceability.unpriceableBlockReason
+    );
     const reasons = [];
     if(checks.near_entry_terminal_block_applied) reasons.push('Terminal avoid/dead state blocks Near Entry.');
     if(!checks.structure_ok) reasons.push('Structure is not strong/intact/developing clean.');

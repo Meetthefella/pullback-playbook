@@ -5814,6 +5814,46 @@ function runPlanSemanticsAssertions(){
     throw new Error('Valid manual prices alone must not promote without bounce/stabilisation confirmation gates.');
   }
 
+  const riskOnlyProvisionalNearEntry = resolverCore.canPromoteToNearEntry({
+    structure_state:'developing_clean',
+    trend_state:'acceptable',
+    bounce_state:'attempt',
+    stabilisation_state:'early',
+    pullback_zone:'near_50ma',
+    market_regime:'supportive',
+    volume_state:'normal',
+    plan_visible:true,
+    plan_status:'valid',
+    plan_blocked:false,
+    has_entry:true,
+    has_stop:true,
+    entry:178.75,
+    stop:176.07,
+    target:193.32,
+    rr:5.44,
+    credible_rr:2.5,
+    provisional_entry:178.75,
+    provisional_stop:176.07,
+    provisional_target:193.32,
+    provisional_rr:5.44,
+    tradeability:'risk_only',
+    pullback_valid:true,
+    entry_trigger_hit:false,
+    stop_distance_too_wide:false,
+    capital_fit:'unknown',
+    affordability:'',
+    price_below_50ma:false,
+    price_below_200ma:false,
+    ma50_below_200ma:false,
+    terminal_avoid_applied:false
+  });
+  if(riskOnlyProvisionalNearEntry.pass !== true){
+    throw new Error('Risk-only provisional scanner plans with valid math must still qualify for Near Entry when capital is not explicitly blocked.');
+  }
+  if(riskOnlyProvisionalNearEntry.checks.tradeability_ok !== true || riskOnlyProvisionalNearEntry.checks.unpriceable_block !== false){
+    throw new Error('Risk-only tradeability must not be treated as an unpriceable plan blocker for provisional Near Entry gating.');
+  }
+
   const frozenReplaySnapshotPath = path.join(os.tmpdir(), `pullback-playbook-frozen-replay-${Date.now()}.json`);
   fs.writeFileSync(frozenReplaySnapshotPath, JSON.stringify({
     snapshots:[
