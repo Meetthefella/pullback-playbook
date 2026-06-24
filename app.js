@@ -3560,13 +3560,35 @@ async function copyTextToClipboard(text){
   return copied;
 }
 
+function showManualSnapshotCopyText(text){
+  const wrap = $('testerSnapshotManualCopyWrap');
+  const field = $('testerSnapshotManualCopyText');
+  if(!wrap || !field) return false;
+  wrap.hidden = false;
+  field.value = String(text || '');
+  try{
+    field.focus({preventScroll:true});
+  }catch(error){}
+  try{
+    field.select();
+    field.setSelectionRange(0, field.value.length);
+  }catch(error){}
+  return true;
+}
+
 async function copyTesterDiagnosticSnapshot(options = {}){
   const snapshot = buildTesterDiagnosticSnapshot(options);
-  const copied = await copyTextToClipboard(JSON.stringify(snapshot, null, 2));
+  const snapshotText = JSON.stringify(snapshot, null, 2);
+  const copied = await copyTextToClipboard(snapshotText);
   if(copied){
     uiState.lastTesterDiagnosticSnapshot = snapshot;
     const status = $('testerReportSnapshotStatus');
     if(status) status.textContent = `Snapshot copied: ${snapshot.panelTitle} | ${formatLocalTimestamp(snapshot.timestamp) || snapshot.timestamp}`;
+  }else{
+    uiState.lastTesterDiagnosticSnapshot = snapshot;
+    showManualSnapshotCopyText(snapshotText);
+    const status = $('testerReportSnapshotStatus');
+    if(status) status.textContent = 'Clipboard copy failed. Snapshot text opened below for manual copy.';
   }
   return copied;
 }

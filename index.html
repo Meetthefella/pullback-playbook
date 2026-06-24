@@ -344,6 +344,11 @@
             <button class="secondary compactbutton" type="button" id="exportTesterSnapshotBtn">Export Current Snapshot</button>
             <button class="primary compactbutton" type="button" id="submitTesterReportBtn">Submit Report</button>
           </div>
+          <div id="testerSnapshotManualCopyWrap" style="margin-top:10px" hidden>
+            <label for="testerSnapshotManualCopyText">Manual Snapshot Copy</label>
+            <textarea id="testerSnapshotManualCopyText" readonly placeholder="If your phone browser blocks clipboard access, the snapshot text will appear here for manual copy."></textarea>
+            <div class="tiny" style="margin-top:6px">If copy fails on mobile, tap in the box, Select All, then Copy.</div>
+          </div>
           <div class="tiny" id="testerReportStatus" style="margin-top:8px">No tester report submitted yet.</div>
         </div>
         <div class="panelbox">
