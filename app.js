@@ -15126,6 +15126,9 @@ function addTicker(rawTicker, meta){
   renderScannerResults();
   renderCards();
   setStatus('tickerSearchStatus', `<span class="ok">${escapeHtml(ticker)} added to the scanner universe.</span>`);
+  if(!meta || (!meta.companyName && !meta.exchange && !meta.tradingViewSymbol)){
+    hydrateTickerMetaForManualAdd(ticker).catch(() => {});
+  }
 }
 
 function addTickerFromSearch(){
@@ -23179,16 +23182,43 @@ function isFreshTimestamp(value, ttlMs = MARKET_CACHE_TTL_MS){
 function rememberTickerMeta(meta){
   if(!meta || !meta.ticker) return;
   const symbol = normalizeTicker(meta.ticker);
-  state.symbolMeta[symbol] = {
+  const normalizedMeta = {
     companyName:String(meta.companyName || ''),
     exchange:String(meta.exchange || ''),
     tradingViewSymbol:String(meta.tradingViewSymbol || ''),
     scanType:normalizeScanType(meta.scanType || '')
   };
+  state.symbolMeta[symbol] = normalizedMeta;
+  const record = state.tickerRecords && state.tickerRecords[symbol];
+  if(record && record.meta){
+    if(normalizedMeta.companyName) record.meta.companyName = normalizedMeta.companyName;
+    if(normalizedMeta.exchange) record.meta.exchange = normalizedMeta.exchange;
+    if(normalizedMeta.tradingViewSymbol) record.meta.tradingViewSymbol = normalizedMeta.tradingViewSymbol;
+  }
 }
 
 function getStoredTickerMeta(ticker){
   return state.symbolMeta[normalizeTicker(ticker)] || null;
+}
+
+async function hydrateTickerMetaForManualAdd(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  const existingMeta = getStoredTickerMeta(symbol);
+  if(existingMeta && (existingMeta.companyName || existingMeta.exchange || existingMeta.tradingViewSymbol)) return;
+  try{
+    const snapshot = await fetchMarketData(symbol);
+    rememberTickerMeta({
+      ticker:symbol,
+      companyName:String(snapshot && snapshot.companyName || ''),
+      exchange:String(snapshot && snapshot.exchange || ''),
+      tradingViewSymbol:String(snapshot && snapshot.tradingViewSymbol || '')
+    });
+    commitTickerState();
+    renderTickerQuickLists();
+    renderScannerResults();
+    renderCards();
+  }catch(_error){}
 }
 
 function applyTickerMetaToCard(card, meta){
