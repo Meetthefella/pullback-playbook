@@ -9932,7 +9932,6 @@ function resolveLifecycleTransition(currentState, inputs = {}){
     lifecycleState === 'watch'
     && finalVerdict === 'near_entry'
     && structureState === 'intact'
-    && bounceState === 'confirmed'
     && planStatus === 'valid'
     && rrConfidence !== 'invalid'
     && marketRegime !== 'weak'
