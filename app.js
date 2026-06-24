@@ -6349,9 +6349,22 @@ function maybeExpireTickerRecord(record){
   return true;
 }
 
+function hasAuthoritativeLifecyclePlan(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const source = String(plan.source || '').trim().toLowerCase();
+  return plan.hasValidPlan === true
+    && String(plan.status || '').trim().toLowerCase() === 'valid'
+    && Number.isFinite(numericOrNull(plan.entry))
+    && Number.isFinite(numericOrNull(plan.stop))
+    && Number.isFinite(numericOrNull(plan.firstTarget))
+    && Number.isFinite(numericOrNull(plan.plannedRR))
+    && source !== 'scanner_estimate';
+}
+
 function applyLifecycleStageFromPlan(record, source = 'plan'){
   if(!record) return;
-  if(record.plan.hasValidPlan){
+  if(hasAuthoritativeLifecyclePlan(record)){
     refreshLifecycleStage(record, 'planned', PLAN_EXPIRY_TRADING_DAYS, 'Valid explicit trade plan saved.', source);
     return;
   }
@@ -35603,7 +35616,7 @@ function refreshSelectedTickerLifecycle(){
   const record = getTickerRecord(ticker);
   if(!record) return;
   const displayStage = normalizeAnalysisVerdict(displayStageForRecord(record));
-  const stage = record.plan.hasValidPlan
+  const stage = hasAuthoritativeLifecyclePlan(record)
     ? 'planned'
     : ((record.review.manualReview || record.review.cardOpen)
       ? 'reviewed'
@@ -35644,7 +35657,7 @@ function reactivateSelectedTickerLifecycle(){
   if(!ticker) return;
   const record = getTickerRecord(ticker);
   if(!record) return;
-  const stage = record.plan.hasValidPlan ? 'planned' : ((record.review.manualReview || record.review.cardOpen) ? 'reviewed' : (record.watchlist.inWatchlist ? 'watchlist' : 'shortlisted'));
+  const stage = hasAuthoritativeLifecyclePlan(record) ? 'planned' : ((record.review.manualReview || record.review.cardOpen) ? 'reviewed' : (record.watchlist.inWatchlist ? 'watchlist' : 'shortlisted'));
   const days = stage === 'planned' ? PLAN_EXPIRY_TRADING_DAYS : (stage === 'reviewed' ? REVIEW_EXPIRY_TRADING_DAYS : WATCHLIST_EXPIRY_TRADING_DAYS);
   record.lifecycle.lockReason = '';
   refreshLifecycleStage(record, stage, days, 'Lifecycle reactivated manually.', 'system');
