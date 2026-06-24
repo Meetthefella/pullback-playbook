@@ -3,6 +3,8 @@
   "version": "4.4.0",
   "private": true,
   "scripts": {
+    "debug:compare-review-snapshot": "node scripts/compare-review-snapshot.js",
+    "debug:market-snapshot": "node scripts/debug-market-snapshot.js",
     "test:storage-persistence": "node scripts/run-storage-persistence-assertions.js",
     "test:resolver-gates": "node scripts/run-resolver-gate-assertions.js",
     "test:trade-execution": "node scripts/run-trade-execution-handler-tests.js"

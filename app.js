@@ -3536,6 +3536,28 @@ async function copyTesterDiagnosticSnapshot(options = {}){
   return copied;
 }
 
+function exportTesterDiagnosticSnapshot(options = {}){
+  const snapshot = options.snapshot && typeof options.snapshot === 'object'
+    ? options.snapshot
+    : (uiState.lastTesterDiagnosticSnapshot || buildTesterDiagnosticSnapshot(options));
+  uiState.lastTesterDiagnosticSnapshot = snapshot;
+  const ticker = String(snapshot.ticker || 'general').trim().toUpperCase() || 'GENERAL';
+  const panelSlug = String(snapshot.panelTitle || 'diagnostics')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'diagnostics';
+  const filename = `pullback-playbook-review-snapshot-${ticker}-${panelSlug}-${todayIsoDate()}.json`;
+  const ok = downloadJsonFile(filename, snapshot);
+  const status = $('testerReportSnapshotStatus');
+  if(status){
+    status.textContent = ok
+      ? `Snapshot exported: ${filename}`
+      : 'Snapshot export failed.';
+  }
+  return ok;
+}
+
 function exportTesterBackup(){
   const testerId = currentTesterId();
   const exportedAt = new Date().toISOString();
@@ -3652,16 +3674,16 @@ function completeTesterSetup(){
 }
 
 function openTesterSetupGuide(){
-  setContextSettingsPanelOpen(true);
-  renderContextHeaderMode();
-  const target = $('contextSectionGateway') || $('tradeGatewayHealthLabel') || $('headerControlSurface');
-  highlightContextSettingsSection(target);
-  if(target && typeof target.scrollIntoView === 'function'){
-    requestAnimationFrame(() => {
-      suppressScrollMemoryForAppScroll('scroll_into_view_open_tester_setup', 1000);
-      target.scrollIntoView({behavior:'smooth', block:'nearest'});
-    });
-  }
+  setActiveWorkspaceTab('diary', {focusTop:false, focusWorkspace:false});
+  const advancedDetails = $('advancedUtilitiesDetails');
+  if(advancedDetails) advancedDetails.open = true;
+  const target = $('tradeGatewayPanel') || $('testerSetupPanel') || $('tradeGatewayHealthLabel') || $('advancedSection');
+  if(!target) return;
+  requestAnimationFrame(() => {
+    suppressScrollMemoryForAppScroll('scroll_into_view_open_tester_setup', 1000);
+    target.scrollIntoView({behavior:'smooth', block:'nearest'});
+    if(typeof target.focus === 'function') target.focus({preventScroll:true});
+  });
 }
 
 function recordTradeGatewayEvent(type, details = {}){
@@ -5509,8 +5531,8 @@ function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
   const sources = `<div class="tiny">Sources: ${escapeHtml((trace.sources || []).join(', ') || 'chart_pipeline_quick_check')}</div>`;
   const details = `${missingLine}${diagnosticsLine}${extracted}${trustedFacts}${imageSource}${extraEvidence}${sources}`;
   const markup = isFailurePanel
-    ? `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>Chart Verification Failed</strong><div class="tiny"><strong>Expected:</strong> ${escapeHtml(expectedTickerDisplay)}</div><div class="tiny"><strong>Read:</strong> ${escapeHtml(readTickerDisplay)}</div><div>AI analysis is blocked until the chart is confirmed or replaced.</div><details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details<button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Chart Verification">Copy</button></summary>${details}</details></div>`
-    : `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>${escapeHtml(decision.title || 'Chart verification')}</strong><div>${escapeHtml(decision.summary || '')}</div><div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([facts.visible_ticker || 'n/a', facts.visible_timeframe || 'n/a', chartVerificationDisplayValue(facts.visible_latest_price)].join(' | '))} <strong>Expected:</strong> ${escapeHtml([trusted.ticker || 'n/a', trusted.expected_timeframe || 'n/a', chartVerificationDisplayValue(trusted.latest_price)].join(' | '))}</div><div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>${evidenceLine}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details<button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Chart Verification">Copy</button></summary>${details}</details></div>`;
+    ? `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>Chart Verification Failed</strong><div class="tiny"><strong>Expected:</strong> ${escapeHtml(expectedTickerDisplay)}</div><div class="tiny"><strong>Read:</strong> ${escapeHtml(readTickerDisplay)}</div><div>AI analysis is blocked until the chart is confirmed or replaced.</div><details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`
+    : `<div class="summary tiny ai-summary-message ${escapeHtml(chartDecisionClassName(decision))}"><strong>${escapeHtml(decision.title || 'Chart verification')}</strong><div>${escapeHtml(decision.summary || '')}</div><div class="tiny"><strong>Read from chart:</strong> ${escapeHtml([facts.visible_ticker || 'n/a', facts.visible_timeframe || 'n/a', chartVerificationDisplayValue(facts.visible_latest_price)].join(' | '))} <strong>Expected:</strong> ${escapeHtml([trusted.ticker || 'n/a', trusted.expected_timeframe || 'n/a', chartVerificationDisplayValue(trusted.latest_price)].join(' | '))}</div><div class="tiny">20MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma20))} | 50MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma50))} | 200MA ${escapeHtml(chartVerificationDisplayValue(facts.visible_ma200))}</div>${evidenceLine}<details class="compact-details" id="reviewChartDetails"${detailsOpenAttr}><summary>Show details</summary>${details}</details></div>`;
   return {
     decision,
     trace,
@@ -34488,7 +34510,16 @@ function renderReviewWorkspace(options = {}){
   const reviewGatewayTrace = advancedOpen
     ? `<details class="compact-details"><summary>Trade Gateway Trace<button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Trade Gateway Trace">Copy</button></summary>${renderTradeGatewayHistoryMarkup()}</details>`
     : '';
-  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDebugCompact}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
+  const reviewChartVerificationCopy = advancedOpen
+    ? `<div class="panelbox" data-diagnostic-panel="Chart Verification" style="margin-top:10px">
+        <strong>Chart Verification Diagnostics</strong>
+        <div class="tiny" style="margin-top:8px">Use this copy action for the sanitized chart-verification snapshot instead of the chart details toggle above.</div>
+        <div class="actions" style="margin-top:10px">
+          <button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Chart Verification">Copy Chart Verification Diagnostics</button>
+        </div>
+      </div>`
+    : '';
+  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewChartVerificationCopy}${reviewDebugCompact}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
@@ -36459,6 +36490,12 @@ click('copyTesterSnapshotBtn', () => {
   }).catch(() => {
     setStatus('testerReportStatus', '<span class="badtext">Could not copy the tester snapshot.</span>');
   });
+});
+click('exportTesterSnapshotBtn', () => {
+  const exported = exportTesterDiagnosticSnapshot({panelTitle:'General diagnostics'});
+  setStatus('testerReportStatus', exported
+    ? '<span class="ok">Current tester snapshot exported.</span>'
+    : '<span class="badtext">Could not export the tester snapshot.</span>');
 });
 click('copyRuntimeDebugBtn', () => {
   const panel = $('runtimeDebugOutput');

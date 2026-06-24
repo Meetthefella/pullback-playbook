@@ -3,6 +3,11 @@
 ## Project
 Pullback Playbook
 
+## Project boundaries
+- This is not a Unity project.
+- This project does not require any MCP server connection to run locally.
+- Treat it as a lightweight web app with optional serverless functions.
+
 ## Purpose
 This app is a simple, fast trading workflow tool for a UK-based retail trader using a Quality Pullback strategy. The app is not meant to be a general stock screener or a fully automated trading bot. Its purpose is to help the user quickly review a watchlist, record chart observations, upload chart screenshots, generate structured analysis prompts, and keep a clean trading workflow on desktop and mobile.
 
@@ -61,7 +66,7 @@ Where relevant, include:
 - Estimated risk per share
 - Approximate position size based on £40 max risk
 
-Do not present risky trade sizing that ignores the user’s stated max loss rule.
+Do not present risky trade sizing that ignores the user's stated max loss rule.
 
 ## Product goals
 Prioritise the following:
@@ -234,7 +239,7 @@ Do not:
 - Add fake or placeholder features presented as complete
 - Break the current workflow in pursuit of a redesign
 - Ignore mobile usability
-- Ignore the user’s fixed risk rules
+- Ignore the user's fixed risk rules
 - Remove the simple checklist workflow
 
 ## Nice-to-have future ideas
@@ -254,4 +259,4 @@ A successful improvement should leave the app:
 - Faster to move through the pullback workflow
 - Less dependent on copy/paste
 - Better at storing watchlist, chart, and prompt data
-- Clearly aligned with the user’s Quality Pullback strategy
+- Clearly aligned with the user's Quality Pullback strategy
