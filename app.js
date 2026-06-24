@@ -4474,7 +4474,14 @@ function analysisDerivedStatesFromRecord(record){
     aiEvidencePriceabilityHint:String(aiEvidence.aiEvidencePriceabilityHint || '').trim(),
     aiEvidenceBounceHint:String(aiEvidence.aiEvidenceBounceHint || '').trim(),
     aiEvidenceStabilisationHint:String(aiEvidence.aiEvidenceStabilisationHint || '').trim(),
-    aiEvidenceVolumeHint:String(aiEvidence.aiEvidenceVolumeHint || '').trim()
+    aiEvidenceVolumeHint:String(aiEvidence.aiEvidenceVolumeHint || '').trim(),
+    candleEvidenceUpClosesAfterLow:numericOrNull(scannerValues.candleEvidenceUpClosesAfterLow),
+    candleEvidenceReclaimedPriorDayHigh:['true','yes'].includes(String(scannerValues.candleEvidenceReclaimedPriorDayHigh || '').trim().toLowerCase()),
+    candleEvidenceDownsideMomentumSlowing:['true','yes'].includes(String(scannerValues.candleEvidenceDownsideMomentumSlowing || '').trim().toLowerCase()),
+    candleEvidenceTighterRanges:['true','yes'].includes(String(scannerValues.candleEvidenceTighterRanges || '').trim().toLowerCase()),
+    candleEvidenceSmallerBodies:['true','yes'].includes(String(scannerValues.candleEvidenceSmallerBodies || '').trim().toLowerCase()),
+    candleEvidenceHigherLowHold:['true','yes'].includes(String(scannerValues.candleEvidenceHigherLowHold || '').trim().toLowerCase()),
+    candleEvidenceReclaimRangeMeaningful:['true','yes'].includes(String(scannerValues.candleEvidenceReclaimRangeMeaningful || '').trim().toLowerCase())
   };
 }
 
@@ -4617,6 +4624,13 @@ const SCANNER_PROJECTION_FIELD_REGISTRY = [
   {key:'setupLocationState', aliases:['setup_location_state', 'setupLocationState', 'setup_location', 'setupLocation'], trusted:true},
   {key:'priceabilityState', aliases:['priceability_state', 'priceabilityState'], trusted:true},
   {key:'volumeState', aliases:['volume_state', 'volumeState'], trusted:true},
+  {key:'candleEvidenceUpClosesAfterLow', aliases:['candle_evidence_up_closes_after_low', 'candleEvidenceUpClosesAfterLow'], trusted:false},
+  {key:'candleEvidenceReclaimedPriorDayHigh', aliases:['candle_evidence_reclaimed_prior_day_high', 'candleEvidenceReclaimedPriorDayHigh'], trusted:false},
+  {key:'candleEvidenceDownsideMomentumSlowing', aliases:['candle_evidence_downside_momentum_slowing', 'candleEvidenceDownsideMomentumSlowing'], trusted:false},
+  {key:'candleEvidenceTighterRanges', aliases:['candle_evidence_tighter_ranges', 'candleEvidenceTighterRanges'], trusted:false},
+  {key:'candleEvidenceSmallerBodies', aliases:['candle_evidence_smaller_bodies', 'candleEvidenceSmallerBodies'], trusted:false},
+  {key:'candleEvidenceHigherLowHold', aliases:['candle_evidence_higher_low_hold', 'candleEvidenceHigherLowHold'], trusted:false},
+  {key:'candleEvidenceReclaimRangeMeaningful', aliases:['candle_evidence_reclaim_range_meaningful', 'candleEvidenceReclaimRangeMeaningful'], trusted:false},
   {key:'scanType', aliases:['scan_type', 'scanType'], trusted:false},
   {key:'evaluationScanType', aliases:['evaluation_scan_type', 'evaluationScanType'], trusted:false},
   {key:'importedScanType', aliases:['imported_scan_type', 'importedScanType'], trusted:false},
@@ -10905,6 +10919,14 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Bounce', value:globalVerdict.bounce_state || 'n/a'},
     {label:'Market', value:globalVerdict.market_regime || 'n/a'},
     {label:'Volume', value:String(derivedStates.volumeState || 'n/a')}
+  ])}${renderDebugSectionMarkup('Candle Evidence', [
+    {label:'upClosesAfterLow', value:Number.isFinite(derivedStates.candleEvidenceUpClosesAfterLow) ? String(derivedStates.candleEvidenceUpClosesAfterLow) : '(none)'},
+    {label:'reclaimedPriorDayHigh', value:derivedStates.candleEvidenceReclaimedPriorDayHigh === true ? 'true' : 'false'},
+    {label:'downsideMomentumSlowing', value:derivedStates.candleEvidenceDownsideMomentumSlowing === true ? 'true' : 'false'},
+    {label:'tighterRanges', value:derivedStates.candleEvidenceTighterRanges === true ? 'true' : 'false'},
+    {label:'smallerBodies', value:derivedStates.candleEvidenceSmallerBodies === true ? 'true' : 'false'},
+    {label:'higherLowHold', value:derivedStates.candleEvidenceHigherLowHold === true ? 'true' : 'false'},
+    {label:'reclaimRangeMeaningful', value:derivedStates.candleEvidenceReclaimRangeMeaningful === true ? 'true' : 'false'}
   ])}${renderDebugSectionMarkup('Execution State', [
     {label:'Lifecycle State', value:lifecycleSnapshot.state || globalVerdict.lifecycle || 'n/a'},
     {label:'Action State', value:resolved.actionStateLabel || resolved.actionLabel || 'n/a'},
@@ -19148,7 +19170,7 @@ function buildSharedSetupNarrative({
   const hasProvisionalPlan = resolved.hasProvisionalPriceablePlan === true || resolved.has_provisional_priceable_plan === true;
   const validPlan = planStatus === 'valid'
     || !!(displayedPlan && typeof displayedPlan === 'object' && String(displayedPlan.status || '').trim().toLowerCase() === 'valid');
-  const aliveStructure = structureEligibility === 'alive' || ['strong','intact','developing_clean'].includes(structureState);
+  const aliveStructure = ['alive','messy'].includes(structureEligibility) || ['strong','intact','developing_clean'].includes(structureState);
   const strongStructure = ['strong','intact','developing_clean'].includes(structureState);
   const bounceAttempt = ['attempt','early','developing'].includes(bounceState);
   const weakVolume = ['weak','light','low','below_average'].includes(volumeState);
@@ -19272,7 +19294,7 @@ function buildSharedSetupNarrative({
   }else{
     stateLabel = monitorTone ? 'Developing Watch' : stateLabelFallback;
     const consolidationDetected = ['strong','intact','developing_clean'].includes(structureState)
-      && (structureEligibility === 'alive' || !structureEligibility)
+      && (['alive','messy'].includes(structureEligibility) || !structureEligibility)
       && ['none','unconfirmed',''].includes(bounceState)
       && ['none','','unclear'].includes(pullbackZone)
       && ['none','off_level','unclear','extended'].includes(setupLocationState);
@@ -19469,7 +19491,7 @@ function isAccepted50MaSupportTestDisplayState({
   const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.99;
   const bounceUnconfirmed = ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState);
   const positiveAliveSignal = structurallyAliveAtRefresh
-    || structureEligibility === 'alive'
+    || ['alive','messy'].includes(structureEligibility)
     || ['strong','intact','developing_clean'].includes(structureState);
   const explicitAliveMonitorReason = /structurally alive;\s*keep on monitor|testing 50ma support|support defence/i.test(refreshDemoteReason);
   const failedSupportTest = explicitAliveMonitorReason
@@ -19535,7 +19557,7 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
   const hasPriceablePlan = resolved.hasPriceablePlan === true || resolved.has_priceable_plan === true;
   const validPlan = String(simplified.planStatus || '').trim().toLowerCase() === 'valid';
   const planVisible = simplified.planVisible === true;
-  const aliveStructure = structureEligibility === 'alive' || ['strong','intact','developing_clean'].includes(structureState);
+  const aliveStructure = ['alive','messy'].includes(structureEligibility) || ['strong','intact','developing_clean'].includes(structureState);
   const strongStructure = ['strong','intact','developing_clean'].includes(structureState);
   const bounceAttempt = ['attempt','early','developing'].includes(bounceState);
   const weakVolume = ['weak','light','low','below_average'].includes(volumeState);
@@ -20667,7 +20689,7 @@ function buildTrackLongPressContract(options = {}){
   })();
   const structureWhy = ['strong','intact','developing_clean'].includes(structureState)
     ? 'structure is strong'
-    : (structureEligibility === 'alive'
+    : ((['alive','messy'].includes(structureEligibility))
       ? 'structure is still intact'
       : (['developing','developing_loose'].includes(structureState)
         ? 'structure is still developing'
@@ -20850,7 +20872,7 @@ function buildTrackLongPressContract(options = {}){
   return toContract({
     source:'ticker_specific',
     why:`This setup is ${(structureState === 'developing' || structureState === 'developing_loose') ? 'Developing' : 'Monitor'} because ${asSentence(base.primary || joinReasonParts([
-      structureWhy || (structureEligibility === 'alive' ? 'structure remains constructive' : ''),
+      structureWhy || ((['alive','messy'].includes(structureEligibility)) ? 'structure remains constructive' : ''),
       locationWhy,
       bounceWhy,
       planWhy
@@ -21222,7 +21244,7 @@ function reviewCopyEvidence(setup = {}){
     || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
   const aliveStructure = !terminalAvoid
     && !structuralWeakness
-    && (structureEligibility === 'alive' || ['strong','intact','developing_clean','developing'].includes(structureState));
+    && (['alive','messy'].includes(structureEligibility) || ['strong','intact','developing_clean','developing'].includes(structureState));
   const consolidating = aliveStructure
     && ['strong','intact','developing_clean'].includes(structureState)
     && ['none','unconfirmed',''].includes(bounceState)
@@ -21672,7 +21694,7 @@ function resolveReviewPullbackBounceDisplayContext({
     || ['clear','present','early'].includes(rawStabilisationState);
   const aliveStructure = !evidence.terminalAvoid
     && !evidence.structuralWeakness
-    && (structureEligibility === 'alive' || ['strong','intact','developing_clean','developing'].includes(structureState));
+    && (['alive','messy'].includes(structureEligibility) || ['strong','intact','developing_clean','developing'].includes(structureState));
   const rawPullbackNone = !rawPullbackState || ['none','unclear'].includes(rawPullbackState);
   let resolvedPullbackState = rawPullbackState;
   let reconciliationReason = '';
@@ -21965,7 +21987,7 @@ function buildReviewSemanticStatus({
   );
   const structuralWeakness = ['damaged','broken'].includes(structureEligibility)
     || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
-  const aliveStructure = structureEligibility === 'alive'
+  const aliveStructure = ['alive','messy'].includes(structureEligibility)
     || ['strong','intact','developing_clean'].includes(structureState);
   const staleWeakCopy = /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(rawBlocker);
   const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
@@ -24649,6 +24671,72 @@ function buildVerdictReason({suitability, scan, riskFit, rewardRisk, checks}){
   return suitability ? suitability.summary : 'Candidate remains reviewable.';
 }
 
+function deriveRecentCandleEvidence(data){
+  const rows = Array.isArray(data && data.history) ? data.history : [];
+  const recentRows = rows.slice(0, 8);
+  const latest = recentRows[0] || {};
+  const prior = recentRows[1] || {};
+  const latestClose = numericOrNull(latest.close);
+  const latestOpen = numericOrNull(latest.open);
+  const priorHigh = numericOrNull(prior.high ?? prior.close);
+  const closes = recentRows.map(row => numericOrNull(row && row.close)).filter(Number.isFinite);
+  const lows = recentRows.map(row => numericOrNull(row && (row.low ?? row.close))).filter(Number.isFinite);
+  const trueRanges = [];
+  const candleRanges = [];
+  const candleBodies = [];
+  for(let index = 0; index < recentRows.length; index += 1){
+    const row = recentRows[index] || {};
+    const high = numericOrNull(row.high ?? row.close);
+    const low = numericOrNull(row.low ?? row.close);
+    const open = numericOrNull(row.open ?? row.close);
+    const close = numericOrNull(row.close);
+    const previousClose = numericOrNull(recentRows[index + 1] && recentRows[index + 1].close);
+    if(Number.isFinite(high) && Number.isFinite(low)){
+      candleRanges.push(high - low);
+      trueRanges.push(Number.isFinite(previousClose)
+        ? Math.max(high - low, Math.abs(high - previousClose), Math.abs(low - previousClose))
+        : high - low);
+    }
+    if(Number.isFinite(open) && Number.isFinite(close)){
+      candleBodies.push(Math.abs(close - open));
+    }
+  }
+  const atrRecent = trueRanges.length ? average(trueRanges.slice(0, 5)) : null;
+  const rangeRecent = candleRanges.length ? average(candleRanges.slice(0, 3)) : null;
+  const rangePrior = candleRanges.length >= 6 ? average(candleRanges.slice(3, 6)) : null;
+  const bodyRecent = candleBodies.length ? average(candleBodies.slice(0, 3)) : null;
+  const bodyPrior = candleBodies.length >= 6 ? average(candleBodies.slice(3, 6)) : null;
+  const pullbackLow = lows.length ? Math.min(...lows) : null;
+  const pullbackLowIndex = Number.isFinite(pullbackLow)
+    ? recentRows.findIndex(row => numericOrNull(row && (row.low ?? row.close)) === pullbackLow)
+    : -1;
+  const reboundRows = pullbackLowIndex >= 0 ? recentRows.slice(0, pullbackLowIndex + 1) : [];
+  const upClosesAfterLow = reboundRows.filter((row, index) => {
+    if(index === reboundRows.length - 1) return false;
+    const currentClose = numericOrNull(row && row.close);
+    const previousClose = numericOrNull(reboundRows[index + 1] && reboundRows[index + 1].close);
+    return Number.isFinite(currentClose) && Number.isFinite(previousClose) && currentClose > previousClose;
+  }).length;
+  return {
+    hasHistory:recentRows.length >= 4,
+    atrRecent,
+    upClosesAfterLow,
+    reclaimedPriorDayHigh:Number.isFinite(latestClose) && Number.isFinite(priorHigh) && latestClose >= priorHigh * 0.998,
+    downsideMomentumSlowing:closes.length >= 3
+      && closes[0] >= closes[1] * 0.995
+      && closes[1] >= closes[2] * 0.985,
+    tighterRanges:Number.isFinite(rangeRecent) && Number.isFinite(rangePrior) && rangeRecent <= rangePrior * 0.92,
+    smallerBodies:Number.isFinite(bodyRecent) && Number.isFinite(bodyPrior) && bodyRecent <= bodyPrior * 0.9,
+    higherLowHold:lows.length >= 2 && lows[0] >= lows[1] * 0.99,
+    reclaimRangeMeaningful:Number.isFinite(latestClose)
+      && Number.isFinite(latestOpen)
+      && Number.isFinite(atrRecent)
+      && atrRecent > 0
+      && (latestClose - latestOpen) >= atrRecent * 0.35,
+    latestGreen:Number.isFinite(latestClose) && Number.isFinite(latestOpen) && latestClose > latestOpen
+  };
+}
+
 function classifyPullbackType(data){
   const price = numericOrNull(data.price);
   const sma20 = numericOrNull(data.sma20);
@@ -24769,7 +24857,32 @@ function buildScannerChecks(data){
   const structureBroken = Number.isFinite(price) && Number.isFinite(sma50) && Number.isFinite(sma20) && price < sma50 && sma20 < sma50;
   const relevantReclaim = near50 && Number.isFinite(sma50) ? sma50 : sma20;
   const reclaimedSupport = Number.isFinite(price) && Number.isFinite(relevantReclaim) && price >= relevantReclaim * 0.998;
-  const bounceReady = Number.isFinite(perf1w) && perf1w >= 2 && reclaimedSupport && !structureBroken;
+  const candleEvidence = deriveRecentCandleEvidence(data);
+  const stabilisationEvidenceCount = [
+    candleEvidence.downsideMomentumSlowing,
+    candleEvidence.tighterRanges,
+    candleEvidence.smallerBodies,
+    candleEvidence.higherLowHold
+  ].filter(Boolean).length;
+  const bounceEvidenceCount = [
+    candleEvidence.upClosesAfterLow >= 2,
+    candleEvidence.reclaimedPriorDayHigh,
+    candleEvidence.reclaimRangeMeaningful,
+    reclaimedSupport,
+    candleEvidence.latestGreen
+  ].filter(Boolean).length;
+  const stabilising = (near20 || near50) && (
+    stabilisationEvidenceCount >= 2
+    || (candleEvidence.hasHistory && candleEvidence.downsideMomentumSlowing)
+    || (!Number.isFinite(perf1w) || perf1w > -1.5)
+  );
+  const bounceReady = !structureBroken && (
+    (reclaimedSupport && bounceEvidenceCount >= 2)
+    || (Number.isFinite(perf1w) && perf1w >= 2 && reclaimedSupport)
+  );
+  const bounceStrength = bounceReady
+    ? ((bounceEvidenceCount >= 4 || (Number.isFinite(perf1w) && perf1w >= 3)) ? 'strong' : 'moderate')
+    : (bounceEvidenceCount >= 2 || (Number.isFinite(perf1w) && perf1w > 0) ? 'weak' : 'none');
   return {
     trendStrong,
     above50:Number.isFinite(price) && Number.isFinite(sma50) && price > sma50,
@@ -24777,11 +24890,10 @@ function buildScannerChecks(data){
     ma50gt200:Number.isFinite(sma50) && Number.isFinite(sma200) && sma50 > sma200,
     near20,
     near50,
-    stabilising:(near20 || near50) && (!Number.isFinite(perf1w) || perf1w > -1.5),
+    stabilising,
     bounce:bounceReady,
-    bounceStrength:Number.isFinite(perf1w)
-      ? (perf1w >= 3 ? 'strong' : (perf1w >= 1 ? 'moderate' : (perf1w > 0 ? 'weak' : 'none')))
-      : 'none',
+    bounceStrength,
+    candleEvidence,
     volume:Number.isFinite(volume) && Number.isFinite(avgVolume30d) && volume >= avgVolume30d,
     mediumTermStrength:Number.isFinite(numericOrNull(data.perf3m)) && numericOrNull(data.perf3m) > 0,
     structureBroken,
@@ -25060,7 +25172,16 @@ async function refreshMarketDataForTickers(tickers, options = {}){
           status:card.status,
           failedRule:scan.failedRule || '',
           breakdown:scan.breakdown || [],
-          derivedStates:card.analysis && card.analysis.derived_states ? card.analysis.derived_states : null
+          derivedStates:card.analysis && card.analysis.derived_states ? card.analysis.derived_states : null,
+          candleEvidence:card.analysis && card.analysis.derived_states ? {
+            upClosesAfterLow:numericOrNull(card.analysis.derived_states.candle_evidence_up_closes_after_low),
+            reclaimedPriorDayHigh:String(card.analysis.derived_states.candle_evidence_reclaimed_prior_day_high || '').trim().toLowerCase(),
+            downsideMomentumSlowing:String(card.analysis.derived_states.candle_evidence_downside_momentum_slowing || '').trim().toLowerCase(),
+            tighterRanges:String(card.analysis.derived_states.candle_evidence_tighter_ranges || '').trim().toLowerCase(),
+            smallerBodies:String(card.analysis.derived_states.candle_evidence_smaller_bodies || '').trim().toLowerCase(),
+            higherLowHold:String(card.analysis.derived_states.candle_evidence_higher_low_hold || '').trim().toLowerCase(),
+            reclaimRangeMeaningful:String(card.analysis.derived_states.candle_evidence_reclaim_range_meaningful || '').trim().toLowerCase()
+          } : null
         };
         scannerDebug.push(debugEntry);
         if(card.status === 'Avoid') rejected += 1;
@@ -25821,6 +25942,9 @@ function deriveSetupStates(card, data, checks, tradePlan){
   const recentHighs = recentRows.map(row => numericOrNull(row && (row.high ?? row.close))).filter(Number.isFinite);
   const recentLows = recentRows.map(row => numericOrNull(row && (row.low ?? row.close))).filter(Number.isFinite);
   const recentCloses = recentRows.map(row => numericOrNull(row && row.close)).filter(Number.isFinite);
+  const candleEvidence = safeChecks.candleEvidence && typeof safeChecks.candleEvidence === 'object'
+    ? safeChecks.candleEvidence
+    : deriveRecentCandleEvidence(safeData);
   const reclaimArea = evaluationScanType === '50MA'
     ? Math.max(...[sma50, sma20].filter(Number.isFinite))
     : Math.max(...[sma20, sma50].filter(Number.isFinite));
@@ -25857,6 +25981,15 @@ function deriveSetupStates(card, data, checks, tradePlan){
   if(structureState !== 'broken' && (trendState === 'weak' || worseningHighs || worseningCloses || (Number.isFinite(perf1w) && perf1w < -2)) && alivePullbackGuardBeforeBounce.applied !== true){
     structureState = 'weak';
   }
+  if(
+    structureState === 'weak'
+    && ['near_20ma','near_50ma'].includes(pullbackZone)
+    && candleEvidence.hasHistory
+    && candleEvidence.upClosesAfterLow >= 2
+    && (candleEvidence.downsideMomentumSlowing || candleEvidence.tighterRanges || candleEvidence.smallerBodies)
+  ){
+    structureState = trendState === 'strong' ? 'intact' : 'developing_clean';
+  }
   if(alivePullbackGuardBeforeBounce.applied === true && ['weak','weakening','developing_loose'].includes(structureState)){
     structureState = alivePullbackGuardBeforeBounce.structureState;
   }
@@ -25866,9 +25999,29 @@ function deriveSetupStates(card, data, checks, tradePlan){
   }
 
   let stabilisationState = 'none';
-  if((pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') && pullbackStoppedWorsening && !worseningCloses && !worseningHighs && reclaimConfirmed){
+  if(
+    (pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma')
+    && (
+      (pullbackStoppedWorsening && !worseningCloses && !worseningHighs && reclaimConfirmed)
+      || (
+        candleEvidence.hasHistory
+        && candleEvidence.upClosesAfterLow >= 2
+        && candleEvidence.downsideMomentumSlowing
+        && (candleEvidence.tighterRanges || candleEvidence.smallerBodies || candleEvidence.higherLowHold)
+      )
+    )
+  ){
     stabilisationState = 'clear';
-  }else if((pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma') && (pullbackStoppedWorsening || safeChecks.stabilising || (Number.isFinite(perf1w) && perf1w > -1.5))){
+  }else if(
+    (pullbackZone === 'near_20ma' || pullbackZone === 'near_50ma')
+    && (
+      pullbackStoppedWorsening
+      || safeChecks.stabilising
+      || candleEvidence.downsideMomentumSlowing
+      || candleEvidence.higherLowHold
+      || (Number.isFinite(perf1w) && perf1w > -1.5)
+    )
+  ){
     stabilisationState = 'early';
   }
 
@@ -25881,11 +26034,21 @@ function deriveSetupStates(card, data, checks, tradePlan){
     && !worseningHighs
     && stabilisationState === 'clear'
     && supportiveVolume
-    && Number.isFinite(perf1w) && perf1w >= 2
+    && (
+      (Number.isFinite(perf1w) && perf1w >= 2)
+      || (candleEvidence.upClosesAfterLow >= 2 && candleEvidence.reclaimedPriorDayHigh && candleEvidence.reclaimRangeMeaningful)
+    )
   ){
     bounceState = 'confirmed';
   }else if(
-    (safeChecks.bounce || stabilisationState === 'early' || (Number.isFinite(perf1w) && perf1w >= 0) || (alivePullbackGuardBeforeBounce.applied === true && positiveSession))
+    (
+      safeChecks.bounce
+      || stabilisationState === 'early'
+      || candleEvidence.upClosesAfterLow >= 1
+      || candleEvidence.reclaimedPriorDayHigh
+      || (Number.isFinite(perf1w) && perf1w >= 0)
+      || (alivePullbackGuardBeforeBounce.applied === true && positiveSession)
+    )
     && !safeChecks.structureBroken
   ){
     bounceState = 'attempt';
@@ -25954,6 +26117,13 @@ function deriveSetupStates(card, data, checks, tradePlan){
     has_priceable_plan:bouncePriceability.hasPriceablePlan ? 'yes' : 'no',
     unpriceable_block_reason:bouncePriceability.unpriceableBlockReason || '',
     volume_state:volumeState,
+    candle_evidence_up_closes_after_low:candleEvidence.upClosesAfterLow,
+    candle_evidence_reclaimed_prior_day_high:candleEvidence.reclaimedPriorDayHigh ? 'yes' : 'no',
+    candle_evidence_downside_momentum_slowing:candleEvidence.downsideMomentumSlowing ? 'yes' : 'no',
+    candle_evidence_tighter_ranges:candleEvidence.tighterRanges ? 'yes' : 'no',
+    candle_evidence_smaller_bodies:candleEvidence.smallerBodies ? 'yes' : 'no',
+    candle_evidence_higher_low_hold:candleEvidence.higherLowHold ? 'yes' : 'no',
+    candle_evidence_reclaim_range_meaningful:candleEvidence.reclaimRangeMeaningful ? 'yes' : 'no',
     scan_type:scanType,
     evaluation_scan_type:evaluationScanType,
     setup_type_overlap_detected:setupTypeDecision.overlapDetected ? 'yes' : 'no',
@@ -38046,6 +38216,13 @@ function runVerdictCapAudit(options = {}){
       audit_pullback_zone:String(blockers.audit_pullback_zone || derivedStates.pullbackZone || ''),
       audit_stabilisation_state:String(blockers.audit_stabilisation_state || derivedStates.stabilisationState || ''),
       audit_bounce_state:String(blockers.audit_bounce_state || derivedStates.bounceState || ''),
+      audit_candle_up_closes_after_low:numericOrNull(derivedStates.candleEvidenceUpClosesAfterLow),
+      audit_candle_reclaimed_prior_day_high:derivedStates.candleEvidenceReclaimedPriorDayHigh === true,
+      audit_candle_downside_momentum_slowing:derivedStates.candleEvidenceDownsideMomentumSlowing === true,
+      audit_candle_tighter_ranges:derivedStates.candleEvidenceTighterRanges === true,
+      audit_candle_smaller_bodies:derivedStates.candleEvidenceSmallerBodies === true,
+      audit_candle_higher_low_hold:derivedStates.candleEvidenceHigherLowHold === true,
+      audit_candle_reclaim_range_meaningful:derivedStates.candleEvidenceReclaimRangeMeaningful === true,
       audit_plan_state:String(blockers.audit_plan_state || resolved.planStateKey || ''),
       audit_risk_too_wide:!!blockers.audit_risk_too_wide,
       audit_hard_blockers:!!blockers.audit_hard_blockers,

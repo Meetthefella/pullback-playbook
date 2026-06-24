@@ -581,12 +581,24 @@
   function resolveStructureEligibility(ctx = {}){
     const structureState = String(ctx.structureState || '').trim().toLowerCase();
     const trendState = String(ctx.trendState || '').trim().toLowerCase();
+    const bounceState = String(ctx.bounceState || '').trim().toLowerCase();
+    const stabilisationState = String(ctx.stabilisationState || '').trim().toLowerCase();
+    const pullbackZone = String(ctx.pullbackZone || '').trim().toLowerCase();
     const brokenBelowStop = ctx.brokenBelowStop === true;
     const brokenStates = ['broken','invalid','failed'];
     if(brokenBelowStop || brokenStates.includes(structureState) || brokenStates.includes(trendState)){
       return {
         structureEligibility:'broken',
         structureReason:'Structure is broken.'
+      };
+    }
+    const constructiveRepairEvidence = ['attempt','early','confirmed'].includes(bounceState)
+      || ['early','present','clear'].includes(stabilisationState)
+      || ['near_20ma','near_50ma','recently_left_20ma','recently_left_50ma'].includes(pullbackZone);
+    if(['weak','weakening'].includes(structureState) && constructiveRepairEvidence){
+      return {
+        structureEligibility:'messy',
+        structureReason:'Structure is still alive, but messy and needs cleaner repair.'
       };
     }
     if(['weak','weakening','developing_loose'].includes(structureState)){
@@ -796,7 +808,9 @@
     const incompleteInputCount = Object.values(inputCompleteness).filter(flag => flag !== true).length;
     const incompleteInputs = incompleteInputCount > 0;
     const hardInvalidation = structureEligibility === 'broken' || hardTrendBroken || terminalAvoidFlag || hasExplicitInvalidation;
-    const defaultLowPriorityBucket = structureEligibility === 'damaged' || bounceEarly ? 'diminishing' : 'monitor';
+    const structureMessy = structureEligibility === 'messy';
+    const structureAliveLike = structureEligibility === 'alive' || structureMessy;
+    const defaultLowPriorityBucket = structureEligibility === 'damaged' ? 'diminishing' : 'monitor';
     const baseViabilityInputs = {
       structureEligibility,
       structureState,
@@ -900,7 +914,7 @@
       fallingKnifeReject.semanticBlockerCode = 'falling_knife';
       return enrich(fallingKnifeReject);
     }
-    if(isExtended && structureEligibility === 'alive'){
+    if(isExtended && structureAliveLike){
       return enrich(asLowPriority(
         'Trend is strong but extended beyond a safe entry zone.',
         'No low-risk entry is available yet.',
@@ -908,7 +922,7 @@
         'Extended alive low priority'
       ));
     }
-    if(structureEligibility === 'alive' && priceabilityState === 'unpriceable' && !priceabilityInferred){
+    if(structureAliveLike && priceabilityState === 'unpriceable' && !priceabilityInferred){
       return enrich(asLowPriority(
         'Strong trend, but too volatile to price reliably.',
         'Strong trend, but too volatile to price reliably.',
@@ -952,7 +966,15 @@
       ));
     }
     if(planInvalidLabel && !viableRrExists && !bounceUseful){
-      if(structureEligibility === 'alive' && !hardInvalidation){
+      if(structureMessy && !hardInvalidation){
+        return enrich(asLowPriority(
+          'Messy setup - monitor only if repair continues.',
+          'Structure is still alive, but messy and needs cleaner repair.',
+          'messy_invalid_plan_no_bounce_low_priority',
+          'Messy invalid plan no bounce low priority'
+        ));
+      }
+      if(structureAliveLike && !hardInvalidation){
         return enrich(asWatchlist(
           'Structurally alive - waiting for confirmation.',
           'No bounce confirmation yet.',
@@ -977,6 +999,14 @@
       ));
     }
 
+    if(structureMessy && bounceEarly){
+      return enrich(asWatchlist(
+        'Messy but repairable setup - waiting for confirmation.',
+        'Repair is in progress, but the bounce is still early.',
+        'messy_with_early_bounce_watchlist',
+        'Messy structure with early bounce watchlist'
+      ));
+    }
     if(structureEligibility === 'damaged' && bounceEarly){
       return enrich(asLowPriority(
         'Weakening setup - monitor only if it improves.',
@@ -996,12 +1026,14 @@
       ));
     }
 
-    if(structureEligibility === 'alive' && (pullbackOk || bounceEarly || setupScore >= 7)){
+    if(structureAliveLike && (pullbackOk || bounceEarly || setupScore >= 7)){
       return enrich(asWatchlist(
-        'Structurally alive - waiting for confirmation.',
-        noBounce ? 'No bounce confirmation yet.' : 'Needs confirmation before promotion.',
-        'alive_watchlist',
-        'Alive watchlist'
+        structureMessy ? 'Messy but repairable setup - waiting for confirmation.' : 'Structurally alive - waiting for confirmation.',
+        structureMessy
+          ? 'Structure needs cleaner repair before promotion.'
+          : (noBounce ? 'No bounce confirmation yet.' : 'Needs confirmation before promotion.'),
+        structureMessy ? 'messy_watchlist' : 'alive_watchlist',
+        structureMessy ? 'Messy watchlist' : 'Alive watchlist'
       ));
     }
 
@@ -1053,6 +1085,7 @@
     const structureState = String(derivedStates.structureState || '').toLowerCase();
     const trendState = String(derivedStates.trendState || '').toLowerCase();
     const bounceState = String(derivedStates.bounceState || '').toLowerCase();
+    const stabilisationState = String(derivedStates.stabilisationState || '').toLowerCase();
     const marketWeak = !!(
       item.setup && item.setup.marketCaution
       || deps.isHostileMarketStatus((item.meta && item.meta.marketStatus) || deps.state.marketStatus)
@@ -1129,7 +1162,7 @@
     const entryTriggerHit = independentEntryTriggerHit({
       structure_state:structureState,
       trend_state:trendState,
-      stabilisation_state:String(derivedStates.stabilisationState || '').toLowerCase(),
+      stabilisation_state:stabilisationState,
       bounce_state:bounceState,
       pullback_zone:pullbackZone,
       current_price:currentPrice,
@@ -1159,7 +1192,7 @@
       structureState,
       trendState,
       bounceState,
-      stabilisationState:String(derivedStates.stabilisationState || '').toLowerCase(),
+      stabilisationState,
       pullbackZone,
       setupLocationState,
       priceabilityState,
@@ -1190,6 +1223,9 @@
     const rawStructureLayer = resolveStructureEligibility({
       structureState,
       trendState,
+      bounceState,
+      stabilisationState,
+      pullbackZone,
       brokenBelowStop
     });
     const structureLayer = nonTerminalRecoveryBlocker

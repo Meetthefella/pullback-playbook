@@ -71,7 +71,7 @@
     const reviewLifecycleLine1 = String(globalVerdict && globalVerdict.review_lifecycle_line1 || '').trim();
     const reviewLifecycleLine2 = String(globalVerdict && globalVerdict.review_lifecycle_line2 || '').trim();
     const trackPresentationBucket = String(globalVerdict && globalVerdict.track_presentation_bucket || '').trim().toLowerCase();
-    const aliveStructure = structureEligibility === 'alive'
+    const aliveStructure = ['alive','messy'].includes(structureEligibility)
       || ['strong','intact','developing_clean'].includes(structureState);
     const structuralWeakness = ['damaged','broken'].includes(structureEligibility)
       || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
@@ -180,6 +180,12 @@
       return {
         line1:'Trend is weakening - no reliable stop level yet.',
         line2:'Monitor - structure weakening.'
+      };
+    }
+    if(structureEligibility === 'messy'){
+      return {
+        line1:'Structure is still alive, but messy and needs cleaner repair.',
+        line2:'Monitor - wait for a cleaner stabilisation and bounce.'
       };
     }
     if(mainBlocker){

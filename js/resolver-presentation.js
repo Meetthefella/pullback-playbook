@@ -77,7 +77,7 @@
     const tradeabilityOk = options.tradeabilityOk === true;
     const rrOk = options.rrOk === true;
     const planValid = options.planValid === true;
-    const aliveStructure = structureEligibility === 'alive'
+    const aliveStructure = ['alive','messy'].includes(structureEligibility)
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const noReclaimEvidence = reclaimSignalCount === 0 || below50WithoutReclaim;
     const weakWatchDowngradeApplied = verdict === 'watch'
@@ -165,7 +165,7 @@
     const verdictIsWatch = String(details.verdict || '').trim().toLowerCase() === 'watch';
     const structureEligibility = String(details.structureEligibility || '').trim().toLowerCase();
     const structureState = String(details.structureState || '').trim().toLowerCase();
-    const aliveStructure = structureEligibility === 'alive'
+    const aliveStructure = ['alive','messy'].includes(structureEligibility)
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const setupLocationState = String(details.setupLocationState || '').trim().toLowerCase();
     const priceabilityState = String(details.priceabilityState || '').trim().toLowerCase();
@@ -316,6 +316,7 @@
     if(priceabilityState === 'unpriceable') return 'Watch - price is too extended to price reliably.';
     if(viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5)) return 'Watch - setup quality has slipped below useful watchlist quality.';
     if(structureEligibility === 'damaged') return 'Watch - structure weakening.';
+    if(structureEligibility === 'messy') return 'Watch - structure still alive, but messy.';
     return 'Watch - waiting for confirmation.';
   }
 
@@ -446,7 +447,7 @@
       safeRecord && safeRecord.meta && safeRecord.meta.previousFinalVerdict,
       deps
     );
-    const aliveStructure = structureEligibility === 'alive'
+    const aliveStructure = ['alive','messy'].includes(structureEligibility)
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const weakeningButAlive = finalVerdict === 'watch'
       && (
