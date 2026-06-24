@@ -16623,7 +16623,31 @@ function evaluatePlanRealism(record, options = {}){
   const bounceUnclear = ['none','unconfirmed','attempt','early'].includes(bounceState);
   const weakVolume = volumeState === 'weak';
   const lowControl = !!(qualityAdjustments.lowControlSetup || qualityAdjustments.tooWideForQualityPullback);
-  const optimisticTargetFlag = Number.isFinite(rawRr) && rawRr > 3 && (weakStructure || looseStructure || developingSetup || bounceUnclear || weakVolume || hostileMarket || lowControl);
+  const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
+  const displayedTarget = numericOrNull(displayedPlan && displayedPlan.target);
+  const displayedEntry = numericOrNull(displayedPlan && displayedPlan.entry);
+  const displayedRiskPerShare = numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.riskPerShare);
+  const targetProfile = Number.isFinite(displayedEntry)
+    ? targetResistanceProfile(marketData, pullbackZone === 'near_50ma' ? '50MA' : '20MA', {
+      entry:displayedEntry,
+      riskPerShare:displayedRiskPerShare,
+      checks:buildScannerChecks(marketData)
+    })
+    : null;
+  const realisticTarget = numericOrNull(targetProfile && targetProfile.realisticTarget);
+  const extendedTarget = numericOrNull(targetProfile && targetProfile.extendedTarget);
+  const realisticRr = numericOrNull(targetProfile && targetProfile.realisticRr);
+  const targetCapReason = String(targetProfile && targetProfile.targetCapReason || '').trim();
+  const targetStretchPct = Number.isFinite(displayedTarget) && Number.isFinite(realisticTarget) && realisticTarget > 0
+    ? ((displayedTarget - realisticTarget) / realisticTarget)
+    : null;
+  const targetExtendsPastLocalResistance = Number.isFinite(targetStretchPct) && targetStretchPct > 0.03;
+  const optimisticTargetFlag = (
+    Number.isFinite(rawRr) && rawRr > 3 && (weakStructure || looseStructure || developingSetup || bounceUnclear || weakVolume || hostileMarket || lowControl)
+  ) || (
+    targetExtendsPastLocalResistance
+    && (weakStructure || bounceUnclear || hostileMarket || lowControl || !(targetProfile && targetProfile.strongRecovery))
+  );
   const reasons = [];
   const pushReason = value => {
     if(value && !reasons.includes(value)) reasons.push(value);
@@ -16644,15 +16668,18 @@ function evaluatePlanRealism(record, options = {}){
     }
   }else{
     credibleRr = rawRr;
+    if(Number.isFinite(realisticRr) && realisticRr > 0 && optimisticTargetFlag){
+      credibleRr = Math.min(rawRr, realisticRr);
+    }
     if(weakStructure || (optimisticTargetFlag && (bounceUnclear || hostileMarket || lowControl || weakVolume || developingSetup))){
       rrRealism = 'low';
       rrRealismLabel = optimisticTargetFlag ? 'Optimistic' : 'Developing';
-      credibleRr = Math.min(rawRr, 2.5);
+      credibleRr = Math.min(credibleRr, 2.5);
       credibleTargetAssessment = optimisticTargetFlag ? 'Optimistic target for current structure' : 'Low-confidence target';
     }else if(looseStructure || developingSetup || bounceUnclear || weakVolume || hostileMarket || lowControl){
       rrRealism = 'conditional';
       rrRealismLabel = 'Developing';
-      credibleRr = Math.min(rawRr, 3);
+      credibleRr = Math.min(credibleRr, 3);
       credibleTargetAssessment = 'Needs better confirmation before trusting full target';
     }else{
       rrRealism = 'high';
@@ -16662,6 +16689,7 @@ function evaluatePlanRealism(record, options = {}){
   }
 
   if(optimisticTargetFlag) pushReason('Raw RR is high, but target is optimistic for current structure.');
+  if(targetExtendsPastLocalResistance) pushReason('Target stretches beyond recent local resistance.');
   if(weakStructure || looseStructure) pushReason('Weak structure reduces confidence in distant target.');
   if(developingSetup && !weakStructure) pushReason('Developing structure does not yet justify a full recovery target.');
   if(bounceUnclear) pushReason('Wait for better confirmation before trusting full target.');
@@ -16682,6 +16710,12 @@ function evaluatePlanRealism(record, options = {}){
     plan_realism_reason:summary,
     credible_target_assessment:credibleTargetAssessment,
     credible_rr:credibleRr,
+    nearest_resistance:numericOrNull(targetProfile && targetProfile.nearestResistance),
+    realistic_target:realisticTarget,
+    extended_target:extendedTarget,
+    realistic_rr:realisticRr,
+    target_stretch_pct:targetStretchPct,
+    target_cap_reason:targetCapReason,
     reasons:reasons.slice(0, 4)
   };
 }
@@ -23678,6 +23712,102 @@ function nearestPivotTargets(data, price, lookback = 42){
   return [...new Set(pivots.map(value => Number(value.toFixed(2))))].sort((a, b) => a - b);
 }
 
+function pullbackSwingHighCandidate(data, entry, lookback = 42){
+  const rows = Array.isArray(data && data.history) ? data.history : [];
+  if(!rows.length || !Number.isFinite(entry)) return null;
+  const windowRows = rows.slice(0, Math.max(lookback, 8));
+  const lows = windowRows.map(row => numericOrNull(row && (row.low ?? row.close))).filter(Number.isFinite);
+  if(!lows.length) return null;
+  const pullbackLow = Math.min(...lows);
+  const pullbackLowIndex = windowRows.findIndex(row => numericOrNull(row && (row.low ?? row.close)) === pullbackLow);
+  if(pullbackLowIndex <= 0) return null;
+  const preLowRows = windowRows.slice(pullbackLowIndex + 1);
+  const highs = preLowRows
+    .map(row => numericOrNull(row && (row.high ?? row.close)))
+    .filter(Number.isFinite)
+    .filter(value => value > entry);
+  if(!highs.length) return null;
+  return Math.max(...highs);
+}
+
+function targetResistanceProfile(data, scanType, options = {}){
+  const price = numericOrNull(data && data.price);
+  const entry = numericOrNull(options.entry);
+  const riskPerShare = numericOrNull(options.riskPerShare);
+  const checks = options.checks || buildScannerChecks(data || {});
+  const candleEvidence = checks.candleEvidence && typeof checks.candleEvidence === 'object'
+    ? checks.candleEvidence
+    : deriveRecentCandleEvidence(data || {});
+  if(!Number.isFinite(price) || !Number.isFinite(entry)) return null;
+  const scanStyle = scanTypeForEvaluation(scanType);
+  const lookback = scanStyle === '50MA' ? 84 : 42;
+  const pivots = nearestPivotTargets(data, price, lookback);
+  const priorHigh = priorHighTarget(data, scanStyle);
+  const swingHigh = pullbackSwingHighCandidate(data, entry, lookback);
+  const recentAtr = numericOrNull(candleEvidence && candleEvidence.atrRecent);
+  const constructiveBounce = !!(
+    checks.bounce
+    || (candleEvidence.upClosesAfterLow >= 2 && (candleEvidence.reclaimedPriorDayHigh || candleEvidence.latestGreen))
+  );
+  const stabilising = !!(
+    checks.stabilising
+    || candleEvidence.downsideMomentumSlowing
+    || candleEvidence.tighterRanges
+    || candleEvidence.smallerBodies
+  );
+  const strongRecovery = constructiveBounce
+    && stabilising
+    && !checks.structureBroken
+    && (candleEvidence.reclaimedPriorDayHigh || candleEvidence.reclaimRangeMeaningful);
+  const resistanceCandidates = [pivots[0], swingHigh, priorHigh]
+    .map(value => numericOrNull(value))
+    .filter(Number.isFinite)
+    .filter(value => value > entry)
+    .sort((a, b) => a - b);
+  if(!resistanceCandidates.length){
+    return {
+      pivots,
+      priorHigh,
+      swingHigh,
+      nearestResistance:null,
+      minimumMeaningfulTarget:Number.isFinite(riskPerShare)
+        ? entry + (riskPerShare * 1.5)
+        : (Number.isFinite(recentAtr) ? entry + (recentAtr * 0.75) : null),
+      realisticTarget:null,
+      extendedTarget:null,
+      realisticRr:null,
+      strongRecovery,
+      targetCapReason:'No nearby overhead resistance found; first target uses fallback recovery logic.'
+    };
+  }
+  const minimumMeaningfulTarget = Number.isFinite(riskPerShare)
+    ? entry + (riskPerShare * (strongRecovery ? 1.75 : 1.5))
+    : (Number.isFinite(recentAtr) ? entry + (recentAtr * (strongRecovery ? 1 : 0.75)) : null);
+  const nearestResistance = resistanceCandidates[0];
+  const extendedTarget = resistanceCandidates.find((level, index) => (
+    index > 0
+    && (!Number.isFinite(minimumMeaningfulTarget) || level >= minimumMeaningfulTarget * 0.985)
+  )) || null;
+  const realisticTarget = nearestResistance;
+  const realisticRr = Number.isFinite(riskPerShare) && riskPerShare > 0 && Number.isFinite(realisticTarget)
+    ? (realisticTarget - entry) / riskPerShare
+    : null;
+  return {
+    pivots,
+    priorHigh,
+    swingHigh,
+    nearestResistance,
+    minimumMeaningfulTarget,
+    realisticTarget,
+    extendedTarget,
+    realisticRr,
+    strongRecovery,
+    targetCapReason:Number.isFinite(extendedTarget) && Number.isFinite(minimumMeaningfulTarget) && nearestResistance < minimumMeaningfulTarget
+      ? 'First target capped at nearest real resistance; farther resistance stays context only.'
+      : 'First target capped at nearest real resistance.'
+  };
+}
+
 function realisticFirstTarget(data, scanType, options = {}){
   const price = numericOrNull(data && data.price);
   const entry = numericOrNull(options.entry);
@@ -23688,23 +23818,31 @@ function realisticFirstTarget(data, scanType, options = {}){
   const perf1w = numericOrNull(data && data.perf1w);
   if(!Number.isFinite(price) || !Number.isFinite(entry)) return null;
   const scanStyle = scanTypeForEvaluation(scanType);
-  const pivots = nearestPivotTargets(data, price, scanStyle === '50MA' ? 84 : 42);
-  const nearestPivot = pivots.find(level => level > entry);
-  const priorHigh = priorHighTarget(data, scanStyle);
+  const resistance = targetResistanceProfile(data, scanStyle, {
+    entry,
+    riskPerShare,
+    checks
+  }) || {};
+  const nearestPivot = numericOrNull(resistance.nearestResistance);
+  const priorHigh = numericOrNull(resistance.priorHigh);
+  const swingHigh = numericOrNull(resistance.swingHigh);
+  const realisticTarget = numericOrNull(resistance.realisticTarget);
   const above20 = Number.isFinite(price) && Number.isFinite(sma20) && price >= sma20;
   const above50 = Number.isFinite(price) && Number.isFinite(sma50) && price >= sma50;
   const strongStructure = !!(checks.trendStrong && above20 && above50 && Number.isFinite(perf1w) && perf1w >= 2);
   const confirmationStrong = !!(checks.bounce && above20 && Number.isFinite(perf1w) && perf1w >= 2);
   const weakOrEarly = !strongStructure || !confirmationStrong || !!checks.structureBroken;
-  const conservativeCap = Number.isFinite(riskPerShare) ? entry + (riskPerShare * (weakOrEarly ? 2 : 3)) : null;
+  const conservativeCap = Number.isFinite(riskPerShare) ? entry + (riskPerShare * (weakOrEarly ? 2.25 : 3.25)) : null;
   const modestRecovery = Number.isFinite(riskPerShare) ? entry + (riskPerShare * 2) : (entry * (weakOrEarly ? 1.03 : 1.05));
   if(weakOrEarly){
-    if(Number.isFinite(nearestPivot)) return nearestPivot;
+    if(Number.isFinite(realisticTarget)) return realisticTarget;
     if(Number.isFinite(conservativeCap)) return conservativeCap;
-    if(Number.isFinite(priorHigh)) return Math.min(priorHigh, Number.isFinite(modestRecovery) ? modestRecovery : priorHigh);
+    if(Number.isFinite(swingHigh)) return swingHigh;
+    if(Number.isFinite(priorHigh)) return priorHigh;
     return modestRecovery;
   }
-  if(Number.isFinite(nearestPivot)) return nearestPivot;
+  if(Number.isFinite(realisticTarget)) return realisticTarget;
+  if(Number.isFinite(swingHigh)) return swingHigh;
   if(Number.isFinite(priorHigh)) return priorHigh;
   if(Number.isFinite(conservativeCap)) return conservativeCap;
   return modestRecovery;
@@ -25010,6 +25148,22 @@ async function refreshCardMarketDataFromSnapshot(ticker, data, options = {}){
     ...currentRiskSettings()
   });
   const rewardRisk = evaluateRewardRisk(tradePlan.entry, tradePlan.stop, tradePlan.target);
+  const scannerPlanRealism = evaluatePlanRealism({
+    marketData:safeData,
+    meta:{marketStatus:state.marketStatus}
+  }, {
+    displayedPlan:deriveCurrentPlanState(tradePlan.entry, tradePlan.stop, tradePlan.target, safeData.currency),
+    derivedStates:{
+      structureState:derivedStates.structure_state,
+      trendState:derivedStates.trend_state,
+      bounceState:derivedStates.bounce_state,
+      stabilisationState:derivedStates.stabilisation_state,
+      volumeState:derivedStates.volume_state,
+      pullbackZone:derivedStates.pullback_zone
+    },
+    displayStage:'Watch',
+    setupState:'developing'
+  });
   const technicalValid = scan.status !== 'Avoid';
   const chartVerdict = suitability
     ? determineScannerVerdict({
@@ -25092,6 +25246,20 @@ async function refreshCardMarketDataFromSnapshot(ticker, data, options = {}){
     rr_ratio:Number.isFinite(rewardRisk.rrRatio) ? rewardRisk.rrRatio.toFixed(2) : '',
     rr_state:rewardRisk.rrState,
     first_target_too_close:rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false,
+    target_profile:{
+      nearestResistance:numericOrNull(scannerPlanRealism.nearest_resistance ?? scannerPlanRealism.realistic_target),
+      extendedTarget:numericOrNull(scannerPlanRealism.extended_target),
+      realisticTarget:numericOrNull(scannerPlanRealism.realistic_target),
+      realisticRr:numericOrNull(scannerPlanRealism.realistic_rr),
+      targetStretchPct:numericOrNull(scannerPlanRealism.target_stretch_pct),
+      targetCapReason:String(scannerPlanRealism.target_cap_reason || '')
+    },
+    nearest_resistance:Number.isFinite(numericOrNull(scannerPlanRealism.nearest_resistance ?? scannerPlanRealism.realistic_target)) ? Number(numericOrNull(scannerPlanRealism.nearest_resistance ?? scannerPlanRealism.realistic_target)).toFixed(2) : '',
+    extended_target:Number.isFinite(numericOrNull(scannerPlanRealism.extended_target)) ? Number(numericOrNull(scannerPlanRealism.extended_target)).toFixed(2) : '',
+    realistic_target:Number.isFinite(numericOrNull(scannerPlanRealism.realistic_target)) ? Number(numericOrNull(scannerPlanRealism.realistic_target)).toFixed(2) : '',
+    realistic_rr:Number.isFinite(numericOrNull(scannerPlanRealism.realistic_rr)) ? Number(numericOrNull(scannerPlanRealism.realistic_rr)).toFixed(2) : '',
+    target_stretch_pct:Number.isFinite(numericOrNull(scannerPlanRealism.target_stretch_pct)) ? Number((numericOrNull(scannerPlanRealism.target_stretch_pct) * 100).toFixed(1)) : '',
+    target_cap_reason:String(scannerPlanRealism.target_cap_reason || ''),
     position_size:Number.isFinite(riskFit.position_size) ? riskFit.position_size : 0,
     reward_risk:Number.isFinite(rewardRisk.rrRatio) ? rewardRisk.rrRatio.toFixed(2) : '',
     quality_score:suitability ? suitability.total : scan.score,
@@ -34985,6 +35153,10 @@ function renderReviewWorkspace(options = {}){
               <div><label>Credible RR</label><input id="credibleRrBox" readonly value="${escapeHtml(credibleRrDisplay)}" /></div>
               <div><label>Optimistic Target</label><input id="optimisticTargetBox" readonly value="${escapeHtml(planRealism.optimistic_target_flag ? 'Yes' : 'No')}" /></div>
               <div><label>Target Assessment</label><input id="targetAssessmentBox" readonly value="${escapeHtml(planRealism.credible_target_assessment)}" /></div>
+              <div><label>Realistic Target</label><input id="realisticTargetBox" readonly value="${escapeHtml(Number.isFinite(planRealism.realistic_target) ? fmtPrice(Number(planRealism.realistic_target)) : 'N/A')}" /></div>
+              <div><label>Extended Target</label><input id="extendedTargetBox" readonly value="${escapeHtml(Number.isFinite(planRealism.extended_target) ? `${fmtPrice(Number(planRealism.extended_target))} (context only)` : 'N/A')}" /></div>
+              <div><label>Target Stretch %</label><input id="targetStretchBox" readonly value="${escapeHtml(Number.isFinite(planRealism.target_stretch_pct) ? `${Number(planRealism.target_stretch_pct * 100).toFixed(1)}%` : 'N/A')}" /></div>
+              <div><label>Target Cap Reason</label><input id="targetCapReasonBox" readonly value="${escapeHtml(planRealism.target_cap_reason || 'N/A')}" /></div>
               <div><label>Plan Source</label><input id="planSourceBox" readonly value="${escapeHtml(planSourceForDiagnostics(record, effectivePlan))}" /></div>
               <div><label>Trigger State</label><input id="triggerStateBox" readonly value="${escapeHtml(triggerStateLabel(record.plan.triggerState))}" /></div>
               <div><label>Plan Check</label><input id="planValidationBox" readonly value="${escapeHtml(planValidationStateLabel(planCheckState))}" /></div>
@@ -35552,7 +35724,7 @@ function resetReview(){
   uiState.activeReviewTicker = '';
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
-  ['selectedTicker','planStateBox','planQualityBox','planSourceBox','exitModeBox','targetReviewStateBox','targetAlertBox','rrRealismBox','credibleRrBox','optimisticTargetBox','targetAssessmentBox','entryPrice','stopPrice','targetPrice'].forEach(id => { if($(id)) $(id).value = ''; });
+  ['selectedTicker','planStateBox','planQualityBox','planSourceBox','exitModeBox','targetReviewStateBox','targetAlertBox','rrRealismBox','credibleRrBox','optimisticTargetBox','targetAssessmentBox','realisticTargetBox','extendedTargetBox','targetStretchBox','targetCapReasonBox','entryPrice','stopPrice','targetPrice'].forEach(id => { if($(id)) $(id).value = ''; });
   checklistIds.forEach(id => {
     const input = $(id);
     if(input) input.checked = false;
@@ -35748,6 +35920,10 @@ function syncPlanDisplayMeta(options = {}){
   if($('credibleRrBox')) $('credibleRrBox').value = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   if($('optimisticTargetBox')) $('optimisticTargetBox').value = planRealism.optimistic_target_flag ? 'Yes' : 'No';
   if($('targetAssessmentBox')) $('targetAssessmentBox').value = planRealism.credible_target_assessment || 'N/A';
+  if($('realisticTargetBox')) $('realisticTargetBox').value = Number.isFinite(planRealism.realistic_target) ? fmtPrice(Number(planRealism.realistic_target)) : 'N/A';
+  if($('extendedTargetBox')) $('extendedTargetBox').value = Number.isFinite(planRealism.extended_target) ? `${fmtPrice(Number(planRealism.extended_target))} (context only)` : 'N/A';
+  if($('targetStretchBox')) $('targetStretchBox').value = Number.isFinite(planRealism.target_stretch_pct) ? `${Number(planRealism.target_stretch_pct * 100).toFixed(1)}%` : 'N/A';
+  if($('targetCapReasonBox')) $('targetCapReasonBox').value = planRealism.target_cap_reason || 'N/A';
   if(planSourceBox) planSourceBox.value = planSourceForDiagnostics(record, effectivePlan);
   if(exitModeBox) exitModeBox.value = executionModeLabel(executionState.exitMode);
   if(triggerStateBox) triggerStateBox.value = triggerStateLabel(record.plan.triggerState);

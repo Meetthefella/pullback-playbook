@@ -146,6 +146,14 @@
     addStep('plan validation', planValidation || '(none)');
     addStep('plan adjustment block', hasPlanAdjustmentBlock ? 'true' : 'false');
     addStep('rr realism', `${planRealism.rr_realism_label || 'Unavailable'} | ${planRealism.credible_target_assessment || 'n/a'}`);
+    addStep('target profile', [
+      Number.isFinite(firstFiniteNumber(planRealism.nearest_resistance, planRealism.realistic_target)) ? `nearest=${deps.fmtPrice(firstFiniteNumber(planRealism.nearest_resistance, planRealism.realistic_target))}` : 'nearest=n/a',
+      Number.isFinite(planRealism.realistic_target) ? `first=${deps.fmtPrice(planRealism.realistic_target)}` : 'first=n/a',
+      Number.isFinite(planRealism.extended_target) ? `extended=${deps.fmtPrice(planRealism.extended_target)}` : 'extended=n/a',
+      Number.isFinite(planRealism.realistic_rr) ? `firstRR=${Number(planRealism.realistic_rr).toFixed(2)}R` : 'firstRR=n/a',
+      Number.isFinite(planRealism.target_stretch_pct) ? `stretch=${Number(planRealism.target_stretch_pct * 100).toFixed(1)}%` : 'stretch=n/a',
+      `cap=${planRealism.target_cap_reason || 'n/a'}`
+    ].join(' | '));
     addStep('effective plan RR', planValidation === 'missing' || planValidation === 'invalid' ? 'rr=n/a' : (Number.isFinite(rrValue) ? `rr=${Number(rrValue).toFixed(2)}` : 'rr=n/a'));
     if(planRealism.optimistic_target_flag) addStep('target realism flag', 'first target too optimistic');
     if(item.setup.marketCaution) addReason('hostile_market');
@@ -310,6 +318,14 @@
       warnings,
       derivedStates,
       rrCategory,
+      targetProfile:{
+        nearestResistance:firstFiniteNumber(planRealism.nearest_resistance, planRealism.realistic_target),
+        realisticTarget:firstFiniteNumber(planRealism.realistic_target),
+        extendedTarget:firstFiniteNumber(planRealism.extended_target),
+        realisticRr:firstFiniteNumber(planRealism.realistic_rr),
+        targetStretchPct:firstFiniteNumber(planRealism.target_stretch_pct),
+        targetCapReason:String(planRealism.target_cap_reason || '')
+      },
       structureQuality,
       isStructureValid,
       hasPlanAdjustmentBlock,
@@ -410,6 +426,12 @@
       {label:'Effective Plan RR', value:globalVerdict.rr_known && Number.isFinite(globalVerdict.resolvedRR) ? Number(globalVerdict.resolvedRR).toFixed(2) : 'n/a'},
       {label:'Scanner Estimated RR', value:Number.isFinite(resolution.rr_value) ? Number(resolution.rr_value).toFixed(2) : 'n/a'},
       {label:'RR Confidence', value:resolution.rr_label || '(none)'},
+      {label:'Nearest Resistance', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.nearestResistance) ? deps.fmtPrice(Number(resolution.targetProfile.nearestResistance)) : 'n/a'},
+      {label:'First Realistic Target', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.realisticTarget) ? deps.fmtPrice(Number(resolution.targetProfile.realisticTarget)) : 'n/a'},
+      {label:'Extended Target', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.extendedTarget) ? `${deps.fmtPrice(Number(resolution.targetProfile.extendedTarget))} (context only)` : 'n/a'},
+      {label:'First-Target RR', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.realisticRr) ? `${Number(resolution.targetProfile.realisticRr).toFixed(2)}R` : 'n/a'},
+      {label:'Target Stretch %', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.targetStretchPct) ? `${Number(resolution.targetProfile.targetStretchPct * 100).toFixed(1)}%` : 'n/a'},
+      {label:'Target Cap Reason', value:resolution.targetProfile && resolution.targetProfile.targetCapReason ? resolution.targetProfile.targetCapReason : '(none)'},
       {label:'Capital Fit', value:(view && view.planUiState && view.planUiState.capitalFitLabel) || '(none)'},
       {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
     ], deps);
@@ -510,6 +532,12 @@
       {label:'Effective Plan RR', value:globalVerdict.rr_known && Number.isFinite(globalVerdict.resolvedRR) ? Number(globalVerdict.resolvedRR).toFixed(2) : 'n/a'},
       {label:'Scanner Estimated RR', value:Number.isFinite(resolution.rr_value) ? Number(resolution.rr_value).toFixed(2) : 'n/a'},
       {label:'RR Confidence', value:resolution.rr_label || '(none)'},
+      {label:'Nearest Resistance', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.nearestResistance) ? deps.fmtPrice(Number(resolution.targetProfile.nearestResistance)) : 'n/a'},
+      {label:'First Realistic Target', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.realisticTarget) ? deps.fmtPrice(Number(resolution.targetProfile.realisticTarget)) : 'n/a'},
+      {label:'Extended Target', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.extendedTarget) ? `${deps.fmtPrice(Number(resolution.targetProfile.extendedTarget))} (context only)` : 'n/a'},
+      {label:'First-Target RR', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.realisticRr) ? `${Number(resolution.targetProfile.realisticRr).toFixed(2)}R` : 'n/a'},
+      {label:'Target Stretch %', value:resolution.targetProfile && Number.isFinite(resolution.targetProfile.targetStretchPct) ? `${Number(resolution.targetProfile.targetStretchPct * 100).toFixed(1)}%` : 'n/a'},
+      {label:'Target Cap Reason', value:resolution.targetProfile && resolution.targetProfile.targetCapReason ? resolution.targetProfile.targetCapReason : '(none)'},
       {label:'Capital Fit', value:(view && view.planUiState && view.planUiState.capitalFitLabel) || '(none)'},
       {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
     ], deps);

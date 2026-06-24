@@ -35,6 +35,7 @@ runBrowserModule('js/presentation/simplified-presentation-model.js');
 runBrowserModule('js/domain/simplified-trade-state.js');
 runBrowserModule('js/scanner-view.js');
 runBrowserModule('js/scanner-results-support.js');
+runBrowserModule('js/scanner-debug.js');
 runBrowserModule('js/services/tracked-state-service.js');
 
 const resolverCore = sandbox.window.ResolverCore;
@@ -283,6 +284,159 @@ function runScanPresentationAssertions(){
 }
 
 runScanPresentationAssertions();
+
+function runScannerTargetObservabilityAssertions(){
+  const scannerDebug = sandbox.window.ScannerDebug;
+  if(!scannerDebug || typeof scannerDebug.resolveScannerStateWithTrace !== 'function'){
+    throw new Error('Scanner debug helper is unavailable.');
+  }
+  const item = {
+    ticker:'OBS',
+    marketData:{price:100.9, ma20:100.1, ma50:98.7, ma200:92, rsi:54},
+    scan:{setupOrigin:'scanner', scanType:'20MA'},
+    setup:{marketCaution:false},
+    plan:{firstTargetTooClose:true},
+    meta:{companyName:'Observability Inc', exchange:'NASDAQ'}
+  };
+  const baseView = {
+    item,
+    displayedPlan:{tradeability:'watch'},
+    setupUiState:{state:'developing'},
+    planUiState:{state:'needs_adjustment', label:'Needs adjustment', capitalFitLabel:'Acceptable'},
+    displayStage:'Watch',
+    warningState:null,
+    setupScore:5,
+    positionSize:10,
+    rrValue:1.2
+  };
+  const derivedStates = {
+    structureState:'intact',
+    pullbackZone:'near_20ma',
+    stabilisationState:'early',
+    bounceState:'attempt',
+    volumeState:'neutral'
+  };
+  const deps = {
+    normalizeTickerRecord(record){ return record; },
+    evaluatePlanRealism(){
+      return {
+        rr_realism_label:'Optimistic',
+        credible_target_assessment:'Target is beyond nearby resistance.',
+        optimistic_target_flag:true,
+        nearest_resistance:102.4,
+        realistic_target:102.4,
+        extended_target:105.8,
+        realistic_rr:1.2,
+        target_stretch_pct:0.074,
+        target_cap_reason:'First target capped at nearest real resistance; farther resistance stays context only.'
+      };
+    },
+    numericOrNull(value){
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    fmtPrice(value){ return Number(value).toFixed(2); },
+    normalizeScanType(value){ return String(value || 'unknown'); },
+    currentSetupType(){ return '20MA'; },
+    resolveEmojiPresentation(){ return {}; },
+    resolveGlobalVerdict(){
+      return {
+        base_verdict:'watch',
+        final_verdict:'watch',
+        bucket:'monitor',
+        tone:'monitor',
+        badge:{text:'Watch'},
+        entry_gate_pass:false,
+        near_entry_gate_pass:false,
+        rr_known:true,
+        resolvedRR:1.2,
+        structure_state:'intact',
+        bounce_state:'attempt',
+        market_regime:'supportive',
+        lifecycle:'watchlist',
+        allow_plan:true
+      };
+    },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      return safe || 'watch';
+    },
+    normalizeVerdict(value){ return String(value || '').trim().toLowerCase(); },
+    globalVerdictLabel(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    },
+    getBucket(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'avoid') return 'avoid';
+      if(safe === 'near_entry') return 'near_entry';
+      return 'monitor';
+    },
+    normalizeAnalysisVerdict(value){ return String(value || 'Watch'); },
+    getActions(){ return {label:'Wait', detail:'No promotion'}; },
+    escapeHtml(value){ return String(value || ''); }
+  };
+  const resolution = scannerDebug.resolveScannerStateWithTrace(item, {
+    baseView,
+    derivedStates,
+    rrCategory:'stretched',
+    structureQuality:'developing_clean'
+  }, deps);
+  if(!resolution.targetProfile || Number(resolution.targetProfile.realisticTarget) !== 102.4 || Number(resolution.targetProfile.extendedTarget) !== 105.8){
+    throw new Error('Scanner debug resolution must expose first-target and extended-target context separately.');
+  }
+  if(!(Number(resolution.targetProfile.realisticRr) < 1.5)){
+    throw new Error('Scanner debug resolution must preserve weak first-target RR when nearer resistance is too close.');
+  }
+  const markup = scannerDebug.renderScannerDecisionTraceContent({
+    item,
+    scannerResolution:resolution,
+    planUiState:baseView.planUiState
+  }, {
+    ...deps,
+    resolveVisualState(){ return null; }
+  });
+  if(!/First Realistic Target/.test(markup) || !/Extended Target/.test(markup) || !/context only/.test(markup) || !/Target Cap Reason/.test(markup)){
+    throw new Error('Scanner debug rendering must show first-target vs extended-target context explicitly.');
+  }
+  const weakFirstTargetPromotion = resolverCore.canPromoteToNearEntry({
+    structure_state:'intact',
+    trend_state:'uptrend',
+    bounce_state:'attempt',
+    stabilisation_state:'early',
+    pullback_zone:'near_20ma',
+    market_regime:'supportive',
+    volume_state:'normal',
+    plan_visible:true,
+    plan_status:'valid',
+    plan_blocked:false,
+    has_entry:true,
+    has_stop:true,
+    entry:100,
+    stop:98,
+    target:102.4,
+    rr:1.2,
+    credible_rr:1.2,
+    tradeability:'watch',
+    pullback_valid:true,
+    entry_trigger_hit:false,
+    stop_distance_too_wide:false,
+    capital_fit:'acceptable',
+    affordability:'affordable',
+    price_below_50ma:false,
+    price_below_200ma:false,
+    ma50_below_200ma:false,
+    terminal_avoid_applied:false
+  });
+  if(weakFirstTargetPromotion.pass === true){
+    throw new Error('Farther extended target context must not allow Near Entry promotion when first-target RR remains weak.');
+  }
+}
+
+runScannerTargetObservabilityAssertions();
 
 function extractFunctionSource(source, functionName){
   const start = source.indexOf(`function ${functionName}`);
@@ -5228,6 +5382,10 @@ function runPlanSemanticsAssertions(){
   const sandbox = {
     console,
     state:{marketStatus:''},
+    average(values){
+      const list = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);
+      return list.length ? list.reduce((sum, value) => sum + value, 0) / list.length : null;
+    },
     numericOrNull:value => {
       if(value === null || value === undefined) return null;
       if(typeof value === 'string' && value.trim() === '') return null;
@@ -5254,6 +5412,7 @@ function runPlanSemanticsAssertions(){
     evaluateCapitalFit:() => ({capital_fit:'acceptable', capital_ok:true, position_cost:800, position_cost_gbp:800}),
     deriveTradeability:(status, riskStatus) => status === 'valid' && riskStatus === 'fits_risk' ? 'tradable' : 'invalid',
     deriveAffordability:() => 'affordable',
+    scanTypeForEvaluation:value => String(value || '20MA'),
     analysisDerivedStatesFromRecord:() => ({structureState:'intact', trendState:'uptrend', bounceState:'none', pullbackZone:'near_50ma', stabilisationState:'none', volumeState:'neutral'}),
     actionableRrValueForPlan:plan => plan && plan.status === 'valid' && plan.rewardRisk && plan.rewardRisk.valid ? plan.rewardRisk.rrRatio : null,
     evaluateSetupQualityAdjustments:() => ({weakRegimePenalty:false, lowControlSetup:false, tooWideForQualityPullback:false}),
@@ -5272,6 +5431,15 @@ function runPlanSemanticsAssertions(){
     'deriveCurrentPlanState',
     'planUiClass',
     'getPlanUiState',
+    'isNearLevel',
+    'deriveRecentCandleEvidence',
+    'buildScannerChecks',
+    'priorHighTarget',
+    'nearestPivotTargets',
+    'pullbackSwingHighCandidate',
+    'targetResistanceProfile',
+    'realisticFirstTarget',
+    'deriveTradePlan',
     'evaluatePlanRealism'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});
@@ -5303,6 +5471,111 @@ function runPlanSemanticsAssertions(){
   if(sandbox.planSourceForDiagnostics(validManualRecord, validEffective) !== 'manual' || validState.status !== 'valid'){
     throw new Error('Complete manual plan must remain manual and use normal validation math.');
   }
+
+  const targetHistory = [
+    {date:'2026-06-24', open:101, high:102, low:100, close:101.8, volume:1200000},
+    {date:'2026-06-23', open:100, high:101, low:99, close:100.7, volume:1100000},
+    {date:'2026-06-20', open:99.5, high:100.5, low:98.8, close:99.9, volume:1000000},
+    {date:'2026-06-19', open:98.7, high:99.4, low:97.5, close:98.5, volume:980000},
+    {date:'2026-06-18', open:98.4, high:98.9, low:96.8, close:97.4, volume:1050000},
+    {date:'2026-06-17', open:100.8, high:104.6, low:100.2, close:103.8, volume:1300000},
+    {date:'2026-06-16', open:101.2, high:103.9, low:100.6, close:102.4, volume:1250000},
+    {date:'2026-06-13', open:100.6, high:102.1, low:99.8, close:101.1, volume:1180000}
+  ];
+  const targetData = {
+    price:101.8,
+    sma20:100.4,
+    sma50:99.2,
+    sma200:92,
+    perf1w:0.8,
+    perf3m:14,
+    volume:1200000,
+    avgVolume30d:1050000,
+    history:targetHistory
+  };
+  const estimatedPlan = sandbox.deriveTradePlan(targetData, '20MA');
+  if(Math.abs(Number(estimatedPlan.target) - 104.6) > 0.01){
+    throw new Error(`Estimated first target should anchor to recent swing resistance at 104.60, got ${estimatedPlan.target}.`);
+  }
+  if(!(Number(estimatedPlan.target) > Number(estimatedPlan.entry))){
+    throw new Error('Estimated first target must stay above entry when anchored to recent swing resistance.');
+  }
+
+  const dualResistanceHistory = [
+    {date:'2026-06-24', open:100.6, high:101.2, low:100.1, close:100.9, volume:1200000},
+    {date:'2026-06-23', open:100.2, high:100.8, low:99.7, close:100.4, volume:1100000},
+    {date:'2026-06-20', open:100.7, high:102.4, low:100.1, close:101.8, volume:1260000},
+    {date:'2026-06-19', open:99.8, high:100.4, low:99.1, close:99.9, volume:1080000},
+    {date:'2026-06-18', open:99.1, high:99.9, low:98.4, close:99, volume:1060000},
+    {date:'2026-06-17', open:98.8, high:99.4, low:97.9, close:98.3, volume:1040000},
+    {date:'2026-06-16', open:102.2, high:105.8, low:101.6, close:104.9, volume:1300000},
+    {date:'2026-06-13', open:101.4, high:103.1, low:100.9, close:102.5, volume:1220000}
+  ];
+  const dualResistanceData = {
+    price:100.9,
+    sma20:100.1,
+    sma50:98.7,
+    sma200:92,
+    perf1w:0.4,
+    perf3m:11,
+    volume:1200000,
+    avgVolume30d:1050000,
+    history:dualResistanceHistory
+  };
+  const dualResistanceProfile = sandbox.targetResistanceProfile(dualResistanceData, '20MA', {
+    entry:100,
+    riskPerShare:2,
+    checks:sandbox.buildScannerChecks(dualResistanceData)
+  });
+  if(Math.abs(Number(dualResistanceProfile.realisticTarget) - 102.4) > 0.01){
+    throw new Error(`Nearest resistance must remain the first realistic target. Got ${dualResistanceProfile.realisticTarget}.`);
+  }
+  if(!(Number(dualResistanceProfile.realisticRr) < 1.5)){
+    throw new Error('Nearest resistance should preserve weak RR when it sits below the minimum meaningful target.');
+  }
+  if(Math.abs(Number(dualResistanceProfile.extendedTarget) - 105.8) > 0.01){
+    throw new Error(`Farther resistance should only be exposed as extended context. Got ${dualResistanceProfile.extendedTarget}.`);
+  }
+  const dualResistancePlan = sandbox.deriveTradePlan(dualResistanceData, '20MA');
+  if(Math.abs(Number(dualResistancePlan.target) - 102.4) > 0.01){
+    throw new Error(`Derived plan must keep the nearest resistance as the first target. Got ${dualResistancePlan.target}.`);
+  }
+  if(!(Number(dualResistancePlan.rr) < 1.5)){
+    throw new Error('Derived plan must preserve weak RR when the nearest resistance is too close.');
+  }
+
+  const optimisticPlanRecord = {
+    ticker:'TARGET',
+    plan:{entry:100, stop:98, firstTarget:110, source:'manual'},
+    review:{manualReview:null},
+    scan:{resolvedVerdict:'Watch'},
+    meta:{marketStatus:'S&P above 50 MA'},
+    marketData:{
+      ...targetData,
+      price:101,
+      currency:'USD'
+    },
+    derivedStates:{
+      structureState:'intact',
+      trendState:'uptrend',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      stabilisationState:'early',
+      volumeState:'neutral'
+    }
+  };
+  const optimisticPlanState = sandbox.deriveCurrentPlanState(100, 98, 110, 'USD');
+  const optimisticPlanRealism = sandbox.evaluatePlanRealism(optimisticPlanRecord, {
+    displayedPlan:optimisticPlanState,
+    derivedStates:optimisticPlanRecord.derivedStates
+  });
+  if(optimisticPlanRealism.optimistic_target_flag !== true || optimisticPlanRealism.rr_realism_label !== 'Optimistic'){
+    throw new Error('Target beyond nearby resistance on an early repair setup must be flagged as optimistic.');
+  }
+  if(!(Number(optimisticPlanRealism.credible_rr) < Number(optimisticPlanRealism.raw_rr))){
+    throw new Error('Credible RR must be clipped below raw RR when the first target stretches beyond local resistance.');
+  }
+
   const validPricesWithoutConfirmation = {
     structure_state:'intact',
     trend_state:'uptrend',

@@ -228,8 +228,28 @@ To improve decisions, the scanner should pull or derive more context from recent
 3. Narrow `watch -> diminishing` so it reflects genuine deterioration, not just missing priceability.
 4. Revisit target logic so first-target RR is not artificially cramped on otherwise valid pullbacks.
 
+## Phase 1 implementation addendum
+
+The audit above remains the reasoning checkpoint. Phase 1 code work is now implemented on top of it.
+
+### Implemented
+
+1. Richer bounce and stabilisation evidence now comes from recent daily candles rather than relying mainly on one-week performance.
+2. `weak` and `weakening` no longer collapse straight into `damaged` when there is constructive repair evidence; they can stay `messy`.
+3. `watch -> diminishing` is now narrower and focuses on actual deterioration rather than punishing early repair states, missing plan alone, or bounce-attempt labels by themselves.
+4. Scanner first-target estimation and plan realism now use recent local resistance more explicitly:
+   - nearest pivot resistance
+   - recent pre-pullback swing high
+   - prior high context
+   - realistic RR clipping when a displayed target stretches beyond local resistance on an early or weak repair
+
+### Net Phase 1 outcome
+
+- `broken` still stays terminal.
+- genuinely damaged or deteriorating setups can still fall into `diminishing` or worse.
+- alive or messy repair attempts near support can remain monitor/watch while they stabilise.
+- target realism is less likely to be distorted by a generic cap or by a target that ignores nearby resistance.
+
 ## Safe point for context compaction
 
-This document is the safe checkpoint for the current audit state.
-
-No behaviour has been changed here. This is analysis only, based on the current code after `d0e153f`.
+This document is now the audit record plus the Phase 1 completion addendum.
