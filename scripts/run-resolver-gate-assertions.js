@@ -3519,19 +3519,108 @@ function runSimplifiedPipelineAssertions(){
         reclaim_signal_count:1
       }
     },
-    setupScore:2
+    setupScore:5
   }, weakWatchReasonDeps);
-  if(bounceAttemptOnlyVisual.canonicalVerdict !== 'watch' || bounceAttemptOnlyVisual.visualBucket !== 'diminishing' || bounceAttemptOnlyVisual.tone !== 'diminishing'){
-    throw new Error('Bounce-attempt-only weak Watch must render as Diminishing.');
+  if(bounceAttemptOnlyVisual.canonicalVerdict !== 'watch' || bounceAttemptOnlyVisual.visualBucket !== 'monitor' || bounceAttemptOnlyVisual.tone !== 'monitor'){
+    throw new Error('Bounce-attempt-only alive repairing Watch must remain Monitor.');
   }
-  if(!String(bounceAttemptOnlyVisual.weakWatchDiminishingReason || '').includes('bounce_attempt_only') || /below50_no_reclaim/.test(bounceAttemptOnlyVisual.weakWatchDiminishingReason || '')){
-    throw new Error('Bounce-attempt-only weak Watch must use the bounce_attempt_only reason token without claiming below50_no_reclaim.');
+  if(bounceAttemptOnlyVisual.weakWatchDiminishingApplied !== false || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.applied !== false){
+    throw new Error('Bounce-attempt-only alone must not independently force diminishing.');
   }
-  if(!bounceAttemptOnlyVisual.weakWatchDiminishingTrace || !Array.isArray(bounceAttemptOnlyVisual.weakWatchDiminishingTrace.triggerTokens) || !bounceAttemptOnlyVisual.weakWatchDiminishingTrace.triggerTokens.includes('bounce_attempt_only') || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.evaluatedBeforeFinalMonitorFallback !== true){
-    throw new Error('Bounce-attempt-only weak Watch must expose the bounce_attempt_only trace token before final monitor fallback.');
+  if(!bounceAttemptOnlyVisual.weakWatchDiminishingTrace || !Array.isArray(bounceAttemptOnlyVisual.weakWatchDiminishingTrace.triggerTokens) || !bounceAttemptOnlyVisual.weakWatchDiminishingTrace.triggerTokens.includes('bounce_attempt_only')){
+    throw new Error('Bounce-attempt-only monitor case must still expose the trace token for diagnostics.');
   }
-  if(bounceAttemptOnlyVisual.weakWatchDiminishingTrace.priceabilityState !== 'unpriceable' || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.priceabilityUnpriceable !== true || bounceAttemptOnlyVisual.weakWatchDiminishingTrace.returnPath !== 'weak_watch_diminishing'){
-    throw new Error('Bounce-attempt-only weak Watch must resolve normalized unpriceable priceability before final monitor fallback.');
+  if(bounceAttemptOnlyVisual.weakWatchDiminishingTrace.returnPath !== 'monitor_fallback'){
+    throw new Error('Bounce-attempt-only monitor case must exit through monitor_fallback, not weak_watch_diminishing.');
+  }
+
+  const earlyBounceMessyMonitorDeps = {
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'messy',
+        viability:'watchlist',
+        viabilityBranchId:'messy_watchlist',
+        setup_location_state:'near_50ma',
+        priceability_state:'unpriceable',
+        entry_gate_pass:false,
+        near_entry_gate_pass:false,
+        entry_gate_checks:{
+          below_50_without_reclaim:false,
+          has_clear_invalidation_level:true,
+          plan_ok:false,
+          tradeability_ok:true,
+          rr_ok:true,
+          rr_priceable:true,
+          resolved_rr:2.1,
+          reclaim_signal_count:1
+        },
+        near_entry_gate_checks:{
+          below_50_without_reclaim:false,
+          has_clear_invalidation_level:true,
+          plan_ok:false,
+          tradeability_ok:true,
+          rr_ok:true,
+          rr_priceable:true,
+          resolved_rr:2.1,
+          reclaim_signal_count:1
+        },
+        final_verdict:'watch',
+        main_blocker:'Repair is in progress, but the bounce is still early.'
+      };
+    },
+    getBadge:resolverCore.getBadge,
+    normalizeGlobalVerdictKey:resolverCore.normalizeGlobalVerdictKey,
+    normalizeVerdict:resolverCore.normalizeVerdict
+  };
+
+  const aliveMessyRepairMonitor = resolverPresentation.resolveVisualState({
+    ticker:'MESSYR',
+    plan:{},
+    marketData:{price:88.4, ma20:87.9, ma50:87.2, ma200:70.1, currency:'USD'}
+  }, 'review', {
+    derivedStates:{
+      structureState:'weakening',
+      setupLocationState:'near_50ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'early',
+      pullbackZone:'near_50ma'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'missing'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'missing',
+      entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:true,
+        plan_ok:false,
+        tradeability_ok:true,
+        rr_ok:true,
+        rr_priceable:true,
+        resolved_rr:2.1,
+        reclaim_signal_count:1
+      },
+      near_entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:true,
+        plan_ok:false,
+        tradeability_ok:true,
+        rr_ok:true,
+        rr_priceable:true,
+        resolved_rr:2.1,
+        reclaim_signal_count:1
+      }
+    },
+    setupScore:5
+  }, earlyBounceMessyMonitorDeps);
+  if(aliveMessyRepairMonitor.canonicalVerdict !== 'watch' || aliveMessyRepairMonitor.visualBucket !== 'monitor' || aliveMessyRepairMonitor.tone !== 'monitor'){
+    throw new Error('Alive/messy + unpriceable + early bounce + stabilising near support must remain Monitor.');
+  }
+  if(aliveMessyRepairMonitor.weakWatchDiminishingApplied !== false || aliveMessyRepairMonitor.weakWatchDiminishingTrace.applied !== false){
+    throw new Error('Alive/messy repairing unpriceable setup must not be visually punished by weak-watch diminishing.');
   }
 
   const noReclaimSignalsVisual = resolverPresentation.resolveVisualState({
@@ -3639,6 +3728,230 @@ function runSimplifiedPipelineAssertions(){
   }
   if(invalidRrVisual.weakWatchDiminishingTrace.priceabilityState !== 'unpriceable' || invalidRrVisual.weakWatchDiminishingTrace.priceabilityUnpriceable !== true || invalidRrVisual.weakWatchDiminishingTrace.returnPath !== 'weak_watch_diminishing'){
     throw new Error('Invalid-RR weak Watch must resolve normalized unpriceable priceability before final monitor fallback.');
+  }
+
+  const promotionBlockedConstructiveVisual = resolverPresentation.resolveVisualState({
+    ticker:'PBLOCK',
+    plan:{},
+    marketData:{price:77.2, ma20:76.8, ma50:75.9, ma200:60.3, currency:'USD'}
+  }, 'review', {
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'near_20ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'missing'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'missing',
+      presentationUpgradeBlocked:true,
+      near_entry_gate_pass:false,
+      entry_gate_pass:false,
+      entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:true,
+        plan_ok:false,
+        tradeability_ok:true,
+        rr_ok:true,
+        rr_priceable:true,
+        resolved_rr:2.0,
+        reclaim_signal_count:1
+      },
+      near_entry_gate_checks:{
+        below_50_without_reclaim:false,
+        has_clear_invalidation_level:true,
+        plan_ok:false,
+        tradeability_ok:true,
+        rr_ok:true,
+        rr_priceable:true,
+        resolved_rr:2.0,
+        reclaim_signal_count:1
+      }
+    },
+    setupScore:6
+  }, weakWatchReasonDeps);
+  if(promotionBlockedConstructiveVisual.visualBucket !== 'monitor' || promotionBlockedConstructiveVisual.weakWatchDiminishingApplied !== false){
+    throw new Error('Promotion-blocked alone must not downgrade a constructive alive repairing Watch to Diminishing.');
+  }
+
+  const aliveMessyNoReclaimDiminishing = resolverPresentation.resolveVisualState({
+    ticker:'NOREPAIR',
+    plan:{},
+    marketData:{price:41.2, ma20:43.8, ma50:44.1, ma200:33.4, currency:'USD'}
+  }, 'review', {
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'near_50ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'near_50ma'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'missing'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'missing',
+      entry_gate_checks:{
+        below_50_without_reclaim:true,
+        has_clear_invalidation_level:false,
+        plan_ok:false,
+        tradeability_ok:false,
+        rr_ok:false,
+        rr_priceable:false,
+        resolved_rr:null,
+        reclaim_signal_count:0
+      },
+      near_entry_gate_checks:{
+        below_50_without_reclaim:true,
+        has_clear_invalidation_level:false,
+        plan_ok:false,
+        tradeability_ok:false,
+        rr_ok:false,
+        rr_priceable:false,
+        resolved_rr:null,
+        reclaim_signal_count:0
+      }
+    },
+    setupScore:5
+  }, earlyBounceMessyMonitorDeps);
+  if(aliveMessyNoReclaimDiminishing.canonicalVerdict !== 'watch' || aliveMessyNoReclaimDiminishing.visualBucket !== 'diminishing' || aliveMessyNoReclaimDiminishing.tone !== 'diminishing'){
+    throw new Error('Alive/messy + unpriceable + no bounce + below50/no reclaim must still downgrade to Diminishing.');
+  }
+
+  const damagedMissingPlanDiminishing = resolverPresentation.resolveVisualState({
+    ticker:'DMGNP',
+    plan:{},
+    marketData:{price:29.1, ma20:30.4, ma50:31.3, ma200:24.8, currency:'USD'}
+  }, 'review', {
+    derivedStates:{
+      structureState:'weakening',
+      setupLocationState:'off_level',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'none'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'missing'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'missing',
+      entry_gate_checks:{
+        below_50_without_reclaim:true,
+        has_clear_invalidation_level:false,
+        plan_ok:false,
+        tradeability_ok:false,
+        rr_ok:false,
+        rr_priceable:false,
+        resolved_rr:null,
+        reclaim_signal_count:0
+      },
+      near_entry_gate_checks:{
+        below_50_without_reclaim:true,
+        has_clear_invalidation_level:false,
+        plan_ok:false,
+        tradeability_ok:false,
+        rr_ok:false,
+        rr_priceable:false,
+        resolved_rr:null,
+        reclaim_signal_count:0
+      }
+    },
+    setupScore:4
+  }, {
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'damaged',
+        viability:'low_priority',
+        viabilityBranchId:'damaged_invalid_plan_no_bounce_low_priority',
+        setup_location_state:'off_level',
+        priceability_state:'unpriceable',
+        entry_gate_pass:false,
+        near_entry_gate_pass:false,
+        entry_gate_checks:{
+          below_50_without_reclaim:true,
+          has_clear_invalidation_level:false,
+          plan_ok:false,
+          tradeability_ok:false,
+          rr_ok:false,
+          rr_priceable:false,
+          resolved_rr:null,
+          reclaim_signal_count:0
+        },
+        near_entry_gate_checks:{
+          below_50_without_reclaim:true,
+          has_clear_invalidation_level:false,
+          plan_ok:false,
+          tradeability_ok:false,
+          rr_ok:false,
+          rr_priceable:false,
+          resolved_rr:null,
+          reclaim_signal_count:0
+        },
+        final_verdict:'watch',
+        main_blocker:'Trend is weakening - no reliable stop level yet.'
+      };
+    },
+    getBadge:resolverCore.getBadge,
+    normalizeGlobalVerdictKey:resolverCore.normalizeGlobalVerdictKey,
+    normalizeVerdict:resolverCore.normalizeVerdict
+  });
+  if(damagedMissingPlanDiminishing.canonicalVerdict !== 'watch' || damagedMissingPlanDiminishing.visualBucket !== 'diminishing' || damagedMissingPlanDiminishing.tone !== 'diminishing'){
+    throw new Error('Damaged + missing plan + no valid invalidation + no bounce must remain Diminishing.');
+  }
+
+  const brokenStructureTerminalVisual = resolverPresentation.resolveVisualState({
+    ticker:'BROKENX',
+    plan:{},
+    marketData:{price:18.2, ma20:21.1, ma50:24.7, ma200:30.5, currency:'USD'}
+  }, 'review', {
+    derivedStates:{
+      structureState:'broken',
+      setupLocationState:'off_level',
+      priceabilityState:'unpriceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'none'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'missing'},
+    resolvedContract:{
+      finalVerdict:'avoid',
+      final_verdict:'avoid',
+      final_verdict_rendered:'avoid',
+      planStatusKey:'missing'
+    },
+    setupScore:1
+  }, {
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'broken',
+        viability:'reject',
+        viabilityBranchId:'broken_structure_reject',
+        setup_location_state:'off_level',
+        priceability_state:'unpriceable',
+        final_verdict:'avoid',
+        terminal_avoid_applied:true,
+        main_blocker:'Structure is broken.'
+      };
+    },
+    getBadge:resolverCore.getBadge,
+    normalizeGlobalVerdictKey:resolverCore.normalizeGlobalVerdictKey,
+    normalizeVerdict:resolverCore.normalizeVerdict
+  });
+  if(brokenStructureTerminalVisual.canonicalVerdict !== 'avoid' || brokenStructureTerminalVisual.visualBucket !== 'avoid' || brokenStructureTerminalVisual.tone !== 'avoid'){
+    throw new Error('Broken structure must preserve terminal Avoid behaviour unchanged.');
   }
 
   const constructiveNoPlanNoBounceWatch = pipeline.resolveRecordState({

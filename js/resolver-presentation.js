@@ -94,7 +94,6 @@
         || !rrOk
         || hasClearInvalidationLevel === false
         || (resolvedRR !== null && resolvedRR < 2)
-        || bounceState === 'attempt'
       );
     const constructiveWaiting = aliveStructure
       && ['attempt','early','confirmed'].includes(bounceState)
@@ -108,15 +107,31 @@
       && ['attempt','early','confirmed'].includes(bounceState)
       && ['early','present','clear'].includes(stabilisationState)
       && priceabilityState !== 'unpriceable';
+    const constructiveUnpriceableWaiting = aliveStructure
+      && ['near_20ma','near_50ma','recently_left_20ma','recently_left_50ma'].includes(pullbackZone)
+      && ['attempt','early'].includes(bounceState)
+      && ['early','present','clear'].includes(stabilisationState)
+      && priceabilityState === 'unpriceable'
+      && !below50WithoutReclaim
+      && reclaimSignalCount !== 0
+      && planStatus !== 'missing'
+      && hasClearInvalidationLevel !== false
+      && (setupScore === null || setupScore >= 4);
     const structureAllowsDevelopingWatch = aliveStructure;
     if(developingWatch && structureAllowsDevelopingWatch){
+      return 'monitor';
+    }
+    if(constructiveUnpriceableWaiting){
       return 'monitor';
     }
     if(setupLocationState === 'none' && constructiveWaiting){
       return 'monitor';
     }
     const deteriorationEvidence = ['damaged','broken'].includes(structureEligibility)
-      || ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
+      || (
+        structureEligibility !== 'messy'
+        && ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
+      )
       || viabilityBranchId.includes('damaged')
       || viabilityBranchId.includes('failed')
       || viabilityBranchId.includes('weakening');
@@ -146,7 +161,7 @@
     if(weakWatchDiminishingApplied){
       return 'diminishing';
     }
-    if(structureEligibility === 'damaged' || structureState === 'weakening'){
+    if(structureEligibility === 'damaged' || (structureEligibility !== 'messy' && structureState === 'weakening')){
       return 'diminishing';
     }
     return 'monitor';
@@ -218,14 +233,14 @@
     if(promotionBlocked) triggerTokens.push('promotion_blocked');
 
     const hasHardWeakToken = triggerTokens.some(token => hardWeakTokens.has(token));
-    const contextualWeakness = ['extended', 'volatile', 'off_level', 'unclear'].includes(setupLocationState)
+    const contextualWeakness = ['extended', 'volatile', 'off_level'].includes(setupLocationState)
       || lowScore
       || below50WithoutReclaim;
     const hasMeaningfulWeakness = weakWatchTriggerMatches.length >= 2
       || weakWatchTriggerMatches.includes('below50_no_reclaim')
       || weakWatchTriggerMatches.includes('invalid_rr')
-      || weakWatchTriggerMatches.includes('bounce_attempt_only')
-      || weakWatchTriggerMatches.includes('bounce_early')
+      || weakWatchTriggerMatches.includes('missing_plan')
+      || weakWatchTriggerMatches.includes('no_valid_invalidation')
       || weakWatchTriggerMatches.includes('promotion_blocked');
     const applied = verdictIsWatch
       && aliveStructure
