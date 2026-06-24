@@ -197,6 +197,11 @@ function nowPerfMs(){
     : Date.now();
 }
 
+function average(values){
+  const list = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);
+  return list.length ? list.reduce((sum, value) => sum + value, 0) / list.length : null;
+}
+
 function logRiskPerf(eventName, payload = {}){
   if(!PP_PERF_DEBUG) return;
   console.debug(`[PP_PERF] ${eventName}`, payload);
