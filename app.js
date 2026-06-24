@@ -3579,14 +3579,13 @@ function showManualSnapshotCopyText(text){
 async function copyTesterDiagnosticSnapshot(options = {}){
   const snapshot = buildTesterDiagnosticSnapshot(options);
   const snapshotText = JSON.stringify(snapshot, null, 2);
+  uiState.lastTesterDiagnosticSnapshot = snapshot;
+  showManualSnapshotCopyText(snapshotText);
   const copied = await copyTextToClipboard(snapshotText);
   if(copied){
-    uiState.lastTesterDiagnosticSnapshot = snapshot;
     const status = $('testerReportSnapshotStatus');
-    if(status) status.textContent = `Snapshot copied: ${snapshot.panelTitle} | ${formatLocalTimestamp(snapshot.timestamp) || snapshot.timestamp}`;
+    if(status) status.textContent = `Snapshot copied: ${snapshot.panelTitle} | ${formatLocalTimestamp(snapshot.timestamp) || snapshot.timestamp}. Manual copy text is also shown below.`;
   }else{
-    uiState.lastTesterDiagnosticSnapshot = snapshot;
-    showManualSnapshotCopyText(snapshotText);
     const status = $('testerReportSnapshotStatus');
     if(status) status.textContent = 'Clipboard copy failed. Snapshot text opened below for manual copy.';
   }
