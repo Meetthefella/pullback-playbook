@@ -10938,6 +10938,13 @@ function watchlistDebugWarnings(record, lifecycleSnapshot, actionPresentation, o
 function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options = {}){
   const item = normalizeTickerRecord(record);
   const globalVerdict = resolveGlobalVerdict(item);
+  const simplifiedState = options.simplifiedState && typeof options.simplifiedState === 'object'
+    ? options.simplifiedState
+    : resolveSimplifiedStateForWatchlistPresentation(item, {
+      surface:'track',
+      source:'renderWatchlistDebugPane',
+      reason:'renderWatchlistDebugPane'
+    });
   const setupScoreTrace = setupScoreTraceForRecord(item);
   const debug = item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
@@ -10963,6 +10970,9 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     structure:item && item.setup && item.setup.structureState,
     bounce:item && item.setup && item.setup.bounceState
   });
+  const trackVisibleModel = options.trackVisibleModel && typeof options.trackVisibleModel === 'object'
+    ? options.trackVisibleModel
+    : resolveTrackCardVisibleModel(item, simplifiedState);
   const simplifiedTrackDebugSource = String(globalVisual.watchlist_presentation_source || '').trim().toLowerCase() === 'simplified_state_pipeline';
   const capitalComfort = capitalComfortSummary({
     capitalFit:displayedPlan.capitalFit.capital_fit,
@@ -11691,6 +11701,8 @@ function renderWatchlistCardElement(record, options = {}){
   watchlistVisualState.longPressHelperBound = entryConditionsHoldBound;
   watchlistVisualState.holdEnabled = entryConditionsHoldBound;
   const debugPane = renderWatchlistDebugPane(record, lifecycleSnapshot, priority, {
+    simplifiedState,
+    trackVisibleModel,
     derivedStates,
     displayedPlan,
     qualityAdjustments,
@@ -11985,6 +11997,15 @@ function renderTrackVisibleAuditMarkup(source, records = [], groups = [], groupe
     return `${key}: built=${built} expanded=${meta && meta.expanded === true ? 'true' : 'false'} cards=${cards}`;
   }).join(' | ') : '';
   return `<div class="panelbox tiny" data-track-render-audit="true" style="margin-bottom:12px"><strong>Track Render Audit</strong><div style="margin-top:6px">source=${escapeHtml(safeSource)} | totalRecords=${escapeHtml(String(totalRecords))} | showExpired=${state.showExpiredWatchlist ? 'true' : 'false'}</div><div style="margin-top:6px">grouped=${escapeHtml(groupedCounts || '(none)')}</div><div style="margin-top:6px">sections=${escapeHtml(sectionCounts || '(none)')}</div></div>`;
+}
+
+function appendTrackRenderAuditMessage(message){
+  const audit = document.querySelector('[data-track-render-audit="true"]');
+  if(!audit) return;
+  const line = document.createElement('div');
+  line.style.marginTop = '6px';
+  line.textContent = String(message || '');
+  audit.appendChild(line);
 }
 
 function isTrackSectionCollapsible(sectionKey){
@@ -12391,15 +12412,22 @@ function renderWatchlistSectionCardsSync(records, container, options = {}){
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   const parentSectionKey = String(options.parentSectionKey || '').trim().toLowerCase();
   records.forEach(record => {
-    const cardElement = renderWatchlistCardElement(record, {
-      passCache,
-      parentSectionKey,
-      usedProjectionBundle:false,
-      recomputedDuringRender:true,
-      renderSource:String(options.source || 'watchlist_render_sync')
-    });
-    if(!cardElement) return;
-    container.appendChild(cardElement);
+    try{
+      const cardElement = renderWatchlistCardElement(record, {
+        passCache,
+        parentSectionKey,
+        usedProjectionBundle:false,
+        recomputedDuringRender:true,
+        renderSource:String(options.source || 'watchlist_render_sync')
+      });
+      if(!cardElement){
+        appendTrackRenderAuditMessage(`card-null sync ${parentSectionKey || '(none)'} ${normalizeTicker(record && record.ticker || '')}`);
+        return;
+      }
+      container.appendChild(cardElement);
+    }catch(error){
+      appendTrackRenderAuditMessage(`card-error sync ${parentSectionKey || '(none)'} ${normalizeTicker(record && record.ticker || '')}: ${String(error && error.message || 'unknown_error')}`);
+    }
   });
 }
 
@@ -12440,15 +12468,23 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
     const slice = projectedRecords.slice(index, index + batchSize);
     const batchFragment = document.createDocumentFragment();
     slice.forEach(item => {
-      const cardElement = renderWatchlistCardElement(item.record, {
-        precomputedView:item.precomputedView,
-        passCache,
-        parentSectionKey,
-        usedProjectionBundle:true,
-        recomputedDuringRender:false,
-        renderSource:source
-      });
-      if(cardElement) batchFragment.appendChild(cardElement);
+      try{
+        const cardElement = renderWatchlistCardElement(item.record, {
+          precomputedView:item.precomputedView,
+          passCache,
+          parentSectionKey,
+          usedProjectionBundle:true,
+          recomputedDuringRender:false,
+          renderSource:source
+        });
+        if(!cardElement){
+          appendTrackRenderAuditMessage(`card-null chunked ${parentSectionKey || '(none)'} ${normalizeTicker(item.record && item.record.ticker || '')}`);
+          return;
+        }
+        batchFragment.appendChild(cardElement);
+      }catch(error){
+        appendTrackRenderAuditMessage(`card-error chunked ${parentSectionKey || '(none)'} ${normalizeTicker(item.record && item.record.ticker || '')}: ${String(error && error.message || 'unknown_error')}`);
+      }
     });
     container.appendChild(batchFragment);
     const batchEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
