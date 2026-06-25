@@ -10060,9 +10060,9 @@ function watchlistLifecycleStateRank(state){
 
 function canonicalLifecycleState(state){
   const value = String(state || '').trim().toLowerCase();
-  if(value === 'developing' || value === 'monitor' || value === 'monitor_watch' || value === 'active') return 'watch';
+  if(value === 'developing' || value === 'monitor' || value === 'monitor_watch' || value === 'active' || value === 'diminishing') return 'watch';
   if(value === 'early') return 'watch';
-  if(value === 'filtered' || value === 'inactive' || value === 'avoided' || value === 'dead' || value === 'diminishing') return 'avoid';
+  if(value === 'filtered' || value === 'inactive' || value === 'avoided' || value === 'dead') return 'avoid';
   if(['entry','near_entry','watch','avoid'].includes(value)) return value;
   return '';
 }
