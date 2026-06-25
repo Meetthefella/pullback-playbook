@@ -2813,18 +2813,6 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 .diagnostic-panel-shell{
   width:100%;
 }
-.diagnostic-panel-header{
-  display:grid;
-  grid-template-columns:minmax(0,1fr) auto;
-  align-items:start;
-  gap:8px 12px;
-}
-.diagnostic-panel-toolbar{
-  align-self:start;
-  display:flex;
-  justify-content:flex-end;
-  margin:0;
-}
 .diagnostic-panel-details{
   width:100%;
   margin-top:0;

@@ -35221,7 +35221,7 @@ function renderReviewWorkspace(options = {}){
     ], 'Legacy / Internal', {})
     : '';
   const reviewGatewayTrace = advancedOpen
-    ? `<div class="diagnostic-panel-shell" data-diagnostic-panel="Trade Gateway Trace"><div class="diagnostic-panel-header"><details class="compact-details diagnostic-panel-details"><summary>Trade Gateway Trace</summary>${renderTradeGatewayHistoryMarkup()}</details><div class="diagnostic-panel-toolbar"><button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="Trade Gateway Trace">Copy</button></div></div></div>`
+    ? `<div class="diagnostic-panel-shell" data-diagnostic-panel="Trade Gateway Trace"><details class="compact-details diagnostic-panel-details"><summary>Trade Gateway Trace</summary>${renderTradeGatewayHistoryMarkup()}</details></div>`
     : '';
   const reviewDiagnosticBundlePanel = advancedOpen
     ? `<div class="panelbox" data-diagnostic-panel="Review Diagnostics Bundle" style="margin-top:10px">

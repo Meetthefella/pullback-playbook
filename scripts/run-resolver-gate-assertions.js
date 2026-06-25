@@ -872,9 +872,9 @@ function runTesterReportAssertions(){
       || !/id="copyTesterSnapshotBtn"/.test(indexSource)
       || !/id="copyScannerPolicyDiagnosticsBtn"/.test(indexSource)
       || !/id="submitTesterReportBtn"/.test(indexSource)
-      || !/data-act="copy-diagnostic-panel"/.test(scannerDebugSource)
-      || !/data-act="copy-diagnostic-panel"/.test(appSource)){
-      throw new Error('Tester reporting UI must expose copy controls for debug panels and report submission controls.');
+      || !/data-act="copy-review-diagnostics-bundle"/.test(appSource)
+      || !/data-act="copy-track-diagnostics-bundle"/.test(appSource)){
+      throw new Error('Tester reporting UI must expose top-level diagnostics bundle copy controls and report submission controls.');
     }
     if(/refreshTesterReportsBtn/.test(indexSource) || /testerReportsList/.test(indexSource) || /testerReportDetail/.test(indexSource)){
       throw new Error('Normal app UI must not expose global tester report browsing.');
