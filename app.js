@@ -10939,8 +10939,8 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
-    {label:'Original Bounce State', value:globalVerdict.originalBounceState || '(none)'},
-    {label:'Adjusted Bounce State', value:globalVerdict.adjustedBounceState || '(none)'},
+    {label:'Original Bounce State', value:debugStateLabel(globalVerdict.originalBounceState)},
+    {label:'Adjusted Bounce State', value:debugStateLabel(globalVerdict.adjustedBounceState)},
     {label:'nearEntryProvisionalBounceApplied', value:globalVerdict.nearEntryProvisionalBounceApplied ? 'true' : 'false'},
     {label:'nearEntryPullbackZoneAccepted', value:globalVerdict.nearEntryPullbackZoneAccepted ? 'true' : 'false'},
     {label:'nearEntryTerminalBlockApplied', value:globalVerdict.nearEntryTerminalBlockApplied ? 'true' : 'false'},
@@ -10954,28 +10954,28 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
     {label:'Near Entry Gate Checks', value:JSON.stringify(globalVerdict.near_entry_gate_checks || {}) || '(none)'},
     {label:'Setup Score Trace', value:`${setupScoreTrace.detail} setup=${Number.isFinite(setupScoreTrace.inputs.setup_score) ? setupScoreTrace.inputs.setup_score : 'n/a'} | base=${Number.isFinite(setupScoreTrace.inputs.base_score) ? setupScoreTrace.inputs.base_score : 'n/a'} | scan=${Number.isFinite(setupScoreTrace.inputs.scan_score) ? setupScoreTrace.inputs.scan_score : 'n/a'}`},
-    {label:'Previous', value:debug.previousState || '(none)'},
+    {label:'Previous', value:debugStateLabel(debug.previousState, {kind:'lifecycle'})},
     {label:'Priority', value:String(priority.score)},
     {label:'Age', value:`${String(Math.max(age, 0))} trading days`},
     {label:'Expiry', value:item.watchlist.expiryAt || 'Not set'},
     {label:'Evaluated', value:formatLocalTimestamp(debug.lastEvaluatedAt) || debug.lastEvaluatedAt || 'n/a'},
     {label:'Trigger', value:debug.lastSource || 'n/a'},
     {label:'Fresh Inputs', value:debug.hadFreshInputs ? 'Yes' : 'No'},
-    {label:'Transition', value:(debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)')},
+    {label:'Transition', value:`${debugStateLabel(debug.previousState, {kind:'lifecycle'})} -> ${debugStateLabel(debug.currentState || lifecycleSnapshot.state, {kind:'lifecycle'})}`},
     {label:'Change Type', value:debug.changeType || 'unchanged'},
     {label:'Removed By', value:debug.watchlist_removed_by || '(none)'},
     {label:'Removal Source', value:debug.removal_source || '(none)'},
     {label:'Removal Verdict', value:debug.removal_global_verdict || '(none)'},
     {label:'Last Alerted State', value:debug.lastAlertedState || '(none)'},
     {label:'Alert Triggered This Cycle', value:debug.alertTriggeredThisCycle || 'false'},
-    {label:'Legacy Scanner Verdict', value:String(item.scan.verdict || '').trim() || '(none)'},
-    {label:'Resolved Scanner Verdict', value:String(item.scan.resolvedVerdict || '').trim() || '(none)'},
+    {label:'Legacy Scanner Verdict', value:debugStateLabel(String(item.scan.verdict || '').trim(), {kind:'verdict'})},
+    {label:'Resolved Scanner Verdict', value:debugStateLabel(String(item.scan.resolvedVerdict || '').trim(), {kind:'verdict'})},
     {label:'Entry Audit Snapshots', value:Array.isArray(entryPromotionAudit.history) ? String(entryPromotionAudit.history.length) : '0'},
-    {label:'Latest Entry Audit', value:latestEntryAudit && latestEntryAudit.timestamp ? `${latestEntryAudit.timestamp} | ${latestEntryAudit.currentVerdict || 'n/a'}` : '(none)'},
+    {label:'Latest Entry Audit', value:latestEntryAudit && latestEntryAudit.timestamp ? `${latestEntryAudit.timestamp} | ${debugStateLabel(latestEntryAudit.currentVerdict, {kind:'verdict'})}` : '(none)'},
     {label:'Why Not Entry', value:latestEntryAudit && Array.isArray(latestEntryAudit.whyNotEntry) && latestEntryAudit.whyNotEntry.length ? latestEntryAudit.whyNotEntry.join(' | ') : '(none)'},
     {label:'Circular Trigger Suspected', value:latestEntryAudit && latestEntryAudit.circularTriggerSuspected === true ? 'true' : 'false'},
     {label:'Stale Data Prevented Pass', value:latestEntryAudit && latestEntryAudit.staleDataPreventedFreshPromotionPass === true ? 'true' : 'false'},
-    {label:'Base Resolver Verdict', value:resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || 'n/a'},
+    {label:'Base Resolver Verdict', value:debugStateLabel(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status, {kind:'verdict'})},
     {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'}
   ])}<div class="watchlist-debug-block tiny"><strong>Watchlist Hold Trace</strong><div data-watchlist-hold-trace="${escapeHtml(item.ticker)}">${escapeHtml(debug.holdTrace || '(none)')}</div><div data-watchlist-hold-trace-history="${escapeHtml(item.ticker)}">${escapeHtml(holdTraceHistory.length ? holdTraceHistory.join(' || ') : '(none)')}</div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
 }
@@ -14429,10 +14429,10 @@ function buildConsistencyAuditRows({
   }
 
   return [
-    {label:'Authoritative Final', value:canonicalVerdict || '(none)'},
-    {label:'Authoritative Bucket', value:visualBucket || '(none)'},
-    {label:'Lifecycle State', value:lifecycleState || '(none)'},
-    {label:'Action State', value:actionState || '(none)'},
+    {label:'Authoritative Final', value:debugStateLabel(canonicalVerdict, {kind:'verdict'})},
+    {label:'Authoritative Bucket', value:debugStateLabel(visualBucket, {kind:'bucket', canonicalVerdict})},
+    {label:'Lifecycle State', value:debugStateLabel(lifecycleState, {kind:'lifecycle'})},
+    {label:'Action State', value:debugStateLabel(actionState, {kind:'action'})},
     {label:'Plan Visible', value:planVisible ? 'true' : 'false'},
     {label:'Plan Status', value:planStatus || '(none)'},
     {label:'Priceability', value:priceabilityState || '(none)'},
@@ -17005,6 +17005,39 @@ function verdictPresentationLabelForKey(key){
   if(normalized === 'avoid') return 'Avoid';
   if(normalized === 'dead') return 'Dead';
   return 'Watch';
+}
+
+function debugStateLabel(value, options = {}){
+  const raw = String(value || '').trim();
+  if(!raw) return '(none)';
+  const kind = String(options.kind || '').trim().toLowerCase();
+  const normalizedVerdict = normalizeGlobalVerdictKey(raw);
+  const recognizedVerdict = ['entry','near_entry','watch','avoid','dead'].includes(normalizedVerdict);
+  if(kind === 'action') return formatActionState(raw);
+  if(kind === 'bucket') return visualBucketLabel(raw, options.canonicalVerdict || '');
+  if(kind === 'verdict') return recognizedVerdict ? verdictPresentationLabelForKey(normalizedVerdict) : raw;
+  if(kind === 'lifecycle'){
+    if(raw === 'expired') return 'Expired';
+    if(raw === 'inactive') return 'Inactive';
+    return recognizedVerdict ? verdictPresentationLabelForKey(normalizedVerdict) : raw;
+  }
+  if(raw === 'action_now') return 'Action Now';
+  if(raw === 'needs_plan') return 'Needs Plan';
+  if(raw === 'tradeable_entry') return 'Near Entry';
+  const lower = raw.toLowerCase();
+  if(['entry','near_entry','watch','avoid','dead','monitor','diminishing','developing'].includes(lower)){
+    if(['monitor','diminishing','developing'].includes(lower)) return lower.charAt(0).toUpperCase() + lower.slice(1);
+    return verdictPresentationLabelForKey(lower);
+  }
+  if(['expired','inactive'].includes(lower)){
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }
+  if(lower.includes('_') || lower.includes('-')){
+    return raw
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, match => match.toUpperCase());
+  }
+  return raw;
 }
 
 function resolveVisualBucketFromInputs(bucket, canonicalVerdict = ''){
