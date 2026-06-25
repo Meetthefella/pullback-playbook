@@ -10459,7 +10459,9 @@ function watchlistLifecycleSnapshot(record, options = {}){
     plan_status:planUiState.state,
     rr_confidence:resolved.rrConfidenceLabel || resolved.rrConfidence || '',
     market_regime:qualityAdjustments.weakRegimePenalty ? 'weak' : 'normal',
-    final_verdict:globalVerdict.final_verdict,
+    // Use the post-gate snapshot state here so lifecycle transition cannot
+    // reintroduce a suppressed avoid after structure-gate softening.
+    final_verdict:snapshot.state,
     final_state:snapshot.state
   });
   if(transitionedState && transitionedState !== snapshot.state){
