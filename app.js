@@ -18236,7 +18236,7 @@ function evaluateEntryTrigger(record, options = {}){
   const noBounce = bounceState === 'none';
   const confirmedBounce = bounceState === 'confirmed';
   const clearStabilisation = stabilisationState === 'clear';
-  const brokenBelowStop = hasAuthoritativeStopBreach(item, {
+  const brokenBelowStop = hasAuthoritativeStopBreach(rawRecord, {
     currentPrice,
     stopPrice:stop,
     thresholdMultiplier:0.995
