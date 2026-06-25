@@ -59,6 +59,10 @@ function fmtRatio(value, digits = 2){
   return Number.isFinite(numeric) ? `${numeric.toFixed(digits)}R` : 'n/a';
 }
 
+function deepClone(value){
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
 function providerApiKey(providerId){
   if(providerId === 'fmp') return process.env.FMP_API_KEY;
   if(providerId === 'marketdata') return process.env.MARKETDATA_API_KEY || process.env.MARKETDATA_TOKEN;
@@ -332,6 +336,7 @@ function buildReplayDeps(sandbox){
         resolveFinalStateContract(item){
           return item && item.resolvedContract || {
             finalVerdict:'Watch',
+            final_verdict:'watch',
             structuralState:'developing',
             actionStateKey:'wait_for_confirmation',
             planStatusKey:'valid',
@@ -345,6 +350,7 @@ function buildReplayDeps(sandbox){
         resolvePreLifecycleStateContract(item){
           return item && item.preLifecycleResolved || item && item.resolvedContract || {
             finalVerdict:'Watch',
+            final_verdict:'watch',
             structuralState:'developing',
             actionStateKey:'wait_for_confirmation',
             planStatusKey:'valid',
@@ -407,6 +413,7 @@ function buildResolvedContractSeed(chartVerdict, displayedPlan, verdictReason, g
     : (normalized === 'near_entry' ? 'near_entry' : (normalized === 'avoid' ? 'dead' : 'developing'));
   return {
     finalVerdict:verdictLabel,
+    final_verdict:normalized || 'watch',
     structuralState,
     actionStateKey:normalized === 'entry' ? 'ready_to_act' : 'wait_for_confirmation',
     planStatusKey:String(displayedPlan && displayedPlan.status || 'missing').trim().toLowerCase(),
@@ -749,8 +756,8 @@ function derivedStateValue(derivedStates, camelKey, snakeKey){
 
 function printTickerReport(result){
   const {ticker, snapshot, proxy, replay} = result;
-  const mismatch = proxy.verdict !== replay.canonicalVerdictLabel;
-  const mismatchLabel = mismatch ? `MISMATCH proxy=${proxy.verdict} resolver=${replay.canonicalVerdictLabel}/${replay.visualBucket}` : 'MATCH';
+  const mismatch = proxy.verdict !== replay.reviewCanonicalVerdictLabel;
+  const mismatchLabel = mismatch ? `MISMATCH proxy=${proxy.verdict} review=${replay.reviewCanonicalVerdictLabel}/${replay.reviewVisualBucket}` : 'MATCH';
   const lines = [
     '',
     `${ticker} | ${mismatchLabel}`,
@@ -758,7 +765,9 @@ function printTickerReport(result){
     `  distances: 20MA ${fmtPct(pctDistance(snapshot.price, snapshot.sma20))} | 50MA ${fmtPct(pctDistance(snapshot.price, snapshot.sma50))}`,
     `  tape: RSI ${safeNumber(snapshot.rsi14, 2) ?? 'n/a'} | volume ratio ${safeNumber((numericOrNull(snapshot.volume) && numericOrNull(snapshot.avgVolume30d)) ? numericOrNull(snapshot.volume) / numericOrNull(snapshot.avgVolume30d) : null, 2) ?? 'n/a'}`,
     `  proxy: ${proxy.verdict} | score ${proxy.score}`,
-    `  resolver: canonical ${replay.canonicalVerdictLabel} | bucket ${replay.visualBucket} | simulated lifecycle ${replay.simulatedLifecycleFromWatch} | setup score ${replay.setupScore}`,
+    `  scannerCanonicalVerdict: ${replay.scannerCanonicalVerdictLabel} | scannerVisualBucket: ${replay.scannerVisualBucket} | setup score ${replay.setupScore}${replay.scannerSnapshotIncomplete ? ' | scannerSnapshotIncomplete: true' : ''}`,
+    `  reviewCanonicalVerdict: ${replay.reviewCanonicalVerdictLabel} | reviewVisualBucket: ${replay.reviewVisualBucket} | simulated lifecycle ${replay.simulatedLifecycleFromWatch}`,
+    `  layer mutation: ${replay.layerMutationReason || 'none'}`,
     `  states: structure ${replay.structureState} | eligibility ${replay.structureEligibility} | bounce ${replay.bounceState} | stabilisation ${replay.stabilisationState} | priceability ${replay.priceabilityState}`,
     `  target profile: first ${fmtPrice(replay.realisticTarget)} | extended ${Number.isFinite(numericOrNull(replay.extendedTarget)) ? `${fmtPrice(replay.extendedTarget)} (context only)` : 'n/a'} | firstRR ${fmtRatio(replay.realisticRr)} | stretch ${fmtPct(replay.targetStretchPct, 1)}`,
     `  target cap: ${replay.targetCapReason || 'n/a'}`
@@ -836,6 +845,19 @@ async function main(){
   const results = snapshots.map(snapshot => {
     const proxy = classifyShortlistCandidate(snapshot);
     const replayBase = buildReplayRecord(snapshot, sandbox);
+    const scannerRecord = deepClone(replayBase.record);
+    const scannerResolvedContract = deepClone(replayBase.record.resolvedContract);
+    // Scanner-layer capture must remain immutable. Review/watchlist mutation happens on a cloned record only.
+    const scannerVisualState = sandbox.window.ResolverPresentation.resolveVisualState(scannerRecord, 'scanner', {
+      derivedStates:scannerRecord.derivedStates,
+      effectivePlan:scannerRecord.effectivePlan,
+      displayedPlan:scannerRecord.displayedPlan,
+      resolvedContract:scannerResolvedContract,
+      setupScore:scannerRecord.setupScore
+    }, visualDeps);
+    const scannerCanonicalVerdictRaw = String(scannerResolvedContract.final_verdict || '').trim().toLowerCase();
+    const scannerSnapshotIncomplete = !scannerCanonicalVerdictRaw;
+    const scannerCanonicalVerdict = scannerCanonicalVerdictRaw || 'unknown';
     const globalVerdict = resolveGlobalVerdict(replayBase.record);
     replayBase.record.resolvedContract = {
       ...replayBase.record.resolvedContract,
@@ -850,7 +872,7 @@ async function main(){
       presentationUpgradeBlocked:globalVerdict.downgrade_applied === true,
       promotionBlockedBy:globalVerdict.downgrade_reason || ''
     };
-    const visualState = sandbox.window.ResolverPresentation.resolveVisualState(replayBase.record, 'scanner', {
+    const reviewVisualState = sandbox.window.ResolverPresentation.resolveVisualState(replayBase.record, 'scanner', {
       derivedStates:replayBase.record.derivedStates,
       effectivePlan:replayBase.record.effectivePlan,
       displayedPlan:replayBase.record.displayedPlan,
@@ -893,11 +915,11 @@ async function main(){
       || ''
     ).trim();
     const finalResolvedVerdict = String(globalVerdict.final_verdict || '').trim().toLowerCase();
-    const finalVisualBucket = String(visualState.visualBucket || '').trim().toLowerCase();
+    const finalVisualBucket = String(reviewVisualState.visualBucket || '').trim().toLowerCase();
     const promotionDiagnosticsActive = !['entry', 'near_entry'].includes(finalResolvedVerdict)
       && !['entry', 'near_entry'].includes(finalVisualBucket);
     const rawWatchToDiminishingReason = String(
-      visualState.weakWatchDiminishingReason
+      reviewVisualState.weakWatchDiminishingReason
       || scannerResolution.remapReason
       || ''
     ).trim();
@@ -911,7 +933,7 @@ async function main(){
         globalVerdict,
         replayBase,
         structureState:derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
-        structureEligibility:globalVerdict.structure_eligibility || visualState.structureEligibility || 'unknown'
+        structureEligibility:globalVerdict.structure_eligibility || reviewVisualState.structureEligibility || 'unknown'
       });
       promotionBlocker = String(
         globalVerdict.promotionBlockedReason
@@ -927,7 +949,7 @@ async function main(){
       if(structureContradictionForPromotionText(
         promotionBlocker,
         derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
-        globalVerdict.structure_eligibility || visualState.structureEligibility || 'unknown'
+        globalVerdict.structure_eligibility || reviewVisualState.structureEligibility || 'unknown'
       )){
         promotionBlocker = fallbackDiagnostic.promotionBlocker;
         failingGate = fallbackDiagnostic.failingGate;
@@ -936,17 +958,37 @@ async function main(){
     const blockerCopy = promotionDiagnosticsActive ? rawBlockerCopy : '';
     const blockers = promotionDiagnosticsActive ? promotionBlockers(globalVerdict, replayBase.record.derivedStates) : [];
     const watchToDiminishingReason = diminishingReasonActive ? rawWatchToDiminishingReason : '';
+    const scannerVisualBucket = String(scannerVisualState.visualBucket || '').trim().toLowerCase() || 'monitor';
+    const reviewVisualBucket = String(reviewVisualState.visualBucket || '').trim().toLowerCase() || 'monitor';
+    const reviewCanonicalVerdict = String(globalVerdict.final_verdict || '').trim().toLowerCase() || 'watch';
+    const layerMutationParts = [];
+    if(scannerCanonicalVerdict !== reviewCanonicalVerdict){
+      layerMutationParts.push(`verdict ${scannerCanonicalVerdict} -> ${reviewCanonicalVerdict}`);
+    }
+    if(scannerVisualBucket !== reviewVisualBucket){
+      layerMutationParts.push(`bucket ${scannerVisualBucket} -> ${reviewVisualBucket}`);
+    }
+    if(layerMutationParts.length && globalVerdict.downgrade_reason){
+      layerMutationParts.push(`reason ${String(globalVerdict.downgrade_reason).trim()}`);
+    }
     return {
       ticker:snapshot.ticker,
       snapshot,
       proxy,
       replay:{
-        canonicalVerdict:globalVerdict.final_verdict,
-        canonicalVerdictLabel:sandbox.window.ResolverCore.globalVerdictLabel(globalVerdict.final_verdict),
-        visualBucket:visualState.visualBucket,
+        scannerCanonicalVerdict,
+        scannerCanonicalVerdictLabel:scannerCanonicalVerdict === 'unknown'
+          ? 'Unknown'
+          : sandbox.window.ResolverCore.globalVerdictLabel(scannerCanonicalVerdict),
+        scannerSnapshotIncomplete,
+        scannerVisualBucket,
+        reviewCanonicalVerdict,
+        reviewCanonicalVerdictLabel:sandbox.window.ResolverCore.globalVerdictLabel(globalVerdict.final_verdict),
+        reviewVisualBucket,
+        layerMutationReason:layerMutationParts.join(' | '),
         simulatedLifecycleFromWatch:String(simulatedLifecycleFromWatch || ''),
         structureState:derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
-        structureEligibility:globalVerdict.structure_eligibility || visualState.structureEligibility || 'unknown',
+        structureEligibility:globalVerdict.structure_eligibility || reviewVisualState.structureEligibility || 'unknown',
         bounceState:derivedStateValue(replayBase.record.derivedStates, 'bounceState', 'bounce_state'),
         stabilisationState:derivedStateValue(replayBase.record.derivedStates, 'stabilisationState', 'stabilisation_state'),
         priceabilityState:derivedStateValue(replayBase.record.derivedStates, 'priceabilityState', 'priceability_state'),
@@ -990,8 +1032,12 @@ async function main(){
     results:results.map(result => ({
       ticker:result.ticker,
       proxyVerdict:result.proxy.verdict,
-      resolverVerdict:result.replay.canonicalVerdict,
-      visualBucket:result.replay.visualBucket,
+      scannerCanonicalVerdict:result.replay.scannerCanonicalVerdict,
+      scannerVisualBucket:result.replay.scannerVisualBucket,
+      scannerSnapshotIncomplete:result.replay.scannerSnapshotIncomplete,
+      reviewCanonicalVerdict:result.replay.reviewCanonicalVerdict,
+      reviewVisualBucket:result.replay.reviewVisualBucket,
+      layerMutationReason:result.replay.layerMutationReason,
       simulatedLifecycleFromWatch:result.replay.simulatedLifecycleFromWatch,
       structureState:result.replay.structureState,
       structureEligibility:result.replay.structureEligibility,

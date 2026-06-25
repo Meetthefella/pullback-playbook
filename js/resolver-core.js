@@ -814,10 +814,26 @@
     };
     const incompleteInputCount = Object.values(inputCompleteness).filter(flag => flag !== true).length;
     const incompleteInputs = incompleteInputCount > 0;
-    const hardInvalidation = structureEligibility === 'broken' || hardTrendBroken || terminalAvoidFlag || hasExplicitInvalidation;
+    const nonStructuralHardInvalidation = hardTrendBroken || terminalAvoidFlag || hasExplicitInvalidation;
+    const hardInvalidation = structureEligibility === 'broken' || nonStructuralHardInvalidation;
     const structureMessy = structureEligibility === 'messy';
     const structureAliveLike = structureEligibility === 'alive' || structureMessy;
     const defaultLowPriorityBucket = structureEligibility === 'damaged' ? 'diminishing' : 'monitor';
+    const aboveKeyTrendContext = ctx.below200ma !== true && ctx.ma50Below200ma !== true;
+    const noConfirmedBreakdown = ctx.below50WithoutReclaim !== true;
+    const qualityFloorMet = setupScore >= 4;
+    const brokenExtendedRepairable = structureEligibility === 'broken'
+      && !nonStructuralHardInvalidation
+      && isExtended
+      && aboveKeyTrendContext
+      && noConfirmedBreakdown
+      && setupLocationState === 'extended'
+      && qualityFloorMet
+      && !planInvalidLabel
+      && planOk
+      && viableRrExists
+      && bounceState === 'none'
+      && structureState === 'weak';
     const baseViabilityInputs = {
       structureEligibility,
       structureState,
@@ -839,6 +855,7 @@
       below200ma:ctx.below200ma === true,
       ma50Below200ma:ctx.ma50Below200ma === true,
       hardInvalidation,
+      brokenExtendedRepairable,
       explicitInvalidationReason:explicitInvalidationReason || '',
       inputCompleteness,
       rejectBlockedByIncompleteInputs:false
@@ -899,6 +916,14 @@
       rejectReason:''
     }, branchId, branchLabel, viabilityReason);
 
+    if(structureEligibility === 'broken' && brokenExtendedRepairable){
+      return enrich(asLowPriority(
+        'Extended pullback is weakening, but no confirmed breakdown is present yet.',
+        'Trend is extended away from support - keep on monitor until price resets or repairs.',
+        'broken_extended_without_hard_invalidation_low_priority',
+        'Broken extended without hard invalidation low priority'
+      ));
+    }
     if(structureEligibility === 'broken'){
       return enrich(asReject(
         'Setup no longer viable - structure is broken.',
@@ -2248,6 +2273,111 @@
           return result.entry_gate_pass === true
             && result.final_verdict === 'entry';
         }
+      },
+      {
+        id:'broken-extended-without-hard-invalidation-viability-branch',
+        viability:{
+          structureEligibility:'broken',
+          structureState:'weak',
+          setupLocationState:'extended',
+          priceabilityState:'provisional',
+          bounceState:'none',
+          pullbackZone:'extended',
+          setupScore:5,
+          planOk:true,
+          rrOk:false,
+          credibleRr:1.87,
+          tradeabilityOk:false,
+          tradeability:'risk_only',
+          volumeOk:false,
+          planStatusKey:'valid',
+          isExtended:true,
+          hasEntry:true,
+          hasStop:true,
+          hasTarget:true,
+          hardTrendBroken:false,
+          terminalAvoidFlag:false,
+          explicitInvalidationReason:'',
+          below50WithoutReclaim:false,
+          below200ma:false,
+          ma50Below200ma:false,
+          stabilisationState:'none'
+        },
+        expect:{
+          viability:'low_priority',
+          branch:'broken_extended_without_hard_invalidation_low_priority',
+          blocker:'Trend is extended away from support - keep on monitor until price resets or repairs.'
+        }
+      },
+      {
+        id:'broken-structure-with-hard-invalidation-still-rejects',
+        viability:{
+          structureEligibility:'broken',
+          structureState:'weak',
+          setupLocationState:'extended',
+          priceabilityState:'provisional',
+          bounceState:'none',
+          pullbackZone:'extended',
+          setupScore:3,
+          planOk:false,
+          rrOk:false,
+          credibleRr:1.2,
+          tradeabilityOk:false,
+          tradeability:'risk_only',
+          volumeOk:false,
+          planStatusKey:'invalid',
+          isExtended:true,
+          hasEntry:true,
+          hasStop:true,
+          hasTarget:true,
+          hardTrendBroken:true,
+          terminalAvoidFlag:false,
+          explicitInvalidationReason:'',
+          below50WithoutReclaim:true,
+          below200ma:false,
+          ma50Below200ma:false,
+          stabilisationState:'none'
+        },
+        expect:{
+          viability:'reject',
+          branch:'broken_structure_reject',
+          blocker:'Structure is broken.'
+        }
+      },
+      {
+        id:'broken-nonexception-does-not-fall-through',
+        viability:{
+          structureEligibility:'broken',
+          structureState:'weak',
+          setupLocationState:'extended',
+          priceabilityState:'provisional',
+          bounceState:'attempt',
+          pullbackZone:'extended',
+          setupScore:5,
+          planOk:true,
+          rrOk:false,
+          credibleRr:1.87,
+          tradeabilityOk:false,
+          tradeability:'risk_only',
+          volumeOk:false,
+          planStatusKey:'valid',
+          isExtended:true,
+          hasEntry:true,
+          hasStop:true,
+          hasTarget:true,
+          hardTrendBroken:false,
+          terminalAvoidFlag:false,
+          explicitInvalidationReason:'',
+          below50WithoutReclaim:false,
+          below200ma:false,
+          ma50Below200ma:false,
+          stabilisationState:'early'
+        },
+        expect:{
+          viability:'reject',
+          branch:'broken_structure_reject',
+          blocker:'Structure is broken.'
+        }
       }
     ];
     const results = cases.map(testCase => {
@@ -2255,13 +2385,14 @@
         const viability = resolveWatchlistViability(testCase.viability);
         const pass = viability.viability === testCase.expect.viability
           && viability.viabilityBranchId === testCase.expect.branch
-          && viability.viability !== 'reject';
+          && (testCase.expect.blocker === undefined || viability.mainBlocker === testCase.expect.blocker);
         return {
           id:testCase.id,
           pass,
           viability:viability.viability,
           viabilityBranchId:viability.viabilityBranchId,
-          viabilityReason:viability.viabilityReason
+          viabilityReason:viability.viabilityReason,
+          mainBlocker:viability.mainBlocker
         };
       }
       const near = canPromoteToNearEntry(testCase.ctx);
@@ -2270,6 +2401,21 @@
       return {id:testCase.id, pass, near:near.pass, entry:entry.pass, nearReasons:near.reasons, entryReasons:entry.reasons};
     });
     resolverCases.forEach(testCase => {
+      if(testCase.viability){
+        const viability = resolveWatchlistViability(testCase.viability);
+        const pass = viability.viability === testCase.expect.viability
+          && viability.viabilityBranchId === testCase.expect.branch
+          && (testCase.expect.blocker === undefined || viability.mainBlocker === testCase.expect.blocker);
+        results.push({
+          id:testCase.id,
+          pass,
+          viability:viability.viability,
+          viabilityBranchId:viability.viabilityBranchId,
+          viabilityReason:viability.viabilityReason,
+          mainBlocker:viability.mainBlocker
+        });
+        return;
+      }
       const resolved = resolveGlobalVerdict(testCase.record, buildResolverDepsForAssertions());
       const pass = testCase.assert(resolved) === true;
       results.push({
@@ -2277,6 +2423,7 @@
         pass,
         finalVerdict:resolved.final_verdict,
         viability:resolved.viability,
+        viabilityBranchId:resolved.viabilityBranchId,
         structureEligibility:resolved.structure_eligibility,
         nearEntryGatePass:resolved.near_entry_gate_pass,
         cumulativePenaltyTrace:resolved.cumulativePenaltyTrace
