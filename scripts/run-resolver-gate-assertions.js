@@ -6934,8 +6934,6 @@ function runCumulativePenaltyDisplayAssertions(){
     'entryPromotionAuditTriggerSource',
     'buildEntryPromotionAuditSnapshot',
     'updateEntryPromotionAudit',
-    'entryPromotionAuditExportRecords',
-    'exportEntryPromotionAuditJson',
     'cumulativePenaltyTraceForRecord',
     'warningStateFromInputs',
     'deriveDisplaySetupScore',
@@ -7277,11 +7275,6 @@ function runCumulativePenaltyDisplayAssertions(){
   if(!historyRecord.entryPromotionAudit || historyRecord.entryPromotionAudit.history.length !== 10){
     throw new Error('Entry promotion audit history must keep the latest 10 snapshots.');
   }
-  sandbox.__allTickerRecords = [historyRecord];
-  if(sandbox.exportEntryPromotionAuditJson() !== true || !sandbox.__lastDownload || !Array.isArray(sandbox.__lastDownload.data.records) || sandbox.__lastDownload.data.records.length !== 1){
-    throw new Error('Entry promotion audit export must emit JSON for audited tickers.');
-  }
-
   const accepted50Record = {
     ticker:'HWM',
     marketData:{price:248.63, sma50:250.23, currency:'USD'},

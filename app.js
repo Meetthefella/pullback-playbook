@@ -10888,82 +10888,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     derivedStates,
     displayedPlan
   });
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-block tiny"><button class="secondary compactbutton" type="button" onclick="exportEntryPromotionAuditJson()">Export Entry Audit JSON</button></div>${renderDebugSectionMarkup('Track Debug | visibleModel', [
-    {label:'canonicalVerdict', value:visibleModel.canonicalVerdict || '(none)'},
-    {label:'visibleBucket', value:visualBucketLabel(visibleModel.visibleBucket || 'monitor', visibleModel.canonicalVerdict || '')},
-    {label:'tone', value:visibleModel.tone || '(none)'},
-    {label:'badgeLabel', value:visibleModel.badgeLabel || '(none)'},
-    {label:'headline', value:visibleModel.headline || '(none)'},
-    {label:'primaryReason', value:visibleModel.primaryReason || '(none)'},
-    {label:'planSummary', value:visibleModel.planSummary || '(none)'}
-  ])}${renderDebugSectionMarkup('Track Debug | resolverTrace', [
-    {label:'baseResolverVerdict', value:resolverTrace.baseResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || 'n/a'},
-    {label:'viability', value:resolverTrace.viability || '(none)'},
-    {label:'viabilityBranchId', value:resolverTrace.viabilityBranchId || '(none)'},
-    {label:'viabilityBranchReason', value:safeViabilityBranchReason},
-    {label:'structureEligibility', value:resolverTrace.structureEligibility || '(none)'},
-    {label:'structureState', value:resolverTrace.structureState || '(none)'},
-    {label:'bounceState', value:resolverTrace.bounceState || '(none)'},
-    {label:'volumeState', value:resolverTrace.volumeState || '(none)'},
-    {label:'priceabilityState', value:resolverTrace.priceabilityState || '(none)'}
-  ])}${renderDebugSectionMarkup('Track Debug | planTrace', [
-    {label:'planVisible', value:planTrace.planVisible === true ? 'true' : 'false'},
-    {label:'planStatus', value:planTrace.planStatus || '(none)'},
-    {label:'hasPriceablePlan', value:planTrace.hasPriceablePlan === true ? 'true' : (planTrace.hasPriceablePlan === false ? 'false' : '(none)')},
-    {label:'hasProvisionalPriceablePlan', value:planTrace.hasProvisionalPriceablePlan === true ? 'true' : (planTrace.hasProvisionalPriceablePlan === false ? 'false' : '(none)')},
-    {label:'hasClearInvalidationLevel', value:planTrace.hasClearInvalidationLevel === true ? 'true' : (planTrace.hasClearInvalidationLevel === false ? 'false' : '(none)')},
-    {label:'unpriceableBlockReason', value:planTrace.unpriceableBlockReason || '(none)'},
-    {label:'resolvedEntry', value:Number.isFinite(planTrace.resolvedEntry) ? String(planTrace.resolvedEntry) : '(none)'},
-    {label:'resolvedStop', value:Number.isFinite(planTrace.resolvedStop) ? String(planTrace.resolvedStop) : '(none)'},
-    {label:'resolvedTarget', value:Number.isFinite(planTrace.resolvedTarget) ? String(planTrace.resolvedTarget) : '(none)'},
-    {label:'resolvedRR', value:Number.isFinite(planTrace.resolvedRR) ? String(planTrace.resolvedRR) : '(none)'}
-  ])}${renderDebugSectionMarkup('Track Debug | gateTrace', [
-    {label:'entryGatePass', value:gateTrace.entryGatePass === true ? 'true' : 'false'},
-    {label:'nearEntryGatePass', value:gateTrace.nearEntryGatePass === true ? 'true' : 'false'},
-    {label:'entryGateReasons', value:Array.isArray(gateTrace.entryGateReasons) && gateTrace.entryGateReasons.length ? gateTrace.entryGateReasons.join(' | ') : '(none)'},
-    {label:'nearEntryGateReasons', value:Array.isArray(gateTrace.nearEntryGateReasons) && gateTrace.nearEntryGateReasons.length ? gateTrace.nearEntryGateReasons.join(' | ') : '(none)'}
-  ])}${renderDebugSectionMarkup('Track Debug | lifecycleTrace', [
-    {label:'previousState', value:lifecycleTrace.previousState || '(none)'},
-    {label:'currentState', value:lifecycleTrace.currentState || lifecycleSnapshot.state || '(none)'},
-    {label:'transition', value:lifecycleTrace.transition || ((debug.previousState || '(none)') + ' -> ' + (debug.currentState || lifecycleSnapshot.state || '(none)'))},
-    {label:'changeType', value:lifecycleTrace.changeType || debug.changeType || 'unchanged'},
-    {label:'downgradeApplied', value:lifecycleTrace.downgradeApplied === true ? 'true' : (lifecycleTrace.downgradeApplied === false ? 'false' : 'false')},
-    {label:'downgradeReason', value:lifecycleTrace.downgradeReason || '(none)'},
-    {label:'refreshDemoteAttempted', value:lifecycleTrace.refreshDemoteAttempted || 'false'},
-    {label:'refreshDemoteReason', value:lifecycleTrace.refreshDemoteReason || '(none)'},
-    {label:'structuralAliveAtRefresh', value:lifecycleTrace.structuralAliveAtRefresh || 'n/a'}
-  ])}${renderDebugSectionMarkup('Base Assessment', [
-    {label:'Base Verdict', value:globalVerdict.base_verdict || 'n/a'},
-    {label:'Setup Score', value:Number.isFinite(globalVerdict.setup_score) ? `${globalVerdict.setup_score}/10` : 'n/a'},
-    {label:'Setup Score Source', value:setupScoreTrace.source || 'n/a'},
-    {label:'Previous Stored Score', value:Number.isFinite(debug.score_previous_stored) ? `${debug.score_previous_stored}/10` : '(none)'},
-    {label:'Recomputed Score', value:Number.isFinite(debug.score_recomputed) ? `${debug.score_recomputed}/10` : '(none)'},
-    {label:'Penalty-Adjusted Score', value:Number.isFinite(debug.score_recomputed_penalty_adjusted) ? `${debug.score_recomputed_penalty_adjusted}/10` : '(none)'},
-    {label:'Fallback Applied', value:debug.score_fallback_applied ? 'true' : 'false'},
-    {label:'Score Change Reason', value:debug.score_change_reason || '(none)'},
-    {label:'Refresh Replaced Reviewed State', value:debug.refresh_replaced_reviewed_state ? 'true' : 'false'},
-    {label:'Structure', value:globalVerdict.structure_state || 'n/a'},
-    {label:'Bounce', value:globalVerdict.bounce_state || 'n/a'},
-    {label:'Market', value:globalVerdict.market_regime || 'n/a'},
-    {label:'Volume', value:String(derivedStates.volumeState || 'n/a')}
-  ])}${renderDebugSectionMarkup('Candle Evidence', [
-    {label:'upClosesAfterLow', value:Number.isFinite(derivedStates.candleEvidenceUpClosesAfterLow) ? String(derivedStates.candleEvidenceUpClosesAfterLow) : '(none)'},
-    {label:'reclaimedPriorDayHigh', value:derivedStates.candleEvidenceReclaimedPriorDayHigh === true ? 'true' : 'false'},
-    {label:'downsideMomentumSlowing', value:derivedStates.candleEvidenceDownsideMomentumSlowing === true ? 'true' : 'false'},
-    {label:'tighterRanges', value:derivedStates.candleEvidenceTighterRanges === true ? 'true' : 'false'},
-    {label:'smallerBodies', value:derivedStates.candleEvidenceSmallerBodies === true ? 'true' : 'false'},
-    {label:'higherLowHold', value:derivedStates.candleEvidenceHigherLowHold === true ? 'true' : 'false'},
-    {label:'reclaimRangeMeaningful', value:derivedStates.candleEvidenceReclaimRangeMeaningful === true ? 'true' : 'false'}
-  ])}${renderDebugSectionMarkup('Execution State', [
-    {label:'Lifecycle State', value:lifecycleSnapshot.state || globalVerdict.lifecycle || 'n/a'},
-    {label:'Action State', value:resolved.actionStateLabel || resolved.actionLabel || 'n/a'},
-    {label:'Plan Status', value:debugPlanUI.showPlan ? (resolved.planStatusLabel || 'n/a') : (debugPlanUI.diagnosticsMessage || 'Bounce is not clear enough to price yet.')},
-    {label:'Plan Visible', value:debugPlanUI.showPlan ? 'true' : 'false'},
-    {label:'RR Confidence', value:resolved.rrConfidenceLabel || 'n/a'},
-    {label:'Capital Fit', value:capitalComfort.label || 'n/a'},
-    {label:'Capital Usage', value:capitalUsageDebugText(displayedPlan)},
-    {label:'Next Possible', value:debug.nextPossibleState || resolved.nextPossibleState || 'n/a'}
-  ])}${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
+  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Original Bounce State', value:globalVerdict.originalBounceState || '(none)'},
@@ -10974,26 +10899,13 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'nearEntryProvisionalBounceReason', value:globalVerdict.nearEntryProvisionalBounceReason || '(none)'},
     {label:'Bounce Priceability Guard Applied', value:globalVerdict.bouncePriceabilityGuardApplied ? 'true' : 'false'},
     {label:'Bounce Priceability Guard Reason', value:globalVerdict.bouncePriceabilityGuardReason || '(none)'},
-    {label:'Has Clear Invalidation Level', value:globalVerdict.hasClearInvalidationLevel === true ? 'true' : (globalVerdict.hasClearInvalidationLevel === false ? 'false' : '(none)')},
-    {label:'Has Priceable Plan', value:globalVerdict.hasPriceablePlan === true ? 'true' : (globalVerdict.hasPriceablePlan === false ? 'false' : '(none)')},
-    {label:'hasProvisionalPriceablePlan', value:globalVerdict.hasProvisionalPriceablePlan === true ? 'true' : (globalVerdict.hasProvisionalPriceablePlan === false ? 'false' : '(none)')},
     {label:'provisionalPlanBlockReason', value:globalVerdict.provisionalPlanBlockReason || '(none)'},
     {label:'Unpriceable Block Reason', value:globalVerdict.unpriceableBlockReason || '(none)'},
     {label:'Priceability Context Source', value:globalVerdict.planPriceabilitySource || '(none)'},
-    {label:'Resolved Plan Entry', value:Number.isFinite(globalVerdict.resolvedPlanEntry) ? String(globalVerdict.resolvedPlanEntry) : '(none)'},
-    {label:'Resolved Plan Stop', value:Number.isFinite(globalVerdict.resolvedPlanStop) ? String(globalVerdict.resolvedPlanStop) : '(none)'},
-    {label:'Resolved Plan Target', value:Number.isFinite(globalVerdict.resolvedPlanTarget) ? String(globalVerdict.resolvedPlanTarget) : '(none)'},
-    {label:'Resolved Plan Current Price', value:Number.isFinite(globalVerdict.resolvedPlanCurrentPrice) ? String(globalVerdict.resolvedPlanCurrentPrice) : '(none)'},
     {label:'Duplicate validateCurrentPlan Removed', value:globalVerdict.duplicateValidateCurrentPlanRemoved ? 'true' : 'false'},
     {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
-    {label:'Allow Plan', value:globalVerdict.allow_plan ? 'true' : 'false'},
-    {label:'Allow Watchlist', value:globalVerdict.allow_watchlist ? 'true' : 'false'},
-    {label:'Source', value:globalVerdict.source || 'resolver'},
-    {label:'Capital Affordability', value:displayedPlan.affordability || '(none)'},
-    {label:'Capital OK', value:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_ok === true ? 'true' : (displayedPlan.capitalFit && displayedPlan.capitalFit.capital_ok === false ? 'false' : '(none)')},
+    {label:'Near Entry Gate Checks', value:JSON.stringify(globalVerdict.near_entry_gate_checks || {}) || '(none)'},
     {label:'Setup Score Trace', value:`${setupScoreTrace.detail} setup=${Number.isFinite(setupScoreTrace.inputs.setup_score) ? setupScoreTrace.inputs.setup_score : 'n/a'} | base=${Number.isFinite(setupScoreTrace.inputs.base_score) ? setupScoreTrace.inputs.base_score : 'n/a'} | scan=${Number.isFinite(setupScoreTrace.inputs.scan_score) ? setupScoreTrace.inputs.scan_score : 'n/a'}`},
-    {label:'Base Action Label', value:resolved.actionStateLabel || resolved.actionLabel || 'n/a'},
-    {label:'Base Tradeability', value:resolved.tradeabilityVerdictLabel || resolved.tradeabilityLabel || 'n/a'},
     {label:'Previous', value:debug.previousState || '(none)'},
     {label:'Priority', value:String(priority.score)},
     {label:'Age', value:`${String(Math.max(age, 0))} trading days`},
@@ -11016,9 +10928,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Circular Trigger Suspected', value:latestEntryAudit && latestEntryAudit.circularTriggerSuspected === true ? 'true' : 'false'},
     {label:'Stale Data Prevented Pass', value:latestEntryAudit && latestEntryAudit.staleDataPreventedFreshPromotionPass === true ? 'true' : 'false'},
     {label:'Base Resolver Verdict', value:resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status || 'n/a'},
-    {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'},
-    {label:'Control', value:qualityAdjustments.controlQuality || 'n/a'},
-    {label:'Main Blocker', value:debug.mainBlocker || resolved.blockerReason || 'n/a'}
+    {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'}
   ])}<div class="watchlist-debug-block tiny"><strong>Watchlist Hold Trace</strong><div data-watchlist-hold-trace="${escapeHtml(item.ticker)}">${escapeHtml(debug.holdTrace || '(none)')}</div><div data-watchlist-hold-trace-history="${escapeHtml(item.ticker)}">${escapeHtml(holdTraceHistory.length ? holdTraceHistory.join(' || ') : '(none)')}</div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
 }
 
@@ -18268,25 +18178,6 @@ function updateEntryPromotionAudit(record, options = {}){
     .filter(entry => entry && typeof entry === 'object')
     .slice(0, 10);
   return snapshot;
-}
-
-function entryPromotionAuditExportRecords(){
-  return allTickerRecords()
-    .map(record => normalizeTickerRecord(record))
-    .filter(record => record && record.entryPromotionAudit && Array.isArray(record.entryPromotionAudit.history) && record.entryPromotionAudit.history.length)
-    .map(record => ({
-      ticker:normalizeTicker(record.ticker || ''),
-      latest:record.entryPromotionAudit.latest || null,
-      history:Array.isArray(record.entryPromotionAudit.history) ? record.entryPromotionAudit.history.slice(0, 10) : []
-    }));
-}
-
-function exportEntryPromotionAuditJson(){
-  const payload = {
-    exportedAt:new Date().toISOString(),
-    records:entryPromotionAuditExportRecords()
-  };
-  return downloadJsonFile(`pullback-playbook-entry-promotion-audit-${todayIsoDate()}.json`, payload);
 }
 
 // validateCurrentPlan is defined once later in this file as the canonical runtime path.
