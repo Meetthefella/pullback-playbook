@@ -11032,7 +11032,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     derivedStates,
     displayedPlan
   });
-  return `<details class="compact-details watchlist-debug-pane" data-diagnostic-panel="Track Diagnostics Bundle" data-track-ticker="${escapeHtml(item.ticker || '')}"><summary>Watchlist Debug<button class="secondary compactbutton" type="button" data-act="copy-track-diagnostics-bundle" data-track-ticker="${escapeHtml(item.ticker || '')}">Copy Track Diagnostics</button></summary>${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
+  return `<div class="diagnostic-panel-shell watchlist-debug-pane-shell watchlist-debug-block" data-diagnostic-panel="Track Diagnostics Bundle" data-track-ticker="${escapeHtml(item.ticker || '')}"><div class="diagnostic-panel-toolbar"><button class="secondary compactbutton no-card-click" type="button" data-act="copy-track-diagnostics-bundle" data-track-ticker="${escapeHtml(item.ticker || '')}">Copy Track Diagnostics</button></div><details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Original Bounce State', value:debugStateLabel(globalVerdict.originalBounceState)},
@@ -11073,7 +11073,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Stale Data Prevented Pass', value:latestEntryAudit && latestEntryAudit.staleDataPreventedFreshPromotionPass === true ? 'true' : 'false'},
     {label:'Base Resolver Verdict', value:debugStateLabel(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status, {kind:'verdict'})},
     {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'}
-  ])}<div class="watchlist-debug-block tiny"><strong>Watchlist Hold Trace</strong><div data-watchlist-hold-trace="${escapeHtml(item.ticker)}">${escapeHtml(debug.holdTrace || '(none)')}</div><div data-watchlist-hold-trace-history="${escapeHtml(item.ticker)}">${escapeHtml(holdTraceHistory.length ? holdTraceHistory.join(' || ') : '(none)')}</div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details>`;
+  ])}<div class="watchlist-debug-block tiny"><strong>Watchlist Hold Trace</strong><div data-watchlist-hold-trace="${escapeHtml(item.ticker)}">${escapeHtml(debug.holdTrace || '(none)')}</div><div data-watchlist-hold-trace-history="${escapeHtml(item.ticker)}">${escapeHtml(holdTraceHistory.length ? holdTraceHistory.join(' || ') : '(none)')}</div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details></div>`;
 }
 
 function stopWatchlistLifecycleAutomation(){
@@ -11983,31 +11983,6 @@ function logTrackRenderBuckets(source, sections = []){
   });
 }
 
-function renderTrackVisibleAuditMarkup(source, records = [], groups = [], grouped = {}, sectionMeta = []){
-  const safeSource = String(source || 'watchlist_render');
-  const totalRecords = Array.isArray(records) ? records.length : 0;
-  const groupedCounts = Array.isArray(groups) ? groups.map(group => {
-    const key = String(group && group.key || '');
-    return `${key}:${Array.isArray(grouped && grouped[key]) ? grouped[key].length : 0}`;
-  }).join(' | ') : '';
-  const sectionCounts = Array.isArray(sectionMeta) ? sectionMeta.map(meta => {
-    const key = String(meta && meta.groupKey || '');
-    const built = meta && meta.section ? 'yes' : 'no';
-    const cards = meta && meta.body ? meta.body.querySelectorAll('[data-watchlist-ticker]').length : 0;
-    return `${key}: built=${built} expanded=${meta && meta.expanded === true ? 'true' : 'false'} cards=${cards}`;
-  }).join(' | ') : '';
-  return `<div class="panelbox tiny" data-track-render-audit="true" style="margin-bottom:12px"><strong>Track Render Audit</strong><div style="margin-top:6px">source=${escapeHtml(safeSource)} | totalRecords=${escapeHtml(String(totalRecords))} | showExpired=${state.showExpiredWatchlist ? 'true' : 'false'}</div><div style="margin-top:6px">grouped=${escapeHtml(groupedCounts || '(none)')}</div><div style="margin-top:6px">sections=${escapeHtml(sectionCounts || '(none)')}</div></div>`;
-}
-
-function appendTrackRenderAuditMessage(message){
-  const audit = document.querySelector('[data-track-render-audit="true"]');
-  if(!audit) return;
-  const line = document.createElement('div');
-  line.style.marginTop = '6px';
-  line.textContent = String(message || '');
-  audit.appendChild(line);
-}
-
 function isTrackSectionCollapsible(sectionKey){
   return sectionKey === 'diminishing' || sectionKey === 'avoid_dead';
 }
@@ -12412,22 +12387,15 @@ function renderWatchlistSectionCardsSync(records, container, options = {}){
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   const parentSectionKey = String(options.parentSectionKey || '').trim().toLowerCase();
   records.forEach(record => {
-    try{
-      const cardElement = renderWatchlistCardElement(record, {
-        passCache,
-        parentSectionKey,
-        usedProjectionBundle:false,
-        recomputedDuringRender:true,
-        renderSource:String(options.source || 'watchlist_render_sync')
-      });
-      if(!cardElement){
-        appendTrackRenderAuditMessage(`card-null sync ${parentSectionKey || '(none)'} ${normalizeTicker(record && record.ticker || '')}`);
-        return;
-      }
-      container.appendChild(cardElement);
-    }catch(error){
-      appendTrackRenderAuditMessage(`card-error sync ${parentSectionKey || '(none)'} ${normalizeTicker(record && record.ticker || '')}: ${String(error && error.message || 'unknown_error')}`);
-    }
+    const cardElement = renderWatchlistCardElement(record, {
+      passCache,
+      parentSectionKey,
+      usedProjectionBundle:false,
+      recomputedDuringRender:true,
+      renderSource:String(options.source || 'watchlist_render_sync')
+    });
+    if(!cardElement) return;
+    container.appendChild(cardElement);
   });
 }
 
@@ -12468,23 +12436,15 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
     const slice = projectedRecords.slice(index, index + batchSize);
     const batchFragment = document.createDocumentFragment();
     slice.forEach(item => {
-      try{
-        const cardElement = renderWatchlistCardElement(item.record, {
-          precomputedView:item.precomputedView,
-          passCache,
-          parentSectionKey,
-          usedProjectionBundle:true,
-          recomputedDuringRender:false,
-          renderSource:source
-        });
-        if(!cardElement){
-          appendTrackRenderAuditMessage(`card-null chunked ${parentSectionKey || '(none)'} ${normalizeTicker(item.record && item.record.ticker || '')}`);
-          return;
-        }
-        batchFragment.appendChild(cardElement);
-      }catch(error){
-        appendTrackRenderAuditMessage(`card-error chunked ${parentSectionKey || '(none)'} ${normalizeTicker(item.record && item.record.ticker || '')}: ${String(error && error.message || 'unknown_error')}`);
-      }
+      const cardElement = renderWatchlistCardElement(item.record, {
+        precomputedView:item.precomputedView,
+        passCache,
+        parentSectionKey,
+        usedProjectionBundle:true,
+        recomputedDuringRender:false,
+        renderSource:source
+      });
+      if(cardElement) batchFragment.appendChild(cardElement);
     });
     container.appendChild(batchFragment);
     const batchEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
@@ -12762,7 +12722,6 @@ async function renderWatchlistChunked(options = {}){
       });
     });
     box.innerHTML = '';
-    box.insertAdjacentHTML('beforeend', renderTrackVisibleAuditMarkup(source, records, groups, grouped, sectionMeta));
     const fragment = document.createDocumentFragment();
     sectionMeta.forEach(meta => {
       if(meta.collapsible){
@@ -12922,7 +12881,6 @@ function renderWatchlist(options = {}){
       if(grouped[groupKey]) grouped[groupKey].push(record);
     });
     box.innerHTML = '';
-    box.insertAdjacentHTML('beforeend', renderTrackVisibleAuditMarkup(source, records, groups, grouped, []));
     box.appendChild(buildWatchlistSectionsFragment(records, showExpired, {passCache:modelPassCache}));
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
@@ -35263,7 +35221,7 @@ function renderReviewWorkspace(options = {}){
     ], 'Legacy / Internal', {})
     : '';
   const reviewGatewayTrace = advancedOpen
-    ? `<details class="compact-details"><summary>Trade Gateway Trace<button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Trade Gateway Trace">Copy</button></summary>${renderTradeGatewayHistoryMarkup()}</details>`
+    ? `<div class="diagnostic-panel-shell" data-diagnostic-panel="Trade Gateway Trace"><div class="diagnostic-panel-toolbar"><button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="Trade Gateway Trace">Copy</button></div><details class="compact-details diagnostic-panel-details"><summary>Trade Gateway Trace</summary>${renderTradeGatewayHistoryMarkup()}</details></div>`
     : '';
   const reviewDiagnosticBundlePanel = advancedOpen
     ? `<div class="panelbox" data-diagnostic-panel="Review Diagnostics Bundle" style="margin-top:10px">
@@ -37308,7 +37266,7 @@ document.addEventListener('click', event => {
   if(trackBundleButton){
     event.preventDefault();
     event.stopPropagation();
-    const panel = trackBundleButton.closest('.watchlist-debug-pane, .panelbox');
+    const panel = trackBundleButton.closest('.watchlist-debug-pane-shell, .watchlist-debug-pane, .panelbox');
     const trackTicker = String(trackBundleButton.getAttribute('data-track-ticker') || panel && panel.getAttribute && panel.getAttribute('data-track-ticker') || '').trim();
     copyTesterDiagnosticSnapshot({
       panelTitle:'Track Diagnostics Bundle',
@@ -37328,7 +37286,7 @@ document.addEventListener('click', event => {
   if(!button) return;
   event.preventDefault();
   event.stopPropagation();
-  const panel = button.closest('.compact-details, .watchlist-debug-block, .panelbox');
+  const panel = button.closest('.diagnostic-panel-shell, .compact-details, .watchlist-debug-block, .panelbox');
   const panelTitle = String(button.getAttribute('data-panel-title') || '').trim() || String(panel && panel.getAttribute && panel.getAttribute('data-diagnostic-panel') || 'Diagnostics');
   copyTesterDiagnosticSnapshot({panelTitle, panelElement:panel}).then(copied => {
     const statusTarget = $('testerReportStatus');

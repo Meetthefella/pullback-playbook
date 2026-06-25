@@ -2806,6 +2806,25 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 }
 .watchlist-debug-pane{margin-top:10px;width:100%}
 .watchlist-debug-pane[open]{width:100%}
+.watchlist-debug-pane-shell{
+  margin-top:10px;
+  width:100%;
+}
+.diagnostic-panel-shell{
+  width:100%;
+}
+.diagnostic-panel-toolbar{
+  display:flex;
+  justify-content:flex-end;
+  margin-top:10px;
+  margin-bottom:8px;
+}
+.diagnostic-panel-details{
+  width:100%;
+}
+.diagnostic-panel-details[open]{
+  width:100%;
+}
 .watchlist-debug-grid{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(120px,1fr));

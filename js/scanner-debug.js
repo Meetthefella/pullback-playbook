@@ -353,14 +353,14 @@
 
   function renderDebugSectionMarkup(title, rows, deps = {}){
     const safeTitle = deps.escapeHtml(String(title || 'Debug'));
-    return `<details class="compact-details watchlist-debug-block" data-diagnostic-panel="${safeTitle}"><summary>${safeTitle}<button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="${safeTitle}">Copy</button></summary>${renderDebugKeyValueGrid(rows, deps)}</details>`;
+    return `<div class="diagnostic-panel-shell watchlist-debug-block" data-diagnostic-panel="${safeTitle}"><div class="diagnostic-panel-toolbar"><button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="${safeTitle}">Copy</button></div><details class="compact-details diagnostic-panel-details"><summary>${safeTitle}</summary>${renderDebugKeyValueGrid(rows, deps)}</details></div>`;
   }
 
   function renderAdvancedDebugMarkup(rows, title = 'Advanced Debug (Internal)', deps = {}){
     const safeRows = Array.isArray(rows) ? rows.filter(row => row && row.label) : [];
     if(!safeRows.length) return '';
     const safeTitle = deps.escapeHtml(String(title));
-    return `<details class="compact-details" data-diagnostic-panel="${safeTitle}"><summary>${safeTitle}<button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="${safeTitle}">Copy</button></summary>${renderDebugKeyValueGrid(safeRows, deps)}</details>`;
+    return `<div class="diagnostic-panel-shell" data-diagnostic-panel="${safeTitle}"><div class="diagnostic-panel-toolbar"><button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="${safeTitle}">Copy</button></div><details class="compact-details diagnostic-panel-details"><summary>${safeTitle}</summary>${renderDebugKeyValueGrid(safeRows, deps)}</details></div>`;
   }
 
   function renderScannerDecisionTraceContent(view, deps = {}){
