@@ -10170,7 +10170,9 @@ function resolveLifecycleTransition(currentState, inputs = {}){
     && finalVerdict
     && finalVerdict !== 'avoid'
   ){
-    return lifecycleState || currentState;
+    // Allow stale avoid states to recover when the authoritative final verdict
+    // has already softened back to a monitor/watch path.
+    return finalVerdict;
   }
 
   if(
