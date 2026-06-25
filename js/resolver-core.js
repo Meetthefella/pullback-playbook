@@ -821,8 +821,19 @@
     const structureAliveLike = structureEligibility === 'alive' || structureMessy;
     const defaultLowPriorityBucket = structureEligibility === 'damaged' ? 'diminishing' : 'monitor';
     const aboveKeyTrendContext = ctx.below200ma !== true && ctx.ma50Below200ma !== true;
-    const noConfirmedBreakdown = ctx.below50WithoutReclaim !== true;
     const qualityFloorMet = setupScore >= 4;
+    const damagedQualityFloorMet = setupScore >= 2;
+    const below50LossStillRepairable = ctx.below50WithoutReclaim === true
+      && aboveKeyTrendContext
+      && setupLocationState === 'extended'
+      && structureState === 'weak'
+      && !hardTrendBroken
+      && !terminalAvoidFlag
+      && !hasExplicitInvalidation
+      && planOk
+      && viableRrExists
+      && bounceState === 'none';
+    const noConfirmedBreakdown = ctx.below50WithoutReclaim !== true || below50LossStillRepairable;
     const brokenExtendedRepairable = structureEligibility === 'broken'
       && !nonStructuralHardInvalidation
       && extendedLocation
@@ -830,6 +841,18 @@
       && noConfirmedBreakdown
       && setupLocationState === 'extended'
       && qualityFloorMet
+      && !planInvalidLabel
+      && planOk
+      && viableRrExists
+      && bounceState === 'none'
+      && structureState === 'weak';
+    const damagedExtendedRepairable = structureEligibility === 'damaged'
+      && !nonStructuralHardInvalidation
+      && extendedLocation
+      && aboveKeyTrendContext
+      && noConfirmedBreakdown
+      && setupLocationState === 'extended'
+      && damagedQualityFloorMet
       && !planInvalidLabel
       && planOk
       && viableRrExists
@@ -923,6 +946,14 @@
         'Trend is extended away from support - keep on monitor until price resets or repairs.',
         'broken_extended_without_hard_invalidation_low_priority',
         'Broken extended without hard invalidation low priority'
+      ));
+    }
+    if(structureEligibility === 'damaged' && damagedExtendedRepairable){
+      return enrich(asLowPriority(
+        'Extended pullback is weakening, but no confirmed breakdown is present yet.',
+        'Trend is extended away from support - keep on monitor until price resets or repairs.',
+        'damaged_extended_without_hard_invalidation_low_priority',
+        'Damaged extended without hard invalidation low priority'
       ));
     }
     if(structureEligibility === 'broken'){
@@ -1383,6 +1414,7 @@
     });
     const nearEntryGateChecks = guardedVerdict.near_entry_gate_checks || {};
     const entryGateChecks = guardedVerdict.entry_gate_checks || {};
+    const below50WithoutReclaim = priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true));
     const hasClearInvalidationLevel = nearEntryGateChecks.has_clear_invalidation_level === true
       || entryGateChecks.has_clear_invalidation_level === true;
     const reclaimSignalCount = Number.isFinite(Number(nearEntryGateChecks.reclaim_signal_count))
@@ -1413,10 +1445,13 @@
       hasEntry,
       hasStop,
       hasTarget,
-      hardTrendBroken:!nonTerminalRecoveryBlocker && (trendState === 'broken' || (priceBelow50MA && weakStructure)),
+      hardTrendBroken:!nonTerminalRecoveryBlocker && (
+        trendState === 'broken'
+        || (below50WithoutReclaim && weakStructure && (priceBelow200MA || ma50Below200MA))
+      ),
       terminalAvoidFlag:item && item.terminal_avoid_applied === true,
       explicitInvalidationReason,
-      below50WithoutReclaim:priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true)),
+      below50WithoutReclaim,
       priceBelow20ma:priceBelow20MA,
       priceBelow50ma:priceBelow50MA,
       priceVs20:Number.isFinite(currentPrice) && Number.isFinite(ma20) && ma20 !== 0 ? (currentPrice - ma20) / ma20 : null,
@@ -1452,6 +1487,8 @@
         trackedReason = semanticBlocker.reason || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.';
       }else if(String(viability.viabilityBranchId || '').toLowerCase().includes('falling_knife')){
         trackedReason = viability.mainBlocker || FALLING_KNIFE_COPY;
+      }else if(String(viability.viabilityBranchId || '').toLowerCase().includes('extended_without_hard_invalidation')){
+        trackedReason = viability.mainBlocker || viability.viabilityReason || trackedReason;
       }else if(structureLayer.structureEligibility === 'damaged'){
         trackedReason = 'Trend is weakening - no reliable stop level yet.';
       }else if(isExtended && ['strong','intact'].includes(structureState)){
@@ -2282,6 +2319,55 @@
         assert(result){
           return result.entry_gate_pass === true
             && result.final_verdict === 'entry';
+        }
+      },
+      {
+        id:'tracked-broken-extended-below-50-without-confirmed-breakdown-stays-watch',
+        record:{
+          ticker:'NVDA',
+          watchlist_entry_exists:true,
+          baseScore:2,
+          setupScore:2,
+          derivedStates:{
+            structureState:'weak',
+            trendState:'acceptable',
+            setupLocationState:'extended',
+            priceabilityState:'priceable',
+            stabilisationState:'none',
+            bounceState:'none',
+            pullbackZone:'extended',
+            volumeState:'weak'
+          },
+          effectivePlan:{entry:208.87, stop:196.14, firstTarget:235.74},
+          displayedPlan:{
+            status:'valid',
+            entry:208.87,
+            stop:196.14,
+            target:235.74,
+            tradeability:'tradable',
+            rewardRisk:{rrRatio:2.11},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'affordable',
+            capitalFit:{capital_fit:'ideal'}
+          },
+          marketData:{price:196.14, ma20:208.87, ma50:210.22, ma200:190.53},
+          resolvedContract:{
+            finalVerdict:'Watch',
+            structuralState:'developing',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Watch',
+            blockerReason:'Needs stronger confirmation',
+            reasonSummary:'Technicals are promising, but stabilisation or bounce is not confirmed yet.',
+            terminal:false,
+            baseVerdict:'watch'
+          }
+        },
+        assert(result){
+          return result.final_verdict === 'watch'
+            && result.viability === 'low_priority'
+            && result.viabilityBranchId === 'damaged_extended_without_hard_invalidation_low_priority'
+            && /extended away from support/i.test(String(result.reason || ''));
         }
       },
       {
