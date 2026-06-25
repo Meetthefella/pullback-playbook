@@ -1,6 +1,8 @@
 (function(global){
   // Canonical global-verdict helpers extracted from app.js.
   const diagnosticTraceState = {};
+  const MIN_ENTRY_RR = 2;
+  const MIN_NEAR_ENTRY_RR = 1.5;
 
   function debugFlagEnabled(flagName){
     try{
@@ -275,7 +277,7 @@
       && Number.isFinite(rr)
       && entry > stop
       && target > entry
-      && rr >= 2
+      && rr >= MIN_NEAR_ENTRY_RR
     );
     const hasProvisionalPlanValues = !!(
       Number.isFinite(entry)
@@ -306,7 +308,7 @@
       if(['too_heavy','too_expensive'].includes(String(ctx.capital_fit || '').trim().toLowerCase())) return 'Capital fit is impossible at this risk level.';
       if(String(ctx.affordability || '').trim().toLowerCase() === 'not_affordable') return 'Capital fit is impossible at this risk level.';
       if(!hasProvisionalPriceablePlan) return hasProvisionalPlanValues
-        ? 'RR or credible RR must be at least 2.0.'
+        ? 'RR or credible RR must be at least 1.5.'
         : 'Risk/reward cannot be calculated from the current plan.';
       if(!structureOk) return 'Structure is not strong/intact/developing clean.';
       if(!pullbackOk) return 'No low-risk entry is available yet.';
@@ -418,8 +420,8 @@
     const validTradeability = ['tradable', 'entry', 'ready', 'action_now', 'risk_only'].includes(tradeability);
     const hasProvisionalPlan = provisionalPlan.hasProvisionalPriceablePlan === true && !provisionalPlan.provisionalPlanBlockReason;
     const rrPriceable = credibleRrValue !== null
-      ? credibleRrValue >= 2
-      : ((rrValue !== null && rrValue >= 2) || (provisionalRrValue !== null && provisionalRrValue >= 2));
+      ? credibleRrValue >= MIN_NEAR_ENTRY_RR
+      : ((rrValue !== null && rrValue >= MIN_NEAR_ENTRY_RR) || (provisionalRrValue !== null && provisionalRrValue >= MIN_NEAR_ENTRY_RR));
     const confirmedBounceOk = bounceState === 'confirmed' && !bouncePriceability.unpriceableBlockReason && bouncePriceability.reclaimConfirmed === true;
     const provisionalBounceOk = provisionalPlan.nearEntryProvisionalBounceApplied === true;
     const checks = {
@@ -490,7 +492,7 @@
     if(!checks.plan_ok) reasons.push('Plan must be valid to qualify for Near Entry.');
     if(checks.weak_bounce_plan_text) reasons.push('Bounce is not clear enough to price yet.');
     if(!checks.risk_width_ok) reasons.push('Stop distance is too wide to price risk cleanly.');
-    if(!checks.rr_priceable) reasons.push('RR or credible RR must be at least 2.0.');
+    if(!checks.rr_priceable) reasons.push('RR or credible RR must be at least 1.5.');
     if(!checks.tradeability_ok) reasons.push('Tradeability is not priceable yet.');
     if(checks.below_50_without_reclaim) reasons.push('Price is below the 50MA with no reclaim attempt.');
     if(checks.below_200ma) reasons.push('Price is below the 200MA.');
@@ -1130,7 +1132,7 @@
       && planEntry > planStop
       && planTarget > planEntry
       && Number.isFinite(rrValue)
-      && rrValue >= 2
+      && rrValue >= MIN_NEAR_ENTRY_RR
       && !stopDistanceTooWide
       && pullbackValid;
     let priceabilityInferenceReason = '';
@@ -1416,7 +1418,7 @@
         && priceabilityState === 'unpriceable';
       const weakRewardPotential = constructiveAliveStructure
         && Number.isFinite(Number(entryGateChecks.resolved_rr))
-        && Number(entryGateChecks.resolved_rr) < 2;
+        && Number(entryGateChecks.resolved_rr) < MIN_NEAR_ENTRY_RR;
       const alivePoorLocation = structureLayer.structureEligibility === 'alive'
         && ['none','off_level','unclear'].includes(setupLocationState)
         && (priceabilityState === 'unpriceable' || String(viability.viabilityBranchId || '').includes('low_score') || setupScore < 5 || invalidPlan);

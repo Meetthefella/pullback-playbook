@@ -5889,6 +5889,42 @@ function runPlanSemanticsAssertions(){
   if(below50ProvisionalNearEntry.pass !== true || below50ProvisionalNearEntry.checks.below_50_without_reclaim !== false){
     throw new Error('Provisional near-50MA repair setups must not fail Near Entry solely because price is fractionally below the 50MA before an explicit reclaim flag prints.');
   }
+  const acceptableRrNearEntry = resolverCore.canPromoteToNearEntry({
+    structure_state:'intact',
+    trend_state:'strong',
+    bounce_state:'attempt',
+    stabilisation_state:'early',
+    pullback_zone:'near_20ma',
+    market_regime:'supportive',
+    volume_state:'normal',
+    plan_visible:true,
+    plan_status:'valid',
+    plan_blocked:false,
+    has_entry:true,
+    has_stop:true,
+    entry:161.74,
+    stop:157.2,
+    target:169.09,
+    rr:1.62,
+    credible_rr:1.62,
+    provisional_entry:161.74,
+    provisional_stop:157.2,
+    provisional_target:169.09,
+    provisional_rr:1.62,
+    tradeability:'tradable',
+    pullback_valid:true,
+    entry_trigger_hit:false,
+    stop_distance_too_wide:false,
+    capital_fit:'acceptable',
+    affordability:'acceptable',
+    price_below_50ma:false,
+    price_below_200ma:false,
+    ma50_below_200ma:false,
+    terminal_avoid_applied:false
+  });
+  if(acceptableRrNearEntry.pass !== true || acceptableRrNearEntry.checks.rr_priceable !== true){
+    throw new Error('Constructive provisional repairs with acceptable first-target RR must remain eligible for Near Entry.');
+  }
 
   const frozenReplaySnapshotPath = path.join(os.tmpdir(), `pullback-playbook-frozen-replay-${Date.now()}.json`);
   fs.writeFileSync(frozenReplaySnapshotPath, JSON.stringify({
