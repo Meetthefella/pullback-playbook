@@ -12370,32 +12370,6 @@ function buildWatchlistSectionShell(group, count, expanded){
   return {section, header, body, collapsible};
 }
 
-function watchlistDomMatchesRenderState(box, groups, groupedRecords, passCache = null){
-  if(!box) return false;
-  const sections = Array.from(box.querySelectorAll('.watchlistgroup[data-group-key]'));
-  if(!sections.length) return false;
-  const sectionMap = new Map();
-  sections.forEach(section => {
-    const key = String(section.getAttribute('data-group-key') || '').trim().toLowerCase();
-    if(key) sectionMap.set(key, section);
-  });
-  for(let index = 0; index < groups.length; index += 1){
-    const group = groups[index];
-    const groupRecords = groupedRecords[group.key] || [];
-    if(!groupRecords.length) continue;
-    const section = sectionMap.get(group.key);
-    if(!section) return false;
-    const sortedGroupRecords = sortWatchlistGroupRecords(groupRecords, group.key, passCache);
-    const expanded = isTrackSectionExpanded(group.key, sortedGroupRecords, passCache);
-    applyTrackSectionExpandedState(section, expanded);
-    const body = section.querySelector('.watchlistgroup__body');
-    if(!body) return false;
-    const renderedCards = body.querySelectorAll('[data-watchlist-ticker]').length;
-    if(expanded && renderedCards === 0) return false;
-  }
-  return true;
-}
-
 function renderWatchlistSectionCardsSync(records, container, options = {}){
   if(!container) return;
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
@@ -12719,15 +12693,6 @@ async function renderWatchlistChunked(options = {}){
       const groupKey = watchlistRenderGroupForBucket(bucket);
       if(grouped[groupKey]) grouped[groupKey].push(record);
     });
-    if(
-      allowCachedReturn
-      &&
-      uiState.watchlistRenderSignature === renderSignature
-      && box.dataset.watchlistSignature === renderSignature
-      && box.childElementCount > 0
-    ){
-      if(watchlistDomMatchesRenderState(box, groups, grouped, modelPassCache)) return;
-    }
     const sectionMeta = [];
     groups.forEach(group => {
       const groupRecords = grouped[group.key] || [];
