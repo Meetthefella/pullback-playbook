@@ -12667,7 +12667,8 @@ async function renderWatchlistChunked(options = {}){
     const model = options.model || prepareWatchlistRenderModel(source, {passCache});
     const {box, showExpired, records, renderSignature} = model;
     const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
-    const preserveUiState = options.preserveUiState !== false && activeWorkspaceTab() === 'track';
+    const structuralFilterChange = source === 'track_show_expired_toggle';
+    const preserveUiState = options.preserveUiState !== false && activeWorkspaceTab() === 'track' && !structuralFilterChange;
     const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
     if(!box) return;
     logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'watchlist', records.length);
@@ -12826,7 +12827,8 @@ function renderWatchlist(options = {}){
   const finishTrackRender = startTrackRenderCycle(source);
   let renderError = null;
   try{
-    const preserveUiState = activeWorkspaceTab() === 'track';
+    const structuralFilterChange = source === 'track_show_expired_toggle';
+    const preserveUiState = activeWorkspaceTab() === 'track' && !structuralFilterChange;
     const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
     const restoreScroll = shouldRestoreTrackScrollForSource(source);
     const passCache = createWatchlistProjectionPassCache();
