@@ -3589,11 +3589,88 @@ function currentReviewStateHealthSnapshot(record){
   };
 }
 
+function buildTrackDiagnosticSnapshot(record){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item) return null;
+  try{
+    const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
+    const simplifiedState = resolveSimplifiedStateForSurface(item, 'track', {
+      renderPass:0,
+      source:'diagnostic_snapshot',
+      mutationSource:'diagnostic_snapshot'
+    });
+    const simplifiedDebug = simplifiedState.debug && typeof simplifiedState.debug === 'object'
+      ? simplifiedState.debug
+      : {};
+    const derivedStates = simplifiedDebug.derivedStates && typeof simplifiedDebug.derivedStates === 'object'
+      ? simplifiedDebug.derivedStates
+      : analysisDerivedStatesFromRecord(item);
+    const displayedPlan = applySetupConfirmationPlanGate(item, deriveCurrentPlanState(
+      item.plan && item.plan.entry,
+      item.plan && item.plan.stop,
+      item.plan && item.plan.firstTarget,
+      item.marketData && item.marketData.currency
+    ), derivedStates);
+    const globalVerdict = simplifiedDebug.resolvedState
+      ? simplifiedDebug.resolvedState
+      : resolveGlobalVerdict(item);
+    const priority = watchlistPriorityForRecord(item, {lifecycleSnapshot});
+    const trackVisibleModel = resolveTrackCardVisibleModel(item, simplifiedState);
+    const debugPlanUI = resolvePlanVisibility({
+      state:globalVerdict.finalVerdict || globalVerdict.final_verdict,
+      bounce_state:globalVerdict.bounce_state || (item.setup && item.setup.bounceState),
+      structure:globalVerdict.structure_state || (item.setup && item.setup.structureState),
+      terminal_avoid_applied:globalVerdict.terminal_avoid_applied === true,
+      avoid_trigger_source:globalVerdict.avoid_trigger_source || '',
+      viability:globalVerdict.viability || '',
+      rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
+      hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
+      hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
+      near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true
+    });
+    const consistencyAudit = buildConsistencyAuditRows({
+      simplifiedState,
+      globalVerdict,
+      trackVisibleModel,
+      debugPlanUI,
+      lifecycleSnapshot,
+      resolved:item.watchlistVisualState || {},
+      derivedStates,
+      displayedPlan
+    });
+    const trackDebug = item.watchlistVisualState && item.watchlistVisualState.trackDebug && typeof item.watchlistVisualState.trackDebug === 'object'
+      ? item.watchlistVisualState.trackDebug
+      : {};
+    return {
+      ticker:String(item.ticker || ''),
+      simplifiedState:currentReviewStateHealthSnapshot(item),
+      lifecycleSnapshot:safeDiagnosticClone(lifecycleSnapshot || {}, {}),
+      consistencyAudit:safeDiagnosticClone(consistencyAudit || [], []),
+      visibleModel:safeDiagnosticClone(trackDebug.visibleModel || {}, {}),
+      resolverTrace:safeDiagnosticClone(trackDebug.resolverTrace || {}, {}),
+      planTrace:safeDiagnosticClone(trackDebug.planTrace || {}, {}),
+      gateTrace:safeDiagnosticClone(trackDebug.gateTrace || {}, {}),
+      lifecycleTrace:safeDiagnosticClone(trackDebug.lifecycleTrace || {}, {}),
+      watchlistDebug:safeDiagnosticClone(item.watchlist && item.watchlist.debug || {}, {}),
+      plan:safeDiagnosticClone(item.plan || {}, {}),
+      scan:safeDiagnosticClone(item.scan || {}, {})
+    };
+  }catch(error){
+    return {
+      ticker:String(item.ticker || ''),
+      snapshotError:String(error && error.message || 'track_snapshot_failed')
+    };
+  }
+}
+
 function buildTesterDiagnosticSnapshot(options = {}){
   const panelTitle = String(options.panelTitle || 'General diagnostics').trim();
   const panelElement = options.panelElement || null;
   const bundleMode = String(options.bundleMode || '').trim().toLowerCase();
-  const record = currentReviewDiagnosticRecord();
+  const trackTicker = normalizeTicker(options.trackTicker || '');
+  const record = bundleMode === 'track_tester_bundle' && trackTicker
+    ? getTickerRecord(trackTicker)
+    : currentReviewDiagnosticRecord();
   try{
     const rawSnapshot = {
       timestamp:new Date().toISOString(),
@@ -3622,6 +3699,15 @@ function buildTesterDiagnosticSnapshot(options = {}){
         review:rawSnapshot.review,
         stateHealth:rawSnapshot.stateHealth,
         chartVerification:currentReviewChartVerificationSnapshot(record),
+        gateway:rawSnapshot.gateway
+      };
+    }
+    if(bundleMode === 'track_tester_bundle'){
+      rawSnapshot.bundleMode = 'track_tester_bundle';
+      rawSnapshot.bundleNote = 'Primary Track tester bundle. Use this instead of copying separate Track debug panels.';
+      rawSnapshot.sections = {
+        track:buildTrackDiagnosticSnapshot(record),
+        policyDiagnostics:rawSnapshot.policyDiagnostics,
         gateway:rawSnapshot.gateway
       };
     }
@@ -10936,7 +11022,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     derivedStates,
     displayedPlan
   });
-  return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
+  return `<details class="compact-details watchlist-debug-pane" data-diagnostic-panel="Track Diagnostics Bundle" data-track-ticker="${escapeHtml(item.ticker || '')}"><summary>Watchlist Debug<button class="secondary compactbutton" type="button" data-act="copy-track-diagnostics-bundle" data-track-ticker="${escapeHtml(item.ticker || '')}">Copy Track Diagnostics</button></summary>${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Original Bounce State', value:debugStateLabel(globalVerdict.originalBounceState)},
@@ -37159,6 +37245,26 @@ document.addEventListener('click', event => {
         : '<span class="badtext">Could not copy Review Diagnostics Bundle.</span>');
     }).catch(() => {
       setStatus('testerReportStatus', '<span class="badtext">Could not copy Review Diagnostics Bundle.</span>');
+    });
+    return;
+  }
+  const trackBundleButton = event.target && event.target.closest ? event.target.closest('[data-act="copy-track-diagnostics-bundle"]') : null;
+  if(trackBundleButton){
+    event.preventDefault();
+    event.stopPropagation();
+    const panel = trackBundleButton.closest('.watchlist-debug-pane, .panelbox');
+    const trackTicker = String(trackBundleButton.getAttribute('data-track-ticker') || panel && panel.getAttribute && panel.getAttribute('data-track-ticker') || '').trim();
+    copyTesterDiagnosticSnapshot({
+      panelTitle:'Track Diagnostics Bundle',
+      bundleMode:'track_tester_bundle',
+      trackTicker,
+      panelElement:panel
+    }).then(copied => {
+      setStatus('testerReportStatus', copied
+        ? `<span class="ok">Track Diagnostics copied${trackTicker ? `: ${escapeHtml(trackTicker)}` : ''}.</span>`
+        : `<span class="badtext">Could not copy Track Diagnostics${trackTicker ? `: ${escapeHtml(trackTicker)}` : ''}.</span>`);
+    }).catch(() => {
+      setStatus('testerReportStatus', `<span class="badtext">Could not copy Track Diagnostics${trackTicker ? `: ${escapeHtml(trackTicker)}` : ''}.</span>`);
     });
     return;
   }
