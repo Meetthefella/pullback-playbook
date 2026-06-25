@@ -435,7 +435,7 @@
       {label:'Capital Fit', value:(view && view.planUiState && view.planUiState.capitalFitLabel) || '(none)'},
       {label:'Next Possible', value:nextAction.detail || nextAction.label || '(none)'}
     ], deps);
-    const advancedSection = `<details class="compact-details"><summary>Advanced Debug (Internal)</summary><div class="mutebox scrollbox">${deps.escapeHtml(lines.join('\n') || 'No trace available.')}</div></details>`;
+    const advancedSection = `<div class="diagnostic-panel-shell" data-diagnostic-panel="Advanced Debug (Internal)"><details class="compact-details diagnostic-panel-details"><summary>Advanced Debug (Internal)</summary><div class="mutebox scrollbox">${deps.escapeHtml(lines.join('\n') || 'No trace available.')}</div></details></div>`;
     const gateSection = renderAdvancedDebugMarkup([
       {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
       {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},

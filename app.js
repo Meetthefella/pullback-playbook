@@ -10209,6 +10209,34 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
 function watchlistLifecycleSnapshot(record, options = {}){
   const item = normalizeTickerRecord(record);
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
+  if(hasLockedLifecycle(item)){
+    const expiryAt = String(item.lifecycle && item.lifecycle.expiresAt || todayIsoDate());
+    const expiryReason = String(item.lifecycle && item.lifecycle.expiryReason || 'Expired manually.');
+    return {
+      state:'expired',
+      label:getBadge('expired').text,
+      badgeClass:getBadge('expired').className,
+      bucket:'low_priority_avoid',
+      stage:'expired',
+      status:'stale',
+      expiresAt:expiryAt,
+      expiryReason,
+      reason:expiryReason,
+      baseVerdict:'watch',
+      downgradeApplied:true,
+      downgradeReason:expiryReason,
+      refresh_demote_attempted:'false',
+      refresh_demote_reason:'Expired manually.',
+      structural_alive_at_refresh:'false',
+      avoid_allowed_by_structure_gate:'true',
+      explicit_invalidation_reason:'(none)',
+      lifecycle_drop_reason:expiryReason,
+      avoid_allowed_by_structure_consistency_guard:'true',
+      remainingTradingDays:0,
+      rank:watchlistLifecycleStateRank('expired'),
+      hasMeaningfulImprovement:false
+    };
+  }
   const liveRefreshPending = isWatchlistLiveRefreshPending(item.ticker);
   if(liveRefreshPending){
     const storedState = canonicalLifecycleState(item.watchlist && item.watchlist.lifecycleState);
@@ -35409,7 +35437,7 @@ function renderReviewWorkspace(options = {}){
           <details class="compact-details">
             <summary>Workspace Status</summary>
             <div class="summary" id="reviewLifecycleSummary">Lifecycle: Not tracked yet.</div>
-            <div class="reviewactions reviewactions-secondary"><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button></div>
+            <div class="reviewactions reviewactions-secondary reviewactions-secondary--lifecycle"><button class="ghost" id="expireLifecycleBtn" type="button">Expire Now</button></div>
             ${reviewDebug}
             <div class="statusline tiny" id="reviewWorkspaceStatus">${renderReviewChartStatusLine(record, simplifiedChartPipeline)}</div>
           </details>

@@ -1941,6 +1941,7 @@ body.debug-advanced .advanced-debug-only{
 .reviewactions{display:flex;flex-wrap:wrap;gap:8px}
 .reviewactions-top{margin-top:-2px}
 .reviewactions-secondary{margin-top:8px}
+.reviewactions-secondary--lifecycle{margin-top:14px}
 .reviewanalysispanel .reviewactions{margin-top:0}
 .review-action-row{
   display:grid;
