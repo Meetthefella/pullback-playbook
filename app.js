@@ -3481,6 +3481,43 @@ function currentVisibleReviewDiagnostics(record){
   };
 }
 
+function currentReviewChartVerificationSnapshot(record){
+  const item = record || currentReviewDiagnosticRecord();
+  if(!item) return null;
+  try{
+    const pipeline = getReviewChartAnalysisPipeline(item) || {};
+    const simplified = buildSimplifiedChartPipelineMarkup(item, pipeline);
+    const decision = simplified && simplified.decision && typeof simplified.decision === 'object'
+      ? simplified.decision
+      : {};
+    const trace = simplified && simplified.trace && typeof simplified.trace === 'object'
+      ? simplified.trace
+      : {};
+    return {
+      phase:String(pipeline.phase || ''),
+      status:String(trace.status || ''),
+      decisionKey:String(decision.key || ''),
+      title:String(decision.title || ''),
+      summary:String(decision.summary || ''),
+      detail:String(decision.detail || ''),
+      aiAnalysisSuppressed:trace.aiAnalysisSuppressed === true,
+      suppressionReason:String(trace.suppressionReason || ''),
+      expectedTicker:String(trace.trustedFacts && trace.trustedFacts.ticker || ''),
+      detectedTicker:String(trace.extractedFacts && trace.extractedFacts.visible_ticker || ''),
+      requestId:String(trace.requestId || ''),
+      imageId:String(trace.imageId || ''),
+      manualConfirmed:trace.manualConfirmed === true,
+      diagnostics:Array.isArray(trace.diagnostics) ? trace.diagnostics.slice(0, 12) : [],
+      evidence:Array.isArray(trace.evidence) ? trace.evidence.slice(0, 12) : [],
+      missing:Array.isArray(trace.missing) ? trace.missing.slice(0, 12) : []
+    };
+  }catch(error){
+    return {
+      snapshotError:String(error && error.message || 'chart_verification_snapshot_failed')
+    };
+  }
+}
+
 function currentReviewStateHealthSnapshot(record){
   const item = record || currentReviewDiagnosticRecord();
   if(!item) return null;
@@ -3555,6 +3592,7 @@ function currentReviewStateHealthSnapshot(record){
 function buildTesterDiagnosticSnapshot(options = {}){
   const panelTitle = String(options.panelTitle || 'General diagnostics').trim();
   const panelElement = options.panelElement || null;
+  const bundleMode = String(options.bundleMode || '').trim().toLowerCase();
   const record = currentReviewDiagnosticRecord();
   try{
     const rawSnapshot = {
@@ -3577,6 +3615,16 @@ function buildTesterDiagnosticSnapshot(options = {}){
       gateway:currentPaperGatewayDiagnostics(),
       panelText:panelElement ? String(panelElement.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000) : ''
     };
+    if(bundleMode === 'review_tester_bundle'){
+      rawSnapshot.bundleMode = 'review_tester_bundle';
+      rawSnapshot.bundleNote = 'Primary Review tester bundle. Use this instead of copying separate Review debug panels.';
+      rawSnapshot.sections = {
+        review:rawSnapshot.review,
+        stateHealth:rawSnapshot.stateHealth,
+        chartVerification:currentReviewChartVerificationSnapshot(record),
+        gateway:rawSnapshot.gateway
+      };
+    }
     return redactDiagnosticPayload(rawSnapshot);
   }catch(error){
     return redactDiagnosticPayload({
@@ -35046,6 +35094,7 @@ function renderReviewWorkspace(options = {}){
         <strong>Chart Verification Diagnostics</strong>
         <div class="tiny" style="margin-top:8px">Use this copy action for the sanitized chart-verification snapshot instead of the chart details toggle above.</div>
         <div class="actions" style="margin-top:10px">
+          <button class="primary compactbutton" type="button" data-act="copy-review-diagnostics-bundle">Copy Review Diagnostics Bundle</button>
           <button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Chart Verification">Copy Chart Verification Diagnostics</button>
         </div>
       </div>`
@@ -37064,6 +37113,22 @@ click('contextSettingsToggle', () => setContextSettingsPanelOpen(!(uiState.conte
 click('contextSettingsCloseBtn', () => setContextSettingsPanelOpen(false));
 click('contextSettingsBackdrop', () => setContextSettingsPanelOpen(false));
 document.addEventListener('click', event => {
+  const reviewBundleButton = event.target && event.target.closest ? event.target.closest('[data-act="copy-review-diagnostics-bundle"]') : null;
+  if(reviewBundleButton){
+    event.preventDefault();
+    event.stopPropagation();
+    copyTesterDiagnosticSnapshot({
+      panelTitle:'Review Diagnostics Bundle',
+      bundleMode:'review_tester_bundle'
+    }).then(copied => {
+      setStatus('testerReportStatus', copied
+        ? '<span class="ok">Review Diagnostics Bundle copied.</span>'
+        : '<span class="badtext">Could not copy Review Diagnostics Bundle.</span>');
+    }).catch(() => {
+      setStatus('testerReportStatus', '<span class="badtext">Could not copy Review Diagnostics Bundle.</span>');
+    });
+    return;
+  }
   const button = event.target && event.target.closest ? event.target.closest('[data-act="copy-diagnostic-panel"]') : null;
   if(!button) return;
   event.preventDefault();
