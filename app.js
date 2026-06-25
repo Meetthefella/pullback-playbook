@@ -11971,6 +11971,22 @@ function logTrackRenderBuckets(source, sections = []){
   });
 }
 
+function renderTrackVisibleAuditMarkup(source, records = [], groups = [], grouped = {}, sectionMeta = []){
+  const safeSource = String(source || 'watchlist_render');
+  const totalRecords = Array.isArray(records) ? records.length : 0;
+  const groupedCounts = Array.isArray(groups) ? groups.map(group => {
+    const key = String(group && group.key || '');
+    return `${key}:${Array.isArray(grouped && grouped[key]) ? grouped[key].length : 0}`;
+  }).join(' | ') : '';
+  const sectionCounts = Array.isArray(sectionMeta) ? sectionMeta.map(meta => {
+    const key = String(meta && meta.groupKey || '');
+    const built = meta && meta.section ? 'yes' : 'no';
+    const cards = meta && meta.body ? meta.body.querySelectorAll('[data-watchlist-ticker]').length : 0;
+    return `${key}: built=${built} expanded=${meta && meta.expanded === true ? 'true' : 'false'} cards=${cards}`;
+  }).join(' | ') : '';
+  return `<div class="panelbox tiny" data-track-render-audit="true" style="margin-bottom:12px"><strong>Track Render Audit</strong><div style="margin-top:6px">source=${escapeHtml(safeSource)} | totalRecords=${escapeHtml(String(totalRecords))} | showExpired=${state.showExpiredWatchlist ? 'true' : 'false'}</div><div style="margin-top:6px">grouped=${escapeHtml(groupedCounts || '(none)')}</div><div style="margin-top:6px">sections=${escapeHtml(sectionCounts || '(none)')}</div></div>`;
+}
+
 function isTrackSectionCollapsible(sectionKey){
   return sectionKey === 'diminishing' || sectionKey === 'avoid_dead';
 }
@@ -12710,6 +12726,7 @@ async function renderWatchlistChunked(options = {}){
       });
     });
     box.innerHTML = '';
+    box.insertAdjacentHTML('beforeend', renderTrackVisibleAuditMarkup(source, records, groups, grouped, sectionMeta));
     const fragment = document.createDocumentFragment();
     sectionMeta.forEach(meta => {
       if(meta.collapsible){
@@ -12860,7 +12877,16 @@ function renderWatchlist(options = {}){
     ){
       return;
     }
+    const groups = watchlistRenderGroups(showExpired);
+    const grouped = {};
+    groups.forEach(group => { grouped[group.key] = []; });
+    records.forEach(record => {
+      const bucket = watchlistPresentationBucketForRecord(record, {passCache:modelPassCache});
+      const groupKey = watchlistRenderGroupForBucket(bucket);
+      if(grouped[groupKey]) grouped[groupKey].push(record);
+    });
     box.innerHTML = '';
+    box.insertAdjacentHTML('beforeend', renderTrackVisibleAuditMarkup(source, records, groups, grouped, []));
     box.appendChild(buildWatchlistSectionsFragment(records, showExpired, {passCache:modelPassCache}));
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
