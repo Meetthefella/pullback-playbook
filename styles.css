@@ -2835,6 +2835,12 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
   width:100%;
   word-break:break-word;
 }
+.diagnostic-panel-shell + .diagnostic-panel-shell{
+  margin-top:10px;
+}
+.watchlist-debug-pane .diagnostic-panel-shell + .diagnostic-panel-shell{
+  margin-top:10px;
+}
 .chartworkflow{margin-top:10px}
 .workflowmenu-inline{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));width:100%;margin-top:0}
 .workflowmenu [data-act="choose-chart"],
