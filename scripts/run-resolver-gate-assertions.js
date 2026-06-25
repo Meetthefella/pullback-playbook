@@ -6368,6 +6368,12 @@ function runTrackPresentationAuthorityAssertions(){
     || !/sameVisibleCopy\(trackVisibleModel\.primaryReason, decisionSummary\)/.test(appSource)){
     throw new Error('Track card render must source visible state from persisted shared presentation, with an explicit live fallback path when persisted fields are unavailable.');
   }
+  if(!/const persistedPresentation = persistTrackPresentationOnRecord\(liveRecord,[\s\S]*?\);\s*const lifecycleSnapshot = syncWatchlistLifecycle\(liveRecord\) \|\| watchlistLifecycleSnapshot\(liveRecord\);/s.test(appSource)){
+    throw new Error('Persisted Track presentation must be created before lifecycle sync so lifecycle can consume the persisted snapshot instead of rewriting presentation authority.');
+  }
+  if(!/const persistedPresentationVerdict = normalizeGlobalVerdictKey\([\s\S]*?persistedSharedPresentation[\s\S]*?canonicalVerdict[\s\S]*?\);[\s\S]*?const canonicalVerdict = persistedPresentationVerdict[\s\S]*?\|\| resolvedFinalVerdictKey/s.test(appSource)){
+    throw new Error('Watchlist lifecycle snapshot must consume persisted shared presentation verdicts before falling back to live recomputation.');
+  }
   if(/decision_summary:presentation\.presentationReason/.test(appSource) || /reason:presentation\.presentationReason/.test(appSource)){
     throw new Error('Legacy presentationReason must not feed non-debug visible Track render paths.');
   }

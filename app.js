@@ -7315,25 +7315,51 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const watchlistDebug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object'
     ? item.watchlist.debug
     : {};
-  const structurallyAliveAtRefresh = String(
-    lifecycleSnapshot.structural_alive_at_refresh
-    || watchlistDebug.structural_alive_at_refresh
-    || ''
-  ).trim().toLowerCase() === 'true';
-  const lifecycleVerdict = normalizeGlobalVerdictKey(lifecycleSnapshot.state || '');
   const simplifiedVerdict = normalizeGlobalVerdictKey(
     simplifiedState.canonicalVerdict
     || simplifiedState.finalVerdict
     || simplifiedState.final_verdict
     || 'watch'
   );
-  const watchlistVerdict = normalizeGlobalVerdictKey(watchlistDebug.finalVerdict || '');
-  const suppressAvoidForTrackedWatch = options.surface === 'track'
-    && item.watchlist && item.watchlist.inWatchlist
-    && lifecycleVerdict === 'watch'
-    && watchlistVerdict === 'watch'
-    && structurallyAliveAtRefresh
-    && simplifiedVerdict === 'avoid';
+  const lifecycleVerdict = normalizeGlobalVerdictKey(lifecycleSnapshot.state || '');
+  const structuralAliveAtRefresh = String(
+    lifecycleSnapshot.structural_alive_at_refresh
+    || watchlistDebug.structural_alive_at_refresh
+    || ''
+  ).trim().toLowerCase() === 'true';
+  const avoidAllowedByStructureGate = String(
+    lifecycleSnapshot.avoid_allowed_by_structure_gate
+    || watchlistDebug.avoid_allowed_by_structure_gate
+    || ''
+  ).trim().toLowerCase() === 'true';
+  const explicitInvalidationReason = String(
+    lifecycleSnapshot.explicit_invalidation_reason
+    || watchlistDebug.explicit_invalidation_reason
+    || globalVerdict.explicit_invalidation_reason
+    || ''
+  ).trim().toLowerCase();
+  const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
+  const baseVerdict = normalizeGlobalVerdictKey(
+    globalVerdict.base_verdict
+    || watchlistDebug.baseVerdict
+    || ''
+  );
+  const resolverVerdict = normalizeGlobalVerdictKey(
+    globalVerdict.final_verdict
+    || globalVerdict.finalVerdict
+    || watchlistDebug.finalVerdict
+    || ''
+  );
+  const softTrackedWatchSuppression = !!(
+    item.watchlist
+    && item.watchlist.inWatchlist
+    && simplifiedVerdict === 'avoid'
+    && structuralAliveAtRefresh
+    && !avoidAllowedByStructureGate
+    && !hasExplicitInvalidation
+    && ['watch', 'monitor'].includes(baseVerdict || resolverVerdict)
+  );
+  const suppressAvoidForTrackedWatch = softTrackedWatchSuppression;
   const canonicalVerdict = suppressAvoidForTrackedWatch ? 'watch' : simplifiedVerdict;
   const simplifiedBucket = normalizeVisualBucketForPairing(
     simplifiedState.visualBucket
@@ -7451,7 +7477,9 @@ function persistedWatchlistVisualStateFromPresentation(presentation = {}){
 function buildPersistedTrackPresentation(record, bundle, options = {}){
   const item = normalizeTickerRecord(record || {});
   const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
-  const lifecycleSnapshot = safeBundle.lifecycleSnapshot || watchlistLifecycleSnapshot(item);
+  const lifecycleSnapshot = safeBundle.lifecycleSnapshot && typeof safeBundle.lifecycleSnapshot === 'object'
+    ? safeBundle.lifecycleSnapshot
+    : null;
   const globalVerdict = safeBundle.globalVerdict || resolveGlobalVerdict(item);
   const derivedStates = safeBundle.derivedStates || analysisDerivedStatesFromRecord(item);
   const displayedPlan = safeBundle.displayedPlan || deriveCurrentPlanState(
@@ -10524,6 +10552,12 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
 function watchlistLifecycleSnapshot(record, options = {}){
   const item = normalizeTickerRecord(record);
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
+  const persistedPresentation = item.watchlist && item.watchlist.presentation && typeof item.watchlist.presentation === 'object'
+    ? item.watchlist.presentation
+    : null;
+  const persistedSharedPresentation = persistedPresentation && persistedPresentation.sharedPresentation && typeof persistedPresentation.sharedPresentation === 'object'
+    ? persistedPresentation.sharedPresentation
+    : null;
   if(hasLockedLifecycle(item)){
     const expiryAt = String(item.lifecycle && item.lifecycle.expiresAt || todayIsoDate());
     const expiryReason = String(item.lifecycle && item.lifecycle.expiryReason || 'Expired manually.');
@@ -10624,6 +10658,12 @@ function watchlistLifecycleSnapshot(record, options = {}){
     emojiPresentation
   }, passCache);
   const canonicalContract = resolveCanonicalTickerVerdict(item, {context:'track', derivedStates});
+  const persistedPresentationVerdict = normalizeGlobalVerdictKey(
+    persistedSharedPresentation && (
+      persistedSharedPresentation.canonicalVerdict
+      || persistedSharedPresentation.finalVerdict
+    )
+  );
   const resolvedFinalVerdictKey = normalizeGlobalVerdictKey(
     resolved && (
       resolved.finalVerdict
@@ -10631,7 +10671,9 @@ function watchlistLifecycleSnapshot(record, options = {}){
       || resolved.final_verdict_rendered
     )
   );
-  const canonicalVerdict = resolvedFinalVerdictKey || normalizeGlobalVerdictKey(canonicalContract.canonicalVerdictKey);
+  const canonicalVerdict = persistedPresentationVerdict
+    || resolvedFinalVerdictKey
+    || normalizeGlobalVerdictKey(canonicalContract.canonicalVerdictKey);
   const actionState = deriveActionStateForRecord(item).stage;
   const bounceState = String(derivedStates.bounceState || '').toLowerCase();
   const expiryTradingDays = item.watchlist.expiryAfterTradingDays || WATCHLIST_EXPIRY_TRADING_DAYS;
@@ -10655,7 +10697,11 @@ function watchlistLifecycleSnapshot(record, options = {}){
   let status = 'active';
   let nextExpiryAt = expiryAt;
   let expiryReason = '';
-  let reason = globalVerdict.reason || 'Still progressing on the watchlist.';
+  let reason = String(
+    (persistedSharedPresentation && (persistedSharedPresentation.primaryReason || persistedSharedPresentation.mainBlocker))
+    || globalVerdict.reason
+    || 'Still progressing on the watchlist.'
+  ).trim() || 'Still progressing on the watchlist.';
 
   if((canonicalVerdict === 'dead' || canonicalVerdict === 'avoid' || !globalVerdict.allow_watchlist) && structureGate.avoid_allowed_by_structure_gate){
     state = canonicalVerdict === 'dead' ? 'dead' : 'avoid';
@@ -10663,7 +10709,13 @@ function watchlistLifecycleSnapshot(record, options = {}){
     stage = 'avoided';
     status = 'inactive';
     nextExpiryAt = '';
-    reason = globalVerdict.reason || structureGate.refresh_demote_reason || resolved.blockerReason || 'Setup is no longer structurally alive.';
+    reason = String(
+      (persistedSharedPresentation && (persistedSharedPresentation.primaryReason || persistedSharedPresentation.mainBlocker))
+      || globalVerdict.reason
+      || structureGate.refresh_demote_reason
+      || resolved.blockerReason
+      || 'Setup is no longer structurally alive.'
+    ).trim() || 'Setup is no longer structurally alive.';
   }else if(remainingTradingDays <= 0 && !hasMeaningfulImprovement){
     state = 'watch';
     bucket = 'monitor_watch';
@@ -10692,14 +10744,22 @@ function watchlistLifecycleSnapshot(record, options = {}){
     stage = 'watchlist';
     status = 'active';
     nextExpiryAt = activeExpiryAt;
-    reason = globalVerdict.reason || 'Monitor setup - keep tracking.';
+    reason = String(
+      (persistedSharedPresentation && (persistedSharedPresentation.primaryReason || persistedSharedPresentation.mainBlocker))
+      || globalVerdict.reason
+      || 'Monitor setup - keep tracking.'
+    ).trim() || 'Monitor setup - keep tracking.';
   }else{
     state = 'watch';
     bucket = 'monitor_watch';
     stage = 'watchlist';
     status = 'active';
     nextExpiryAt = activeExpiryAt;
-    reason = globalVerdict.reason || 'Needs confirmation before it can be acted on.';
+    reason = String(
+      (persistedSharedPresentation && (persistedSharedPresentation.primaryReason || persistedSharedPresentation.mainBlocker))
+      || globalVerdict.reason
+      || 'Needs confirmation before it can be acted on.'
+    ).trim() || 'Needs confirmation before it can be acted on.';
   }
 
   let snapshot = {
@@ -29936,7 +29996,6 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
       planSource:String(effectivePlan && effectivePlan.source || '')
     }
   };
-  const lifecycleSnapshot = syncWatchlistLifecycle(liveRecord) || watchlistLifecycleSnapshot(liveRecord);
   const globalVerdict = resolveGlobalVerdict(liveRecord);
   const simplifiedState = resolveSimplifiedStateForSurface(liveRecord, 'track', {
     log:false,
@@ -29947,7 +30006,6 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
     resolvedContract,
     visualState,
     globalVerdict,
-    lifecycleSnapshot,
     derivedStates,
     effectivePlan,
     displayedPlan,
@@ -29958,6 +30016,7 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
     sourceSurface,
     reason
   }, {source, sourceSurface, reason});
+  const lifecycleSnapshot = syncWatchlistLifecycle(liveRecord) || watchlistLifecycleSnapshot(liveRecord);
   return {
     record:liveRecord,
     normalizedRecordSnapshot:item,
