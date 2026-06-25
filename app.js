@@ -11032,7 +11032,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     derivedStates,
     displayedPlan
   });
-  return `<div class="diagnostic-panel-shell watchlist-debug-pane-shell watchlist-debug-block" data-diagnostic-panel="Track Diagnostics Bundle" data-track-ticker="${escapeHtml(item.ticker || '')}"><div class="diagnostic-panel-toolbar"><button class="secondary compactbutton no-card-click" type="button" data-act="copy-track-diagnostics-bundle" data-track-ticker="${escapeHtml(item.ticker || '')}">Copy Track Diagnostics</button></div><details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
+  return `<div class="diagnostic-panel-shell watchlist-debug-pane-shell watchlist-debug-block" data-diagnostic-panel="Track Diagnostics Bundle" data-track-ticker="${escapeHtml(item.ticker || '')}"><div class="diagnostic-panel-header"><details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary>${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Original Bounce State', value:debugStateLabel(globalVerdict.originalBounceState)},
@@ -11073,7 +11073,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Stale Data Prevented Pass', value:latestEntryAudit && latestEntryAudit.staleDataPreventedFreshPromotionPass === true ? 'true' : 'false'},
     {label:'Base Resolver Verdict', value:debugStateLabel(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status, {kind:'verdict'})},
     {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'}
-  ])}<div class="watchlist-debug-block tiny"><strong>Watchlist Hold Trace</strong><div data-watchlist-hold-trace="${escapeHtml(item.ticker)}">${escapeHtml(debug.holdTrace || '(none)')}</div><div data-watchlist-hold-trace-history="${escapeHtml(item.ticker)}">${escapeHtml(holdTraceHistory.length ? holdTraceHistory.join(' || ') : '(none)')}</div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details></div>`;
+  ])}<div class="watchlist-debug-block tiny"><strong>Watchlist Hold Trace</strong><div data-watchlist-hold-trace="${escapeHtml(item.ticker)}">${escapeHtml(debug.holdTrace || '(none)')}</div><div data-watchlist-hold-trace-history="${escapeHtml(item.ticker)}">${escapeHtml(holdTraceHistory.length ? holdTraceHistory.join(' || ') : '(none)')}</div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details><div class="diagnostic-panel-toolbar"><button class="secondary compactbutton no-card-click" type="button" data-act="copy-track-diagnostics-bundle" data-track-ticker="${escapeHtml(item.ticker || '')}">Copy Track Diagnostics</button></div></div></div>`;
 }
 
 function stopWatchlistLifecycleAutomation(){
@@ -35221,7 +35221,7 @@ function renderReviewWorkspace(options = {}){
     ], 'Legacy / Internal', {})
     : '';
   const reviewGatewayTrace = advancedOpen
-    ? `<div class="diagnostic-panel-shell" data-diagnostic-panel="Trade Gateway Trace"><div class="diagnostic-panel-toolbar"><button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="Trade Gateway Trace">Copy</button></div><details class="compact-details diagnostic-panel-details"><summary>Trade Gateway Trace</summary>${renderTradeGatewayHistoryMarkup()}</details></div>`
+    ? `<div class="diagnostic-panel-shell" data-diagnostic-panel="Trade Gateway Trace"><div class="diagnostic-panel-header"><details class="compact-details diagnostic-panel-details"><summary>Trade Gateway Trace</summary>${renderTradeGatewayHistoryMarkup()}</details><div class="diagnostic-panel-toolbar"><button class="secondary compactbutton no-card-click" type="button" data-act="copy-diagnostic-panel" data-panel-title="Trade Gateway Trace">Copy</button></div></div></div>`
     : '';
   const reviewDiagnosticBundlePanel = advancedOpen
     ? `<div class="panelbox" data-diagnostic-panel="Review Diagnostics Bundle" style="margin-top:10px">
