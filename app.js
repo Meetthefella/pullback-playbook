@@ -11927,8 +11927,8 @@ function isAllowedCanonicalVisualPair(canonicalVerdict, visualBucket){
 function normalizeTrackSectionState(raw){
   const stateValue = raw && typeof raw === 'object' ? raw : {};
   return {
-    diminishing:stateValue.diminishing === true,
-    avoid_dead:stateValue.avoid_dead === true
+    diminishing:typeof stateValue.diminishing === 'boolean' ? stateValue.diminishing : null,
+    avoid_dead:typeof stateValue.avoid_dead === 'boolean' ? stateValue.avoid_dead : null
   };
 }
 
@@ -12009,8 +12009,9 @@ function isTrackSectionExpanded(sectionKey, sectionRecords = [], passCache = nul
   if(!isTrackSectionCollapsible(sectionKey)) return true;
   const stateMap = readTrackSectionState();
   if(stateMap[sectionKey] === true) return true;
+  if(stateMap[sectionKey] === false) return false;
   if(shouldForceTrackSectionCollapsed(sectionKey, sectionRecords, passCache)) return false;
-  return stateMap[sectionKey] === true;
+  return true;
 }
 
 function traceScrollEvent(label, details = {}){
