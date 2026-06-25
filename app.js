@@ -6515,6 +6515,43 @@ function hasAuthoritativeLifecyclePlan(record){
     && source !== 'scanner_estimate';
 }
 
+function hasAuthoritativeStopBreach(record, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const currentPrice = Number.isFinite(Number(options.currentPrice))
+    ? Number(options.currentPrice)
+    : numericOrNull(item.marketData && item.marketData.price);
+  const stopPrice = Number.isFinite(Number(options.stopPrice))
+    ? Number(options.stopPrice)
+    : numericOrNull(plan.stop);
+  const thresholdMultiplier = Number.isFinite(Number(options.thresholdMultiplier))
+    ? Number(options.thresholdMultiplier)
+    : 1;
+  const source = String(plan.source || '').trim().toLowerCase();
+  const triggerState = String(plan.triggerState || '').trim().toLowerCase();
+  const planValidationState = String(plan.planValidationState || '').trim().toLowerCase();
+  const reviewedNonScannerPlan = source !== 'scanner_estimate'
+    && Number.isFinite(numericOrNull(plan.entry))
+    && Number.isFinite(stopPrice);
+  const authoritativePlan = hasAuthoritativeLifecyclePlan(item);
+  const invalidatedReviewedPlan = reviewedNonScannerPlan
+    && (plan.invalidatedState === true || String(plan.invalidatedState || '').trim() !== '');
+  const triggeredReviewedPlan = reviewedNonScannerPlan
+    && triggerState === 'triggered'
+    && ['valid', 'invalidated'].includes(planValidationState);
+  const confirmedReviewedPlan = reviewedNonScannerPlan
+    && planValidationState === 'valid';
+  const breached = Number.isFinite(currentPrice)
+    && Number.isFinite(stopPrice)
+    && currentPrice <= (stopPrice * thresholdMultiplier);
+  return breached && (
+    authoritativePlan
+    || invalidatedReviewedPlan
+    || triggeredReviewedPlan
+    || confirmedReviewedPlan
+  );
+}
+
 function applyLifecycleStageFromPlan(record, source = 'plan'){
   if(!record) return;
   if(hasAuthoritativeLifecyclePlan(record)){
@@ -16173,6 +16210,49 @@ function penaltyReasonLabelFromSource(sourceId, options = {}){
 
 function cumulativePenaltyTraceForRecord(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
+  const stopBreachApplies = (currentPriceValue, stopPriceValue, thresholdMultiplier = 1) => {
+    if(typeof hasAuthoritativeStopBreach === 'function'){
+      return hasAuthoritativeStopBreach(rawRecord, {
+        currentPrice:currentPriceValue,
+        stopPrice:stopPriceValue,
+        thresholdMultiplier
+      });
+    }
+    const plan = rawRecord.plan && typeof rawRecord.plan === 'object' ? rawRecord.plan : {};
+    const source = String(plan.source || '').trim().toLowerCase();
+    const triggerState = String(plan.triggerState || '').trim().toLowerCase();
+    const planValidationState = String(plan.planValidationState || '').trim().toLowerCase();
+    const reviewedNonScannerPlan = source !== 'scanner_estimate'
+      && Number.isFinite(numericOrNull(plan.entry))
+      && Number.isFinite(stopPriceValue);
+    const authoritativePlan = typeof hasAuthoritativeLifecyclePlan === 'function'
+      ? hasAuthoritativeLifecyclePlan(rawRecord)
+      : (
+        plan.hasValidPlan === true
+        && String(plan.status || '').trim().toLowerCase() === 'valid'
+        && Number.isFinite(numericOrNull(plan.entry))
+        && Number.isFinite(numericOrNull(plan.stop))
+        && Number.isFinite(numericOrNull(plan.firstTarget))
+        && Number.isFinite(numericOrNull(plan.plannedRR))
+        && source !== 'scanner_estimate'
+      );
+    const invalidatedReviewedPlan = reviewedNonScannerPlan
+      && (plan.invalidatedState === true || String(plan.invalidatedState || '').trim() !== '');
+    const triggeredReviewedPlan = reviewedNonScannerPlan
+      && triggerState === 'triggered'
+      && ['valid', 'invalidated'].includes(planValidationState);
+    const confirmedReviewedPlan = reviewedNonScannerPlan
+      && planValidationState === 'valid';
+    const breached = Number.isFinite(currentPriceValue)
+      && Number.isFinite(stopPriceValue)
+      && currentPriceValue <= (stopPriceValue * thresholdMultiplier);
+    return breached && (
+      authoritativePlan
+      || invalidatedReviewedPlan
+      || triggeredReviewedPlan
+      || confirmedReviewedPlan
+    );
+  };
   const derived = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     rawRecord.plan && rawRecord.plan.entry,
@@ -16204,7 +16284,7 @@ function cumulativePenaltyTraceForRecord(record, options = {}){
   const rrRatio = numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
   const currentPrice = numericOrNull(rawRecord.marketData && rawRecord.marketData.price);
   const stopPrice = numericOrNull(rawRecord.plan && rawRecord.plan.stop);
-  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
+  const brokenBelowStop = stopBreachApplies(currentPrice, stopPrice);
   const emphasizeWeakRegime = qualityAdjustments.weakRegimePenalty === true;
 
   if(structureState === 'broken'){
@@ -17789,7 +17869,7 @@ function legacyResolveEmojiPresentation(record, options = {}){
   const invalidated = !!(item.plan && (item.plan.invalidatedState || item.plan.missedState));
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stop = numericOrNull(item.plan && item.plan.stop);
-  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop;
+  const brokenBelowStop = hasAuthoritativeStopBreach(item, {currentPrice, stopPrice:stop});
   const volumeState = String(derivedStates.volumeState || '').toLowerCase();
   const warningReasons = warningState && Array.isArray(warningState.reasons) ? warningState.reasons : [];
   const weakConditionsPresent = !!(
@@ -18156,10 +18236,15 @@ function evaluateEntryTrigger(record, options = {}){
   const noBounce = bounceState === 'none';
   const confirmedBounce = bounceState === 'confirmed';
   const clearStabilisation = stabilisationState === 'clear';
+  const brokenBelowStop = hasAuthoritativeStopBreach(item, {
+    currentPrice,
+    stopPrice:stop,
+    thresholdMultiplier:0.995
+  });
   const hardFail = trendState === 'broken'
     || structureState === 'broken'
     || (['weak','weakening'].includes(structureState) && noBounce && hostileMarket)
-    || (Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= (stop * 0.995));
+    || brokenBelowStop;
   const hasReviewedPlan = displayedPlan.status === 'valid';
   const breakAboveTrigger = hasReviewedPlan && Number.isFinite(currentPrice) && Number.isFinite(entry) && currentPrice >= entry;
   const strongReversal = pullbackValid && structureIntact && confirmedBounce && clearStabilisation;
@@ -18460,12 +18545,55 @@ function aiVerdictCeilingForRecord(record){
 
 function isTerminalDeadSetup(record, options = {}){
   const item = record && typeof record === 'object' ? record : {};
+  const stopBreachApplies = (currentPriceValue, stopPriceValue, thresholdMultiplier = 1) => {
+    if(typeof hasAuthoritativeStopBreach === 'function'){
+      return hasAuthoritativeStopBreach(item, {
+        currentPrice:currentPriceValue,
+        stopPrice:stopPriceValue,
+        thresholdMultiplier
+      });
+    }
+    const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+    const source = String(plan.source || '').trim().toLowerCase();
+    const triggerState = String(plan.triggerState || '').trim().toLowerCase();
+    const planValidationState = String(plan.planValidationState || '').trim().toLowerCase();
+    const reviewedNonScannerPlan = source !== 'scanner_estimate'
+      && Number.isFinite(numericOrNull(plan.entry))
+      && Number.isFinite(stopPriceValue);
+    const authoritativePlan = typeof hasAuthoritativeLifecyclePlan === 'function'
+      ? hasAuthoritativeLifecyclePlan(item)
+      : (
+        plan.hasValidPlan === true
+        && String(plan.status || '').trim().toLowerCase() === 'valid'
+        && Number.isFinite(numericOrNull(plan.entry))
+        && Number.isFinite(numericOrNull(plan.stop))
+        && Number.isFinite(numericOrNull(plan.firstTarget))
+        && Number.isFinite(numericOrNull(plan.plannedRR))
+        && source !== 'scanner_estimate'
+      );
+    const invalidatedReviewedPlan = reviewedNonScannerPlan
+      && (plan.invalidatedState === true || String(plan.invalidatedState || '').trim() !== '');
+    const triggeredReviewedPlan = reviewedNonScannerPlan
+      && triggerState === 'triggered'
+      && ['valid', 'invalidated'].includes(planValidationState);
+    const confirmedReviewedPlan = reviewedNonScannerPlan
+      && planValidationState === 'valid';
+    const breached = Number.isFinite(currentPriceValue)
+      && Number.isFinite(stopPriceValue)
+      && currentPriceValue <= (stopPriceValue * thresholdMultiplier);
+    return breached && (
+      authoritativePlan
+      || invalidatedReviewedPlan
+      || triggeredReviewedPlan
+      || confirmedReviewedPlan
+    );
+  };
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stopPrice = numericOrNull(item.plan && item.plan.stop);
-  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
+  const brokenBelowStop = stopBreachApplies(currentPrice, stopPrice);
 
   if(structureState === 'broken') return {dead:true, reasonCode:'broken_structure', terminalTriggerUsed:'structure_state'};
   if(trendState === 'broken') return {dead:true, reasonCode:'broken_trend', terminalTriggerUsed:'trend_state'};
@@ -28568,7 +28696,7 @@ function isAnalysisStaleForRecord(record){
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stop = numericOrNull(item.plan && item.plan.stop);
 
-  if(Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop){
+  if(hasAuthoritativeStopBreach(item, {currentPrice, stopPrice:stop})){
     return true;
   }
 
@@ -38021,7 +38149,7 @@ function resolveFinalStateContract(record, options = {}){
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const sma50 = numericOrNull(item.marketData && item.marketData.sma50);
   const stop = numericOrNull(item.plan && item.plan.stop);
-  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= stop;
+  const brokenBelowStop = hasAuthoritativeStopBreach(item, {currentPrice, stopPrice:stop});
   const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.9975;
   const marketWeak = !!(
     qualityAdjustments.weakRegimePenalty
@@ -38872,7 +39000,7 @@ function watchlistRefreshStructureGate(record){
   const explicitInvalidation = !!(item.plan && item.plan.invalidatedState);
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stopPrice = numericOrNull(item.plan && item.plan.stop);
-  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
+  const brokenBelowStop = hasAuthoritativeStopBreach(item, {currentPrice, stopPrice});
   const structuralBroken = deadCheck.dead || structureState === 'broken' || trendState === 'broken' || brokenBelowStop;
   const explicitInvalidationAllowed = explicitInvalidation && structuralBroken;
   const structuralAlive = !deadCheck.dead
@@ -39016,7 +39144,7 @@ function currentHardFailVerdictForRecord(record){
     || trendState === 'broken'
     || (item.plan && item.plan.invalidatedState)
     || (item.plan && item.plan.missedState)
-    || (Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice)
+    || hasAuthoritativeStopBreach(item, {currentPrice, stopPrice})
   );
   return structurallyDead ? 'Avoid' : '';
 }
@@ -39118,12 +39246,55 @@ function deriveDisplaySetupScore(record, options = {}){
 
 function isTerminalDeadSetup(record, options = {}){
   const item = record && typeof record === 'object' ? record : {};
+  const stopBreachApplies = (currentPriceValue, stopPriceValue, thresholdMultiplier = 1) => {
+    if(typeof hasAuthoritativeStopBreach === 'function'){
+      return hasAuthoritativeStopBreach(item, {
+        currentPrice:currentPriceValue,
+        stopPrice:stopPriceValue,
+        thresholdMultiplier
+      });
+    }
+    const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+    const source = String(plan.source || '').trim().toLowerCase();
+    const triggerState = String(plan.triggerState || '').trim().toLowerCase();
+    const planValidationState = String(plan.planValidationState || '').trim().toLowerCase();
+    const reviewedNonScannerPlan = source !== 'scanner_estimate'
+      && Number.isFinite(numericOrNull(plan.entry))
+      && Number.isFinite(stopPriceValue);
+    const authoritativePlan = typeof hasAuthoritativeLifecyclePlan === 'function'
+      ? hasAuthoritativeLifecyclePlan(item)
+      : (
+        plan.hasValidPlan === true
+        && String(plan.status || '').trim().toLowerCase() === 'valid'
+        && Number.isFinite(numericOrNull(plan.entry))
+        && Number.isFinite(numericOrNull(plan.stop))
+        && Number.isFinite(numericOrNull(plan.firstTarget))
+        && Number.isFinite(numericOrNull(plan.plannedRR))
+        && source !== 'scanner_estimate'
+      );
+    const invalidatedReviewedPlan = reviewedNonScannerPlan
+      && (plan.invalidatedState === true || String(plan.invalidatedState || '').trim() !== '');
+    const triggeredReviewedPlan = reviewedNonScannerPlan
+      && triggerState === 'triggered'
+      && ['valid', 'invalidated'].includes(planValidationState);
+    const confirmedReviewedPlan = reviewedNonScannerPlan
+      && planValidationState === 'valid';
+    const breached = Number.isFinite(currentPriceValue)
+      && Number.isFinite(stopPriceValue)
+      && currentPriceValue <= (stopPriceValue * thresholdMultiplier);
+    return breached && (
+      authoritativePlan
+      || invalidatedReviewedPlan
+      || triggeredReviewedPlan
+      || confirmedReviewedPlan
+    );
+  };
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stopPrice = numericOrNull(item.plan && item.plan.stop);
-  const brokenBelowStop = Number.isFinite(currentPrice) && Number.isFinite(stopPrice) && currentPrice <= stopPrice;
+  const brokenBelowStop = stopBreachApplies(currentPrice, stopPrice);
 
   if(structureState === 'broken') return {dead:true, reasonCode:'broken_structure', terminalTriggerUsed:'structure_state'};
   if(trendState === 'broken') return {dead:true, reasonCode:'broken_trend', terminalTriggerUsed:'trend_state'};
@@ -39133,6 +39304,49 @@ function isTerminalDeadSetup(record, options = {}){
 
 function validateCurrentPlan(record, options = {}){
   const rawRecord = record && typeof record === 'object' ? record : {};
+  const stopBreachApplies = (currentPriceValue, stopPriceValue, thresholdMultiplier = 1) => {
+    if(typeof hasAuthoritativeStopBreach === 'function'){
+      return hasAuthoritativeStopBreach(rawRecord, {
+        currentPrice:currentPriceValue,
+        stopPrice:stopPriceValue,
+        thresholdMultiplier
+      });
+    }
+    const plan = rawRecord.plan && typeof rawRecord.plan === 'object' ? rawRecord.plan : {};
+    const source = String(plan.source || '').trim().toLowerCase();
+    const triggerState = String(plan.triggerState || '').trim().toLowerCase();
+    const planValidationState = String(plan.planValidationState || '').trim().toLowerCase();
+    const reviewedNonScannerPlan = source !== 'scanner_estimate'
+      && Number.isFinite(numericOrNull(plan.entry))
+      && Number.isFinite(stopPriceValue);
+    const authoritativePlan = typeof hasAuthoritativeLifecyclePlan === 'function'
+      ? hasAuthoritativeLifecyclePlan(rawRecord)
+      : (
+        plan.hasValidPlan === true
+        && String(plan.status || '').trim().toLowerCase() === 'valid'
+        && Number.isFinite(numericOrNull(plan.entry))
+        && Number.isFinite(numericOrNull(plan.stop))
+        && Number.isFinite(numericOrNull(plan.firstTarget))
+        && Number.isFinite(numericOrNull(plan.plannedRR))
+        && source !== 'scanner_estimate'
+      );
+    const invalidatedReviewedPlan = reviewedNonScannerPlan
+      && (plan.invalidatedState === true || String(plan.invalidatedState || '').trim() !== '');
+    const triggeredReviewedPlan = reviewedNonScannerPlan
+      && triggerState === 'triggered'
+      && ['valid', 'invalidated'].includes(planValidationState);
+    const confirmedReviewedPlan = reviewedNonScannerPlan
+      && planValidationState === 'valid';
+    const breached = Number.isFinite(currentPriceValue)
+      && Number.isFinite(stopPriceValue)
+      && currentPriceValue <= (stopPriceValue * thresholdMultiplier);
+    return breached && (
+      authoritativePlan
+      || invalidatedReviewedPlan
+      || triggeredReviewedPlan
+      || confirmedReviewedPlan
+    );
+  };
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     rawRecord.plan && rawRecord.plan.entry,
     rawRecord.plan && rawRecord.plan.stop,
@@ -39147,10 +39361,15 @@ function validateCurrentPlan(record, options = {}){
   const entry = displayedPlan.entry;
   const stop = displayedPlan.stop;
   const target = displayedPlan.target;
+  const brokenBelowStop = stopBreachApplies(
+    currentPrice,
+    stop,
+    0.995
+  );
   const structurallyDead = !!(
     structureState === 'broken'
     || trendState === 'broken'
-    || (Number.isFinite(currentPrice) && Number.isFinite(stop) && currentPrice <= (stop * 0.995))
+    || brokenBelowStop
   );
   const structurePremature = !trigger.trendValid || !trigger.structureIntact;
   const confirmationPremature = !trigger.confirmedBounce || !trigger.clearStabilisation;
