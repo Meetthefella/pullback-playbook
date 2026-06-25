@@ -6355,15 +6355,18 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/No actionable trade plan yet|waiting for confirmation|not actionable yet|plan needs confirmation|Bounce is not clear enough to price yet|Wait for the chart to provide a cleaner entry structure/i.test(String(hiddenPlanFallbackModel.planSummary || '')) || /^missing$/i.test(String(hiddenPlanFallbackModel.planSummary || ''))){
     throw new Error('Track visible model must provide friendly hidden-plan copy when no plan summary exists, and must not leak raw plan status.');
   }
-  if(!/const trackVisibleModel = resolveTrackCardVisibleModel\(record, simplifiedState\);/.test(appSource)
-    || !/decision_summary:String\(trackVisibleModel\.headline/.test(appSource)
+  if(!/const persistedSharedPresentation = persistedPresentation && persistedPresentation\.sharedPresentation/.test(appSource)
+    || !/const presentationSourceOfTruth = persistedSharedPresentation[\s\S]*?'watchlist_persisted_presentation'[\s\S]*?'live_recomputed_fallback';/.test(appSource)
+    || !/const sharedPresentation = persistedSharedPresentation \|\| buildSharedReviewTrackPresentation\(record,\s*\{/.test(appSource)
+    || !/const trackVisibleModel = persistedTrackVisibleModelFromPresentation\(sharedPresentation\);/.test(appSource)
+    || !/const watchlistVisualState = persistedPresentation && persistedPresentation\.watchlistVisualState[\s\S]*?: persistedWatchlistVisualStateFromPresentation\(sharedPresentation\);/.test(appSource)
     || !/const visualBucket = normalizeVisualBucketForPairing\(trackVisibleModel\.visibleBucket \|\| 'monitor'\);/.test(appSource)
     || !/const tone = String\(trackVisibleModel\.tone \|\| visualBucket \|\| 'monitor'\)/.test(appSource)
     || !/trackVisibleModel\.planSummary/.test(appSource)
     || !/trackVisibleModel\.primaryReason/.test(appSource)
     || !/trackVisibleModel\.nextAction/.test(appSource)
     || !/sameVisibleCopy\(trackVisibleModel\.primaryReason, decisionSummary\)/.test(appSource)){
-    throw new Error('Track card render must source visible state from resolveTrackCardVisibleModel rather than layered legacy fields.');
+    throw new Error('Track card render must source visible state from persisted shared presentation, with an explicit live fallback path when persisted fields are unavailable.');
   }
   if(/decision_summary:presentation\.presentationReason/.test(appSource) || /reason:presentation\.presentationReason/.test(appSource)){
     throw new Error('Legacy presentationReason must not feed non-debug visible Track render paths.');

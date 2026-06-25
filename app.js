@@ -3593,12 +3593,17 @@ function buildTrackDiagnosticSnapshot(record){
   const item = record && typeof record === 'object' ? record : null;
   if(!item) return null;
   try{
+    const persistedPresentation = item.watchlist && item.watchlist.presentation && typeof item.watchlist.presentation === 'object'
+      ? item.watchlist.presentation
+      : null;
     const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
-    const simplifiedState = resolveSimplifiedStateForSurface(item, 'track', {
-      renderPass:0,
-      source:'diagnostic_snapshot',
-      mutationSource:'diagnostic_snapshot'
-    });
+    const simplifiedState = persistedPresentation && persistedPresentation.simplifiedState && typeof persistedPresentation.simplifiedState === 'object'
+      ? persistedPresentation.simplifiedState
+      : resolveSimplifiedStateForWatchlistPresentation(item, {
+        surface:'track',
+        source:'diagnostic_snapshot',
+        reason:'diagnostic_snapshot'
+      });
     const simplifiedDebug = simplifiedState.debug && typeof simplifiedState.debug === 'object'
       ? simplifiedState.debug
       : {};
@@ -3611,11 +3616,28 @@ function buildTrackDiagnosticSnapshot(record){
       item.plan && item.plan.firstTarget,
       item.marketData && item.marketData.currency
     ), derivedStates);
-    const globalVerdict = simplifiedDebug.resolvedState
+    const globalVerdict = persistedPresentation && persistedPresentation.globalVerdict && typeof persistedPresentation.globalVerdict === 'object'
+      ? persistedPresentation.globalVerdict
+      : (simplifiedDebug.resolvedState
       ? simplifiedDebug.resolvedState
-      : resolveGlobalVerdict(item);
+      : resolveGlobalVerdict(item));
     const priority = watchlistPriorityForRecord(item, {lifecycleSnapshot});
-    const trackVisibleModel = resolveTrackCardVisibleModel(item, simplifiedState);
+    const persistedSharedPresentation = persistedPresentation && persistedPresentation.sharedPresentation && typeof persistedPresentation.sharedPresentation === 'object'
+      ? persistedPresentation.sharedPresentation
+      : null;
+    const diagnosticsSourceOfTruth = persistedSharedPresentation
+      ? 'watchlist_persisted_presentation'
+      : 'live_recomputed_fallback';
+    const sharedPresentation = persistedSharedPresentation || buildSharedReviewTrackPresentation(item, {
+      surface:'track',
+      simplifiedState,
+      lifecycleSnapshot,
+      globalVerdict,
+      sourceOfTruth:diagnosticsSourceOfTruth,
+      source:'diagnostic_snapshot',
+      reason:'diagnostic_snapshot'
+    });
+    const trackVisibleModel = persistedTrackVisibleModelFromPresentation(sharedPresentation);
     const debugPlanUI = resolvePlanVisibility({
       state:globalVerdict.finalVerdict || globalVerdict.final_verdict,
       bounce_state:globalVerdict.bounce_state || (item.setup && item.setup.bounceState),
@@ -3634,16 +3656,42 @@ function buildTrackDiagnosticSnapshot(record){
       trackVisibleModel,
       debugPlanUI,
       lifecycleSnapshot,
-      resolved:item.watchlistVisualState || {},
+      resolved:item.watchlistVisualState || (persistedPresentation && persistedPresentation.watchlistVisualState) || {},
       derivedStates,
       displayedPlan
     });
-    const trackDebug = item.watchlistVisualState && item.watchlistVisualState.trackDebug && typeof item.watchlistVisualState.trackDebug === 'object'
-      ? item.watchlistVisualState.trackDebug
+    const authoritativeVisualState = item.watchlistVisualState && typeof item.watchlistVisualState === 'object'
+      ? item.watchlistVisualState
+      : (persistedPresentation && persistedPresentation.watchlistVisualState && typeof persistedPresentation.watchlistVisualState === 'object'
+        ? persistedPresentation.watchlistVisualState
+        : {});
+    const trackDebug = authoritativeVisualState.trackDebug && typeof authoritativeVisualState.trackDebug === 'object'
+      ? authoritativeVisualState.trackDebug
       : {};
+    const trackStateHealth = {
+      sourceOfTruth:diagnosticsSourceOfTruth,
+      ticker:String(item.ticker || ''),
+      canonicalVerdict:String(sharedPresentation.canonicalVerdict || ''),
+      visualBucket:String(sharedPresentation.visualBucket || ''),
+      tone:String(sharedPresentation.tone || ''),
+      structureEligibility:String(simplifiedState.structureEligibility || ''),
+      structureState:String(simplifiedState.structureState || ''),
+      setupLocationState:String(simplifiedState.setupLocationState || ''),
+      priceabilityState:String(simplifiedState.priceabilityState || ''),
+      bounceState:String(simplifiedState.bounceState || ''),
+      planStatus:String(simplifiedState.planStatus || ''),
+      resolvedRR:Number.isFinite(Number(simplifiedState.resolvedRR)) ? Number(simplifiedState.resolvedRR) : null,
+      entryGatePass:simplifiedState.entryGatePass === true,
+      nearEntryGatePass:simplifiedState.nearEntryGatePass === true,
+      primaryBlockerReason:String(sharedPresentation.mainBlocker || ''),
+      avoidTriggerSource:String(simplifiedState.avoidTriggerSource || ''),
+      terminalAvoidApplied:simplifiedState.terminalAvoidApplied === true,
+      divergenceDetected:false,
+      lastReviewedAt:String(item.review && item.review.lastReviewedAt || '')
+    };
     return {
       ticker:String(item.ticker || ''),
-      simplifiedState:currentReviewStateHealthSnapshot(item),
+      simplifiedState:trackStateHealth,
       lifecycleSnapshot:safeDiagnosticClone(lifecycleSnapshot || {}, {}),
       consistencyAudit:safeDiagnosticClone(consistencyAudit || [], []),
       visibleModel:safeDiagnosticClone(trackDebug.visibleModel || {}, {}),
@@ -7187,10 +7235,21 @@ function buildWatchlistSimplifiedStateCacheKey(record, options = {}){
 
 function resolveSimplifiedStateForWatchlistPresentation(record, options = {}){
   const item = normalizeTickerRecord(record || {});
+  const persistedPresentation = item.watchlist && item.watchlist.presentation && typeof item.watchlist.presentation === 'object'
+    ? item.watchlist.presentation
+    : null;
   const explicitSimplified = options.simplifiedState && typeof options.simplifiedState === 'object'
     ? options.simplifiedState
     : null;
   if(explicitSimplified) return explicitSimplified;
+  if(
+    persistedPresentation
+    && persistedPresentation.simplifiedState
+    && typeof persistedPresentation.simplifiedState === 'object'
+    && options.forceRecompute !== true
+  ){
+    return persistedPresentation.simplifiedState;
+  }
 
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   const key = buildWatchlistSimplifiedStateCacheKey(item, options);
@@ -7235,6 +7294,223 @@ function resolveSimplifiedStateForWatchlistPresentation(record, options = {}){
     passCache.simplifiedStateCacheMisses = Number(passCache.simplifiedStateCacheMisses || 0) + 1;
   }
   return simplifiedState;
+}
+
+function buildSharedReviewTrackPresentation(record, options = {}){
+  const item = normalizeTickerRecord(record || {});
+  const simplifiedState = options.simplifiedState && typeof options.simplifiedState === 'object'
+    ? options.simplifiedState
+    : resolveSimplifiedStateForSurface(item, options.surface || 'track', {
+      log:false,
+      source:options.source || 'shared_presentation',
+      reason:options.reason || 'shared_presentation'
+    });
+  const lifecycleSnapshot = options.lifecycleSnapshot && typeof options.lifecycleSnapshot === 'object'
+    ? options.lifecycleSnapshot
+    : watchlistLifecycleSnapshot(item);
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object'
+    ? options.globalVerdict
+    : resolveGlobalVerdict(item);
+  const sourceOfTruth = String(options.sourceOfTruth || 'live_recomputed_fallback');
+  const watchlistDebug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object'
+    ? item.watchlist.debug
+    : {};
+  const structurallyAliveAtRefresh = String(
+    lifecycleSnapshot.structural_alive_at_refresh
+    || watchlistDebug.structural_alive_at_refresh
+    || ''
+  ).trim().toLowerCase() === 'true';
+  const lifecycleVerdict = normalizeGlobalVerdictKey(lifecycleSnapshot.state || '');
+  const simplifiedVerdict = normalizeGlobalVerdictKey(
+    simplifiedState.canonicalVerdict
+    || simplifiedState.finalVerdict
+    || simplifiedState.final_verdict
+    || 'watch'
+  );
+  const watchlistVerdict = normalizeGlobalVerdictKey(watchlistDebug.finalVerdict || '');
+  const suppressAvoidForTrackedWatch = options.surface === 'track'
+    && item.watchlist && item.watchlist.inWatchlist
+    && lifecycleVerdict === 'watch'
+    && watchlistVerdict === 'watch'
+    && structurallyAliveAtRefresh
+    && simplifiedVerdict === 'avoid';
+  const canonicalVerdict = suppressAvoidForTrackedWatch ? 'watch' : simplifiedVerdict;
+  const simplifiedBucket = normalizeVisualBucketForPairing(
+    simplifiedState.visualBucket
+    || simplifiedState.presentationBucket
+    || 'monitor'
+  );
+  const visualBucket = suppressAvoidForTrackedWatch
+    ? (simplifiedBucket === 'avoid' ? 'diminishing' : (simplifiedBucket || 'diminishing'))
+    : simplifiedBucket;
+  const tone = suppressAvoidForTrackedWatch
+    ? 'diminishing'
+    : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor');
+  const mainBlocker = suppressAvoidForTrackedWatch
+    ? 'Trend is extended away from support - keep on monitor until price resets or repairs.'
+    : String(simplifiedState.mainBlocker || '').trim();
+  const headline = String(
+    simplifiedState.actionLabel
+    || simplifiedState.badgeLabel
+    || globalVerdictLabel(canonicalVerdict || 'watch')
+    || 'Watch'
+  ).trim();
+  const primaryReason = mainBlocker || String(globalVerdict.reason || '').trim();
+  const nextAction = canonicalVerdict === 'watch'
+    ? 'Wait for stronger confirmation before considering entry.'
+    : '';
+  const planVisible = simplifiedState.planVisible === true;
+  const planStatus = String(simplifiedState.planStatus || '').trim().toLowerCase() || 'missing';
+  const planSummary = planVisible
+    ? 'Trade plan available.'
+    : (String(mainBlocker || primaryReason || 'No actionable trade plan yet.').trim() || 'No actionable trade plan yet.');
+  return {
+    canonicalVerdict,
+    finalVerdict:canonicalVerdict,
+    visualBucket,
+    tone,
+    badgeLabel:String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim(),
+    headline,
+    statusText:headline,
+    primaryReason,
+    mainBlocker,
+    nextAction,
+    planVisible,
+    planStatus,
+    planSummary,
+    lifecycleState:lifecycleVerdict || canonicalVerdict,
+    lifecycleLabel:String(lifecycleSnapshot.label || globalVerdictLabel(lifecycleVerdict || canonicalVerdict || 'watch') || 'Watch').trim(),
+    lifecycleStatus:String(lifecycleSnapshot.status || '').trim(),
+    sourceOfTruth,
+    sourceTrace:{
+      source:String(options.source || 'shared_presentation'),
+      reason:String(options.reason || 'shared_presentation'),
+      surface:String(options.surface || 'track'),
+      suppressAvoidForTrackedWatch
+    }
+  };
+}
+
+function persistedTrackVisibleModelFromPresentation(presentation = {}){
+  const canonicalVerdict = normalizeGlobalVerdictKey(presentation.canonicalVerdict || presentation.finalVerdict || 'watch');
+  return {
+    canonicalVerdict,
+    planVisible:presentation.planVisible === true,
+    planStatus:String(presentation.planStatus || '').trim().toLowerCase() || 'missing',
+    mainBlocker:String(presentation.mainBlocker || '').trim(),
+    visibleBucket:normalizeVisualBucketForPairing(presentation.visualBucket || 'monitor'),
+    tone:String(presentation.tone || presentation.visualBucket || 'monitor').trim().toLowerCase() || 'monitor',
+    badgeLabel:String(presentation.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim(),
+    headline:String(presentation.headline || presentation.statusText || '').trim(),
+    primaryReason:String(presentation.primaryReason || presentation.mainBlocker || '').trim(),
+    nextAction:String(presentation.nextAction || '').trim(),
+    planSummary:String(presentation.planSummary || '').trim(),
+    lowerPriority:normalizeVisualBucketForPairing(presentation.visualBucket || '') === 'diminishing',
+    internalVisualBucket:normalizeVisualBucketForPairing(presentation.visualBucket || 'monitor')
+  };
+}
+
+function persistedWatchlistVisualStateFromPresentation(presentation = {}){
+  const canonicalVerdict = normalizeGlobalVerdictKey(presentation.canonicalVerdict || presentation.finalVerdict || 'watch');
+  const visualBucket = normalizeVisualBucketForPairing(presentation.visualBucket || 'monitor');
+  const tone = String(presentation.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const badgeClass = simplifiedVisualBadgeClass(visualBucket);
+  const cardClass = simplifiedVisualCardClass(visualBucket);
+  const visualStateKey = canonicalVerdict === 'entry'
+    ? 'entry'
+    : (canonicalVerdict === 'near_entry'
+      ? 'near_entry'
+      : (canonicalVerdict === 'avoid' ? 'avoid' : 'watch'));
+  const className = `visual-state-card visual-state-${visualStateKey} visual-tone-${tone} ${cardClass}`;
+  return {
+    state:visualStateKey,
+    canonicalVerdict,
+    finalVerdict:canonicalVerdict,
+    final_verdict:canonicalVerdict,
+    renderedVerdict:canonicalVerdict,
+    final_verdict_rendered:canonicalVerdict,
+    visualBucket,
+    presentationBucket:visualBucket,
+    trackPresentationBucket:visualBucket,
+    visual_tone:tone,
+    trackPresentationTone:tone,
+    tone,
+    className,
+    toneClass:className,
+    styleAttr:'',
+    badge:{
+      text:String(presentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch'),
+      className:badgeClass
+    },
+    decision_summary:String(presentation.headline || '').trim(),
+    watchlist_presentation_source:String(presentation.sourceOfTruth || 'watchlist_persisted_presentation'),
+    simplifiedTrackCard:true
+  };
+}
+
+function buildPersistedTrackPresentation(record, bundle, options = {}){
+  const item = normalizeTickerRecord(record || {});
+  const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
+  const lifecycleSnapshot = safeBundle.lifecycleSnapshot || watchlistLifecycleSnapshot(item);
+  const globalVerdict = safeBundle.globalVerdict || resolveGlobalVerdict(item);
+  const derivedStates = safeBundle.derivedStates || analysisDerivedStatesFromRecord(item);
+  const displayedPlan = safeBundle.displayedPlan || deriveCurrentPlanState(
+    (safeBundle.effectivePlan && safeBundle.effectivePlan.entry) || (item.plan && item.plan.entry),
+    (safeBundle.effectivePlan && safeBundle.effectivePlan.stop) || (item.plan && item.plan.stop),
+    (safeBundle.effectivePlan && safeBundle.effectivePlan.firstTarget) || (item.plan && item.plan.firstTarget),
+    item.marketData && item.marketData.currency
+  );
+  const qualityAdjustments = safeBundle.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const resolvedContract = safeBundle.resolvedContract || resolveFinalStateContract(item, {
+    context:'shared_refresh',
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    warningState:safeBundle.warningState || evaluateWarningState(item)
+  });
+  const simplifiedState = safeBundle.simplifiedState && typeof safeBundle.simplifiedState === 'object'
+    ? safeBundle.simplifiedState
+    : resolveSimplifiedStateForSurface(item, 'track', {
+      log:false,
+      source:options.source || safeBundle.source || 'shared_refresh',
+      reason:options.reason || safeBundle.reason || 'shared_refresh'
+    });
+  const sharedPresentation = buildSharedReviewTrackPresentation(item, {
+    surface:'track',
+    simplifiedState,
+    globalVerdict,
+    lifecycleSnapshot,
+    sourceOfTruth:'watchlist_persisted_presentation',
+    source:options.source || safeBundle.source || 'shared_refresh',
+    reason:options.reason || safeBundle.reason || 'shared_refresh'
+  });
+  const watchlistVisualState = persistedWatchlistVisualStateFromPresentation(sharedPresentation);
+  const trackVisibleModel = persistedTrackVisibleModelFromPresentation(sharedPresentation);
+  return {
+    updatedAt:new Date().toISOString(),
+    source:String(options.source || safeBundle.source || 'shared_refresh'),
+    sourceSurface:String(options.sourceSurface || safeBundle.sourceSurface || 'track'),
+    reason:String(options.reason || safeBundle.reason || 'shared_refresh'),
+    sourceOfTruth:'watchlist_persisted_presentation',
+    sharedPresentation,
+    simplifiedState,
+    watchlistVisualState,
+    trackVisibleModel,
+    resolvedContract,
+    globalVerdict,
+    lifecycleSnapshot,
+    displayedPlan,
+    derivedStates
+  };
+}
+
+function persistTrackPresentationOnRecord(record, bundle, options = {}){
+  const item = normalizeTickerRecord(record || {});
+  if(!item.watchlist || !item.watchlist.inWatchlist) return null;
+  const persisted = buildPersistedTrackPresentation(item, bundle, options);
+  item.watchlist.presentation = persisted;
+  item.watchlistVisualState = persisted.watchlistVisualState;
+  return persisted;
 }
 
 function watchlistTickerRecords(options = {}){
@@ -11583,6 +11859,9 @@ function renderWatchlistCardElement(record, options = {}){
       ? passCache.lifecycle.get(symbol)
       : (syncWatchlistLifecycle(record, {passCache}) || watchlistLifecycleSnapshot(record, {passCache}))
   );
+  const persistedPresentation = record.watchlist && record.watchlist.presentation && typeof record.watchlist.presentation === 'object'
+    ? record.watchlist.presentation
+    : null;
   const expired = lifecycleSnapshot.state === 'expired' || record.lifecycle.stage === 'expired' || record.lifecycle.status === 'stale';
   const expiryDate = record.lifecycle.expiresAt || 'Not set';
   const priority = watchlistPriorityForRecord(record, {lifecycleSnapshot, passCache});
@@ -11606,15 +11885,31 @@ function renderWatchlistCardElement(record, options = {}){
   ), derivedStates);
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
   const rrResolution = resolveScannerStateWithTrace(record);
-  const globalVerdict = simplifiedDebug.resolvedState
-    ? simplifiedDebug.resolvedState
+  const globalVerdict = persistedPresentation && persistedPresentation.globalVerdict && typeof persistedPresentation.globalVerdict === 'object'
+    ? persistedPresentation.globalVerdict
+    : (simplifiedDebug.resolvedState
+      ? simplifiedDebug.resolvedState
+      : null);
+  const persistedSharedPresentation = persistedPresentation && persistedPresentation.sharedPresentation && typeof persistedPresentation.sharedPresentation === 'object'
+    ? persistedPresentation.sharedPresentation
     : null;
-  const trackVisibleModel = resolveTrackCardVisibleModel(record, simplifiedState);
+  const presentationSourceOfTruth = persistedSharedPresentation
+    ? 'watchlist_persisted_presentation'
+    : 'live_recomputed_fallback';
+  const sharedPresentation = persistedSharedPresentation || buildSharedReviewTrackPresentation(record, {
+    surface:'track',
+    simplifiedState,
+    lifecycleSnapshot,
+    globalVerdict:globalVerdict || resolveGlobalVerdict(record),
+    sourceOfTruth:presentationSourceOfTruth,
+    source:'renderWatchlistCardElement',
+    reason:'renderWatchlistCardElement'
+  });
+  const trackVisibleModel = persistedTrackVisibleModelFromPresentation(sharedPresentation);
   const canonicalVerdict = normalizeGlobalVerdictKey(trackVisibleModel.canonicalVerdict || 'watch');
-  const trackPresentation = resolveTrackPresentationModel(record, globalVerdict || resolveGlobalVerdict(record), lifecycleSnapshot, priority);
-  const trackStateDivergence = collectStateDivergence(record, 'track.render', simplifiedState, trackPresentation, [
+  const trackStateDivergence = collectStateDivergence(record, 'track.render', simplifiedState, trackVisibleModel, [
     'canonicalVerdict',
-    'visualBucket',
+    'visibleBucket',
     'tone',
     'badgeLabel',
     'mainBlocker',
@@ -11633,30 +11928,9 @@ function renderWatchlistCardElement(record, options = {}){
       : (canonicalVerdict === 'avoid' ? 'avoid' : 'watch'));
   const className = `visual-state-card visual-state-${visualStateKey} visual-tone-${tone} ${cardClass}`;
   const trackAuthoritativeState = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
-  const watchlistVisualState = {
-    state:visualStateKey,
-    canonicalVerdict,
-    finalVerdict:canonicalVerdict,
-    final_verdict:canonicalVerdict,
-    renderedVerdict:canonicalVerdict,
-    final_verdict_rendered:canonicalVerdict,
-    visualBucket,
-    presentationBucket:visualBucket,
-    trackPresentationBucket:visualBucket,
-    visual_tone:tone,
-    trackPresentationTone:tone,
-    tone,
-    className,
-    toneClass:className,
-    styleAttr:'',
-    badge:{
-      text:String(trackVisibleModel.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch'),
-      className:badgeClass
-    },
-    decision_summary:String(trackVisibleModel.headline || '').trim(),
-    watchlist_presentation_source:'simplified_state_pipeline',
-    simplifiedTrackCard:true
-  };
+  const watchlistVisualState = persistedPresentation && persistedPresentation.watchlistVisualState && typeof persistedPresentation.watchlistVisualState === 'object'
+    ? {...persistedPresentation.watchlistVisualState}
+    : persistedWatchlistVisualStateFromPresentation(sharedPresentation);
   const rawViabilityBranchReason = String(globalVerdict && globalVerdict.viabilityBranchReason || '').trim();
   const staleTrackViabilityBranchReason = /needs structure repair/i.test(rawViabilityBranchReason)
     && ['alive'].includes(String(derivedStates.structureEligibility || globalVerdict && globalVerdict.structure_eligibility || '').trim().toLowerCase())
@@ -11741,7 +12015,7 @@ function renderWatchlistCardElement(record, options = {}){
       visiblePrimaryReason:trackVisibleModel.primaryReason,
       visibleNextAction:trackVisibleModel.nextAction,
       planSummary:trackVisibleModel.planSummary,
-      trackPresentationBucket:trackPresentation.presentationBucket,
+      trackPresentationBucket:sharedPresentation.visualBucket,
       weakWatchDowngradeApplied:simplifiedState.weakWatchDowngradeApplied === true,
       weakWatchDowngradeReasonCount:Array.isArray(simplifiedState.weakWatchDowngradeReasons) ? simplifiedState.weakWatchDowngradeReasons.length : 0
     });
@@ -29664,6 +29938,26 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
   };
   const lifecycleSnapshot = syncWatchlistLifecycle(liveRecord) || watchlistLifecycleSnapshot(liveRecord);
   const globalVerdict = resolveGlobalVerdict(liveRecord);
+  const simplifiedState = resolveSimplifiedStateForSurface(liveRecord, 'track', {
+    log:false,
+    source,
+    reason
+  });
+  const persistedPresentation = persistTrackPresentationOnRecord(liveRecord, {
+    resolvedContract,
+    visualState,
+    globalVerdict,
+    lifecycleSnapshot,
+    derivedStates,
+    effectivePlan,
+    displayedPlan,
+    qualityAdjustments,
+    warningState,
+    simplifiedState,
+    source,
+    sourceSurface,
+    reason
+  }, {source, sourceSurface, reason});
   return {
     record:liveRecord,
     normalizedRecordSnapshot:item,
@@ -29672,6 +29966,8 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
     visualState,
     globalVerdict,
     lifecycleSnapshot,
+    simplifiedState,
+    persistedPresentation,
     derivedStates,
     effectivePlan,
     displayedPlan,
@@ -29691,6 +29987,8 @@ function toResolvedStateBundleCache(bundle){
     visualState:safeBundle.visualState || null,
     globalVerdict:safeBundle.globalVerdict || null,
     lifecycleSnapshot:safeBundle.lifecycleSnapshot || null,
+    simplifiedState:safeBundle.simplifiedState || null,
+    persistedPresentation:safeBundle.persistedPresentation || null,
     effectivePlan:safeBundle.effectivePlan || null,
     displayedPlan:safeBundle.displayedPlan || null,
     qualityAdjustments:safeBundle.qualityAdjustments || null,
@@ -29712,6 +30010,8 @@ function withLiveRecordFromCache(liveRecord, cache){
     visualState:safeCache.visualState || null,
     globalVerdict:safeCache.globalVerdict || null,
     lifecycleSnapshot:safeCache.lifecycleSnapshot || null,
+    simplifiedState:safeCache.simplifiedState || null,
+    persistedPresentation:safeCache.persistedPresentation || null,
     effectivePlan:safeCache.effectivePlan || null,
     displayedPlan:safeCache.displayedPlan || null,
     qualityAdjustments:safeCache.qualityAdjustments || null,
@@ -30024,6 +30324,8 @@ function validateSharedRefreshBundle(bundle, context = 'unknown'){
   if(!item || !item.visualState) missing.push('visualState');
   if(!item || !item.globalVerdict) missing.push('globalVerdict');
   if(!item || !item.lifecycleSnapshot) missing.push('lifecycleSnapshot');
+  if(!item || !item.simplifiedState) missing.push('simplifiedState');
+  if(!item || !item.persistedPresentation) missing.push('persistedPresentation');
   if(!item || !item.effectivePlan) missing.push('effectivePlan');
   if(!item || !item.displayedPlan) missing.push('displayedPlan');
   if(!missing.length) return;
