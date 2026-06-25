@@ -1479,8 +1479,17 @@
     const lifecycleDowngradeSuppressed = !isTracked
       && (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
       && trackedAvoidTriggerSource === 'lifecycle';
+    const nonTrackedSoftenedReject = !isTracked && trackedVerdict === 'avoid' && !structurallyBroken;
     finalVerdict = normalizeVerdict(isTracked ? trackedVerdict : baseVerdict);
-    reason = isTracked ? trackedReason : (lifecycleDowngradeSuppressed ? 'Pre-watchlist lifecycle downgrade suppressed.' : trackedReason);
+    if(isTracked){
+      reason = trackedReason;
+    }else if(lifecycleDowngradeSuppressed){
+      reason = 'Pre-watchlist lifecycle downgrade suppressed.';
+    }else if(nonTrackedSoftenedReject){
+      reason = guardedVerdict.reason || resolved.blockerReason || reason;
+    }else{
+      reason = trackedReason;
+    }
     const avoidAllowedByStructureConsistencyGuard = structurallyBroken || viability.viability === 'reject';
     if(!avoidAllowedByStructureConsistencyGuard && (finalVerdict === 'avoid' || finalVerdict === 'dead')){
       finalVerdict = 'monitor';
@@ -1653,7 +1662,7 @@
       input_completeness:viability.inputCompleteness || null,
       reject_blocked_by_incomplete_inputs:viability.rejectBlockedByIncompleteInputs === true,
       viability_visual_bucket:viability.visualBucket || '',
-      main_blocker:trackedReason || viability.mainBlocker || '',
+      main_blocker:reason || trackedReason || viability.mainBlocker || '',
       primary_blocker_source:fallingKnifeApplied
         ? 'falling_knife'
         : ((resolved && resolved.primaryBlockerSource) || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (isExtended ? 'setup_location' : (priceabilityState === 'unpriceable' && !priceabilityInferred ? 'priceability' : 'resolver')))),

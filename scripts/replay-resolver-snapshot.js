@@ -707,6 +707,29 @@ function promotionBlockers(globalVerdict, derivedStates = {}){
     .slice(0, 4);
 }
 
+function normalizeReplayBlockers({
+  finalResolvedVerdict,
+  finalVisualBucket,
+  rawBlockers,
+  promotionBlocker,
+  blockerCopy
+}){
+  const safeBlockers = Array.isArray(rawBlockers) ? rawBlockers.filter(Boolean) : [];
+  const safePromotionBlocker = String(promotionBlocker || '').trim();
+  const safeBlockerCopy = String(blockerCopy || '').trim();
+  const avoidLike = ['avoid', 'dead'].includes(String(finalResolvedVerdict || '').trim().toLowerCase());
+  if(avoidLike) return {blockers:safeBlockers, blockerCopy:safeBlockerCopy};
+  if(String(finalVisualBucket || '').trim().toLowerCase() !== 'diminishing'){
+    return {blockers:safeBlockers, blockerCopy:safeBlockerCopy};
+  }
+  const filtered = safeBlockers.filter(blocker => !/^Structure is broken\.$/i.test(String(blocker || '').trim()));
+  if(safePromotionBlocker && !filtered.includes(safePromotionBlocker)) filtered.unshift(safePromotionBlocker);
+  return {
+    blockers:filtered,
+    blockerCopy:safePromotionBlocker || safeBlockerCopy
+  };
+}
+
 function structureContradictionForPromotionText(text, structureState, structureEligibility){
   const safeText = String(text || '').trim();
   if(!safeText) return false;
@@ -958,6 +981,13 @@ async function main(){
     const blockerCopy = promotionDiagnosticsActive ? rawBlockerCopy : '';
     const blockers = promotionDiagnosticsActive ? promotionBlockers(globalVerdict, replayBase.record.derivedStates) : [];
     const watchToDiminishingReason = diminishingReasonActive ? rawWatchToDiminishingReason : '';
+    const normalizedReplayDiagnostics = normalizeReplayBlockers({
+      finalResolvedVerdict,
+      finalVisualBucket,
+      rawBlockers:blockers,
+      promotionBlocker,
+      blockerCopy
+    });
     const scannerVisualBucket = String(scannerVisualState.visualBucket || '').trim().toLowerCase() || 'monitor';
     const reviewVisualBucket = String(reviewVisualState.visualBucket || '').trim().toLowerCase() || 'monitor';
     const reviewCanonicalVerdict = String(globalVerdict.final_verdict || '').trim().toLowerCase() || 'watch';
@@ -998,12 +1028,12 @@ async function main(){
         realisticRr:replayBase.record.planRealism.realistic_rr,
         targetStretchPct:replayBase.record.planRealism.target_stretch_pct,
         targetCapReason:replayBase.record.planRealism.target_cap_reason,
-        blockers,
+        blockers:normalizedReplayDiagnostics.blockers,
         blockerSource,
         promotionDiagnosticsActive,
         promotionBlocker,
         failingGate,
-        blockerCopy,
+        blockerCopy:normalizedReplayDiagnostics.blockerCopy,
         watchToDiminishingReason,
         diminishingReasonActive
       }
