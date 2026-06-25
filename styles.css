@@ -2812,15 +2812,21 @@ button[disabled]{opacity:.55;cursor:not-allowed;transform:none}
 }
 .diagnostic-panel-shell{
   width:100%;
+  position:relative;
+  padding-right:110px;
 }
 .diagnostic-panel-toolbar{
+  position:absolute;
+  top:0;
+  right:0;
   display:flex;
   justify-content:flex-end;
-  margin-top:10px;
-  margin-bottom:8px;
+  margin:0;
+  z-index:2;
 }
 .diagnostic-panel-details{
   width:100%;
+  margin-top:0;
 }
 .diagnostic-panel-details[open]{
   width:100%;
