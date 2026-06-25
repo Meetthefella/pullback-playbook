@@ -35063,6 +35063,7 @@ function renderReviewWorkspace(options = {}){
     {label:'divergenceDetected', value:reviewStateDivergence.detected ? 'true' : 'false'},
     {label:'lastReviewedAt', value:record.review.lastReviewedAt || '(none)'}
   ]);
+  const reviewStateHealthDebug = (window.PP_FORCE_STATE_DEBUG === true) ? reviewDebugCompact : '';
   const reviewDebugInternal = (window.PP_FORCE_STATE_DEBUG === true)
     ? renderAdvancedDebugMarkup([
       {label:'Review Legacy State', value:JSON.stringify(reviewLegacyState || {}, null, 0) || '(none)'},
@@ -35089,17 +35090,16 @@ function renderReviewWorkspace(options = {}){
   const reviewGatewayTrace = advancedOpen
     ? `<details class="compact-details"><summary>Trade Gateway Trace<button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Trade Gateway Trace">Copy</button></summary>${renderTradeGatewayHistoryMarkup()}</details>`
     : '';
-  const reviewChartVerificationCopy = advancedOpen
-    ? `<div class="panelbox" data-diagnostic-panel="Chart Verification" style="margin-top:10px">
-        <strong>Chart Verification Diagnostics</strong>
-        <div class="tiny" style="margin-top:8px">Use this copy action for the sanitized chart-verification snapshot instead of the chart details toggle above.</div>
+  const reviewDiagnosticBundlePanel = advancedOpen
+    ? `<div class="panelbox" data-diagnostic-panel="Review Diagnostics Bundle" style="margin-top:10px">
+        <strong>Review Diagnostics Bundle</strong>
+        <div class="tiny" style="margin-top:8px">Primary tester copy for Review. Includes state health, chart verification, resolver trace, and gateway snapshot.</div>
         <div class="actions" style="margin-top:10px">
           <button class="primary compactbutton" type="button" data-act="copy-review-diagnostics-bundle">Copy Review Diagnostics Bundle</button>
-          <button class="secondary compactbutton" type="button" data-act="copy-diagnostic-panel" data-panel-title="Chart Verification">Copy Chart Verification Diagnostics</button>
         </div>
       </div>`
     : '';
-  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewChartVerificationCopy}${reviewDebugCompact}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
+  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDiagnosticBundlePanel}${reviewStateHealthDebug}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
