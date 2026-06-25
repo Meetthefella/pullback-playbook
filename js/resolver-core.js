@@ -787,6 +787,7 @@
     const bounceEarly = ['attempt','early'].includes(bounceState);
     const bounceUseful = bounceEarly || bounceState === 'confirmed';
     const isExtended = ctx.isExtended === true;
+    const extendedLocation = isExtended || setupLocationState === 'extended';
     const planInvalidLabel = String(ctx.planStatusKey || '').toLowerCase() === 'invalid';
     const credibleRrValue = numericValueOrNull(ctx.credibleRr);
     const viableRrExists = rrOk || (credibleRrValue !== null && credibleRrValue >= 1.5);
@@ -824,7 +825,7 @@
     const qualityFloorMet = setupScore >= 4;
     const brokenExtendedRepairable = structureEligibility === 'broken'
       && !nonStructuralHardInvalidation
-      && isExtended
+      && extendedLocation
       && aboveKeyTrendContext
       && noConfirmedBreakdown
       && setupLocationState === 'extended'
@@ -2301,6 +2302,41 @@
           volumeOk:false,
           planStatusKey:'valid',
           isExtended:true,
+          hasEntry:true,
+          hasStop:true,
+          hasTarget:true,
+          hardTrendBroken:false,
+          terminalAvoidFlag:false,
+          explicitInvalidationReason:'',
+          below50WithoutReclaim:false,
+          below200ma:false,
+          ma50Below200ma:false,
+          stabilisationState:'none'
+        },
+        expect:{
+          viability:'low_priority',
+          branch:'broken_extended_without_hard_invalidation_low_priority',
+          blocker:'Trend is extended away from support - keep on monitor until price resets or repairs.'
+        }
+      },
+      {
+        id:'broken-extended-live-location-state-without-distance-flag-still-softens',
+        viability:{
+          structureEligibility:'broken',
+          structureState:'weak',
+          setupLocationState:'extended',
+          priceabilityState:'provisional',
+          bounceState:'none',
+          pullbackZone:'extended',
+          setupScore:4,
+          planOk:true,
+          rrOk:false,
+          credibleRr:1.98,
+          tradeabilityOk:false,
+          tradeability:'risk_only',
+          volumeOk:false,
+          planStatusKey:'valid',
+          isExtended:false,
           hasEntry:true,
           hasStop:true,
           hasTarget:true,
