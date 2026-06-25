@@ -1955,6 +1955,24 @@ function runReviewProjectionAssertions(){
     throw new Error('Terminal Avoid plan copy must still display Avoid wording.');
   }
 
+  const nearEntryProvisionalPlanVisibility = projectionSandbox.resolvePlanVisibility({
+    state:'near_entry',
+    finalVerdict:'near_entry',
+    visualBucket:'near_entry',
+    structure:'intact',
+    bounce_state:'attempt',
+    terminal_avoid_applied:false,
+    avoid_trigger_source:'',
+    lifecycle:'active',
+    hasProvisionalPriceablePlan:true
+  });
+  if(nearEntryProvisionalPlanVisibility.showPlan !== true || nearEntryProvisionalPlanVisibility.showRR !== true || nearEntryProvisionalPlanVisibility.showCapital !== true){
+    throw new Error('Near Entry provisional plans must remain visible in execution/debug plan visibility state.');
+  }
+  if(!/provisional plan|confirmation/i.test(String(nearEntryProvisionalPlanVisibility.diagnosticsMessage || ''))){
+    throw new Error('Near Entry provisional plan visibility must keep confirmation wording instead of hiding the plan.');
+  }
+
   const terminalAvoid = projectionSandbox.applyProjectionSnapshotToReviewBundle({}, {
     ticker:'DINO',
     finalVerdict:'avoid',

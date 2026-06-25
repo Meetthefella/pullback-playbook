@@ -10878,6 +10878,16 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const safeViabilityBranchReason = staleViabilityBranchReason
     ? 'Low-priority watch - confirmation still required. (stale branch reason suppressed)'
     : String(resolverTrace.viabilityBranchReason || '(none)');
+  const consistencyAuditRows = buildConsistencyAuditRows({
+    simplifiedState,
+    globalVerdict,
+    trackVisibleModel,
+    debugPlanUI,
+    lifecycleSnapshot,
+    resolved,
+    derivedStates,
+    displayedPlan
+  });
   return `<details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="watchlist-debug-block tiny"><button class="secondary compactbutton" type="button" onclick="exportEntryPromotionAuditJson()">Export Entry Audit JSON</button></div>${renderDebugSectionMarkup('Track Debug | visibleModel', [
     {label:'canonicalVerdict', value:visibleModel.canonicalVerdict || '(none)'},
     {label:'visibleBucket', value:visualBucketLabel(visibleModel.visibleBucket || 'monitor', visibleModel.canonicalVerdict || '')},
@@ -10953,7 +10963,7 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Capital Fit', value:capitalComfort.label || 'n/a'},
     {label:'Capital Usage', value:capitalUsageDebugText(displayedPlan)},
     {label:'Next Possible', value:debug.nextPossibleState || resolved.nextPossibleState || 'n/a'}
-  ])}${renderAdvancedDebugMarkup([
+  ])}${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
     {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
     {label:'Original Bounce State', value:globalVerdict.originalBounceState || '(none)'},
@@ -14391,6 +14401,89 @@ function renderDebugSectionMarkup(title, rows){
 
 function renderAdvancedDebugMarkup(rows, title = 'Advanced Debug (Internal)'){
   return renderAdvancedDebugMarkupImpl(rows, title, scannerDebugBridgeDeps());
+}
+
+function buildConsistencyAuditRows({
+  simplifiedState,
+  globalVerdict,
+  trackVisibleModel,
+  debugPlanUI,
+  lifecycleSnapshot,
+  resolved,
+  derivedStates,
+  displayedPlan
+} = {}){
+  const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  const visible = trackVisibleModel && typeof trackVisibleModel === 'object' ? trackVisibleModel : {};
+  const planUi = debugPlanUI && typeof debugPlanUI === 'object' ? debugPlanUI : {};
+  const lifecycle = lifecycleSnapshot && typeof lifecycleSnapshot === 'object' ? lifecycleSnapshot : {};
+  const resolvedState = resolved && typeof resolved === 'object' ? resolved : {};
+  const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const canonicalVerdict = normalizeGlobalVerdictKey(simplified.canonicalVerdict || visible.canonicalVerdict || global.final_verdict || 'watch');
+  const visualBucket = normalizeVisualBucketForPairing(simplified.visualBucket || visible.visibleBucket || 'monitor');
+  const lifecycleState = normalizeGlobalVerdictKey(lifecycle.state || global.lifecycle || canonicalVerdict || 'watch');
+  const planStatus = String(simplified.planStatus || global.plan_status || '').trim().toLowerCase();
+  const priceabilityState = String(simplified.priceabilityState || global.priceability_state || derived.priceabilityState || '').trim().toLowerCase();
+  const bounceState = String(simplified.bounceState || global.bounce_state || derived.bounceState || '').trim().toLowerCase();
+  const structureState = String(simplified.structureState || global.structure_state || derived.structureState || '').trim().toLowerCase();
+  const actionState = String(resolvedState.actionStateLabel || resolvedState.actionLabel || '').trim();
+  const planVisible = planUi.showPlan === true;
+  const hasProvisionalPlan = global.hasProvisionalPriceablePlan === true || global.has_provisional_priceable_plan === true;
+  const hasPriceablePlan = global.hasPriceablePlan === true || global.has_priceable_plan === true;
+  const resolvedRr = numericOrNull(simplified.resolvedRR != null ? simplified.resolvedRR : global.resolved_rr);
+  const blockerText = String(simplified.mainBlocker || global.main_blocker || '').trim();
+  const contradictions = [];
+
+  if(['near_entry','entry'].includes(canonicalVerdict) && lifecycleState !== canonicalVerdict){
+    contradictions.push(`Lifecycle mismatch: final ${canonicalVerdict} but lifecycle ${lifecycleState || '(none)'}.`);
+  }
+  if(['near_entry','entry'].includes(canonicalVerdict) && !/near entry|entry/i.test(actionState)){
+    contradictions.push(`Action mismatch: final ${canonicalVerdict} but action state "${actionState || '(none)'}".`);
+  }
+  if(canonicalVerdict === 'near_entry' && planVisible !== true && (hasProvisionalPlan || hasPriceablePlan || planStatus === 'valid')){
+    contradictions.push('Near Entry has a valid/provisional plan but Plan Visible is false.');
+  }
+  if(canonicalVerdict === 'near_entry' && priceabilityState === 'unpriceable' && (hasProvisionalPlan || hasPriceablePlan || simplified.nearEntryGatePass === true)){
+    contradictions.push('Near Entry is marked unpriceable despite provisional/priceable plan evidence.');
+  }
+  if(Number.isFinite(resolvedRr) && resolvedRr >= 1.5 && /nearby resistance limits current reward potential/i.test(blockerText)){
+    contradictions.push(`RR mismatch: blocker says nearby resistance but resolved RR is ${resolvedRr.toFixed(2)}R.`);
+  }
+  if(simplified.nearEntryGatePass === true && canonicalVerdict === 'watch'){
+    contradictions.push('Near Entry gate passed but final canonical verdict is still watch.');
+  }
+  if(visualBucket === 'near_entry' && !['near_entry','entry'].includes(canonicalVerdict)){
+    contradictions.push(`Visual mismatch: bucket ${visualBucket} with final ${canonicalVerdict}.`);
+  }
+  if(['strong','intact','developing_clean'].includes(structureState) && /structure is not strong|structure is weakening|structure is broken/i.test(blockerText)){
+    contradictions.push(`Structure mismatch: structure ${structureState} but blocker blames structure deterioration.`);
+  }
+  if(planVisible === true && ['missing','invalid'].includes(planStatus)){
+    contradictions.push(`Plan visibility mismatch: plan is visible while planStatus is ${planStatus}.`);
+  }
+  if(planVisible !== true && plan.status === 'valid' && ['near_entry','entry'].includes(canonicalVerdict)){
+    contradictions.push('Visible plan mismatch: displayed plan is valid but plan visibility is false for an actionable state.');
+  }
+  if(contradictions.length === 0){
+    contradictions.push('No contradictions detected.');
+  }
+
+  return [
+    {label:'Authoritative Final', value:canonicalVerdict || '(none)'},
+    {label:'Authoritative Bucket', value:visualBucket || '(none)'},
+    {label:'Lifecycle State', value:lifecycleState || '(none)'},
+    {label:'Action State', value:actionState || '(none)'},
+    {label:'Plan Visible', value:planVisible ? 'true' : 'false'},
+    {label:'Plan Status', value:planStatus || '(none)'},
+    {label:'Priceability', value:priceabilityState || '(none)'},
+    {label:'Bounce', value:bounceState || '(none)'},
+    {label:'Structure', value:structureState || '(none)'},
+    {label:'Resolved RR', value:Number.isFinite(resolvedRr) ? `${resolvedRr.toFixed(2)}R` : '(none)'},
+    {label:'Main Blocker', value:blockerText || '(none)'},
+    {label:'Contradictions', value:contradictions.join(' | ')}
+  ];
 }
 
 function renderScannerVisualDebugContent(view){
@@ -21419,6 +21512,8 @@ function resolvePlanVisibility(setup){
   const noConfirmation = bounceState === 'none' || bounceState === 'attempt';
   const weakStructure = structure === 'weakening' || structure === 'broken';
   const terminalAvoidEvidence = terminalAvoidEvidenceForReviewCopy(setup);
+  const provisionalPlanVisible = hasUnconfirmedPriceablePlanForReviewCopy(setup)
+    && ['near_entry', 'entry'].includes(state);
   const confirmationMessage = provisionalPlanConfirmationCopy(setup);
   const semanticConfirmationMessage = sanitizeAliveWatchSemanticCopy(confirmationMessage, setup) || confirmationMessage;
 
@@ -21485,6 +21580,17 @@ function resolvePlanVisibility(setup){
       showRR:true,
       diagnosticsMessage:null,
       diagnosticsTone:null
+    };
+  }
+
+  if(provisionalPlanVisible && !weakStructure){
+    return {
+      showPlan:true,
+      showPositionSize:true,
+      showCapital:true,
+      showRR:true,
+      diagnosticsMessage:sanitizeNonTerminalPlanCopy(semanticConfirmationMessage, setup),
+      diagnosticsTone:'neutral'
     };
   }
 
