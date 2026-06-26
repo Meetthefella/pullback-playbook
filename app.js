@@ -1889,10 +1889,10 @@ function ensureOnboardingDisplayBridge(){
     if(!list || document.getElementById(demoIds.track)) return;
     const card = document.createElement('div');
     card.id = demoIds.track;
-    card.className = 'card watchlist-card';
+    card.className = 'card watchlist-card card--watch visual-state-card visual-state-watch visual-tone-monitor';
     card.setAttribute('data-tour', 'ticker-card');
     card.setAttribute('data-onboarding-demo', 'track');
-    card.innerHTML = `<div style="display:grid;gap:6px"><strong>NVDA</strong><div class="tiny">Demo tracked setup for the tour only.</div></div>`;
+    card.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">NVDA</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill">Watch</span><span class="score score--good">81</span><span class="tiny watchlist-card__priority">Priority 1</span></div><div class="tiny watchlist-card__company">NVIDIA | NASDAQ</div></div><div class="watchlist-signal-row"><span class="pill">20 MA support</span><span class="pill">Needs bounce</span></div><div class="tiny watchlist-card__reason decision-summary">Strong trend intact. Waiting for cleaner confirmation before upgrade.</div><div class="tiny watchlist-plan-meta">Entry 129.40 | Stop 125.80 | Target 136.00</div><div class="watchlist-actions"><button class="primary" type="button" disabled>Review</button><button class="secondary" type="button" disabled>Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">Demo tracked setup for the tour only. Nothing here is saved or actionable.</div><div class="tiny">Added today | Expires in 3 days | Lifecycle: Watching</div></details>`;
     list.insertBefore(card, list.firstChild || null);
   }
   function ensureTourDemoSurface(surface){
@@ -36567,7 +36567,7 @@ function renderReviewWorkspace(options = {}){
       <div class="summary review-technical-line" id="reviewTechnicalContextLine">${escapeHtml(technicalContextLine)}</div>
       <div class="review-action-row review-action-row--top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
       ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
-      ${aiSummaryVisible ? `<details class="responsepanel compact-open-on-demand" id="reviewResponse" ${analysisResponseOpen}>
+      ${aiSummaryVisible ? `<details class="responsepanel compact-open-on-demand" id="reviewResponse" data-tour="ai-summary" ${analysisResponseOpen}>
         <summary id="reviewAiSummaryTitle">${escapeHtml(aiSummaryTitle)}</summary>
         <div class="tiny review-ai-preview" id="reviewAiSummaryPreview">${escapeHtml(aiSummaryPreview)}</div>
         <div class="tiny review-ai-overflow-hint" id="reviewAiSummaryOverflowHint" hidden>Scroll for more</div>

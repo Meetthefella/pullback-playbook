@@ -53,10 +53,22 @@
       beforeStep(){ showWorkspace('review'); ensureDemoSurface('review'); }
     },
     {
+      id:'chart-upload',
+      title:'💡 Chart Upload',
+      body:'Add a chart here first. A clean screenshot gives the app and the AI better context.',
+      targets:['[data-tour="chart-upload"]','[data-tour="review-workspace"]']
+    },
+    {
       id:'verdict-summary',
       title:'💡 Verdict Summary',
       body:'This card shows the current decision state in plain language before you plan or save anything.',
       targets:['[data-tour="verdict-card"]','[data-tour="review-workspace"]']
+    },
+    {
+      id:'ai-summary',
+      title:'💡 AI Summary',
+      body:'Use this as a quick second opinion. Read it for context, then compare it with the verdict above.',
+      targets:['[data-tour="ai-summary"]','[data-tour="review-workspace"]']
     },
     {
       id:'trade-plan',
@@ -82,6 +94,16 @@
       id:'paper-trading',
       title:'💡 Diary And Tester',
       body:'Diary and tester tools live here. Paper-trading stays gated until setup and gateway checks are ready.',
+      targets:['[data-tour="paper-trade"]','[data-tour="help-menu"]'],
+      beforeStep(){
+        showWorkspace('diary');
+        setDetailsOpen('advancedUtilitiesDetails', true);
+      }
+    },
+    {
+      id:'diary-log',
+      title:'💡 Diary',
+      body:'Use Diary to log what you planned, what happened, and what you learned after the trade.',
       targets:['[data-tour="paper-trade"]','[data-tour="help-menu"]'],
       beforeStep(){
         showWorkspace('diary');

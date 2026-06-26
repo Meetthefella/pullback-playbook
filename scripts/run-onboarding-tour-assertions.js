@@ -388,7 +388,7 @@ async function run(){
     window.startOnboardingTour();
     await flushAsync();
     const overlay = window.document.getElementById('onboardingTourOverlay');
-    for(let index = 0; index < 10; index += 1){
+    for(let index = 0; index < 12; index += 1){
       overlay.querySelector('[data-tour-action="next"]').click();
       await flushAsync();
     }
