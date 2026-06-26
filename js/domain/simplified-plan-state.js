@@ -77,6 +77,36 @@
     return 'watch';
   }
 
+  function authoritativePlanBlock(record){
+    const item = record && typeof record === 'object' ? record : {};
+    const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+    const status = String(plan.status || '').trim().toLowerCase();
+    const tradeability = String(plan.tradeability || '').trim().toLowerCase();
+    const riskStatus = String(plan.riskStatus || '').trim().toLowerCase();
+    const blockedReason = String(plan.blockedReason || '').trim();
+    const source = String(plan.source || '').trim().toLowerCase();
+    const firstTargetTooClose = plan.firstTargetTooClose === true;
+    const invalidByStatus = ['invalid','missing'].includes(status);
+    const invalidByTradeability = ['invalid','too_wide','too_expensive'].includes(tradeability);
+    const invalidByRisk = ['plan_blocked','invalid_plan','plan_missing','too_wide'].includes(riskStatus);
+    const blocked = !!(
+      invalidByStatus
+      || invalidByTradeability
+      || invalidByRisk
+      || blockedReason
+      || firstTargetTooClose
+    );
+    return {
+      blocked,
+      source,
+      status,
+      tradeability,
+      riskStatus,
+      blockedReason,
+      firstTargetTooClose
+    };
+  }
+
   function deriveCurrentPlanState(record, effectivePlan, riskSettings, deps = {}){
     const planMath = deps.PlanMath || global.PlanMath || {};
     const item = record && typeof record === 'object' ? record : {};
@@ -157,19 +187,23 @@
       })
       : '';
 
+    const authoritative = authoritativePlanBlock(item);
+    const shouldHonorAuthoritativeBlock = authoritative.blocked === true
+      && authoritative.source === 'scanner_estimate';
+
     return {
       entry,
       stop,
       target,
-      status,
+      status:shouldHonorAuthoritativeBlock ? 'invalid' : status,
       rewardRisk,
       rewardPerShare,
       riskFit,
       capitalFit,
-      tradeability,
+      tradeability:shouldHonorAuthoritativeBlock ? 'invalid' : tradeability,
       affordability,
       planSourceUsedForRisk:plan.source,
-      planVisible:status === 'valid',
+      planVisible:shouldHonorAuthoritativeBlock ? false : status === 'valid',
       hasEntry,
       hasStop,
       hasTarget,
@@ -181,7 +215,9 @@
       positionCostGbp:capitalFit.position_cost_gbp,
       capitalOk:capitalFit.capital_ok,
       capitalUsagePct:capitalFit.capital_usage_pct,
-      quoteCurrency:capitalFit.quote_currency || quoteCurrency || ''
+      quoteCurrency:capitalFit.quote_currency || quoteCurrency || '',
+      authoritativeBlockApplied:shouldHonorAuthoritativeBlock,
+      authoritativeBlockedReason:shouldHonorAuthoritativeBlock ? authoritative.blockedReason : ''
     };
   }
 
