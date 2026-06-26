@@ -7372,15 +7372,17 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const tone = suppressAvoidForTrackedWatch
     ? 'diminishing'
     : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor');
+  const suppressingTrackedAvoid = suppressAvoidForTrackedWatch === true;
   const mainBlocker = suppressAvoidForTrackedWatch
     ? 'Trend is extended away from support - keep on monitor until price resets or repairs.'
     : String(simplifiedState.mainBlocker || '').trim();
-  const headline = String(
-    simplifiedState.actionLabel
-    || simplifiedState.badgeLabel
-    || globalVerdictLabel(canonicalVerdict || 'watch')
-    || 'Watch'
-  ).trim();
+  const finalBadgeLabel = suppressingTrackedAvoid
+    ? 'Watch'
+    : String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim();
+  const finalActionLabel = suppressingTrackedAvoid
+    ? (visualBucket === 'diminishing' ? 'Diminishing' : globalVerdictLabel(canonicalVerdict || 'watch'))
+    : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim();
+  const headline = String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim();
   const primaryReason = mainBlocker || String(globalVerdict.reason || '').trim();
   const nextAction = canonicalVerdict === 'watch'
     ? 'Wait for stronger confirmation before considering entry.'
@@ -7395,7 +7397,8 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     finalVerdict:canonicalVerdict,
     visualBucket,
     tone,
-    badgeLabel:String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim(),
+    badgeLabel:finalBadgeLabel,
+    actionLabel:finalActionLabel,
     headline,
     statusText:headline,
     primaryReason,
@@ -7412,7 +7415,8 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       source:String(options.source || 'shared_presentation'),
       reason:String(options.reason || 'shared_presentation'),
       surface:String(options.surface || 'track'),
-      suppressAvoidForTrackedWatch
+      suppressAvoidForTrackedWatch,
+      suppressingTrackedAvoid
     }
   };
 }

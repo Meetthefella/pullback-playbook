@@ -6057,6 +6057,9 @@ function runTrackPresentationAuthorityAssertions(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const authoritySandbox = {
     console,
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
     normalizeGlobalVerdictKey(value){
       const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
       if(safe === 'nearentry') return 'near_entry';
@@ -6086,10 +6089,46 @@ function runTrackPresentationAuthorityAssertions(){
     'terminalAvoidCopyPattern',
     'provisionalPlanConfirmationCopy',
     'sanitizeNonTerminalPlanCopy',
+    'buildSharedReviewTrackPresentation',
     'resolveTrackCardVisibleModel'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), authoritySandbox, {filename:`app.js#${functionName}`});
   });
+  const suppressedAvoidPresentation = authoritySandbox.buildSharedReviewTrackPresentation({
+    ticker:'NVDA',
+    watchlist:{inWatchlist:true, debug:{structural_alive_at_refresh:'true', baseVerdict:'watch', finalVerdict:'avoid'}},
+  }, {
+    surface:'track',
+    sourceOfTruth:'watchlist_persisted_presentation',
+    simplifiedState:{
+      canonicalVerdict:'avoid',
+      visualBucket:'avoid',
+      tone:'avoid',
+      badgeLabel:'Avoid',
+      actionLabel:'Avoid',
+      mainBlocker:'Structure is broken.'
+    },
+    lifecycleSnapshot:{
+      state:'avoid',
+      structural_alive_at_refresh:'true',
+      avoid_allowed_by_structure_gate:'false',
+      explicit_invalidation_reason:'(none)'
+    },
+    globalVerdict:{
+      base_verdict:'watch',
+      final_verdict:'avoid',
+      explicit_invalidation_reason:'(none)'
+    }
+  });
+  if(suppressedAvoidPresentation.canonicalVerdict !== 'watch' || suppressedAvoidPresentation.visualBucket !== 'diminishing'){
+    throw new Error('Suppressed stale tracked avoid must persist as watch/diminishing authority.');
+  }
+  if(/avoid/i.test(String(suppressedAvoidPresentation.badgeLabel || ''))
+    || /avoid/i.test(String(suppressedAvoidPresentation.actionLabel || ''))
+    || /avoid/i.test(String(suppressedAvoidPresentation.headline || ''))
+    || /avoid/i.test(String(suppressedAvoidPresentation.statusText || ''))){
+    throw new Error('Suppressed stale tracked avoid must not leak Avoid wording into persisted shared presentation labels or headline copy.');
+  }
   const model = authoritySandbox.resolveTrackCardVisibleModel({
     ticker:'LIN'
   }, {
