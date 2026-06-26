@@ -149,7 +149,7 @@
     <div class="scan-primary-stack" style="margin-top:10px">
       <strong>Import From Screenshot</strong>
       <div class="tiny" style="margin-top:6px">Upload a TradingView screenshot to extract tickers for review before scanning.</div>
-      <div class="actions">
+      <div class="actions" data-tour="screenshot-import">
         <button class="secondary" id="importScreenshotBtn">Import From Screenshot</button>
       </div>
       <input id="ocrImportFile" type="file" accept="image/*" style="display:none" />
@@ -174,7 +174,7 @@
         </div>
         <div class="statusline tiny" id="tickerSearchStatus">Add one ticker quickly, or search provider symbols below.</div>
       </div>
-      <div style="margin-top:14px">
+      <div style="margin-top:14px" data-tour="pasted-list">
         <label>Paste Ticker List</label>
         <textarea id="tvImportInput" placeholder="CAT,DE,UNP,GEV&#10;or&#10;CAT DE UNP GEV&#10;or one ticker per line"></textarea>
         <div class="actions">

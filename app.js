@@ -1780,6 +1780,11 @@ function activeWorkspaceTab(){
 function ensureOnboardingDisplayBridge(){
   if(typeof window === 'undefined') return null;
   const allowedTabs = new Set(['scan', 'review', 'track', 'diary']);
+  const demoIds = {
+    scan:'onboardingTourDemoScanCard',
+    review:'onboardingTourDemoReviewCard',
+    track:'onboardingTourDemoTrackCard'
+  };
   function normalizeWorkspaceTab(value){
     const next = String(value || '').trim().toLowerCase();
     return allowedTabs.has(next) ? next : 'scan';
@@ -1852,6 +1857,51 @@ function ensureOnboardingDisplayBridge(){
     if(details && 'open' in details) details.open = open === true;
     return !!(details && details.open === true);
   }
+  function removeTourDemoArtifacts(){
+    Object.values(demoIds).forEach(id => {
+      const node = document.getElementById(id);
+      if(node && node.parentNode) node.parentNode.removeChild(node);
+    });
+  }
+  function ensureDemoScanCard(){
+    const list = document.getElementById('results');
+    if(!list || document.getElementById(demoIds.scan)) return;
+    const card = document.createElement('div');
+    card.id = demoIds.scan;
+    card.className = 'card';
+    card.setAttribute('data-onboarding-demo', 'scan');
+    card.innerHTML = `<div style="display:grid;gap:8px"><strong>NVDA</strong><div class="tiny">Demo candidate for the tour only. This card is not saved or scanned.</div><div class="actions"><button type="button" class="secondary compactbutton" disabled>Open In Review</button></div></div>`;
+    list.insertBefore(card, list.firstChild || null);
+  }
+  function ensureDemoReviewCard(){
+    const box = document.getElementById('reviewWorkspace');
+    if(!box || document.getElementById(demoIds.review)) return;
+    const card = document.createElement('div');
+    card.id = demoIds.review;
+    card.className = 'list reviewworkspace-shell';
+    card.setAttribute('data-onboarding-demo', 'review');
+    card.innerHTML = `<div class="panelbox review-section review-section--snapshot" data-tour="verdict-card"><div class="tiny">Demo review ticker</div><strong style="display:block;margin-top:4px">NVDA</strong><p class="tiny" style="margin-top:8px">Watch for a clean pullback into support before planning a live entry.</p></div><div class="panelbox review-section review-section--trade plannerbox" data-tour="trade-plan"><div class="tiny">Trade plan preview</div><strong style="display:block;margin-top:4px">Entry 129.40 | Stop 125.80 | Target 136.00</strong><p class="tiny" style="margin-top:8px">This demo plan is shown only so the tour has real Review anchors.</p></div>`;
+    box.innerHTML = '';
+    box.appendChild(card);
+  }
+  function ensureDemoTrackCard(){
+    const list = document.getElementById('watchlistList');
+    if(!list || document.getElementById(demoIds.track)) return;
+    const card = document.createElement('div');
+    card.id = demoIds.track;
+    card.className = 'card watchlist-card';
+    card.setAttribute('data-tour', 'ticker-card');
+    card.setAttribute('data-onboarding-demo', 'track');
+    card.innerHTML = `<div style="display:grid;gap:6px"><strong>NVDA</strong><div class="tiny">Demo tracked setup for the tour only.</div></div>`;
+    list.insertBefore(card, list.firstChild || null);
+  }
+  function ensureTourDemoSurface(surface){
+    const key = String(surface || '').trim().toLowerCase();
+    if(key === 'scan') ensureDemoScanCard();
+    if(key === 'review') ensureDemoReviewCard();
+    if(key === 'track') ensureDemoTrackCard();
+    return key;
+  }
   const bridge = window.pullbackPlaybookOnboarding && typeof window.pullbackPlaybookOnboarding === 'object'
     ? window.pullbackPlaybookOnboarding
     : (window.pullbackPlaybookOnboarding = {});
@@ -1866,6 +1916,7 @@ function ensureOnboardingDisplayBridge(){
   };
   bridge.restoreVisibleContext = function restoreVisibleContext(context){
     const snapshot = context && typeof context === 'object' ? context : {};
+    removeTourDemoArtifacts();
     const workspaceTab = snapshot.workspaceTab ? normalizeWorkspaceTab(snapshot.workspaceTab) : currentVisibleWorkspaceTabDisplayOnly();
     applyVisibleWorkspaceForTour(workspaceTab);
     setAdvancedUtilitiesOpenDisplayOnly(snapshot.advancedOpen === true);
@@ -1879,6 +1930,13 @@ function ensureOnboardingDisplayBridge(){
   };
   bridge.setAdvancedUtilitiesOpen = function setAdvancedUtilitiesOpen(open){
     return setAdvancedUtilitiesOpenDisplayOnly(open);
+  };
+  bridge.ensureDemoSurface = function ensureDemoSurface(surface){
+    return ensureTourDemoSurface(surface);
+  };
+  bridge.clearDemoSurface = function clearDemoSurface(){
+    removeTourDemoArtifacts();
+    return true;
   };
   return bridge;
 }

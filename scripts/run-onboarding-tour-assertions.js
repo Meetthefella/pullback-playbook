@@ -6,7 +6,7 @@ function assert(condition, message){
   if(!condition) throw new Error(message);
 }
 
-async function flushAsync(turns = 6){
+async function flushAsync(turns = 20){
   for(let index = 0; index < turns; index += 1){
     await Promise.resolve();
   }
@@ -49,6 +49,7 @@ function createElement(tagName, registry){
     hidden:false,
     classList:createClassList(),
     listeners:{},
+    attributes:{},
     focusCount:0,
     offsetHeight:160,
     appendChild(child){ child.parentNode = this; child.ownerDocument = this.ownerDocument; return child; },
@@ -57,7 +58,11 @@ function createElement(tagName, registry){
     focus(){ this.focusCount += 1; if(this.ownerDocument) this.ownerDocument.activeElement = this; },
     scrollIntoView(){},
     getBoundingClientRect(){ return this._rect || {top:100, left:80, width:220, height:120, bottom:220, right:300}; },
-    querySelector(selector){ return this._query ? this._query[selector] || null : null; }
+    querySelector(selector){ return this._query ? this._query[selector] || null : null; },
+    setAttribute(name, value){ this.attributes[String(name)] = String(value); },
+    getAttribute(name){ return Object.prototype.hasOwnProperty.call(this.attributes, String(name)) ? this.attributes[String(name)] : null; },
+    removeAttribute(name){ delete this.attributes[String(name)]; },
+    hasAttribute(name){ return Object.prototype.hasOwnProperty.call(this.attributes, String(name)); }
   };
   Object.defineProperty(element, 'id', {
     get(){ return this._id || ''; },
@@ -306,7 +311,7 @@ async function run(){
     target.scrollIntoView = () => { scrollCalls += 1; };
     const targets = {
       '[data-tour="scan-tab"]':createElement('button', {}),
-      '[data-tour="ticker-inputs"]':target
+      '[data-tour="screenshot-import"]':target
     };
     const {window, warnings, infos} = createEnvironment(targets);
     loadScript(window, warnings, infos);
@@ -336,6 +341,8 @@ async function run(){
     window.startOnboardingTour();
     await flushAsync();
     const overlay = window.document.getElementById('onboardingTourOverlay');
+    overlay.querySelector('[data-tour-action="next"]').click();
+    await flushAsync();
     overlay.querySelector('[data-tour-action="next"]').click();
     await flushAsync();
     overlay.querySelector('[data-tour-action="next"]').click();
@@ -381,7 +388,7 @@ async function run(){
     window.startOnboardingTour();
     await flushAsync();
     const overlay = window.document.getElementById('onboardingTourOverlay');
-    for(let index = 0; index < 9; index += 1){
+    for(let index = 0; index < 10; index += 1){
       overlay.querySelector('[data-tour-action="next"]').click();
       await flushAsync();
     }
@@ -412,6 +419,8 @@ async function run(){
     window.startOnboardingTour();
     await flushAsync();
     const overlay = window.document.getElementById('onboardingTourOverlay');
+    overlay.querySelector('[data-tour-action="next"]').click();
+    await flushAsync();
     overlay.querySelector('[data-tour-action="next"]').click();
     await flushAsync();
     overlay.querySelector('[data-tour-action="next"]').click();

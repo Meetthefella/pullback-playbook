@@ -25,13 +25,19 @@
       title:'💡 Scan',
       body:'This is the starting workspace. Use it to gather tickers and send promising names into Review.',
       targets:['[data-tour="scan-tab"]','[data-tour="scan-workspace"]'],
-      beforeStep(){ showWorkspace('scan'); }
+      beforeStep(){ showWorkspace('scan'); ensureDemoSurface('scan'); }
     },
     {
-      id:'ticker-inputs',
-      title:'💡 Add Tickers',
-      body:'Use screenshot import, manual search, or a pasted list to build the names you want to check.',
-      targets:['[data-tour="ticker-inputs"]']
+      id:'screenshot-import',
+      title:'💡 Screenshot Import',
+      body:'Drop in a chart screenshot here when you want the app to pull ticker ideas out before you scan.',
+      targets:['[data-tour="screenshot-import"]']
+    },
+    {
+      id:'pasted-list',
+      title:'💡 Paste A List',
+      body:'Paste a ready-made ticker list here when you already know the names you want to run through Scan.',
+      targets:['[data-tour="pasted-list"]','[data-tour="ticker-inputs"]']
     },
     {
       id:'run-scan',
@@ -44,7 +50,7 @@
       title:'💡 Review',
       body:'Review keeps one active ticker in focus so chart context, verdict, and planning stay together.',
       targets:['[data-tour="review-tab"]','[data-tour="review-workspace"]'],
-      beforeStep(){ showWorkspace('review'); }
+      beforeStep(){ showWorkspace('review'); ensureDemoSurface('review'); }
     },
     {
       id:'verdict-summary',
@@ -63,14 +69,14 @@
       title:'💡 Track',
       body:'Track is the live watchlist view for active setups and lifecycle follow-up.',
       targets:['[data-tour="track-tab"]','[data-tour="track-workspace"]'],
-      beforeStep(){ showWorkspace('track'); }
+      beforeStep(){ showWorkspace('track'); ensureDemoSurface('track'); }
     },
     {
       id:'ticker-card',
       title:'💡 Ticker Card',
       body:'Open a tracked name again from here, or watch the lifecycle state if the list is still empty.',
       targets:['[data-tour="ticker-card"]','[data-tour="watchlist"]'],
-      beforeStep(){ showWorkspace('track'); }
+      beforeStep(){ showWorkspace('track'); ensureDemoSurface('track'); }
     },
     {
       id:'paper-trading',
@@ -317,6 +323,19 @@
     }
     const node = global.document ? global.document.getElementById(id) : null;
     if(node && 'open' in node) node.open = open === true;
+  }
+  function ensureDemoSurface(surface){
+    const bridge = onboardingBridge();
+    if(bridge && typeof bridge.ensureDemoSurface === 'function'){
+      try{
+        bridge.ensureDemoSurface(surface);
+      }catch(error){
+        warn('[ONBOARDING_TOUR_BRIDGE_FAILED]', error, {
+          action:'ensureDemoSurface',
+          surface:String(surface || '')
+        });
+      }
+    }
   }
   function showWorkspace(tab){
     lastDisplayNav = String(tab || '');
