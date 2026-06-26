@@ -4016,6 +4016,9 @@ function mergeRecentBugReceiptWorkflows(receipts, workflowRows){
     const safe = normalizeRecentBugReceipt(receipt);
     const workflow = workflowMap.get(safe.issueId);
     if(!workflow) return safe;
+    if(safe.status === 'closed' && workflow.status !== 'closed'){
+      return safe;
+    }
     if(
       safe.status === workflow.status
       && safe.statusLabel === workflow.statusLabel

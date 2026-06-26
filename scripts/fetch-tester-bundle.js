@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const ISSUE_ID_PATTERN = /^BUG-\d{14}-[A-Z0-9._-]+$/;
 const STATUS_FLAGS = {
@@ -7,9 +8,10 @@ const STATUS_FLAGS = {
   '--mark-analysis-complete':{status:'analysis_complete'},
   '--mark-fixed':{status:'fixed'}
 };
+const STATUS_ORDER = ['submitted', 'under_investigation', 'analysis_complete', 'fixed'];
 
 function usage(){
-  console.error('Usage: node scripts/fetch-tester-bundle.js BUG-YYYYMMDDHHMMSS-TICKER [--mark-under-investigation|--mark-analysis-complete|--mark-fixed --fixed-in-build vX.Y.Z] [--override] [--reason "text"]');
+  console.error('Usage: node scripts/fetch-tester-bundle.js BUG-YYYYMMDDHHMMSS-TICKER [--mark-under-investigation|--mark-analysis-complete|--mark-fixed --fixed-in-build vX.Y.Z|--auto-progress] [--override] [--reason "text"]');
   process.exit(1);
 }
 
@@ -40,6 +42,7 @@ function parseArgs(argv){
   let fixedInBuild = '';
   let override = false;
   let reason = '';
+  let autoProgress = false;
   for(let index = 0; index < args.length; index += 1){
     const token = String(args[index] || '').trim();
     if(STATUS_FLAGS[token]){
@@ -49,6 +52,10 @@ function parseArgs(argv){
     }
     if(token === '--override'){
       override = true;
+      continue;
+    }
+    if(token === '--auto-progress'){
+      autoProgress = true;
       continue;
     }
     if(token === '--reason'){
@@ -66,12 +73,16 @@ function parseArgs(argv){
   if(mark && mark.status === 'fixed' && !fixedInBuild){
     throw new Error('Missing --fixed-in-build for --mark-fixed.');
   }
+  if(mark && autoProgress){
+    throw new Error('Use either an explicit mark flag or --auto-progress, not both.');
+  }
   return {
     issueId,
     markStatus:mark ? mark.status : '',
     fixedInBuild,
     override,
-    reason
+    reason,
+    autoProgress
   };
 }
 
@@ -114,16 +125,94 @@ async function downloadBundle({issueId, token}){
   });
 }
 
+function workflowRank(status){
+  const normalized = String(status || '').trim().toLowerCase();
+  return STATUS_ORDER.indexOf(normalized);
+}
+
+function currentWorkflowStatus(bundle){
+  return String(bundle && bundle.workflow && bundle.workflow.status || 'submitted').trim().toLowerCase() || 'submitted';
+}
+
+function isIgnorableGitStatusLine(line){
+  const trimmed = String(line || '').trim();
+  if(!trimmed) return true;
+  return /(^|\s)debug-bundles([\\/]|$)/.test(trimmed);
+}
+
+function hasCleanWorkingTreeForAutoFix(){
+  try{
+    const output = execFileSync('git', ['status', '--short'], {encoding:'utf8'});
+    const relevantLines = String(output || '')
+      .split(/\r?\n/)
+      .map(line => line.trimEnd())
+      .filter(line => line.trim())
+      .filter(line => !isIgnorableGitStatusLine(line));
+    return relevantLines.length === 0;
+  }catch(error){
+    return false;
+  }
+}
+
+function determineAutoProgressAction(bundle, options = {}){
+  const status = currentWorkflowStatus(bundle);
+  const gitClean = options.gitClean === true
+    ? true
+    : (options.gitClean === false ? false : hasCleanWorkingTreeForAutoFix());
+  if(status === 'submitted'){
+    return {
+      status:'under_investigation',
+      note:options.reason || 'Auto-progressed when bundle was fetched for investigation.'
+    };
+  }
+  if(status === 'under_investigation'){
+    if(!String(options.reason || '').trim()){
+      return null;
+    }
+    return {
+      status:'analysis_complete',
+      note:String(options.reason || '').trim()
+    };
+  }
+  if(status === 'analysis_complete'){
+    if(!String(options.reason || '').trim()) return null;
+    if(!String(options.fixedInBuild || '').trim()) return null;
+    if(!gitClean) return null;
+    return {
+      status:'fixed',
+      fixedInBuild:String(options.fixedInBuild || '').trim(),
+      note:String(options.reason || '').trim()
+    };
+  }
+  return null;
+}
+
 async function main(){
-  const { issueId, markStatus, fixedInBuild, override, reason } = parseArgs(process.argv);
+  const { issueId, markStatus, fixedInBuild, override, reason, autoProgress } = parseArgs(process.argv);
   const token = String(process.env.TESTER_REPORT_ADMIN_TOKEN || '').trim();
   if(!token) throw new Error('Missing TESTER_REPORT_ADMIN_TOKEN.');
 
+  let body;
   if(markStatus){
     await updateStatus({issueId, status:markStatus, fixedInBuild, override, reason, token});
+    body = await downloadBundle({issueId, token});
+  }else{
+    body = await downloadBundle({issueId, token});
+    if(autoProgress){
+      const autoAction = determineAutoProgressAction(body, {fixedInBuild, reason});
+      if(autoAction){
+        await updateStatus({
+          issueId,
+          status:autoAction.status,
+          fixedInBuild:autoAction.fixedInBuild || '',
+          override,
+          reason:autoAction.note || '',
+          token
+        });
+        body = await downloadBundle({issueId, token});
+      }
+    }
   }
-
-  const body = await downloadBundle({issueId, token});
   const outputDir = path.join(process.cwd(), 'debug-bundles');
   fs.mkdirSync(outputDir, {recursive:true});
   const outputPath = path.join(outputDir, `${issueId}.json`);
@@ -131,7 +220,19 @@ async function main(){
   console.log(outputPath);
 }
 
-main().catch(error => {
-  console.error(error && error.message ? error.message : String(error));
-  process.exit(1);
-});
+if(require.main === module){
+  main().catch(error => {
+    console.error(error && error.message ? error.message : String(error));
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  STATUS_ORDER,
+  parseArgs,
+  workflowRank,
+  currentWorkflowStatus,
+  isIgnorableGitStatusLine,
+  hasCleanWorkingTreeForAutoFix,
+  determineAutoProgressAction
+};

@@ -105,6 +105,31 @@ node scripts/fetch-tester-bundle.js BUG-YYYYMMDDHHMMSS-TICKER
 
 It always downloads the full bundle to `debug-bundles/{issueId}.json`.
 
+### Semi-Automatic Progression
+
+The helper script now supports opt-in semi-automatic server status progression:
+
+```powershell
+node scripts/fetch-tester-bundle.js BUG-20260626102014-AAPL --auto-progress
+```
+
+It only advances one safe server-side step at a time:
+
+- `submitted -> under_investigation`
+  - advances automatically when the bundle is fetched for investigation
+- `under_investigation -> analysis_complete`
+  - only advances if `--reason` is supplied
+- `analysis_complete -> fixed`
+  - only advances if `--reason` is supplied
+  - only advances if `--fixed-in-build` is supplied
+  - only advances if the local git working tree is clean apart from `debug-bundles/`
+
+It does not auto-advance:
+
+- backward transitions
+- skip-ahead transitions
+- `closed`
+
 ### Fetch Only
 
 ```powershell
@@ -127,6 +152,26 @@ node scripts/fetch-tester-bundle.js BUG-20260626102014-AAPL --mark-analysis-comp
 
 ```powershell
 node scripts/fetch-tester-bundle.js BUG-20260626102014-AAPL --mark-fixed --fixed-in-build v4.4.20
+```
+
+### Auto-Progress During Investigation
+
+Start investigation and fetch the latest bundle in one step:
+
+```powershell
+node scripts/fetch-tester-bundle.js BUG-20260626102014-AAPL --auto-progress
+```
+
+Mark analysis complete once findings are recorded:
+
+```powershell
+node scripts/fetch-tester-bundle.js BUG-20260626102014-AAPL --auto-progress --reason "Root cause confirmed in watchlist debug snapshot path"
+```
+
+Mark fixed only after code is in place, the working tree is clean, and a build is known:
+
+```powershell
+node scripts/fetch-tester-bundle.js BUG-20260626102014-AAPL --auto-progress --fixed-in-build v4.4.20 --reason "Production patch deployed and verified"
 ```
 
 ### Override Transition
@@ -161,6 +206,7 @@ Run:
 ```powershell
 npm run test:tester-bundle
 npm run test:tester-bundle-admin
+npm run test:tester-bundle-fetch
 npm run test:tester-bundle-status
 node --check app.js
 ```
