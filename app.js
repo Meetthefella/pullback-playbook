@@ -35245,7 +35245,6 @@ function renderReviewWorkspace(options = {}){
   );
   const effectiveReviewPresentationState = resolvedReviewFinalVerdictKey || 'watch';
   const effectiveReviewBadge = reviewBadge;
-  const projectionSnapshotAuthority = reviewProjectionSource === 'clicked_card_snapshot' || reviewProjectionSource === 'track_projection_updated';
   const isReviewOpenRender = ['review_open','watchlist','watchlist_card_open','track_projection_updated'].includes(String(reviewRenderSource || '').trim().toLowerCase());
   const effectiveReviewProjectionSourceBase = projectionSnapshotAuthority && !isReviewOpenRender
     ? (sourceProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve')
