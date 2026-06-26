@@ -10326,6 +10326,8 @@ function addToWatchlist(tickerData){
     force:true
   });
   markWatchlistDirty([entry.ticker], 'watchlist_add');
+  uiState.watchlistPreparedModelCache = null;
+  uiState.watchlistRenderSignature = '';
   commitTickerState();
   requeueTickerForToday(entry.ticker);
   if(activeWorkspaceTab() === 'track'){
@@ -29167,6 +29169,62 @@ function buildStableReviewProjectionSnapshot(record, context = 'review_open_duri
   return projectionSnapshot;
 }
 
+function buildTrackProjectionSnapshotFromPersistedPresentation(record, context = 'watchlist_add_projection'){
+  const item = normalizeTickerRecord(record || {});
+  const ticker = normalizeTicker(item.ticker || '');
+  if(!ticker) return null;
+  const persistedPresentation = item.watchlist
+    && item.watchlist.presentation
+    && typeof item.watchlist.presentation === 'object'
+    ? item.watchlist.presentation
+    : null;
+  const persistedSharedPresentation = persistedPresentation
+    && persistedPresentation.sharedPresentation
+    && typeof persistedPresentation.sharedPresentation === 'object'
+    ? persistedPresentation.sharedPresentation
+    : null;
+  const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
+  const globalVerdict = persistedPresentation && persistedPresentation.globalVerdict && typeof persistedPresentation.globalVerdict === 'object'
+    ? persistedPresentation.globalVerdict
+    : resolveGlobalVerdict(item);
+  const simplifiedState = persistedPresentation && persistedPresentation.simplifiedState && typeof persistedPresentation.simplifiedState === 'object'
+    ? persistedPresentation.simplifiedState
+    : resolveSimplifiedStateForSurface(item, 'track', {
+      log:false,
+      source:context,
+      reason:context
+    });
+  const sharedPresentation = persistedSharedPresentation || buildSharedReviewTrackPresentation(item, {
+    surface:'track',
+    simplifiedState,
+    lifecycleSnapshot,
+    globalVerdict,
+    sourceOfTruth:persistedSharedPresentation ? 'watchlist_persisted_presentation' : 'live_recomputed_fallback',
+    source:context,
+    reason:context
+  });
+  const visualBucket = normalizeVisualBucketForPairing(sharedPresentation.visualBucket || 'monitor');
+  const canonicalVerdict = normalizeGlobalVerdictKey(sharedPresentation.canonicalVerdict || sharedPresentation.finalVerdict || 'watch');
+  const resolvedSectionKey = String(watchlistRenderGroupForBucket(visualBucket) || visualBucket || '').trim().toLowerCase();
+  return {
+    ticker,
+    context:String(context || 'watchlist_add_projection'),
+    canonicalVerdict,
+    finalVerdict:canonicalVerdict,
+    renderedVerdict:canonicalVerdict,
+    visualBucket,
+    sourceOfTruthVisualBucket:visualBucket,
+    renderedBucket:visualBucket,
+    tone:String(sharedPresentation.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor',
+    sectionKey:resolvedSectionKey,
+    resolvedSectionKey,
+    decisionSummary:String(sharedPresentation.headline || sharedPresentation.statusText || '').trim(),
+    actionGuidance:String(sharedPresentation.nextAction || sharedPresentation.actionLabel || '').trim(),
+    capturedAt:new Date().toISOString(),
+    source:'persisted_track_presentation'
+  };
+}
+
 function logReviewOpenMutationTrace(ticker, writerPath, beforeSnapshot, afterSnapshot){
   if(!isPerfDebugVerbose()) return;
   const watchedKeys = [
@@ -31745,9 +31803,22 @@ function addActiveReviewTickerToWatchlist(){
       renderedTrack:startupCoordinator.renderedTabs.track === true
     });
   }
+  const postAddProjectionSnapshot = buildTrackProjectionSnapshotFromPersistedPresentation(entry && entry.record ? entry.record : liveRecord, 'watchlist_add_projection');
+  if(postAddProjectionSnapshot && activeReviewTicker() === liveRecord.ticker){
+    uiState.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshot;
+    uiState.activeReviewProjectionSource = 'track_projection_updated';
+    uiState.activeReviewVerdictOverride = '';
+  }
   setStatus('reviewWorkspaceStatus', statusMarkup);
   setStatus('inputStatus', statusMarkup);
-  renderReviewWorkspace();
+  renderReviewWorkspace(postAddProjectionSnapshot
+    ? {
+      source:'track_projection_updated',
+      skipWatchlistLifecycle:true,
+      recompute:false,
+      persistDraft:false
+    }
+    : undefined);
 }
 
 function saveActiveReviewTickerTrade(){

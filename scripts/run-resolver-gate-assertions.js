@@ -6413,6 +6413,9 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const persistedPresentationVerdict = normalizeGlobalVerdictKey\([\s\S]*?persistedSharedPresentation[\s\S]*?canonicalVerdict[\s\S]*?\);[\s\S]*?const canonicalVerdict = persistedPresentationVerdict[\s\S]*?\|\| resolvedFinalVerdictKey/s.test(appSource)){
     throw new Error('Watchlist lifecycle snapshot must consume persisted shared presentation verdicts before falling back to live recomputation.');
   }
+  if(!/function buildTrackProjectionSnapshotFromPersistedPresentation\(record, context = 'watchlist_add_projection'\)\{[\s\S]*?const sharedPresentation = persistedSharedPresentation \|\| buildSharedReviewTrackPresentation\(item,[\s\S]*?const visualBucket = normalizeVisualBucketForPairing\(sharedPresentation\.visualBucket \|\| 'monitor'\);/s.test(appSource)){
+    throw new Error('Review add-to-watchlist handoff must be able to derive a projection snapshot directly from persisted Track presentation authority.');
+  }
   if(!/function watchlistPresentationBucketForRecord\(record, options = \{\}\)\{[\s\S]*?const persistedSharedPresentation = item\.watchlist[\s\S]*?item\.watchlist\.presentation\.sharedPresentation[\s\S]*?if\(persistedSharedPresentation && persistedSharedPresentation\.visualBucket\)\{\s*return normalizeVisualBucketForPairing\(persistedSharedPresentation\.visualBucket \|\| 'monitor'\);\s*\}/s.test(appSource)){
     throw new Error('Track section placement must use persisted shared presentation buckets before falling back to live simplified recomputation.');
   }
@@ -6425,6 +6428,9 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const eligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'watchlist_add',\s*deferWatchlistRemoval:false,\s*commitOnChange:true\s*\}\);/s.test(appSource)){
     throw new Error('addToWatchlist must compute eligibility from the shared post-gate helper and must not rely on a stale pre-gate eligibility snapshot.');
   }
+  if(!/markWatchlistDirty\(\[entry\.ticker\], 'watchlist_add'\);\s*uiState\.watchlistPreparedModelCache = null;\s*uiState\.watchlistRenderSignature = '';/s.test(appSource)){
+    throw new Error('Watchlist add must invalidate prepared Track render caches so section grouping cannot reuse stale avoid buckets.');
+  }
   if(!/const watchlistEligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'review_add_watchlist_hidden',\s*deferWatchlistRemoval:true,\s*commitOnChange:false\s*\}\);/s.test(appSource)){
     throw new Error('Review Add to Watchlist button state must use the same post-gate eligibility decision as the actual add path.');
   }
@@ -6433,6 +6439,9 @@ function runTrackPresentationAuthorityAssertions(){
     || !/const decisionSummary = String\(\s*projectionDecisionSummary[\s\S]*?reviewSemanticStatus\.primaryReason/s.test(appSource)
     || !/const reviewAction = \{label:projectionActionGuidance \|\| reviewSemanticStatus\.nextAction \|\| simplifiedActionLabel \|\| 'Review setup inputs'\};/s.test(appSource)){
     throw new Error('Review reopen rendering must prefer the active Track projection snapshot for visible verdict, bucket, and softened copy before falling back to stale simplified review state.');
+  }
+  if(!/const postAddProjectionSnapshot = buildTrackProjectionSnapshotFromPersistedPresentation\(entry && entry\.record \? entry\.record : liveRecord, 'watchlist_add_projection'\);[\s\S]*?uiState\.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshot;[\s\S]*?uiState\.activeReviewProjectionSource = 'track_projection_updated';[\s\S]*?renderReviewWorkspace\(postAddProjectionSnapshot[\s\S]*?source:'track_projection_updated'/s.test(appSource)){
+    throw new Error('Review must adopt the persisted Track projection snapshot immediately after Add to Watchlist so it does not flash back to stale Avoid copy.');
   }
   if(/decision_summary:presentation\.presentationReason/.test(appSource) || /reason:presentation\.presentationReason/.test(appSource)){
     throw new Error('Legacy presentationReason must not feed non-debug visible Track render paths.');
