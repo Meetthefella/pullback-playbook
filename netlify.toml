@@ -56,3 +56,23 @@
   from = "/api/paper-trade"
   to = "/.netlify/functions/paper-trade"
   status = 200
+
+[[redirects]]
+  from = "/api/tester-bundle"
+  to = "/.netlify/functions/tester-bundle"
+  status = 200
+
+[[redirects]]
+  from = "/api/tester-report"
+  to = "/.netlify/functions/tester-report"
+  status = 200
+
+[[redirects]]
+  from = "/api/tester-bundle-admin"
+  to = "/.netlify/functions/tester-bundle-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/tester-bundle-status"
+  to = "/.netlify/functions/tester-bundle-status"
+  status = 200

@@ -335,14 +335,29 @@
             </select>
           </div>
           <div style="margin-top:10px">
-            <label>Tester Notes</label>
-            <textarea id="testerReportNotes" placeholder="What happened, what you expected, and any steps to reproduce."></textarea>
+            <label>Expected</label>
+            <textarea id="testerReportExpected" placeholder="What should have happened?"></textarea>
+          </div>
+          <div style="margin-top:10px">
+            <label>Actual</label>
+            <textarea id="testerReportActual" placeholder="What did the app actually do?"></textarea>
+          </div>
+          <div style="margin-top:10px">
+            <label>Notes</label>
+            <textarea id="testerReportNotes" placeholder="Extra context, repro steps, or anything else useful for triage."></textarea>
           </div>
           <div class="tiny" id="testerReportSnapshotStatus" style="margin-top:8px">Reports attach the current sanitized diagnostic snapshot automatically. Use any Copy button first if you want to lock the report to a specific panel snapshot.</div>
           <div class="actions" style="margin-top:10px">
             <button class="secondary compactbutton" type="button" id="copyTesterSnapshotBtn">Copy Current Snapshot</button>
             <button class="secondary compactbutton" type="button" id="exportTesterSnapshotBtn">Export Current Snapshot</button>
             <button class="primary compactbutton" type="button" id="submitTesterReportBtn">Submit Report</button>
+          </div>
+          <div style="margin-top:12px">
+            <strong>Recent Submitted Bugs</strong>
+            <div class="tiny" style="margin-top:6px">Saved locally on this device only. Use Copy Codex Prompt to hand off an issue quickly without exposing bundle contents in the browser.</div>
+            <div id="recentSubmittedBugsList" style="margin-top:8px">
+              <div class="tiny">No recent submitted bugs saved on this device yet.</div>
+            </div>
           </div>
           <div id="testerSnapshotManualCopyWrap" style="margin-top:10px" hidden>
             <label for="testerSnapshotManualCopyText">Manual Snapshot Copy</label>

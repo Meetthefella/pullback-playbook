@@ -1506,8 +1506,10 @@ const {
 
 const checklistIds = ['trendStrong','above50','above200','ma50gt200','near20','near50','stabilising','bounce','volume','entryDefined','stopDefined','targetDefined'];
 const testerIdStorageKey = 'pullbackPlaybookTesterIdV1';
+const testerRecentBugReceiptsStorageKey = 'pullbackPlaybookRecentBugReceiptsV1';
 const testerIdPattern = /^[a-f0-9-]{16,64}$/;
 const defaultTesterReportEndpoint = '/api/tester-report';
+const defaultTesterBundleEndpoint = '/api/tester-bundle';
 const testerReportCategories = ['Bad verdict', 'Chart mismatch', 'Paper trade problem', 'UI problem', 'Other'];
 let memoizedTesterId = null;
 const checklistLabels = {
@@ -3898,6 +3900,7 @@ function resetTesterProfile(){
   safeStorageRemove(savedScannerUniverseKey);
   safeStorageRemove(savedScannerUniverseMetaKey);
   safeStorageRemove(trackSectionStateKey);
+  safeStorageRemove(testerRecentBugReceiptsStorageKey);
   Object.assign(state, createDefaultState());
   uiState.lastTesterDiagnosticSnapshot = null;
   uiState.tradeGatewayHealthHistory = [];
@@ -3907,6 +3910,7 @@ function resetTesterProfile(){
   renderTradeGatewayHealth();
   renderTesterSetupPanel();
   renderTesterIdentityPanel();
+  renderRecentSubmittedBugs();
   setStatus('testerReportStatus', `<span class="ok">New tester profile ready. Current tester ID: ${escapeHtml(currentTesterId())}</span>`);
   setStatus('inputStatus', '<span class="ok">Started a fresh local tester profile on this device.</span>');
   return true;
@@ -3920,8 +3924,181 @@ function renderTesterIdentityPanel(){
   if(detail) detail.textContent = 'Use Export Tester Backup before handing the device to someone else. Start New Tester Profile rotates the local tester ID and clears local tester workflow data, paper credentials, and local app/provider settings.';
 }
 
+function normalizeRecentBugReceipt(value){
+  const safe = value && typeof value === 'object' ? value : {};
+  const workflow = normalizeTesterWorkflowStatus({
+    status:safe.status,
+    statusLabel:safe.statusLabel,
+    statusUpdatedAt:safe.statusUpdatedAt || safe.submittedAt,
+    statusUpdatedBy:safe.statusUpdatedBy,
+    fixedInBuild:safe.fixedInBuild,
+    closedAt:safe.closedAt
+  });
+  return {
+    issueId:String(safe.issueId || '').trim(),
+    category:String(safe.category || '').trim() || 'Other',
+    ticker:String(safe.ticker || '').trim().toUpperCase(),
+    buildVersion:String(safe.buildVersion || '').trim(),
+    submittedAt:String(safe.submittedAt || '').trim(),
+    activeWorkspace:String(safe.activeWorkspace || '').trim(),
+    status:workflow.status,
+    statusLabel:workflow.statusLabel,
+    statusUpdatedAt:workflow.statusUpdatedAt,
+    statusUpdatedBy:workflow.statusUpdatedBy,
+    fixedInBuild:workflow.fixedInBuild,
+    closedAt:workflow.closedAt,
+    statusColorToken:workflow.statusColorToken
+  };
+}
+
+const testerWorkflowStatusMeta = {
+  submitted:{label:'Submitted', colorToken:'grey'},
+  under_investigation:{label:'Under Investigation', colorToken:'amber'},
+  analysis_complete:{label:'Analysis Complete', colorToken:'blue'},
+  fixed:{label:'Fixed', colorToken:'green'},
+  closed:{label:'Closed', colorToken:'dark_grey'}
+};
+
+function normalizeTesterWorkflowStatus(value){
+  const safe = value && typeof value === 'object' ? value : {};
+  const requestedStatus = String(safe.status || 'submitted').trim().toLowerCase();
+  const meta = testerWorkflowStatusMeta[requestedStatus] || testerWorkflowStatusMeta.submitted;
+  const status = testerWorkflowStatusMeta[requestedStatus] ? requestedStatus : 'submitted';
+  return {
+    status,
+    statusLabel:String(safe.statusLabel || meta.label).trim() || meta.label,
+    statusUpdatedAt:String(safe.statusUpdatedAt || '').trim(),
+    statusUpdatedBy:String(safe.statusUpdatedBy || '').trim(),
+    fixedInBuild:String(safe.fixedInBuild || '').trim(),
+    closedAt:String(safe.closedAt || '').trim(),
+    statusColorToken:meta.colorToken
+  };
+}
+
+function testerWorkflowStatusMarkup(workflow){
+  const safe = normalizeTesterWorkflowStatus(workflow);
+  const palette = {
+    grey:{background:'rgba(148, 163, 184, 0.16)', border:'rgba(148, 163, 184, 0.45)', text:'#d7dee8'},
+    amber:{background:'rgba(245, 158, 11, 0.16)', border:'rgba(245, 158, 11, 0.45)', text:'#f6c56a'},
+    blue:{background:'rgba(59, 130, 246, 0.16)', border:'rgba(59, 130, 246, 0.45)', text:'#93c5fd'},
+    green:{background:'rgba(34, 197, 94, 0.16)', border:'rgba(34, 197, 94, 0.45)', text:'#86efac'},
+    dark_grey:{background:'rgba(100, 116, 139, 0.22)', border:'rgba(100, 116, 139, 0.5)', text:'#e2e8f0'}
+  };
+  const tone = palette[safe.statusColorToken] || palette.grey;
+  return `<span style="display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;border:1px solid ${tone.border};background:${tone.background};color:${tone.text};font-size:12px;font-weight:600">${escapeHtml(safe.statusLabel)}</span>`;
+}
+
+function loadRecentBugReceipts(){
+  const stored = safeStorageGet(testerRecentBugReceiptsStorageKey, []);
+  return Array.isArray(stored)
+    ? stored.map(normalizeRecentBugReceipt).filter(item => item.issueId)
+    : [];
+}
+
+function saveRecentBugReceipts(receipts){
+  const normalized = Array.isArray(receipts)
+    ? receipts.map(normalizeRecentBugReceipt).filter(item => item.issueId).slice(0, 10)
+    : [];
+  safeStorageSet(testerRecentBugReceiptsStorageKey, normalized);
+  return normalized;
+}
+
+function rememberRecentBugReceipt(receipt){
+  const normalized = normalizeRecentBugReceipt(receipt);
+  if(!normalized.issueId) return [];
+  const existing = loadRecentBugReceipts().filter(item => item.issueId !== normalized.issueId);
+  return saveRecentBugReceipts([normalized, ...existing]);
+}
+
+function markRecentBugReceiptClosed(issueId){
+  const safeIssueId = String(issueId || '').trim();
+  if(!safeIssueId) return null;
+  const receipts = loadRecentBugReceipts();
+  const target = receipts.find(item => item.issueId === safeIssueId);
+  if(!target) return null;
+  const updated = normalizeRecentBugReceipt({
+    ...target,
+    status:'closed',
+    statusLabel:'Closed',
+    statusUpdatedAt:new Date().toISOString(),
+    statusUpdatedBy:'app',
+    closedAt:new Date().toISOString()
+  });
+  saveRecentBugReceipts([updated, ...receipts.filter(item => item.issueId !== safeIssueId)]);
+  return updated;
+}
+
+function submittedTimeLabel(value){
+  const raw = String(value || '').trim();
+  return formatLocalTimestamp(raw) || raw || 'Unknown';
+}
+
+function recentBugCodexPrompt(receipt){
+  const safe = normalizeRecentBugReceipt(receipt);
+  return [
+    'Fetch and inspect this tester bundle for Codex debugging.',
+    '',
+    `Issue ID: ${safe.issueId || 'UNKNOWN'}`,
+    `Issue category: ${safe.category || 'Other'}`,
+    `Ticker: ${safe.ticker || 'UNKNOWN'}`,
+    `Build version: ${safe.buildVersion || 'Unknown'}`,
+    `Workflow status: ${safe.statusLabel || 'Submitted'}`,
+    '',
+    `Run: node scripts/fetch-tester-bundle.js ${safe.issueId || 'BUG-YYYYMMDDHHMMSS-TICKER'}`,
+    '',
+    'Suggested focus paths:',
+    '- summary',
+    '- stateHealth',
+    '- codexFocus',
+    '- contradictions',
+    '- expectedVsActual',
+    '- resolverTrace.watchlistDebug',
+    '- resolverTrace.plan',
+    '- extractedSections'
+  ].join('\n');
+}
+
+function renderRecentSubmittedBugs(){
+  const box = $('recentSubmittedBugsList');
+  if(!box) return;
+  const receipts = loadRecentBugReceipts();
+  if(!receipts.length){
+    box.innerHTML = '<div class="tiny">No recent submitted bugs saved on this device yet.</div>';
+    return;
+  }
+  box.innerHTML = receipts.map(receipt => {
+    const safe = normalizeRecentBugReceipt(receipt);
+    return `<div class="panelbox" style="margin-top:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><strong>${escapeHtml(safe.issueId || 'UNKNOWN')}</strong>${testerWorkflowStatusMarkup(safe)}</div>
+      <div class="tiny" style="margin-top:4px">Category: ${escapeHtml(safe.category || 'Other')} | Ticker: ${escapeHtml(safe.ticker || 'UNKNOWN')} | Build: ${escapeHtml(safe.buildVersion || 'Unknown')}</div>
+      <div class="tiny" style="margin-top:4px">Submitted: ${escapeHtml(submittedTimeLabel(safe.submittedAt))}${safe.activeWorkspace ? ` | Workspace: ${escapeHtml(safe.activeWorkspace)}` : ''}</div>
+      <div class="tiny" style="margin-top:4px">Status updated: ${escapeHtml(submittedTimeLabel(safe.statusUpdatedAt || safe.submittedAt))}${safe.fixedInBuild ? ` | Fixed in: ${escapeHtml(safe.fixedInBuild)}` : ''}</div>
+      <div class="actions" style="margin-top:8px">
+        <button class="secondary compactbutton" type="button" data-act="copy-codex-prompt" data-issue-id="${escapeHtml(safe.issueId)}">Copy Codex Prompt</button>
+        ${safe.status !== 'closed' ? `<button class="secondary compactbutton" type="button" data-act="mark-recent-bug-closed" data-issue-id="${escapeHtml(safe.issueId)}">Mark Closed</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function testerReceiptMarkup(receipt, fallbackIssueId){
+  const safe = receipt && typeof receipt === 'object' ? receipt : {};
+  const title = String(safe.title || 'Diagnostics Submitted').trim();
+  const issueId = String(safe.issueId || fallbackIssueId || 'UNKNOWN').trim();
+  const buildVersion = String(safe.buildVersion || '').trim() || 'Unknown';
+  const bundle = String(safe.bundle || '').trim() || 'General';
+  const stored = Array.isArray(safe.stored) && safe.stored.length
+    ? safe.stored.map(item => escapeHtml(String(item || '').trim())).filter(Boolean).join('<br>')
+    : 'Index<br>Full Bundle';
+  const submittedAtUtc = String(safe.submittedAtUtc || '').trim() || 'Unknown UTC';
+  const workflow = normalizeTesterWorkflowStatus(safe.workflow);
+  return `<span class="ok"><strong>${escapeHtml(title)}</strong><br><br><strong>Issue:</strong><br>${escapeHtml(issueId)}<br><br><strong>Build:</strong><br>${escapeHtml(buildVersion)}<br><br><strong>Bundle:</strong><br>${escapeHtml(bundle)}<br><br><strong>Status:</strong><br>${escapeHtml(workflow.statusLabel)}<br><br><strong>Stored:</strong><br>${stored}<br><br><strong>Submitted:</strong><br>${escapeHtml(submittedAtUtc)}</span>`;
+}
+
 async function submitTesterReport(){
   const category = String(($('testerReportCategory') && $('testerReportCategory').value) || '').trim();
+  const expected = String(($('testerReportExpected') && $('testerReportExpected').value) || '').trim();
+  const actual = String(($('testerReportActual') && $('testerReportActual').value) || '').trim();
   const notes = String(($('testerReportNotes') && $('testerReportNotes').value) || '').trim();
   const snapshot = uiState.lastTesterDiagnosticSnapshot || buildTesterDiagnosticSnapshot({panelTitle:'General diagnostics'});
   if(!testerReportCategories.includes(category)){
@@ -3930,12 +4107,14 @@ async function submitTesterReport(){
   }
   const payload = redactDiagnosticPayload({
     category,
+    expected,
+    actual,
     notes,
     snapshot
   });
   setStatus('testerReportStatus', '<span class="warntext">Submitting tester report...</span>');
   try{
-    const response = await fetchJsonWithTimeout(defaultTesterReportEndpoint, {
+    const response = await fetchJsonWithTimeout(defaultTesterBundleEndpoint, {
       method:'POST',
       headers:{
         'Content-Type':'application/json',
@@ -3947,11 +4126,34 @@ async function submitTesterReport(){
     if(!response.ok || !body || body.ok === false){
       throw new Error(body && body.error ? body.error : 'tester_report_failed');
     }
+    if($('testerReportExpected')) $('testerReportExpected').value = '';
+    if($('testerReportActual')) $('testerReportActual').value = '';
     if($('testerReportNotes')) $('testerReportNotes').value = '';
-    setStatus('testerReportStatus', `<span class="ok">Tester report submitted${body.reportKey ? ` | ${escapeHtml(body.reportKey)}` : ''}</span>`);
+    rememberRecentBugReceipt({
+      issueId:String(body.issueId || ''),
+      category,
+      ticker:String(snapshot && snapshot.ticker || ''),
+      buildVersion:String(snapshot && snapshot.buildVersion || body && body.receipt && body.receipt.buildVersion || ''),
+      submittedAt:String(body && body.receipt && body.receipt.submittedAtUtc || new Date().toISOString()),
+      activeWorkspace:String(snapshot && snapshot.activeWorkspace || ''),
+      status:String(body && body.receipt && body.receipt.workflow && body.receipt.workflow.status || 'submitted'),
+      statusLabel:String(body && body.receipt && body.receipt.workflow && body.receipt.workflow.statusLabel || 'Submitted'),
+      statusUpdatedAt:String(body && body.receipt && body.receipt.workflow && body.receipt.workflow.statusUpdatedAt || new Date().toISOString()),
+      statusUpdatedBy:String(body && body.receipt && body.receipt.workflow && body.receipt.workflow.statusUpdatedBy || 'app'),
+      fixedInBuild:String(body && body.receipt && body.receipt.workflow && body.receipt.workflow.fixedInBuild || ''),
+      closedAt:String(body && body.receipt && body.receipt.workflow && body.receipt.workflow.closedAt || '')
+    });
+    renderRecentSubmittedBugs();
+    setStatus('testerReportStatus', testerReceiptMarkup(body.receipt, body.issueId));
     return true;
   }catch(error){
-    setStatus('testerReportStatus', `<span class="badtext">${escapeHtml(String(error && error.message || 'Tester report failed.'))}</span>`);
+    const reason = String(error && error.message || 'Tester report failed.');
+    let message = 'Server rejection while submitting diagnostics.';
+    if(/invalid json/i.test(reason)) message = 'Submission failed: invalid JSON.';
+    else if(/too large/i.test(reason)) message = 'Submission failed: diagnostics payload is too large.';
+    else if(/network|fetch/i.test(reason)) message = 'Submission failed: network error.';
+    else if(/failed to store/i.test(reason)) message = 'Submission failed: server could not store diagnostics.';
+    setStatus('testerReportStatus', `<span class="badtext">${escapeHtml(message)}</span>`);
     return false;
   }
 }
@@ -23810,6 +24012,7 @@ function refreshMarketContextWidgets(displayModel = buildMarketContextDisplayMod
   renderTradeGatewayHealth();
   renderTesterSetupPanel();
   renderTesterIdentityPanel();
+  renderRecentSubmittedBugs();
 }
 
 function currentQueueCycleKey(now = new Date()){
@@ -37946,6 +38149,33 @@ click('contextSettingsToggle', () => setContextSettingsPanelOpen(!(uiState.conte
 click('contextSettingsCloseBtn', () => setContextSettingsPanelOpen(false));
 click('contextSettingsBackdrop', () => setContextSettingsPanelOpen(false));
 document.addEventListener('click', event => {
+  const codexPromptButton = event.target && event.target.closest ? event.target.closest('[data-act="copy-codex-prompt"]') : null;
+  if(codexPromptButton){
+    event.preventDefault();
+    event.stopPropagation();
+    const issueId = String(codexPromptButton.getAttribute('data-issue-id') || '').trim();
+    const receipt = loadRecentBugReceipts().find(item => item.issueId === issueId);
+    copyTextToClipboard(recentBugCodexPrompt(receipt)).then(copied => {
+      setStatus('testerReportStatus', copied
+        ? `<span class="ok">Codex prompt copied for ${escapeHtml(issueId || 'recent bug')}.</span>`
+        : `<span class="badtext">Could not copy Codex prompt for ${escapeHtml(issueId || 'recent bug')}.</span>`);
+    }).catch(() => {
+      setStatus('testerReportStatus', `<span class="badtext">Could not copy Codex prompt for ${escapeHtml(issueId || 'recent bug')}.</span>`);
+    });
+    return;
+  }
+  const closeRecentBugButton = event.target && event.target.closest ? event.target.closest('[data-act="mark-recent-bug-closed"]') : null;
+  if(closeRecentBugButton){
+    event.preventDefault();
+    event.stopPropagation();
+    const issueId = String(closeRecentBugButton.getAttribute('data-issue-id') || '').trim();
+    const updated = markRecentBugReceiptClosed(issueId);
+    renderRecentSubmittedBugs();
+    setStatus('testerReportStatus', updated
+      ? `<span class="ok">${escapeHtml(issueId || 'Recent bug')} marked Closed on this device.</span>`
+      : `<span class="badtext">Could not update ${escapeHtml(issueId || 'recent bug')}.</span>`);
+    return;
+  }
   const reviewBundleButton = event.target && event.target.closest ? event.target.closest('[data-act="copy-review-diagnostics-bundle"]') : null;
   if(reviewBundleButton){
     event.preventDefault();

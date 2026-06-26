@@ -5,7 +5,8 @@ function trustedOrigins(){
     .filter(Boolean);
   const envOrigins = [
     process.env.URL,
-    process.env.DEPLOY_PRIME_URL
+    process.env.DEPLOY_PRIME_URL,
+    process.env.DEPLOY_URL
   ].map(value => String(value || '').trim()).filter(Boolean);
   const localOrigins = [
     'http://localhost:8888',
@@ -26,10 +27,44 @@ function requestReferer(event){
   return String(headers.referer || headers.Referer || '').trim();
 }
 
+function requestHost(event){
+  const headers = event && event.headers ? event.headers : {};
+  return String(
+    headers['x-forwarded-host']
+    || headers['X-Forwarded-Host']
+    || headers.host
+    || headers.Host
+    || ''
+  ).trim().toLowerCase();
+}
+
+function sameOriginRequest(event){
+  const host = requestHost(event);
+  if(!host) return false;
+  const origin = requestOrigin(event);
+  if(origin){
+    try{
+      return String(new URL(origin).host || '').trim().toLowerCase() === host;
+    }catch(error){
+      return false;
+    }
+  }
+  const referer = requestReferer(event);
+  if(referer){
+    try{
+      return String(new URL(referer).host || '').trim().toLowerCase() === host;
+    }catch(error){
+      return false;
+    }
+  }
+  return false;
+}
+
 function originAllowed(event){
   const allowedOrigins = trustedOrigins();
   const origin = requestOrigin(event);
   const referer = requestReferer(event);
+  if(sameOriginRequest(event)) return true;
   if(origin) return allowedOrigins.includes(origin);
   if(referer){
     try{

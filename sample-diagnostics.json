@@ -1,0 +1,38 @@
+{
+  "category": "UI problem",
+  "expected": "Button should open review.",
+  "actual": "Button did nothing.",
+  "notes": "Happens after switching tabs.",
+  "snapshot": {
+    "timestamp": "2026-06-26T10:00:00.000Z",
+    "buildVersion": "v-test",
+    "activeWorkspace": "review",
+    "panelTitle": "General diagnostics",
+    "ticker": "AAPL",
+    "stateHealth": {
+      "canonicalVerdict": "Watch",
+      "visualBucket": "Watch",
+      "tone": "neutral",
+      "entryGatePass": false,
+      "nearEntryGatePass": true,
+      "resolvedRR": 2.4,
+      "primaryBlockerReason": "waiting_for_confirmation",
+      "divergenceDetected": false,
+      "terminalAvoidApplied": false
+    },
+    "paperTradeApiKey": "leak-me",
+    "paperTradeApiSecret": "leak-me-secret",
+    "paperApiKey": "alias-key",
+    "paperApiSecret": "alias-secret",
+    "apiKey": "provider-key",
+    "apiSecret": "provider-secret",
+    "token": "session-token",
+    "password": "password-secret",
+    "nested": {
+      "Authorization": "Basic abc",
+      "deep": {
+        "trading212Token": "sensitive-token"
+      }
+    }
+  }
+}
