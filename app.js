@@ -1880,7 +1880,72 @@ function ensureOnboardingDisplayBridge(){
     card.id = demoIds.review;
     card.className = 'list reviewworkspace-shell';
     card.setAttribute('data-onboarding-demo', 'review');
-    card.innerHTML = `<div class="panelbox review-section review-section--snapshot" data-tour="verdict-card"><div class="tiny">Demo review ticker</div><strong style="display:block;margin-top:4px">NVDA</strong><p class="tiny" style="margin-top:8px">Watch for a clean pullback into support before planning a live entry.</p></div><div class="panelbox review-section review-section--trade plannerbox" data-tour="trade-plan"><div class="tiny">Trade plan preview</div><strong style="display:block;margin-top:4px">Entry 129.40 | Stop 125.80 | Target 136.00</strong><p class="tiny" style="margin-top:8px">This demo plan is shown only so the tour has real Review anchors.</p></div>`;
+    card.innerHTML = `<div class="reviewworkspace reviewworkspace--ready" data-visual-tone="monitor" data-visual-state="watch">
+      <div class="panelbox review-section review-section--snapshot" data-tour="verdict-card">
+        <div class="reviewsectionhead"><strong>Decision Summary</strong></div>
+        <div class="reviewhero reviewhero-compact">
+          <div class="reviewherohead review-summary-top">
+            <div class="reviewheadline review-summary-left">
+              <div class="review-ticker-row"><strong>NVDA</strong></div>
+              <div class="tiny">NVIDIA | NASDAQ</div>
+              <div class="tiny">S&P above 50 MA</div>
+            </div>
+            <div class="review-summary-right">
+              <div class="inline-status review-summary-badges">
+                <span class="badge">Watch</span>
+                <span class="score visual-score">81</span>
+              </div>
+            </div>
+          </div>
+          <div class="review-decision-primary decision-summary">Trend is healthy, but confirmation is still missing.</div>
+          <div class="tiny review-next-action-inline">Action guidance: Wait for a cleaner bounce before planning an entry.</div>
+        </div>
+        <div class="reviewchartpanel reviewchartpanel--compact" data-tour="chart-upload">
+          <div class="reviewsectionhead">
+            <strong>Chart</strong>
+            <div class="actions" style="margin-top:0">
+              <button class="secondary compactbutton" type="button" disabled>Choose Screenshot</button>
+            </div>
+          </div>
+          <div class="thumbwrap" style="margin-top:10px">
+            <div class="thumb" style="display:grid;place-items:center;min-height:120px;background:rgba(15,23,42,.08);color:#475569;font-size:.78rem">Chart preview</div>
+            <div>
+              <div class="tiny">Demo chart slot for the tour only.</div>
+              <div class="tiny">Upload a screenshot here before leaning on the AI summary.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="panelbox review-section review-section--trade plannerbox" data-tour="trade-plan">
+        <div class="reviewsectionhead"><strong>Trade Plan</strong></div>
+        <div class="summary">Entry: 129.40 | Stop: 125.80 | First Target: 136.00 | Planned R:R: 1.8</div>
+        <div class="reviewstats plan-grid plan-grid-stats reviewstats--compact">
+          <div class="stat stat--trade-status"><div>Trade Status</div><div class="big">Waiting</div></div>
+          <div class="stat stat--primary"><div>R:R</div><div class="big">1.8</div></div>
+          <div class="stat stat--capital-fit"><div>Capital Fit</div><div class="big">Fits</div></div>
+        </div>
+        <div class="statnote trade-plan-fx-note">Demo plan only. Nothing here is saved or executable.</div>
+      </div>
+      <div class="panelbox review-section review-section--confidence">
+        <div class="reviewsectionhead"><strong>Technical Context</strong></div>
+        <div class="summary review-technical-line">Near 20 MA support with room back toward the prior swing high.</div>
+        <div class="review-action-row review-action-row--top">
+          <button class="primary" type="button" disabled>Analyse Setup</button>
+          <button class="ghost" type="button" disabled>Remove</button>
+        </div>
+        <details class="responsepanel compact-open-on-demand" data-tour="ai-summary" open>
+          <summary>AI Summary</summary>
+          <div class="tiny review-ai-preview">The setup looks constructive, but the bounce is not confirmed yet.</div>
+        </details>
+        <div class="review-action-row review-action-row--bottom">
+          <button class="primary" type="button" disabled>Paper Trade</button>
+          <button class="secondary" type="button" disabled>Save Review</button>
+        </div>
+        <div class="review-action-row review-action-row--watchlist">
+          <button class="secondary" type="button" disabled>Add to Watchlist</button>
+        </div>
+      </div>
+    </div>`;
     box.innerHTML = '';
     box.appendChild(card);
   }
