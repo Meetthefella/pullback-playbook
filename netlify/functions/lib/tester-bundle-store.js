@@ -170,9 +170,10 @@ function normalizeWorkflowStatusFields(value, fallback = {}){
   const rawStatus = String(safe.status || fallback.status || 'submitted').trim().toLowerCase();
   const meta = workflowStatusMeta(rawStatus) || WORKFLOW_STATUS_META.submitted;
   const status = workflowStatusMeta(rawStatus) ? rawStatus : 'submitted';
+  const explicitStatusProvided = workflowStatusMeta(String(safe.status || '').trim().toLowerCase()) ? true : false;
   return {
     status,
-    statusLabel:String(safe.statusLabel || fallback.statusLabel || meta.label).trim() || meta.label,
+    statusLabel:String(safe.statusLabel || (explicitStatusProvided ? meta.label : fallback.statusLabel) || meta.label).trim() || meta.label,
     statusUpdatedAt:String(safe.statusUpdatedAt || fallback.statusUpdatedAt || '').trim(),
     statusUpdatedBy:String(safe.statusUpdatedBy || fallback.statusUpdatedBy || '').trim(),
     fixedInBuild:String(safe.fixedInBuild || fallback.fixedInBuild || '').trim(),

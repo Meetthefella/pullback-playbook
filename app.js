@@ -3966,9 +3966,10 @@ function normalizeTesterWorkflowStatus(value){
   const requestedStatus = String(safe.status || 'submitted').trim().toLowerCase();
   const meta = testerWorkflowStatusMeta[requestedStatus] || testerWorkflowStatusMeta.submitted;
   const status = testerWorkflowStatusMeta[requestedStatus] ? requestedStatus : 'submitted';
+  const explicitStatusProvided = testerWorkflowStatusMeta[String(safe.status || '').trim().toLowerCase()] ? true : false;
   return {
     status,
-    statusLabel:String(safe.statusLabel || meta.label).trim() || meta.label,
+    statusLabel:String(safe.statusLabel || (explicitStatusProvided ? meta.label : '') || meta.label).trim() || meta.label,
     statusUpdatedAt:String(safe.statusUpdatedAt || '').trim(),
     statusUpdatedBy:String(safe.statusUpdatedBy || '').trim(),
     fixedInBuild:String(safe.fixedInBuild || '').trim(),

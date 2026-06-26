@@ -115,6 +115,7 @@ async function run(){
   const firstBody = parseBody(first);
   assert(first.statusCode === 200 && firstBody.ok, 'Valid transition must succeed.');
   assert(firstBody.workflow.status === 'under_investigation', 'Workflow response must return updated status.');
+  assert(firstBody.workflow.statusLabel === 'Under Investigation', 'Workflow response must recalculate the canonical status label.');
 
   const repeated = await statusHandler.handler(eventFor({issueId:seeded.issueId, status:'under_investigation'}, {'x-admin-token':'admin-secret'}));
   assert(repeated.statusCode === 200, 'Idempotent status repeats must be allowed.');
@@ -135,6 +136,7 @@ async function run(){
   const storedBundle = fullStore.get(seeded.fullKey);
   assert(storedIndex.workflow.status === 'fixed', 'Compact index must remain at fixed after closed is rejected.');
   assert(storedBundle.workflow.status === 'fixed', 'Full bundle must remain at fixed after closed is rejected.');
+  assert(storedBundle.workflow.statusLabel === 'Fixed', 'Full bundle must keep the canonical status label after transitions.');
   assert(storedBundle.workflow.fixedInBuild === 'v4.4.20', 'Full bundle must retain fixedInBuild.');
   assert(Array.isArray(storedBundle.history) && storedBundle.history.length >= 5, 'History must append status events.');
   assert(storedBundle.history[0].type === 'submission', 'Submission history must be preserved as the first event.');
