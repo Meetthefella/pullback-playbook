@@ -1777,6 +1777,113 @@ function activeWorkspaceTab(){
     : 'scan';
 }
 
+function ensureOnboardingDisplayBridge(){
+  if(typeof window === 'undefined') return null;
+  const allowedTabs = new Set(['scan', 'review', 'track', 'diary']);
+  function normalizeWorkspaceTab(value){
+    const next = String(value || '').trim().toLowerCase();
+    return allowedTabs.has(next) ? next : 'scan';
+  }
+  function workspaceTabButtons(){
+    return Array.from(document.querySelectorAll('[data-workspace-tab]'));
+  }
+  function workspaceCards(){
+    return Array.from(document.querySelectorAll('[data-workspace-card]'));
+  }
+  function currentVisibleWorkspaceTabDisplayOnly(){
+    const fromBody = document.body ? String(document.body.getAttribute('data-visible-workspace') || document.body.getAttribute('data-active-workspace') || '').trim().toLowerCase() : '';
+    if(allowedTabs.has(fromBody)) return fromBody;
+    const selectedButton = workspaceTabButtons().find(button => String(button.getAttribute('aria-selected') || '').toLowerCase() === 'true');
+    const selectedTab = selectedButton ? normalizeWorkspaceTab(selectedButton.getAttribute('data-workspace-tab')) : '';
+    if(allowedTabs.has(selectedTab)) return selectedTab;
+    const visibleCard = workspaceCards().find(card => card.hidden !== true && String(card.getAttribute('aria-hidden') || '').toLowerCase() !== 'true');
+    return visibleCard ? normalizeWorkspaceTab(visibleCard.getAttribute('data-workspace-card')) : 'scan';
+  }
+  function syncWorkspaceTabsDisplayOnly(visibleTab){
+    workspaceTabButtons().forEach(button => {
+      const buttonTab = normalizeWorkspaceTab(button.getAttribute('data-workspace-tab'));
+      const active = buttonTab === visibleTab;
+      button.classList.toggle('is-active', active);
+      button.classList.remove('is-pending-transition');
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+      button.setAttribute('tabindex', active ? '0' : '-1');
+      button.removeAttribute('aria-busy');
+      button.removeAttribute('data-pending-target');
+    });
+  }
+  function syncWorkspaceCardsDisplayOnly(visibleTab){
+    workspaceCards().forEach(card => {
+      const cardTab = normalizeWorkspaceTab(card.getAttribute('data-workspace-card'));
+      const active = cardTab === visibleTab;
+      card.hidden = !active;
+      if(active){
+        card.removeAttribute('inert');
+        card.removeAttribute('aria-hidden');
+      }else{
+        card.setAttribute('inert', '');
+        card.setAttribute('aria-hidden', 'true');
+      }
+      card.classList.toggle('is-active-workspace', active);
+      card.classList.remove('is-visual-hold-workspace');
+      card.style.removeProperty('--visual-hold-offset-y');
+    });
+  }
+  function applyVisibleWorkspaceForTour(tabKey){
+    const visibleTab = normalizeWorkspaceTab(tabKey);
+    syncWorkspaceTabsDisplayOnly(visibleTab);
+    syncWorkspaceCardsDisplayOnly(visibleTab);
+    if(document.body){
+      document.body.setAttribute('data-active-workspace', visibleTab);
+      document.body.setAttribute('data-visible-workspace', visibleTab);
+      document.body.removeAttribute('data-pending-workspace');
+    }
+    return visibleTab;
+  }
+  function isAdvancedUtilitiesOpenDisplayOnly(){
+    const details = document && typeof document.getElementById === 'function'
+      ? document.getElementById('advancedUtilitiesDetails')
+      : null;
+    return !!(details && details.open === true);
+  }
+  function setAdvancedUtilitiesOpenDisplayOnly(open){
+    const details = document && typeof document.getElementById === 'function'
+      ? document.getElementById('advancedUtilitiesDetails')
+      : null;
+    if(details && 'open' in details) details.open = open === true;
+    return !!(details && details.open === true);
+  }
+  const bridge = window.pullbackPlaybookOnboarding && typeof window.pullbackPlaybookOnboarding === 'object'
+    ? window.pullbackPlaybookOnboarding
+    : (window.pullbackPlaybookOnboarding = {});
+  bridge.showWorkspaceForTour = function showWorkspaceForTour(tabKey){
+    return applyVisibleWorkspaceForTour(tabKey);
+  };
+  bridge.getVisibleContext = function getVisibleContext(){
+    return {
+      workspaceTab:currentVisibleWorkspaceTabDisplayOnly(),
+      advancedOpen:isAdvancedUtilitiesOpenDisplayOnly()
+    };
+  };
+  bridge.restoreVisibleContext = function restoreVisibleContext(context){
+    const snapshot = context && typeof context === 'object' ? context : {};
+    const workspaceTab = snapshot.workspaceTab ? normalizeWorkspaceTab(snapshot.workspaceTab) : currentVisibleWorkspaceTabDisplayOnly();
+    applyVisibleWorkspaceForTour(workspaceTab);
+    setAdvancedUtilitiesOpenDisplayOnly(snapshot.advancedOpen === true);
+    return {
+      workspaceTab,
+      advancedOpen:isAdvancedUtilitiesOpenDisplayOnly()
+    };
+  };
+  bridge.isAdvancedUtilitiesOpen = function isAdvancedUtilitiesOpen(){
+    return isAdvancedUtilitiesOpenDisplayOnly();
+  };
+  bridge.setAdvancedUtilitiesOpen = function setAdvancedUtilitiesOpen(open){
+    return setAdvancedUtilitiesOpenDisplayOnly(open);
+  };
+  return bridge;
+}
+ensureOnboardingDisplayBridge();
+
 function bindWorkspaceAnchorBridge(){
   if(workspaceAnchorBridgeBound || typeof document === 'undefined') return;
   workspaceAnchorBridgeBound = true;

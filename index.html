@@ -162,7 +162,7 @@
         <button class="secondary" id="applyOcrBtn">Confirm OCR Tickers</button>
         <button class="ghost" id="clearOcrBtn">Clear OCR Review</button>
       </div>
-      <div style="margin-top:14px">
+      <div style="margin-top:14px" data-tour="ticker-inputs">
         <label>Quick Manual Ticker Search</label>
         <div class="searchaddrow" style="margin-top:10px">
           <div class="searchaddinput">
@@ -453,10 +453,10 @@
   </main>
 
   <nav id="bottomRibbonNav" class="bottom-ribbon-nav" data-tour="main-tabs" aria-label="Primary navigation" role="tablist">
-    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="true" data-workspace-tab="scan">Scan</button>
-    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="review">Review</button>
-    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="track">Track</button>
-    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="diary">Diary</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="true" data-workspace-tab="scan" data-tour="scan-tab">Scan</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="review" data-tour="review-tab">Review</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="track" data-tour="track-tab">Track</button>
+    <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="diary" data-tour="diary-tab">Diary</button>
   </nav>
   <button id="trackScrollTopBtn" class="track-scroll-top-button" type="button" aria-label="Scroll Track to top" hidden>↑</button>
 </div>
