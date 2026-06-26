@@ -6129,6 +6129,109 @@ function runTrackPresentationAuthorityAssertions(){
     || /avoid/i.test(String(suppressedAvoidPresentation.statusText || ''))){
     throw new Error('Suppressed stale tracked avoid must not leak Avoid wording into persisted shared presentation labels or headline copy.');
   }
+  const persistedScanWatch = sandbox.window.SimplifiedTradeState.resolveRecordState({
+    ticker:'NVDA',
+    watchlist:{
+      inWatchlist:true,
+      presentation:{
+        sharedPresentation:suppressedAvoidPresentation
+      }
+    }
+  }, {
+    surface:'scan',
+    log:false,
+    deps:{
+      effectivePlanForRecord(){
+        return {entry:'', stop:'', firstTarget:'', source:''};
+      },
+      riskSettingsProvider(){
+        return {accountSize:4000, maxRisk:40};
+      },
+      analysisDerivedStatesFromRecord(){
+        return {
+          structureState:'weak',
+          setupLocationState:'extended',
+          priceabilityState:'unpriceable',
+          trendState:'acceptable',
+          bounceState:'none',
+          stabilisationState:'none',
+          pullbackZone:'extended',
+          volumeState:'normal'
+        };
+      },
+      applySetupConfirmationPlanGate(_record, displayedPlan){
+        return displayedPlan;
+      },
+      baseVerdictFromResolvedContract(){
+        return 'watch';
+      },
+      resolvePreLifecycleStateContract(){
+        return {
+          finalVerdict:'Avoid',
+          structuralState:'developing',
+          actionStateKey:'recalculate_plan',
+          planStatusKey:'missing',
+          tradeabilityVerdict:'Watch',
+          blockerReason:'Structure is broken.',
+          reasonSummary:'Structure is broken.',
+          terminal:false,
+          baseVerdict:'watch'
+        };
+      },
+      resolveFinalStateContract(){
+        return {
+          finalVerdict:'Avoid',
+          structuralState:'developing',
+          actionStateKey:'recalculate_plan',
+          planStatusKey:'missing',
+          tradeabilityVerdict:'Watch',
+          blockerReason:'Structure is broken.',
+          reasonSummary:'Structure is broken.',
+          terminal:false,
+          baseVerdict:'watch'
+        };
+      },
+      evaluatePlanRealism(){
+        return {credible_rr:null};
+      },
+      setupScoreForRecord(){
+        return 2;
+      },
+      isHostileMarketStatus(){
+        return false;
+      },
+      scannerScoreGradientClass(){
+        return '';
+      },
+      state:{marketStatus:'S&P above 50 MA'},
+      normalizeGlobalVerdictKey(value){
+        const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+        if(['entry','near_entry','watch','avoid'].includes(safe)) return safe;
+        return 'watch';
+      },
+      normalizeVerdict(value){
+        return String(value || '').trim().toLowerCase();
+      },
+      getBadge(verdict){
+        return {text:verdict === 'avoid' ? 'Avoid' : 'Watch'};
+      },
+      getActions(){
+        return {label:'WATCH'};
+      },
+      deriveTradeability(){
+        return 'watch';
+      },
+      evaluateRiskFit(){
+        return {risk_status:'plan_missing'};
+      }
+    }
+  });
+  if(persistedScanWatch.canonicalVerdict !== 'watch' || persistedScanWatch.visualBucket !== 'diminishing' || persistedScanWatch.tone !== 'diminishing'){
+    throw new Error('Scan simplified pipeline must reuse persisted watch/diminishing authority for suppressed tracked avoids.');
+  }
+  if(persistedScanWatch.debug.sourceOfTruth !== 'watchlist_persisted_presentation' || persistedScanWatch.debug.persistedWatchAuthorityApplied !== true){
+    throw new Error('Scan simplified pipeline must label persisted watch-authority reuse honestly.');
+  }
   const model = authoritySandbox.resolveTrackCardVisibleModel({
     ticker:'LIN'
   }, {

@@ -331,6 +331,65 @@
     return `fp_${(hash >>> 0).toString(16).padStart(8, '0')}_${input.length}`;
   }
 
+  function persistedSharedPresentationForRecord(record){
+    const item = record && typeof record === 'object' ? record : {};
+    const watchlist = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : null;
+    const presentation = watchlist && watchlist.presentation && typeof watchlist.presentation === 'object'
+      ? watchlist.presentation
+      : null;
+    const sharedPresentation = presentation && presentation.sharedPresentation && typeof presentation.sharedPresentation === 'object'
+      ? presentation.sharedPresentation
+      : null;
+    return sharedPresentation || null;
+  }
+
+  function shouldApplyPersistedWatchAuthority(record, surface, result, persistedSharedPresentation){
+    const item = record && typeof record === 'object' ? record : {};
+    const persisted = persistedSharedPresentation && typeof persistedSharedPresentation === 'object'
+      ? persistedSharedPresentation
+      : null;
+    if(!persisted) return false;
+    if(!(item.watchlist && item.watchlist.inWatchlist)) return false;
+    if(String(surface || '').trim().toLowerCase() !== 'scan') return false;
+    const persistedVerdict = String(persisted.canonicalVerdict || persisted.finalVerdict || '').trim().toLowerCase();
+    const persistedBucket = String(persisted.visualBucket || '').trim().toLowerCase();
+    const resultVerdict = String(result && result.canonicalVerdict || '').trim().toLowerCase();
+    const suppressedTrackedAvoid = !!(
+      persisted.sourceTrace
+      && typeof persisted.sourceTrace === 'object'
+      && (
+        persisted.sourceTrace.suppressAvoidForTrackedWatch === true
+        || persisted.sourceTrace.suppressingTrackedAvoid === true
+      )
+    );
+    return suppressedTrackedAvoid
+      && resultVerdict === 'avoid'
+      && persistedVerdict === 'watch'
+      && ['monitor', 'diminishing'].includes(persistedBucket);
+  }
+
+  function applyPersistedWatchAuthority(result, persistedSharedPresentation){
+    const persisted = persistedSharedPresentation && typeof persistedSharedPresentation === 'object'
+      ? persistedSharedPresentation
+      : null;
+    if(!persisted || !result || typeof result !== 'object') return result;
+    result.canonicalVerdict = 'watch';
+    result.visualBucket = String(persisted.visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+    result.tone = String(persisted.tone || result.visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+    result.badgeLabel = String(persisted.badgeLabel || 'Watch').trim() || 'Watch';
+    result.actionLabel = String(persisted.actionLabel || result.badgeLabel || 'Watch').trim() || 'Watch';
+    result.mainBlocker = String(persisted.mainBlocker || persisted.primaryReason || result.mainBlocker || '').trim();
+    result.finalVisualBucket = result.visualBucket;
+    result.debug = {
+      ...(result.debug || {}),
+      sourceOfTruth:'watchlist_persisted_presentation',
+      persistedWatchAuthorityApplied:true,
+      persistedWatchAuthorityBucket:result.visualBucket,
+      persistedWatchAuthorityTone:result.tone
+    };
+    return result;
+  }
+
   function pickMarketDataForFingerprint(record){
     const item = record && typeof record === 'object' ? record : {};
     const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
@@ -528,6 +587,10 @@
         resolvedState,
         visualState
       });
+      const persistedSharedPresentation = persistedSharedPresentationForRecord(item);
+      if(shouldApplyPersistedWatchAuthority(item, surface, result, persistedSharedPresentation)){
+        applyPersistedWatchAuthority(result, persistedSharedPresentation);
+      }
       const accepted50MaSupportTest = accepted50MaSupportTestDisplayState(item, resolvedState, derivedStates);
       if(accepted50MaSupportTest && String(result.visualBucket || '').trim().toLowerCase() === 'diminishing'){
         result.visualBucket = 'monitor';
