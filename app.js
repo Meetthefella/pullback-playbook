@@ -10325,6 +10325,13 @@ function addToWatchlist(tickerData){
     render:false,
     force:true
   });
+  refreshTrackedTickerState(entry.ticker, {
+    source:'watchlist_add',
+    sourceSurface:'track',
+    reason:'watchlist_add_refresh',
+    force:true,
+    persist:false
+  });
   markWatchlistDirty([entry.ticker], 'watchlist_add');
   uiState.watchlistPreparedModelCache = null;
   uiState.watchlistRenderSignature = '';

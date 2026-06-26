@@ -6428,8 +6428,8 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const eligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'watchlist_add',\s*deferWatchlistRemoval:false,\s*commitOnChange:true\s*\}\);/s.test(appSource)){
     throw new Error('addToWatchlist must compute eligibility from the shared post-gate helper and must not rely on a stale pre-gate eligibility snapshot.');
   }
-  if(!/markWatchlistDirty\(\[entry\.ticker\], 'watchlist_add'\);\s*uiState\.watchlistPreparedModelCache = null;\s*uiState\.watchlistRenderSignature = '';/s.test(appSource)){
-    throw new Error('Watchlist add must invalidate prepared Track render caches so section grouping cannot reuse stale avoid buckets.');
+  if(!/runWatchlistLifecycleEvaluation\(\{[\s\S]*?source:'watchlist_add'[\s\S]*?\}\);\s*refreshTrackedTickerState\(entry\.ticker, \{[\s\S]*?source:'watchlist_add'[\s\S]*?reason:'watchlist_add_refresh'[\s\S]*?force:true[\s\S]*?persist:false[\s\S]*?\}\);\s*markWatchlistDirty\(\[entry\.ticker\], 'watchlist_add'\);\s*uiState\.watchlistPreparedModelCache = null;\s*uiState\.watchlistRenderSignature = '';/s.test(appSource)){
+    throw new Error('Watchlist add must rebuild persisted Track presentation and invalidate prepared Track render caches so section grouping cannot reuse stale avoid buckets.');
   }
   if(!/const watchlistEligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'review_add_watchlist_hidden',\s*deferWatchlistRemoval:true,\s*commitOnChange:false\s*\}\);/s.test(appSource)){
     throw new Error('Review Add to Watchlist button state must use the same post-gate eligibility decision as the actual add path.');
