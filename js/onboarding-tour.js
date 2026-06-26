@@ -10,6 +10,8 @@
   const MOBILE_MARGIN = 16;
   const TOOLTIP_MAX_WIDTH = 320;
   const SMALL_TARGET_EDGE = 24;
+  const TOOLTIP_TARGET_GAP = 18;
+  const TOOLTIP_BOTTOM_BREATHING_ROOM = 24;
 
   const stepDefinitions = [
     {
@@ -222,7 +224,7 @@
       right:offsetLeft + width,
       bottom:offsetTop + height,
       safeTop:offsetTop + MOBILE_MARGIN,
-      safeBottom:offsetTop + height - Math.max(bottomInset + MOBILE_MARGIN, MOBILE_MARGIN),
+      safeBottom:offsetTop + height - Math.max(bottomInset + TOOLTIP_BOTTOM_BREATHING_ROOM, MOBILE_MARGIN + TOOLTIP_BOTTOM_BREATHING_ROOM),
       safeLeft:offsetLeft + MOBILE_MARGIN,
       safeRight:offsetLeft + width - MOBILE_MARGIN
     };
@@ -408,6 +410,7 @@
     tooltip.style.removeProperty('left');
     tooltip.style.removeProperty('top');
     tooltip.style.removeProperty('max-width');
+    tooltip.removeAttribute('data-pointer-direction');
     tooltip.style.maxWidth = `${viewport.width - (MOBILE_MARGIN * 2)}px`;
     const rect = targetRect(target);
     positionSpotlight(target, viewport);
@@ -415,14 +418,16 @@
       tooltip.classList.add('is-centered');
       return;
     }
-    const belowTop = rect.bottom + 12;
-    const aboveTop = rect.top - metrics.height - 12;
+    const belowTop = rect.bottom + TOOLTIP_TARGET_GAP;
+    const aboveTop = rect.top - metrics.height - TOOLTIP_TARGET_GAP;
     const canPlaceBelow = belowTop + metrics.height <= viewport.safeBottom;
     const canPlaceAbove = aboveTop >= viewport.safeTop;
-    let top = canPlaceBelow || !canPlaceAbove ? belowTop : aboveTop;
+    let top = canPlaceAbove || !canPlaceBelow ? aboveTop : belowTop;
+    const pointerDirection = top === aboveTop ? 'down' : 'up';
     top = clamp(top, viewport.safeTop, Math.max(viewport.safeTop, viewport.safeBottom - metrics.height));
     const centeredLeft = rect.left + (rect.width / 2) - (metrics.width / 2);
     const left = clamp(centeredLeft, viewport.safeLeft, Math.max(viewport.safeLeft, viewport.safeRight - metrics.width));
+    tooltip.setAttribute('data-pointer-direction', pointerDirection);
     tooltip.style.left = `${left}px`;
     tooltip.style.top = `${top}px`;
     if(settings.logPosition === true){
