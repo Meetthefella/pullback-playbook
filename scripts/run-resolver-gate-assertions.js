@@ -6428,8 +6428,8 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const watchlistEligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'review_add_watchlist_hidden',\s*deferWatchlistRemoval:true,\s*commitOnChange:false\s*\}\);/s.test(appSource)){
     throw new Error('Review Add to Watchlist button state must use the same post-gate eligibility decision as the actual add path.');
   }
-  if(!/const projectionCanonicalVerdict = projectionSnapshotAuthority[\s\S]*?sourceProjectionSnapshot[\s\S]*?canonicalVerdict[\s\S]*?const simplifiedCanonicalVerdict = projectionCanonicalVerdict \|\| normalizeGlobalVerdictKey\(simplifiedState\.canonicalVerdict \|\| 'watch'\);/s.test(appSource)
-    || !/const projectionVisualBucket = projectionSnapshotAuthority[\s\S]*?sourceProjectionSnapshot[\s\S]*?sourceOfTruthVisualBucket[\s\S]*?const simplifiedVisualBucket = projectionVisualBucket \|\| normalizeVisualBucketForPairing\(simplifiedState\.visualBucket \|\| 'monitor'\);/s.test(appSource)
+  if(!/const projectionCanonicalVerdict = reviewSnapshotAuthority[\s\S]*?sourceProjectionSnapshot[\s\S]*?canonicalVerdict[\s\S]*?const simplifiedCanonicalVerdict = projectionCanonicalVerdict \|\| normalizeGlobalVerdictKey\(simplifiedState\.canonicalVerdict \|\| 'watch'\);/s.test(appSource)
+    || !/const projectionVisualBucket = reviewSnapshotAuthority[\s\S]*?sourceProjectionSnapshot[\s\S]*?sourceOfTruthVisualBucket[\s\S]*?const simplifiedVisualBucket = projectionVisualBucket \|\| normalizeVisualBucketForPairing\(simplifiedState\.visualBucket \|\| 'monitor'\);/s.test(appSource)
     || !/const decisionSummary = String\(\s*projectionDecisionSummary[\s\S]*?reviewSemanticStatus\.primaryReason/s.test(appSource)
     || !/const reviewAction = \{label:projectionActionGuidance \|\| reviewSemanticStatus\.nextAction \|\| simplifiedActionLabel \|\| 'Review setup inputs'\};/s.test(appSource)){
     throw new Error('Review reopen rendering must prefer the active Track projection snapshot for visible verdict, bucket, and softened copy before falling back to stale simplified review state.');

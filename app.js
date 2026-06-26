@@ -34819,7 +34819,7 @@ function renderReviewWorkspace(options = {}){
     source:reviewRenderSource,
     mutationSource:reviewRenderSource
   });
-  const projectionCanonicalVerdict = projectionSnapshotAuthority
+  const projectionCanonicalVerdict = reviewSnapshotAuthority
     ? normalizeGlobalVerdictKey(
       sourceProjectionSnapshot && (
         sourceProjectionSnapshot.canonicalVerdict
@@ -34828,7 +34828,7 @@ function renderReviewWorkspace(options = {}){
       ) || ''
     )
     : '';
-  const projectionVisualBucket = projectionSnapshotAuthority
+  const projectionVisualBucket = reviewSnapshotAuthority
     ? normalizeVisualBucketForPairing(
       sourceProjectionSnapshot && (
         sourceProjectionSnapshot.sourceOfTruthVisualBucket
@@ -34837,7 +34837,7 @@ function renderReviewWorkspace(options = {}){
       ) || ''
     )
     : '';
-  const projectionTone = projectionSnapshotAuthority
+  const projectionTone = reviewSnapshotAuthority
     ? (String(
       sourceProjectionSnapshot && (
         sourceProjectionSnapshot.tone
@@ -34846,10 +34846,10 @@ function renderReviewWorkspace(options = {}){
       ) || ''
     ).trim().toLowerCase() || '')
     : '';
-  const projectionDecisionSummary = projectionSnapshotAuthority
+  const projectionDecisionSummary = reviewSnapshotAuthority
     ? String(sourceProjectionSnapshot && sourceProjectionSnapshot.decisionSummary || '').trim()
     : '';
-  const projectionActionGuidance = projectionSnapshotAuthority
+  const projectionActionGuidance = reviewSnapshotAuthority
     ? String(
       sourceProjectionSnapshot && (
         sourceProjectionSnapshot.actionGuidance
@@ -35246,10 +35246,10 @@ function renderReviewWorkspace(options = {}){
   const effectiveReviewPresentationState = resolvedReviewFinalVerdictKey || 'watch';
   const effectiveReviewBadge = reviewBadge;
   const isReviewOpenRender = ['review_open','watchlist','watchlist_card_open','track_projection_updated'].includes(String(reviewRenderSource || '').trim().toLowerCase());
-  const effectiveReviewProjectionSourceBase = projectionSnapshotAuthority && !isReviewOpenRender
+  const effectiveReviewProjectionSourceBase = reviewSnapshotAuthority && !isReviewOpenRender
     ? (sourceProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve')
     : reviewProjectionSource;
-  if(projectionSnapshotAuthority && !isReviewOpenRender){
+  if(reviewSnapshotAuthority && !isReviewOpenRender){
     uiState.activeReviewProjectionSource = sourceProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve';
   }
   const visualBucketSource = simplifiedVisualBucket;
@@ -35259,7 +35259,7 @@ function renderReviewWorkspace(options = {}){
   const reviewBucketBeforeFallback = simplifiedVisualBucket || '(none)';
   const canonicalAvoidActive = resolvedReviewFinalVerdictKey === 'avoid';
   const finalReviewVisualBucket = reviewDisplayBucket;
-  const effectiveReviewProjectionSource = projectionSnapshotAuthority
+  const effectiveReviewProjectionSource = reviewSnapshotAuthority
     ? 'track_projection_updated'
     : 'simplified_state_pipeline';
   uiState.lastReviewProjectionInvalidationKey = '';
