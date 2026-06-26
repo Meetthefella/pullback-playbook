@@ -6413,6 +6413,9 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const persistedPresentationVerdict = normalizeGlobalVerdictKey\([\s\S]*?persistedSharedPresentation[\s\S]*?canonicalVerdict[\s\S]*?\);[\s\S]*?const canonicalVerdict = persistedPresentationVerdict[\s\S]*?\|\| resolvedFinalVerdictKey/s.test(appSource)){
     throw new Error('Watchlist lifecycle snapshot must consume persisted shared presentation verdicts before falling back to live recomputation.');
   }
+  if(!/function watchlistPresentationBucketForRecord\(record, options = \{\}\)\{[\s\S]*?const persistedSharedPresentation = item\.watchlist[\s\S]*?item\.watchlist\.presentation\.sharedPresentation[\s\S]*?if\(persistedSharedPresentation && persistedSharedPresentation\.visualBucket\)\{\s*return normalizeVisualBucketForPairing\(persistedSharedPresentation\.visualBucket \|\| 'monitor'\);\s*\}/s.test(appSource)){
+    throw new Error('Track section placement must use persisted shared presentation buckets before falling back to live simplified recomputation.');
+  }
   if(!/function watchlistEligibilityForRecord\(record, options = \{\}\)\{[\s\S]*?const globalVerdict = options\.globalVerdict && typeof options\.globalVerdict === 'object'[\s\S]*?: resolveGlobalVerdict\(item\);[\s\S]*?const simplifiedState = resolveSimplifiedStateForSurface\(item, 'review', \{[\s\S]*?source:'watchlist_eligibility'[\s\S]*?reason:'watchlist_eligibility'[\s\S]*?\}\);[\s\S]*?const finalVerdict = normalizeGlobalVerdictKey\([\s\S]*?simplifiedState[\s\S]*?\|\| globalVerdict\.final_verdict[\s\S]*?\);[\s\S]*?const eligibleVerdict = \['watch','near_entry','entry'\]\.includes\(finalVerdict\);[\s\S]*?const allowWatchlist = eligibleVerdict && globalVerdict\.allow_watchlist === true;/s.test(appSource)){
     throw new Error('Watchlist eligibility must use the simplified review verdict for labels while keeping post-gate global allow_watchlist as the hard Add-to-Watchlist authority.');
   }
@@ -6424,6 +6427,12 @@ function runTrackPresentationAuthorityAssertions(){
   }
   if(!/const watchlistEligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'review_add_watchlist_hidden',\s*deferWatchlistRemoval:true,\s*commitOnChange:false\s*\}\);/s.test(appSource)){
     throw new Error('Review Add to Watchlist button state must use the same post-gate eligibility decision as the actual add path.');
+  }
+  if(!/const projectionCanonicalVerdict = projectionSnapshotAuthority[\s\S]*?sourceProjectionSnapshot[\s\S]*?canonicalVerdict[\s\S]*?const simplifiedCanonicalVerdict = projectionCanonicalVerdict \|\| normalizeGlobalVerdictKey\(simplifiedState\.canonicalVerdict \|\| 'watch'\);/s.test(appSource)
+    || !/const projectionVisualBucket = projectionSnapshotAuthority[\s\S]*?sourceProjectionSnapshot[\s\S]*?sourceOfTruthVisualBucket[\s\S]*?const simplifiedVisualBucket = projectionVisualBucket \|\| normalizeVisualBucketForPairing\(simplifiedState\.visualBucket \|\| 'monitor'\);/s.test(appSource)
+    || !/const decisionSummary = String\(\s*projectionDecisionSummary[\s\S]*?reviewSemanticStatus\.primaryReason/s.test(appSource)
+    || !/const reviewAction = \{label:projectionActionGuidance \|\| reviewSemanticStatus\.nextAction \|\| simplifiedActionLabel \|\| 'Review setup inputs'\};/s.test(appSource)){
+    throw new Error('Review reopen rendering must prefer the active Track projection snapshot for visible verdict, bucket, and softened copy before falling back to stale simplified review state.');
   }
   if(/decision_summary:presentation\.presentationReason/.test(appSource) || /reason:presentation\.presentationReason/.test(appSource)){
     throw new Error('Legacy presentationReason must not feed non-debug visible Track render paths.');

@@ -19558,6 +19558,16 @@ function watchlistStrictAvoidTruth(record, globalVerdict, lifecycleSnapshot){
 function watchlistPresentationBucketForRecord(record, options = {}){
   const item = normalizeTickerRecord(record || {});
   if(isWatchlistLiveRefreshPending(item.ticker)) return 'monitor';
+  const persistedSharedPresentation = item.watchlist
+    && item.watchlist.presentation
+    && typeof item.watchlist.presentation === 'object'
+    && item.watchlist.presentation.sharedPresentation
+    && typeof item.watchlist.presentation.sharedPresentation === 'object'
+    ? item.watchlist.presentation.sharedPresentation
+    : null;
+  if(persistedSharedPresentation && persistedSharedPresentation.visualBucket){
+    return normalizeVisualBucketForPairing(persistedSharedPresentation.visualBucket || 'monitor');
+  }
   const simplifiedState = resolveSimplifiedStateForWatchlistPresentation(item, {
     ...options,
     surface:'track',
@@ -34809,10 +34819,49 @@ function renderReviewWorkspace(options = {}){
     source:reviewRenderSource,
     mutationSource:reviewRenderSource
   });
+  const projectionCanonicalVerdict = projectionSnapshotAuthority
+    ? normalizeGlobalVerdictKey(
+      sourceProjectionSnapshot && (
+        sourceProjectionSnapshot.canonicalVerdict
+        || sourceProjectionSnapshot.finalVerdict
+        || sourceProjectionSnapshot.renderedVerdict
+      ) || ''
+    )
+    : '';
+  const projectionVisualBucket = projectionSnapshotAuthority
+    ? normalizeVisualBucketForPairing(
+      sourceProjectionSnapshot && (
+        sourceProjectionSnapshot.sourceOfTruthVisualBucket
+        || sourceProjectionSnapshot.visualBucket
+        || sourceProjectionSnapshot.renderedBucket
+      ) || ''
+    )
+    : '';
+  const projectionTone = projectionSnapshotAuthority
+    ? (String(
+      sourceProjectionSnapshot && (
+        sourceProjectionSnapshot.tone
+        || sourceProjectionSnapshot.sourceOfTruthVisualBucket
+        || sourceProjectionSnapshot.visualBucket
+      ) || ''
+    ).trim().toLowerCase() || '')
+    : '';
+  const projectionDecisionSummary = projectionSnapshotAuthority
+    ? String(sourceProjectionSnapshot && sourceProjectionSnapshot.decisionSummary || '').trim()
+    : '';
+  const projectionActionGuidance = projectionSnapshotAuthority
+    ? String(
+      sourceProjectionSnapshot && (
+        sourceProjectionSnapshot.actionGuidance
+        || sourceProjectionSnapshot.actionLabel
+        || sourceProjectionSnapshot.actionShortLabel
+      ) || ''
+    ).trim()
+    : '';
   const derivedStates = refreshBundle.derivedStates || analysisDerivedStatesFromRecord(record);
   const globalVerdict = bundleValid ? refreshBundle.globalVerdict : resolveGlobalVerdict(record);
-  const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
-  const simplifiedVisualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
+  const simplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  const simplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
   const accepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
     record,
     simplifiedState,
@@ -34824,7 +34873,7 @@ function renderReviewWorkspace(options = {}){
     : simplifiedVisualBucket;
   const simplifiedTone = accepted50MaSupportTestDisplay && reviewDisplayBucket === 'monitor'
     ? 'monitor'
-    : (String(simplifiedState.tone || reviewDisplayBucket || 'monitor').trim().toLowerCase() || 'monitor');
+    : (projectionTone || String(simplifiedState.tone || reviewDisplayBucket || 'monitor').trim().toLowerCase() || 'monitor');
   const simplifiedBadgeClass = ({
     entry:'badge--entry ready',
     near_entry:'badge--near-entry near',
@@ -34833,10 +34882,10 @@ function renderReviewWorkspace(options = {}){
     avoid:'badge--avoid avoid'
   })[reviewDisplayBucket] || 'badge--monitor watch';
   const simplifiedBadge = {
-    text:String(simplifiedState.badgeLabel || globalVerdictLabel(simplifiedCanonicalVerdict) || 'Watch'),
+    text:String(globalVerdictLabel(simplifiedCanonicalVerdict) || simplifiedState.badgeLabel || 'Watch'),
     className:simplifiedBadgeClass
   };
-  const simplifiedActionLabel = String(simplifiedState.actionLabel || '').trim();
+  const simplifiedActionLabel = String(projectionActionGuidance || simplifiedState.actionLabel || '').trim();
   if(typeof console !== 'undefined' && console.log){
     console.log('[REVIEW_SIMPLIFIED_STATE]', {
       ticker:record.ticker,
@@ -35147,7 +35196,13 @@ function renderReviewWorkspace(options = {}){
     displayedPlan,
     planRealism
   });
-  const decisionSummary = String(reviewSemanticStatus.primaryReason || reviewLifecycleBias.decisionSummary || visualState.decision_summary || '').trim();
+  const decisionSummary = String(
+    projectionDecisionSummary
+    || reviewSemanticStatus.primaryReason
+    || reviewLifecycleBias.decisionSummary
+    || visualState.decision_summary
+    || ''
+  ).trim();
   const resolvedFinalVerdictKey = normalizeGlobalVerdictKey(
     simplifiedCanonicalVerdict || 'watch'
   );
@@ -35205,7 +35260,9 @@ function renderReviewWorkspace(options = {}){
   const reviewBucketBeforeFallback = simplifiedVisualBucket || '(none)';
   const canonicalAvoidActive = resolvedReviewFinalVerdictKey === 'avoid';
   const finalReviewVisualBucket = reviewDisplayBucket;
-  const effectiveReviewProjectionSource = 'simplified_state_pipeline';
+  const effectiveReviewProjectionSource = projectionSnapshotAuthority
+    ? 'track_projection_updated'
+    : 'simplified_state_pipeline';
   uiState.lastReviewProjectionInvalidationKey = '';
   const reviewVisualTone = accepted50MaSupportTestDisplay && finalReviewVisualBucket === 'monitor'
     ? 'monitor'
@@ -35436,7 +35493,7 @@ function renderReviewWorkspace(options = {}){
     fromFreshResolverOutput:true,
     finalReviewVisualBucket
   });
-  const reviewAction = {label:reviewSemanticStatus.nextAction || simplifiedActionLabel || 'Review setup inputs'};
+  const reviewAction = {label:projectionActionGuidance || reviewSemanticStatus.nextAction || simplifiedActionLabel || 'Review setup inputs'};
   const resolvedReviewDisplay = buildResolvedReviewDisplayModel({
     record,
     simplifiedState,
