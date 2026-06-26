@@ -3412,10 +3412,10 @@ body[data-active-workspace="review"] .contextstrip{
   max-width:calc(100vw - 32px);
   padding:12px 14px;
   border-radius:14px;
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(12,20,35,.94);
-  box-shadow:0 14px 32px rgba(2,6,23,.28);
-  color:var(--text-primary);
+  border:1px solid rgba(148,163,184,.28);
+  background:rgba(248,250,252,.97);
+  box-shadow:0 14px 32px rgba(2,6,23,.18);
+  color:#0f172a;
   z-index:1;
 }
 .onboarding-tour-tooltip::before{
@@ -3424,9 +3424,9 @@ body[data-active-workspace="review"] .contextstrip{
   left:50%;
   width:14px;
   height:14px;
-  background:rgba(12,20,35,.94);
-  border-left:1px solid rgba(255,255,255,.08);
-  border-top:1px solid rgba(255,255,255,.08);
+  background:rgba(248,250,252,.97);
+  border-left:1px solid rgba(148,163,184,.28);
+  border-top:1px solid rgba(148,163,184,.28);
   transform:translateX(-50%) rotate(45deg);
   box-shadow:0 0 0 2px rgba(110,255,201,.12);
 }
@@ -3451,17 +3451,18 @@ body[data-active-workspace="review"] .contextstrip{
   justify-content:flex-end;
   gap:8px;
   margin-bottom:6px;
-  color:var(--text-secondary);
+  color:#475569;
   font-size:.72rem;
 }
 .onboarding-tour-title{
   margin:0 0 6px;
   font-size:.94rem;
   line-height:1.15;
+  color:#0f172a;
 }
 .onboarding-tour-body{
   margin:0;
-  color:var(--text-secondary);
+  color:#334155;
   font-size:.9rem;
   line-height:1.35;
 }
@@ -3482,7 +3483,7 @@ body[data-active-workspace="review"] .contextstrip{
   display:inline-flex;
   align-items:center;
   gap:6px;
-  color:var(--text-secondary);
+  color:#475569;
   font-size:.74rem;
   margin-top:10px;
 }
