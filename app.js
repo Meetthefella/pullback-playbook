@@ -11294,7 +11294,8 @@ function runWatchlistLifecycleEvaluation(options = {}){
         });
         const attemptedRecompute = recomputeAttemptedForSource(source);
         const previousPlan = normalizeStoredPlanSnapshot(record.watchlist.debug && record.watchlist.debug.newPlan);
-        const newPlan = planSnapshotFromDisplayedPlan(displayedPlan);
+        const authoritativeBlockedPlan = blockedScannerEstimatePlanSnapshot(record);
+        const newPlan = authoritativeBlockedPlan || planSnapshotFromDisplayedPlan(displayedPlan);
         const displayedPlanHasValues = !!(
           Number.isFinite(numericOrNull(displayedPlan && displayedPlan.entry))
           || Number.isFinite(numericOrNull(displayedPlan && displayedPlan.stop))
@@ -18756,6 +18757,23 @@ function storedPlanState(snapshot){
 
 function planSnapshotFromDisplayedPlan(displayedPlan){
   return planSnapshotFromDisplayedPlanImpl(displayedPlan, { numericOrNull });
+}
+
+function blockedScannerEstimatePlanSnapshot(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const source = String(plan.source || '').trim().toLowerCase();
+  const status = String(plan.status || '').trim().toLowerCase();
+  const tradeability = String(plan.tradeability || '').trim().toLowerCase();
+  const riskStatus = String(plan.riskStatus || '').trim().toLowerCase();
+  const blockedReason = String(plan.blockedReason || '').trim();
+  if(source !== 'scanner_estimate') return null;
+  const blocked = status === 'invalid'
+    || tradeability === 'invalid'
+    || riskStatus === 'plan_blocked'
+    || !!blockedReason
+    || plan.firstTargetTooClose === true;
+  return blocked ? normalizeStoredPlanSnapshot(plan) : null;
 }
 
 function planSnapshotSummary(snapshot, options = {}){
