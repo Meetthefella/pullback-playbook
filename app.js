@@ -10225,10 +10225,24 @@ function watchlistEntryExistsForRecord(record){
   return (state.watchlist || []).some(entry => normalizeTicker(entry && entry.ticker) === item.ticker);
 }
 
-function watchlistEligibilityForRecord(record){
+function watchlistEligibilityForRecord(record, options = {}){
   const item = normalizeTickerRecord(record);
-  const globalVerdict = resolveGlobalVerdict(item);
-  const finalVerdict = normalizeGlobalVerdictKey(globalVerdict.final_verdict);
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object'
+    ? options.globalVerdict
+    : resolveGlobalVerdict(item);
+  const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {
+    log:false,
+    source:'watchlist_eligibility',
+    reason:'watchlist_eligibility'
+  });
+  const finalVerdict = normalizeGlobalVerdictKey(
+    simplifiedState && (
+      simplifiedState.canonicalVerdict
+      || simplifiedState.finalVerdict
+      || simplifiedState.final_verdict
+    )
+    || globalVerdict.final_verdict
+  );
   const inWatchlist = !!(item.watchlist && item.watchlist.inWatchlist);
   const watchlistEntryExists = watchlistEntryExistsForRecord(item);
   const reviewExists = !!(
@@ -10237,8 +10251,8 @@ function watchlistEligibilityForRecord(record){
     || String(item.review && item.review.lastPrompt || '').trim()
     || String(item.review && item.review.aiAnalysisRaw || '').trim()
   );
-  const allowWatchlist = !!(globalVerdict.allow_watchlist || ['near_entry','entry'].includes(finalVerdict));
   const eligibleVerdict = ['watch','near_entry','entry'].includes(finalVerdict);
+  const allowWatchlist = eligibleVerdict && globalVerdict.allow_watchlist === true;
   return {
     recordExists:!!item.ticker,
     reviewExists,
@@ -10252,13 +10266,36 @@ function watchlistEligibilityForRecord(record){
   };
 }
 
+function resolvePostGateWatchlistEligibility(record, options = {}){
+  const item = normalizeTickerRecord(record);
+  const gated = options.gated && typeof options.gated === 'object'
+    ? options.gated
+    : applyGlobalVerdictGates(item, {
+      source:String(options.source || 'review_add_watchlist_hidden'),
+      deferWatchlistRemoval:options.deferWatchlistRemoval !== false
+    });
+  if(gated && gated.changed && options.commitOnChange === true){
+    commitTickerState();
+  }
+  const globalVerdict = gated && gated.globalVerdict && typeof gated.globalVerdict === 'object'
+    ? gated.globalVerdict
+    : resolveGlobalVerdict(item);
+  const eligibility = watchlistEligibilityForRecord(item, {globalVerdict});
+  return {
+    ...eligibility,
+    gated
+  };
+}
+
 function addToWatchlist(tickerData){
   const entry = normalizeWatchlistEntry(tickerData);
   if(!entry) return {entry:null, record:null, added:false, updated:false, error:'invalid_ticker'};
   const record = upsertTickerRecord(entry.ticker);
-  const eligibility = watchlistEligibilityForRecord(record);
-  const gated = applyGlobalVerdictGates(record, {source:'watchlist_add'});
-  if(gated.changed) commitTickerState();
+  const eligibility = resolvePostGateWatchlistEligibility(record, {
+    source:'watchlist_add',
+    deferWatchlistRemoval:false,
+    commitOnChange:true
+  });
   record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
   if(!eligibility.allowWatchlist || !eligibility.eligibleVerdict){
     record.watchlist.debug.lastAddResult = 'blocked';
@@ -34919,7 +34956,11 @@ function renderReviewWorkspace(options = {}){
   const simulatedFinalVerdict = capitalSimulationState.simulation
     ? (simulatedExecutionVerdict || displayStage)
     : '';
-  const watchlistEligibility = watchlistEligibilityForRecord(record);
+  const watchlistEligibility = resolvePostGateWatchlistEligibility(record, {
+    source:'review_add_watchlist_hidden',
+    deferWatchlistRemoval:true,
+    commitOnChange:false
+  });
   const visualState = bundleValid
     ? refreshBundle.visualState
     : {finalVerdict:'watch', final_verdict:'watch', renderedVerdict:'watch', final_verdict_rendered:'watch', decision_summary:'Developing - waiting for confirmation.'};

@@ -6374,6 +6374,18 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const persistedPresentationVerdict = normalizeGlobalVerdictKey\([\s\S]*?persistedSharedPresentation[\s\S]*?canonicalVerdict[\s\S]*?\);[\s\S]*?const canonicalVerdict = persistedPresentationVerdict[\s\S]*?\|\| resolvedFinalVerdictKey/s.test(appSource)){
     throw new Error('Watchlist lifecycle snapshot must consume persisted shared presentation verdicts before falling back to live recomputation.');
   }
+  if(!/function watchlistEligibilityForRecord\(record, options = \{\}\)\{[\s\S]*?const globalVerdict = options\.globalVerdict && typeof options\.globalVerdict === 'object'[\s\S]*?: resolveGlobalVerdict\(item\);[\s\S]*?const simplifiedState = resolveSimplifiedStateForSurface\(item, 'review', \{[\s\S]*?source:'watchlist_eligibility'[\s\S]*?reason:'watchlist_eligibility'[\s\S]*?\}\);[\s\S]*?const finalVerdict = normalizeGlobalVerdictKey\([\s\S]*?simplifiedState[\s\S]*?\|\| globalVerdict\.final_verdict[\s\S]*?\);[\s\S]*?const eligibleVerdict = \['watch','near_entry','entry'\]\.includes\(finalVerdict\);[\s\S]*?const allowWatchlist = eligibleVerdict && globalVerdict\.allow_watchlist === true;/s.test(appSource)){
+    throw new Error('Watchlist eligibility must use the simplified review verdict for labels while keeping post-gate global allow_watchlist as the hard Add-to-Watchlist authority.');
+  }
+  if(!/function resolvePostGateWatchlistEligibility\(record, options = \{\}\)\{[\s\S]*?applyGlobalVerdictGates\(item, \{[\s\S]*?source:String\(options\.source \|\| 'review_add_watchlist_hidden'\)[\s\S]*?deferWatchlistRemoval:options\.deferWatchlistRemoval !== false[\s\S]*?\}\);[\s\S]*?const eligibility = watchlistEligibilityForRecord\(item, \{globalVerdict\}\);/s.test(appSource)){
+    throw new Error('Review and add-to-watchlist paths must share one post-gate watchlist eligibility helper instead of duplicating pre-gate and post-gate logic.');
+  }
+  if(!/const eligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'watchlist_add',\s*deferWatchlistRemoval:false,\s*commitOnChange:true\s*\}\);/s.test(appSource)){
+    throw new Error('addToWatchlist must compute eligibility from the shared post-gate helper and must not rely on a stale pre-gate eligibility snapshot.');
+  }
+  if(!/const watchlistEligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'review_add_watchlist_hidden',\s*deferWatchlistRemoval:true,\s*commitOnChange:false\s*\}\);/s.test(appSource)){
+    throw new Error('Review Add to Watchlist button state must use the same post-gate eligibility decision as the actual add path.');
+  }
   if(/decision_summary:presentation\.presentationReason/.test(appSource) || /reason:presentation\.presentationReason/.test(appSource)){
     throw new Error('Legacy presentationReason must not feed non-debug visible Track render paths.');
   }
