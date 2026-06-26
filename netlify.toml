@@ -76,3 +76,8 @@
   from = "/api/tester-bundle-status"
   to = "/.netlify/functions/tester-bundle-status"
   status = 200
+
+[[redirects]]
+  from = "/api/tester-bundle-receipts"
+  to = "/.netlify/functions/tester-bundle-receipts"
+  status = 200

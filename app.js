@@ -1510,8 +1510,10 @@ const testerRecentBugReceiptsStorageKey = 'pullbackPlaybookRecentBugReceiptsV1';
 const testerIdPattern = /^[a-f0-9-]{16,64}$/;
 const defaultTesterReportEndpoint = '/api/tester-report';
 const defaultTesterBundleEndpoint = '/api/tester-bundle';
+const defaultTesterBundleReceiptsEndpoint = '/api/tester-bundle-receipts';
 const testerReportCategories = ['Bad verdict', 'Chart mismatch', 'Paper trade problem', 'UI problem', 'Other'];
 let memoizedTesterId = null;
+let recentBugReceiptSyncPromise = null;
 const checklistLabels = {
   trendStrong:'Strong uptrend',
   above50:'Above 50 MA',
@@ -4003,6 +4005,72 @@ function saveRecentBugReceipts(receipts){
   return normalized;
 }
 
+function mergeRecentBugReceiptWorkflows(receipts, workflowRows){
+  const workflowMap = new Map((Array.isArray(workflowRows) ? workflowRows : []).map(row => [
+    String(row && row.issueId || '').trim(),
+    normalizeTesterWorkflowStatus(row && row.workflow)
+  ]));
+  let changed = false;
+  const merged = (Array.isArray(receipts) ? receipts : []).map(receipt => {
+    const safe = normalizeRecentBugReceipt(receipt);
+    const workflow = workflowMap.get(safe.issueId);
+    if(!workflow) return safe;
+    if(
+      safe.status === workflow.status
+      && safe.statusLabel === workflow.statusLabel
+      && safe.statusUpdatedAt === workflow.statusUpdatedAt
+      && safe.statusUpdatedBy === workflow.statusUpdatedBy
+      && safe.fixedInBuild === workflow.fixedInBuild
+      && safe.closedAt === workflow.closedAt
+    ){
+      return safe;
+    }
+    changed = true;
+    return normalizeRecentBugReceipt({
+      ...safe,
+      status:workflow.status,
+      statusLabel:workflow.statusLabel,
+      statusUpdatedAt:workflow.statusUpdatedAt,
+      statusUpdatedBy:workflow.statusUpdatedBy,
+      fixedInBuild:workflow.fixedInBuild,
+      closedAt:workflow.closedAt
+    });
+  });
+  return {changed, receipts:merged};
+}
+
+async function syncRecentBugReceiptsWithServer(options = {}){
+  if(recentBugReceiptSyncPromise) return recentBugReceiptSyncPromise;
+  const receipts = loadRecentBugReceipts();
+  const issueIds = receipts.map(item => item.issueId).filter(Boolean).slice(0, 10);
+  if(!issueIds.length) return false;
+  recentBugReceiptSyncPromise = (async () => {
+    try{
+      const response = await fetchJsonWithTimeout(defaultTesterBundleReceiptsEndpoint, {
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          'X-Pullback-Tester-Id':currentTesterId()
+        },
+        body:JSON.stringify({issueIds})
+      });
+      const body = await response.json().catch(() => ({}));
+      if(!response.ok || !body || body.ok === false) return false;
+      const merged = mergeRecentBugReceiptWorkflows(receipts, body.receipts);
+      if(merged.changed){
+        saveRecentBugReceipts(merged.receipts);
+        if(options.render !== false) renderRecentSubmittedBugs();
+      }
+      return merged.changed;
+    }catch(error){
+      return false;
+    }finally{
+      recentBugReceiptSyncPromise = null;
+    }
+  })();
+  return await recentBugReceiptSyncPromise;
+}
+
 function rememberRecentBugReceipt(receipt){
   const normalized = normalizeRecentBugReceipt(receipt);
   if(!normalized.issueId) return [];
@@ -4079,6 +4147,7 @@ function renderRecentSubmittedBugs(){
       </div>
     </div>`;
   }).join('');
+  syncRecentBugReceiptsWithServer({render:true}).catch(() => {});
 }
 
 function testerReceiptMarkup(receipt, fallbackIssueId){
@@ -39858,6 +39927,13 @@ function applyGlobalVerdictGates(record, options = {}){
     const planSource = String(item.plan.source || '').trim().toLowerCase();
     const preserveScannerEstimatePlan = planSource === 'scanner_estimate'
       && [item.plan.entry, item.plan.stop, item.plan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
+    const planBlockState = String(globalVerdict.plan_status || globalVerdict.planStatusKey || '').trim().toLowerCase();
+    const scannerEstimateMustDemote = preserveScannerEstimatePlan && (
+      !!String(globalVerdict.unpriceableBlockReason || '').trim()
+      || globalVerdict.priceability_state === 'unpriceable'
+      || ['invalid','needs_adjustment','unrealistic_rr'].includes(planBlockState)
+      || item.plan.firstTargetTooClose === true
+    );
     const hadPlan = !!(item.plan.entry || item.plan.stop || item.plan.firstTarget);
     if(hadPlan && !preserveScannerEstimatePlan){
       item.plan.entry = '';
@@ -39866,6 +39942,27 @@ function applyGlobalVerdictGates(record, options = {}){
       item.plan.hasValidPlan = false;
       item.plan.riskStatus = 'plan_blocked';
       changed = true;
+    }else if(scannerEstimateMustDemote){
+      if(item.plan.hasValidPlan !== false){
+        item.plan.hasValidPlan = false;
+        changed = true;
+      }
+      if(item.plan.status !== 'invalid'){
+        item.plan.status = 'invalid';
+        changed = true;
+      }
+      if(item.plan.tradeability !== 'invalid'){
+        item.plan.tradeability = 'invalid';
+        changed = true;
+      }
+      if(item.plan.riskStatus !== 'plan_blocked'){
+        item.plan.riskStatus = 'plan_blocked';
+        changed = true;
+      }
+      if(item.plan.planValidationState !== 'needs_replan'){
+        item.plan.planValidationState = 'needs_replan';
+        changed = true;
+      }
     }
     const blockedMessage = globalVerdict.reason || globalVerdict.downgrade_reason || 'Blocked';
     if(item.plan.blockedReason !== blockedMessage){

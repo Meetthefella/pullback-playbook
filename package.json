@@ -9,6 +9,7 @@
     "debug:market-snapshot": "node scripts/debug-market-snapshot.js",
     "test:tester-bundle-admin": "node scripts/run-tester-bundle-admin-tests.js",
     "test:tester-bundle": "node scripts/run-tester-bundle-handler-tests.js",
+    "test:tester-bundle-receipts": "node scripts/run-tester-bundle-receipts-tests.js",
     "test:tester-bundle-status": "node scripts/run-tester-bundle-status-tests.js",
     "test:storage-persistence": "node scripts/run-storage-persistence-assertions.js",
     "test:resolver-gates": "node scripts/run-resolver-gate-assertions.js",
