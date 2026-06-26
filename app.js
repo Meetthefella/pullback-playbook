@@ -7537,11 +7537,11 @@ function buildPersistedTrackPresentation(record, bundle, options = {}){
 }
 
 function persistTrackPresentationOnRecord(record, bundle, options = {}){
-  const item = normalizeTickerRecord(record || {});
-  if(!item.watchlist || !item.watchlist.inWatchlist) return null;
-  const persisted = buildPersistedTrackPresentation(item, bundle, options);
-  item.watchlist.presentation = persisted;
-  item.watchlistVisualState = persisted.watchlistVisualState;
+  const liveRecord = record && typeof record === 'object' ? record : null;
+  if(!liveRecord || !liveRecord.watchlist || liveRecord.watchlist.inWatchlist !== true) return null;
+  const persisted = buildPersistedTrackPresentation(liveRecord, bundle, options);
+  liveRecord.watchlist.presentation = persisted;
+  liveRecord.watchlistVisualState = persisted.watchlistVisualState;
   return persisted;
 }
 

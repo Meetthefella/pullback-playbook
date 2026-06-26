@@ -6410,6 +6410,9 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const persistedPresentation = persistTrackPresentationOnRecord\(liveRecord,[\s\S]*?\);\s*const lifecycleSnapshot = syncWatchlistLifecycle\(liveRecord\) \|\| watchlistLifecycleSnapshot\(liveRecord\);/s.test(appSource)){
     throw new Error('Persisted Track presentation must be created before lifecycle sync so lifecycle can consume the persisted snapshot instead of rewriting presentation authority.');
   }
+  if(!/function persistTrackPresentationOnRecord\(record, bundle, options = \{\}\)\{[\s\S]*?const liveRecord = record && typeof record === 'object' \? record : null;[\s\S]*?liveRecord\.watchlist\.presentation = persisted;[\s\S]*?liveRecord\.watchlistVisualState = persisted\.watchlistVisualState;/s.test(appSource)){
+    throw new Error('Persisted Track presentation must be written back onto the live ticker record, not a normalized clone, or Track will fall back to recomputation and stale grouping.');
+  }
   if(!/const persistedPresentationVerdict = normalizeGlobalVerdictKey\([\s\S]*?persistedSharedPresentation[\s\S]*?canonicalVerdict[\s\S]*?\);[\s\S]*?const canonicalVerdict = persistedPresentationVerdict[\s\S]*?\|\| resolvedFinalVerdictKey/s.test(appSource)){
     throw new Error('Watchlist lifecycle snapshot must consume persisted shared presentation verdicts before falling back to live recomputation.');
   }
