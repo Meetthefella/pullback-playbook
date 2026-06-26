@@ -23585,7 +23585,13 @@ function planCheckStateForRecord(record, options = {}){
   };
   const hasCompleteDisplayedPlan = [currentPlan.entry, currentPlan.stop, currentPlan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
   const explicitState = String(item.plan && item.plan.planValidationState || '').trim();
-  if(['invalidated','missed','stale','needs_replan'].includes(explicitState)){
+  const planSource = String(item.plan && item.plan.source || '').trim().toLowerCase();
+  const ignoreStaleScannerEstimatePlanCheck = planSource === 'scanner_estimate'
+    && displayedPlan.status === 'valid'
+    && item.plan
+    && item.plan.firstTargetTooClose !== true
+    && ['stale','needs_replan'].includes(explicitState);
+  if(['invalidated','missed','stale','needs_replan'].includes(explicitState) && !ignoreStaleScannerEstimatePlanCheck){
     return explicitState;
   }
   if(displayedPlan.status === 'valid' && hasUnsavedPlanEdits(item, currentPlan)){

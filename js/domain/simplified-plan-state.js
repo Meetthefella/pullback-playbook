@@ -103,7 +103,10 @@
       tradeability,
       riskStatus,
       blockedReason,
-      firstTargetTooClose
+      firstTargetTooClose,
+      invalidByStatus,
+      invalidByTradeability,
+      invalidByRisk
     };
   }
 
@@ -188,8 +191,12 @@
       : '';
 
     const authoritative = authoritativePlanBlock(item);
+    const staleScannerEstimateBlock = authoritative.source === 'scanner_estimate'
+      && status === 'valid'
+      && authoritative.firstTargetTooClose !== true;
     const shouldHonorAuthoritativeBlock = authoritative.blocked === true
-      && authoritative.source === 'scanner_estimate';
+      && authoritative.source === 'scanner_estimate'
+      && !staleScannerEstimateBlock;
 
     return {
       entry,
