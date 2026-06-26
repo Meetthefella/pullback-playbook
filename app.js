@@ -9029,6 +9029,17 @@ function startApplication(){
     updateProviderStatusNote();
     refreshTrading212PaperAvailability({render:false}).catch(() => {});
   }, {delayMs:120, idle:false});
+  if(typeof window !== 'undefined' && typeof window.initOnboardingTour === 'function'){
+    try{
+      window.initOnboardingTour();
+    }catch(error){
+      if(typeof console !== 'undefined' && typeof console.warn === 'function'){
+        console.warn('[ONBOARDING_TOUR_INIT_FAILED]', {
+          message:error && error.message ? String(error.message) : 'unknown_error'
+        });
+      }
+    }
+  }
 }
 
 function renderContextHeaderMode(){
@@ -12550,6 +12561,9 @@ function renderWatchlistCardElement(record, options = {}){
   div.dataset.visualTone = tone;
   div.dataset.visualState = visualStateKey;
   div.dataset.watchlistTicker = entry.ticker;
+  if(options.assignTourAnchor === true){
+    div.setAttribute('data-tour', 'ticker-card');
+  }
   div.innerHTML = `<div class="watchlist-card__header"><div class="watchlist-card__header-row"><div class="ticker watchlist-card__ticker">${escapeHtml(entry.ticker)}</div></div><div class="watchlist-card__status badge-score-row"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(watchlistVisualState.badge.text || 'Watch')}</span>${watchlistScoreMarkup}<span class="tiny ${escapeHtml(priorityClass)}">${escapeHtml(priorityLabel)}</span></div><div class="tiny watchlist-card__company">${escapeHtml(record.meta.companyName || '')}${record.meta.exchange ? ` | ${escapeHtml(record.meta.exchange)}` : ''}</div>${liveRefreshNote}</div><div class="watchlist-signal-row"></div>${decisionSummary ? `<div class="tiny watchlist-card__reason decision-summary">${escapeHtml(decisionSummary)}</div>` : ''}${compactPrimaryPlanHeadline ? `<div class="tiny watchlist-plan-meta">${escapeHtml(compactPrimaryPlanHeadline)}</div>` : ''}${compactNextAction ? `<div class="tiny watchlist-plan-meta">${escapeHtml(compactNextAction)}</div>` : ''}<div class="watchlist-actions"><button class="primary" data-act="review">Review</button><button class="secondary" data-act="remove-watch">Remove</button></div><details class="compact-details watchlist-card__details"><summary>More</summary><div class="tiny watchlist-plan-meta">${escapeHtml(diagnosticPlanBlocker)}</div><div class="tiny">Added ${escapeHtml(entry.dateAdded)} | Expires ${escapeHtml(expiryDate)} | ${escapeHtml(String(remaining))} day${remaining === 1 ? '' : 's'} left</div><div class="tiny">Lifecycle: ${escapeHtml(lifecycleText)}</div>${debugPane}<div class="watchlist-actions watchlist-actions--detail"><button class="secondary" data-act="save-diary">Log to Diary</button><button class="secondary" data-act="refresh-life"${refreshButtonDisabled}>${escapeHtml(refreshButtonLabel)}</button></div></details>`;
   div.querySelector('[data-act="review"]').title = 'Load the saved setup into Setup Review';
   const cardProjectionSnapshot = {...clickedCardProjectionSnapshot};
@@ -13115,15 +13129,22 @@ function renderWatchlistSectionCardsSync(records, container, options = {}){
   if(!container) return;
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   const parentSectionKey = String(options.parentSectionKey || '').trim().toLowerCase();
+  const tourAnchorState = options.tourAnchorState && typeof options.tourAnchorState === 'object'
+    ? options.tourAnchorState
+    : {assigned:false};
   records.forEach(record => {
     const cardElement = renderWatchlistCardElement(record, {
       passCache,
       parentSectionKey,
       usedProjectionBundle:false,
       recomputedDuringRender:true,
-      renderSource:String(options.source || 'watchlist_render_sync')
+      renderSource:String(options.source || 'watchlist_render_sync'),
+      assignTourAnchor:tourAnchorState.assigned !== true
     });
     if(!cardElement) return;
+    if(cardElement.getAttribute && cardElement.getAttribute('data-tour') === 'ticker-card'){
+      tourAnchorState.assigned = true;
+    }
     container.appendChild(cardElement);
   });
 }
@@ -13160,6 +13181,9 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
   }
   const renderStartedAt = nowPerfMs();
   let batchIndex = 0;
+  const tourAnchorState = options.tourAnchorState && typeof options.tourAnchorState === 'object'
+    ? options.tourAnchorState
+    : {assigned:false};
   for(let index = 0; index < projectedRecords.length; index += batchSize){
     const batchStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     const slice = projectedRecords.slice(index, index + batchSize);
@@ -13171,9 +13195,15 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
         parentSectionKey,
         usedProjectionBundle:true,
         recomputedDuringRender:false,
-        renderSource:source
+        renderSource:source,
+        assignTourAnchor:tourAnchorState.assigned !== true
       });
-      if(cardElement) batchFragment.appendChild(cardElement);
+      if(cardElement){
+        if(cardElement.getAttribute && cardElement.getAttribute('data-tour') === 'ticker-card'){
+          tourAnchorState.assigned = true;
+        }
+        batchFragment.appendChild(cardElement);
+      }
     });
     container.appendChild(batchFragment);
     const batchEndedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
@@ -13311,6 +13341,9 @@ function prepareWatchlistRenderModel(source = 'watchlist_render', options = {}){
 
 function buildWatchlistSectionsFragment(records, showExpired, options = {}){
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
+  const tourAnchorState = options.tourAnchorState && typeof options.tourAnchorState === 'object'
+    ? options.tourAnchorState
+    : {assigned:false};
   const groups = watchlistRenderGroups(showExpired);
   const grouped = {};
   groups.forEach(group => { grouped[group.key] = []; });
@@ -13332,7 +13365,8 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
       renderWatchlistSectionCardsSync(sortedGroupRecords, body, {
         passCache,
         parentSectionKey:group.key,
-        source:'watchlist_render_sync'
+        source:'watchlist_render_sync',
+        tourAnchorState
       });
       section.dataset.rendered = '1';
       logTrackSectionRender(group.key, false, sortedGroupRecords.length, body.children.length, 'watchlist_render_sync');
@@ -13359,7 +13393,8 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
           renderWatchlistSectionCardsSync(sortedGroupRecords, body, {
             passCache,
             parentSectionKey:group.key,
-            source:'watchlist_render_sync_expand'
+            source:'watchlist_render_sync_expand',
+            tourAnchorState
           });
           section.dataset.rendered = '1';
           logTrackSectionRender(group.key, false, sortedGroupRecords.length, body.children.length, 'watchlist_render_sync_expand');
@@ -13408,6 +13443,7 @@ async function renderWatchlistChunked(options = {}){
     const model = options.model || prepareWatchlistRenderModel(source, {passCache});
     const {box, showExpired, records, renderSignature} = model;
     const modelPassCache = model.passCache && typeof model.passCache === 'object' ? model.passCache : passCache;
+    const tourAnchorState = {assigned:false};
     const structuralFilterChange = source === 'track_show_expired_toggle';
     const preserveUiState = options.preserveUiState !== false && activeWorkspaceTab() === 'track' && !structuralFilterChange;
     const trackUiSnapshot = preserveUiState ? captureTrackUiState() : null;
@@ -13416,6 +13452,9 @@ async function renderWatchlistChunked(options = {}){
     if(!records.length){
       uiState.watchlistRenderSignature = renderSignature;
       box.dataset.watchlistSignature = renderSignature;
+      if(box.querySelectorAll){
+        box.querySelectorAll('[data-tour="ticker-card"]').forEach(node => node.removeAttribute('data-tour'));
+      }
       box.innerHTML = showExpired
         ? '<div class="summary">No watchlist entries match this filter right now.</div>'
         : '<div class="summary">No active watchlist entries yet. Add one from a ticker card after you review a setup.</div>';
@@ -13473,7 +13512,8 @@ async function renderWatchlistChunked(options = {}){
               batchSize,
               source:`${source}_${meta.groupKey}_expand`,
               passCache:modelPassCache,
-              parentSectionKey:meta.groupKey
+              parentSectionKey:meta.groupKey,
+              tourAnchorState
             }).then(() => {
               meta.rendered = true;
               meta.section.dataset.rendered = '1';
@@ -13488,7 +13528,8 @@ async function renderWatchlistChunked(options = {}){
               renderWatchlistSectionCardsSync(meta.records, meta.body, {
                 passCache:modelPassCache,
                 parentSectionKey:meta.groupKey,
-                source:`${source}_${meta.groupKey}_expand_fallback`
+                source:`${source}_${meta.groupKey}_expand_fallback`,
+                tourAnchorState
               });
               meta.rendered = true;
               meta.section.dataset.rendered = '1';
@@ -13513,7 +13554,8 @@ async function renderWatchlistChunked(options = {}){
           batchSize,
           source:`${source}_${meta.groupKey}`,
           passCache:modelPassCache,
-          parentSectionKey:meta.groupKey
+          parentSectionKey:meta.groupKey,
+          tourAnchorState
         });
       }catch(error){
         console.warn('[TrackSectionInitialRenderFallback]', {
@@ -13525,7 +13567,8 @@ async function renderWatchlistChunked(options = {}){
         renderWatchlistSectionCardsSync(meta.records, meta.body, {
           passCache:modelPassCache,
           parentSectionKey:meta.groupKey,
-          source:`${source}_${meta.groupKey}_fallback`
+          source:`${source}_${meta.groupKey}_fallback`,
+          tourAnchorState
         });
       }
       meta.rendered = true;
@@ -36298,7 +36341,7 @@ function renderReviewWorkspace(options = {}){
     if(activeReviewTicker() === record.ticker) calculate({persist:false});
   });
   box.innerHTML = `<div class="reviewworkspace reviewworkspace--ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(reviewOuterBorderTone || visualState.visual_tone || '')}" data-visual-state="${escapeHtml(finalReviewVisualState || visualState.state || '')}">
-    <div class="panelbox review-section review-section--snapshot">
+    <div class="panelbox review-section review-section--snapshot" data-tour="verdict-card">
       <div class="reviewsectionhead"><strong>Decision Summary</strong></div>
       <div class="reviewhero reviewhero-compact">
         <div class="reviewherohead review-summary-top">
@@ -36319,7 +36362,7 @@ function renderReviewWorkspace(options = {}){
         <div class="review-decision-primary decision-summary">${escapeHtml(snapshotVerdictLine)}</div>
         <div class="tiny review-next-action-inline" id="reviewNextActionInline">Action guidance: ${escapeHtml(reviewNextActionLabel)}</div>
       </div>
-      <div class="reviewchartpanel reviewchartpanel--compact">
+      <div class="reviewchartpanel reviewchartpanel--compact" data-tour="chart-upload">
         ${chartGuidance}
         <div class="reviewsectionhead">
           <strong>Chart</strong>
@@ -36331,7 +36374,7 @@ function renderReviewWorkspace(options = {}){
         ${chartManualActionsMarkup}
       </div>
     </div>
-    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(finalReviewVisualState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">
+    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-tour="trade-plan" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(finalReviewVisualState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">
       <div class="reviewsectionhead"><strong id="plannerSection">Trade Plan</strong></div>
       <div class="summary review-hidden" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div>
       <input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden />

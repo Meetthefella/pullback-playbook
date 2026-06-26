@@ -3377,6 +3377,90 @@ body[data-active-workspace="review"] .contextstrip{
   transform:translateY(0) scale(1);
   pointer-events:auto;
 }
+.onboarding-tour-overlay{
+  position:fixed;
+  inset:0;
+  z-index:4000;
+  pointer-events:auto;
+}
+.onboarding-tour-overlay[hidden]{display:none}
+.onboarding-tour-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(3,8,18,.78);
+}
+.onboarding-tour-spotlight{
+  position:absolute;
+  border-radius:18px;
+  border:2px solid rgba(78,222,163,.7);
+  box-shadow:0 0 0 9999px rgba(3,8,18,.72), 0 0 0 8px rgba(78,222,163,.12);
+  pointer-events:none;
+  transition:top .18s ease,left .18s ease,width .18s ease,height .18s ease,opacity .18s ease;
+}
+.onboarding-tour-spotlight.is-hidden{
+  opacity:0;
+  width:0;
+  height:0;
+}
+.onboarding-tour-card{
+  position:absolute;
+  width:min(360px, calc(100vw - 24px));
+  padding:16px;
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(12,20,35,.98);
+  box-shadow:0 22px 60px rgba(2,6,23,.56);
+  color:var(--text-primary);
+}
+.onboarding-tour-card.is-centered{
+  left:50% !important;
+  top:50% !important;
+  transform:translate(-50%, -50%);
+}
+.onboarding-tour-progress{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:10px;
+  color:var(--text-secondary);
+  font-size:.78rem;
+}
+.onboarding-tour-title{
+  margin:0 0 8px;
+  font-size:1rem;
+}
+.onboarding-tour-body{
+  margin:0;
+  color:var(--text-secondary);
+  line-height:1.5;
+}
+.onboarding-tour-controls,
+.onboarding-tour-footer{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+.onboarding-tour-controls button,
+.onboarding-tour-footer button{
+  flex:1 1 120px;
+}
+.onboarding-tour-footer{
+  align-items:center;
+  justify-content:space-between;
+}
+.onboarding-tour-checkbox{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:var(--text-secondary);
+  font-size:.8rem;
+  margin-top:12px;
+}
+body.onboarding-tour-open{
+  overflow:hidden;
+}
 .track-scroll-top-button:hover:not([disabled]){
   transform:translateY(-1px) scale(1);
   background:rgba(30,41,59,.94);
@@ -3455,6 +3539,19 @@ body[data-active-workspace="track"] #watchlistSection{
     min-height:38px;
     padding:9px 14px;
     line-height:1.1;
+  }
+}
+
+@media (max-width: 560px){
+  .onboarding-tour-card{
+    width:calc(100vw - 20px);
+    max-height:calc(100vh - 20px);
+    overflow:auto;
+  }
+  .onboarding-tour-controls,
+  .onboarding-tour-footer{
+    flex-direction:column;
+    align-items:stretch;
   }
 }
 

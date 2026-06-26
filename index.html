@@ -144,7 +144,7 @@
   </div>
 
   <main id="workspaceArea" class="workspace-area">
-  <div class="card app-workspace-card" data-workspace-card="scan" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="scan" data-tour="scan-workspace" style="margin-top:14px">
     <h2 id="dailyInput">Scan</h2>
     <div class="scan-primary-stack" style="margin-top:10px">
       <strong>Import From Screenshot</strong>
@@ -179,7 +179,7 @@
         <textarea id="tvImportInput" placeholder="CAT,DE,UNP,GEV&#10;or&#10;CAT DE UNP GEV&#10;or one ticker per line"></textarea>
         <div class="actions">
           <button class="secondary" id="importTvBtn">Import Tickers</button>
-          <button class="primary" id="buildBtn">Run Scan</button>
+          <button class="primary" id="buildBtn" data-tour="run-scan">Run Scan</button>
           <button class="ghost" id="clearBtn">Clear</button>
         </div>
         <div id="tvImportPreview" class="mutebox" style="margin-top:10px">No imported ticker list yet.</div>
@@ -198,7 +198,7 @@
           <div class="tiny" style="align-self:end">Max loss uses the override if set, otherwise account size x risk %.</div>
         </div>
         <div class="row" style="margin-top:12px">
-          <div>
+          <div data-tour="source-preference">
             <label>Source Preference</label>
             <select id="advancedUniverseMode">
               <option value="tradingview_only">TradingView</option>
@@ -254,19 +254,19 @@
     </details>
   </div>
 
-  <div class="card app-workspace-card" data-workspace-card="review" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="review" data-tour="review-workspace" style="margin-top:14px">
     <h2 id="reviewSection">Review</h2>
     <p class="tiny">One active ticker at a time: chart, verdict, plan, and next action.</p>
-    <div id="reviewWorkspace" class="list" style="margin-top:14px"></div>
+    <div id="reviewWorkspace" class="list" data-tour="review-workspace" style="margin-top:14px"></div>
   </div>
 
-  <div class="card app-workspace-card" data-workspace-card="track" style="margin-top:14px">
+  <div class="card app-workspace-card" data-workspace-card="track" data-tour="track-workspace" style="margin-top:14px">
     <h2 id="watchlistSection">Track</h2>
     <p class="tiny">Monitor active setups, refresh lifecycle state, and reopen names in Review.</p>
     <div class="actions" style="margin-top:10px">
       <label class="checkitem" style="padding:0"><input id="showExpiredWatchlist" type="checkbox"> Show expired</label>
     </div>
-    <div id="watchlistList" class="list"></div>
+    <div id="watchlistList" class="list" data-tour="watchlist"></div>
   </div>
 
   <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
@@ -289,10 +289,10 @@
   </div>
 
   <div class="card app-workspace-card" data-workspace-card="diary" style="margin-top:14px">
-    <details id="advancedUtilitiesDetails">
+    <details id="advancedUtilitiesDetails" data-tour="help-menu">
       <summary><strong id="advancedSection">Advanced / API Utilities</strong></summary>
       <div class="grid" style="margin-top:12px">
-        <div class="panelbox" id="tradeGatewayPanel">
+        <div class="panelbox" id="tradeGatewayPanel" data-tour="paper-trade">
           <strong>Trade Gateway</strong>
           <div class="tiny" id="tradeGatewayHealthLabel" style="margin-top:10px">Paper gateway status loading...</div>
           <div class="tiny" id="tradeGatewayHealthDetail">Review will enable paper-trade actions only after the gateway is confirmed.</div>
@@ -384,6 +384,13 @@
           <div id="apiStatus" class="subtle">No API test run yet.</div>
         </div>
         <div class="panelbox">
+          <strong>App Help</strong>
+          <div class="tiny" style="margin-top:10px">Replay the guided walkthrough without changing your saved workflow data.</div>
+          <div class="actions" style="margin-top:10px">
+            <button class="secondary compactbutton" id="startOnboardingTourBtn" type="button">Start App Tour</button>
+          </div>
+        </div>
+        <div class="panelbox">
           <strong>How In-App Analysis Works</strong>
           <div class="helpbox" style="margin-top:10px">
             Each active review card builds a structured setup payload with ticker, market status, saved checklist, notes, chart context, and your fixed risk rules.
@@ -445,7 +452,7 @@
   </div>
   </main>
 
-  <nav id="bottomRibbonNav" class="bottom-ribbon-nav" aria-label="Primary navigation" role="tablist">
+  <nav id="bottomRibbonNav" class="bottom-ribbon-nav" data-tour="main-tabs" aria-label="Primary navigation" role="tablist">
     <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="true" data-workspace-tab="scan">Scan</button>
     <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="review">Review</button>
     <button class="bottom-ribbon-nav__tab" type="button" role="tab" aria-selected="false" data-workspace-tab="track">Track</button>
@@ -490,6 +497,7 @@
 <script defer src="./js/features/review/review-analysis-feature.js?v=4.4.19"></script>
 <script defer src="./js/features/track/track-watchlist-feature.js?v=4.4.19"></script>
 <script defer src="./js/features/diary/diary-feature.js?v=4.4.19"></script>
+<script defer src="./js/onboarding-tour.js?v=4.4.19"></script>
 <script defer src="./app.js?v=4.4.19"></script>
 </body>
 </html>
