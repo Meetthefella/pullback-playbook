@@ -144,6 +144,7 @@ function loadAppHarness(rootDir){
   [
     'scannerEstimateAuthorityReasonPriority',
     'scannerEstimateAuthorityReasonFromText',
+    'resolveScannerEstimateStructuredAuthorityCode',
     'scannerEstimateBlockedPlanSnapshotRecord',
     'resolveCurrentScannerEstimatePlanBlockers',
     'resolveScannerEstimatePlanAuthority',
@@ -533,6 +534,61 @@ function run(){
   assert(staleBlockedReasonRecord.plan.status === 'valid', `Expected stale stored blocked reason/code status valid, got ${staleBlockedReasonRecord.plan.status}.`);
   assert(staleBlockedReasonRecord.plan.blockedReason === '', `Expected stale stored blocked reason to clear, got ${staleBlockedReasonRecord.plan.blockedReason}.`);
   assert(staleBlockedReasonRecord.plan.blockedReasonCode === '', `Expected stale stored blocked reason code to clear, got ${staleBlockedReasonRecord.plan.blockedReasonCode}.`);
+
+  const genericReasonCodeRecord = {
+    ticker:'GENCODE',
+    marketData:{currency:'USD'},
+    lifecycle:{stage:'watchlist', status:'active'},
+    plan:{
+      entry:110.27,
+      stop:102.29,
+      firstTarget:136.19,
+      source:'scanner_estimate',
+      hasValidPlan:false,
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      planValidationState:'pending_validation',
+      triggerState:'waiting_for_trigger',
+      missedState:'',
+      invalidatedState:'',
+      blockedReason:'Old generic invalidation',
+      blockedReasonCode:'invalidated',
+      firstTargetTooClose:false
+    },
+    watchlist:{debug:{}},
+    _globalVerdict:{
+      allow_plan:true,
+      final_verdict:'entry',
+      reason:'Repair is forming but the setup is not priceable yet.',
+      downgrade_reason:'Strong trend, but no usable pullback setup yet. Wait for a cleaner reset near support.',
+      reasonCode:'technical_invalidation',
+      downgrade_reason_code:'technical_invalidation',
+      unpriceable_reason_code:'technical_invalidation',
+      blockerCode:'bounce_not_priceable',
+      priceability_state:'priceable',
+      plan_status:'valid',
+      planStatusKey:'valid',
+      unpriceableBlockReason:'',
+      terminal_avoid_applied:false,
+      explicit_invalidation_reason:'',
+      explicit_invalidation_reason_code:''
+    }
+  };
+  sandbox.applyGlobalVerdictGates(genericReasonCodeRecord, {source:'focus'});
+  const genericReasonCodeAuthority = sandbox.resolveScannerEstimatePlanAuthority(genericReasonCodeRecord, genericReasonCodeRecord._globalVerdict, sandbox.deriveCurrentPlanState(
+    genericReasonCodeRecord.plan.entry,
+    genericReasonCodeRecord.plan.stop,
+    genericReasonCodeRecord.plan.firstTarget,
+    genericReasonCodeRecord.marketData.currency
+  ));
+  assert(genericReasonCodeAuthority.mode === 'recover', `Expected generic resolver reason codes to stay non-authoritative, got ${genericReasonCodeAuthority.mode}.`);
+  assert(genericReasonCodeAuthority.reasonCode === 'unknown', `Expected no specific blocker reasonCode from generic resolver codes, got ${genericReasonCodeAuthority.reasonCode}.`);
+  assert(genericReasonCodeRecord.plan.status === 'valid', `Expected generic resolver-code record to recover status valid, got ${genericReasonCodeRecord.plan.status}.`);
+  assert(genericReasonCodeRecord.plan.tradeability === 'tradable', `Expected generic resolver-code record to recover tradeability tradable, got ${genericReasonCodeRecord.plan.tradeability}.`);
+  assert(genericReasonCodeRecord.plan.riskStatus === 'fits_risk', `Expected generic resolver-code record to recover riskStatus fits_risk, got ${genericReasonCodeRecord.plan.riskStatus}.`);
+  assert(genericReasonCodeRecord.plan.blockedReason === '', `Expected generic resolver-code blockedReason to clear, got ${genericReasonCodeRecord.plan.blockedReason}.`);
+  assert(genericReasonCodeRecord.plan.blockedReasonCode === '', `Expected generic resolver-code blockedReasonCode to clear, got ${genericReasonCodeRecord.plan.blockedReasonCode}.`);
 
   console.log('TROW plan regressions passed.');
 }

@@ -19059,6 +19059,37 @@ function scannerEstimateAuthorityReasonFromText(reason){
   return '';
 }
 
+function resolveScannerEstimateStructuredAuthorityCode(globalVerdict){
+  const resolvedVerdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  const explicitInvalidationCode = String(resolvedVerdict.explicit_invalidation_reason_code || '').trim().toLowerCase();
+  if(explicitInvalidationCode){
+    return scannerEstimateAuthorityReasonFromText(explicitInvalidationCode);
+  }
+  const blockerCode = String(
+    resolvedVerdict.blockerCode
+      || resolvedVerdict.blocker_code
+      || resolvedVerdict.primary_blocker_code
+      || ''
+  ).trim().toLowerCase();
+  switch(blockerCode){
+    case 'setup_invalidated':
+    case 'technical_invalidation':
+      return 'invalidated';
+    case 'missed_setup':
+      return 'missed';
+    case 'plan_premature_or_stale':
+      return 'stale_trigger';
+    case 'broken_structure':
+    case 'broken_trend':
+    case 'stop_breach':
+      return 'broken_structure';
+    case 'target_too_close':
+      return 'target_too_close';
+    default:
+      return '';
+  }
+}
+
 function scannerEstimateBlockedPlanSnapshotRecord(plan){
   const normalized = normalizeStoredPlanSnapshot(plan);
   return {
@@ -19146,29 +19177,21 @@ function resolveScannerEstimatePlanAuthority(record, globalVerdict, displayedPla
   const planMathValid = !!(currentPlan && currentPlan.status === 'valid');
   const firstTargetTooClose = plan.firstTargetTooClose === true;
   const terminalAvoid = item.terminal_avoid_applied === true || resolvedVerdict.terminal_avoid_applied === true;
-  const resolverReasonCode = String(
-    resolvedVerdict.reasonCode
-      || resolvedVerdict.downgrade_reason_code
-      || resolvedVerdict.unpriceable_reason_code
-      || ''
-  ).trim().toLowerCase();
   const explicitInvalidationReason = String(resolvedVerdict.explicit_invalidation_reason || '').trim();
   const explicitInvalidationReasonCode = String(resolvedVerdict.explicit_invalidation_reason_code || '').trim().toLowerCase();
-  const currentStateReasonCode = scannerEstimateAuthorityReasonFromText(
-    explicitInvalidationReasonCode || resolverReasonCode
-  );
-  const staleState = currentStateReasonCode === 'stale_trigger'
+  const structuredAuthorityCode = resolveScannerEstimateStructuredAuthorityCode(resolvedVerdict);
+  const staleState = structuredAuthorityCode === 'stale_trigger'
     || currentPlanBlockers.currentStale;
   const invalidatedState = !!explicitInvalidationReason
-    || currentStateReasonCode === 'invalidated'
+    || structuredAuthorityCode === 'invalidated'
     || currentPlanBlockers.currentInvalidated;
-  const missedState = currentStateReasonCode === 'missed'
+  const missedState = structuredAuthorityCode === 'missed'
     || currentPlanBlockers.currentMissed;
   const expiredState = ['expired','dead','entered','exited','cancelled'].includes(lifecycleStage)
     || ['closed','dead'].includes(lifecycleStatus);
   const brokenStructure = /broken|structure|stop[_\s-]?breach/i.test(explicitInvalidationReason)
     || ['broken_structure','broken_trend','stop_breach'].includes(explicitInvalidationReasonCode)
-    || currentStateReasonCode === 'broken_structure';
+    || structuredAuthorityCode === 'broken_structure';
   let reasonCode = '';
   let reason = '';
   if(firstTargetTooClose){
