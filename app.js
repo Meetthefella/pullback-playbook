@@ -19073,8 +19073,9 @@ function resolveScannerEstimateStructuredAuthorityCode(globalVerdict){
   ).trim().toLowerCase();
   switch(blockerCode){
     case 'setup_invalidated':
-    case 'technical_invalidation':
       return 'invalidated';
+    case 'technical_invalidation':
+      return 'technical_invalidation';
     case 'missed_setup':
       return 'missed';
     case 'plan_premature_or_stale':
@@ -19088,6 +19089,39 @@ function resolveScannerEstimateStructuredAuthorityCode(globalVerdict){
     default:
       return '';
   }
+}
+
+function isCurrentTechnicalInvalidation(record, globalVerdict, displayedPlan){
+  const item = record && typeof record === 'object' ? record : {};
+  const resolvedVerdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const lifecycle = item.lifecycle && typeof item.lifecycle === 'object' ? item.lifecycle : {};
+  const currentPlan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const structureState = String(derivedStates.structureState || '').trim().toLowerCase();
+  const trendState = String(derivedStates.trendState || '').trim().toLowerCase();
+  const planValidationState = String(currentPlan.planValidationState || plan.planValidationState || '').trim().toLowerCase();
+  const triggerState = String(currentPlan.triggerState || plan.triggerState || '').trim().toLowerCase();
+  const explicitInvalidationReason = String(resolvedVerdict.explicit_invalidation_reason || '').trim();
+  const explicitInvalidationReasonCode = String(resolvedVerdict.explicit_invalidation_reason_code || '').trim().toLowerCase();
+  const lifecycleStage = String(lifecycle.stage || '').trim().toLowerCase();
+  const lifecycleStatus = String(lifecycle.status || '').trim().toLowerCase();
+  const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const stopPrice = numericOrNull(currentPlan.stop ?? plan.stop);
+  const brokenBelowStop = Number.isFinite(currentPrice)
+    && Number.isFinite(stopPrice)
+    && currentPrice <= (stopPrice * 0.995);
+  return !!(
+    explicitInvalidationReason
+    || ['invalidated','technical_invalidation','broken_structure','broken_trend','stop_breach'].includes(explicitInvalidationReasonCode)
+    || planValidationState === 'invalidated'
+    || triggerState === 'invalidated'
+    || structureState === 'broken'
+    || trendState === 'broken'
+    || brokenBelowStop
+    || ['dead','expired','entered','exited','cancelled'].includes(lifecycleStage)
+    || ['dead','closed'].includes(lifecycleStatus)
+  );
 }
 
 function scannerEstimateBlockedPlanSnapshotRecord(plan){
@@ -19180,10 +19214,13 @@ function resolveScannerEstimatePlanAuthority(record, globalVerdict, displayedPla
   const explicitInvalidationReason = String(resolvedVerdict.explicit_invalidation_reason || '').trim();
   const explicitInvalidationReasonCode = String(resolvedVerdict.explicit_invalidation_reason_code || '').trim().toLowerCase();
   const structuredAuthorityCode = resolveScannerEstimateStructuredAuthorityCode(resolvedVerdict);
+  const corroboratedTechnicalInvalidation = structuredAuthorityCode === 'technical_invalidation'
+    && isCurrentTechnicalInvalidation(item, resolvedVerdict, currentPlan);
   const staleState = structuredAuthorityCode === 'stale_trigger'
     || currentPlanBlockers.currentStale;
   const invalidatedState = !!explicitInvalidationReason
     || structuredAuthorityCode === 'invalidated'
+    || corroboratedTechnicalInvalidation
     || currentPlanBlockers.currentInvalidated;
   const missedState = structuredAuthorityCode === 'missed'
     || currentPlanBlockers.currentMissed;

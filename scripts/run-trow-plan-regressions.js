@@ -88,6 +88,9 @@ function loadAppHarness(rootDir){
     resolveGlobalVerdict(record){
       return record._globalVerdict || {};
     },
+    analysisDerivedStatesFromRecord(record){
+      return record && record.derivedStates ? record.derivedStates : {};
+    },
     normalizeGlobalVerdictKey(value){
       const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
       if(safe === 'monitor') return 'watch';
@@ -145,6 +148,7 @@ function loadAppHarness(rootDir){
     'scannerEstimateAuthorityReasonPriority',
     'scannerEstimateAuthorityReasonFromText',
     'resolveScannerEstimateStructuredAuthorityCode',
+    'isCurrentTechnicalInvalidation',
     'scannerEstimateBlockedPlanSnapshotRecord',
     'resolveCurrentScannerEstimatePlanBlockers',
     'resolveScannerEstimatePlanAuthority',
@@ -589,6 +593,119 @@ function run(){
   assert(genericReasonCodeRecord.plan.riskStatus === 'fits_risk', `Expected generic resolver-code record to recover riskStatus fits_risk, got ${genericReasonCodeRecord.plan.riskStatus}.`);
   assert(genericReasonCodeRecord.plan.blockedReason === '', `Expected generic resolver-code blockedReason to clear, got ${genericReasonCodeRecord.plan.blockedReason}.`);
   assert(genericReasonCodeRecord.plan.blockedReasonCode === '', `Expected generic resolver-code blockedReasonCode to clear, got ${genericReasonCodeRecord.plan.blockedReasonCode}.`);
+
+  const focusPendingValidationRecord = {
+    ticker:'FOCUSPEND',
+    marketData:{currency:'USD'},
+    lifecycle:{stage:'watchlist', status:'active'},
+    plan:{
+      entry:110.27,
+      stop:102.29,
+      firstTarget:136.19,
+      source:'scanner_estimate',
+      hasValidPlan:true,
+      status:'valid',
+      tradeability:'tradable',
+      riskStatus:'fits_risk',
+      planValidationState:'pending_validation',
+      triggerState:'waiting_for_trigger',
+      missedState:'',
+      invalidatedState:'',
+      blockedReason:'',
+      blockedReasonCode:'',
+      firstTargetTooClose:false
+    },
+    watchlist:{debug:{
+      newPlan:{
+        entry:'110.27',
+        stop:'102.29',
+        firstTarget:'136.19',
+        status:'valid',
+        tradeability:'tradable'
+      }
+    }},
+    _globalVerdict:{
+      allow_plan:false,
+      final_verdict:'watch',
+      reason:'Repair is forming but the setup is not priceable yet.',
+      downgrade_reason:'Strong trend, but no usable pullback setup yet. Wait for a cleaner reset near support.',
+      blockerCode:'technical_invalidation',
+      priceability_state:'unpriceable',
+      plan_status:'valid',
+      planStatusKey:'valid',
+      unpriceableBlockReason:'Developing - waiting for confirmation.',
+      terminal_avoid_applied:false,
+      explicit_invalidation_reason:'',
+      explicit_invalidation_reason_code:''
+    }
+  };
+  sandbox.applyGlobalVerdictGates(focusPendingValidationRecord, {source:'focus'});
+  const focusPendingValidationAuthority = sandbox.resolveScannerEstimatePlanAuthority(focusPendingValidationRecord, focusPendingValidationRecord._globalVerdict, sandbox.deriveCurrentPlanState(
+    focusPendingValidationRecord.plan.entry,
+    focusPendingValidationRecord.plan.stop,
+    focusPendingValidationRecord.plan.firstTarget,
+    focusPendingValidationRecord.marketData.currency
+  ));
+  assert(focusPendingValidationAuthority.mode === 'blocked', `Expected focus pending-validation case to remain blocked, got ${focusPendingValidationAuthority.mode}.`);
+  assert(focusPendingValidationAuthority.specificBlock === false, `Expected focus pending-validation case to stay a soft resolver block, got specificBlock=${focusPendingValidationAuthority.specificBlock}.`);
+  assert(focusPendingValidationAuthority.reasonCode === 'resolver_block', `Expected focus pending-validation case to use resolver_block, got ${focusPendingValidationAuthority.reasonCode}.`);
+  assert(focusPendingValidationRecord.plan.blockedReasonCode === 'resolver_block', `Expected focus pending-validation blockedReasonCode resolver_block, got ${focusPendingValidationRecord.plan.blockedReasonCode}.`);
+  assert(focusPendingValidationRecord.plan.invalidatedState === '', `Expected focus pending-validation invalidatedState to remain empty, got ${focusPendingValidationRecord.plan.invalidatedState}.`);
+
+  sandbox.__derivedPlanOverrides = {
+    planValidationState:'invalidated',
+    triggerState:'invalidated'
+  };
+  const corroboratedTechnicalInvalidationRecord = {
+    ticker:'TECHINV',
+    marketData:{currency:'USD', price:95},
+    lifecycle:{stage:'watchlist', status:'active'},
+    derivedStates:{structureState:'broken', trendState:'broken'},
+    plan:{
+      entry:110.27,
+      stop:102.29,
+      firstTarget:136.19,
+      source:'scanner_estimate',
+      hasValidPlan:true,
+      status:'valid',
+      tradeability:'tradable',
+      riskStatus:'fits_risk',
+      planValidationState:'pending_validation',
+      triggerState:'waiting_for_trigger',
+      missedState:'',
+      invalidatedState:'',
+      blockedReason:'',
+      blockedReasonCode:'',
+      firstTargetTooClose:false
+    },
+    watchlist:{debug:{}},
+    _globalVerdict:{
+      allow_plan:false,
+      final_verdict:'watch',
+      reason:'Setup is no longer technically valid.',
+      downgrade_reason:'Setup is no longer technically valid.',
+      blockerCode:'technical_invalidation',
+      priceability_state:'unpriceable',
+      plan_status:'valid',
+      planStatusKey:'valid',
+      unpriceableBlockReason:'',
+      terminal_avoid_applied:false,
+      explicit_invalidation_reason:'',
+      explicit_invalidation_reason_code:''
+    }
+  };
+  sandbox.applyGlobalVerdictGates(corroboratedTechnicalInvalidationRecord, {source:'focus'});
+  const corroboratedTechnicalInvalidationAuthority = sandbox.resolveScannerEstimatePlanAuthority(corroboratedTechnicalInvalidationRecord, corroboratedTechnicalInvalidationRecord._globalVerdict, sandbox.deriveCurrentPlanState(
+    corroboratedTechnicalInvalidationRecord.plan.entry,
+    corroboratedTechnicalInvalidationRecord.plan.stop,
+    corroboratedTechnicalInvalidationRecord.plan.firstTarget,
+    corroboratedTechnicalInvalidationRecord.marketData.currency
+  ));
+  assert(corroboratedTechnicalInvalidationAuthority.mode === 'blocked', `Expected corroborated technical invalidation to remain blocked, got ${corroboratedTechnicalInvalidationAuthority.mode}.`);
+  assert(corroboratedTechnicalInvalidationAuthority.specificBlock === true, `Expected corroborated technical invalidation to remain a specific block, got specificBlock=${corroboratedTechnicalInvalidationAuthority.specificBlock}.`);
+  assert(corroboratedTechnicalInvalidationAuthority.reasonCode === 'invalidated', `Expected corroborated technical invalidation reasonCode invalidated, got ${corroboratedTechnicalInvalidationAuthority.reasonCode}.`);
+  assert(corroboratedTechnicalInvalidationRecord.plan.blockedReasonCode === 'invalidated', `Expected corroborated technical invalidation blockedReasonCode invalidated, got ${corroboratedTechnicalInvalidationRecord.plan.blockedReasonCode}.`);
+  sandbox.__derivedPlanOverrides = null;
 
   console.log('TROW plan regressions passed.');
 }
