@@ -3720,13 +3720,8 @@ function currentReviewChartVerificationSnapshot(record){
   if(!item) return null;
   try{
     const pipeline = getReviewChartAnalysisPipeline(item) || {};
-    const simplified = buildSimplifiedChartPipelineMarkup(item, pipeline);
-    const decision = simplified && simplified.decision && typeof simplified.decision === 'object'
-      ? simplified.decision
-      : {};
-    const trace = simplified && simplified.trace && typeof simplified.trace === 'object'
-      ? simplified.trace
-      : {};
+    const decision = buildSimplifiedChartPipelineDecision(item, pipeline) || {};
+    const trace = buildSimplifiedChartPipelineTrace(item, pipeline) || {};
     return {
       phase:String(pipeline.phase || ''),
       status:String(trace.status || ''),
@@ -19035,6 +19030,202 @@ function planSnapshotFromDisplayedPlan(displayedPlan){
   return planSnapshotFromDisplayedPlanImpl(displayedPlan, { numericOrNull });
 }
 
+function scannerEstimateAuthorityReasonPriority(reasonCode){
+  const priorities = {
+    target_too_close:7,
+    invalidated:6,
+    missed:5,
+    expired:4,
+    terminal:3,
+    stale_trigger:2,
+    broken_structure:1,
+    resolver_block:0,
+    unknown:-1
+  };
+  return priorities[String(reasonCode || '').trim().toLowerCase()] ?? -1;
+}
+
+function scannerEstimateAuthorityReasonFromText(reason){
+  const text = String(reason || '').trim().toLowerCase().replace(/\s+/g, '_');
+  if(!text) return '';
+  if(['target_too_close'].includes(text)) return 'target_too_close';
+  if(['invalidated','technical_invalidation'].includes(text)) return 'invalidated';
+  if(['missed','missed_setup'].includes(text)) return 'missed';
+  if(['expired','closed','dead'].includes(text)) return 'expired';
+  if(['terminal','terminal_avoid'].includes(text)) return 'terminal';
+  if(['stale','stale_trigger','plan_premature_or_stale'].includes(text)) return 'stale_trigger';
+  if(['broken_structure','broken_trend','stop_breach'].includes(text)) return 'broken_structure';
+  if(['resolver_block','unpriceable','plan_missing','plan_incomplete'].includes(text)) return 'resolver_block';
+  return '';
+}
+
+function scannerEstimateBlockedPlanSnapshotRecord(plan){
+  const normalized = normalizeStoredPlanSnapshot(plan);
+  return {
+    ...normalized,
+    blockedReasonCode:String(plan && plan.blockedReasonCode || ''),
+    planValidationState:String(plan && plan.planValidationState || ''),
+    triggerState:String(plan && plan.triggerState || ''),
+    missedState:String(plan && plan.missedState || ''),
+    invalidatedState:String(plan && plan.invalidatedState || ''),
+    riskStatus:String(plan && plan.riskStatus || normalized.riskStatus || ''),
+    tradeability:String(plan && plan.tradeability || normalized.tradeability || ''),
+    firstTargetTooClose:plan && plan.firstTargetTooClose === true
+  };
+}
+
+function resolveCurrentScannerEstimatePlanBlockers(record, globalVerdict, displayedPlan){
+  const item = record && typeof record === 'object' ? record : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const lifecycle = item.lifecycle && typeof item.lifecycle === 'object' ? item.lifecycle : {};
+  const resolvedVerdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : resolveGlobalVerdict(item);
+  const currentPlan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const persistedPlanValidationState = String(plan.planValidationState || '').trim().toLowerCase();
+  const persistedTriggerState = String(plan.triggerState || '').trim().toLowerCase();
+  const currentPlanValidationState = String(currentPlan.planValidationState || '').trim().toLowerCase();
+  const currentTriggerState = String(currentPlan.triggerState || '').trim().toLowerCase();
+  const persistedMissedState = String(plan.missedState || '').trim();
+  const persistedInvalidatedState = String(plan.invalidatedState || '').trim();
+  const explicitInvalidationReason = String(resolvedVerdict.explicit_invalidation_reason || '').trim();
+  const lifecycleStatus = String(lifecycle.status || '').trim().toLowerCase();
+  const currentMissed = currentPlanValidationState === 'missed'
+    || currentTriggerState === 'missed';
+  const currentInvalidated = currentPlanValidationState === 'invalidated'
+    || currentTriggerState === 'invalidated'
+    || !!explicitInvalidationReason;
+  const currentStale = currentPlanValidationState === 'stale'
+    || currentTriggerState === 'stale'
+    || lifecycleStatus === 'stale';
+
+  return {
+    currentPlanValidationState,
+    currentTriggerState,
+    persistedPlanValidationState,
+    persistedTriggerState,
+    currentMissed,
+    currentInvalidated,
+    currentStale,
+    staleFields:{
+      planValidationState:!!persistedPlanValidationState && !currentPlanValidationState,
+      triggerState:!!persistedTriggerState && !currentTriggerState,
+      missedState:!!persistedMissedState && !currentMissed,
+      invalidatedState:!!persistedInvalidatedState && !currentInvalidated
+    }
+  };
+}
+
+function resolveScannerEstimatePlanAuthority(record, globalVerdict, displayedPlan){
+  const item = record && typeof record === 'object' ? record : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const source = String(plan.source || '').trim().toLowerCase();
+  if(source !== 'scanner_estimate'){
+    return {
+      mode:'ignore',
+      constructive:false,
+      specificBlock:false,
+      reason:'',
+      reasonCode:'',
+      clearBlockedMetadata:false,
+      preserveBlockedSnapshot:false
+    };
+  }
+  const resolvedVerdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : resolveGlobalVerdict(item);
+  const lifecycle = item.lifecycle && typeof item.lifecycle === 'object' ? item.lifecycle : {};
+  const lifecycleStage = String(lifecycle.stage || '').trim().toLowerCase();
+  const lifecycleStatus = String(lifecycle.status || '').trim().toLowerCase();
+  const currentVerdict = normalizeGlobalVerdictKey(resolvedVerdict.final_verdict || resolvedVerdict.finalVerdict || '');
+  const priceabilityState = String(resolvedVerdict.priceability_state || '').trim().toLowerCase();
+  const planBlockState = String(resolvedVerdict.plan_status || resolvedVerdict.planStatusKey || '').trim().toLowerCase();
+  const numericPlan = [plan.entry, plan.stop, plan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
+  const currentPlan = displayedPlan || (
+    numericPlan
+      ? deriveCurrentPlanState(plan.entry, plan.stop, plan.firstTarget, item.marketData && item.marketData.currency)
+      : null
+  );
+  const currentPlanBlockers = resolveCurrentScannerEstimatePlanBlockers(item, resolvedVerdict, currentPlan);
+  const planMathValid = !!(currentPlan && currentPlan.status === 'valid');
+  const firstTargetTooClose = plan.firstTargetTooClose === true;
+  const terminalAvoid = item.terminal_avoid_applied === true || resolvedVerdict.terminal_avoid_applied === true;
+  const resolverReasonCode = String(
+    resolvedVerdict.reasonCode
+      || resolvedVerdict.downgrade_reason_code
+      || resolvedVerdict.unpriceable_reason_code
+      || ''
+  ).trim().toLowerCase();
+  const explicitInvalidationReason = String(resolvedVerdict.explicit_invalidation_reason || '').trim();
+  const explicitInvalidationReasonCode = String(resolvedVerdict.explicit_invalidation_reason_code || '').trim().toLowerCase();
+  const currentStateReasonCode = scannerEstimateAuthorityReasonFromText(
+    explicitInvalidationReasonCode || resolverReasonCode
+  );
+  const staleState = currentStateReasonCode === 'stale_trigger'
+    || currentPlanBlockers.currentStale;
+  const invalidatedState = !!explicitInvalidationReason
+    || currentStateReasonCode === 'invalidated'
+    || currentPlanBlockers.currentInvalidated;
+  const missedState = currentStateReasonCode === 'missed'
+    || currentPlanBlockers.currentMissed;
+  const expiredState = ['expired','dead','entered','exited','cancelled'].includes(lifecycleStage)
+    || ['closed','dead'].includes(lifecycleStatus);
+  const brokenStructure = /broken|structure|stop[_\s-]?breach/i.test(explicitInvalidationReason)
+    || ['broken_structure','broken_trend','stop_breach'].includes(explicitInvalidationReasonCode)
+    || currentStateReasonCode === 'broken_structure';
+  let reasonCode = '';
+  let reason = '';
+  if(firstTargetTooClose){
+    reasonCode = 'target_too_close';
+    reason = String(plan.blockedReason || 'First target is too close for a usable reward-to-risk plan.').trim();
+  }else if(invalidatedState){
+    reasonCode = 'invalidated';
+    reason = explicitInvalidationReason || String(plan.blockedReason || resolvedVerdict.reason || resolvedVerdict.downgrade_reason || 'Setup invalidated.').trim();
+  }else if(missedState){
+    reasonCode = 'missed';
+    reason = String(resolvedVerdict.reason || resolvedVerdict.downgrade_reason || plan.blockedReason || 'Setup already missed.').trim();
+  }else if(expiredState){
+    reasonCode = 'expired';
+    reason = String(plan.blockedReason || resolvedVerdict.reason || resolvedVerdict.downgrade_reason || 'Setup expired.').trim();
+  }else if(terminalAvoid){
+    reasonCode = 'terminal';
+    reason = String(plan.blockedReason || resolvedVerdict.reason || resolvedVerdict.downgrade_reason || 'Terminal avoid state.').trim();
+  }else if(staleState){
+    reasonCode = 'stale_trigger';
+    reason = String(plan.blockedReason || resolvedVerdict.reason || resolvedVerdict.downgrade_reason || 'Trigger state is stale.').trim();
+  }else if(brokenStructure){
+    reasonCode = 'broken_structure';
+    reason = explicitInvalidationReason || String(plan.blockedReason || resolvedVerdict.reason || resolvedVerdict.downgrade_reason || 'Structure is broken.').trim();
+  }else if(resolvedVerdict.allow_plan !== true || priceabilityState === 'unpriceable' || !planMathValid || ['invalid','needs_adjustment','unrealistic_rr'].includes(planBlockState)){
+    reasonCode = 'resolver_block';
+    reason = String(plan.blockedReason || resolvedVerdict.reason || resolvedVerdict.downgrade_reason || resolvedVerdict.unpriceableBlockReason || 'Blocked').trim();
+  }else{
+    reasonCode = 'unknown';
+    reason = String(plan.blockedReason || resolvedVerdict.reason || resolvedVerdict.downgrade_reason || '').trim();
+  }
+  const specificBlock = ['target_too_close','invalidated','missed','expired','terminal','stale_trigger','broken_structure'].includes(reasonCode);
+  const constructive = !!(
+    numericPlan
+    && planMathValid
+    && resolvedVerdict.allow_plan === true
+    && ['entry','near_entry'].includes(currentVerdict)
+    && priceabilityState !== 'unpriceable'
+    && !terminalAvoid
+    && !invalidatedState
+    && !missedState
+    && !staleState
+    && !expiredState
+    && !brokenStructure
+    && !firstTargetTooClose
+  );
+  return {
+    mode:constructive ? 'recover' : 'blocked',
+    constructive,
+    specificBlock,
+    reason,
+    reasonCode,
+    clearBlockedMetadata:constructive,
+    preserveBlockedSnapshot:!constructive,
+    stalePlanBlockers:currentPlanBlockers.staleFields
+  };
+}
+
 function blockedScannerEstimatePlanSnapshot(record){
   const item = record && typeof record === 'object' ? record : {};
   const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
@@ -19049,7 +19240,10 @@ function blockedScannerEstimatePlanSnapshot(record){
     || riskStatus === 'plan_blocked'
     || !!blockedReason
     || plan.firstTargetTooClose === true;
-  return blocked ? normalizeStoredPlanSnapshot(plan) : null;
+  const globalVerdict = resolveGlobalVerdict(item);
+  const displayedPlan = deriveCurrentPlanState(plan.entry, plan.stop, plan.firstTarget, item.marketData && item.marketData.currency);
+  const authority = resolveScannerEstimatePlanAuthority(item, globalVerdict, displayedPlan);
+  return blocked && authority.preserveBlockedSnapshot ? scannerEstimateBlockedPlanSnapshotRecord(plan) : null;
 }
 
 function planSnapshotSummary(snapshot, options = {}){
@@ -40224,51 +40418,130 @@ function applyGlobalVerdictGates(record, options = {}){
     }
     changed = true;
   }
-  if(item.plan && !globalVerdict.allow_plan){
+  if(item.plan){
     const planSource = String(item.plan.source || '').trim().toLowerCase();
-    const preserveScannerEstimatePlan = planSource === 'scanner_estimate'
+    const scannerEstimatePlan = planSource === 'scanner_estimate';
+    const preserveScannerEstimatePlan = scannerEstimatePlan
       && [item.plan.entry, item.plan.stop, item.plan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
-    const planBlockState = String(globalVerdict.plan_status || globalVerdict.planStatusKey || '').trim().toLowerCase();
-    const scannerEstimateMustDemote = preserveScannerEstimatePlan && (
-      !!String(globalVerdict.unpriceableBlockReason || '').trim()
-      || globalVerdict.priceability_state === 'unpriceable'
-      || ['invalid','needs_adjustment','unrealistic_rr'].includes(planBlockState)
-      || item.plan.firstTargetTooClose === true
-    );
-    const hadPlan = !!(item.plan.entry || item.plan.stop || item.plan.firstTarget);
-    if(hadPlan && !preserveScannerEstimatePlan){
-      item.plan.entry = '';
-      item.plan.stop = '';
-      item.plan.firstTarget = '';
-      item.plan.hasValidPlan = false;
-      item.plan.riskStatus = 'plan_blocked';
-      changed = true;
-    }else if(scannerEstimateMustDemote){
-      if(item.plan.hasValidPlan !== false){
+    const scannerEstimateDisplayedPlan = preserveScannerEstimatePlan
+      ? deriveCurrentPlanState(item.plan.entry, item.plan.stop, item.plan.firstTarget, item.marketData && item.marketData.currency)
+      : null;
+    const scannerEstimateAuthority = scannerEstimatePlan
+      ? resolveScannerEstimatePlanAuthority(item, globalVerdict, scannerEstimateDisplayedPlan)
+      : null;
+    if(scannerEstimateAuthority){
+      item.watchlist.debug.scanner_estimate_authority_mode = scannerEstimateAuthority.mode;
+      item.watchlist.debug.scanner_estimate_authority_reason_code = scannerEstimateAuthority.reasonCode || '';
+      item.watchlist.debug.scanner_estimate_authority_reason = scannerEstimateAuthority.reason || '';
+    }
+    if(scannerEstimateAuthority && scannerEstimateAuthority.mode === 'recover' && scannerEstimateDisplayedPlan){
+      if(item.plan.hasValidPlan !== true){
+        item.plan.hasValidPlan = true;
+        changed = true;
+      }
+      if(item.plan.status !== String(scannerEstimateDisplayedPlan.status || '')){
+        item.plan.status = String(scannerEstimateDisplayedPlan.status || '');
+        changed = true;
+      }
+      if(item.plan.tradeability !== String(scannerEstimateDisplayedPlan.tradeability || '')){
+        item.plan.tradeability = String(scannerEstimateDisplayedPlan.tradeability || '');
+        changed = true;
+      }
+      if(item.plan.riskStatus !== String(scannerEstimateDisplayedPlan.riskFit && scannerEstimateDisplayedPlan.riskFit.risk_status || '')){
+        item.plan.riskStatus = String(scannerEstimateDisplayedPlan.riskFit && scannerEstimateDisplayedPlan.riskFit.risk_status || '');
+        changed = true;
+      }
+      if(scannerEstimateAuthority.stalePlanBlockers && scannerEstimateAuthority.stalePlanBlockers.planValidationState && item.plan.planValidationState){
+        item.plan.planValidationState = '';
+        changed = true;
+      }
+      if(scannerEstimateAuthority.stalePlanBlockers && scannerEstimateAuthority.stalePlanBlockers.triggerState && item.plan.triggerState){
+        item.plan.triggerState = '';
+        changed = true;
+      }
+      if(scannerEstimateAuthority.stalePlanBlockers && scannerEstimateAuthority.stalePlanBlockers.missedState && item.plan.missedState){
+        item.plan.missedState = '';
+        changed = true;
+      }
+      if(scannerEstimateAuthority.stalePlanBlockers && scannerEstimateAuthority.stalePlanBlockers.invalidatedState && item.plan.invalidatedState){
+        item.plan.invalidatedState = '';
+        changed = true;
+      }
+      if(item.plan.blockedReason){
+        item.plan.blockedReason = '';
+        changed = true;
+      }
+      if(item.plan.blockedReasonCode){
+        item.plan.blockedReasonCode = '';
+        changed = true;
+      }
+    }else if(globalVerdict.allow_plan !== true || (scannerEstimateAuthority && scannerEstimateAuthority.mode === 'blocked' && scannerEstimateAuthority.specificBlock)){
+      const planBlockState = String(globalVerdict.plan_status || globalVerdict.planStatusKey || '').trim().toLowerCase();
+      const scannerEstimateMustDemote = preserveScannerEstimatePlan && (
+        !!String(globalVerdict.unpriceableBlockReason || '').trim()
+        || globalVerdict.priceability_state === 'unpriceable'
+        || ['invalid','needs_adjustment','unrealistic_rr'].includes(planBlockState)
+        || item.plan.firstTargetTooClose === true
+        || !!(scannerEstimateAuthority && scannerEstimateAuthority.specificBlock)
+      );
+      const hadPlan = !!(item.plan.entry || item.plan.stop || item.plan.firstTarget);
+      if(hadPlan && !preserveScannerEstimatePlan){
+        item.plan.entry = '';
+        item.plan.stop = '';
+        item.plan.firstTarget = '';
         item.plan.hasValidPlan = false;
-        changed = true;
-      }
-      if(item.plan.status !== 'invalid'){
-        item.plan.status = 'invalid';
-        changed = true;
-      }
-      if(item.plan.tradeability !== 'invalid'){
-        item.plan.tradeability = 'invalid';
-        changed = true;
-      }
-      if(item.plan.riskStatus !== 'plan_blocked'){
         item.plan.riskStatus = 'plan_blocked';
         changed = true;
+      }else if(scannerEstimateMustDemote){
+        if(item.plan.hasValidPlan !== false){
+          item.plan.hasValidPlan = false;
+          changed = true;
+        }
+        if(item.plan.status !== 'invalid'){
+          item.plan.status = 'invalid';
+          changed = true;
+        }
+        if(item.plan.tradeability !== 'invalid'){
+          item.plan.tradeability = 'invalid';
+          changed = true;
+        }
+        if(item.plan.riskStatus !== 'plan_blocked'){
+          item.plan.riskStatus = 'plan_blocked';
+          changed = true;
+        }
+        if((!scannerEstimateAuthority || !scannerEstimateAuthority.specificBlock) && item.plan.planValidationState !== 'needs_replan'){
+          item.plan.planValidationState = 'needs_replan';
+          changed = true;
+        }
       }
-      if(item.plan.planValidationState !== 'needs_replan'){
-        item.plan.planValidationState = 'needs_replan';
+      const blockedMessage = globalVerdict.reason || globalVerdict.downgrade_reason || 'Blocked';
+      const existingReasonCode = scannerEstimatePlan
+        ? String(item.plan.blockedReasonCode || '').trim().toLowerCase()
+        : '';
+      const nextReasonCode = scannerEstimatePlan
+        ? String(scannerEstimateAuthority && scannerEstimateAuthority.reasonCode || '').trim().toLowerCase()
+        : '';
+      const preserveSpecificReason = scannerEstimatePlan
+        && scannerEstimateAuthority
+        && scannerEstimateAuthority.specificBlock
+        && scannerEstimateAuthorityReasonPriority(existingReasonCode) >= scannerEstimateAuthorityReasonPriority(nextReasonCode);
+      if(scannerEstimatePlan && scannerEstimateAuthority && scannerEstimateAuthority.reasonCode && !preserveSpecificReason){
+        if(item.plan.blockedReason !== scannerEstimateAuthority.reason){
+          item.plan.blockedReason = scannerEstimateAuthority.reason;
+          changed = true;
+        }
+        if(item.plan.blockedReasonCode !== scannerEstimateAuthority.reasonCode){
+          item.plan.blockedReasonCode = scannerEstimateAuthority.reasonCode;
+          changed = true;
+        }
+      }else if(!scannerEstimatePlan && !item.plan.blockedReason && blockedMessage){
+        item.plan.blockedReason = blockedMessage;
+        changed = true;
+      }else if(scannerEstimatePlan && !scannerEstimateAuthority?.specificBlock && !item.plan.blockedReason && blockedMessage){
+        item.plan.blockedReason = blockedMessage;
+        item.plan.blockedReasonCode = 'resolver_block';
         changed = true;
       }
-    }
-    const blockedMessage = globalVerdict.reason || globalVerdict.downgrade_reason || 'Blocked';
-    if(item.plan.blockedReason !== blockedMessage){
-      item.plan.blockedReason = blockedMessage;
-      changed = true;
     }
   }
   return {changed, globalVerdict};
