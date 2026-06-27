@@ -16719,26 +16719,11 @@ function getPlanUiState(record, options = {}){
       ? options.planCheckState
       : (item.plan && item.plan.planValidationState || '')
   ).trim();
-  const rewardRisk = displayedPlan.rewardRisk && typeof displayedPlan.rewardRisk === 'object' ? displayedPlan.rewardRisk : {};
   const rrRatio = actionableRrValueForPlan(displayedPlan);
-  const setupState = options.setupState || '';
-  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const positionSize = numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size);
-  const firstTargetTooClose = rewardRisk.valid
-    && Number.isFinite(rewardRisk.rewardPerShare)
-    && Number.isFinite(rewardRisk.riskPerShare)
-    && rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare);
-  const planRealism = evaluatePlanRealism(item, {
-    displayedPlan,
-    derivedStates,
-    displayStage:options.displayStage || 'Watch',
-    setupState
-  });
   let stateKey = 'invalid';
 
-  if(setupState === 'broken'){
-    stateKey = 'invalid';
-  }else if(displayedPlan.status === 'missing'){
+  if(displayedPlan.status === 'missing'){
     stateKey = hasAnyPlanFields(item) ? 'invalid' : 'missing';
   }else if(displayedPlan.status !== 'valid'){
     stateKey = 'invalid';
@@ -16748,14 +16733,6 @@ function getPlanUiState(record, options = {}){
     stateKey = 'invalid';
   }else if(rrRatio > 12){
     stateKey = 'unrealistic_rr';
-  }else if(
-    rrRatio > 8
-    || firstTargetTooClose
-    || ['needs_replan','pending_validation'].includes(planCheckState)
-    || planRealism.optimistic_target_flag
-    || planRealism.rr_realism === 'low'
-  ){
-    stateKey = 'needs_adjustment';
   }else{
     stateKey = 'valid';
   }
@@ -17525,7 +17502,6 @@ function legacyResolveFinalStateContract(record, options = {}){
   const hardStructureBroken = deadCheck.dead || structureState === 'broken' || trendState === 'broken';
   const planInvalid = planUiState.state === 'invalid';
   const planMissing = planUiState.state === 'missing';
-  const planNeedsAdjustment = planUiState.state === 'needs_adjustment';
   const planUnrealistic = planUiState.state === 'unrealistic_rr';
   const zeroShares = !Number.isFinite(positionSize) || positionSize < 1;
   const riskTooWide = riskStatus === 'too_wide' || (zeroShares && displayedPlan.status === 'valid');
@@ -18732,7 +18708,7 @@ function executionDowngradeVerdictForRecord(record, options = {}){
   if(planUiState.state === 'invalid' || planUiState.state === 'unrealistic_rr') return 'Watch';
   if(!Number.isFinite(positionSize) || positionSize < 1) return 'Watch';
   if(displayedPlan.tradeability === 'too_expensive' || displayedPlan.affordability === 'not_affordable') return 'Watch';
-  if(planUiState.state === 'needs_adjustment' || displayedPlan.status !== 'valid' || planValidationState === 'needs_replan') return 'Watch';
+  if(displayedPlan.status !== 'valid' || planValidationState === 'needs_replan') return 'Watch';
   return '';
 }
 
@@ -24198,7 +24174,6 @@ function rankTickerForFocus(record){
   else if(view.convictionTier === 'Cautious') score += 10;
   if(view.warningState && view.warningState.showWarning) score -= 10;
   if(view.planUiState.state === 'valid') score += 8;
-  else if(view.planUiState.state === 'needs_adjustment') score -= 4;
   else if(view.planUiState.state === 'unrealistic_rr') score -= 20;
   if(item.plan.planValidationState === 'stale' || item.plan.triggerState === 'stale') score -= 80;
   if(Number.isFinite(view.rrValue)) score += Math.min(view.rrValue, 5);
@@ -24291,7 +24266,7 @@ function deriveActionStateForRecord(record){
     stage = 'avoid';
   }else if(executionCapitalHeavy(displayedPlan)){
     stage = 'needs_plan';
-  }else if(planUiState.state === 'unrealistic_rr' || planUiState.state === 'needs_adjustment'){
+  }else if(planUiState.state === 'unrealistic_rr'){
     stage = 'needs_plan';
   }else if(planValidationState === 'needs_replan'){
     stage = 'needs_plan';
