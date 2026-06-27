@@ -3826,13 +3826,11 @@ function buildTrackDiagnosticSnapshot(record){
       ? item.watchlist.presentation
       : null;
     const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
-    const simplifiedState = persistedPresentation && persistedPresentation.simplifiedState && typeof persistedPresentation.simplifiedState === 'object'
-      ? persistedPresentation.simplifiedState
-      : resolveSimplifiedStateForWatchlistPresentation(item, {
-        surface:'track',
-        source:'diagnostic_snapshot',
-        reason:'diagnostic_snapshot'
-      });
+    const simplifiedState = resolveSimplifiedStateForWatchlistPresentation(item, {
+      surface:'track',
+      source:'diagnostic_snapshot',
+      reason:'diagnostic_snapshot'
+    });
     const simplifiedDebug = simplifiedState.debug && typeof simplifiedState.debug === 'object'
       ? simplifiedState.debug
       : {};
@@ -3845,19 +3843,15 @@ function buildTrackDiagnosticSnapshot(record){
       item.plan && item.plan.firstTarget,
       item.marketData && item.marketData.currency
     ), derivedStates);
-    const globalVerdict = persistedPresentation && persistedPresentation.globalVerdict && typeof persistedPresentation.globalVerdict === 'object'
-      ? persistedPresentation.globalVerdict
-      : (simplifiedDebug.resolvedState
+    const globalVerdict = (simplifiedDebug.resolvedState
       ? simplifiedDebug.resolvedState
       : resolveGlobalVerdict(item));
     const priority = watchlistPriorityForRecord(item, {lifecycleSnapshot});
     const persistedSharedPresentation = persistedPresentation && persistedPresentation.sharedPresentation && typeof persistedPresentation.sharedPresentation === 'object'
       ? persistedPresentation.sharedPresentation
       : null;
-    const diagnosticsSourceOfTruth = persistedSharedPresentation
-      ? 'watchlist_persisted_presentation'
-      : 'live_recomputed_fallback';
-    const sharedPresentation = persistedSharedPresentation || buildSharedReviewTrackPresentation(item, {
+    const diagnosticsSourceOfTruth = 'live_recomputed_fallback';
+    const sharedPresentation = buildSharedReviewTrackPresentation(item, {
       surface:'track',
       simplifiedState,
       lifecycleSnapshot,
@@ -3916,7 +3910,9 @@ function buildTrackDiagnosticSnapshot(record){
       avoidTriggerSource:String(simplifiedState.avoidTriggerSource || ''),
       terminalAvoidApplied:simplifiedState.terminalAvoidApplied === true,
       divergenceDetected:false,
-      lastReviewedAt:String(item.review && item.review.lastReviewedAt || '')
+      lastReviewedAt:String(item.review && item.review.lastReviewedAt || ''),
+      persistedPresentationAvailable:persistedSharedPresentation != null,
+      persistedPresentationCacheOnly:persistedSharedPresentation != null
     };
     return {
       ticker:String(item.ticker || ''),
@@ -7735,21 +7731,10 @@ function buildWatchlistSimplifiedStateCacheKey(record, options = {}){
 
 function resolveSimplifiedStateForWatchlistPresentation(record, options = {}){
   const item = normalizeTickerRecord(record || {});
-  const persistedPresentation = item.watchlist && item.watchlist.presentation && typeof item.watchlist.presentation === 'object'
-    ? item.watchlist.presentation
-    : null;
   const explicitSimplified = options.simplifiedState && typeof options.simplifiedState === 'object'
     ? options.simplifiedState
     : null;
   if(explicitSimplified) return explicitSimplified;
-  if(
-    persistedPresentation
-    && persistedPresentation.simplifiedState
-    && typeof persistedPresentation.simplifiedState === 'object'
-    && options.forceRecompute !== true
-  ){
-    return persistedPresentation.simplifiedState;
-  }
 
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   const key = buildWatchlistSimplifiedStateCacheKey(item, options);
@@ -12507,18 +12492,14 @@ function renderWatchlistCardElement(record, options = {}){
   ), derivedStates);
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
   const rrResolution = resolveScannerStateWithTrace(record);
-  const globalVerdict = persistedPresentation && persistedPresentation.globalVerdict && typeof persistedPresentation.globalVerdict === 'object'
-    ? persistedPresentation.globalVerdict
-    : (simplifiedDebug.resolvedState
-      ? simplifiedDebug.resolvedState
-      : null);
+  const globalVerdict = simplifiedDebug.resolvedState
+    ? simplifiedDebug.resolvedState
+    : null;
   const persistedSharedPresentation = persistedPresentation && persistedPresentation.sharedPresentation && typeof persistedPresentation.sharedPresentation === 'object'
     ? persistedPresentation.sharedPresentation
     : null;
-  const presentationSourceOfTruth = persistedSharedPresentation
-    ? 'watchlist_persisted_presentation'
-    : 'live_recomputed_fallback';
-  const sharedPresentation = persistedSharedPresentation || buildSharedReviewTrackPresentation(record, {
+  const presentationSourceOfTruth = 'live_recomputed_fallback';
+  const sharedPresentation = buildSharedReviewTrackPresentation(record, {
     surface:'track',
     simplifiedState,
     lifecycleSnapshot,
@@ -19022,7 +19003,9 @@ function scannerEstimateAuthorityReasonPriority(reasonCode){
 }
 
 function scannerEstimateAuthorityReasonFromText(reason){
-  const text = String(reason || '').trim().toLowerCase().replace(/\s+/g, '_');
+  const raw = String(reason || '').trim().toLowerCase();
+  if(!raw || !/^[a-z0-9_-]+$/.test(raw)) return '';
+  const text = raw.replace(/-/g, '_');
   if(!text) return '';
   if(['target_too_close'].includes(text)) return 'target_too_close';
   if(['invalidated','technical_invalidation'].includes(text)) return 'invalidated';
@@ -19039,12 +19022,34 @@ function resolveScannerEstimateStructuredAuthorityCode(globalVerdict){
   const resolvedVerdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
   const explicitInvalidationCode = String(resolvedVerdict.explicit_invalidation_reason_code || '').trim().toLowerCase();
   if(explicitInvalidationCode){
-    return scannerEstimateAuthorityReasonFromText(explicitInvalidationCode);
+    switch(explicitInvalidationCode.replace(/-/g, '_')){
+      case 'setup_invalidated':
+      case 'invalidated':
+      case 'technical_invalidation':
+        return 'invalidated';
+      case 'broken_structure':
+      case 'broken_trend':
+      case 'stop_breach':
+        return 'broken_structure';
+      case 'missed':
+      case 'missed_setup':
+        return 'missed';
+      case 'plan_premature_or_stale':
+      case 'stale_trigger':
+        return 'stale_trigger';
+      case 'target_too_close':
+        return 'target_too_close';
+      default:
+        return scannerEstimateAuthorityReasonFromText(explicitInvalidationCode);
+    }
   }
   const blockerCode = String(
     resolvedVerdict.blockerCode
       || resolvedVerdict.blocker_code
       || resolvedVerdict.primary_blocker_code
+      || resolvedVerdict.reasonCode
+      || resolvedVerdict.reason_code
+      || resolvedVerdict.downgrade_reason_code
       || ''
   ).trim().toLowerCase();
   switch(blockerCode){
@@ -19078,7 +19083,6 @@ function isCurrentTechnicalInvalidation(record, globalVerdict, displayedPlan){
   const trendState = String(derivedStates.trendState || '').trim().toLowerCase();
   const planValidationState = String(currentPlan.planValidationState || plan.planValidationState || '').trim().toLowerCase();
   const triggerState = String(currentPlan.triggerState || plan.triggerState || '').trim().toLowerCase();
-  const explicitInvalidationReason = String(resolvedVerdict.explicit_invalidation_reason || '').trim();
   const explicitInvalidationReasonCode = String(resolvedVerdict.explicit_invalidation_reason_code || '').trim().toLowerCase();
   const lifecycleStage = String(lifecycle.stage || '').trim().toLowerCase();
   const lifecycleStatus = String(lifecycle.status || '').trim().toLowerCase();
@@ -19088,8 +19092,7 @@ function isCurrentTechnicalInvalidation(record, globalVerdict, displayedPlan){
     && Number.isFinite(stopPrice)
     && currentPrice <= (stopPrice * 0.995);
   return !!(
-    explicitInvalidationReason
-    || ['invalidated','technical_invalidation','broken_structure','broken_trend','stop_breach'].includes(explicitInvalidationReasonCode)
+    ['invalidated','technical_invalidation','broken_structure','broken_trend','stop_breach'].includes(explicitInvalidationReasonCode)
     || planValidationState === 'invalidated'
     || triggerState === 'invalidated'
     || structureState === 'broken'
@@ -19127,13 +19130,13 @@ function resolveCurrentScannerEstimatePlanBlockers(record, globalVerdict, displa
   const currentTriggerState = String(currentPlan.triggerState || '').trim().toLowerCase();
   const persistedMissedState = String(plan.missedState || '').trim();
   const persistedInvalidatedState = String(plan.invalidatedState || '').trim();
-  const explicitInvalidationReason = String(resolvedVerdict.explicit_invalidation_reason || '').trim();
+  const explicitInvalidationReasonCode = String(resolvedVerdict.explicit_invalidation_reason_code || '').trim().toLowerCase();
   const lifecycleStatus = String(lifecycle.status || '').trim().toLowerCase();
   const currentMissed = currentPlanValidationState === 'missed'
     || currentTriggerState === 'missed';
   const currentInvalidated = currentPlanValidationState === 'invalidated'
     || currentTriggerState === 'invalidated'
-    || !!explicitInvalidationReason;
+    || ['invalidated','technical_invalidation','broken_structure','broken_trend','stop_breach'].includes(explicitInvalidationReasonCode);
   const currentStale = currentPlanValidationState === 'stale'
     || currentTriggerState === 'stale'
     || lifecycleStatus === 'stale';
@@ -19194,16 +19197,14 @@ function resolveScannerEstimatePlanAuthority(record, globalVerdict, displayedPla
     && isCurrentTechnicalInvalidation(item, resolvedVerdict, currentPlan);
   const staleState = structuredAuthorityCode === 'stale_trigger'
     || currentPlanBlockers.currentStale;
-  const invalidatedState = !!explicitInvalidationReason
-    || structuredAuthorityCode === 'invalidated'
+  const invalidatedState = structuredAuthorityCode === 'invalidated'
     || corroboratedTechnicalInvalidation
     || currentPlanBlockers.currentInvalidated;
   const missedState = structuredAuthorityCode === 'missed'
     || currentPlanBlockers.currentMissed;
   const expiredState = ['expired','dead','entered','exited','cancelled'].includes(lifecycleStage)
     || ['closed','dead'].includes(lifecycleStatus);
-  const brokenStructure = /broken|structure|stop[_\s-]?breach/i.test(explicitInvalidationReason)
-    || ['broken_structure','broken_trend','stop_breach'].includes(explicitInvalidationReasonCode)
+  const brokenStructure = ['broken_structure','broken_trend','stop_breach'].includes(explicitInvalidationReasonCode)
     || structuredAuthorityCode === 'broken_structure';
   let reasonCode = '';
   let reason = '';
@@ -20363,16 +20364,6 @@ function watchlistStrictAvoidTruth(record, globalVerdict, lifecycleSnapshot){
 function watchlistPresentationBucketForRecord(record, options = {}){
   const item = normalizeTickerRecord(record || {});
   if(isWatchlistLiveRefreshPending(item.ticker)) return 'monitor';
-  const persistedSharedPresentation = item.watchlist
-    && item.watchlist.presentation
-    && typeof item.watchlist.presentation === 'object'
-    && item.watchlist.presentation.sharedPresentation
-    && typeof item.watchlist.presentation.sharedPresentation === 'object'
-    ? item.watchlist.presentation.sharedPresentation
-    : null;
-  if(persistedSharedPresentation && persistedSharedPresentation.visualBucket){
-    return normalizeVisualBucketForPairing(persistedSharedPresentation.visualBucket || 'monitor');
-  }
   const simplifiedState = resolveSimplifiedStateForWatchlistPresentation(item, {
     ...options,
     surface:'track',
@@ -20462,14 +20453,15 @@ function resolveTrackPresentationModel(record, globalVerdict, lifecycleSnapshot,
   const viabilityBranchId = String(verdictSource && (verdictSource.viabilityBranchId || verdictSource.viability_branch_id) || '').trim().toLowerCase();
   const setupScore = Number(setupScoreForRecord(item));
   const explicitInvalidationReason = String(verdictSource && verdictSource.explicit_invalidation_reason || '').trim().toLowerCase();
-  const explicitInvalidation = explicitInvalidationReason && explicitInvalidationReason !== '(none)';
+  const explicitInvalidationAuthorityCode = resolveStructuredExplicitInvalidationAuthorityCode(verdictSource);
+  const explicitInvalidation = ['invalidated','broken_structure'].includes(explicitInvalidationAuthorityCode);
   const structuralAliveAtRefresh = String(lifecycleSnapshot && lifecycleSnapshot.structural_alive_at_refresh || '').trim().toLowerCase() === 'true';
   const avoidAllowedByStructureGuard = String(lifecycleSnapshot && lifecycleSnapshot.avoid_allowed_by_structure_gate || '').trim().toLowerCase() === 'true';
   const isTerminal = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict) || ['dead','expired'].includes(lifecycleState);
   const terminalByVerdict = ['avoid','dead','reject'].includes(rawFinalVerdict) || ['avoid','dead'].includes(normalizedFinalVerdict);
   const broken = structureEligibility === 'broken' || ['broken','invalid','failed'].includes(structureState);
   const avoidByBroken = broken;
-  const avoidByExplicitInvalidation = !!explicitInvalidation;
+  const avoidByExplicitInvalidation = explicitInvalidation;
   const rejectedByViabilityGate = !!(
     verdictSource
     && (
@@ -29993,22 +29985,18 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     ? persistedPresentation.sharedPresentation
     : null;
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
-  const globalVerdict = persistedPresentation && persistedPresentation.globalVerdict && typeof persistedPresentation.globalVerdict === 'object'
-    ? persistedPresentation.globalVerdict
-    : resolveGlobalVerdict(item);
-  const simplifiedState = persistedPresentation && persistedPresentation.simplifiedState && typeof persistedPresentation.simplifiedState === 'object'
-    ? persistedPresentation.simplifiedState
-    : resolveSimplifiedStateForSurface(item, 'track', {
-      log:false,
-      source:context,
-      reason:context
-    });
-  const sharedPresentation = persistedSharedPresentation || buildSharedReviewTrackPresentation(item, {
+  const globalVerdict = resolveGlobalVerdict(item);
+  const simplifiedState = resolveSimplifiedStateForSurface(item, 'track', {
+    log:false,
+    source:context,
+    reason:context
+  });
+  const sharedPresentation = buildSharedReviewTrackPresentation(item, {
     surface:'track',
     simplifiedState,
     lifecycleSnapshot,
     globalVerdict,
-    sourceOfTruth:persistedSharedPresentation ? 'watchlist_persisted_presentation' : 'live_recomputed_fallback',
+    sourceOfTruth:'live_recomputed_fallback',
     source:context,
     reason:context
   });
@@ -30029,6 +30017,8 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     resolvedSectionKey,
     decisionSummary:String(sharedPresentation.headline || sharedPresentation.statusText || '').trim(),
     actionGuidance:String(sharedPresentation.nextAction || sharedPresentation.actionLabel || '').trim(),
+    persistedPresentationAvailable:persistedSharedPresentation != null,
+    persistedPresentationCacheOnly:persistedSharedPresentation != null,
     capturedAt:new Date().toISOString(),
     source:'persisted_track_presentation'
   };
@@ -31001,6 +30991,23 @@ function withLiveRecordFromCache(liveRecord, cache){
   };
 }
 
+function resolveStructuredExplicitInvalidationAuthorityCode(source){
+  const item = source && typeof source === 'object' ? source : {};
+  const explicitCode = String(
+    item.explicit_invalidation_reason_code
+    || item.explicitInvalidationReasonCode
+    || item.reasonCode
+    || item.reason_code
+    || ''
+  ).trim().toLowerCase().replace(/-/g, '_');
+  if(['setup_invalidated','invalidated','technical_invalidation'].includes(explicitCode)) return 'invalidated';
+  if(['broken_structure','broken_trend','stop_breach'].includes(explicitCode)) return 'broken_structure';
+  if(['missed','missed_setup'].includes(explicitCode)) return 'missed';
+  if(['plan_premature_or_stale','stale_trigger'].includes(explicitCode)) return 'stale_trigger';
+  if(['target_too_close'].includes(explicitCode)) return 'target_too_close';
+  return '';
+}
+
 function hasProjectionTerminalAvoidReason(snapshot, bundle){
   const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
   const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
@@ -31042,17 +31049,9 @@ function hasProjectionTerminalAvoidReason(snapshot, bundle){
     || globalVerdict.viability
     || ''
   ).trim().toLowerCase();
-  const explicitInvalidationReason = String(
-    source.explicitInvalidationReason
-    || source.explicit_invalidation_reason
-    || visualState.explicit_invalidation_reason
-    || globalVerdict.explicit_invalidation_reason
-    || ''
-  ).trim().toLowerCase();
-  const hasExplicitInvalidation = !!(
-    explicitInvalidationReason
-    && !['(none)', 'none', 'n/a'].includes(explicitInvalidationReason)
-  );
+  const explicitInvalidationAuthorityCode = resolveStructuredExplicitInvalidationAuthorityCode(source)
+    || resolveStructuredExplicitInvalidationAuthorityCode(visualState)
+    || resolveStructuredExplicitInvalidationAuthorityCode(globalVerdict);
   return !!(
     source.terminalAvoidApplied === true
     || source.terminal_avoid_applied === true
@@ -31064,7 +31063,7 @@ function hasProjectionTerminalAvoidReason(snapshot, bundle){
     || ['broken', 'dead', 'invalid', 'failed'].includes(structureState)
     || ['terminal', 'terminal_avoid', 'structure_broken', 'explicit_invalidation', 'dead', 'avoid'].includes(avoidSource)
     || viability === 'reject'
-    || hasExplicitInvalidation
+    || ['invalidated','broken_structure'].includes(explicitInvalidationAuthorityCode)
   );
 }
 
@@ -40355,6 +40354,50 @@ function resolveGlobalVerdict(record){
       displayStage:globalVerdictLabel(verdict.final_verdict || '')
     });
   }
+  try{
+    if(debugFlagEnabled('PP_DEBUG_CANONICAL_INPUT')
+      && typeof window !== 'undefined'
+      && window.CanonicalResolverInput
+      && typeof window.CanonicalResolverInput.buildCanonicalResolverInputComparison === 'function'){
+      const canonicalComparison = window.CanonicalResolverInput.buildCanonicalResolverInputComparison(item, {
+        surface:'live_resolver_entrypoint',
+        mode:'diagnostic',
+        derivedStates,
+        effectivePlan,
+        displayedPlan
+      });
+      window.__canonicalResolverInputDebugByTicker = window.__canonicalResolverInputDebugByTicker && typeof window.__canonicalResolverInputDebugByTicker === 'object'
+        ? window.__canonicalResolverInputDebugByTicker
+        : {};
+      if(canonicalComparison && canonicalComparison.ticker){
+        window.__canonicalResolverInputDebugByTicker[canonicalComparison.ticker] = canonicalComparison;
+        const debugTickerKeys = Object.keys(window.__canonicalResolverInputDebugByTicker);
+        if(debugTickerKeys.length > 50){
+          debugTickerKeys
+            .sort((left, right) => {
+              const leftAt = String(window.__canonicalResolverInputDebugByTicker[left] && window.__canonicalResolverInputDebugByTicker[left].capturedAt || '');
+              const rightAt = String(window.__canonicalResolverInputDebugByTicker[right] && window.__canonicalResolverInputDebugByTicker[right].capturedAt || '');
+              return leftAt.localeCompare(rightAt);
+            })
+            .slice(0, debugTickerKeys.length - 50)
+            .forEach(key => {
+              delete window.__canonicalResolverInputDebugByTicker[key];
+            });
+        }
+      }
+      uiState.canonicalResolverInputLastComparison = canonicalComparison || null;
+      if(canonicalComparison && canonicalComparison.hasDifferences && typeof console !== 'undefined' && console.info){
+        console.info('[CANONICAL_RESOLVER_INPUT_DIFF]', canonicalComparison);
+      }
+    }
+  }catch(error){
+    if(debugFlagEnabled('PP_DEBUG_CANONICAL_INPUT') && typeof console !== 'undefined' && console.warn){
+      console.warn('[CANONICAL_RESOLVER_INPUT_DIFF_FAILED]', {
+        ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
+        message:String(error && error.message || error || 'canonical_input_diff_failed')
+      });
+    }
+  }
   return verdict;
 }
 
@@ -40577,6 +40620,18 @@ function applyGlobalVerdictGates(record, options = {}){
         }
       }
       const blockedMessage = globalVerdict.reason || globalVerdict.downgrade_reason || 'Blocked';
+      const structuredPlanBlockCode = scannerEstimatePlan
+        ? String(scannerEstimateAuthority && scannerEstimateAuthority.reasonCode || '').trim().toLowerCase()
+        : (
+          resolveScannerEstimateStructuredAuthorityCode(globalVerdict)
+          || (
+            (globalVerdict.allow_plan !== true
+              || globalVerdict.priceability_state === 'unpriceable'
+              || ['invalid','needs_adjustment','unrealistic_rr'].includes(planBlockState))
+              ? 'resolver_block'
+              : ''
+          )
+        );
       const existingReasonCode = scannerEstimatePlan
         ? String(item.plan.blockedReasonCode || '').trim().toLowerCase()
         : '';
@@ -40596,13 +40651,25 @@ function applyGlobalVerdictGates(record, options = {}){
           item.plan.blockedReasonCode = scannerEstimateAuthority.reasonCode;
           changed = true;
         }
-      }else if(!scannerEstimatePlan && !item.plan.blockedReason && blockedMessage){
+      }else if(!scannerEstimatePlan && structuredPlanBlockCode){
+        if(item.plan.blockedReasonCode !== structuredPlanBlockCode){
+          item.plan.blockedReasonCode = structuredPlanBlockCode;
+          changed = true;
+        }
+        if(blockedMessage && item.plan.blockedReason !== blockedMessage){
+          item.plan.blockedReason = blockedMessage;
+          changed = true;
+        }
+      }else if(scannerEstimatePlan && structuredPlanBlockCode && !scannerEstimateAuthority?.specificBlock){
         item.plan.blockedReason = blockedMessage;
-        changed = true;
-      }else if(scannerEstimatePlan && !scannerEstimateAuthority?.specificBlock && !item.plan.blockedReason && blockedMessage){
-        item.plan.blockedReason = blockedMessage;
-        item.plan.blockedReasonCode = 'resolver_block';
-        changed = true;
+        if(item.plan.blockedReasonCode !== structuredPlanBlockCode){
+          item.plan.blockedReasonCode = structuredPlanBlockCode;
+          changed = true;
+        }
+        if(item.plan.blockedReason !== blockedMessage){
+          item.plan.blockedReason = blockedMessage;
+          changed = true;
+        }
       }
     }
   }

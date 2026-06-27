@@ -915,6 +915,7 @@ function runTesterProfileResetAssertions(){
     savedScannerUniverseKey:'pp_scanner_universe_saved',
     savedScannerUniverseMetaKey:'pp_scanner_universe_saved_meta',
     trackSectionStateKey:'pp_track_section_state_v1',
+    testerRecentBugReceiptsStorageKey:'pullbackPlaybookRecentBugReceiptsV1',
     removedKeys:[],
     rotateTesterId(){
       resetSandbox.__testerId = '55555555-5555-4555-8555-555555555555';
@@ -939,6 +940,7 @@ function runTesterProfileResetAssertions(){
     renderTradeGatewayHealth(){},
     renderTesterSetupPanel(){},
     renderTesterIdentityPanel(){},
+    renderRecentSubmittedBugs(){},
     setStatus(){},
     escapeHtml(value){ return String(value || ''); },
     currentTesterId(){ return resetSandbox.__testerId || '55555555-5555-4555-8555-555555555555'; }
@@ -950,7 +952,7 @@ function runTesterProfileResetAssertions(){
     throw new Error('resetTesterProfile must complete successfully in the happy path.');
   }
   const removed = new Set(resetSandbox.removedKeys);
-  ['pullbackPlaybookV3', 'pullbackPlaybookV3Lite', 'pullbackPlaybookSettingsV1', 'pullbackPlaybookRecordsLiteV1', 'pp_scanner_universe_saved', 'pp_scanner_universe_saved_meta', 'pp_track_section_state_v1'].forEach(storageKey => {
+  ['pullbackPlaybookV3', 'pullbackPlaybookV3Lite', 'pullbackPlaybookSettingsV1', 'pullbackPlaybookRecordsLiteV1', 'pp_scanner_universe_saved', 'pp_scanner_universe_saved_meta', 'pp_track_section_state_v1', 'pullbackPlaybookRecentBugReceiptsV1'].forEach(storageKey => {
     if(!removed.has(storageKey)){
       throw new Error(`resetTesterProfile must clear ${storageKey}.`);
     }
@@ -1778,6 +1780,7 @@ function runReviewProjectionAssertions(){
   vm.createContext(projectionSandbox);
   [
     'isAllowedCanonicalVisualPair',
+    'resolveStructuredExplicitInvalidationAuthorityCode',
     'hasProjectionTerminalAvoidReason',
     'terminalAvoidEvidenceForReviewCopy',
     'reviewCopyEvidence',
@@ -5607,6 +5610,12 @@ function runPlanSemanticsAssertions(){
     scanTypeForEvaluation:value => String(value || '20MA'),
     analysisDerivedStatesFromRecord:() => ({structureState:'intact', trendState:'uptrend', bounceState:'none', pullbackZone:'near_50ma', stabilisationState:'none', volumeState:'neutral'}),
     resolveGlobalVerdict:() => ({allow_plan:false, allow_watchlist:true, final_verdict:'watch', reason:'Wait', downgrade_reason:'Wait'}),
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid'].includes(safe)) return safe;
+      return safe || 'watch';
+    },
     watchlistRefreshStructureGate:() => ({
       refresh_demote_reason:'Structurally alive; keep on monitor.',
       structural_alive_at_refresh:true,
@@ -5634,6 +5643,12 @@ function runPlanSemanticsAssertions(){
     'hasAnyPlanFields',
     'effectivePlanForRecord',
     'planSourceForDiagnostics',
+    'scannerEstimateAuthorityReasonPriority',
+    'scannerEstimateAuthorityReasonFromText',
+    'resolveScannerEstimateStructuredAuthorityCode',
+    'isCurrentTechnicalInvalidation',
+    'resolveCurrentScannerEstimatePlanBlockers',
+    'resolveScannerEstimatePlanAuthority',
     'applyGlobalVerdictGates',
     'deriveCurrentPlanState',
     'planUiClass',
@@ -6226,11 +6241,423 @@ function runTrackPresentationAuthorityAssertions(){
       }
     }
   });
-  if(persistedScanWatch.canonicalVerdict !== 'watch' || persistedScanWatch.visualBucket !== 'diminishing' || persistedScanWatch.tone !== 'diminishing'){
-    throw new Error('Scan simplified pipeline must reuse persisted watch/diminishing authority for suppressed tracked avoids.');
+  if(persistedScanWatch.canonicalVerdict !== 'avoid' || persistedScanWatch.visualBucket !== 'avoid' || persistedScanWatch.tone !== 'avoid'){
+    throw new Error('Scan simplified pipeline must keep fresh canonical/presentation state instead of reusing persisted watch/diminishing authority.');
   }
-  if(persistedScanWatch.debug.sourceOfTruth !== 'watchlist_persisted_presentation' || persistedScanWatch.debug.persistedWatchAuthorityApplied !== true){
-    throw new Error('Scan simplified pipeline must label persisted watch-authority reuse honestly.');
+  if(persistedScanWatch.debug.persistedPresentationAvailable !== true
+    || persistedScanWatch.debug.persistedPresentationOverlayApplied !== true
+    || persistedScanWatch.debug.persistedPresentationAuthorityDisabled !== 'global_non_authoritative'){
+    throw new Error('Scan simplified pipeline must retain persisted presentation as cache/debug only, not authority.');
+  }
+  if(!persistedScanWatch.debug.persistedPresentationFeedback
+    || persistedScanWatch.debug.persistedPresentationFeedback.verdictConflict !== true
+    || persistedScanWatch.debug.persistedPresentationFeedback.bucketConflict !== true){
+    throw new Error('Scan simplified pipeline must report persisted presentation feedback conflicts when stale presentation disagrees with fresh state.');
+  }
+  const watchlistBucketSandbox = {
+    console,
+    uiState:{
+      watchlistRenderSignature:'',
+      watchlistPreparedModelCache:null,
+      watchlistPresentationStateCache:null
+    },
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
+    isWatchlistLiveRefreshPending(){
+      return false;
+    },
+    resolveSimplifiedStateForSurface(){
+      return {visualBucket:'monitor'};
+    },
+    normalizeVisualBucketForPairing(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(['entry','near_entry','diminishing','avoid'].includes(safe)) return safe;
+      return 'monitor';
+    },
+    resolveGlobalVerdict(){
+      return {final_verdict:'avoid'};
+    },
+    watchlistLifecycleSnapshot(){
+      return {state:'watch'};
+    },
+    watchlistPriorityForRecord(){
+      return {score:0};
+    },
+    resolveTrackPresentationModel(){
+      return {presentationBucket:'avoid', finalVerdict:'avoid'};
+    },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    }
+  };
+  vm.createContext(watchlistBucketSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'buildWatchlistSimplifiedStateCacheKey'), watchlistBucketSandbox, {filename:'app.js#buildWatchlistSimplifiedStateCacheKey'});
+  vm.runInContext(extractFunctionSource(appSource, 'resolveSimplifiedStateForWatchlistPresentation'), watchlistBucketSandbox, {filename:'app.js#resolveSimplifiedStateForWatchlistPresentation'});
+  vm.runInContext(extractFunctionSource(appSource, 'watchlistPresentationBucketForRecord'), watchlistBucketSandbox, {filename:'app.js#watchlistPresentationBucketForRecord'});
+  const freshBucket = watchlistBucketSandbox.watchlistPresentationBucketForRecord({
+    ticker:'NVDA',
+    watchlist:{
+      presentation:{
+        sharedPresentation:{visualBucket:'avoid'},
+        simplifiedState:{visualBucket:'avoid'},
+        globalVerdict:{final_verdict:'avoid'}
+      }
+    }
+  });
+  if(freshBucket !== 'monitor'){
+    throw new Error('Watchlist section placement must come from fresh simplified state, not embedded persisted presentation state.');
+  }
+  const projectionSandbox = {
+    console,
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
+    watchlistLifecycleSnapshot(){
+      return {state:'watch'};
+    },
+    resolveGlobalVerdict(){
+      return {final_verdict:'watch'};
+    },
+    resolveSimplifiedStateForSurface(){
+      return {canonicalVerdict:'watch', visualBucket:'monitor', tone:'monitor'};
+    },
+    buildSharedReviewTrackPresentation(item, options = {}){
+      const verdict = options.globalVerdict && options.globalVerdict.final_verdict || 'watch';
+      const simplified = options.simplifiedState || {};
+      return {
+        canonicalVerdict:String(simplified.canonicalVerdict || verdict || 'watch').trim().toLowerCase(),
+        finalVerdict:String(simplified.canonicalVerdict || verdict || 'watch').trim().toLowerCase(),
+        visualBucket:String(simplified.visualBucket || 'monitor').trim().toLowerCase(),
+        tone:String(simplified.tone || 'monitor').trim().toLowerCase(),
+        headline:'Fresh headline',
+        statusText:'Fresh headline',
+        nextAction:'Fresh action',
+        actionLabel:'Fresh action'
+      };
+    },
+    normalizeVisualBucketForPairing(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(['entry','near_entry','diminishing','avoid'].includes(safe)) return safe;
+      return 'monitor';
+    },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    },
+    watchlistRenderGroupForBucket(value){
+      return String(value || '').trim().toLowerCase();
+    }
+  };
+  vm.createContext(projectionSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'buildTrackProjectionSnapshotFromPersistedPresentation'), projectionSandbox, {filename:'app.js#buildTrackProjectionSnapshotFromPersistedPresentation'});
+  const freshProjection = projectionSandbox.buildTrackProjectionSnapshotFromPersistedPresentation({
+    ticker:'NVDA',
+    watchlist:{
+      presentation:{
+        sharedPresentation:{canonicalVerdict:'avoid', visualBucket:'avoid', tone:'avoid'},
+        globalVerdict:{final_verdict:'avoid'},
+        simplifiedState:{canonicalVerdict:'avoid', visualBucket:'avoid', tone:'avoid'}
+      }
+    }
+  });
+  if(freshProjection.canonicalVerdict !== 'watch'
+    || freshProjection.visualBucket !== 'monitor'
+    || freshProjection.tone !== 'monitor'
+    || freshProjection.persistedPresentationCacheOnly !== true){
+    throw new Error('Track projection snapshot must use fresh resolver/simplified state and keep embedded persisted presentation cache-only.');
+  }
+  const renderWatchlistSandbox = {
+    console,
+    __buildSharedReviewTrackPresentationArgs:null,
+    __trackVisiblePresentation:null,
+    uiState:{
+      watchlistRenderSignature:'',
+      watchlistPreparedModelCache:null,
+      watchlistPresentationStateCache:null
+    },
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
+    tickerRecordToWatchlistEntry(record){
+      return record ? {ticker:String(record.ticker || '').trim().toUpperCase()} : null;
+    },
+    buildFinalSetupView(){
+      return {};
+    },
+    isWatchlistLiveRefreshPending(){
+      return false;
+    },
+    isManualWatchlistRefreshInProgress(){
+      return false;
+    },
+    getTradingDaysRemaining(){
+      return 5;
+    },
+    lifecycleLabel(){
+      return 'Watch';
+    },
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
+    syncWatchlistLifecycle(){
+      return {state:'watch'};
+    },
+    watchlistLifecycleSnapshot(){
+      return {state:'watch'};
+    },
+    watchlistPriorityForRecord(){
+      return {score:0};
+    },
+    resolveSimplifiedStateForSurface(){
+      return {
+        canonicalVerdict:'watch',
+        visualBucket:'monitor',
+        tone:'monitor',
+        badgeLabel:'Watch',
+        actionLabel:'Watch',
+        mainBlocker:'Fresh blocker',
+        planStatus:'missing',
+        debug:{
+          resolvedState:{final_verdict:'watch'},
+          derivedStates:{structureEligibility:'alive', structureState:'strong', bounceState:'attempt', volumeState:'normal', priceabilityState:'priceable'}
+        }
+      };
+    },
+    analysisDerivedStatesFromRecord(){
+      return {structureEligibility:'alive', structureState:'strong', bounceState:'attempt', volumeState:'normal', priceabilityState:'priceable'};
+    },
+    deriveCurrentPlanState(){
+      return {status:'missing'};
+    },
+    applySetupConfirmationPlanGate(_record, displayedPlan){
+      return displayedPlan;
+    },
+    evaluateSetupQualityAdjustments(){
+      return {};
+    },
+    resolveScannerStateWithTrace(){
+      return {rawResolverVerdict:'watch', status:'watch'};
+    },
+    buildSharedReviewTrackPresentation(record, options = {}){
+      renderWatchlistSandbox.__buildSharedReviewTrackPresentationArgs = {
+        record,
+        options
+      };
+      return {
+        canonicalVerdict:'watch',
+        finalVerdict:'watch',
+        visualBucket:'monitor',
+        tone:'monitor',
+        badgeLabel:'Fresh Watch',
+        headline:'Fresh headline',
+        statusText:'Fresh headline',
+        nextAction:'Fresh action',
+        actionLabel:'Fresh action'
+      };
+    },
+    persistedTrackVisibleModelFromPresentation(sharedPresentation){
+      renderWatchlistSandbox.__trackVisiblePresentation = sharedPresentation;
+      throw new Error('__TRACK_VISIBLE_MODEL_CAPTURED__');
+    }
+  };
+  vm.createContext(renderWatchlistSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'buildWatchlistSimplifiedStateCacheKey'), renderWatchlistSandbox, {filename:'app.js#buildWatchlistSimplifiedStateCacheKey'});
+  vm.runInContext(extractFunctionSource(appSource, 'resolveSimplifiedStateForWatchlistPresentation'), renderWatchlistSandbox, {filename:'app.js#resolveSimplifiedStateForWatchlistPresentation'});
+  vm.runInContext(extractFunctionSource(appSource, 'renderWatchlistCardElement'), renderWatchlistSandbox, {filename:'app.js#renderWatchlistCardElement'});
+  const freshHelperState = renderWatchlistSandbox.resolveSimplifiedStateForWatchlistPresentation({
+    ticker:'NVDA',
+    watchlist:{
+      presentation:{
+        simplifiedState:{canonicalVerdict:'avoid', visualBucket:'avoid', tone:'avoid'}
+      }
+    }
+  }, {
+    surface:'track',
+    source:'phase6_runtime_test',
+    reason:'phase6_runtime_test'
+  });
+  if(String(freshHelperState && freshHelperState.visualBucket || '').trim().toLowerCase() !== 'monitor'){
+    throw new Error('resolveSimplifiedStateForWatchlistPresentation must recompute fresh state instead of reusing persisted simplifiedState.');
+  }
+  try{
+    renderWatchlistSandbox.renderWatchlistCardElement({
+      ticker:'NVDA',
+      lifecycle:{stage:'watch', status:'active'},
+      watchlist:{
+        presentation:{
+          sharedPresentation:{canonicalVerdict:'avoid', visualBucket:'avoid', tone:'avoid'},
+          globalVerdict:{final_verdict:'avoid'},
+          simplifiedState:{canonicalVerdict:'avoid', visualBucket:'avoid', tone:'avoid'}
+        },
+        debug:{}
+      },
+      plan:{},
+      marketData:{currency:'USD'}
+    }, {});
+    throw new Error('renderWatchlistCardElement sentinel did not fire.');
+  }catch(error){
+    if(String(error && error.message || error) !== '__TRACK_VISIBLE_MODEL_CAPTURED__'){
+      throw error;
+    }
+  }
+  if(!renderWatchlistSandbox.__buildSharedReviewTrackPresentationArgs
+    || !renderWatchlistSandbox.__trackVisiblePresentation){
+    throw new Error('Track card render behavioral harness must capture fresh shared presentation inputs.');
+  }
+  if(String(renderWatchlistSandbox.__buildSharedReviewTrackPresentationArgs.options.globalVerdict && renderWatchlistSandbox.__buildSharedReviewTrackPresentationArgs.options.globalVerdict.final_verdict || '').trim().toLowerCase() !== 'watch'
+    || String(renderWatchlistSandbox.__buildSharedReviewTrackPresentationArgs.options.simplifiedState && renderWatchlistSandbox.__buildSharedReviewTrackPresentationArgs.options.simplifiedState.visualBucket || '').trim().toLowerCase() !== 'monitor'
+    || String(renderWatchlistSandbox.__trackVisiblePresentation.visualBucket || '').trim().toLowerCase() !== 'monitor'){
+    throw new Error('Track card render must build trackVisibleModel from fresh canonical/simplified presentation, not embedded persisted presentation state.');
+  }
+  const trackDiagnosticSandbox = {
+    console,
+    uiState:{
+      watchlistRenderSignature:'',
+      watchlistPreparedModelCache:null,
+      watchlistPresentationStateCache:null
+    },
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
+    watchlistLifecycleSnapshot(){
+      return {state:'watch'};
+    },
+    resolveSimplifiedStateForSurface(){
+      return {
+        canonicalVerdict:'watch',
+        visualBucket:'monitor',
+        tone:'monitor',
+        structureEligibility:'alive',
+        structureState:'strong',
+        setupLocationState:'near_20ma',
+        priceabilityState:'priceable',
+        bounceState:'attempt',
+        planStatus:'missing',
+        resolvedRR:2.1,
+        entryGatePass:false,
+        nearEntryGatePass:false,
+        avoidTriggerSource:'',
+        terminalAvoidApplied:false,
+        debug:{
+          resolvedState:{
+            final_verdict:'watch',
+            viability:'watch',
+            finalVerdict:'watch'
+          },
+          derivedStates:{
+            structureEligibility:'alive',
+            structureState:'strong',
+            bounceState:'attempt',
+            volumeState:'normal',
+            priceabilityState:'priceable'
+          }
+        }
+      };
+    },
+    analysisDerivedStatesFromRecord(){
+      return {
+        structureEligibility:'alive',
+        structureState:'strong',
+        bounceState:'attempt',
+        volumeState:'normal',
+        priceabilityState:'priceable'
+      };
+    },
+    deriveCurrentPlanState(){
+      return {status:'missing'};
+    },
+    applySetupConfirmationPlanGate(_record, displayedPlan){
+      return displayedPlan;
+    },
+    resolveGlobalVerdict(){
+      return {final_verdict:'watch', viability:'watch'};
+    },
+    watchlistPriorityForRecord(){
+      return {score:0};
+    },
+    buildSharedReviewTrackPresentation(_record, options = {}){
+      return {
+        canonicalVerdict:String(options.simplifiedState && options.simplifiedState.canonicalVerdict || 'watch').trim().toLowerCase(),
+        visualBucket:String(options.simplifiedState && options.simplifiedState.visualBucket || 'monitor').trim().toLowerCase(),
+        tone:String(options.simplifiedState && options.simplifiedState.tone || 'monitor').trim().toLowerCase(),
+        mainBlocker:'Fresh blocker'
+      };
+    },
+    persistedTrackVisibleModelFromPresentation(sharedPresentation){
+      return {
+        canonicalVerdict:sharedPresentation.canonicalVerdict,
+        visibleBucket:sharedPresentation.visualBucket,
+        tone:sharedPresentation.tone
+      };
+    },
+    resolvePlanVisibility(){
+      return {};
+    },
+    buildConsistencyAuditRows(){
+      return [];
+    },
+    safeDiagnosticClone(value){
+      return value;
+    }
+  };
+  vm.createContext(trackDiagnosticSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'buildWatchlistSimplifiedStateCacheKey'), trackDiagnosticSandbox, {filename:'app.js#buildWatchlistSimplifiedStateCacheKey'});
+  vm.runInContext(extractFunctionSource(appSource, 'resolveSimplifiedStateForWatchlistPresentation'), trackDiagnosticSandbox, {filename:'app.js#resolveSimplifiedStateForWatchlistPresentation'});
+  vm.runInContext(extractFunctionSource(appSource, 'buildTrackDiagnosticSnapshot'), trackDiagnosticSandbox, {filename:'app.js#buildTrackDiagnosticSnapshot'});
+  const freshDiagnostic = trackDiagnosticSandbox.buildTrackDiagnosticSnapshot({
+    ticker:'NVDA',
+    watchlist:{
+      presentation:{
+        sharedPresentation:{
+          canonicalVerdict:'avoid',
+          visualBucket:'diminishing',
+          tone:'diminishing'
+        },
+        simplifiedState:{
+          canonicalVerdict:'avoid',
+          visualBucket:'avoid',
+          tone:'avoid',
+          structureEligibility:'broken',
+          priceabilityState:'unpriceable'
+        },
+        globalVerdict:{
+          final_verdict:'avoid'
+        }
+      },
+      debug:{}
+    },
+    watchlistVisualState:{
+      trackDebug:{
+        visibleModel:{canonicalVerdict:'avoid', visibleBucket:'avoid', tone:'avoid'}
+      }
+    },
+    plan:{},
+    marketData:{currency:'USD'},
+    review:{}
+  });
+  if(!freshDiagnostic
+    || freshDiagnostic.snapshotError
+    || !freshDiagnostic.simplifiedState
+    || freshDiagnostic.simplifiedState.canonicalVerdict !== 'watch'
+    || freshDiagnostic.simplifiedState.visualBucket !== 'monitor'
+    || freshDiagnostic.simplifiedState.tone !== 'monitor'
+    || freshDiagnostic.simplifiedState.priceabilityState !== 'priceable'
+    || freshDiagnostic.simplifiedState.persistedPresentationCacheOnly !== true){
+    throw new Error('Track diagnostics must use fresh simplified/canonical state and keep embedded persisted presentation cache-only.');
   }
   const model = authoritySandbox.resolveTrackCardVisibleModel({
     ticker:'LIN'
@@ -6498,8 +6925,10 @@ function runTrackPresentationAuthorityAssertions(){
     throw new Error('Track visible model must provide friendly hidden-plan copy when no plan summary exists, and must not leak raw plan status.');
   }
   if(!/const persistedSharedPresentation = persistedPresentation && persistedPresentation\.sharedPresentation/.test(appSource)
-    || !/const presentationSourceOfTruth = persistedSharedPresentation[\s\S]*?'watchlist_persisted_presentation'[\s\S]*?'live_recomputed_fallback';/.test(appSource)
-    || !/const sharedPresentation = persistedSharedPresentation \|\| buildSharedReviewTrackPresentation\(record,\s*\{/.test(appSource)
+    || !/const presentationSourceOfTruth = 'live_recomputed_fallback';/.test(appSource)
+    || /const globalVerdict = persistedPresentation && persistedPresentation\.globalVerdict/.test(appSource)
+    || /persistedPresentation\.simplifiedState[\s\S]*?return persistedPresentation\.simplifiedState;/.test(appSource)
+    || !/const sharedPresentation = buildSharedReviewTrackPresentation\(record,\s*\{/.test(appSource)
     || !/const trackVisibleModel = persistedTrackVisibleModelFromPresentation\(sharedPresentation\);/.test(appSource)
     || !/const watchlistVisualState = persistedPresentation && persistedPresentation\.watchlistVisualState[\s\S]*?: persistedWatchlistVisualStateFromPresentation\(sharedPresentation\);/.test(appSource)
     || !/const visualBucket = normalizeVisualBucketForPairing\(trackVisibleModel\.visibleBucket \|\| 'monitor'\);/.test(appSource)
@@ -6508,7 +6937,7 @@ function runTrackPresentationAuthorityAssertions(){
     || !/trackVisibleModel\.primaryReason/.test(appSource)
     || !/trackVisibleModel\.nextAction/.test(appSource)
     || !/sameVisibleCopy\(trackVisibleModel\.primaryReason, decisionSummary\)/.test(appSource)){
-    throw new Error('Track card render must source visible state from persisted shared presentation, with an explicit live fallback path when persisted fields are unavailable.');
+    throw new Error('Track card render must source visible state from fresh shared presentation, without embedded persisted global/simplified state authority.');
   }
   if(!/const persistedPresentation = persistTrackPresentationOnRecord\(liveRecord,[\s\S]*?\);\s*const lifecycleSnapshot = syncWatchlistLifecycle\(liveRecord\) \|\| watchlistLifecycleSnapshot\(liveRecord\);/s.test(appSource)){
     throw new Error('Persisted Track presentation must be created before lifecycle sync so lifecycle can consume the persisted snapshot instead of rewriting presentation authority.');
@@ -6519,11 +6948,11 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const persistedPresentationVerdict = normalizeGlobalVerdictKey\([\s\S]*?persistedSharedPresentation[\s\S]*?canonicalVerdict[\s\S]*?\);[\s\S]*?const canonicalVerdict = persistedPresentationVerdict[\s\S]*?\|\| resolvedFinalVerdictKey/s.test(appSource)){
     throw new Error('Watchlist lifecycle snapshot must consume persisted shared presentation verdicts before falling back to live recomputation.');
   }
-  if(!/function buildTrackProjectionSnapshotFromPersistedPresentation\(record, context = 'watchlist_add_projection'\)\{[\s\S]*?const sharedPresentation = persistedSharedPresentation \|\| buildSharedReviewTrackPresentation\(item,[\s\S]*?const visualBucket = normalizeVisualBucketForPairing\(sharedPresentation\.visualBucket \|\| 'monitor'\);/s.test(appSource)){
-    throw new Error('Review add-to-watchlist handoff must be able to derive a projection snapshot directly from persisted Track presentation authority.');
+  if(!/function buildTrackProjectionSnapshotFromPersistedPresentation\(record, context = 'watchlist_add_projection'\)\{[\s\S]*?const globalVerdict = resolveGlobalVerdict\(item\);[\s\S]*?const simplifiedState = resolveSimplifiedStateForSurface\(item, 'track', \{[\s\S]*?const sharedPresentation = buildSharedReviewTrackPresentation\(item,[\s\S]*?sourceOfTruth:'live_recomputed_fallback'[\s\S]*?const visualBucket = normalizeVisualBucketForPairing\(sharedPresentation\.visualBucket \|\| 'monitor'\);/s.test(appSource)){
+    throw new Error('Review add-to-watchlist handoff must derive projection snapshots from fresh globalVerdict/simplifiedState, not embedded persisted presentation state.');
   }
-  if(!/function watchlistPresentationBucketForRecord\(record, options = \{\}\)\{[\s\S]*?const persistedSharedPresentation = item\.watchlist[\s\S]*?item\.watchlist\.presentation\.sharedPresentation[\s\S]*?if\(persistedSharedPresentation && persistedSharedPresentation\.visualBucket\)\{\s*return normalizeVisualBucketForPairing\(persistedSharedPresentation\.visualBucket \|\| 'monitor'\);\s*\}/s.test(appSource)){
-    throw new Error('Track section placement must use persisted shared presentation buckets before falling back to live simplified recomputation.');
+  if(/function watchlistPresentationBucketForRecord\(record, options = \{\}\)\{[\s\S]*?persistedSharedPresentation[\s\S]*?return normalizeVisualBucketForPairing\(persistedSharedPresentation\.visualBucket \|\| 'monitor'\);/s.test(appSource)){
+    throw new Error('Track section placement must not use persisted shared presentation buckets as authority.');
   }
   if(!/function watchlistEligibilityForRecord\(record, options = \{\}\)\{[\s\S]*?const globalVerdict = options\.globalVerdict && typeof options\.globalVerdict === 'object'[\s\S]*?: resolveGlobalVerdict\(item\);[\s\S]*?const simplifiedState = resolveSimplifiedStateForSurface\(item, 'review', \{[\s\S]*?source:'watchlist_eligibility'[\s\S]*?reason:'watchlist_eligibility'[\s\S]*?\}\);[\s\S]*?const finalVerdict = normalizeGlobalVerdictKey\([\s\S]*?simplifiedState[\s\S]*?\|\| globalVerdict\.final_verdict[\s\S]*?\);[\s\S]*?const eligibleVerdict = \['watch','near_entry','entry'\]\.includes\(finalVerdict\);[\s\S]*?const allowWatchlist = eligibleVerdict && globalVerdict\.allow_watchlist === true;/s.test(appSource)){
     throw new Error('Watchlist eligibility must use the simplified review verdict for labels while keeping post-gate global allow_watchlist as the hard Add-to-Watchlist authority.');

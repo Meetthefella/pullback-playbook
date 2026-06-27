@@ -19,6 +19,7 @@ function usage(){
   console.log('  node scripts/replay-resolver-snapshot.js EMR ANET MOD --provider=fmp');
   console.log('  node scripts/replay-resolver-snapshot.js --snapshot snapshots/phase1-anet-old.json');
   console.log('  node scripts/replay-resolver-snapshot.js EMR ANET MOD --save-snapshot snapshots/phase1-live.json');
+  console.log('  node scripts/replay-resolver-snapshot.js EMR ANET MOD --canonical-input-diagnostics');
 }
 
 function normalizeTicker(value){
@@ -132,6 +133,7 @@ function loadReplayRuntime(){
   runBrowserModule('js/resolver-core.js', sandbox);
   runBrowserModule('js/resolver-presentation.js', sandbox);
   runBrowserModule('js/scanner-debug.js', sandbox);
+  runBrowserModule('js/domain/canonical-resolver-input.js', sandbox);
 
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   sandbox.numericOrNull = numericOrNull;
@@ -803,11 +805,15 @@ function printTickerReport(result){
   if(replay.diminishingReasonActive){
     lines.push(`  diminishing: ${replay.watchToDiminishingReason || 'n/a'}`);
   }
+  if(replay.canonicalInputDiagnostics){
+    lines.push(`  canonical input: plan ${replay.canonicalInputDiagnostics.selectedPlanAuthority || 'n/a'} | derived ${replay.canonicalInputDiagnostics.selectedDerivedStates || 'n/a'} | audit ${replay.canonicalInputDiagnostics.auditOnlyCount} | presentation ${replay.canonicalInputDiagnostics.presentationOnlyCount} | free-text ${replay.canonicalInputDiagnostics.blockedFreeTextCount}`);
+  }
   console.log(lines.join('\n'));
 }
 
 async function main(){
   const args = process.argv.slice(2);
+  const canonicalInputDiagnosticsEnabled = args.includes('--canonical-input-diagnostics');
   const snapshotFlagIndex = args.findIndex(arg => arg === '--snapshot');
   const snapshotPath = snapshotFlagIndex >= 0 ? args[snapshotFlagIndex + 1] : '';
   const saveSnapshotFlagIndex = args.findIndex(arg => arg === '--save-snapshot');
@@ -1001,6 +1007,14 @@ async function main(){
     if(layerMutationParts.length && globalVerdict.downgrade_reason){
       layerMutationParts.push(`reason ${String(globalVerdict.downgrade_reason).trim()}`);
     }
+    const canonicalInputDiagnostics = canonicalInputDiagnosticsEnabled
+      && sandbox.window.CanonicalResolverInput
+      && typeof sandbox.window.CanonicalResolverInput.buildCanonicalResolverInput === 'function'
+      ? sandbox.window.CanonicalResolverInput.buildCanonicalResolverInput(replayBase.record, {
+        surface:'replay',
+        mode:'diagnostic'
+      })
+      : null;
     return {
       ticker:snapshot.ticker,
       snapshot,
@@ -1035,7 +1049,19 @@ async function main(){
         failingGate,
         blockerCopy:normalizedReplayDiagnostics.blockerCopy,
         watchToDiminishingReason,
-        diminishingReasonActive
+        diminishingReasonActive,
+        canonicalInputDiagnostics:canonicalInputDiagnostics
+          ? {
+            selectedPlanAuthority:String(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.selectedPlanAuthorityCandidate && canonicalInputDiagnostics.diagnostics.selectedPlanAuthorityCandidate.source || ''),
+            selectedDerivedStates:String(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.selectedDerivedStateAuthorityCandidate && canonicalInputDiagnostics.diagnostics.selectedDerivedStateAuthorityCandidate.source || ''),
+            auditOnlyCount:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.auditOnlyFields) ? canonicalInputDiagnostics.diagnostics.auditOnlyFields.length : 0,
+            presentationOnlyCount:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.presentationOnlyFields) ? canonicalInputDiagnostics.diagnostics.presentationOnlyFields.length : 0,
+            blockedFreeTextCount:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.blockedFreeTextAuthorityPaths) ? canonicalInputDiagnostics.diagnostics.blockedFreeTextAuthorityPaths.length : 0,
+            ignoredStaleFields:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.ignoredStaleFields)
+              ? canonicalInputDiagnostics.diagnostics.ignoredStaleFields
+              : []
+          }
+          : null
       }
     };
   });

@@ -91,6 +91,19 @@
     };
   }
 
+  function tryBuildCanonicalResolverInput(record, options = {}){
+    try{
+      if(!global.CanonicalResolverInput || typeof global.CanonicalResolverInput.buildCanonicalResolverInput !== 'function'){
+        return null;
+      }
+      return global.CanonicalResolverInput.buildCanonicalResolverInput(record, options);
+    }catch(error){
+      return {
+        error:String(error && error.message || error || 'canonical_resolver_input_failed')
+      };
+    }
+  }
+
   function fallbackEffectivePlan(record){
     const item = record && typeof record === 'object' ? record : {};
     const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
@@ -343,49 +356,85 @@
     return sharedPresentation || null;
   }
 
-  function shouldApplyPersistedWatchAuthority(record, surface, result, persistedSharedPresentation){
-    const item = record && typeof record === 'object' ? record : {};
+  function persistedPresentationFeedbackDiagnostics(result, persistedSharedPresentation){
     const persisted = persistedSharedPresentation && typeof persistedSharedPresentation === 'object'
       ? persistedSharedPresentation
       : null;
-    if(!persisted) return false;
-    if(!(item.watchlist && item.watchlist.inWatchlist)) return false;
-    if(String(surface || '').trim().toLowerCase() !== 'scan') return false;
-    const persistedVerdict = String(persisted.canonicalVerdict || persisted.finalVerdict || '').trim().toLowerCase();
-    const persistedBucket = String(persisted.visualBucket || '').trim().toLowerCase();
-    const resultVerdict = String(result && result.canonicalVerdict || '').trim().toLowerCase();
-    const suppressedTrackedAvoid = !!(
-      persisted.sourceTrace
-      && typeof persisted.sourceTrace === 'object'
-      && (
-        persisted.sourceTrace.suppressAvoidForTrackedWatch === true
-        || persisted.sourceTrace.suppressingTrackedAvoid === true
-      )
-    );
-    return suppressedTrackedAvoid
-      && resultVerdict === 'avoid'
-      && persistedVerdict === 'watch'
-      && ['monitor', 'diminishing'].includes(persistedBucket);
+    const fresh = result && typeof result === 'object' ? result : {};
+    const persistedVerdict = String(persisted && (persisted.canonicalVerdict || persisted.finalVerdict) || '').trim().toLowerCase();
+    const freshVerdict = String(fresh.canonicalVerdict || fresh.finalVerdict || '').trim().toLowerCase();
+    const persistedBucket = String(persisted && (persisted.visualBucket || persisted.presentationBucket || persisted.trackPresentationBucket) || '').trim().toLowerCase();
+    const freshBucket = String(fresh.visualBucket || fresh.presentationBucket || '').trim().toLowerCase();
+    const persistedTone = String(persisted && persisted.tone || '').trim().toLowerCase();
+    const freshTone = String(fresh.tone || '').trim().toLowerCase();
+    const persistedBadge = String(persisted && persisted.badgeLabel || '').trim();
+    const freshBadge = String(fresh.badgeLabel || '').trim();
+    const persistedAction = String(persisted && persisted.actionLabel || '').trim();
+    const freshAction = String(fresh.actionLabel || '').trim();
+    const persistedMainBlocker = String(persisted && (persisted.mainBlocker || persisted.primaryReason) || '').trim();
+    const freshMainBlocker = String(fresh.mainBlocker || '').trim();
+    const risks = [
+      'watchlist.presentation.sharedPresentation',
+      'visualBucket',
+      'badgeLabel',
+      'actionLabel',
+      'tone',
+      'presentationBucket',
+      'trackPresentationBucket'
+    ];
+    return {
+      hasPersistedPresentation:!!persisted,
+      presentationOnlyFeedbackRisks:risks,
+      persistedCanonicalVerdict:persistedVerdict || '(none)',
+      freshCanonicalVerdict:freshVerdict || '(none)',
+      persistedVisualBucket:persistedBucket || '(none)',
+      freshVisualBucket:freshBucket || '(none)',
+      persistedTone:persistedTone || '(none)',
+      freshTone:freshTone || '(none)',
+      verdictConflict:!!(persistedVerdict && freshVerdict && persistedVerdict !== freshVerdict),
+      bucketConflict:!!(persistedBucket && freshBucket && persistedBucket !== freshBucket),
+      toneConflict:!!(persistedTone && freshTone && persistedTone !== freshTone),
+      badgeConflict:!!(persistedBadge && freshBadge && persistedBadge !== freshBadge),
+      actionConflict:!!(persistedAction && freshAction && persistedAction !== freshAction),
+      mainBlockerConflict:!!(persistedMainBlocker && freshMainBlocker && persistedMainBlocker !== freshMainBlocker)
+    };
   }
 
-  function applyPersistedWatchAuthority(result, persistedSharedPresentation){
+  function applyPersistedPresentationOverlay(result, persistedSharedPresentation){
     const persisted = persistedSharedPresentation && typeof persistedSharedPresentation === 'object'
       ? persistedSharedPresentation
       : null;
     if(!persisted || !result || typeof result !== 'object') return result;
-    result.canonicalVerdict = 'watch';
-    result.visualBucket = String(persisted.visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
-    result.tone = String(persisted.tone || result.visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
-    result.badgeLabel = String(persisted.badgeLabel || 'Watch').trim() || 'Watch';
-    result.actionLabel = String(persisted.actionLabel || result.badgeLabel || 'Watch').trim() || 'Watch';
-    result.mainBlocker = String(persisted.mainBlocker || persisted.primaryReason || result.mainBlocker || '').trim();
-    result.finalVisualBucket = result.visualBucket;
+    const feedback = persistedPresentationFeedbackDiagnostics(result, persistedSharedPresentation);
+    const conflictsDetected = feedback.verdictConflict
+      || feedback.bucketConflict
+      || feedback.toneConflict
+      || feedback.badgeConflict
+      || feedback.actionConflict
+      || feedback.mainBlockerConflict;
+    if(!conflictsDetected && !String(result.badgeLabel || '').trim() && String(persisted.badgeLabel || '').trim()){
+      result.badgeLabel = String(persisted.badgeLabel || '').trim();
+    }
+    if(!conflictsDetected && !String(result.actionLabel || '').trim() && String(persisted.actionLabel || '').trim()){
+      result.actionLabel = String(persisted.actionLabel || '').trim();
+    }
+    if(!conflictsDetected && !String(result.mainBlocker || '').trim() && String(persisted.mainBlocker || persisted.primaryReason || '').trim()){
+      result.mainBlocker = String(persisted.mainBlocker || persisted.primaryReason || '').trim();
+    }
     result.debug = {
       ...(result.debug || {}),
-      sourceOfTruth:'watchlist_persisted_presentation',
-      persistedWatchAuthorityApplied:true,
-      persistedWatchAuthorityBucket:result.visualBucket,
-      persistedWatchAuthorityTone:result.tone
+      persistedPresentationAvailable:true,
+      persistedPresentationOverlayApplied:true,
+      persistedPresentationAuthorityDisabled:'global_non_authoritative',
+      persistedPresentationConflictSuppressed:conflictsDetected,
+      persistedPresentationSnapshot:stableDebugValue({
+        canonicalVerdict:persisted.canonicalVerdict || persisted.finalVerdict || '',
+        visualBucket:persisted.visualBucket || persisted.presentationBucket || persisted.trackPresentationBucket || '',
+        tone:persisted.tone || '',
+        badgeLabel:persisted.badgeLabel || '',
+        actionLabel:persisted.actionLabel || '',
+        mainBlocker:persisted.mainBlocker || persisted.primaryReason || ''
+      })
     };
     return result;
   }
@@ -588,9 +637,7 @@
         visualState
       });
       const persistedSharedPresentation = persistedSharedPresentationForRecord(item);
-      if(shouldApplyPersistedWatchAuthority(item, surface, result, persistedSharedPresentation)){
-        applyPersistedWatchAuthority(result, persistedSharedPresentation);
-      }
+      applyPersistedPresentationOverlay(result, persistedSharedPresentation);
       const accepted50MaSupportTest = accepted50MaSupportTestDisplayState(item, resolvedState, derivedStates);
       if(accepted50MaSupportTest && String(result.visualBucket || '').trim().toLowerCase() === 'diminishing'){
         result.visualBucket = 'monitor';
@@ -611,8 +658,13 @@
         originalDerivedStates:rawDerivedStates,
         effectivePlan,
         pipeline:'record->effectivePlan->planState->validate->ResolverCore->ResolverPresentation->presentationModel',
-        accepted50MaSupportTestDisplay:accepted50MaSupportTest
+        accepted50MaSupportTestDisplay:accepted50MaSupportTest,
+        persistedPresentationFeedback:persistedPresentationFeedbackDiagnostics(result, persistedSharedPresentation)
       };
+      const canonicalResolverInputDiagnostics = tryBuildCanonicalResolverInput(item, {surface, mode:'diagnostic'});
+      if(canonicalResolverInputDiagnostics){
+        result.debug.canonicalResolverInputDiagnostics = canonicalResolverInputDiagnostics;
+      }
       const pipelineDiagnostics = derivePipelineDiagnostics(item, {...options, surface}, {
         effectivePlan,
         planState,
