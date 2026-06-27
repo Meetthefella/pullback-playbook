@@ -649,8 +649,12 @@ function run(){
   assert(focusPendingValidationAuthority.mode === 'blocked', `Expected focus pending-validation case to remain blocked, got ${focusPendingValidationAuthority.mode}.`);
   assert(focusPendingValidationAuthority.specificBlock === false, `Expected focus pending-validation case to stay a soft resolver block, got specificBlock=${focusPendingValidationAuthority.specificBlock}.`);
   assert(focusPendingValidationAuthority.reasonCode === 'resolver_block', `Expected focus pending-validation case to use resolver_block, got ${focusPendingValidationAuthority.reasonCode}.`);
+  assert(focusPendingValidationRecord.plan.status === 'valid', `Expected focus pending-validation status to stay valid, got ${focusPendingValidationRecord.plan.status}.`);
+  assert(focusPendingValidationRecord.plan.tradeability === 'tradable', `Expected focus pending-validation tradeability to stay tradable, got ${focusPendingValidationRecord.plan.tradeability}.`);
+  assert(focusPendingValidationRecord.plan.riskStatus === 'fits_risk', `Expected focus pending-validation riskStatus to stay fits_risk, got ${focusPendingValidationRecord.plan.riskStatus}.`);
   assert(focusPendingValidationRecord.plan.blockedReasonCode === 'resolver_block', `Expected focus pending-validation blockedReasonCode resolver_block, got ${focusPendingValidationRecord.plan.blockedReasonCode}.`);
   assert(focusPendingValidationRecord.plan.invalidatedState === '', `Expected focus pending-validation invalidatedState to remain empty, got ${focusPendingValidationRecord.plan.invalidatedState}.`);
+  assert(sandbox.blockedScannerEstimatePlanSnapshot(focusPendingValidationRecord) === null, 'Expected focus pending-validation case to avoid preserving a blocked snapshot.');
 
   sandbox.__derivedPlanOverrides = {
     planValidationState:'invalidated',

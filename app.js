@@ -19281,7 +19281,7 @@ function resolveScannerEstimatePlanAuthority(record, globalVerdict, displayedPla
     reason,
     reasonCode,
     clearBlockedMetadata:constructive,
-    preserveBlockedSnapshot:!constructive,
+    preserveBlockedSnapshot:specificBlock,
     stalePlanBlockers:currentPlanBlockers.staleFields
   };
 }
@@ -40535,14 +40535,23 @@ function applyGlobalVerdictGates(record, options = {}){
         item.plan.blockedReasonCode = '';
         changed = true;
       }
-    }else if(globalVerdict.allow_plan !== true || (scannerEstimateAuthority && scannerEstimateAuthority.mode === 'blocked' && scannerEstimateAuthority.specificBlock)){
+    }else if(globalVerdict.allow_plan !== true || (scannerEstimateAuthority && scannerEstimateAuthority.mode === 'blocked')){
       const planBlockState = String(globalVerdict.plan_status || globalVerdict.planStatusKey || '').trim().toLowerCase();
+      const scannerEstimateSpecificBlock = !!(scannerEstimateAuthority && scannerEstimateAuthority.specificBlock);
+      const scannerEstimateSoftBlock = !!(
+        scannerEstimatePlan
+        && preserveScannerEstimatePlan
+        && scannerEstimateDisplayedPlan
+        && scannerEstimateDisplayedPlan.status === 'valid'
+        && !scannerEstimateSpecificBlock
+        && (globalVerdict.allow_plan !== true || globalVerdict.priceability_state === 'unpriceable')
+      );
       const scannerEstimateMustDemote = preserveScannerEstimatePlan && (
-        !!String(globalVerdict.unpriceableBlockReason || '').trim()
-        || globalVerdict.priceability_state === 'unpriceable'
+        (!!String(globalVerdict.unpriceableBlockReason || '').trim() && !scannerEstimateSoftBlock)
+        || (globalVerdict.priceability_state === 'unpriceable' && !scannerEstimateSoftBlock)
         || ['invalid','needs_adjustment','unrealistic_rr'].includes(planBlockState)
         || item.plan.firstTargetTooClose === true
-        || !!(scannerEstimateAuthority && scannerEstimateAuthority.specificBlock)
+        || scannerEstimateSpecificBlock
       );
       const hadPlan = !!(item.plan.entry || item.plan.stop || item.plan.firstTarget);
       if(hadPlan && !preserveScannerEstimatePlan){
@@ -40571,6 +40580,24 @@ function applyGlobalVerdictGates(record, options = {}){
         }
         if((!scannerEstimateAuthority || !scannerEstimateAuthority.specificBlock) && item.plan.planValidationState !== 'needs_replan'){
           item.plan.planValidationState = 'needs_replan';
+          changed = true;
+        }
+      }else if(scannerEstimateSoftBlock && scannerEstimateDisplayedPlan){
+        if(item.plan.hasValidPlan !== true){
+          item.plan.hasValidPlan = true;
+          changed = true;
+        }
+        if(item.plan.status !== String(scannerEstimateDisplayedPlan.status || '')){
+          item.plan.status = String(scannerEstimateDisplayedPlan.status || '');
+          changed = true;
+        }
+        if(item.plan.tradeability !== String(scannerEstimateDisplayedPlan.tradeability || '')){
+          item.plan.tradeability = String(scannerEstimateDisplayedPlan.tradeability || '');
+          changed = true;
+        }
+        const softBlockRiskStatus = String(scannerEstimateDisplayedPlan.riskFit && scannerEstimateDisplayedPlan.riskFit.risk_status || '');
+        if(item.plan.riskStatus !== softBlockRiskStatus){
+          item.plan.riskStatus = softBlockRiskStatus;
           changed = true;
         }
       }
