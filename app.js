@@ -3755,20 +3755,22 @@ function currentReviewStateHealthSnapshot(record){
     source:'diagnostic_snapshot',
     mutationSource:'diagnostic_snapshot'
   });
-  const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
-  const simplifiedVisualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
-  const derivedTone = String(simplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const globalVerdict = resolveGlobalVerdict(item);
+  const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
+  const effectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(item, simplifiedState, globalVerdict, lifecycleSnapshot);
+  const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
+  const simplifiedVisualBucket = normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
+  const derivedTone = String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
   let divergenceDetected = false;
   try{
-    const globalVerdict = resolveGlobalVerdict(item);
     const derivedStates = analysisDerivedStatesFromRecord(item);
     const reviewLegacyState = {
       canonicalVerdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || '',
       visualBucket:globalVerdict.bucket || '',
       tone:derivedTone,
-      badgeLabel:simplifiedState.badgeLabel || '',
+      badgeLabel:effectiveSimplifiedState.badgeLabel || '',
       mainBlocker:globalVerdict.main_blocker || globalVerdict.reason || '',
-      planStatus:globalVerdict.plan_status || simplifiedState.planStatus || '',
+      planStatus:globalVerdict.plan_status || effectiveSimplifiedState.planStatus || '',
       entryGatePass:globalVerdict.entry_gate_pass,
       nearEntryGatePass:globalVerdict.near_entry_gate_pass,
       structureEligibility:globalVerdict.structure_eligibility || '',
@@ -3777,7 +3779,7 @@ function currentReviewStateHealthSnapshot(record){
       priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState || '',
       bounceState:globalVerdict.bounce_state || derivedStates.bounceState || ''
     };
-    divergenceDetected = collectStateDivergence(item, 'review.snapshot', simplifiedState, reviewLegacyState, [
+    divergenceDetected = collectStateDivergence(item, 'review.snapshot', effectiveSimplifiedState, reviewLegacyState, [
       'canonicalVerdict',
       'visualBucket',
       'tone',
@@ -3801,20 +3803,69 @@ function currentReviewStateHealthSnapshot(record){
     canonicalVerdict:simplifiedCanonicalVerdict,
     visualBucket:simplifiedVisualBucket,
     tone:derivedTone,
-    structureEligibility:String(simplifiedState.structureEligibility || ''),
-    structureState:String(simplifiedState.structureState || ''),
-    setupLocationState:String(simplifiedState.setupLocationState || ''),
-    priceabilityState:String(simplifiedState.priceabilityState || ''),
-    bounceState:String(simplifiedState.bounceState || ''),
-    planStatus:String(simplifiedState.planStatus || ''),
-    resolvedRR:Number.isFinite(Number(simplifiedState.resolvedRR)) ? Number(simplifiedState.resolvedRR) : null,
-    entryGatePass:simplifiedState.entryGatePass === true,
-    nearEntryGatePass:simplifiedState.nearEntryGatePass === true,
-    primaryBlockerReason:String(simplifiedState.mainBlocker || ''),
-    avoidTriggerSource:String(simplifiedState.avoidTriggerSource || ''),
-    terminalAvoidApplied:simplifiedState.terminalAvoidApplied === true,
+    structureEligibility:String(effectiveSimplifiedState.structureEligibility || ''),
+    structureState:String(effectiveSimplifiedState.structureState || ''),
+    setupLocationState:String(effectiveSimplifiedState.setupLocationState || ''),
+    priceabilityState:String(effectiveSimplifiedState.priceabilityState || ''),
+    bounceState:String(effectiveSimplifiedState.bounceState || ''),
+    planStatus:String(effectiveSimplifiedState.planStatus || ''),
+    resolvedRR:Number.isFinite(Number(effectiveSimplifiedState.resolvedRR)) ? Number(effectiveSimplifiedState.resolvedRR) : null,
+    entryGatePass:effectiveSimplifiedState.entryGatePass === true,
+    nearEntryGatePass:effectiveSimplifiedState.nearEntryGatePass === true,
+    primaryBlockerReason:String(effectiveSimplifiedState.mainBlocker || ''),
+    avoidTriggerSource:String(effectiveSimplifiedState.avoidTriggerSource || ''),
+    terminalAvoidApplied:effectiveSimplifiedState.terminalAvoidApplied === true,
     divergenceDetected,
     lastReviewedAt:String(item.review && item.review.lastReviewedAt || '')
+  };
+}
+
+function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedState, globalVerdict, lifecycleSnapshot){
+  const item = normalizeTickerRecord(record || {});
+  const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  const verdict = normalizeGlobalVerdictKey(simplified.canonicalVerdict || 'watch');
+  if(verdict !== 'watch') return simplified;
+  if(!(item.watchlist && item.watchlist.inWatchlist)) return simplified;
+  if(String(simplified.planStatus || '').trim().toLowerCase() !== 'valid') return simplified;
+  if(String(simplified.priceabilityState || '').trim().toLowerCase() !== 'priceable') return simplified;
+  const lifecycle = lifecycleSnapshot && typeof lifecycleSnapshot === 'object'
+    ? lifecycleSnapshot
+    : watchlistLifecycleSnapshot(item);
+  const lifecycleVerdict = normalizeGlobalVerdictKey(lifecycle.state || '');
+  if(!['entry','near_entry'].includes(lifecycleVerdict)) return simplified;
+  const global = globalVerdict && typeof globalVerdict === 'object'
+    ? globalVerdict
+    : resolveGlobalVerdict(item);
+  const explicitInvalidationAuthorityCode = resolveStructuredExplicitInvalidationAuthorityCode(global);
+  const planBlockedReasonCode = String(item.plan && item.plan.blockedReasonCode || '').trim().toLowerCase();
+  const structureState = String(
+    simplified.structureState
+    || (item.setup && item.setup.structureState)
+    || ''
+  ).trim().toLowerCase();
+  const structureEligibility = String(
+    simplified.structureEligibility
+    || global.structure_eligibility
+    || ''
+  ).trim().toLowerCase();
+  const hardStructuredBlock = ['invalidated','missed','target_too_close','broken_structure'].includes(explicitInvalidationAuthorityCode)
+    || ['invalidated','missed','target_too_close','broken_structure','terminal','expired'].includes(planBlockedReasonCode)
+    || simplified.terminalAvoidApplied === true
+    || global.terminal_avoid_applied === true
+    || global.rejected_by_viability_gate === true
+    || structureEligibility === 'broken'
+    || ['broken','failed'].includes(structureState);
+  if(hardStructuredBlock) return simplified;
+  return {
+    ...simplified,
+    canonicalVerdict:lifecycleVerdict,
+    visualBucket:lifecycleVerdict === 'entry' ? 'entry' : 'near_entry',
+    tone:getTone(lifecycleVerdict),
+    debug:{
+      ...(simplified.debug || {}),
+      reviewWatchlistSoftReadinessDisplayOverrideApplied:true,
+      reviewWatchlistSoftReadinessDisplayOverrideSource:'watchlist_lifecycle'
+    }
   };
 }
 
@@ -35906,20 +35957,28 @@ function renderReviewWorkspace(options = {}){
     : '';
   const derivedStates = refreshBundle.derivedStates || analysisDerivedStatesFromRecord(record);
   const globalVerdict = bundleValid ? refreshBundle.globalVerdict : resolveGlobalVerdict(record);
-  const simplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
-  const simplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
-  const accepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
+  const reviewEffectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(
     record,
     simplifiedState,
     globalVerdict,
+    refreshBundle && refreshBundle.lifecycleSnapshot
+  );
+  const simplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  const simplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
+  const effectiveSimplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(reviewEffectiveSimplifiedState.canonicalVerdict || 'watch');
+  const effectiveSimplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(reviewEffectiveSimplifiedState.visualBucket || simplifiedState.visualBucket || 'monitor');
+  const accepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
+    record,
+    simplifiedState:reviewEffectiveSimplifiedState,
+    globalVerdict,
     derivedStates
   });
-  const reviewDisplayBucket = accepted50MaSupportTestDisplay && simplifiedVisualBucket === 'diminishing'
+  const reviewDisplayBucket = accepted50MaSupportTestDisplay && effectiveSimplifiedVisualBucket === 'diminishing'
     ? 'monitor'
-    : simplifiedVisualBucket;
+    : effectiveSimplifiedVisualBucket;
   const simplifiedTone = accepted50MaSupportTestDisplay && reviewDisplayBucket === 'monitor'
     ? 'monitor'
-    : (projectionTone || String(simplifiedState.tone || reviewDisplayBucket || 'monitor').trim().toLowerCase() || 'monitor');
+    : (projectionTone || String(reviewEffectiveSimplifiedState.tone || reviewDisplayBucket || 'monitor').trim().toLowerCase() || 'monitor');
   const simplifiedBadgeClass = ({
     entry:'badge--entry ready',
     near_entry:'badge--near-entry near',
@@ -35928,29 +35987,29 @@ function renderReviewWorkspace(options = {}){
     avoid:'badge--avoid avoid'
   })[reviewDisplayBucket] || 'badge--monitor watch';
   const simplifiedBadge = {
-    text:String(globalVerdictLabel(simplifiedCanonicalVerdict) || simplifiedState.badgeLabel || 'Watch'),
+    text:String(globalVerdictLabel(effectiveSimplifiedCanonicalVerdict) || reviewEffectiveSimplifiedState.badgeLabel || 'Watch'),
     className:simplifiedBadgeClass
   };
-  const simplifiedActionLabel = String(projectionActionGuidance || simplifiedState.actionLabel || '').trim();
+  const simplifiedActionLabel = String(projectionActionGuidance || reviewEffectiveSimplifiedState.actionLabel || '').trim();
   if(typeof console !== 'undefined' && console.log){
     console.log('[REVIEW_SIMPLIFIED_STATE]', {
       ticker:record.ticker,
-      canonicalVerdict:simplifiedCanonicalVerdict,
+      canonicalVerdict:effectiveSimplifiedCanonicalVerdict,
       visualBucket:simplifiedVisualBucket,
       tone:simplifiedTone,
-      structureState:simplifiedState.structureState || '',
-      structureEligibility:simplifiedState.structureEligibility || '',
-      hasPresentationModel:!!simplifiedState
+      structureState:reviewEffectiveSimplifiedState.structureState || '',
+      structureEligibility:reviewEffectiveSimplifiedState.structureEligibility || '',
+      hasPresentationModel:!!reviewEffectiveSimplifiedState
     });
   }
   if(typeof console !== 'undefined' && console.info){
     console.info('[SIMPLIFIED_REVIEW_STATE]', {
-      ticker:simplifiedState.ticker || record.ticker,
-      canonicalVerdict:simplifiedState.canonicalVerdict,
-      visualBucket:simplifiedState.visualBucket,
-      tone:simplifiedState.tone,
-      badgeLabel:simplifiedState.badgeLabel,
-      mainBlocker:simplifiedState.mainBlocker
+      ticker:reviewEffectiveSimplifiedState.ticker || record.ticker,
+      canonicalVerdict:reviewEffectiveSimplifiedState.canonicalVerdict,
+      visualBucket:reviewEffectiveSimplifiedState.visualBucket,
+      tone:reviewEffectiveSimplifiedState.tone,
+      badgeLabel:reviewEffectiveSimplifiedState.badgeLabel,
+      mainBlocker:reviewEffectiveSimplifiedState.mainBlocker
     });
   }
   const analysisState = getReviewAnalysisState(record);
@@ -35978,7 +36037,7 @@ function renderReviewWorkspace(options = {}){
     derivedStates,
     effectivePlan,
     displayedPlan,
-    simplifiedState
+    simplifiedState:reviewEffectiveSimplifiedState
   });
   const displayedReviewChecks = resolvedReviewChecksForDisplay(reviewChecks, reviewChecklistContext);
   const reviewSetupQuality = scoreAndStatusFromChecks(displayedReviewChecks, reviewChecklistContext);
@@ -36064,10 +36123,10 @@ function renderReviewWorkspace(options = {}){
     ? refreshBundle.visualState
     : {finalVerdict:'watch', final_verdict:'watch', renderedVerdict:'watch', final_verdict_rendered:'watch', decision_summary:'Developing - waiting for confirmation.'};
   const unifiedFinalReviewVerdict = normalizeReviewPresentationVerdict(
-    simplifiedCanonicalVerdict || 'watch'
+    effectiveSimplifiedCanonicalVerdict || 'watch'
   );
   const reviewFinalVerdictForPaperTrade = normalizeAnalysisVerdict(
-    simplifiedCanonicalVerdict || 'watch'
+    effectiveSimplifiedCanonicalVerdict || 'watch'
   );
   const paperTradeEligibilityState = paperTradeEligibility.evaluatePaperTradeEligibility({
     finalVerdict:reviewFinalVerdictForPaperTrade,
@@ -36205,8 +36264,8 @@ function renderReviewWorkspace(options = {}){
     review_presentation_source:'simplified_state_pipeline',
     review_lifecycle_copy_override_applied:false,
     review_lifecycle_copy_reason:'',
-    decisionSummary:String(simplifiedState.mainBlocker || simplifiedActionLabel || '').trim(),
-    tradeStatusLine1:String(simplifiedState.planStatus || '').trim(),
+    decisionSummary:String(reviewEffectiveSimplifiedState.mainBlocker || simplifiedActionLabel || '').trim(),
+    tradeStatusLine1:String(reviewEffectiveSimplifiedState.planStatus || '').trim(),
     tradeStatusLine2:'',
     trackPresentationBucket:reviewDisplayBucket,
     trackPresentationTone:simplifiedTone,
@@ -36236,7 +36295,7 @@ function renderReviewWorkspace(options = {}){
   };
   const reviewSemanticStatus = buildReviewSemanticStatus({
     record,
-    simplifiedState,
+    simplifiedState:reviewEffectiveSimplifiedState,
     globalVerdict:reviewTradeStatusVerdict,
     derivedStates,
     displayedPlan,
@@ -36250,19 +36309,19 @@ function renderReviewWorkspace(options = {}){
     || ''
   ).trim();
   const resolvedFinalVerdictKey = normalizeGlobalVerdictKey(
-    simplifiedCanonicalVerdict || 'watch'
+    effectiveSimplifiedCanonicalVerdict || 'watch'
   );
   const resolvedFinalVerdictLabel = globalVerdictLabel(resolvedFinalVerdictKey || 'watch');
   const reviewBadge = simplifiedBadge;
   const reviewRenderedVerdict = String(unifiedFinalReviewVerdict || '').trim().toLowerCase();
-  const sharedCanonicalVerdictKey = simplifiedCanonicalVerdict;
+  const sharedCanonicalVerdictKey = effectiveSimplifiedCanonicalVerdict;
   const explicitInvalidationReason = String(
     visualState.explicit_invalidation_reason
     || globalVerdict.explicit_invalidation_reason
     || ''
   ).trim().toLowerCase();
   const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
-  const resolvedReviewFinalVerdictKey = simplifiedCanonicalVerdict;
+  const resolvedReviewFinalVerdictKey = effectiveSimplifiedCanonicalVerdict;
   const terminalAvoidFlagged = !!(
     visualState.terminal_avoid_applied === true
     || reviewLifecycleBias.terminal_avoid_applied === true
@@ -36541,7 +36600,7 @@ function renderReviewWorkspace(options = {}){
   const reviewAction = {label:projectionActionGuidance || reviewSemanticStatus.nextAction || simplifiedActionLabel || 'Review setup inputs'};
   const resolvedReviewDisplay = buildResolvedReviewDisplayModel({
     record,
-    simplifiedState,
+    simplifiedState:reviewEffectiveSimplifiedState,
     globalVerdict:reviewTradeStatusVerdict,
     reviewSemanticStatus,
     derivedStates,
@@ -37673,6 +37732,13 @@ function syncPlanDisplayMeta(options = {}){
   if(canonicalPlanSynced) commitTickerState();
   const record = normalizeTickerRecord(liveRecord);
   const metaSimplifiedState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+  const metaGlobalVerdict = resolveGlobalVerdict(record);
+  const effectiveMetaSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(
+    record,
+    metaSimplifiedState,
+    metaGlobalVerdict,
+    watchlistLifecycleSnapshot(record)
+  );
   const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
   const entryValue = $('entryPrice') ? $('entryPrice').value : effectivePlan.entry;
   const stopValue = $('stopPrice') ? $('stopPrice').value : effectivePlan.stop;
@@ -37750,11 +37816,11 @@ function syncPlanDisplayMeta(options = {}){
     displayedPlan,
     setupScore:setupScoreForRecord(record)
   });
-  const globalVerdict = resolveGlobalVerdict(record);
-  const metaDisplayBucket = normalizeVisualBucketForPairing(metaSimplifiedState.visualBucket || 'monitor');
+  const globalVerdict = metaGlobalVerdict;
+  const metaDisplayBucket = normalizeVisualBucketForPairing(effectiveMetaSimplifiedState.visualBucket || 'monitor');
   const metaAccepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
     record,
-    simplifiedState:metaSimplifiedState,
+    simplifiedState:effectiveMetaSimplifiedState,
     globalVerdict,
     derivedStates
   });
@@ -37763,7 +37829,7 @@ function syncPlanDisplayMeta(options = {}){
     : metaDisplayBucket;
   const reviewDisplayTone = metaAccepted50MaSupportTestDisplay && reviewDisplayBucket === 'monitor'
     ? 'monitor'
-    : (String(metaSimplifiedState.tone || reviewDisplayBucket || 'monitor').trim().toLowerCase() || 'monitor');
+    : (String(effectiveMetaSimplifiedState.tone || reviewDisplayBucket || 'monitor').trim().toLowerCase() || 'monitor');
   const reviewLifecycleBias = {
     review_lifecycle_bias:reviewDisplayBucket,
     review_lifecycle_copy_override_applied:false,
@@ -37796,7 +37862,7 @@ function syncPlanDisplayMeta(options = {}){
   };
   const reviewSemanticStatus = buildReviewSemanticStatus({
     record,
-    simplifiedState:metaSimplifiedState,
+    simplifiedState:effectiveMetaSimplifiedState,
     globalVerdict:reviewTradeStatusVerdict,
     derivedStates,
     displayedPlan,
@@ -37804,7 +37870,7 @@ function syncPlanDisplayMeta(options = {}){
   });
   const resolvedReviewDisplay = buildResolvedReviewDisplayModel({
     record,
-    simplifiedState:metaSimplifiedState,
+    simplifiedState:effectiveMetaSimplifiedState,
     globalVerdict:reviewTradeStatusVerdict,
     reviewSemanticStatus,
     derivedStates,
