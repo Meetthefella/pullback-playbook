@@ -3503,7 +3503,7 @@ function runSimplifiedPipelineAssertions(){
     in_watchlist:true,
     reclaimAttempt:true,
     plan:{entry:100, stop:97, firstTarget:106},
-    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'},
+    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'USD'},
     setup:{volumeRequired:false}
   }, {
     log:false,
@@ -3525,7 +3525,11 @@ function runSimplifiedPipelineAssertions(){
       blockerReason:'Waiting for confirmation.',
       reasonSummary:'Close to trigger.',
       terminal:false,
-      baseVerdict:'near_entry'
+      baseVerdict:'near_entry',
+      canonical_final_verdict:'entry',
+      canonical_visual_bucket:'entry',
+      canonical_priceability_state:'priceable',
+      canonical_soft_readiness_alignment_applied:true
     })
   });
   const reconciledDerived = reconciledPriceability.debug && reconciledPriceability.debug.derivedStates || {};
@@ -3540,6 +3544,44 @@ function runSimplifiedPipelineAssertions(){
   }
   if(reconciledPriceability.nearEntryGatePass !== true || reconciledPriceability.canonicalVerdict !== 'near_entry'){
     throw new Error('Priceability reconciliation must preserve existing Near Entry gate outcome when gates already pass.');
+  }
+  if(reconciledDerived.priceabilityReconciliationDiagnostics && reconciledDerived.priceabilityReconciliationDiagnostics.checks && reconciledDerived.priceabilityReconciliationDiagnostics.checks.riskOnlyFxEstimated !== true){
+    throw new Error('FX-estimated risk_only reconciliation must expose riskOnlyFxEstimated diagnostic flag.');
+  }
+
+  const targetTooCloseStillBlocked = pipeline.resolveRecordState({
+    ticker:'PRICEFIXBLOCK',
+    in_watchlist:true,
+    reclaimAttempt:true,
+    plan:{entry:100, stop:97, firstTarget:103, source:'scanner_estimate'},
+    marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'USD'},
+    setup:{volumeRequired:false}
+  }, {
+    log:false,
+    deps:depsFor({
+      structureState:'developing_clean',
+      trendState:'intact',
+      setupLocationState:'near_20ma',
+      priceabilityState:'unpriceable',
+      stabilisationState:'early',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'normal'
+    }, {
+      finalVerdict:'Watch',
+      structuralState:'developing',
+      actionStateKey:'recalculate_plan',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Target too close.',
+      reasonSummary:'Target too close.',
+      terminal:false,
+      baseVerdict:'watch'
+    })
+  });
+  const targetTooCloseDerived = targetTooCloseStillBlocked.debug && targetTooCloseStillBlocked.debug.derivedStates || {};
+  if(targetTooCloseDerived.priceabilityState === 'priceable' || targetTooCloseDerived.priceabilityReconciledFromPlan === true){
+    throw new Error('target_too_close authoritative block must still prevent FX-estimated risk_only reconciliation.');
   }
   const lowRrPlan = pipeline.resolveRecordState({
     ticker:'LOWRR',

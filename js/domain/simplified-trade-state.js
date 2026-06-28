@@ -173,7 +173,17 @@
     const tradeability = String(plan.tradeability || '').trim().toLowerCase();
     const riskStatus = String(plan.riskFit && plan.riskFit.risk_status || '').trim().toLowerCase();
     const capitalFit = String(plan.capitalFit && plan.capitalFit.capital_fit || '').trim().toLowerCase();
-    const gatePriceableTradeability = ['tradable','entry','ready','action_now'].includes(tradeability);
+    const capitalNote = String(plan.capitalFit && plan.capitalFit.capital_note || '').trim();
+    const fxStatus = String(plan.capitalFit && plan.capitalFit.fx_status || '').trim().toLowerCase();
+    const authoritativeHardBlock = plan.authoritativeBlockApplied === true;
+    const riskOnlyFxEstimated = tradeability === 'risk_only'
+      && capitalFit === 'unknown'
+      && !authoritativeHardBlock
+      && (
+        fxStatus === 'estimated'
+        || /fx estimated|conversion unavailable|fx unavailable|capital check: fx estimated/i.test(capitalNote)
+      );
+    const gatePriceableTradeability = ['tradable','entry','ready','action_now'].includes(tradeability) || riskOnlyFxEstimated;
     const riskInvalid = ['invalid_plan','plan_missing','too_wide'].includes(riskStatus);
     const capitalImpossible = ['too_heavy','too_expensive','impossible'].includes(capitalFit);
     const checks = {
@@ -186,6 +196,8 @@
       rrKnown:Number.isFinite(rr),
       rrOk:Number.isFinite(rr) && rr >= 2,
       tradeabilityOk:gatePriceableTradeability,
+      riskOnlyFxEstimated,
+      noAuthoritativeHardBlock:!authoritativeHardBlock,
       riskOk:!riskInvalid,
       capitalOk:!capitalImpossible
     };
@@ -202,7 +214,10 @@
         rr,
         tradeability,
         riskStatus,
-        capitalFit
+        capitalFit,
+        capitalNote,
+        fxStatus,
+        authoritativeHardBlock
       }
     };
   }
@@ -222,7 +237,9 @@
         priceability_state:'priceable',
         originalPriceabilityState:current,
         priceabilityReconciledFromPlan:true,
-        priceabilityReconciliationReason:'Effective plan has valid entry, stop, target, RR, risk fit, and tradeability.',
+        priceabilityReconciliationReason:diagnostics.checks.riskOnlyFxEstimated === true
+          ? 'Effective plan has valid price structure and FX-estimated capital uncertainty should not keep priceability unpriceable.'
+          : 'Effective plan has valid entry, stop, target, RR, risk fit, and tradeability.',
         priceabilityReconciliationDiagnostics:diagnostics
       };
     }

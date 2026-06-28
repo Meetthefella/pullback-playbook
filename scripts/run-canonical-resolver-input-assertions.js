@@ -119,7 +119,7 @@ function assertSimplifiedPipelineResolverInjection(){
       return {entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'};
     },
     riskSettingsProvider(){
-      return {accountSize:4000, riskPercent:0.01, maxLoss:40, wholeSharesOnly:true};
+      return {accountSize:4000, riskPercent:1, maxLoss:40, wholeSharesOnly:true};
     },
     analysisDerivedStatesFromRecord(){
       return {
@@ -186,7 +186,7 @@ function assertSimplifiedPipelineResolverInjection(){
   };
   const record = {
     ticker:'TROW',
-    marketData:{price:110.27, currency:'GBP'},
+    marketData:{price:110.27, currency:'USD'},
     plan:{entry:110.27, stop:102.29, firstTarget:136.19}
   };
   const result = sandbox.window.SimplifiedTradeState.resolveRecordState(record, {
@@ -201,6 +201,242 @@ function assertSimplifiedPipelineResolverInjection(){
   assert.strictEqual(capturedDeps.resolveFinalStateContract(record).canonical_final_verdict, 'entry', 'override-aware final-state contract should be injected');
   assert.strictEqual(result.canonicalVerdict, 'entry', 'soft-readiness-only review case should preserve canonical Entry in simplified pipeline');
   assert.strictEqual(result.priceabilityState, 'priceable', 'soft-readiness-only review case should preserve priceable state in simplified pipeline');
+}
+
+function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
+  const sandbox = {
+    window:{},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval
+  };
+  sandbox.globalThis = sandbox.window;
+  sandbox.window.setTimeout = setTimeout;
+  sandbox.window.clearTimeout = clearTimeout;
+  sandbox.window.setInterval = setInterval;
+  sandbox.window.clearInterval = clearInterval;
+
+  const runModule = relativePath => {
+    const source = fs.readFileSync(path.join(root, relativePath), 'utf8');
+    vm.runInNewContext(source, sandbox, {filename:relativePath});
+  };
+
+  runModule('js/plan-math.js');
+  runModule('js/tradeability.js');
+  runModule('js/domain/simplified-plan-state.js');
+  runModule('js/presentation/simplified-presentation-model.js');
+  runModule('js/domain/simplified-trade-state.js');
+
+  sandbox.window.ResolverCore = {
+    resolveGlobalVerdict(){
+      return {
+        final_verdict:'watch',
+        main_blocker:'',
+        reason:'',
+        structure_eligibility:'alive',
+        structure_state:'strong',
+        priceability_state:'priceable',
+        bounce_state:'attempt',
+        near_entry_gate_pass:false,
+        entry_gate_pass:false,
+        contractDiagnostics:{softReadinessOnlyDemotion:true}
+      };
+    },
+    globalVerdictLabel(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    },
+    normalizeVerdict(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    },
+    getBadge(){ return {text:'Entry'}; },
+    getActions(){ return {label:'WAIT'}; }
+  };
+  sandbox.window.ResolverPresentation = {
+    resolveVisualState(unusedRecord, unusedSurface, options){
+      const resolvedContract = options && options.resolvedContract || {};
+      return {
+        canonicalVerdict:resolvedContract.canonical_final_verdict || 'watch',
+        finalVerdict:resolvedContract.final_verdict || 'watch',
+        visualBucket:resolvedContract.canonical_visual_bucket || 'monitor',
+        tone:resolvedContract.canonical_visual_bucket || 'monitor',
+        badge:{text:resolvedContract.canonical_final_verdict === 'entry' ? 'Entry' : 'Watch'},
+        priceabilityState:resolvedContract.canonical_priceability_state || 'unpriceable'
+      };
+    }
+  };
+
+  const deps = {
+    effectivePlanForRecord(item){
+      return item && item.effectivePlan || {entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'};
+    },
+    riskSettingsProvider(){
+      return {accountSize:4000, riskPercent:1, maxLoss:40, wholeSharesOnly:true};
+    },
+    analysisDerivedStatesFromRecord(item){
+      return item && item.derivedStates || {
+        structureState:'strong',
+        trendState:'intact',
+        bounceState:'attempt',
+        stabilisationState:'none',
+        volumeState:'supportive',
+        pullbackZone:'none',
+        setupLocationState:'off_level',
+        priceabilityState:'unpriceable'
+      };
+    },
+    applySetupConfirmationPlanGate(unusedRecord, displayedPlan){
+      return displayedPlan;
+    },
+    baseVerdictFromResolvedContract(resolved){
+      return String(resolved && resolved.baseVerdict || 'watch').toLowerCase();
+    },
+    resolvePreLifecycleStateContract(){
+      return {
+        finalVerdict:'Watch',
+        structuralState:'developing',
+        actionStateKey:'wait_for_confirmation',
+        planStatusKey:'valid',
+        tradeabilityVerdict:'Watch',
+        blockerReason:'Needs stronger confirmation',
+        reasonSummary:'Pre-watchlist setup',
+        terminal:false,
+        baseVerdict:'watch'
+      };
+    },
+    resolveFinalStateContract(){
+      return {
+        finalVerdict:'Watch',
+        final_verdict:'watch',
+        structuralState:'developing',
+        actionStateKey:'wait_for_confirmation',
+        planStatusKey:'valid',
+        tradeabilityVerdict:'Watch',
+        blockerReason:'Needs stronger confirmation',
+        reasonSummary:'Pre-watchlist setup',
+        terminal:false,
+        baseVerdict:'watch',
+        canonical_final_verdict:'entry',
+        canonical_visual_bucket:'entry',
+        canonical_priceability_state:'priceable',
+        canonical_soft_readiness_alignment_applied:true
+      };
+    },
+    evaluatePlanRealism(){
+      return {credible_rr:3.25};
+    },
+    setupScoreForRecord(){
+      return 7;
+    },
+    isHostileMarketStatus(){
+      return false;
+    },
+    scannerScoreGradientClass(){
+      return '';
+    },
+    state:{marketStatus:'supportive'}
+  };
+
+  const makeRecord = overrides => ({
+    ticker:'TROW',
+    marketData:{price:110.27, currency:'USD'},
+    plan:{entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'},
+    effectivePlan:{entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'},
+    derivedStates:{
+      structureState:'strong',
+      trendState:'intact',
+      bounceState:'attempt',
+      stabilisationState:'none',
+      volumeState:'supportive',
+      pullbackZone:'none',
+      setupLocationState:'off_level',
+      priceabilityState:'unpriceable'
+    },
+    ...overrides
+  });
+
+  const reviewRecord = makeRecord();
+  const reviewResult = sandbox.window.SimplifiedTradeState.resolveRecordState(reviewRecord, {
+    surface:'review',
+    log:false,
+    deps
+  });
+  assert.strictEqual(reviewResult.canonicalVerdict, 'entry', 'FX-estimated risk_only plan should preserve canonical Entry for TROW-like review');
+  assert.strictEqual(reviewResult.priceabilityState, 'priceable', 'FX-estimated risk_only plan should reconcile stale unpriceable to priceable');
+  assert.strictEqual(reviewResult.planStatus, 'valid', 'FX-estimated risk_only reconciliation should keep plan valid');
+
+  const tooHeavyRecord = makeRecord({
+    marketData:{price:110.27, currency:'GBP'},
+    effectivePlan:{entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'},
+    plan:{entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'}
+  });
+  const tooHeavyDeps = {
+    ...deps,
+    riskSettingsProvider(){
+      return {accountSize:200, riskPercent:1, maxLoss:40, wholeSharesOnly:true};
+    }
+  };
+  const tooHeavyResult = sandbox.window.SimplifiedTradeState.resolveRecordState(tooHeavyRecord, {
+    surface:'review',
+    log:false,
+    deps:tooHeavyDeps
+  });
+  assert.strictEqual(tooHeavyResult.debug.derivedStates.priceabilityState, 'unpriceable', 'too_heavy capital fit must not reconcile to priceable');
+  assert.strictEqual(tooHeavyResult.debug.derivedStates.priceabilityReconciledFromPlan, false, 'too_heavy capital fit must not set reconciliation true');
+
+  const tooExpensiveRecord = makeRecord({
+    marketData:{price:4100, currency:'GBP'},
+    effectivePlan:{entry:4100, stop:4000, firstTarget:4500, source:'scanner_estimate'},
+    plan:{entry:4100, stop:4000, firstTarget:4500, source:'scanner_estimate'}
+  });
+  const tooExpensiveResult = sandbox.window.SimplifiedTradeState.resolveRecordState(tooExpensiveRecord, {
+    surface:'review',
+    log:false,
+    deps
+  });
+  assert.strictEqual(tooExpensiveResult.debug.derivedStates.priceabilityState, 'unpriceable', 'too_expensive capital fit must not reconcile to priceable');
+  assert.strictEqual(tooExpensiveResult.debug.derivedStates.priceabilityReconciledFromPlan, false, 'too_expensive capital fit must not set reconciliation true');
+
+  const invalidRiskRecord = makeRecord({
+    effectivePlan:{entry:110.27, stop:111.10, firstTarget:136.19, source:'scanner_estimate'},
+    plan:{entry:110.27, stop:111.10, firstTarget:136.19, source:'scanner_estimate'}
+  });
+  const invalidRiskResult = sandbox.window.SimplifiedTradeState.resolveRecordState(invalidRiskRecord, {
+    surface:'review',
+    log:false,
+    deps
+  });
+  assert.strictEqual(invalidRiskResult.debug.derivedStates.priceabilityState, 'unpriceable', 'invalid risk status must not reconcile to priceable');
+  assert.strictEqual(invalidRiskResult.debug.derivedStates.priceabilityReconciledFromPlan, false, 'invalid risk status must not set reconciliation true');
+
+  const targetTooCloseRecord = makeRecord({
+    plan:{
+      entry:110.27,
+      stop:102.29,
+      firstTarget:118.00,
+      source:'scanner_estimate',
+      blockedReason:'Target too close',
+      blockedReasonCode:'target_too_close'
+    },
+    effectivePlan:{entry:110.27, stop:102.29, firstTarget:118.00, source:'scanner_estimate'}
+  });
+  const targetTooCloseResult = sandbox.window.SimplifiedTradeState.resolveRecordState(targetTooCloseRecord, {
+    surface:'review',
+    log:false,
+    deps
+  });
+  assert.strictEqual(targetTooCloseResult.debug.derivedStates.priceabilityState, 'unpriceable', 'target_too_close authoritative block must still prevent reconciliation');
+  assert.strictEqual(targetTooCloseResult.debug.derivedStates.priceabilityReconciledFromPlan, false, 'target_too_close authoritative block must not set reconciliation true');
 }
 
 function deepClone(value){
@@ -398,6 +634,7 @@ function run(){
   assert.ok(typeof circularComparison.capturedAt === 'string' && circularComparison.capturedAt.length > 0, 'comparison should include capture timestamp');
 
   assertSimplifiedPipelineResolverInjection();
+  assertFxEstimatedRiskOnlyPriceabilityReconciliation();
 
   console.log('run-canonical-resolver-input-assertions: ok');
 }
