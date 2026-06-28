@@ -3012,6 +3012,106 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('Simplified presentation model must consume canonical non-tracked soft-readiness overrides for Review parity.');
   }
 
+  function makeReviewOverrideTrowLikeRecord(overrides = {}){
+    return {
+      ticker:'TROWREVIEW',
+      watchlist:{inWatchlist:true, debug:{}},
+      plan:{
+        entry:110.27,
+        stop:102.29,
+        firstTarget:136.19,
+        source:'scanner_estimate'
+      },
+      marketData:{price:110.27, currency:'USD'},
+      setup:{structureState:'strong', trendState:'uptrend', volumeRequired:false},
+      ...overrides
+    };
+  }
+
+  const reviewOverrideDeps = {
+    effectivePlanForRecord(){
+      return {entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'};
+    },
+    riskSettingsProvider(){
+      return {accountSize:4000, riskPercent:1, maxLoss:40, wholeSharesOnly:true};
+    },
+    analysisDerivedStatesFromRecord(){
+      return {
+        structureState:'strong',
+        trendState:'uptrend',
+        bounceState:'attempt',
+        stabilisationState:'none',
+        volumeState:'supportive',
+        pullbackZone:'near_20ma',
+        setupLocationState:'off_level',
+        priceabilityState:'priceable'
+      };
+    },
+    state:{marketStatus:'S&P above 50 MA'}
+  };
+
+  const currentMissedReviewRecord = makeReviewOverrideTrowLikeRecord({
+      ticker:'TROWMISSEDREVIEW',
+      marketData:{price:134.0, currency:'USD'}
+    });
+  const currentMissedPlanState = simplifiedPlanState.deriveCurrentPlanState(
+    currentMissedReviewRecord,
+    reviewOverrideDeps.effectivePlanForRecord(),
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(currentMissedPlanState.authoritativeBlockApplied !== true || currentMissedPlanState.status !== 'invalid'){
+    throw new Error('Review-only soft-readiness override missed regression requires current missed to invalidate the current plan state.');
+  }
+  const currentMissedReviewResult = pipeline.resolveRecordState(
+    currentMissedReviewRecord,
+    {
+      surface:'review',
+      log:false,
+      deps:reviewOverrideDeps
+    }
+  );
+  if(currentMissedReviewResult.canonicalVerdict === 'entry'){
+    throw new Error('Review-only soft-readiness override must not preserve Entry when current missed blocking is active.');
+  }
+  if(currentMissedReviewResult.planStatus === 'valid'){
+    throw new Error('Review-only soft-readiness override missed regression must not restore a valid Review plan after current missed invalidation.');
+  }
+
+  const terminalLifecycleReviewRecord = makeReviewOverrideTrowLikeRecord({
+    ticker:'TROWTERMINALREVIEW',
+    lifecycle:{stage:'exited', status:'closed'}
+  });
+  const terminalLifecyclePlanState = simplifiedPlanState.deriveCurrentPlanState(
+    terminalLifecycleReviewRecord,
+    reviewOverrideDeps.effectivePlanForRecord(),
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(terminalLifecyclePlanState.authoritativeBlockApplied !== true || terminalLifecyclePlanState.status !== 'invalid'){
+    throw new Error('Review-only soft-readiness override terminal regression requires terminal lifecycle to invalidate the current plan state.');
+  }
+  const terminalLifecycleReviewResult = pipeline.resolveRecordState(
+    terminalLifecycleReviewRecord,
+    {
+      surface:'review',
+      log:false,
+      deps:reviewOverrideDeps
+    }
+  );
+  if(terminalLifecycleReviewResult.canonicalVerdict === 'entry'){
+    throw new Error('Review-only soft-readiness override must not preserve Entry when terminal lifecycle blocking is active.');
+  }
+  if(terminalLifecycleReviewResult.planStatus === 'valid'){
+    throw new Error('Review-only soft-readiness override terminal regression must not restore a valid Review plan after terminal lifecycle invalidation.');
+  }
+
   const currentBlockedRecord = {
     ticker:'SIMPBLOCK',
     in_watchlist:true,

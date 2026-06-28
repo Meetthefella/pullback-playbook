@@ -1122,6 +1122,7 @@
   function resolveGlobalVerdict(record, deps = {}){
     const item = record && typeof record === 'object' ? record : {};
     const preLifecycleResolved = deps.resolvePreLifecycleStateContract(item);
+    const preserveReviewCanonicalForSoftReadiness = deps.preserveReviewCanonicalForSoftReadiness === true;
     const isTracked = !!(
       item.in_watchlist
       || item.watchlist_entry_exists
@@ -1148,7 +1149,8 @@
     const displayedPlan = typeof deps.applySetupConfirmationPlanGate === 'function'
       ? deps.applySetupConfirmationPlanGate(item, rawDisplayedPlan, derivedStates)
       : rawDisplayedPlan;
-    const nonTrackedCanonicalContract = !isTracked && typeof deps.resolveFinalStateContract === 'function'
+    const canonicalSoftReadinessOverrideAllowed = !isTracked || preserveReviewCanonicalForSoftReadiness;
+    const nonTrackedCanonicalContract = canonicalSoftReadinessOverrideAllowed && typeof deps.resolveFinalStateContract === 'function'
       ? deps.resolveFinalStateContract(item, {
         context:'global',
         derivedStates,
@@ -1621,7 +1623,7 @@
         || /fx estimated|conversion unavailable|fx unavailable|capital check: fx estimated/i.test(nonTrackedCanonicalCapitalNote)
       );
     const nonTrackedCanonicalAlignmentApplied = !!(
-      !isTracked
+      canonicalSoftReadinessOverrideAllowed
       && nonTrackedCanonicalDiagnostics
       && nonTrackedCanonicalDiagnostics.softReadinessOnlyDemotion === true
       && nonTrackedCanonicalDiagnostics.structuredBlockersPresent !== true
@@ -1744,7 +1746,11 @@
       canonical_visual_bucket:canonicalVisualBucketForVerdict(canonicalReviewVerdict),
       canonical_priceability_state:canonicalReviewPriceabilityState,
       canonical_soft_readiness_alignment_applied:nonTrackedCanonicalAlignmentApplied,
-      canonical_soft_readiness_alignment_source:nonTrackedCanonicalAlignmentApplied ? 'resolveFinalStateContract(non_tracked_soft_readiness)' : '',
+      canonical_soft_readiness_alignment_source:nonTrackedCanonicalAlignmentApplied
+        ? (isTracked && preserveReviewCanonicalForSoftReadiness
+          ? 'resolveFinalStateContract(review_soft_readiness_override)'
+          : 'resolveFinalStateContract(non_tracked_soft_readiness)')
+        : '',
       setup_location_state:setupLocationState,
       priceability_state:priceabilityState,
       priceability_inferred:priceabilityInferred,

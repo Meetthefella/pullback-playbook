@@ -602,6 +602,7 @@
       const validation = global.SimplifiedPlanState.validateCurrentPlan(item, planState, {derivedStates, deps});
       const resolverDeps = {
         ...deps,
+        preserveReviewCanonicalForSoftReadiness:surface === 'review',
         analysisDerivedStatesFromRecord:() => derivedStates,
         effectivePlanForRecord:() => effectivePlan,
         deriveCurrentPlanState:() => planState,

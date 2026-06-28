@@ -39769,6 +39769,15 @@ function resolveFinalStateContract(record, options = {}){
     )
   );
   const upstreamPriceabilityState = String(derivedStates.priceabilityState || derivedStates.priceability_state || '').trim().toLowerCase();
+  const capitalFitState = String(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || '').trim().toLowerCase();
+  const capitalNoteText = String(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_note || '').trim();
+  const capitalFxStatus = String(displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.fx_status || '').trim().toLowerCase();
+  const riskOnlyFxEstimatedTradeability = tradeability === 'risk_only'
+    && capitalFitState === 'unknown'
+    && (
+      capitalFxStatus === 'estimated'
+      || /fx estimated|conversion unavailable|fx unavailable|capital check: fx estimated/i.test(capitalNoteText)
+    );
 
   let planStateKey = 'valid';
   if(!hasPlanValues || planUiState.state === 'missing') planStateKey = 'missing';
@@ -39779,7 +39788,7 @@ function resolveFinalStateContract(record, options = {}){
     requestedFinalVerdict === 'Entry'
     && upstreamPriceabilityState === 'priceable'
     && planStateKey === 'valid'
-    && tradeability === 'tradable'
+    && (tradeability === 'tradable' || riskOnlyFxEstimatedTradeability)
     && !structuredBlockersPresent
     && !!bounceGuard.unpriceableBlockReason
   );
@@ -39983,7 +39992,7 @@ function resolveFinalStateContract(record, options = {}){
     requestedFinalVerdict === 'Entry'
     && upstreamPriceabilityState === 'priceable'
     && planStateKey === 'valid'
-    && tradeability === 'tradable'
+    && (tradeability === 'tradable' || riskOnlyFxEstimatedTradeability)
     && !structuredBlockersPresent
     && !!bounceGuard.unpriceableBlockReason
     && finalVerdict !== 'Entry'

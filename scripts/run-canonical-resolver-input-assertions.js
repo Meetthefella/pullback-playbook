@@ -43,6 +43,18 @@ function assertResolveGlobalVerdictContractAlignment(){
     assert.ok(appSource.includes(fragment), `app.js must honor injected dep: ${fragment}`);
   });
   assert.ok(
+    resolverSource.includes("const preserveReviewCanonicalForSoftReadiness = deps.preserveReviewCanonicalForSoftReadiness === true;"),
+    'js/resolver-core.js must accept the Review-only soft-readiness canonical preservation override'
+  );
+  assert.ok(
+    resolverSource.includes("const canonicalSoftReadinessOverrideAllowed = !isTracked || preserveReviewCanonicalForSoftReadiness;"),
+    'js/resolver-core.js must allow Review-only canonical soft-readiness preservation even after watchlist add'
+  );
+  assert.ok(
+    simplifiedTradeStateSource.includes("preserveReviewCanonicalForSoftReadiness:surface === 'review'"),
+    'simplified-trade-state must inject the Review-only soft-readiness preservation override'
+  );
+  assert.ok(
     appSource.includes("const derivedProjection = projection.derived_states && typeof projection.derived_states === 'object'"),
     'app.js scanner projection extraction must inspect nested analysisProjection.derived_states fields'
   );
@@ -232,6 +244,7 @@ function assertSimplifiedPipelineResolverInjection(){
   assert.ok(capturedDeps && typeof capturedDeps === 'object', 'simplified pipeline should inject resolver deps');
   assert.strictEqual(capturedDeps.analysisDerivedStatesFromRecord(record).priceabilityState, 'priceable', 'reconciled derivedStates should be injected into ResolverCore.resolveGlobalVerdict');
   assert.strictEqual(capturedDeps.resolveFinalStateContract(record).canonical_final_verdict, 'entry', 'override-aware final-state contract should be injected');
+  assert.strictEqual(capturedDeps.preserveReviewCanonicalForSoftReadiness, true, 'review surface must inject the Review-only soft-readiness preservation override');
   assert.strictEqual(result.canonicalVerdict, 'entry', 'soft-readiness-only review case should preserve canonical Entry in simplified pipeline');
   assert.strictEqual(result.priceabilityState, 'priceable', 'soft-readiness-only review case should preserve priceable state in simplified pipeline');
 }
@@ -261,20 +274,40 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
   runModule('js/domain/simplified-plan-state.js');
   runModule('js/presentation/simplified-presentation-model.js');
   runModule('js/domain/simplified-trade-state.js');
+  let lastResolverDeps = null;
 
   sandbox.window.ResolverCore = {
-    resolveGlobalVerdict(){
+    resolveGlobalVerdict(record, injectedDeps){
+      lastResolverDeps = injectedDeps || null;
+      const plan = record && record.plan && typeof record.plan === 'object' ? record.plan : {};
+      const derivedStates = record && record.derivedStates && typeof record.derivedStates === 'object' ? record.derivedStates : {};
+      const marketData = record && record.marketData && typeof record.marketData === 'object' ? record.marketData : {};
+      const stop = Number(plan.stop);
+      const price = Number(marketData.price);
+      const targetTooClose = String(plan.blockedReasonCode || '').trim().toLowerCase() === 'target_too_close';
+      const invalidated = !!String(plan.invalidatedState || '').trim();
+      const brokenStructure = String(derivedStates.structureState || '').trim().toLowerCase() === 'broken'
+        || String(derivedStates.trendState || '').trim().toLowerCase() === 'broken';
+      const stopBreach = Number.isFinite(price) && Number.isFinite(stop) && price <= stop;
+      const hardBlocked = targetTooClose || invalidated || brokenStructure || stopBreach;
       return {
-        final_verdict:'watch',
-        main_blocker:'',
-        reason:'',
+        final_verdict:hardBlocked ? 'watch' : 'watch',
+        canonical_final_verdict:hardBlocked ? 'watch' : 'entry',
+        canonical_visual_bucket:hardBlocked ? 'monitor' : 'entry',
+        canonical_priceability_state:hardBlocked ? 'unpriceable' : 'priceable',
+        canonical_soft_readiness_alignment_applied:hardBlocked !== true,
+        main_blocker:hardBlocked ? 'Structured blocker active.' : '',
+        reason:hardBlocked ? 'Structured blocker active.' : '',
         structure_eligibility:'alive',
-        structure_state:'strong',
-        priceability_state:'priceable',
+        structure_state:brokenStructure ? 'broken' : 'strong',
+        priceability_state:hardBlocked ? 'unpriceable' : 'priceable',
         bounce_state:'attempt',
         near_entry_gate_pass:false,
         entry_gate_pass:false,
-        contractDiagnostics:{softReadinessOnlyDemotion:true}
+        contractDiagnostics:{
+          softReadinessOnlyDemotion:hardBlocked !== true,
+          structuredBlockersPresent:hardBlocked === true
+        }
       };
     },
     globalVerdictLabel(value){
@@ -407,6 +440,22 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
   assert.strictEqual(reviewResult.canonicalVerdict, 'entry', 'FX-estimated risk_only plan should preserve canonical Entry for TROW-like review');
   assert.strictEqual(reviewResult.priceabilityState, 'priceable', 'FX-estimated risk_only plan should reconcile stale unpriceable to priceable');
   assert.strictEqual(reviewResult.planStatus, 'valid', 'FX-estimated risk_only reconciliation should keep plan valid');
+  const reviewTrackedSoftReadinessRecord = makeRecord({
+    watchlist:{inWatchlist:true}
+  });
+  const reviewTrackedSoftReadinessResult = sandbox.window.SimplifiedTradeState.resolveRecordState(reviewTrackedSoftReadinessRecord, {
+    surface:'review',
+    log:false,
+    deps
+  });
+  assert.strictEqual(reviewTrackedSoftReadinessResult.canonicalVerdict, 'entry', 'review surface must preserve canonical Entry after add-to-watchlist for soft-readiness-only cases');
+  assert.strictEqual(reviewTrackedSoftReadinessResult.priceabilityState, 'priceable', 'review surface must preserve priceable state after add-to-watchlist for soft-readiness-only cases');
+  sandbox.window.SimplifiedTradeState.resolveRecordState(reviewTrackedSoftReadinessRecord, {
+    surface:'track',
+    log:false,
+    deps
+  });
+  assert.strictEqual(lastResolverDeps.preserveReviewCanonicalForSoftReadiness, false, 'track surface must not inject the Review-only soft-readiness preservation override');
   const tooHeavyRecord = makeRecord({
     marketData:{price:110.27, currency:'GBP'},
     effectivePlan:{entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'},
@@ -469,6 +518,68 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
   });
   assert.strictEqual(targetTooCloseResult.debug.derivedStates.priceabilityState, 'unpriceable', 'target_too_close authoritative block must still prevent reconciliation');
   assert.strictEqual(targetTooCloseResult.debug.derivedStates.priceabilityReconciledFromPlan, false, 'target_too_close authoritative block must not set reconciliation true');
+
+  const invalidatedRecord = makeRecord({
+    plan:{
+      entry:110.27,
+      stop:102.29,
+      firstTarget:136.19,
+      source:'scanner_estimate',
+      invalidatedState:'invalidated'
+    },
+    effectivePlan:{entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'}
+  });
+  const invalidatedResult = sandbox.window.SimplifiedTradeState.resolveRecordState(invalidatedRecord, {
+    surface:'review',
+    log:false,
+    deps
+  });
+  assert.strictEqual(lastResolverDeps.preserveReviewCanonicalForSoftReadiness, true, 'review surface must still use the Review-only override path while hard-blocker coverage remains in the gate suite');
+
+  const stopBreachRecord = makeRecord({
+    marketData:{price:101.5, currency:'USD'},
+    effectivePlan:{entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'},
+    plan:{entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'}
+  });
+  const stopBreachResult = sandbox.window.SimplifiedTradeState.resolveRecordState(stopBreachRecord, {
+    surface:'review',
+    log:false,
+    deps:{
+      ...deps,
+      analysisDerivedStatesFromRecord(){
+        return {
+          structureState:'strong',
+          trendState:'intact',
+          bounceState:'attempt',
+          stabilisationState:'none',
+          volumeState:'supportive',
+          pullbackZone:'none',
+          setupLocationState:'off_level',
+          priceabilityState:'priceable'
+        };
+      }
+    }
+  });
+  assert.strictEqual(lastResolverDeps.preserveReviewCanonicalForSoftReadiness, true, 'review surface must keep the Review-only override flag for stop-breach scenarios');
+
+  const brokenStructureRecord = makeRecord({
+    derivedStates:{
+      structureState:'broken',
+      trendState:'broken',
+      bounceState:'attempt',
+      stabilisationState:'none',
+      volumeState:'supportive',
+      pullbackZone:'none',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable'
+    }
+  });
+  const brokenStructureResult = sandbox.window.SimplifiedTradeState.resolveRecordState(brokenStructureRecord, {
+    surface:'review',
+    log:false,
+    deps
+  });
+  assert.strictEqual(lastResolverDeps.preserveReviewCanonicalForSoftReadiness, true, 'review surface must keep the Review-only override flag for broken-structure scenarios');
 }
 
 function deepClone(value){

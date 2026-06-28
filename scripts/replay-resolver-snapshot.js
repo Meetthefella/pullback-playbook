@@ -64,6 +64,10 @@ function deepClone(value){
   return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
+function cloneObject(value){
+  return value && typeof value === 'object' ? deepClone(value) : null;
+}
+
 function providerApiKey(providerId){
   if(providerId === 'fmp') return process.env.FMP_API_KEY;
   if(providerId === 'marketdata') return process.env.MARKETDATA_API_KEY || process.env.MARKETDATA_TOKEN;
@@ -284,7 +288,21 @@ function normalizeSnapshotInput(payload, fallbackTicker = ''){
       low:numericOrNull(row.low),
       close:numericOrNull(row.close),
       volume:numericOrNull(row.volume)
-    }))
+    })),
+    meta:cloneObject(source.meta),
+    marketData:cloneObject(source.marketData),
+    setup:cloneObject(source.setup),
+    plan:cloneObject(source.plan),
+    scan:cloneObject(source.scan),
+    review:cloneObject(source.review),
+    reclaimAttempt:source.reclaimAttempt === true,
+    reclaimsLevel:source.reclaimsLevel === true,
+    breaksLocalHigh:source.breaksLocalHigh === true,
+    strongBullishContinuation:source.strongBullishContinuation === true,
+    in_watchlist:source.in_watchlist === true,
+    watchlist_entry_exists:source.watchlist_entry_exists === true,
+    terminal_avoid_applied:source.terminal_avoid_applied === true,
+    avoid_trigger_source:String(source.avoid_trigger_source || '').trim()
   };
 }
 
@@ -551,32 +569,76 @@ function buildBaseView(record, displayedPlan, chartVerdict, planRealism, setupSc
   };
 }
 
+function deriveStatesFromPreservedProjection(analysisProjection){
+  const projection = analysisProjection && typeof analysisProjection === 'object' ? analysisProjection : {};
+  const pullbackZone = String(
+    projection.pullback_zone
+    || projection.pullbackZone
+    || projection.pullback_status
+    || projection.pullbackStatus
+    || ''
+  ).trim().toLowerCase();
+  return {
+    trendState:String(projection.trend_state || projection.trendState || '').trim().toLowerCase(),
+    pullbackZone,
+    pullbackState:pullbackZone,
+    pullbackQuality:'',
+    structureState:String(projection.structure_state || projection.structureState || '').trim().toLowerCase(),
+    setupLocationState:String(projection.setup_location_state || projection.setupLocationState || '').trim().toLowerCase(),
+    priceabilityState:String(projection.priceability_state || projection.priceabilityState || '').trim().toLowerCase(),
+    stabilisationState:String(projection.stabilisation_state || projection.stabilisationState || '').trim().toLowerCase(),
+    bounceState:String(projection.bounce_state || projection.bounceState || '').trim().toLowerCase(),
+    volumeState:String(projection.volume_state || projection.volumeState || '').trim().toLowerCase(),
+    scanType:String(projection.scan_type || projection.scanType || '').trim(),
+    evaluationScanType:String(projection.evaluation_scan_type || projection.evaluationScanType || '').trim(),
+    importedScanType:String(projection.imported_scan_type || projection.importedScanType || '').trim(),
+    globalSetupType:String(projection.global_setup_type || projection.globalSetupType || '').trim(),
+    setupTypeOverlapDetected:String(projection.setup_type_overlap_detected || projection.setupTypeOverlapDetected || '').trim().toLowerCase(),
+    setupTypeReason:String(projection.setup_type_reason || projection.setupTypeReason || '').trim(),
+    candleEvidenceUpClosesAfterLow:numericOrNull(projection.candle_evidence_up_closes_after_low ?? projection.candleEvidenceUpClosesAfterLow),
+    candleEvidenceReclaimedPriorDayHigh:['true','yes'].includes(String(projection.candle_evidence_reclaimed_prior_day_high || projection.candleEvidenceReclaimedPriorDayHigh || '').trim().toLowerCase()),
+    candleEvidenceDownsideMomentumSlowing:['true','yes'].includes(String(projection.candle_evidence_downside_momentum_slowing || projection.candleEvidenceDownsideMomentumSlowing || '').trim().toLowerCase()),
+    candleEvidenceTighterRanges:['true','yes'].includes(String(projection.candle_evidence_tighter_ranges || projection.candleEvidenceTighterRanges || '').trim().toLowerCase()),
+    candleEvidenceSmallerBodies:['true','yes'].includes(String(projection.candle_evidence_smaller_bodies || projection.candleEvidenceSmallerBodies || '').trim().toLowerCase()),
+    candleEvidenceHigherLowHold:['true','yes'].includes(String(projection.candle_evidence_higher_low_hold || projection.candleEvidenceHigherLowHold || '').trim().toLowerCase()),
+    candleEvidenceReclaimRangeMeaningful:['true','yes'].includes(String(projection.candle_evidence_reclaim_range_meaningful || projection.candleEvidenceReclaimRangeMeaningful || '').trim().toLowerCase())
+  };
+}
+
 function buildReplayRecord(snapshot, sandbox){
+  const preservedMarketData = snapshot.marketData && typeof snapshot.marketData === 'object'
+    ? deepClone(snapshot.marketData)
+    : {};
   const marketData = {
+    ...preservedMarketData,
     ticker:snapshot.ticker,
     tradingViewSymbol:snapshot.tradingViewSymbol,
     exchange:snapshot.exchange,
-    currency:snapshot.currency,
-    price:snapshot.price,
-    previousClose:snapshot.previousClose,
-    sma20:snapshot.sma20,
-    sma50:snapshot.sma50,
-    sma200:snapshot.sma200,
-    ma20:snapshot.sma20,
-    ma50:snapshot.sma50,
-    ma200:snapshot.sma200,
-    rsi14:snapshot.rsi14,
-    rsi:snapshot.rsi14,
-    volume:snapshot.volume,
-    avgVolume30d:snapshot.avgVolume30d,
-    avgVolume30:snapshot.avgVolume30d,
-    perf1w:snapshot.perf1w,
-    perf1m:snapshot.perf1m,
-    perf3m:snapshot.perf3m,
-    perf6m:snapshot.perf6m,
-    perfYtd:snapshot.perfYtd,
-    history:Array.isArray(snapshot.history) ? snapshot.history : [],
-    warnings:Array.isArray(snapshot.warnings) ? snapshot.warnings : []
+    currency:String(preservedMarketData.currency || snapshot.currency || 'USD').trim() || 'USD',
+    price:numericOrNull(preservedMarketData.price ?? snapshot.price),
+    currentPrice:numericOrNull(preservedMarketData.currentPrice ?? preservedMarketData.price ?? snapshot.price),
+    close:numericOrNull(preservedMarketData.close ?? preservedMarketData.price ?? snapshot.price),
+    previousClose:numericOrNull(preservedMarketData.previousClose ?? snapshot.previousClose),
+    sma20:numericOrNull(preservedMarketData.sma20 ?? preservedMarketData.ma20 ?? snapshot.sma20),
+    sma50:numericOrNull(preservedMarketData.sma50 ?? preservedMarketData.ma50 ?? snapshot.sma50),
+    sma200:numericOrNull(preservedMarketData.sma200 ?? preservedMarketData.ma200 ?? snapshot.sma200),
+    ma20:numericOrNull(preservedMarketData.ma20 ?? preservedMarketData.sma20 ?? snapshot.sma20),
+    ma50:numericOrNull(preservedMarketData.ma50 ?? preservedMarketData.sma50 ?? snapshot.sma50),
+    ma200:numericOrNull(preservedMarketData.ma200 ?? preservedMarketData.sma200 ?? snapshot.sma200),
+    rsi14:numericOrNull(preservedMarketData.rsi14 ?? preservedMarketData.rsi ?? snapshot.rsi14),
+    rsi:numericOrNull(preservedMarketData.rsi ?? preservedMarketData.rsi14 ?? snapshot.rsi14),
+    volume:numericOrNull(preservedMarketData.volume ?? snapshot.volume),
+    avgVolume30d:numericOrNull(preservedMarketData.avgVolume30d ?? preservedMarketData.avgVolume30 ?? preservedMarketData.avgVolume ?? snapshot.avgVolume30d),
+    avgVolume30:numericOrNull(preservedMarketData.avgVolume30 ?? preservedMarketData.avgVolume30d ?? preservedMarketData.avgVolume ?? snapshot.avgVolume30d),
+    avgVolume:numericOrNull(preservedMarketData.avgVolume ?? preservedMarketData.avgVolume30d ?? snapshot.avgVolume30d),
+    perf1w:numericOrNull(preservedMarketData.perf1w ?? snapshot.perf1w),
+    perf1m:numericOrNull(preservedMarketData.perf1m ?? snapshot.perf1m),
+    perf3m:numericOrNull(preservedMarketData.perf3m ?? snapshot.perf3m),
+    perf6m:numericOrNull(preservedMarketData.perf6m ?? snapshot.perf6m),
+    perfYtd:numericOrNull(preservedMarketData.perfYtd ?? snapshot.perfYtd),
+    history:Array.isArray(preservedMarketData.history) ? preservedMarketData.history : (Array.isArray(snapshot.history) ? snapshot.history : []),
+    warnings:Array.isArray(preservedMarketData.warnings) ? preservedMarketData.warnings : (Array.isArray(snapshot.warnings) ? snapshot.warnings : []),
+    asOf:String(preservedMarketData.asOf || snapshot.fetchedAt || '')
   };
   const card = {
     ticker:snapshot.ticker,
@@ -586,8 +648,29 @@ function buildReplayRecord(snapshot, sandbox){
   const checks = sandbox.buildScannerChecks(marketData);
   card.checks = checks;
   const suitability = sandbox.scoreSuitability(card, marketData, checks);
-  const tradePlan = suitability && suitability.tradePlan ? suitability.tradePlan : sandbox.deriveTradePlan(marketData, '20MA');
-  const derivedStates = sandbox.deriveSetupStates(card, marketData, checks, tradePlan);
+  const preservedPlan = snapshot.plan && typeof snapshot.plan === 'object' ? deepClone(snapshot.plan) : null;
+  const preservedScan = snapshot.scan && typeof snapshot.scan === 'object' ? deepClone(snapshot.scan) : {};
+  const preservedReview = snapshot.review && typeof snapshot.review === 'object' ? deepClone(snapshot.review) : {};
+  const preservedManualReview = preservedReview.manualReview && typeof preservedReview.manualReview === 'object'
+    ? preservedReview.manualReview
+    : null;
+  const preservedAnalysisProjection = preservedScan.analysisProjection && typeof preservedScan.analysisProjection === 'object'
+    ? deepClone(preservedScan.analysisProjection)
+    : null;
+  const preservedDerivedStates = preservedAnalysisProjection
+    ? deriveStatesFromPreservedProjection(preservedAnalysisProjection)
+    : null;
+  const derivedTradePlan = suitability && suitability.tradePlan ? suitability.tradePlan : sandbox.deriveTradePlan(marketData, '20MA');
+  const tradePlan = preservedPlan
+    ? {
+      entry:numericOrNull(preservedPlan.entry ?? (preservedManualReview && preservedManualReview.entry)) ?? derivedTradePlan.entry,
+      stop:numericOrNull(preservedPlan.stop ?? (preservedManualReview && preservedManualReview.stop)) ?? derivedTradePlan.stop,
+      target:numericOrNull(preservedPlan.firstTarget ?? preservedPlan.target ?? (preservedManualReview && preservedManualReview.target)) ?? derivedTradePlan.target,
+      rr:numericOrNull(preservedPlan.plannedRR ?? preservedPlan.rr ?? derivedTradePlan.rr),
+      source:String(preservedPlan.source || (preservedManualReview ? 'manual' : derivedTradePlan.source || 'scanner_estimate'))
+    }
+    : derivedTradePlan;
+  const derivedStates = preservedDerivedStates || sandbox.deriveSetupStates(card, marketData, checks, tradePlan);
   const riskFit = sandbox.evaluateRiskFit({
     entry:tradePlan.entry,
     stop:tradePlan.stop,
@@ -602,13 +685,44 @@ function buildReplayRecord(snapshot, sandbox){
     rewardRisk
   });
   const displayedPlan = sandbox.deriveCurrentPlanState(tradePlan.entry, tradePlan.stop, tradePlan.target, marketData.currency);
+  if(preservedPlan){
+    displayedPlan.source = String(preservedPlan.source || tradePlan.source || displayedPlan.source || '');
+    displayedPlan.status = String(preservedPlan.status || displayedPlan.status || '').trim().toLowerCase() || displayedPlan.status;
+    displayedPlan.tradeability = String(preservedPlan.tradeability || displayedPlan.tradeability || '').trim().toLowerCase() || displayedPlan.tradeability;
+    displayedPlan.planValidationState = String(preservedPlan.planValidationState || '').trim().toLowerCase();
+    displayedPlan.triggerState = String(preservedPlan.triggerState || '').trim().toLowerCase();
+    displayedPlan.firstTargetTooClose = preservedPlan.firstTargetTooClose === true;
+    displayedPlan.blockedReason = String(preservedPlan.blockedReason || '').trim();
+    displayedPlan.blockedReasonCode = String(preservedPlan.blockedReasonCode || '').trim().toLowerCase();
+    displayedPlan.invalidatedState = String(preservedPlan.invalidatedState || '').trim().toLowerCase();
+    displayedPlan.missedState = String(preservedPlan.missedState || '').trim().toLowerCase();
+    displayedPlan.needsReplan = preservedPlan.needsReplan === true;
+    displayedPlan.hasValidPlan = preservedPlan.hasValidPlan === true;
+    displayedPlan.affordability = String(preservedPlan.affordability || displayedPlan.affordability || '').trim().toLowerCase();
+    displayedPlan.positionSize = numericOrNull(preservedPlan.positionSize) ?? displayedPlan.positionSize;
+    displayedPlan.positionCost = numericOrNull(preservedPlan.positionCost) ?? displayedPlan.positionCost;
+    displayedPlan.positionCostGbp = numericOrNull(preservedPlan.positionCostGbp) ?? displayedPlan.positionCostGbp;
+    displayedPlan.maxLoss = numericOrNull(preservedPlan.maxLoss) ?? displayedPlan.maxLoss;
+    displayedPlan.quoteCurrency = String(preservedPlan.quoteCurrency || displayedPlan.quoteCurrency || marketData.currency || '').trim().toUpperCase();
+    if(displayedPlan.riskFit && typeof displayedPlan.riskFit === 'object'){
+      displayedPlan.riskFit.risk_status = String(preservedPlan.riskStatus || displayedPlan.riskFit.risk_status || '').trim().toLowerCase() || displayedPlan.riskFit.risk_status;
+    }
+    if(displayedPlan.capitalFit && typeof displayedPlan.capitalFit === 'object'){
+      displayedPlan.capitalFit.capital_fit = String(preservedPlan.capitalFit || displayedPlan.capitalFit.capital_fit || '').trim().toLowerCase() || displayedPlan.capitalFit.capital_fit;
+      displayedPlan.capitalFit.capital_note = String(preservedPlan.capitalNote || displayedPlan.capitalFit.capital_note || '').trim();
+      displayedPlan.capitalFit.quote_currency = String(preservedPlan.quoteCurrency || displayedPlan.capitalFit.quote_currency || marketData.currency || '').trim().toUpperCase();
+      displayedPlan.capitalFit.position_cost = numericOrNull(preservedPlan.positionCost) ?? displayedPlan.capitalFit.position_cost;
+      displayedPlan.capitalFit.position_cost_gbp = numericOrNull(preservedPlan.positionCostGbp) ?? displayedPlan.capitalFit.position_cost_gbp;
+      displayedPlan.capitalFit.fx_status = /fx estimated/i.test(String(preservedPlan.capitalNote || '')) ? 'estimated' : String(displayedPlan.capitalFit.fx_status || '').trim().toLowerCase();
+    }
+  }
   const setupStateHint = String(chartVerdict || '').toLowerCase() === 'entry' ? 'entry' : 'developing';
   const planRealism = sandbox.evaluatePlanRealism({
     ticker:snapshot.ticker,
     meta:{marketStatus:sandbox.state.marketStatus},
     marketData,
-    review:{},
-    plan:{entry:tradePlan.entry, stop:tradePlan.stop, firstTarget:tradePlan.target, source:'scanner'},
+    review:preservedReview || {},
+    plan:{entry:tradePlan.entry, stop:tradePlan.stop, firstTarget:tradePlan.target, source:tradePlan.source || 'scanner'},
     scan:{resolvedVerdict:chartVerdict},
     derivedStates
   }, {
@@ -625,14 +739,18 @@ function buildReplayRecord(snapshot, sandbox){
   const record = {
     ticker:snapshot.ticker,
     meta:{
+      ...(snapshot.meta && typeof snapshot.meta === 'object' ? snapshot.meta : {}),
       companyName:snapshot.companyName,
       exchange:snapshot.exchange,
       marketStatus:sandbox.state.marketStatus
     },
     marketData,
-    setup:{marketCaution:false},
-    review:{},
-    plan:{
+    setup:{
+      ...(snapshot.setup && typeof snapshot.setup === 'object' ? snapshot.setup : {}),
+      marketCaution:!!(snapshot.setup && snapshot.setup.marketCaution)
+    },
+    review:preservedReview || {},
+    plan:preservedPlan || {
       entry:tradePlan.entry,
       stop:tradePlan.stop,
       firstTarget:tradePlan.target,
@@ -640,9 +758,10 @@ function buildReplayRecord(snapshot, sandbox){
       plannedRR:displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio
     },
     scan:{
-      estimatedRR:tradePlan.rr,
-      flags:{checks},
-      analysisProjection:{
+      ...(preservedScan || {}),
+      estimatedRR:numericOrNull((preservedScan && preservedScan.estimatedRR) ?? tradePlan.rr),
+      flags:preservedScan && preservedScan.flags ? preservedScan.flags : {checks},
+      analysisProjection:preservedAnalysisProjection || {
         trend_state:derivedStates.trendState,
         pullback_zone:derivedStates.pullbackZone,
         structure_state:derivedStates.structureState,
@@ -665,11 +784,19 @@ function buildReplayRecord(snapshot, sandbox){
       }
     },
     derivedStates,
-    effectivePlan:{entry:tradePlan.entry, stop:tradePlan.stop, firstTarget:tradePlan.target},
+    effectivePlan:{entry:tradePlan.entry, stop:tradePlan.stop, firstTarget:tradePlan.target, source:tradePlan.source || ''},
     displayedPlan,
     planRealism,
     resolvedContract,
-    setupScore
+    setupScore,
+    reclaimAttempt:snapshot.reclaimAttempt === true,
+    reclaimsLevel:snapshot.reclaimsLevel === true,
+    breaksLocalHigh:snapshot.breaksLocalHigh === true,
+    strongBullishContinuation:snapshot.strongBullishContinuation === true,
+    in_watchlist:snapshot.in_watchlist === true,
+    watchlist_entry_exists:snapshot.watchlist_entry_exists === true,
+    terminal_avoid_applied:snapshot.terminal_avoid_applied === true,
+    avoid_trigger_source:String(snapshot.avoid_trigger_source || '').trim()
   };
   return {
     record,
