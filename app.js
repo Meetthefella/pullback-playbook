@@ -5346,8 +5346,12 @@ function scannerProjectionFieldRegistry(){
 
 function scannerProjectionValues(analysisProjection){
   const projection = analysisProjection && typeof analysisProjection === 'object' ? analysisProjection : {};
+  const derivedProjection = projection.derived_states && typeof projection.derived_states === 'object'
+    ? projection.derived_states
+    : {};
   return scannerProjectionFieldRegistry().reduce((values, field) => {
-    values[field.key] = projectionValue(projection, ...field.aliases);
+    values[field.key] = projectionValue(projection, ...field.aliases)
+      || projectionValue(derivedProjection, ...field.aliases);
     return values;
   }, {});
 }

@@ -41,6 +41,14 @@ function assertResolveGlobalVerdictContractAlignment(){
   ].forEach(fragment => {
     assert.ok(appSource.includes(fragment), `app.js must honor injected dep: ${fragment}`);
   });
+  assert.ok(
+    appSource.includes("const derivedProjection = projection.derived_states && typeof projection.derived_states === 'object'"),
+    'app.js scanner projection extraction must inspect nested analysisProjection.derived_states fields'
+  );
+  assert.ok(
+    appSource.includes("|| projectionValue(derivedProjection, ...field.aliases)"),
+    'app.js scanner projection extraction must fall back to nested derived_states values when top-level fields are absent'
+  );
 }
 
 function assertSimplifiedPipelineResolverInjection(){
