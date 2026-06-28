@@ -195,8 +195,10 @@
     const resolved = resolvedState && typeof resolvedState === 'object' ? resolvedState : {};
     const visual = visualState && typeof visualState === 'object' ? visualState : {};
     const plan = planState && typeof planState === 'object' ? planState : {};
+    const canonicalSoftReadinessAlignment = resolved.canonical_soft_readiness_alignment_applied === true;
     const verdict = canonicalVerdict(
-      visual.canonicalVerdict
+      (canonicalSoftReadinessAlignment ? resolved.canonical_final_verdict : '')
+      || visual.canonicalVerdict
       || visual.finalVerdict
       || visual.final_verdict
       || resolved.final_verdict
@@ -241,9 +243,9 @@
     }
     const accepted50MaSupportTest = accepted50MaSupportTestDisplayState(item, resolved, visual);
     const normalizedVisualBucket = accepted50MaSupportTest
-      && String(visual.visualBucket || visual.presentationBucket || visual.bucket || resolved.bucket || 'monitor').trim().toLowerCase() === 'diminishing'
+      && String((canonicalSoftReadinessAlignment ? resolved.canonical_visual_bucket : '') || visual.visualBucket || visual.presentationBucket || visual.bucket || resolved.bucket || 'monitor').trim().toLowerCase() === 'diminishing'
         ? 'monitor'
-        : String(visual.visualBucket || visual.presentationBucket || visual.bucket || resolved.bucket || 'monitor').trim().toLowerCase() || 'monitor';
+        : String((canonicalSoftReadinessAlignment ? resolved.canonical_visual_bucket : '') || visual.visualBucket || visual.presentationBucket || visual.bucket || resolved.bucket || 'monitor').trim().toLowerCase() || 'monitor';
     const normalizedTone = accepted50MaSupportTest
       && String(visual.tone || visual.visual_tone || resolved.tone || normalizedVisualBucket).trim().toLowerCase() === 'diminishing'
         ? 'monitor'
@@ -290,7 +292,8 @@
         || ''
       ).trim().toLowerCase(),
       priceabilityState:String(
-        visual.priceabilityState
+        (canonicalSoftReadinessAlignment ? resolved.canonical_priceability_state : '')
+        || visual.priceabilityState
         || visual.priceability_state
         || resolved.priceability_state
         || ''
@@ -318,6 +321,7 @@
         surface,
         source:'simplified-state-pipeline',
         resolvedFinalVerdict:resolved.final_verdict || resolved.finalVerdict || '',
+        resolvedCanonicalFinalVerdict:resolved.canonical_final_verdict || '',
         visualFinalVerdict:visual.finalVerdict || visual.final_verdict || '',
         planSource:plan.planSourceUsedForRisk || '',
         entryGateChecks:resolved.entry_gate_checks || {},

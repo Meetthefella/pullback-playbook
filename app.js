@@ -11375,7 +11375,59 @@ function watchlistLifecycleSnapshot(record, options = {}){
     });
   }
 
+  if(shouldSuppressWatchlistAddSoftDowngrade(item, snapshot, {
+    source:options.source,
+    globalVerdict,
+    structureGate,
+    displayedPlan
+  })){
+    snapshot.downgradeApplied = false;
+    snapshot.downgradeReason = '';
+  }
+
   return snapshot;
+}
+
+function shouldSuppressWatchlistAddSoftDowngrade(record, snapshot, context = {}){
+  const source = String(context.source || '').trim().toLowerCase();
+  if(source !== 'watchlist_add') return false;
+  const item = record && typeof record === 'object' ? record : {};
+  const currentSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  if(String(currentSnapshot.state || '').trim().toLowerCase() !== 'entry') return false;
+  const downgradeReason = String(
+    currentSnapshot.downgradeReason
+    || (context.globalVerdict && (context.globalVerdict.downgrade_reason || context.globalVerdict.reason))
+    || ''
+  ).trim();
+  if(!downgradeReason) return false;
+  const globalVerdict = context.globalVerdict && typeof context.globalVerdict === 'object'
+    ? context.globalVerdict
+    : resolveGlobalVerdict(item);
+  if(globalVerdict.allow_watchlist !== true) return false;
+  const displayedPlan = context.displayedPlan || deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  if(!displayedPlan || String(displayedPlan.status || '').trim().toLowerCase() !== 'valid') return false;
+  const priceabilityState = String(globalVerdict.priceability_state || '').trim().toLowerCase();
+  if(priceabilityState === 'unpriceable') return false;
+  const planStatus = String(globalVerdict.plan_status || globalVerdict.planStatusKey || '').trim().toLowerCase();
+  if(['invalid','needs_adjustment','unrealistic_rr'].includes(planStatus)) return false;
+  const structureGate = context.structureGate && typeof context.structureGate === 'object'
+    ? context.structureGate
+    : watchlistRefreshStructureGate(item);
+  if(structureGate.avoid_allowed_by_structure_gate === true) return false;
+  const scannerEstimateAuthority = resolveScannerEstimatePlanAuthority(item, globalVerdict, displayedPlan);
+  if(scannerEstimateAuthority && scannerEstimateAuthority.specificBlock === true) return false;
+  const authorityReasonCode = String(scannerEstimateAuthority && scannerEstimateAuthority.reasonCode || '').trim().toLowerCase();
+  const genericSoftCopy = /^conditions are not strong enough for active focus\.?$/i.test(downgradeReason);
+  const softGenericResolverBlock = authorityReasonCode === 'resolver_block'
+    && globalVerdict.allow_plan !== true
+    && priceabilityState !== 'unpriceable'
+    && !['invalid','needs_adjustment','unrealistic_rr'].includes(planStatus);
+  return genericSoftCopy || softGenericResolverBlock;
 }
 
 function syncWatchlistLifecycle(record, options = {}){
@@ -11492,7 +11544,7 @@ function runWatchlistLifecycleEvaluation(options = {}){
       const previousLabel = String(record.watchlist.lifecycleLabel || '');
       if(shouldEvaluateWatchlistLifecycleRecord(record, options)){
         reevaluateTickerProgress(record);
-        const snapshot = syncWatchlistLifecycle(record);
+        const snapshot = syncWatchlistLifecycle(record, {source});
         const settledGlobalVerdict = resolveGlobalVerdict(record);
         maybeTriggerEntryAlert(record, settledGlobalVerdict, {source});
         const derivedStates = analysisDerivedStatesFromRecord(record);

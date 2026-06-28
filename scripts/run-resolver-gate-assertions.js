@@ -2978,6 +2978,40 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('Stale persisted scanner-estimate invalid metadata must not apply authoritative plan blocking.');
   }
 
+  const canonicalSoftReadinessPresentation = sandbox.window.SimplifiedPresentationModel.buildPresentationModel({
+    surface:'review',
+    record:{ticker:'TROWLIKE'},
+    planState:{
+      status:'valid',
+      planVisible:true,
+      tradeability:'tradable'
+    },
+    resolvedState:{
+      final_verdict:'watch',
+      canonical_final_verdict:'entry',
+      canonical_visual_bucket:'entry',
+      canonical_priceability_state:'priceable',
+      canonical_soft_readiness_alignment_applied:true,
+      action:{label:'WATCH'},
+      reason:'Repair is forming but the setup is not priceable yet.',
+      main_blocker:'Repair is forming but the setup is not priceable yet.',
+      entry_gate_pass:false,
+      near_entry_gate_pass:false
+    },
+    visualState:{
+      visualBucket:'monitor',
+      tone:'monitor',
+      priceability_state:'unpriceable',
+      bounce_state:'attempt',
+      structure_state:'strong'
+    }
+  });
+  if(canonicalSoftReadinessPresentation.canonicalVerdict !== 'entry'
+    || canonicalSoftReadinessPresentation.visualBucket !== 'entry'
+    || canonicalSoftReadinessPresentation.priceabilityState !== 'priceable'){
+    throw new Error('Simplified presentation model must consume canonical non-tracked soft-readiness overrides for Review parity.');
+  }
+
   const currentBlockedRecord = {
     ticker:'SIMPBLOCK',
     in_watchlist:true,
@@ -6173,6 +6207,7 @@ function runPlanSemanticsAssertions(){
     'executionDowngradeVerdictForRecord',
     'isAnalysisStaleForRecord',
     'watchlistRefreshStructureGate',
+    'shouldSuppressWatchlistAddSoftDowngrade',
     'deriveActionStateForRecord',
     'actionStateForRecord',
     'nextActionTextForRecord',
@@ -6728,6 +6763,121 @@ function runPlanSemanticsAssertions(){
   }, brokenStructurePlan);
   if(!['invalidated','broken_structure'].includes(brokenStructureAuthority.reasonCode)){
     throw new Error('Broken-structure blocker must remain authoritative.');
+  }
+
+  const addTimeSoftDowngradeRecord = {
+    ticker:'ADDTIMEENTRY',
+    plan:{
+      entry:110.27,
+      stop:102.29,
+      firstTarget:136.19,
+      source:'scanner_estimate',
+      status:'valid',
+      tradeability:'tradable',
+      riskStatus:'fits_risk',
+      blockedReason:'',
+      blockedReasonCode:''
+    },
+    marketData:{price:110.27, currency:'USD'},
+    setup:{},
+    watchlist:{debug:{}, inWatchlist:true}
+  };
+  sandbox.analysisDerivedStatesFromRecord = () => ({
+    structureState:'strong',
+    trendState:'uptrend',
+    bounceState:'attempt',
+    pullbackZone:'near_20ma',
+    stabilisationState:'none',
+    volumeState:'supportive',
+    priceabilityState:'priceable'
+  });
+  const addTimeSoftDowngradePlan = sandbox.deriveCurrentPlanState(110.27, 102.29, 136.19, 'USD');
+  const addTimeSoftDowngradeVerdict = {
+    allow_plan:false,
+    allow_watchlist:true,
+    final_verdict:'watch',
+    priceability_state:'priceable',
+    plan_status:'valid',
+    reason:'Conditions are not strong enough for active focus.',
+    downgrade_reason:'Conditions are not strong enough for active focus.'
+  };
+  const suppressSoftAddDowngrade = sandbox.shouldSuppressWatchlistAddSoftDowngrade(addTimeSoftDowngradeRecord, {
+    state:'entry',
+    downgradeReason:'Conditions are not strong enough for active focus.'
+  }, {
+    source:'watchlist_add',
+    globalVerdict:addTimeSoftDowngradeVerdict,
+    structureGate:sandbox.watchlistRefreshStructureGate(addTimeSoftDowngradeRecord),
+    displayedPlan:addTimeSoftDowngradePlan
+  });
+  if(suppressSoftAddDowngrade !== true){
+    throw new Error('Add-to-watchlist lifecycle must suppress generic soft downgrade copy for a fresh Entry/priceable setup with no hard structured blocker.');
+  }
+
+  const addTimeTargetTooClosePlan = sandbox.deriveCurrentPlanState(100, 95, 101, 'USD');
+  const suppressTargetTooCloseDowngrade = sandbox.shouldSuppressWatchlistAddSoftDowngrade(targetTooCloseRecord, {
+    state:'entry',
+    downgradeReason:'Conditions are not strong enough for active focus.'
+  }, {
+    source:'watchlist_add',
+    globalVerdict:{
+      allow_plan:false,
+      allow_watchlist:true,
+      final_verdict:'watch',
+      priceability_state:'priceable',
+      plan_status:'valid',
+      reason:'Conditions are not strong enough for active focus.',
+      downgrade_reason:'Conditions are not strong enough for active focus.'
+    },
+    structureGate:sandbox.watchlistRefreshStructureGate(targetTooCloseRecord),
+    displayedPlan:addTimeTargetTooClosePlan
+  });
+  if(suppressTargetTooCloseDowngrade === true){
+    throw new Error('Add-to-watchlist lifecycle must keep current target_too_close blockers authoritative.');
+  }
+
+  const suppressInvalidatedDowngrade = sandbox.shouldSuppressWatchlistAddSoftDowngrade(currentInvalidatedLiveRecord, {
+    state:'entry',
+    downgradeReason:'Conditions are not strong enough for active focus.'
+  }, {
+    source:'watchlist_add',
+    globalVerdict:{
+      allow_plan:false,
+      allow_watchlist:true,
+      final_verdict:'watch',
+      priceability_state:'priceable',
+      plan_status:'valid',
+      explicit_invalidation_reason_code:'broken_structure',
+      reason:'Conditions are not strong enough for active focus.',
+      downgrade_reason:'Conditions are not strong enough for active focus.'
+    },
+    structureGate:sandbox.watchlistRefreshStructureGate(currentInvalidatedLiveRecord),
+    displayedPlan:currentInvalidatedDisplayedPlan
+  });
+  if(suppressInvalidatedDowngrade === true){
+    throw new Error('Add-to-watchlist lifecycle must keep current invalidated/broken-structure blockers authoritative.');
+  }
+
+  const suppressStopBreachDowngrade = sandbox.shouldSuppressWatchlistAddSoftDowngrade(stopBreachRecord, {
+    state:'entry',
+    downgradeReason:'Conditions are not strong enough for active focus.'
+  }, {
+    source:'watchlist_add',
+    globalVerdict:{
+      allow_plan:false,
+      allow_watchlist:true,
+      final_verdict:'watch',
+      priceability_state:'priceable',
+      plan_status:'valid',
+      explicit_invalidation_reason_code:'stop_breach',
+      reason:'Conditions are not strong enough for active focus.',
+      downgrade_reason:'Conditions are not strong enough for active focus.'
+    },
+    structureGate:sandbox.watchlistRefreshStructureGate(stopBreachRecord),
+    displayedPlan:stopBreachPlan
+  });
+  if(suppressStopBreachDowngrade === true){
+    throw new Error('Add-to-watchlist lifecycle must keep stop-breach blockers authoritative.');
   }
 
   const targetHistory = [
@@ -8269,6 +8419,9 @@ function runTrackPresentationAuthorityAssertions(){
   }
   if(!/runWatchlistLifecycleEvaluation\(\{[\s\S]*?source:'watchlist_add'[\s\S]*?\}\);\s*refreshTrackedTickerState\(entry\.ticker, \{[\s\S]*?source:'watchlist_add'[\s\S]*?reason:'watchlist_add_refresh'[\s\S]*?force:true[\s\S]*?persist:false[\s\S]*?\}\);\s*markWatchlistDirty\(\[entry\.ticker\], 'watchlist_add'\);\s*uiState\.watchlistPreparedModelCache = null;\s*uiState\.watchlistRenderSignature = '';/s.test(appSource)){
     throw new Error('Watchlist add must rebuild persisted Track presentation and invalidate prepared Track render caches so section grouping cannot reuse stale avoid buckets.');
+  }
+  if(!/const snapshot = syncWatchlistLifecycle\(record, \{source\}\);/.test(appSource)){
+    throw new Error('Watchlist lifecycle evaluation must pass its source through to syncWatchlistLifecycle() so add-time guards can distinguish watchlist_add from later refreshes.');
   }
   if(!/const watchlistEligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'review_add_watchlist_hidden',\s*deferWatchlistRemoval:true,\s*commitOnChange:false\s*\}\);/s.test(appSource)){
     throw new Error('Review Add to Watchlist button state must use the same post-gate eligibility decision as the actual add path.');

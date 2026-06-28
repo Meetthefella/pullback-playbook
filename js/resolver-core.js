@@ -96,6 +96,14 @@
     })[safeVerdict] || {label:'WATCH', detail:'Needs confirmation', planAllowed:false, watchlistAllowed:true};
   }
 
+  function canonicalVisualBucketForVerdict(verdict){
+    const safeVerdict = normalizeVerdict(verdict);
+    if(safeVerdict === 'entry') return 'entry';
+    if(safeVerdict === 'near_entry') return 'near_entry';
+    if(safeVerdict === 'avoid') return 'avoid';
+    return 'monitor';
+  }
+
   function numericValueOrNull(value){
     if(value === null || value === undefined) return null;
     if(typeof value === 'string' && value.trim() === '') return null;
@@ -1140,6 +1148,13 @@
     const displayedPlan = typeof deps.applySetupConfirmationPlanGate === 'function'
       ? deps.applySetupConfirmationPlanGate(item, rawDisplayedPlan, derivedStates)
       : rawDisplayedPlan;
+    const nonTrackedCanonicalContract = !isTracked && typeof deps.resolveFinalStateContract === 'function'
+      ? deps.resolveFinalStateContract(item, {
+        context:'global',
+        derivedStates,
+        displayedPlan
+      })
+      : null;
     const canonicalSetupScore = typeof deps.canonicalSetupScoreForRecord === 'function'
       ? numericValueOrNull(deps.canonicalSetupScoreForRecord(item))
       : null;
@@ -1569,6 +1584,38 @@
     const bucket = (canonicalFinalVerdict === 'watch' && deteriorationLowPriority)
       ? 'lower_priority'
       : getBucket(canonicalFinalVerdict);
+    const nonTrackedCanonicalDiagnostics = nonTrackedCanonicalContract
+      && nonTrackedCanonicalContract.contractDiagnostics
+      && typeof nonTrackedCanonicalContract.contractDiagnostics === 'object'
+        ? nonTrackedCanonicalContract.contractDiagnostics
+        : null;
+    const nonTrackedCanonicalVerdict = normalizeVerdict(
+      nonTrackedCanonicalContract && (
+        nonTrackedCanonicalContract.finalVerdict
+        || nonTrackedCanonicalContract.final_verdict
+      )
+    );
+    const nonTrackedCanonicalPriceabilityState = String(
+      nonTrackedCanonicalDiagnostics && nonTrackedCanonicalDiagnostics.finalPriceabilityState
+      || ''
+    ).trim().toLowerCase();
+    const nonTrackedCanonicalAlignmentApplied = !!(
+      !isTracked
+      && nonTrackedCanonicalDiagnostics
+      && nonTrackedCanonicalDiagnostics.softReadinessOnlyDemotion === true
+      && nonTrackedCanonicalDiagnostics.structuredBlockersPresent !== true
+      && displayedPlan
+      && String(displayedPlan.status || '').trim().toLowerCase() === 'valid'
+      && String(displayedPlan.tradeability || '').trim().toLowerCase() === 'tradable'
+      && ['entry','near_entry'].includes(nonTrackedCanonicalVerdict)
+      && nonTrackedCanonicalPriceabilityState === 'priceable'
+    );
+    const canonicalReviewVerdict = nonTrackedCanonicalAlignmentApplied
+      ? nonTrackedCanonicalVerdict
+      : canonicalFinalVerdict;
+    const canonicalReviewPriceabilityState = nonTrackedCanonicalAlignmentApplied
+      ? nonTrackedCanonicalPriceabilityState
+      : priceabilityState;
     const fallingKnifeTrace = viability.fallingKnife || resolveFallingKnifeRisk({
       structureEligibility:structureLayer.structureEligibility,
       structureState,
@@ -1669,6 +1716,11 @@
       setup_score:Number.isFinite(setupScore) ? setupScore : null,
       priority_score_adjustment:isExtended ? -0.35 : 0,
       is_extended:isExtended,
+      canonical_final_verdict:canonicalReviewVerdict,
+      canonical_visual_bucket:canonicalVisualBucketForVerdict(canonicalReviewVerdict),
+      canonical_priceability_state:canonicalReviewPriceabilityState,
+      canonical_soft_readiness_alignment_applied:nonTrackedCanonicalAlignmentApplied,
+      canonical_soft_readiness_alignment_source:nonTrackedCanonicalAlignmentApplied ? 'resolveFinalStateContract(non_tracked_soft_readiness)' : '',
       setup_location_state:setupLocationState,
       priceability_state:priceabilityState,
       priceability_inferred:priceabilityInferred,
