@@ -2730,6 +2730,14 @@ function runSharedNarrativeConsistencyAssertions(){
       if(safe === 'near_entry') return 'Near Entry';
       if(safe === 'avoid') return 'Avoid';
       return 'Watch';
+    },
+    getTone(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(['entry','near_entry','monitor','diminishing','avoid'].includes(safe)) return safe;
+      return 'monitor';
+    },
+    resolveStructuredExplicitInvalidationAuthorityCode(globalVerdict){
+      return String(globalVerdict && globalVerdict.explicit_invalidation_authority_code || '').trim().toLowerCase();
     }
   };
   vm.createContext(narrativeSandbox);
@@ -7700,6 +7708,7 @@ function runTrackPresentationAuthorityAssertions(){
     'terminalAvoidCopyPattern',
     'provisionalPlanConfirmationCopy',
     'sanitizeNonTerminalPlanCopy',
+    'resolveStructuredExplicitInvalidationAuthorityCode',
     'buildSharedReviewTrackPresentation',
     'resolveTrackCardVisibleModel'
   ].forEach(functionName => {
@@ -8255,6 +8264,128 @@ function runTrackPresentationAuthorityAssertions(){
     || freshDiagnostic.simplifiedState.persistedPresentationCacheOnly !== true){
     throw new Error('Track diagnostics must use fresh simplified/canonical state and keep embedded persisted presentation cache-only.');
   }
+  const trackLifecycleAuthoritySandbox = {
+    console,
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : '';
+    },
+    normalizeVisualBucketForPairing(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','monitor','diminishing','avoid'].includes(safe) ? safe : 'monitor';
+    },
+    getTone(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','monitor','diminishing','avoid'].includes(safe) ? safe : 'monitor';
+    },
+    globalVerdictLabel(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    },
+    resolveStructuredExplicitInvalidationAuthorityCode(globalVerdict){
+      return String(globalVerdict && globalVerdict.explicit_invalidation_authority_code || '').trim().toLowerCase();
+    },
+    resolveGlobalVerdict(){
+      return {
+        final_verdict:'watch',
+        base_verdict:'watch',
+        structure_eligibility:'alive',
+        structure_state:'strong',
+        terminal_avoid_applied:false,
+        rejected_by_viability_gate:false
+      };
+    },
+    watchlistLifecycleSnapshot(){
+      return {
+        state:'entry',
+        label:'Entry',
+        status:'active'
+      };
+    }
+  };
+  vm.createContext(trackLifecycleAuthoritySandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'resolveStructuredExplicitInvalidationAuthorityCode'), trackLifecycleAuthoritySandbox, {filename:'app.js#resolveStructuredExplicitInvalidationAuthorityCode'});
+  vm.runInContext(extractFunctionSource(appSource, 'buildSharedReviewTrackPresentation'), trackLifecycleAuthoritySandbox, {filename:'app.js#buildSharedReviewTrackPresentation'});
+  const trackedLifecycleEntryPresentation = trackLifecycleAuthoritySandbox.buildSharedReviewTrackPresentation({
+    ticker:'TROW',
+    watchlist:{inWatchlist:true, debug:{}},
+    plan:{blockedReasonCode:''},
+    setup:{structureState:'strong'}
+  }, {
+    surface:'track',
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      visualBucket:'monitor',
+      tone:'monitor',
+      badgeLabel:'Watch',
+      actionLabel:'WATCH',
+      mainBlocker:'Conditions are not strong enough for active focus.',
+      planStatus:'valid',
+      priceabilityState:'priceable',
+      structureState:'strong',
+      structureEligibility:'alive'
+    },
+    lifecycleSnapshot:{
+      state:'entry',
+      label:'Entry',
+      status:'active'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      base_verdict:'watch',
+      structure_eligibility:'alive',
+      structure_state:'strong',
+      terminal_avoid_applied:false,
+      rejected_by_viability_gate:false
+    }
+  });
+  if(trackedLifecycleEntryPresentation.canonicalVerdict !== 'entry'
+    || trackedLifecycleEntryPresentation.visualBucket !== 'entry'
+    || trackedLifecycleEntryPresentation.tone !== 'entry'){
+    throw new Error('Track shared presentation must preserve lifecycle Entry over soft tracked watch when no hard blocker exists.');
+  }
+  const trackedLifecycleBlockedPresentation = trackLifecycleAuthoritySandbox.buildSharedReviewTrackPresentation({
+    ticker:'UNP',
+    watchlist:{inWatchlist:true, debug:{}},
+    plan:{blockedReasonCode:'target_too_close'},
+    setup:{structureState:'strong'}
+  }, {
+    surface:'track',
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      visualBucket:'monitor',
+      tone:'monitor',
+      badgeLabel:'Watch',
+      actionLabel:'WATCH',
+      mainBlocker:'Nearby resistance limits current reward potential.',
+      planStatus:'valid',
+      priceabilityState:'priceable',
+      structureState:'strong',
+      structureEligibility:'alive'
+    },
+    lifecycleSnapshot:{
+      state:'entry',
+      label:'Entry',
+      status:'active'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      base_verdict:'watch',
+      structure_eligibility:'alive',
+      structure_state:'strong',
+      terminal_avoid_applied:false,
+      rejected_by_viability_gate:false
+    }
+  });
+  if(trackedLifecycleBlockedPresentation.canonicalVerdict !== 'watch'){
+    throw new Error('Track shared presentation must not preserve lifecycle Entry when a hard structured blocker exists.');
+  }
   const model = authoritySandbox.resolveTrackCardVisibleModel({
     ticker:'LIN'
   }, {
@@ -8582,6 +8713,9 @@ function runTrackPresentationAuthorityAssertions(){
   }
   if(!/trackDebug\s*=\s*\{/.test(appSource) || !/visibleModel:\s*\{/.test(appSource) || !/resolverTrace:\s*\{/.test(appSource) || !/planTrace:\s*\{/.test(appSource) || !/gateTrace:\s*\{/.test(appSource) || !/lifecycleTrace:\s*\{/.test(appSource)){
     throw new Error('Track debug output must use one namespaced trackDebug structure.');
+  }
+  if(!/const trackedLifecycleHardStructuredBlock = \['invalidated','missed','target_too_close','broken_structure'\]\.includes\(explicitInvalidationAuthorityCode\)[\s\S]*?\|\| \['invalidated','missed','target_too_close','broken_structure','terminal','expired'\]\.includes\(planBlockedReasonCode\)[\s\S]*?const preserveTrackedLifecycleCanonicalVerdict = !!\([\s\S]*?\['entry','near_entry'\]\.includes\(lifecycleVerdict\)[\s\S]*?simplifiedVerdict === 'watch'[\s\S]*?trackedLifecycleHardStructuredBlock !== true[\s\S]*?\);[\s\S]*?const canonicalVerdict = suppressAvoidForTrackedWatch[\s\S]*?\: \(preserveTrackedLifecycleCanonicalVerdict \? lifecycleVerdict : simplifiedVerdict\);/s.test(appSource)){
+    throw new Error('Track shared presentation must allow lifecycle entry/near_entry to outrank soft tracked watch only when no hard structured blocker exists.');
   }
   if(/Final Verdict Rendered|Canonical Final Verdict|Track Visual Bucket|Scan Visual Bucket|Presentation Reason/.test(appSource)){
     throw new Error('Watchlist debug output must not print redundant flat Track state aliases.');

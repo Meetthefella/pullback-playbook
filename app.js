@@ -7959,6 +7959,19 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     || ''
   ).trim().toLowerCase();
   const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
+  const explicitInvalidationAuthorityCode = resolveStructuredExplicitInvalidationAuthorityCode(globalVerdict);
+  const planBlockedReasonCode = String(item.plan && item.plan.blockedReasonCode || '').trim().toLowerCase();
+  const structureState = String(
+    simplifiedState.structureState
+    || globalVerdict.structure_state
+    || (item.setup && item.setup.structureState)
+    || ''
+  ).trim().toLowerCase();
+  const structureEligibility = String(
+    simplifiedState.structureEligibility
+    || globalVerdict.structure_eligibility
+    || ''
+  ).trim().toLowerCase();
   const baseVerdict = normalizeGlobalVerdictKey(
     globalVerdict.base_verdict
     || watchlistDebug.baseVerdict
@@ -7979,19 +7992,44 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     && !hasExplicitInvalidation
     && ['watch', 'monitor'].includes(baseVerdict || resolverVerdict)
   );
+  const trackedLifecycleHardStructuredBlock = ['invalidated','missed','target_too_close','broken_structure'].includes(explicitInvalidationAuthorityCode)
+    || ['invalidated','missed','target_too_close','broken_structure','terminal','expired'].includes(planBlockedReasonCode)
+    || globalVerdict.terminal_avoid_applied === true
+    || globalVerdict.rejected_by_viability_gate === true
+    || structureEligibility === 'broken'
+    || ['broken','failed'].includes(structureState);
+  const preserveTrackedLifecycleCanonicalVerdict = !!(
+    item.watchlist
+    && item.watchlist.inWatchlist
+    && ['entry','near_entry'].includes(lifecycleVerdict)
+    && simplifiedVerdict === 'watch'
+    && trackedLifecycleHardStructuredBlock !== true
+  );
   const suppressAvoidForTrackedWatch = softTrackedWatchSuppression;
-  const canonicalVerdict = suppressAvoidForTrackedWatch ? 'watch' : simplifiedVerdict;
+  const canonicalVerdict = suppressAvoidForTrackedWatch
+    ? 'watch'
+    : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict);
   const simplifiedBucket = normalizeVisualBucketForPairing(
     simplifiedState.visualBucket
     || simplifiedState.presentationBucket
     || 'monitor'
   );
+  const lifecycleVisualBucket = lifecycleVerdict === 'entry'
+    ? 'entry'
+    : (lifecycleVerdict === 'near_entry' ? 'near_entry' : '');
   const visualBucket = suppressAvoidForTrackedWatch
     ? (simplifiedBucket === 'avoid' ? 'diminishing' : (simplifiedBucket || 'diminishing'))
-    : simplifiedBucket;
+    : (preserveTrackedLifecycleCanonicalVerdict
+      ? normalizeVisualBucketForPairing(lifecycleVisualBucket || simplifiedBucket || 'monitor')
+      : simplifiedBucket);
+  const canonicalTone = canonicalVerdict === 'entry'
+    ? 'entry'
+    : (canonicalVerdict === 'near_entry' ? 'near_entry' : '');
   const tone = suppressAvoidForTrackedWatch
     ? 'diminishing'
-    : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor');
+    : (preserveTrackedLifecycleCanonicalVerdict
+      ? (canonicalTone || String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')
+      : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor'));
   const suppressingTrackedAvoid = suppressAvoidForTrackedWatch === true;
   const mainBlocker = suppressAvoidForTrackedWatch
     ? 'Trend is extended away from support - keep on monitor until price resets or repairs.'
@@ -8035,6 +8073,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       source:String(options.source || 'shared_presentation'),
       reason:String(options.reason || 'shared_presentation'),
       surface:String(options.surface || 'track'),
+      preserveTrackedLifecycleCanonicalVerdict,
       suppressAvoidForTrackedWatch,
       suppressingTrackedAvoid
     }
