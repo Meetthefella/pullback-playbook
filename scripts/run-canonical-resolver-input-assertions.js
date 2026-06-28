@@ -19,6 +19,190 @@ function loadCanonicalResolverInput(){
   return sandbox.window.CanonicalResolverInput;
 }
 
+function assertResolveGlobalVerdictContractAlignment(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const resolverSource = fs.readFileSync(path.join(root, 'js/resolver-core.js'), 'utf8');
+  assert.ok(
+    /function resolveGlobalVerdict\(record,\s*deps\s*=\s*\{\}\)/.test(appSource),
+    'app.js resolveGlobalVerdict must accept injected deps'
+  );
+  assert.ok(
+    /function resolveGlobalVerdict\(record,\s*deps\s*=\s*\{\}\)/.test(resolverSource),
+    'js/resolver-core.js resolveGlobalVerdict must accept injected deps'
+  );
+  [
+    'deps.resolveFinalStateContract || resolveFinalStateContract',
+    'deps.resolvePreLifecycleStateContract || resolvePreLifecycleStateContract',
+    'deps.analysisDerivedStatesFromRecord || analysisDerivedStatesFromRecord',
+    'deps.effectivePlanForRecord || effectivePlanForRecord',
+    'deps.applySetupConfirmationPlanGate || applySetupConfirmationPlanGate',
+    'deps.deriveCurrentPlanState || deriveCurrentPlanState',
+    'deps.evaluatePlanRealism || evaluatePlanRealism'
+  ].forEach(fragment => {
+    assert.ok(appSource.includes(fragment), `app.js must honor injected dep: ${fragment}`);
+  });
+}
+
+function assertSimplifiedPipelineResolverInjection(){
+  const sandbox = {
+    window:{},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval
+  };
+  sandbox.globalThis = sandbox.window;
+  sandbox.window.setTimeout = setTimeout;
+  sandbox.window.clearTimeout = clearTimeout;
+  sandbox.window.setInterval = setInterval;
+  sandbox.window.clearInterval = clearInterval;
+
+  const runModule = relativePath => {
+    const source = fs.readFileSync(path.join(root, relativePath), 'utf8');
+    vm.runInNewContext(source, sandbox, {filename:relativePath});
+  };
+
+  runModule('js/plan-math.js');
+  runModule('js/tradeability.js');
+  runModule('js/domain/simplified-plan-state.js');
+  runModule('js/presentation/simplified-presentation-model.js');
+
+  let capturedDeps = null;
+  let capturedRecord = null;
+  sandbox.window.ResolverCore = {
+    resolveGlobalVerdict(record, deps){
+      capturedRecord = record;
+      capturedDeps = deps;
+      return {
+        final_verdict:'watch',
+        main_blocker:'',
+        reason:'',
+        contractDiagnostics:{softReadinessOnlyDemotion:true}
+      };
+    },
+    globalVerdictLabel(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    },
+    normalizeVerdict(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    },
+    getBadge(){ return {text:'Watch'}; },
+    getActions(){ return {label:'WAIT'}; }
+  };
+  sandbox.window.ResolverPresentation = {
+    resolveVisualState(){
+      return {
+        canonicalVerdict:'entry',
+        finalVerdict:'watch',
+        visualBucket:'entry',
+        tone:'entry',
+        badge:{text:'Entry'},
+        priceabilityState:'priceable'
+      };
+    }
+  };
+
+  runModule('js/domain/simplified-trade-state.js');
+
+  const deps = {
+    effectivePlanForRecord(){
+      return {entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'};
+    },
+    riskSettingsProvider(){
+      return {accountSize:4000, riskPercent:0.01, maxLoss:40, wholeSharesOnly:true};
+    },
+    analysisDerivedStatesFromRecord(){
+      return {
+        structureState:'strong',
+        trendState:'intact',
+        bounceState:'attempt',
+        stabilisationState:'none',
+        volumeState:'supportive',
+        pullbackZone:'none',
+        setupLocationState:'off_level',
+        priceabilityState:'unpriceable'
+      };
+    },
+    applySetupConfirmationPlanGate(unusedRecord, displayedPlan){
+      return displayedPlan;
+    },
+    baseVerdictFromResolvedContract(resolved){
+      return String(resolved && resolved.baseVerdict || 'watch').toLowerCase();
+    },
+    resolvePreLifecycleStateContract(){
+      return {
+        finalVerdict:'Watch',
+        structuralState:'developing',
+        actionStateKey:'wait_for_confirmation',
+        planStatusKey:'valid',
+        tradeabilityVerdict:'Watch',
+        blockerReason:'Needs stronger confirmation',
+        reasonSummary:'Pre-watchlist setup',
+        terminal:false,
+        baseVerdict:'watch'
+      };
+    },
+    resolveFinalStateContract(){
+      return {
+        finalVerdict:'Watch',
+        final_verdict:'watch',
+        structuralState:'developing',
+        actionStateKey:'wait_for_confirmation',
+        planStatusKey:'valid',
+        tradeabilityVerdict:'Watch',
+        blockerReason:'Needs stronger confirmation',
+        reasonSummary:'Pre-watchlist setup',
+        terminal:false,
+        baseVerdict:'watch',
+        canonical_final_verdict:'entry',
+        canonical_visual_bucket:'entry',
+        canonical_priceability_state:'priceable',
+        canonical_soft_readiness_alignment_applied:true
+      };
+    },
+    evaluatePlanRealism(){
+      return {credible_rr:3.25};
+    },
+    setupScoreForRecord(){
+      return 7;
+    },
+    isHostileMarketStatus(){
+      return false;
+    },
+    scannerScoreGradientClass(){
+      return '';
+    },
+    state:{marketStatus:'supportive'}
+  };
+  const record = {
+    ticker:'TROW',
+    marketData:{price:110.27, currency:'GBP'},
+    plan:{entry:110.27, stop:102.29, firstTarget:136.19}
+  };
+  const result = sandbox.window.SimplifiedTradeState.resolveRecordState(record, {
+    surface:'review',
+    log:false,
+    deps
+  });
+
+  assert.strictEqual(capturedRecord, record, 'simplified pipeline should pass the same record into ResolverCore.resolveGlobalVerdict');
+  assert.ok(capturedDeps && typeof capturedDeps === 'object', 'simplified pipeline should inject resolver deps');
+  assert.strictEqual(capturedDeps.analysisDerivedStatesFromRecord(record).priceabilityState, 'priceable', 'reconciled derivedStates should be injected into ResolverCore.resolveGlobalVerdict');
+  assert.strictEqual(capturedDeps.resolveFinalStateContract(record).canonical_final_verdict, 'entry', 'override-aware final-state contract should be injected');
+  assert.strictEqual(result.canonicalVerdict, 'entry', 'soft-readiness-only review case should preserve canonical Entry in simplified pipeline');
+  assert.strictEqual(result.priceabilityState, 'priceable', 'soft-readiness-only review case should preserve priceable state in simplified pipeline');
+}
+
 function deepClone(value){
   return JSON.parse(JSON.stringify(value));
 }
@@ -126,6 +310,7 @@ function circularRecord(){
 }
 
 function run(){
+  assertResolveGlobalVerdictContractAlignment();
   const canonicalModule = loadCanonicalResolverInput();
   const {buildCanonicalResolverInput, buildCanonicalResolverInputComparison} = canonicalModule;
   const record = sampleRecord();
@@ -211,6 +396,8 @@ function run(){
   });
   assert.notStrictEqual(circularComparison.oldLiveResolverInputs.derivedStates, circular.review, 'comparison snapshots must remain detached from live objects');
   assert.ok(typeof circularComparison.capturedAt === 'string' && circularComparison.capturedAt.length > 0, 'comparison should include capture timestamp');
+
+  assertSimplifiedPipelineResolverInjection();
 
   console.log('run-canonical-resolver-input-assertions: ok');
 }

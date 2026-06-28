@@ -40529,29 +40529,30 @@ function resolvePreLifecycleStateContract(record){
   };
 }
 
-function resolveGlobalVerdict(record){
-  const verdict = resolveGlobalVerdictImpl(record, {
-    resolveFinalStateContract,
-    resolvePreLifecycleStateContract,
-    baseVerdictFromResolvedContract,
-    analysisDerivedStatesFromRecord,
-    effectivePlanForRecord,
-    applySetupConfirmationPlanGate,
-    deriveCurrentPlanState,
-    evaluatePlanRealism,
-    setupScoreForRecord,
-    canonicalSetupScoreForRecord:rawSetupScoreForRecord,
-    buildCumulativePenaltyTrace:cumulativePenaltyTraceForRecord,
-    isHostileMarketStatus,
-    state,
-    scannerScoreGradientClass
-  });
+function resolveGlobalVerdict(record, deps = {}){
+  const resolverDeps = {
+    resolveFinalStateContract:deps.resolveFinalStateContract || resolveFinalStateContract,
+    resolvePreLifecycleStateContract:deps.resolvePreLifecycleStateContract || resolvePreLifecycleStateContract,
+    baseVerdictFromResolvedContract:deps.baseVerdictFromResolvedContract || baseVerdictFromResolvedContract,
+    analysisDerivedStatesFromRecord:deps.analysisDerivedStatesFromRecord || analysisDerivedStatesFromRecord,
+    effectivePlanForRecord:deps.effectivePlanForRecord || effectivePlanForRecord,
+    applySetupConfirmationPlanGate:deps.applySetupConfirmationPlanGate || applySetupConfirmationPlanGate,
+    deriveCurrentPlanState:deps.deriveCurrentPlanState || deriveCurrentPlanState,
+    evaluatePlanRealism:deps.evaluatePlanRealism || evaluatePlanRealism,
+    setupScoreForRecord:deps.setupScoreForRecord || setupScoreForRecord,
+    canonicalSetupScoreForRecord:deps.canonicalSetupScoreForRecord || rawSetupScoreForRecord,
+    buildCumulativePenaltyTrace:deps.buildCumulativePenaltyTrace || cumulativePenaltyTraceForRecord,
+    isHostileMarketStatus:deps.isHostileMarketStatus || isHostileMarketStatus,
+    state:deps.state || state,
+    scannerScoreGradientClass:deps.scannerScoreGradientClass || scannerScoreGradientClass
+  };
+  const verdict = resolveGlobalVerdictImpl(record, resolverDeps);
   const item = record && typeof record === 'object' ? record : {};
-  const derivedStates = analysisDerivedStatesFromRecord(item);
-  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
-  const displayedPlan = applySetupConfirmationPlanGate(
+  const derivedStates = resolverDeps.analysisDerivedStatesFromRecord(item);
+  const effectivePlan = resolverDeps.effectivePlanForRecord(item, {allowScannerFallback:true});
+  const displayedPlan = resolverDeps.applySetupConfirmationPlanGate(
     item,
-    deriveCurrentPlanState(
+    resolverDeps.deriveCurrentPlanState(
       effectivePlan.entry,
       effectivePlan.stop,
       effectivePlan.firstTarget,
@@ -40559,7 +40560,7 @@ function resolveGlobalVerdict(record){
     ),
     derivedStates
   );
-  const resolvedContract = resolveFinalStateContract(item, {
+  const resolvedContract = resolverDeps.resolveFinalStateContract(item, {
     finalVerdict:globalVerdictLabel(verdict.final_verdict || ''),
     derivedStates,
     displayedPlan
@@ -40574,7 +40575,7 @@ function resolveGlobalVerdict(record){
     derivedStates
   });
   if(!verdict.cumulativePenaltyTrace || !Array.isArray(verdict.cumulativePenaltyTrace.sources)){
-    verdict.cumulativePenaltyTrace = cumulativePenaltyTraceForRecord(item, {
+    verdict.cumulativePenaltyTrace = resolverDeps.buildCumulativePenaltyTrace(item, {
       analysis:resolvedContract,
       derivedStates,
       displayedPlan,

@@ -2374,6 +2374,67 @@
         }
       },
       {
+        id:'non-tracked-soft-readiness-deps-can-preserve-entry-priceability',
+        record:{
+          ticker:'TROW',
+          derivedStates:{
+            structureState:'strong',
+            trendState:'intact',
+            bounceState:'attempt',
+            stabilisationState:'none',
+            volumeState:'supportive',
+            pullbackZone:'none',
+            setupLocationState:'off_level',
+            priceabilityState:'priceable'
+          },
+          effectivePlan:{entry:110.27, stop:102.29, firstTarget:136.19},
+          displayedPlan:{
+            status:'valid',
+            entry:110.27,
+            stop:102.29,
+            target:136.19,
+            tradeability:'tradable',
+            rewardRisk:{rrRatio:3.25},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'acceptable',
+            capitalFit:{capital_fit:'acceptable'}
+          },
+          preLifecycleResolved:{
+            finalVerdict:'Watch',
+            structuralState:'developing',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Watch',
+            blockerReason:'Needs stronger confirmation',
+            reasonSummary:'Pre-watchlist setup',
+            terminal:false,
+            baseVerdict:'watch'
+          },
+          resolvedContract:{
+            finalVerdict:'Watch',
+            structuralState:'developing',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Watch',
+            blockerReason:'Needs stronger confirmation',
+            reasonSummary:'Pre-watchlist setup',
+            terminal:false,
+            baseVerdict:'watch',
+            final_verdict:'watch',
+            canonical_final_verdict:'entry',
+            canonical_visual_bucket:'entry',
+            canonical_priceability_state:'priceable',
+            canonical_soft_readiness_alignment_applied:true,
+            contractDiagnostics:{softReadinessOnlyDemotion:true}
+          }
+        },
+        assert(result){
+          return result.final_verdict === 'watch'
+            && result.priceability_state === 'priceable'
+            && result.tracked === false;
+        }
+      },
+      {
         id:'tracked-broken-extended-below-50-without-confirmed-breakdown-stays-watch',
         record:{
           ticker:'NVDA',
