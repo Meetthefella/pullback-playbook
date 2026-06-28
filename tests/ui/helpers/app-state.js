@@ -146,7 +146,19 @@ function buildReplaySnapshotFromRecord(record){
 async function extractAppTickerState(page, ticker, consoleEvents = []){
   const appState = await page.evaluate(async ({ticker, consoleEvents}) => {
     const safeText = value => String(value || '').replace(/\s+/g, ' ').trim();
-    const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+    const record = (() => {
+      if(typeof getTickerRecord === 'function'){
+        const direct = getTickerRecord(ticker);
+        if(direct) return direct;
+      }
+      if(typeof allTickerRecords === 'function'){
+        const records = allTickerRecords();
+        if(Array.isArray(records)){
+          return records.find(item => String(item && item.ticker || '').trim().toUpperCase() === String(ticker || '').trim().toUpperCase()) || null;
+        }
+      }
+      return null;
+    })();
     const globalVerdict = record && typeof resolveGlobalVerdict === 'function' ? resolveGlobalVerdict(record) : null;
     const scanSimplified = record && typeof resolveSimplifiedStateForSurface === 'function'
       ? resolveSimplifiedStateForSurface(record, 'scan', {source:'playwright_parity', mutationSource:'playwright_parity'})
