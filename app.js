@@ -30209,7 +30209,7 @@ function reviewOpenMutationSnapshot(record, context = 'review_open'){
 
 function buildStableReviewProjectionSnapshot(record, context = 'review_open_during_refresh'){
   const item = normalizeTickerRecord(record);
-  const simplifiedState = resolveSimplifiedStateForSurface(item, 'track', {log:false});
+  const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {log:false});
   const ticker = normalizeTicker(item.ticker || '');
   if(!ticker) return null;
   const visualBucket = String(simplifiedState.visualBucket || '').trim();
@@ -32843,11 +32843,7 @@ function addActiveReviewTickerToWatchlist(){
     renderReviewWorkspace();
     return;
   }
-  const preAddReviewProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
-    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
-    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(liveRecord.ticker || ticker || '')
-      ? uiState.activeReviewSourceProjectionSnapshot
-      : null;
+  const preAddReviewProjectionSnapshot = buildStableReviewProjectionSnapshot(liveRecord, 'watchlist_add_projection');
   const entry = addToWatchlist({
     ticker:liveRecord.ticker,
     dateAdded:todayIsoDate(),

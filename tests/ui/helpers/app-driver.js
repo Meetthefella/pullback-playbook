@@ -30,7 +30,7 @@ async function attachConsoleRecorder(page){
 }
 
 async function gotoApp(page){
-  await page.goto('/', {waitUntil:'domcontentloaded'});
+  await page.goto(`/?pp_parity_bust=${Date.now()}`, {waitUntil:'domcontentloaded'});
   await expect(page.locator('#buildBtn')).toBeVisible();
 }
 
@@ -61,6 +61,20 @@ async function dismissOptionalOverlays(page){
 
 async function resetAppState(page){
   await page.evaluate(async () => {
+    if('serviceWorker' in navigator){
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map(registration => registration.unregister()));
+    }
+    if('caches' in window){
+      const cacheKeys = await caches.keys();
+      await Promise.all(cacheKeys.map(cacheKey => caches.delete(cacheKey)));
+    }
+    try{
+      localStorage.clear();
+    }catch(error){}
+    try{
+      sessionStorage.clear();
+    }catch(error){}
     if(typeof clearPlaybookCaches === 'function') await clearPlaybookCaches();
     if(typeof resetAllData === 'function') resetAllData();
     if(typeof clearTransientSessionState === 'function'){
