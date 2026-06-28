@@ -151,6 +151,19 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
         `${ticker} must not first mutate at watchlistDowngradeReason during Review -> postAdd for a fresh Entry/priceable parity case.`
       ).not.toBe('watchlistDowngradeReason');
     }
+    const scanCanonicalVerdict = String(preReviewScanAppState && preReviewScanAppState.scan && preReviewScanAppState.scan.simplifiedState && preReviewScanAppState.scan.simplifiedState.canonicalVerdict || '').trim().toLowerCase();
+    const scanVisibleBadgeLabel = String(preReviewScanAppState && preReviewScanAppState.scan && preReviewScanAppState.scan.visibleCard && preReviewScanAppState.scan.visibleCard.badgeLabel || '').trim().toLowerCase();
+    const scanDecisionTraceText = String(preReviewScanAppState && preReviewScanAppState.scan && preReviewScanAppState.scan.decisionTrace && preReviewScanAppState.scan.decisionTrace.panelText || '').trim().toLowerCase();
+    if(scanCanonicalVerdict === 'entry'){
+      expect(
+        scanVisibleBadgeLabel,
+        `${ticker} scan card badge must stay aligned with canonical scan entry state.`
+      ).toContain('entry');
+      expect(
+        scanDecisionTraceText,
+        `${ticker} scan decision trace headline must stay aligned with canonical scan entry state.`
+      ).toContain('final verdict renderedentry');
+    }
     reports.push({
       ticker,
       preReviewScanAppResult:preReviewScanAppState,

@@ -377,13 +377,15 @@
     const item = view && view.item ? view.item : {};
     const globalVerdict = deps.resolveGlobalVerdict(item);
     const visualState = deps.resolveVisualState ? deps.resolveVisualState(item, 'scanner') : null;
-    const simplifiedState = deps.resolveSimplifiedStateForSurface
+    const simplifiedState = view && view.simplifiedState
+      ? view.simplifiedState
+      : (deps.resolveSimplifiedStateForSurface
       ? deps.resolveSimplifiedStateForSurface(item, 'scan', {
         source:'scanner_debug_trace',
         mutationSource:'scanner_debug_trace',
         log:false
       })
-      : null;
+      : null);
     const nextAction = deps.getActions(globalVerdict.final_verdict || '');
     const canonicalVerdict = String(simplifiedState && simplifiedState.canonicalVerdict || globalVerdict.final_verdict || '').trim().toLowerCase() || 'watch';
     const renderedVerdict = canonicalVerdict || '(none)';
@@ -493,13 +495,15 @@
     const item = view && view.item ? view.item : {};
     const globalVerdict = deps.resolveGlobalVerdict(item);
     const visualState = deps.resolveVisualState ? deps.resolveVisualState(item, 'scanner') : null;
-    const simplifiedState = deps.resolveSimplifiedStateForSurface
+    const simplifiedState = view && view.simplifiedState
+      ? view.simplifiedState
+      : (deps.resolveSimplifiedStateForSurface
       ? deps.resolveSimplifiedStateForSurface(item, 'scan', {
         source:'scanner_visual_debug',
         mutationSource:'scanner_visual_debug',
         log:false
       })
-      : null;
+      : null);
     const statusChip = deps.primaryShortlistStatusChip(view || {});
     const structureQuality = String(view && view.setupStates && view.setupStates.structureQuality || '').toLowerCase();
     const bounceState = String(view && view.setupStates && view.setupStates.bounceState || '').toLowerCase();

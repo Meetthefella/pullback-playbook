@@ -15557,7 +15557,38 @@ function scanCardIntensityForView(view){
 */
 
 function renderScannerDecisionTraceContent(view){
-  return renderScannerDecisionTraceContentImpl(view, scannerDebugBridgeDeps());
+  const markup = renderScannerDecisionTraceContentImpl(view, scannerDebugBridgeDeps());
+  const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object' ? view.simplifiedState : null;
+  if(!simplified || typeof markup !== 'string') return markup;
+  const canonicalVerdict = String(simplified.canonicalVerdict || '').trim().toLowerCase();
+  const visualBucket = String(simplified.visualBucket || '').trim().toLowerCase();
+  const tone = String(simplified.tone || '').trim().toLowerCase();
+  const badgeLabel = String(simplified.badgeLabel || '').trim();
+  const planStatus = String(simplified.planStatus || '').trim().toLowerCase();
+  if(!canonicalVerdict) return markup;
+  const planBlocked = ['invalid','missing'].includes(planStatus) ? 'true' : 'false';
+  if(typeof document === 'undefined') return markup;
+  const host = document.createElement('div');
+  host.innerHTML = markup;
+  const replacements = {
+    'Final Verdict Rendered':canonicalVerdict,
+    'Bucket Rendered':visualBucket || 'monitor',
+    'Scanner Verdict':canonicalVerdict,
+    'Final Verdict':canonicalVerdict,
+    'Tone':tone || 'monitor',
+    'Bucket':visualBucket || 'monitor',
+    'Badge':badgeLabel || globalVerdictLabel(canonicalVerdict),
+    'Plan Blocked':planBlocked
+  };
+  host.querySelectorAll('.watchlist-debug-grid > div').forEach(row => {
+    const labelNode = row.querySelector('strong');
+    const valueNode = labelNode ? labelNode.nextElementSibling : null;
+    const label = labelNode ? String(labelNode.textContent || '').trim() : '';
+    if(label && valueNode && Object.prototype.hasOwnProperty.call(replacements, label)){
+      valueNode.textContent = replacements[label];
+    }
+  });
+  return host.innerHTML;
 }
 
 function currentScanCardMenuState(ticker){
@@ -15752,7 +15783,38 @@ function buildConsistencyAuditRows({
 }
 
 function renderScannerVisualDebugContent(view){
-  return renderScannerVisualDebugContentImpl(view, scannerDebugBridgeDeps());
+  const markup = renderScannerVisualDebugContentImpl(view, scannerDebugBridgeDeps());
+  const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object' ? view.simplifiedState : null;
+  if(!simplified || typeof markup !== 'string') return markup;
+  const canonicalVerdict = String(simplified.canonicalVerdict || '').trim().toLowerCase();
+  const visualBucket = String(simplified.visualBucket || '').trim().toLowerCase();
+  const tone = String(simplified.tone || '').trim().toLowerCase();
+  const badgeLabel = String(simplified.badgeLabel || '').trim();
+  const planStatus = String(simplified.planStatus || '').trim().toLowerCase();
+  if(!canonicalVerdict) return markup;
+  const planBlocked = ['invalid','missing'].includes(planStatus) ? 'true' : 'false';
+  if(typeof document === 'undefined') return markup;
+  const host = document.createElement('div');
+  host.innerHTML = markup;
+  const replacements = {
+    'Final Verdict Rendered':canonicalVerdict,
+    'Bucket Rendered':visualBucket || 'monitor',
+    'Scanner Verdict':canonicalVerdict,
+    'Final Verdict':canonicalVerdict,
+    'Tone':tone || 'monitor',
+    'Bucket':visualBucket || 'monitor',
+    'Badge':badgeLabel || globalVerdictLabel(canonicalVerdict),
+    'Plan Blocked':planBlocked
+  };
+  host.querySelectorAll('.watchlist-debug-grid > div').forEach(row => {
+    const labelNode = row.querySelector('strong');
+    const valueNode = labelNode ? labelNode.nextElementSibling : null;
+    const label = labelNode ? String(labelNode.textContent || '').trim() : '';
+    if(label && valueNode && Object.prototype.hasOwnProperty.call(replacements, label)){
+      valueNode.textContent = replacements[label];
+    }
+  });
+  return host.innerHTML;
 }
 
 function renderScanCardSecondaryUi(view){
@@ -15837,8 +15899,27 @@ function renderCompactResultCardFromView(view){
       ...view,
       simplifiedState
     });
-  const visualBucket = normalizeVisualBucketForPairing(scanPresentation.presentationBucket || simplifiedState.visualBucket || 'monitor');
-  const tone = String(scanPresentation.tone || simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const scanPresentationCanonical = normalizeGlobalVerdictKey(scanPresentation.canonicalVerdict || '');
+  const presentationBucketAligned = isAllowedCanonicalVisualPair(
+    canonicalVerdict,
+    scanPresentation.presentationBucket || scanPresentation.visualBucket || ''
+  );
+  const effectiveScanPresentation = (
+    (scanPresentationCanonical && scanPresentationCanonical !== canonicalVerdict)
+    || (!presentationBucketAligned && ['entry','near_entry'].includes(canonicalVerdict))
+  )
+    ? {
+      ...scanPresentation,
+      canonicalVerdict,
+      visualBucket:String(simplifiedState.visualBucket || scanPresentation.visualBucket || 'monitor').trim().toLowerCase() || 'monitor',
+      presentationBucket:String(simplifiedState.visualBucket || scanPresentation.presentationBucket || 'monitor').trim().toLowerCase() || 'monitor',
+      tone:String(simplifiedState.tone || scanPresentation.tone || simplifiedState.visualBucket || 'monitor').trim().toLowerCase() || 'monitor',
+      badgeLabel:String(simplifiedState.badgeLabel || scanPresentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch').trim(),
+      summary:String(simplifiedState.mainBlocker || simplifiedState.actionLabel || scanPresentation.summary || '').trim()
+    }
+    : scanPresentation;
+  const visualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || effectiveScanPresentation.presentationBucket || 'monitor');
+  const tone = String(simplifiedState.tone || effectiveScanPresentation.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
   const badgeClass = simplifiedVisualBadgeClass(visualBucket);
   const cardClass = simplifiedVisualCardClass(visualBucket);
   const scanLegacyState = view && view.globalVerdict && typeof view.globalVerdict === 'object'
@@ -15885,11 +15966,11 @@ function renderCompactResultCardFromView(view){
   const renderView = {
     ...view,
     simplifiedState,
-    scanPresentation,
+    scanPresentation:effectiveScanPresentation,
     canonicalVerdict,
     visualBucket,
     tone,
-    badgeLabel:scanPresentation.badgeLabel || simplifiedState.badgeLabel,
+    badgeLabel:simplifiedState.badgeLabel || effectiveScanPresentation.badgeLabel,
     actionLabel:simplifiedState.actionLabel,
     planVisible:simplifiedState.planVisible,
     planStatus:simplifiedState.planStatus,
@@ -15910,23 +15991,23 @@ function renderCompactResultCardFromView(view){
   const companyLine = [item && item.meta && item.meta.companyName || '', item && item.meta && item.meta.exchange || ''].filter(Boolean).join(' | ');
   const technicalSummary = scanCardTechnicalSummaryForView(view);
   const decisionSummary = String(
-    sharedNarrative.stateLabel && !sameVisibleCopy(sharedNarrative.stateLabel, scanPresentation.badgeLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict) || '')
-      ? `${sharedNarrative.stateLabel} - ${sharedNarrative.primaryReason || scanPresentation.summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || ''}`
-      : (sharedNarrative.primaryReason || scanPresentation.summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || '')
+    sharedNarrative.stateLabel && !sameVisibleCopy(sharedNarrative.stateLabel, simplifiedState.badgeLabel || effectiveScanPresentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || '')
+      ? `${sharedNarrative.stateLabel} - ${sharedNarrative.primaryReason || effectiveScanPresentation.summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || ''}`
+      : (sharedNarrative.primaryReason || effectiveScanPresentation.summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || '')
   ).trim()
     || compactReasonLineForView(view, 3)
     || scanCardPrimaryActionLabel(view);
   if(typeof console !== 'undefined' && console.info){
     console.info('[SCAN_PRESENTATION_GROUP]', {
       ticker:item.ticker || '',
-      canonicalVerdict:scanPresentation.canonicalVerdict || canonicalVerdict,
-      visualBucket:scanPresentation.visualBucket || simplifiedState.visualBucket || '',
-      presentationBucket:scanPresentation.presentationBucket || visualBucket,
-      scanSection:scanPresentation.scanSection || '',
+      canonicalVerdict:effectiveScanPresentation.canonicalVerdict || canonicalVerdict,
+      visualBucket:effectiveScanPresentation.visualBucket || simplifiedState.visualBucket || '',
+      presentationBucket:effectiveScanPresentation.presentationBucket || visualBucket,
+      scanSection:effectiveScanPresentation.scanSection || '',
       tone,
-      badgeLabel:scanPresentation.badgeLabel || simplifiedState.badgeLabel || '',
-      reasonCode:scanPresentation.reasonCode || '',
-      sortPriority:scanPresentation.sortPriority
+      badgeLabel:simplifiedState.badgeLabel || effectiveScanPresentation.badgeLabel || '',
+      reasonCode:effectiveScanPresentation.reasonCode || '',
+      sortPriority:effectiveScanPresentation.sortPriority
     });
   }
   if(typeof console !== 'undefined' && console.info){
@@ -15935,7 +16016,7 @@ function renderCompactResultCardFromView(view){
       canonicalVerdict:simplifiedState.canonicalVerdict,
       visualBucket:simplifiedState.visualBucket,
       tone:simplifiedState.tone,
-      badgeLabel:scanPresentation.badgeLabel || simplifiedState.badgeLabel,
+      badgeLabel:simplifiedState.badgeLabel || effectiveScanPresentation.badgeLabel,
       mainBlocker:simplifiedState.mainBlocker,
       primaryBlockerSource:simplifiedState.debug && simplifiedState.debug.resolvedState && simplifiedState.debug.resolvedState.primary_blocker_source || '',
       projectionBundleAuthoritative:false,
@@ -15989,7 +16070,7 @@ function renderCompactResultCardFromView(view){
     fromResolvedStateBundleCache:false,
     fromFreshResolverOutput:true
   });
-  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(className)}" style="" data-visual-tone="${escapeHtml(tone)}" data-visual-state="${escapeHtml(visualStateKey)}" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="scan-card__header"><div class="scan-card__header-row"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div></div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(scanPresentation.badgeLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch')}</span><span class="score visual-score scan-card__score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="scan-card__company tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="scan-card__body"><div class="scan-card__technical tiny">${escapeHtml(technicalSummary)}</div><div class="scan-card__decision resultreason decision-summary">${escapeHtml(decisionSummary)}</div></div><div class="scan-card__footer"><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button></div>${secondaryUiMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(className)}" style="" data-visual-tone="${escapeHtml(tone)}" data-visual-state="${escapeHtml(visualStateKey)}" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="scan-card__header"><div class="scan-card__header-row"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div></div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(simplifiedState.badgeLabel || effectiveScanPresentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch')}</span><span class="score visual-score scan-card__score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="scan-card__company tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="scan-card__body"><div class="scan-card__technical tiny">${escapeHtml(technicalSummary)}</div><div class="scan-card__decision resultreason decision-summary">${escapeHtml(decisionSummary)}</div></div><div class="scan-card__footer"><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button></div>${secondaryUiMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
