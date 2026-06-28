@@ -10,7 +10,8 @@ const {
   runScan,
   openReviewForTicker,
   addActiveReviewToWatchlistIfEligible,
-  openTrackTab
+  openTrackTab,
+  waitForUiTransitionSettle
 } = require('./helpers/app-driver');
 const {extractAppTickerState} = require('./helpers/app-state');
 const {diagnoseParity} = require('./helpers/parity-diff');
@@ -37,14 +38,19 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
   const reports = [];
   for(const ticker of tickers){
     await openReviewForTicker(page, ticker);
+    const reviewOpenImmediateAppState = await extractAppTickerState(page, ticker, consoleEvents);
+    await waitForUiTransitionSettle(page);
     await captureStage(page, testInfo, `${ticker.toLowerCase()}-review`);
     const preWatchlistAppState = await extractAppTickerState(page, ticker, consoleEvents);
     assertReplaySnapshotContract(preWatchlistAppState.snapshot, ticker);
     const addedToWatchlist = await addActiveReviewToWatchlistIfEligible(page);
     const postAddAppState = await extractAppTickerState(page, ticker, consoleEvents);
     assertReplaySnapshotContract(postAddAppState.snapshot, ticker);
+    let trackOpenImmediateAppState = null;
     if(addedToWatchlist){
       await openTrackTab(page);
+      trackOpenImmediateAppState = await extractAppTickerState(page, ticker, consoleEvents);
+      await waitForUiTransitionSettle(page);
       await captureStage(page, testInfo, `${ticker.toLowerCase()}-track`);
     }
     const appState = await extractAppTickerState(page, ticker, consoleEvents);
@@ -61,8 +67,16 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
     const replayRun = runReplayForSnapshot(appState.snapshot);
     const diagnosis = diagnoseParity(appState, replayRun.result);
     const stageMutation = {
+      reviewOpenTransition:summarizeStageMutation(reviewOpenImmediateAppState, preWatchlistAppState, {
+        label:'review_open_transition',
+        addedToWatchlist:false
+      }),
       reviewToPostAdd:summarizeStageMutation(preWatchlistAppState, postAddAppState, {
         label:'review_to_post_add',
+        addedToWatchlist
+      }),
+      trackOpenTransition:summarizeStageMutation(trackOpenImmediateAppState, appState, {
+        label:'track_open_transition',
         addedToWatchlist
       }),
       postAddToPostTrack:summarizeStageMutation(postAddAppState, appState, {
@@ -77,9 +91,26 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
     const preReviewState = preWatchlistAppState && preWatchlistAppState.review && preWatchlistAppState.review.stateHealth
       ? preWatchlistAppState.review.stateHealth
       : {};
+    const reviewOpenImmediateState = reviewOpenImmediateAppState && reviewOpenImmediateAppState.review && reviewOpenImmediateAppState.review.stateHealth
+      ? reviewOpenImmediateAppState.review.stateHealth
+      : {};
     const replayCanonicalVerdict = String(replayRun.result && replayRun.result.reviewCanonicalVerdict || '').trim().toLowerCase();
     const preReviewCanonicalVerdict = String(preReviewState.canonicalVerdict || '').trim().toLowerCase();
     const preReviewPriceabilityState = String(preReviewState.priceabilityState || '').trim().toLowerCase();
+    const reviewOpenImmediateCanonicalVerdict = String(reviewOpenImmediateState.canonicalVerdict || '').trim().toLowerCase();
+    const reviewOpenImmediatePriceabilityState = String(reviewOpenImmediateState.priceabilityState || '').trim().toLowerCase();
+    if(replayCanonicalVerdict === 'entry'
+      && reviewOpenImmediateCanonicalVerdict === 'entry'
+      && reviewOpenImmediatePriceabilityState === 'priceable'){
+      expect(
+        stageMutation.reviewOpenTransition.firstMutatedField,
+        `${ticker} opening Review must not autosave-mutate canonical verdict away from a fresh Entry/priceable parity state.`
+      ).not.toBe('reviewCanonicalVerdict');
+      expect(
+        stageMutation.reviewOpenTransition.firstMutatedField,
+        `${ticker} opening Review must not autosave-mutate priceability away from a fresh Entry/priceable parity state.`
+      ).not.toBe('reviewPriceabilityState');
+    }
     if(addedToWatchlist
       && replayCanonicalVerdict === 'entry'
       && preReviewCanonicalVerdict === 'entry'
@@ -91,8 +122,10 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
     }
     reports.push({
       ticker,
+      reviewOpenImmediateAppResult:reviewOpenImmediateAppState,
       preWatchlistAppResult:preWatchlistAppState,
       postAddAppResult:postAddAppState,
+      trackOpenImmediateAppResult:trackOpenImmediateAppState,
       appResult:appState,
       snapshotContract:appState.snapshotContract,
       replayResult:replayRun.result,

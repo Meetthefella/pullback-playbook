@@ -146,6 +146,7 @@
         lastReviewedAt: '',
         lastPrompt: '',
         lastError: '',
+        draft: null,
         manualReview: null,
         cardOpen: false,
         source: 'manual'
@@ -520,6 +521,7 @@
     if (!merged.review.analysisState.prompt && merged.review.lastPrompt) merged.review.analysisState.prompt = merged.review.lastPrompt;
     if (!merged.review.analysisState.error && merged.review.lastError) merged.review.analysisState.error = merged.review.lastError;
     if (!merged.review.analysisState.reviewedAt && merged.review.lastReviewedAt) merged.review.analysisState.reviewedAt = merged.review.lastReviewedAt;
+    merged.review.draft = merged.review.draft && typeof merged.review.draft === 'object' ? merged.review.draft : null;
     merged.review.cardOpen = !!merged.review.cardOpen;
     merged.review.chartAvailable = !!(merged.review.chartAvailable || (merged.review.chartRef && merged.review.chartRef.dataUrl));
     merged.review.chartImageOriginal = merged.review.chartImageOriginal && typeof merged.review.chartImageOriginal === 'object' ? merged.review.chartImageOriginal : null;

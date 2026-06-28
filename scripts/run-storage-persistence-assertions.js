@@ -77,6 +77,16 @@ function extractFunction(name){
 
 const sandbox = {
   console,
+  normalizeTicker(value){
+    return String(value || '').trim().toUpperCase();
+  },
+  normalizeScanType(value){
+    return String(value || '').trim();
+  },
+  numericOrNull(value){
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  },
   normalizeTickerRecordsMap(value){
     return value && typeof value === 'object' ? value : {};
   }
@@ -84,6 +94,8 @@ const sandbox = {
 sandbox.globalThis = sandbox;
 
 [
+  'baseCard',
+  'normalizeCard',
   'withPersistMeta',
   'stripPersistMeta',
   'persistedAtMs',
@@ -159,8 +171,62 @@ function testPersistenceOrderingDiagnostics(){
   assert(ordered[1].name === 'full', 'Newer full layer must appear last.');
 }
 
+function testDraftOnlyReviewSurvivesNormalization(){
+  const normalized = sandbox.normalizeCard({
+    ticker:'TROW',
+    draft:{
+      checks:{uptrend:true, bounce:true},
+      entry:'110.27',
+      stop:'102.29',
+      target:'136.19',
+      summary:'Constructive setup.',
+      savedAt:'2026-06-28T20:00:00.000Z'
+    },
+    manualReview:null,
+    savedVerdict:'',
+    savedScore:null
+  });
+  assert(normalized.draft && normalized.draft.entry === '110.27', 'Draft-only review payload must survive app normalization.');
+  assert(normalized.draft && normalized.draft.checks && normalized.draft.checks.bounce === true, 'Draft checklist state must survive app normalization.');
+  assert(normalized.manualReview === null, 'Draft-only review must not create manualReview authority during normalization.');
+}
+
+function testDraftOnlyReviewDoesNotCreateAuthorityDuringFullPersist(){
+  const full = sandbox.buildFullPersistedState({
+    tickerRecords:{
+      TROW:{
+        ticker:'TROW',
+        review:{
+          draft:{
+            checks:{uptrend:true},
+            entry:'110.27',
+            stop:'102.29',
+            target:'136.19',
+            summary:'Constructive setup.',
+            savedAt:'2026-06-28T20:00:00.000Z'
+          },
+          manualReview:null,
+          savedVerdict:'',
+          savedScore:null
+        }
+      }
+    }
+  }, {
+    persistedAt:'2026-06-28T20:01:00.000Z'
+  });
+  const review = full.tickerRecords && full.tickerRecords.TROW && full.tickerRecords.TROW.review
+    ? full.tickerRecords.TROW.review
+    : null;
+  assert(review && review.draft && review.draft.target === '136.19', 'Full persisted state must retain draft-only review state.');
+  assert(review && review.manualReview === null, 'Full persisted state must not invent manualReview authority for draft-only reviews.');
+  assert(review && review.savedVerdict === '', 'Full persisted state must keep savedVerdict empty for draft-only reviews.');
+  assert(review && review.savedScore == null, 'Full persisted state must keep savedScore empty for draft-only reviews.');
+}
+
 testFreshFallbackBeatsStaleFull();
 testFullSnapshotTrimsDuplicateProjections();
 testPersistenceOrderingDiagnostics();
+testDraftOnlyReviewSurvivesNormalization();
+testDraftOnlyReviewDoesNotCreateAuthorityDuringFullPersist();
 
 console.log('Storage persistence assertions passed.');

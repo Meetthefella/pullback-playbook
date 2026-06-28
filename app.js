@@ -5165,6 +5165,7 @@ function normalizeCard(card){
   normalized.pullbackStatus = String(normalized.pullbackStatus || '');
   normalized.chartVerdict = String(normalized.chartVerdict || normalized.status || 'Watch');
   normalized.riskStatus = String(normalized.riskStatus || 'plan_missing');
+  normalized.draft = normalized.draft && typeof normalized.draft === 'object' ? normalized.draft : null;
   normalized.manualReview = normalized.manualReview && typeof normalized.manualReview === 'object' ? normalized.manualReview : null;
   normalized.pullbackType = String(normalized.pullbackType || '');
   normalized.rewardPerShare = numericOrNull(normalized.rewardPerShare);
@@ -17039,6 +17040,12 @@ function computeBaseSetupScoreForRecord(record, options = {}){
   if(manualChecks && Object.keys(manualChecks).length){
     return scoreAndStatusFromChecks(manualChecks).score;
   }
+  const draftChecks = safeRecord.review && safeRecord.review.draft && safeRecord.review.draft.checks && typeof safeRecord.review.draft.checks === 'object'
+    ? safeRecord.review.draft.checks
+    : null;
+  if(draftChecks && Object.keys(draftChecks).length){
+    return scoreAndStatusFromChecks(draftChecks).score;
+  }
   const scanChecks = safeRecord.scan && safeRecord.scan.flags && safeRecord.scan.flags.checks && typeof safeRecord.scan.flags.checks === 'object'
     ? safeRecord.scan.flags.checks
     : null;
@@ -26549,7 +26556,10 @@ function buildTickerPromptFromRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const projected = item.scan.analysisProjection || {};
   const manualReview = item.review.manualReview || {};
-  const checks = (manualReview && manualReview.checks) || (item.scan.flags && item.scan.flags.checks) || {};
+  const draftReview = item.review && item.review.draft && typeof item.review.draft === 'object'
+    ? item.review.draft
+    : null;
+  const checks = (manualReview && manualReview.checks) || (draftReview && draftReview.checks) || (item.scan.flags && item.scan.flags.checks) || {};
   const appVerdictCeiling = aiVerdictCeilingForRecord(item);
   const marketData = Number.isFinite(item.marketData.price) || Number.isFinite(item.marketData.ma20) || Number.isFinite(item.marketData.ma50) || Number.isFinite(item.marketData.ma200)
     ? {
@@ -27602,6 +27612,7 @@ function currentChecks(){
   const record = ticker ? getTickerRecord(ticker) : null;
   const savedChecks = (
     (record && record.review && record.review.manualReview && record.review.manualReview.checks)
+    || (record && record.review && record.review.draft && record.review.draft.checks)
     || (record && record.review && record.review.checks)
     || (record && record.scan && record.scan.flags && record.scan.flags.checks)
     || {}
@@ -28566,6 +28577,9 @@ function effectivePlanForRecord(record, options = {}){
   const manualReview = item.review && item.review.manualReview && typeof item.review.manualReview === 'object'
     ? item.review.manualReview
     : null;
+  const reviewDraft = item.review && item.review.draft && typeof item.review.draft === 'object'
+    ? item.review.draft
+    : null;
   const hasCanonicalPlan = [item.plan.entry, item.plan.stop, item.plan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
   if(hasCanonicalPlan){
     return {
@@ -28584,6 +28598,15 @@ function effectivePlanForRecord(record, options = {}){
       source:'manual'
     };
   }
+  const hasCompleteDraftPlan = reviewDraft && [reviewDraft.entry, reviewDraft.stop, reviewDraft.target].every(value => Number.isFinite(numericOrNull(value)));
+  if(hasCompleteDraftPlan){
+    return {
+      entry:String(reviewDraft.entry || ''),
+      stop:String(reviewDraft.stop || ''),
+      firstTarget:String(reviewDraft.target || ''),
+      source:'draft'
+    };
+  }
   const hasPartialCanonicalPlan = [item.plan.entry, item.plan.stop, item.plan.firstTarget].some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
   if(hasPartialCanonicalPlan){
     return {
@@ -28600,6 +28623,15 @@ function effectivePlanForRecord(record, options = {}){
       stop:String(manualReview.stop ?? ''),
       firstTarget:String(manualReview.target ?? ''),
       source:'manual'
+    };
+  }
+  const hasPartialDraftPlan = reviewDraft && [reviewDraft.entry, reviewDraft.stop, reviewDraft.target].some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
+  if(hasPartialDraftPlan){
+    return {
+      entry:String(reviewDraft.entry ?? ''),
+      stop:String(reviewDraft.stop ?? ''),
+      firstTarget:String(reviewDraft.target ?? ''),
+      source:'draft'
     };
   }
   const fallbackPlan = allowScannerFallback
@@ -36099,7 +36131,9 @@ function renderReviewWorkspace(options = {}){
     targetLevel:displayedPlan.target
   });
   const promptText = analysisState.promptPreview;
-  const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : null;
+  const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object'
+    ? record.review.manualReview
+    : (record.review && record.review.draft && typeof record.review.draft === 'object' ? record.review.draft : null);
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
   const rrRatio = displayedPlan.rewardRisk.valid ? displayedPlan.rewardRisk.rrRatio : null;
   const rewardPerShare = displayedPlan.rewardPerShare;
@@ -37542,7 +37576,9 @@ function loadCard(ticker, options = {}){
     reviewRenderSeq:reviewSeq
   });
   setScannerCardClickTrace(ticker, 'loadCard.after_renderReviewWorkspace', 'workspace_rendered');
-  const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : null;
+  const review = record.review && record.review.manualReview && typeof record.review.manualReview === 'object'
+    ? record.review.manualReview
+    : (record.review && record.review.draft && typeof record.review.draft === 'object' ? record.review.draft : null);
   const reviewChecks = review && review.checks ? review.checks : ((record.scan.flags && record.scan.flags.checks) || {});
   checklistIds.forEach(id => {
     const input = $(id);
@@ -37663,23 +37699,28 @@ function persistActiveReviewDraft(options = {}){
     summary:reviewSetupQualitySummary(checks, result, checklistContext),
     savedAt:new Date().toISOString()
   };
-  record.review.manualReview = manualReview;
-  record.review.lastReviewedAt = manualReview.savedAt;
-  record.review.savedSummary = manualReview.summary;
-  if(String(result.status || '').trim()){
-    record.review.savedVerdict = normalizeImportedStatus(result.status, {preserveEmpty:true});
-  }
-  if(Number.isFinite(numericOrNull(result.score))){
-    record.review.savedScore = Number(result.score);
+  record.review.draft = manualReview;
+  if(isManualSave){
+    record.review.manualReview = manualReview;
+    record.review.lastReviewedAt = manualReview.savedAt;
+    record.review.savedSummary = manualReview.summary;
+    if(String(result.status || '').trim()){
+      record.review.savedVerdict = normalizeImportedStatus(result.status, {preserveEmpty:true});
+    }
+    if(Number.isFinite(numericOrNull(result.score))){
+      record.review.savedScore = Number(result.score);
+    }
   }
   updateTickerInputFromState();
-  refreshTrackedTickerState(ticker, {
-    source:'review',
-    reason:String(options.source || 'review_draft'),
-    force:true,
-    persist:false,
-    emitTrace:true
-  });
+  if(isManualSave){
+    refreshTrackedTickerState(ticker, {
+      source:'review',
+      reason:String(options.source || 'review_draft'),
+      force:true,
+      persist:false,
+      emitTrace:true
+    });
+  }
   commitTickerState();
   if(activeWorkspaceTab() === 'track'){
     updateWatchlistCardForTicker(ticker);
