@@ -10925,11 +10925,6 @@ function addToWatchlist(tickerData){
   const entry = normalizeWatchlistEntry(tickerData);
   if(!entry) return {entry:null, record:null, added:false, updated:false, error:'invalid_ticker'};
   const record = upsertTickerRecord(entry.ticker);
-  const preAddReviewProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
-    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
-    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(entry.ticker || '')
-      ? uiState.activeReviewSourceProjectionSnapshot
-      : null;
   const eligibility = resolvePostGateWatchlistEligibility(record, {
     source:'watchlist_add',
     deferWatchlistRemoval:false,
@@ -32848,6 +32843,11 @@ function addActiveReviewTickerToWatchlist(){
     renderReviewWorkspace();
     return;
   }
+  const preAddReviewProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(liveRecord.ticker || ticker || '')
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
   const entry = addToWatchlist({
     ticker:liveRecord.ticker,
     dateAdded:todayIsoDate(),
