@@ -33434,6 +33434,21 @@ function renderScannerResults(){
         card.innerHTML = renderCompactResultCardFromView(view);
         const node = card.firstElementChild;
         if(!node) return;
+        const canonicalScanState = view && view.simplifiedState && typeof view.simplifiedState === 'object'
+          ? view.simplifiedState
+          : null;
+        if(canonicalScanState){
+          const canonicalVerdict = normalizeGlobalVerdictKey(canonicalScanState.canonicalVerdict || 'watch');
+          const canonicalBucket = normalizeVisualBucketForPairing(canonicalScanState.visualBucket || 'monitor');
+          const canonicalTone = String(canonicalScanState.tone || canonicalBucket || 'monitor').trim().toLowerCase() || 'monitor';
+          const badgeNode = node.querySelector('.badge.state-pill');
+          if(badgeNode){
+            badgeNode.textContent = String(canonicalScanState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch').trim();
+            badgeNode.className = `badge state-pill ${simplifiedVisualBadgeClass(canonicalBucket)}`;
+          }
+          node.setAttribute('data-visual-tone', canonicalTone);
+          node.setAttribute('data-visual-state', canonicalVerdict === 'avoid' ? 'avoid' : (canonicalVerdict || 'watch'));
+        }
         const ticker = view.ticker;
         const sourceVerdict = node.getAttribute('data-source-verdict') || '';
         const overflowToggle = node.querySelector('[data-act="overflow-toggle"]');
