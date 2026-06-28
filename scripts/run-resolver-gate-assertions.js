@@ -8657,7 +8657,7 @@ function runTrackPresentationAuthorityAssertions(){
     || /persistedPresentation\.simplifiedState[\s\S]*?return persistedPresentation\.simplifiedState;/.test(appSource)
     || !/const sharedPresentation = buildSharedReviewTrackPresentation\(record,\s*\{/.test(appSource)
     || !/const trackVisibleModel = persistedTrackVisibleModelFromPresentation\(sharedPresentation\);/.test(appSource)
-    || !/const watchlistVisualState = persistedPresentation && persistedPresentation\.watchlistVisualState[\s\S]*?: persistedWatchlistVisualStateFromPresentation\(sharedPresentation\);/.test(appSource)
+    || !/const watchlistVisualState = persistedWatchlistVisualStateFromPresentation\(sharedPresentation\);/.test(appSource)
     || !/const visualBucket = normalizeVisualBucketForPairing\(trackVisibleModel\.visibleBucket \|\| 'monitor'\);/.test(appSource)
     || !/const tone = String\(trackVisibleModel\.tone \|\| visualBucket \|\| 'monitor'\)/.test(appSource)
     || !/trackVisibleModel\.planSummary/.test(appSource)

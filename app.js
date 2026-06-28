@@ -12757,9 +12757,7 @@ function renderWatchlistCardElement(record, options = {}){
       : (canonicalVerdict === 'avoid' ? 'avoid' : 'watch'));
   const className = `visual-state-card visual-state-${visualStateKey} visual-tone-${tone} ${cardClass}`;
   const trackAuthoritativeState = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
-  const watchlistVisualState = persistedPresentation && persistedPresentation.watchlistVisualState && typeof persistedPresentation.watchlistVisualState === 'object'
-    ? {...persistedPresentation.watchlistVisualState}
-    : persistedWatchlistVisualStateFromPresentation(sharedPresentation);
+  const watchlistVisualState = persistedWatchlistVisualStateFromPresentation(sharedPresentation);
   const rawViabilityBranchReason = String(globalVerdict && globalVerdict.viabilityBranchReason || '').trim();
   const staleTrackViabilityBranchReason = /needs structure repair/i.test(rawViabilityBranchReason)
     && ['alive'].includes(String(derivedStates.structureEligibility || globalVerdict && globalVerdict.structure_eligibility || '').trim().toLowerCase())
