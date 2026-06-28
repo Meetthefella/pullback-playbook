@@ -3831,8 +3831,23 @@ function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedStat
   const lifecycle = lifecycleSnapshot && typeof lifecycleSnapshot === 'object'
     ? lifecycleSnapshot
     : watchlistLifecycleSnapshot(item);
+  const persistedSharedPresentation = item.watchlist
+    && item.watchlist.presentation
+    && item.watchlist.presentation.sharedPresentation
+    && typeof item.watchlist.presentation.sharedPresentation === 'object'
+      ? item.watchlist.presentation.sharedPresentation
+      : null;
+  const persistedVerdict = normalizeGlobalVerdictKey(
+    persistedSharedPresentation && (
+      persistedSharedPresentation.canonicalVerdict
+      || persistedSharedPresentation.finalVerdict
+    ) || ''
+  );
   const lifecycleVerdict = normalizeGlobalVerdictKey(lifecycle.state || '');
-  if(!['entry','near_entry'].includes(lifecycleVerdict)) return simplified;
+  const overrideVerdict = ['entry','near_entry'].includes(persistedVerdict)
+    ? persistedVerdict
+    : lifecycleVerdict;
+  if(!['entry','near_entry'].includes(overrideVerdict)) return simplified;
   const global = globalVerdict && typeof globalVerdict === 'object'
     ? globalVerdict
     : resolveGlobalVerdict(item);
@@ -3858,13 +3873,21 @@ function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedStat
   if(hardStructuredBlock) return simplified;
   return {
     ...simplified,
-    canonicalVerdict:lifecycleVerdict,
-    visualBucket:lifecycleVerdict === 'entry' ? 'entry' : 'near_entry',
-    tone:getTone(lifecycleVerdict),
+    canonicalVerdict:overrideVerdict,
+    visualBucket:String(
+      persistedSharedPresentation && persistedSharedPresentation.visualBucket
+      || (overrideVerdict === 'entry' ? 'entry' : 'near_entry')
+    ).trim().toLowerCase() || (overrideVerdict === 'entry' ? 'entry' : 'near_entry'),
+    tone:String(
+      persistedSharedPresentation && persistedSharedPresentation.tone
+      || getTone(overrideVerdict)
+    ).trim().toLowerCase() || getTone(overrideVerdict),
     debug:{
       ...(simplified.debug || {}),
       reviewWatchlistSoftReadinessDisplayOverrideApplied:true,
-      reviewWatchlistSoftReadinessDisplayOverrideSource:'watchlist_lifecycle'
+      reviewWatchlistSoftReadinessDisplayOverrideSource:['entry','near_entry'].includes(persistedVerdict)
+        ? 'watchlist_persisted_shared_presentation'
+        : 'watchlist_lifecycle'
     }
   };
 }
