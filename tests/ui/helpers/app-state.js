@@ -3,13 +3,149 @@ function normalizeNumber(value){
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function cloneJsonValue(value){
+  if(value == null) return value;
+  if(Array.isArray(value)) return value.map(cloneJsonValue);
+  if(typeof value === 'object'){
+    return Object.keys(value).reduce((output, key) => {
+      const nextValue = cloneJsonValue(value[key]);
+      if(nextValue !== undefined) output[key] = nextValue;
+      return output;
+    }, {});
+  }
+  if(['string', 'number', 'boolean'].includes(typeof value)) return value;
+  return undefined;
+}
+
+function pickObject(source, keys = []){
+  const input = source && typeof source === 'object' ? source : {};
+  return keys.reduce((output, key) => {
+    if(input[key] !== undefined){
+      output[key] = cloneJsonValue(input[key]);
+    }
+    return output;
+  }, {});
+}
+
+function mapHistoryRows(history){
+  return Array.isArray(history)
+    ? history.map(row => ({
+      date:String(row && row.date || ''),
+      open:normalizeNumber(row && row.open),
+      high:normalizeNumber(row && row.high),
+      low:normalizeNumber(row && row.low),
+      close:normalizeNumber(row && row.close),
+      volume:normalizeNumber(row && row.volume)
+    }))
+    : [];
+}
+
+function buildReplaySnapshotFromRecord(record){
+  const item = record && typeof record === 'object' ? cloneJsonValue(record) : null;
+  if(!item) return null;
+  const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const reviewAnalysisState = review.analysisState && typeof review.analysisState === 'object'
+    ? review.analysisState
+    : {};
+  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
+  const meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
+  const setup = item.setup && typeof item.setup === 'object' ? item.setup : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const manualReview = review.manualReview && typeof review.manualReview === 'object'
+    ? review.manualReview
+    : null;
+  return {
+    ticker:String(item.ticker || ''),
+    trustedComparisonFields:{
+      ticker:String(item.ticker || ''),
+      companyName:String(meta.companyName || ''),
+      exchange:String(meta.exchange || ''),
+      currency:String(marketData.currency || 'USD'),
+      tradingViewSymbol:String(meta.tradingViewSymbol || ''),
+      price:normalizeNumber(marketData.price),
+      previousClose:normalizeNumber(marketData.previousClose),
+      sma20:normalizeNumber(marketData.ma20),
+      sma50:normalizeNumber(marketData.ma50),
+      sma200:normalizeNumber(marketData.ma200),
+      rsi14:normalizeNumber(marketData.rsi),
+      volume:normalizeNumber(marketData.volume),
+      avgVolume30d:normalizeNumber(marketData.avgVolume),
+      perf1w:normalizeNumber(marketData.perf1w),
+      perf1m:normalizeNumber(marketData.perf1m),
+      perf3m:normalizeNumber(marketData.perf3m),
+      perf6m:normalizeNumber(marketData.perf6m),
+      perfYtd:normalizeNumber(marketData.perfYtd),
+      fetchedAt:String(marketData.asOf || ''),
+      warnings:Array.isArray(marketData.warnings) ? cloneJsonValue(marketData.warnings) : []
+    },
+    recentDailyHistory:mapHistoryRows(marketData.history),
+    meta:pickObject(meta, ['companyName', 'exchange', 'tradingViewSymbol']),
+    marketData:{
+      currency:String(marketData.currency || 'USD'),
+      price:normalizeNumber(marketData.price),
+      previousClose:normalizeNumber(marketData.previousClose),
+      ma20:normalizeNumber(marketData.ma20),
+      ma50:normalizeNumber(marketData.ma50),
+      ma200:normalizeNumber(marketData.ma200),
+      sma20:normalizeNumber(marketData.sma20),
+      sma50:normalizeNumber(marketData.sma50),
+      sma200:normalizeNumber(marketData.sma200),
+      rsi:normalizeNumber(marketData.rsi),
+      volume:normalizeNumber(marketData.volume),
+      avgVolume:normalizeNumber(marketData.avgVolume),
+      perf1w:normalizeNumber(marketData.perf1w),
+      perf1m:normalizeNumber(marketData.perf1m),
+      perf3m:normalizeNumber(marketData.perf3m),
+      perf6m:normalizeNumber(marketData.perf6m),
+      perfYtd:normalizeNumber(marketData.perfYtd),
+      asOf:String(marketData.asOf || ''),
+      warnings:Array.isArray(marketData.warnings) ? cloneJsonValue(marketData.warnings) : [],
+      history:mapHistoryRows(marketData.history)
+    },
+    setup:pickObject(setup, ['marketCaution', 'volumeRequired', 'bounceState', 'structureState', 'trendState']),
+    plan:cloneJsonValue(plan),
+    scan:{
+      analysisProjection:scan.analysisProjection && typeof scan.analysisProjection === 'object'
+        ? cloneJsonValue(scan.analysisProjection)
+        : null,
+      score:normalizeNumber(scan.score),
+      riskStatus:String(scan.riskStatus || ''),
+      summary:String(scan.summary || ''),
+      resolvedVerdict:String(scan.resolvedVerdict || ''),
+      verdict:String(scan.verdict || ''),
+      reasons:Array.isArray(scan.reasons) ? cloneJsonValue(scan.reasons) : [],
+      flags:scan.flags && typeof scan.flags === 'object' ? cloneJsonValue(scan.flags) : null,
+      estimatedEntryZone:normalizeNumber(scan.estimatedEntryZone),
+      estimatedStopArea:normalizeNumber(scan.estimatedStopArea),
+      estimatedTargetArea:normalizeNumber(scan.estimatedTargetArea),
+      estimatedRR:normalizeNumber(scan.estimatedRR)
+    },
+    review:{
+      normalizedAnalysis:review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object'
+        ? cloneJsonValue(review.normalizedAnalysis)
+        : null,
+      manualReview:manualReview ? cloneJsonValue(manualReview) : null,
+      analysisState:{
+        normalized:reviewAnalysisState.normalized && typeof reviewAnalysisState.normalized === 'object'
+          ? cloneJsonValue(reviewAnalysisState.normalized)
+          : null
+      }
+    },
+    reclaimAttempt:item.reclaimAttempt === true,
+    reclaimsLevel:item.reclaimsLevel === true,
+    breaksLocalHigh:item.breaksLocalHigh === true,
+    strongBullishContinuation:item.strongBullishContinuation === true,
+    in_watchlist:item.in_watchlist === true,
+    watchlist_entry_exists:item.watchlist_entry_exists === true,
+    terminal_avoid_applied:item.terminal_avoid_applied === true,
+    avoid_trigger_source:String(item.avoid_trigger_source || '')
+  };
+}
+
 async function extractAppTickerState(page, ticker, consoleEvents = []){
-  return page.evaluate(async ({ticker, consoleEvents}) => {
+  const appState = await page.evaluate(async ({ticker, consoleEvents}) => {
     const safeText = value => String(value || '').replace(/\s+/g, ' ').trim();
-    const numericOrNull = value => {
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? numeric : null;
-    };
     const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
     const globalVerdict = record && typeof resolveGlobalVerdict === 'function' ? resolveGlobalVerdict(record) : null;
     const scanSimplified = record && typeof resolveSimplifiedStateForSurface === 'function'
@@ -29,44 +165,9 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     const watchlistPresentation = record && record.watchlist && record.watchlist.presentation && typeof record.watchlist.presentation === 'object'
       ? record.watchlist.presentation
       : null;
-    const replaySnapshot = record ? {
-      ticker:String(record.ticker || ''),
-      trustedComparisonFields:{
-        ticker:String(record.ticker || ''),
-        companyName:String(record.meta && record.meta.companyName || ''),
-        exchange:String(record.meta && record.meta.exchange || ''),
-        currency:String(record.marketData && record.marketData.currency || 'USD'),
-        tradingViewSymbol:String(record.meta && record.meta.tradingViewSymbol || ''),
-        price:numericOrNull(record.marketData && record.marketData.price),
-        previousClose:numericOrNull(record.marketData && record.marketData.previousClose),
-        sma20:numericOrNull(record.marketData && record.marketData.ma20),
-        sma50:numericOrNull(record.marketData && record.marketData.ma50),
-        sma200:numericOrNull(record.marketData && record.marketData.ma200),
-        rsi14:numericOrNull(record.marketData && record.marketData.rsi),
-        volume:numericOrNull(record.marketData && record.marketData.volume),
-        avgVolume30d:numericOrNull(record.marketData && record.marketData.avgVolume),
-        perf1w:numericOrNull(record.marketData && record.marketData.perf1w),
-        perf1m:numericOrNull(record.marketData && record.marketData.perf1m),
-        perf3m:numericOrNull(record.marketData && record.marketData.perf3m),
-        perf6m:numericOrNull(record.marketData && record.marketData.perf6m),
-        perfYtd:numericOrNull(record.marketData && record.marketData.perfYtd),
-        fetchedAt:String(record.marketData && record.marketData.asOf || ''),
-        warnings:Array.isArray(record.marketData && record.marketData.warnings) ? record.marketData.warnings.slice() : []
-      },
-      recentDailyHistory:Array.isArray(record.marketData && record.marketData.history)
-        ? record.marketData.history.map(row => ({
-          date:String(row.date || ''),
-          open:numericOrNull(row.open),
-          high:numericOrNull(row.high),
-          low:numericOrNull(row.low),
-          close:numericOrNull(row.close),
-          volume:numericOrNull(row.volume)
-        }))
-        : []
-    } : null;
     return {
       ticker,
-      snapshot:replaySnapshot,
+      authoritativeRecord:record,
       recordFlags:{
         inWatchlist:!!(record && record.watchlist && record.watchlist.inWatchlist),
         hasManualReview:!!(record && record.review && record.review.manualReview),
@@ -132,9 +233,20 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       }
     };
   }, {ticker, consoleEvents});
+  appState.snapshot = buildReplaySnapshotFromRecord(appState.authoritativeRecord);
+  appState.snapshotContract = {
+    hasAnalysisProjection:!!(appState.snapshot && appState.snapshot.scan && appState.snapshot.scan.analysisProjection),
+    hasPlan:!!(appState.snapshot && appState.snapshot.plan),
+    hasNormalizedReviewAnalysis:!!(appState.snapshot && appState.snapshot.review && appState.snapshot.review.analysisState && appState.snapshot.review.analysisState.normalized),
+    excludesWatchlistPresentation:!(appState.snapshot && appState.snapshot.watchlist && appState.snapshot.watchlist.presentation),
+    excludesTrackDiagnostics:appState.snapshot && appState.snapshot.track === undefined
+  };
+  delete appState.authoritativeRecord;
+  return appState;
 }
 
 module.exports = {
+  buildReplaySnapshotFromRecord,
   extractAppTickerState,
   normalizeNumber
 };

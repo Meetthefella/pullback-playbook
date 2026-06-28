@@ -59,6 +59,11 @@ function diagnoseParity(appState, replayResult){
 
   const firstReplayMismatch = comparisons.find(entry => entry.replay !== null && !same(entry.app, entry.replay));
   if(firstReplayMismatch){
+    const authoritativeReplayInputsAligned = !!(
+      appState.snapshotContract
+      && appState.snapshotContract.hasAnalysisProjection === true
+      && appState.snapshotContract.hasPlan === true
+    );
     const persistedInfluence = !!(
       appState.recordFlags
       && (
@@ -74,11 +79,15 @@ function diagnoseParity(appState, replayResult){
       replayValue:firstReplayMismatch.replay,
       firstFunction:firstReplayMismatch.source,
       likelySourceFile:firstReplayMismatch.file,
-      confidence:persistedInfluence ? 'high' : 'medium',
-      verdict:persistedInfluence ? 'app and replay are using different effective inputs' : 'app or replay canonical layer is wrong',
-      recommendedFix:persistedInfluence
+      confidence:authoritativeReplayInputsAligned ? 'high' : (persistedInfluence ? 'high' : 'medium'),
+      verdict:authoritativeReplayInputsAligned
+        ? 'app or replay canonical layer is wrong'
+        : (persistedInfluence ? 'app and replay are using different effective inputs' : 'app or replay canonical layer is wrong'),
+      recommendedFix:authoritativeReplayInputsAligned
+        ? 'Compare live canonical resolver inputs and outputs against replay for this frozen snapshot and fix the first authoritative transformation.'
+        : (persistedInfluence
         ? 'Audit persisted review/watchlist metadata and app-only authority gates before changing resolver logic.'
-        : 'Compare canonical resolver inputs for the live record against the replay snapshot and fix the first authoritative transformation.',
+        : 'Compare canonical resolver inputs for the live record against the replay snapshot and fix the first authoritative transformation.'),
       regressionAssertion:firstReplayMismatch.field === 'reviewCanonicalVerdict'
         ? 'Assert live review canonical verdict matches replay reviewCanonicalVerdict for the same frozen snapshot.'
         : `Assert live ${firstReplayMismatch.field} matches replay output for the same frozen snapshot.`

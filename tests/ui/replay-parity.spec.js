@@ -39,14 +39,25 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
     await openReviewForTicker(page, ticker);
     await captureStage(page, testInfo, `${ticker.toLowerCase()}-review`);
     const preWatchlistAppState = await extractAppTickerState(page, ticker, consoleEvents);
+    assertReplaySnapshotContract(preWatchlistAppState.snapshot, ticker);
     const addedToWatchlist = await addActiveReviewToWatchlistIfEligible(page);
     const postAddAppState = await extractAppTickerState(page, ticker, consoleEvents);
+    assertReplaySnapshotContract(postAddAppState.snapshot, ticker);
     if(addedToWatchlist){
       await openTrackTab(page);
       await captureStage(page, testInfo, `${ticker.toLowerCase()}-track`);
     }
     const appState = await extractAppTickerState(page, ticker, consoleEvents);
+    assertReplaySnapshotContract(appState.snapshot, ticker);
     expect(appState.snapshot, `Missing replay snapshot source for ${ticker}`).toBeTruthy();
+    expect(
+      appState.snapshot.plan,
+      `${ticker} replay snapshot must carry current plan authority from the live record.`
+    ).toBeTruthy();
+    expect(
+      appState.snapshot.scan && appState.snapshot.scan.analysisProjection,
+      `${ticker} replay snapshot must carry scan.analysisProjection from the live record.`
+    ).toBeTruthy();
     const replayRun = runReplayForSnapshot(appState.snapshot);
     const diagnosis = diagnoseParity(appState, replayRun.result);
     const stageMutation = {
@@ -83,6 +94,7 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
       preWatchlistAppResult:preWatchlistAppState,
       postAddAppResult:postAddAppState,
       appResult:appState,
+      snapshotContract:appState.snapshotContract,
       replayResult:replayRun.result,
       replayReportText:replayRun.reportText,
       firstDivergence:diagnosis,
@@ -112,6 +124,29 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
       : ''
   ).toEqual([]);
 });
+
+function assertReplaySnapshotContract(snapshot, ticker){
+  expect(snapshot, `${ticker} replay snapshot must be present.`).toBeTruthy();
+  expect(snapshot.scan, `${ticker} replay snapshot must include scan authority.`).toBeTruthy();
+  expect(
+    snapshot.scan && snapshot.scan.analysisProjection,
+    `${ticker} replay snapshot must include scan.analysisProjection.`
+  ).toBeTruthy();
+  expect(snapshot.plan, `${ticker} replay snapshot must include the current plan.`).toBeTruthy();
+  expect(snapshot.review, `${ticker} replay snapshot must include review authority.`).toBeTruthy();
+  expect(
+    snapshot.review && snapshot.review.analysisState && Object.prototype.hasOwnProperty.call(snapshot.review.analysisState, 'normalized'),
+    `${ticker} replay snapshot must carry review.analysisState.normalized when present.`
+  ).toBeTruthy();
+  expect(
+    snapshot.watchlist,
+    `${ticker} replay snapshot must not include watchlist presentation/debug authority.`
+  ).toBeUndefined();
+  expect(
+    snapshot.track,
+    `${ticker} replay snapshot must not include track presentation/debug authority.`
+  ).toBeUndefined();
+}
 
 function summarizeStageMutation(preTrackState, postTrackState, context = {}){
   const fields = [
