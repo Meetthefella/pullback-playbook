@@ -1,5 +1,6 @@
 const {test, expect} = require('@playwright/test');
 const {buildReplaySnapshotFromRecord} = require('./helpers/app-state');
+const {runReplayForSnapshot} = require('./helpers/replay-runner');
 
 test('replay snapshot includes authoritative review inputs and excludes presentation-only state', async () => {
   const snapshot = buildReplaySnapshotFromRecord({
@@ -71,6 +72,16 @@ test('replay snapshot includes authoritative review inputs and excludes presenta
     track:{
       diagnostics:{debugOnly:true}
     }
+  }, {
+    reviewProjectionSource:'clicked_card_snapshot',
+    reviewProjectionSnapshot:{
+      ticker:'TROW',
+      canonicalVerdict:'entry',
+      finalVerdict:'entry',
+      sourceOfTruthVisualBucket:'entry',
+      visualBucket:'entry',
+      tone:'entry'
+    }
   });
 
   expect(snapshot.scan.analysisProjection).toBeTruthy();
@@ -84,6 +95,15 @@ test('replay snapshot includes authoritative review inputs and excludes presenta
     ai_observation_only:true,
     coach_summary:'Constructive but waiting for confirmation.'
   });
+  expect(snapshot.review.projectionSource).toBe('clicked_card_snapshot');
+  expect(snapshot.review.projectionSnapshot).toEqual({
+    ticker:'TROW',
+    canonicalVerdict:'entry',
+    finalVerdict:'entry',
+    sourceOfTruthVisualBucket:'entry',
+    visualBucket:'entry',
+    tone:'entry'
+  });
   expect(snapshot.review.manualReview).toEqual({
     entry:110.27,
     stop:102.29,
@@ -92,4 +112,61 @@ test('replay snapshot includes authoritative review inputs and excludes presenta
   expect(snapshot.marketData.history).toHaveLength(1);
   expect(snapshot.watchlist).toBeUndefined();
   expect(snapshot.track).toBeUndefined();
+});
+
+test('replay honors authoritative review projection snapshot when present', async () => {
+  const snapshot = buildReplaySnapshotFromRecord({
+    ticker:'TROW',
+    marketData:{
+      currency:'USD',
+      price:110.27,
+      previousClose:106.34,
+      ma20:106.727,
+      ma50:103.852,
+      ma200:100.9815,
+      rsi:64.82,
+      volume:3831934,
+      avgVolume:2115787.96,
+      asOf:'2026-06-28T20:56:13.518Z',
+      history:[{date:'2026-06-26', open:110.27, high:110.27, low:110.27, close:110.27, volume:3831934}]
+    },
+    plan:{
+      entry:110.27,
+      stop:102.29,
+      firstTarget:136.19,
+      status:'valid',
+      tradeability:'tradable'
+    },
+    scan:{
+      analysisProjection:{
+        priceability_state:'unpriceable',
+        bounce_state:'attempt',
+        structure_state:'strong',
+        setup_location_state:'off_level'
+      },
+      resolvedVerdict:'Entry',
+      verdict:'Entry'
+    },
+    review:{
+      analysisState:{
+        normalized:{coach_summary:'Constructive but waiting for confirmation.'}
+      }
+    }
+  }, {
+    reviewProjectionSource:'clicked_card_snapshot',
+    reviewProjectionSnapshot:{
+      ticker:'TROW',
+      canonicalVerdict:'entry',
+      finalVerdict:'entry',
+      sourceOfTruthVisualBucket:'entry',
+      visualBucket:'entry',
+      tone:'entry'
+    }
+  });
+
+  const replay = runReplayForSnapshot(snapshot);
+
+  expect(replay.result.reviewCanonicalVerdict).toBe('entry');
+  expect(replay.result.reviewVisualBucket).toBe('entry');
+  expect(replay.result.reviewProjectionSource).toBe('clicked_card_snapshot');
 });

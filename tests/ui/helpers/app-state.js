@@ -40,9 +40,10 @@ function mapHistoryRows(history){
     : [];
 }
 
-function buildReplaySnapshotFromRecord(record){
+function buildReplaySnapshotFromRecord(record, runtimeContext = {}){
   const item = record && typeof record === 'object' ? cloneJsonValue(record) : null;
   if(!item) return null;
+  const context = runtimeContext && typeof runtimeContext === 'object' ? runtimeContext : {};
   const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
   const review = item.review && typeof item.review === 'object' ? item.review : {};
   const reviewAnalysisState = review.analysisState && typeof review.analysisState === 'object'
@@ -126,6 +127,10 @@ function buildReplaySnapshotFromRecord(record){
         ? cloneJsonValue(review.normalizedAnalysis)
         : null,
       manualReview:manualReview ? cloneJsonValue(manualReview) : null,
+      projectionSource:String(context.reviewProjectionSource || ''),
+      projectionSnapshot:context.reviewProjectionSnapshot && typeof context.reviewProjectionSnapshot === 'object'
+        ? cloneJsonValue(context.reviewProjectionSnapshot)
+        : null,
       analysisState:{
         normalized:reviewAnalysisState.normalized && typeof reviewAnalysisState.normalized === 'object'
           ? cloneJsonValue(reviewAnalysisState.normalized)
@@ -144,9 +149,38 @@ function buildReplaySnapshotFromRecord(record){
 }
 
 async function extractAppTickerState(page, ticker, consoleEvents = []){
-  const appState = await page.evaluate(async ({ticker, consoleEvents}) => {
+  const resolveAppRecord = targetTicker => page.evaluate(({ticker}) => {
+    const normalizedTicker = String(ticker || '').trim().toUpperCase();
+    if(typeof getTickerRecord === 'function'){
+      const direct = getTickerRecord(normalizedTicker);
+      if(direct) return direct;
+    }
+    if(typeof allTickerRecords === 'function'){
+      const records = allTickerRecords();
+      if(Array.isArray(records)){
+        return records.find(item => String(item && item.ticker || '').trim().toUpperCase() === normalizedTicker) || null;
+      }
+    }
+    return null;
+  }, {ticker:targetTicker});
+
+  let authoritativeRecord = await resolveAppRecord(ticker);
+  if(!authoritativeRecord){
+    await page.waitForFunction(targetTicker => {
+      const normalizedTicker = String(targetTicker || '').trim().toUpperCase();
+      if(typeof getTickerRecord === 'function' && getTickerRecord(normalizedTicker)) return true;
+      if(typeof allTickerRecords === 'function'){
+        const records = allTickerRecords();
+        return Array.isArray(records) && records.some(item => String(item && item.ticker || '').trim().toUpperCase() === normalizedTicker);
+      }
+      return false;
+    }, ticker, {timeout:2000}).catch(() => null);
+    authoritativeRecord = await resolveAppRecord(ticker);
+  }
+
+  const appState = await page.evaluate(async ({ticker, consoleEvents, authoritativeRecord}) => {
     const safeText = value => String(value || '').replace(/\s+/g, ' ').trim();
-    const record = (() => {
+    const record = authoritativeRecord || (() => {
       if(typeof getTickerRecord === 'function'){
         const direct = getTickerRecord(ticker);
         if(direct) return direct;
@@ -172,6 +206,16 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     const trackSnapshot = record && typeof buildTrackDiagnosticSnapshot === 'function'
       ? buildTrackDiagnosticSnapshot(record)
       : null;
+    const activeProjectionSnapshot = typeof uiState === 'object'
+      && uiState
+      && uiState.activeReviewSourceProjectionSnapshot
+      && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+      && String(uiState.activeReviewSourceProjectionSnapshot.ticker || '').trim().toUpperCase() === String(ticker || '').trim().toUpperCase()
+        ? uiState.activeReviewSourceProjectionSnapshot
+        : null;
+    const reviewProjectionSource = activeProjectionSnapshot
+      ? String(uiState.activeReviewProjectionSource || 'clicked_card_snapshot')
+      : '';
     const reviewShell = document.querySelector('#reviewWorkspace .reviewworkspace-shell');
     const activeTrackCard = document.querySelector(`[data-watchlist-ticker="${ticker}"]`);
     const watchlistPresentation = record && record.watchlist && record.watchlist.presentation && typeof record.watchlist.presentation === 'object'
@@ -242,14 +286,19 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       console:{
         warnings:consoleEvents.filter(entry => entry.type === 'warning').map(entry => entry.text),
         errors:consoleEvents.filter(entry => entry.type === 'error' || entry.type === 'pageerror').map(entry => entry.text)
+      },
+      reviewProjectionContext:{
+        reviewProjectionSource,
+        reviewProjectionSnapshot:activeProjectionSnapshot
       }
     };
-  }, {ticker, consoleEvents});
-  appState.snapshot = buildReplaySnapshotFromRecord(appState.authoritativeRecord);
+  }, {ticker, consoleEvents, authoritativeRecord});
+  appState.snapshot = buildReplaySnapshotFromRecord(appState.authoritativeRecord, appState.reviewProjectionContext);
   appState.snapshotContract = {
     hasAnalysisProjection:!!(appState.snapshot && appState.snapshot.scan && appState.snapshot.scan.analysisProjection),
     hasPlan:!!(appState.snapshot && appState.snapshot.plan),
     hasNormalizedReviewAnalysis:!!(appState.snapshot && appState.snapshot.review && appState.snapshot.review.analysisState && appState.snapshot.review.analysisState.normalized),
+    hasReviewProjectionSnapshot:!!(appState.snapshot && appState.snapshot.review && appState.snapshot.review.projectionSnapshot),
     excludesWatchlistPresentation:!(appState.snapshot && appState.snapshot.watchlist && appState.snapshot.watchlist.presentation),
     excludesTrackDiagnostics:appState.snapshot && appState.snapshot.track === undefined
   };

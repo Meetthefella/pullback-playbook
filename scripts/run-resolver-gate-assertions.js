@@ -6963,6 +6963,18 @@ function runPlanSemanticsAssertions(){
   if(suppressSoftAddDowngrade !== true){
     throw new Error('Add-to-watchlist lifecycle must suppress generic soft downgrade copy for a fresh Entry/priceable setup with no hard structured blocker.');
   }
+  const suppressSoftAutoRecomputeDowngrade = sandbox.shouldSuppressWatchlistAddSoftDowngrade(addTimeSoftDowngradeRecord, {
+    state:'entry',
+    downgradeReason:'Conditions are not strong enough for active focus.'
+  }, {
+    source:'auto_recompute',
+    globalVerdict:addTimeSoftDowngradeVerdict,
+    structureGate:sandbox.watchlistRefreshStructureGate(addTimeSoftDowngradeRecord),
+    displayedPlan:addTimeSoftDowngradePlan
+  });
+  if(suppressSoftAutoRecomputeDowngrade !== true){
+    throw new Error('Immediate post-add auto_recompute must also suppress generic soft downgrade copy for a fresh Entry/priceable setup with no hard structured blocker.');
+  }
 
   const addTimeTargetTooClosePlan = sandbox.deriveCurrentPlanState(100, 95, 101, 'USD');
   const suppressTargetTooCloseDowngrade = sandbox.shouldSuppressWatchlistAddSoftDowngrade(targetTooCloseRecord, {

@@ -11546,7 +11546,7 @@ function watchlistLifecycleSnapshot(record, options = {}){
 
 function shouldSuppressWatchlistAddSoftDowngrade(record, snapshot, context = {}){
   const source = String(context.source || '').trim().toLowerCase();
-  if(source !== 'watchlist_add') return false;
+  if(source !== 'watchlist_add' && source !== 'auto_recompute') return false;
   const item = record && typeof record === 'object' ? record : {};
   const currentSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
   if(String(currentSnapshot.state || '').trim().toLowerCase() !== 'entry') return false;

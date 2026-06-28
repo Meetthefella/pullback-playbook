@@ -136,6 +136,9 @@ function loadReplayRuntime(){
   runBrowserModule('js/setup-basis-policy.js', sandbox);
   runBrowserModule('js/resolver-core.js', sandbox);
   runBrowserModule('js/resolver-presentation.js', sandbox);
+  runBrowserModule('js/domain/simplified-plan-state.js', sandbox);
+  runBrowserModule('js/presentation/simplified-presentation-model.js', sandbox);
+  runBrowserModule('js/domain/simplified-trade-state.js', sandbox);
   runBrowserModule('js/scanner-debug.js', sandbox);
   runBrowserModule('js/domain/canonical-resolver-input.js', sandbox);
 
@@ -306,6 +309,41 @@ function normalizeSnapshotInput(payload, fallbackTicker = ''){
   };
 }
 
+function normalizeReviewProjectionContext(snapshot){
+  const review = snapshot && snapshot.review && typeof snapshot.review === 'object' ? snapshot.review : {};
+  const projectionSnapshot = review.projectionSnapshot && typeof review.projectionSnapshot === 'object'
+    ? cloneObject(review.projectionSnapshot)
+    : null;
+  const projectionSource = String(review.projectionSource || '').trim().toLowerCase();
+  const authoritative = !!projectionSnapshot && (
+    projectionSource === 'clicked_card_snapshot'
+    || projectionSource === 'track_projection_updated'
+  );
+  const canonicalVerdict = authoritative
+    ? String(
+      projectionSnapshot.canonicalVerdict
+      || projectionSnapshot.finalVerdict
+      || projectionSnapshot.renderedVerdict
+      || ''
+    ).trim().toLowerCase()
+    : '';
+  const visualBucket = authoritative
+    ? String(
+      projectionSnapshot.sourceOfTruthVisualBucket
+      || projectionSnapshot.visualBucket
+      || projectionSnapshot.renderedBucket
+      || ''
+    ).trim().toLowerCase()
+    : '';
+  return {
+    authoritative,
+    projectionSource,
+    projectionSnapshot,
+    canonicalVerdict,
+    visualBucket
+  };
+}
+
 function ensureDirectoryForFile(filePath){
   const directory = path.dirname(filePath);
   fs.mkdirSync(directory, {recursive:true});
@@ -356,12 +394,12 @@ function buildReplayDeps(sandbox){
     if(!coreDepsCache){
       coreDepsCache = {
         resolveFinalStateContract(item){
-          return item && item.resolvedContract || {
+          return {
             finalVerdict:'Watch',
             final_verdict:'watch',
             structuralState:'developing',
             actionStateKey:'wait_for_confirmation',
-            planStatusKey:'valid',
+            planStatusKey:String(item && item.displayedPlan && item.displayedPlan.status || item && item.plan && item.plan.status || 'valid').trim().toLowerCase(),
             tradeabilityVerdict:'Watch',
             blockerReason:'Needs stronger confirmation',
             reasonSummary:'Needs stronger confirmation',
@@ -370,12 +408,12 @@ function buildReplayDeps(sandbox){
           };
         },
         resolvePreLifecycleStateContract(item){
-          return item && item.preLifecycleResolved || item && item.resolvedContract || {
+          return {
             finalVerdict:'Watch',
             final_verdict:'watch',
             structuralState:'developing',
             actionStateKey:'wait_for_confirmation',
-            planStatusKey:'valid',
+            planStatusKey:String(item && item.displayedPlan && item.displayedPlan.status || item && item.plan && item.plan.status || 'valid').trim().toLowerCase(),
             tradeabilityVerdict:'Watch',
             blockerReason:'Needs stronger confirmation',
             reasonSummary:'Needs stronger confirmation',
@@ -921,6 +959,7 @@ function buildReplayJsonResult(result){
     scannerSnapshotIncomplete:result.replay.scannerSnapshotIncomplete,
     reviewCanonicalVerdict:result.replay.reviewCanonicalVerdict,
     reviewVisualBucket:result.replay.reviewVisualBucket,
+    reviewProjectionSource:result.replay.reviewProjectionSource,
     layerMutationReason:result.replay.layerMutationReason,
     simulatedLifecycleFromWatch:result.replay.simulatedLifecycleFromWatch,
     structureState:result.replay.structureState,
@@ -1010,7 +1049,7 @@ async function main(){
   }
 
   const sandbox = loadReplayRuntime();
-  const {resolveGlobalVerdict} = buildReplayDeps(sandbox);
+  const {resolveGlobalVerdict, coreDeps} = buildReplayDeps(sandbox);
   const visualDeps = buildVisualDeps(sandbox, resolveGlobalVerdict);
   const scannerDebugDeps = buildScannerDebugDeps(
     sandbox,
@@ -1047,6 +1086,7 @@ async function main(){
 
   const results = snapshots.map(snapshot => {
     const proxy = classifyShortlistCandidate(snapshot);
+    const reviewProjectionContext = normalizeReviewProjectionContext(snapshot);
     const replayBase = buildReplayRecord(snapshot, sandbox);
     const scannerRecord = deepClone(replayBase.record);
     const scannerResolvedContract = deepClone(replayBase.record.resolvedContract);
@@ -1058,7 +1098,19 @@ async function main(){
       resolvedContract:scannerResolvedContract,
       setupScore:scannerRecord.setupScore
     }, visualDeps);
-    const scannerCanonicalVerdictRaw = String(scannerResolvedContract.final_verdict || '').trim().toLowerCase();
+    const simplifiedScannerState = sandbox.window.SimplifiedTradeState
+      && typeof sandbox.window.SimplifiedTradeState.resolveRecordState === 'function'
+      ? sandbox.window.SimplifiedTradeState.resolveRecordState(scannerRecord, {
+        surface:'scan',
+        log:false,
+        deps:coreDeps()
+      })
+      : null;
+    const scannerCanonicalVerdictRaw = String(
+      (simplifiedScannerState && simplifiedScannerState.canonicalVerdict)
+      || scannerResolvedContract.final_verdict
+      || ''
+    ).trim().toLowerCase();
     const scannerSnapshotIncomplete = !scannerCanonicalVerdictRaw;
     const scannerCanonicalVerdict = scannerCanonicalVerdictRaw || 'unknown';
     const globalVerdict = resolveGlobalVerdict(replayBase.record);
@@ -1082,6 +1134,14 @@ async function main(){
       resolvedContract:replayBase.record.resolvedContract,
       setupScore:replayBase.record.setupScore
     }, visualDeps);
+    const simplifiedReviewState = sandbox.window.SimplifiedTradeState
+      && typeof sandbox.window.SimplifiedTradeState.resolveRecordState === 'function'
+      ? sandbox.window.SimplifiedTradeState.resolveRecordState(replayBase.record, {
+        surface:'review',
+        log:false,
+        deps:coreDeps()
+      })
+      : null;
     const baseView = buildBaseView(
       replayBase.record,
       replayBase.record.displayedPlan,
@@ -1168,9 +1228,23 @@ async function main(){
       promotionBlocker,
       blockerCopy
     });
-    const scannerVisualBucket = String(scannerVisualState.visualBucket || '').trim().toLowerCase() || 'monitor';
-    const reviewVisualBucket = String(reviewVisualState.visualBucket || '').trim().toLowerCase() || 'monitor';
-    const reviewCanonicalVerdict = String(globalVerdict.final_verdict || '').trim().toLowerCase() || 'watch';
+    const scannerVisualBucket = String(
+      (simplifiedScannerState && simplifiedScannerState.visualBucket)
+      || scannerVisualState.visualBucket
+      || ''
+    ).trim().toLowerCase() || 'monitor';
+    const reviewVisualBucket = String(
+      (reviewProjectionContext.authoritative && reviewProjectionContext.visualBucket)
+      || (simplifiedReviewState && simplifiedReviewState.visualBucket)
+      || reviewVisualState.visualBucket
+      || ''
+    ).trim().toLowerCase() || 'monitor';
+    const reviewCanonicalVerdict = String(
+      (reviewProjectionContext.authoritative && reviewProjectionContext.canonicalVerdict)
+      || (simplifiedReviewState && simplifiedReviewState.canonicalVerdict)
+      || globalVerdict.final_verdict
+      || ''
+    ).trim().toLowerCase() || 'watch';
     const layerMutationParts = [];
     if(scannerCanonicalVerdict !== reviewCanonicalVerdict){
       layerMutationParts.push(`verdict ${scannerCanonicalVerdict} -> ${reviewCanonicalVerdict}`);
@@ -1201,8 +1275,9 @@ async function main(){
         scannerSnapshotIncomplete,
         scannerVisualBucket,
         reviewCanonicalVerdict,
-        reviewCanonicalVerdictLabel:sandbox.window.ResolverCore.globalVerdictLabel(globalVerdict.final_verdict),
+        reviewCanonicalVerdictLabel:sandbox.window.ResolverCore.globalVerdictLabel(reviewCanonicalVerdict),
         reviewVisualBucket,
+        reviewProjectionSource:reviewProjectionContext.projectionSource,
         layerMutationReason:layerMutationParts.join(' | '),
         simulatedLifecycleFromWatch:String(simulatedLifecycleFromWatch || ''),
         structureState:derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
