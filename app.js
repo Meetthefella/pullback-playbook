@@ -3750,6 +3750,17 @@ function currentReviewChartVerificationSnapshot(record){
 function currentReviewStateHealthSnapshot(record){
   const item = record || currentReviewDiagnosticRecord();
   if(!item) return null;
+  const activeProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(item.ticker || '')
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const reviewProjectionSource = String(
+    uiState.activeReviewProjectionSource
+    || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
+  ).trim().toLowerCase();
+  const reviewSnapshotAuthority = reviewProjectionSource === 'clicked_card_snapshot'
+    || (reviewProjectionSource === 'track_projection_updated' && !!activeProjectionSnapshot);
   const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {
     renderPass:0,
     source:'diagnostic_snapshot',
@@ -3758,9 +3769,36 @@ function currentReviewStateHealthSnapshot(record){
   const globalVerdict = resolveGlobalVerdict(item);
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
   const effectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(item, simplifiedState, globalVerdict, lifecycleSnapshot);
-  const simplifiedCanonicalVerdict = normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
-  const simplifiedVisualBucket = normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
-  const derivedTone = String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const projectionCanonicalVerdict = reviewSnapshotAuthority
+    ? normalizeGlobalVerdictKey(
+      activeProjectionSnapshot && (
+        activeProjectionSnapshot.canonicalVerdict
+        || activeProjectionSnapshot.finalVerdict
+        || activeProjectionSnapshot.renderedVerdict
+      ) || ''
+    )
+    : '';
+  const projectionVisualBucket = reviewSnapshotAuthority
+    ? normalizeVisualBucketForPairing(
+      activeProjectionSnapshot && (
+        activeProjectionSnapshot.sourceOfTruthVisualBucket
+        || activeProjectionSnapshot.visualBucket
+        || activeProjectionSnapshot.renderedBucket
+      ) || ''
+    )
+    : '';
+  const projectionTone = reviewSnapshotAuthority
+    ? (String(
+      activeProjectionSnapshot && (
+        activeProjectionSnapshot.tone
+        || activeProjectionSnapshot.sourceOfTruthVisualBucket
+        || activeProjectionSnapshot.visualBucket
+      ) || ''
+    ).trim().toLowerCase() || '')
+    : '';
+  const simplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
+  const simplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
+  const derivedTone = projectionTone || (String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor');
   let divergenceDetected = false;
   try{
     const derivedStates = analysisDerivedStatesFromRecord(item);
@@ -3798,7 +3836,7 @@ function currentReviewStateHealthSnapshot(record){
     divergenceDetected = false;
   }
   return {
-    sourceOfTruth:'simplified_state_pipeline',
+    sourceOfTruth:reviewSnapshotAuthority ? 'review_projection_snapshot' : 'simplified_state_pipeline',
     ticker:String(item.ticker || ''),
     canonicalVerdict:simplifiedCanonicalVerdict,
     visualBucket:simplifiedVisualBucket,
@@ -10887,6 +10925,11 @@ function addToWatchlist(tickerData){
   const entry = normalizeWatchlistEntry(tickerData);
   if(!entry) return {entry:null, record:null, added:false, updated:false, error:'invalid_ticker'};
   const record = upsertTickerRecord(entry.ticker);
+  const preAddReviewProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(entry.ticker || '')
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
   const eligibility = resolvePostGateWatchlistEligibility(record, {
     source:'watchlist_add',
     deferWatchlistRemoval:false,
@@ -32852,7 +32895,15 @@ function addActiveReviewTickerToWatchlist(){
       renderedTrack:startupCoordinator.renderedTabs.track === true
     });
   }
-  const postAddProjectionSnapshot = buildTrackProjectionSnapshotFromPersistedPresentation(entry && entry.record ? entry.record : liveRecord, 'watchlist_add_projection');
+  const postAddProjectionSnapshot = preAddReviewProjectionSnapshot
+    ? {
+      ...preAddReviewProjectionSnapshot,
+      ticker:normalizeTicker(entry.ticker || liveRecord.ticker || ''),
+      context:'watchlist_add_projection',
+      capturedAt:new Date().toISOString(),
+      source:'pre_add_review_projection'
+    }
+    : buildTrackProjectionSnapshotFromPersistedPresentation(entry && entry.record ? entry.record : liveRecord, 'watchlist_add_projection');
   if(postAddProjectionSnapshot && activeReviewTicker() === liveRecord.ticker){
     uiState.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshot;
     uiState.activeReviewProjectionSource = 'track_projection_updated';

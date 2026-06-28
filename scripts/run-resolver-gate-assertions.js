@@ -8574,8 +8574,8 @@ function runTrackPresentationAuthorityAssertions(){
     || !/const reviewAction = \{label:projectionActionGuidance \|\| reviewSemanticStatus\.nextAction \|\| simplifiedActionLabel \|\| 'Review setup inputs'\};/s.test(appSource)){
     throw new Error('Review reopen rendering must prefer the active Track projection snapshot for visible verdict, bucket, and softened copy before falling back to stale simplified review state.');
   }
-  if(!/const postAddProjectionSnapshot = buildTrackProjectionSnapshotFromPersistedPresentation\(entry && entry\.record \? entry\.record : liveRecord, 'watchlist_add_projection'\);[\s\S]*?uiState\.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshot;[\s\S]*?uiState\.activeReviewProjectionSource = 'track_projection_updated';[\s\S]*?renderReviewWorkspace\(postAddProjectionSnapshot[\s\S]*?source:'track_projection_updated'/s.test(appSource)){
-    throw new Error('Review must adopt the persisted Track projection snapshot immediately after Add to Watchlist so it does not flash back to stale Avoid copy.');
+  if(!/const preAddReviewProjectionSnapshot = uiState\.activeReviewSourceProjectionSnapshot[\s\S]*?const postAddProjectionSnapshot = preAddReviewProjectionSnapshot[\s\S]*?\? \{[\s\S]*?source:'pre_add_review_projection'[\s\S]*?\}\s*:\s*buildTrackProjectionSnapshotFromPersistedPresentation\(entry && entry\.record \? entry\.record : liveRecord, 'watchlist_add_projection'\);[\s\S]*?uiState\.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshot;[\s\S]*?uiState\.activeReviewProjectionSource = 'track_projection_updated';[\s\S]*?renderReviewWorkspace\(postAddProjectionSnapshot[\s\S]*?source:'track_projection_updated'/s.test(appSource)){
+    throw new Error('Review must preserve the pre-add Review projection after Add to Watchlist when available, and only fall back to tracked presentation if no Review projection exists.');
   }
   if(/decision_summary:presentation\.presentationReason/.test(appSource) || /reason:presentation\.presentationReason/.test(appSource)){
     throw new Error('Legacy presentationReason must not feed non-debug visible Track render paths.');
