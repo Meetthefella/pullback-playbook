@@ -54,6 +54,50 @@ if(failures.length){
   process.exit(1);
 }
 
+function parseJsonPrefix(output){
+  const trimmed = String(output || '').trim();
+  if(!trimmed) return null;
+  const start = trimmed.indexOf('{');
+  if(start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for(let index = start; index < trimmed.length; index += 1){
+    const char = trimmed[index];
+    if(inString){
+      if(escaped){
+        escaped = false;
+        continue;
+      }
+      if(char === '\\'){
+        escaped = true;
+        continue;
+      }
+      if(char === '"') inString = false;
+      continue;
+    }
+    if(char === '"'){
+      inString = true;
+      continue;
+    }
+    if(char === '{'){
+      depth += 1;
+      continue;
+    }
+    if(char === '}'){
+      depth -= 1;
+      if(depth === 0){
+        try{
+          return JSON.parse(trimmed.slice(start, index + 1));
+        }catch(_error){
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function runScanPresentationAssertions(){
   const scannerView = sandbox.window.ScannerView;
   const scannerResultsSupport = sandbox.window.ScannerResultsSupport;
@@ -2867,8 +2911,12 @@ runSharedNarrativeConsistencyAssertions();
 
 function runSimplifiedPipelineAssertions(){
   const pipeline = sandbox.window.SimplifiedTradeState;
+  const simplifiedPlanState = sandbox.window.SimplifiedPlanState;
   if(!pipeline || typeof pipeline.resolveRecordState !== 'function'){
     throw new Error('SimplifiedTradeState pipeline is unavailable.');
+  }
+  if(!simplifiedPlanState || typeof simplifiedPlanState.deriveCurrentPlanState !== 'function'){
+    throw new Error('SimplifiedPlanState is unavailable.');
   }
   const requiredKeys = [
     'ticker',
@@ -2896,6 +2944,370 @@ function runSimplifiedPipelineAssertions(){
       scannerScoreGradientClass:() => '',
       ...extraDeps
     };
+  }
+
+  const stalePersistedInvalidRecord = {
+    ticker:'SIMPSTALE',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const stalePersistedPlanState = simplifiedPlanState.deriveCurrentPlanState(
+    stalePersistedInvalidRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(stalePersistedPlanState.status !== 'valid' || stalePersistedPlanState.tradeability !== 'tradable' || stalePersistedPlanState.planVisible !== true){
+    throw new Error('Fresh valid scanner-estimate plan math must defeat stale persisted invalid status/tradeability/riskStatus/blockedReason metadata.');
+  }
+  if(stalePersistedPlanState.authoritativeBlockApplied === true){
+    throw new Error('Stale persisted scanner-estimate invalid metadata must not apply authoritative plan blocking.');
+  }
+
+  const currentBlockedRecord = {
+    ticker:'SIMPBLOCK',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked'
+    },
+    marketData:{price:118, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const currentBlockedPlanState = simplifiedPlanState.deriveCurrentPlanState(
+    currentBlockedRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(currentBlockedPlanState.status !== 'invalid' || currentBlockedPlanState.planVisible !== false || currentBlockedPlanState.authoritativeBlockApplied !== true){
+    throw new Error('Current structured blockers must still invalidate/hide scanner-estimate plans in SimplifiedPlanState.');
+  }
+
+  const currentInvalidatedFlagRecord = {
+    ticker:'SIMPINVALIDATED',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked',
+      planValidationState:'invalidated',
+      invalidatedState:'invalidated'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const currentInvalidatedFlagPlanState = simplifiedPlanState.deriveCurrentPlanState(
+    currentInvalidatedFlagRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(currentInvalidatedFlagPlanState.status !== 'invalid' || currentInvalidatedFlagPlanState.planVisible !== false){
+    throw new Error('Current structured invalidated evidence must still invalidate/hide fresh scanner-estimate math.');
+  }
+
+  const stalePersistedInvalidatedFlagRecord = {
+    ticker:'SIMPSTALEINVALIDATED',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked',
+      invalidatedState:'invalidated'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const stalePersistedInvalidatedFlagPlanState = simplifiedPlanState.deriveCurrentPlanState(
+    stalePersistedInvalidatedFlagRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(stalePersistedInvalidatedFlagPlanState.status !== 'valid' || stalePersistedInvalidatedFlagPlanState.tradeability !== 'tradable' || stalePersistedInvalidatedFlagPlanState.planVisible !== true){
+    throw new Error('Persisted stale plan.invalidatedState must not hide/block fresh valid scanner-estimate math.');
+  }
+
+  const currentMissedFlagRecord = {
+    ticker:'SIMPMISSED',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked',
+      triggerState:'missed',
+      missedState:'missed'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const currentMissedFlagPlanState = simplifiedPlanState.deriveCurrentPlanState(
+    currentMissedFlagRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(currentMissedFlagPlanState.status !== 'invalid' || currentMissedFlagPlanState.planVisible !== false){
+    throw new Error('Current structured missed evidence must still invalidate/hide fresh scanner-estimate math.');
+  }
+
+  const stalePersistedMissedFlagRecord = {
+    ticker:'SIMPSTALEMISSED',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked',
+      missedState:'missed'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const stalePersistedMissedFlagPlanState = simplifiedPlanState.deriveCurrentPlanState(
+    stalePersistedMissedFlagRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(stalePersistedMissedFlagPlanState.status !== 'valid' || stalePersistedMissedFlagPlanState.tradeability !== 'tradable' || stalePersistedMissedFlagPlanState.planVisible !== true){
+    throw new Error('Persisted stale plan.missedState must not hide/block fresh valid scanner-estimate math.');
+  }
+
+  const currentValidationStateBlockRecord = {
+    ticker:'SIMPPLANSTATE',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked',
+      planValidationState:'invalidated'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const currentValidationStateBlockPlanState = simplifiedPlanState.deriveCurrentPlanState(
+    currentValidationStateBlockRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(currentValidationStateBlockPlanState.status !== 'invalid' || currentValidationStateBlockPlanState.planVisible !== false){
+    throw new Error('Current blocking plan.planValidationState must still invalidate/hide fresh scanner-estimate math.');
+  }
+
+  const currentTriggerStateBlockRecord = {
+    ticker:'SIMPTRIGGERSTATE',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked',
+      triggerState:'invalidated'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const currentTriggerStateBlockPlanState = simplifiedPlanState.deriveCurrentPlanState(
+    currentTriggerStateBlockRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(currentTriggerStateBlockPlanState.status !== 'invalid' || currentTriggerStateBlockPlanState.planVisible !== false){
+    throw new Error('Current blocking plan.triggerState must still invalidate/hide fresh scanner-estimate math.');
+  }
+
+  const stalePlanValidationStateRecord = {
+    ticker:'SIMPSTALEPLANSTATE',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked',
+      planValidationState:'stale'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const stalePlanValidationStatePlanState = simplifiedPlanState.deriveCurrentPlanState(
+    stalePlanValidationStateRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(stalePlanValidationStatePlanState.status !== 'valid' || stalePlanValidationStatePlanState.tradeability !== 'tradable' || stalePlanValidationStatePlanState.planVisible !== true){
+    throw new Error('Persisted stale plan.planValidationState must not hide/block fresh valid scanner-estimate math.');
+  }
+
+  const staleTriggerStateRecord = {
+    ticker:'SIMPSTALETRIGGER',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked',
+      triggerState:'stale'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const staleTriggerStatePlanState = simplifiedPlanState.deriveCurrentPlanState(
+    staleTriggerStateRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(staleTriggerStatePlanState.status !== 'valid' || staleTriggerStatePlanState.tradeability !== 'tradable' || staleTriggerStatePlanState.planVisible !== true){
+    throw new Error('Persisted stale plan.triggerState must not hide/block fresh valid scanner-estimate math.');
+  }
+
+  const harmlessPendingStateRecord = {
+    ticker:'SIMPPENDING',
+    in_watchlist:true,
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'invalid',
+      tradeability:'invalid',
+      riskStatus:'plan_blocked',
+      blockedReason:'Blocked',
+      planValidationState:'pending_validation',
+      triggerState:'waiting_for_trigger'
+    },
+    marketData:{price:100, ma20:99, ma50:95, ma200:80, currency:'GBP'},
+    setup:{structureState:'intact', trendState:'intact', volumeRequired:false}
+  };
+  const harmlessPendingStatePlanState = simplifiedPlanState.deriveCurrentPlanState(
+    harmlessPendingStateRecord,
+    null,
+    {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true},
+    {
+      PlanMath:sandbox.window.PlanMath,
+      deriveTradeability:sandbox.window.Tradeability && sandbox.window.Tradeability.deriveTradeability
+    }
+  );
+  if(harmlessPendingStatePlanState.status !== 'valid' || harmlessPendingStatePlanState.tradeability !== 'tradable' || harmlessPendingStatePlanState.planVisible !== true){
+    throw new Error('Harmless pending plan/trigger states must not hide fresh valid scanner-estimate math.');
+  }
+
+  const stalePersistedPipeline = pipeline.resolveRecordState(stalePersistedInvalidRecord, {
+    log:false,
+    surface:'track',
+    deps:depsFor({
+      structureState:'intact',
+      trendState:'intact',
+      stabilisationState:'clear',
+      bounceState:'confirmed',
+      pullbackZone:'near_20ma',
+      volumeState:'normal',
+      priceabilityState:'priceable'
+    }, {
+      finalVerdict:'Entry',
+      structuralState:'entry',
+      actionStateKey:'ready_to_act',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Entry',
+      blockerReason:'',
+      reasonSummary:'Ready to act.',
+      terminal:false,
+      baseVerdict:'entry'
+    })
+  });
+  if(stalePersistedPipeline.planStatus !== 'valid' || stalePersistedPipeline.planVisible !== true){
+    throw new Error('resolveRecordState(track) must not let stale persisted invalid plan metadata override fresh valid scanner-estimate math.');
+  }
+  if(stalePersistedPipeline.debug && stalePersistedPipeline.debug.validation && stalePersistedPipeline.debug.validation.state === 'needs_replan'){
+    throw new Error('Simplified pipeline validation must not inherit stale persisted invalid metadata as needs_replan when current scanner-estimate math is valid.');
   }
 
   const entryBlocked = pipeline.resolveRecordState({
@@ -5238,6 +5650,9 @@ function runAiContractAssertions(){
       const valid = Number.isFinite(risk) && Number.isFinite(reward) && risk > 0 && reward > 0;
       return {status:valid ? 'valid' : 'invalid', riskFit:{risk_status:valid ? 'fits_risk' : 'invalid_plan'}};
     },
+    hasAuthoritativeStopBreach(){
+      return false;
+    },
     escapeHtml(value){
       return String(value == null ? '' : value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
     }
@@ -5256,6 +5671,7 @@ function runAiContractAssertions(){
     'resolveDerivedStateSource',
     'aiObservationEvidenceStates',
     'hasMathematicallyPriceablePlan',
+    'currentScannerEstimateHardBlockers',
     'resolveAlivePullbackReboundGuard',
     'chartConsistencyArray',
     'chartVerificationNumberOrNull',
@@ -5427,6 +5843,48 @@ function runAiContractAssertions(){
   if(freshActualWeakGuard.applied !== true || freshActualWeakGuard.structureState === 'weak' || freshActualWeakGuard.bounceState !== 'attempt'){
     throw new Error('Fresh derivation may only apply alive pullback guard after an actual structure downgrade exists.');
   }
+  const staleScannerInvalidatedGuard = evidenceSandbox.resolveAlivePullbackReboundGuard({
+    record:{
+      plan:{
+        source:'scanner_estimate',
+        entry:73.19,
+        stop:69.5,
+        firstTarget:82,
+        invalidatedState:true
+      },
+      marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87, currency:'USD'}
+    },
+    marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87, currency:'USD'},
+    trendState:'strong',
+    structureState:'weak',
+    pullbackZone:'near_50ma',
+    stabilisationState:'early',
+    bounceState:'none'
+  });
+  if(staleScannerInvalidatedGuard.applied !== true || staleScannerInvalidatedGuard.structureState === 'weak' || staleScannerInvalidatedGuard.bounceState !== 'attempt'){
+    throw new Error('Stale persisted scanner-estimate invalidatedState must not suppress alive pullback rebound correction.');
+  }
+  const currentScannerInvalidatedGuard = evidenceSandbox.resolveAlivePullbackReboundGuard({
+    record:{
+      plan:{
+        source:'scanner_estimate',
+        entry:73.19,
+        stop:69.5,
+        firstTarget:82
+      },
+      marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87, currency:'USD'},
+      setup:{structureState:'broken', trendState:'broken'}
+    },
+    marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87, currency:'USD'},
+    trendState:'broken',
+    structureState:'broken',
+    pullbackZone:'near_50ma',
+    stabilisationState:'early',
+    bounceState:'none'
+  });
+  if(currentScannerInvalidatedGuard.applied === true){
+    throw new Error('Real current scanner-estimate invalidation/broken structure must still suppress alive pullback rebound correction.');
+  }
   const blankTrendMarketOnlyDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
     marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87},
     scan:{analysisProjection:{
@@ -5581,6 +6039,7 @@ function runPlanSemanticsAssertions(){
       const list = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);
       return list.length ? list.reduce((sum, value) => sum + value, 0) / list.length : null;
     },
+    normalizeTickerRecord:record => record,
     numericOrNull:value => {
       if(value === null || value === undefined) return null;
       if(typeof value === 'string' && value.trim() === '') return null;
@@ -5623,6 +6082,34 @@ function runPlanSemanticsAssertions(){
       explicit_invalidation_reason:'(none)',
       lifecycle_drop_reason:'(none)'
     }),
+    normalizeAnalysisVerdict(value){
+      const safe = String(value || 'Watch').trim();
+      if(/^entry$/i.test(safe)) return 'Entry';
+      if(/^near[ _-]?entry$/i.test(safe)) return 'Near Entry';
+      if(/^avoid$/i.test(safe)) return 'Avoid';
+      return 'Watch';
+    },
+    capitalConstraintReasonForPlan:() => '',
+    normalizeRrConfidenceLabel:() => 'Strong',
+    executionCapitalBlocked:() => false,
+    executionCapitalHeavy:() => false,
+    hasAuthoritativeStopBreach:() => false,
+    evaluateBouncePriceabilityGuard(input = {}){
+      return {
+        originalBounceState:String(input.originalBounceState || 'attempt').trim().toLowerCase(),
+        adjustedBounceState:String(input.originalBounceState || 'attempt').trim().toLowerCase(),
+        bouncePriceabilityGuardApplied:true,
+        bouncePriceabilityGuardReason:'Repair is forming but the setup is not priceable yet.',
+        hasClearInvalidationLevel:true,
+        hasPriceablePlan:true,
+        unpriceableBlockReason:'Repair is forming but the setup is not priceable yet.'
+      };
+    },
+    avoidSubtypeForRecord:() => '',
+    isTerminalDeadSetup:() => ({dead:false, reason:'', reasonCode:''}),
+    getReviewAnalysisState:() => ({normalizedAnalysis:{}}),
+    getPlanUiState:() => ({state:'valid', label:'Plan valid'}),
+    getSetupUiState:() => ({state:'watch'}),
     appendWatchlistDebugEvent:() => {},
     globalVerdictLabel:value => String(value || ''),
     setStatus:() => {},
@@ -5631,15 +6118,41 @@ function runPlanSemanticsAssertions(){
     uiState:{watchlistLifecycleRunning:false},
     actionableRrValueForPlan:plan => plan && plan.status === 'valid' && plan.rewardRisk && plan.rewardRisk.valid ? plan.rewardRisk.rrRatio : null,
     evaluateSetupQualityAdjustments:() => ({weakRegimePenalty:false, lowControlSetup:false, tooWideForQualityPullback:false}),
+    evaluateWarningState:() => ({}),
     normalizeAnalysisVerdict:value => String(value || 'Watch'),
     getSetupUiState:() => ({state:'monitor'}),
     isHostileMarketStatus:() => false,
+    resolveGlobalVerdictImpl:record => ({
+      final_verdict:'Entry',
+      allow_plan:true,
+      allow_watchlist:true,
+      priceability_state:'priceable',
+      plan_status:'valid',
+      reason:'',
+      downgrade_reason:''
+    }),
+    resolvePreLifecycleStateContract:() => ({}),
+    baseVerdictFromResolvedContract:resolved => String(resolved && resolved.finalVerdict || 'Watch'),
+    applySetupConfirmationPlanGate:(_item, displayedPlan) => displayedPlan,
+    setupScoreForRecord:() => 75,
+    rawSetupScoreForRecord:() => 75,
+    cumulativePenaltyTraceForRecord:() => ({sources:[]}),
+    state:{},
+    scannerScoreGradientClass:() => 'neutral',
+    buildDecisionSummary:() => 'Decision summary',
+    debugFlagEnabled:() => false,
+    planNeedsAdjustment:false,
+    actionPriority:stage => ({action_now:0, near_entry:1, needs_plan:2, watch:3, avoid:4}[stage] ?? 4),
+    hasUnsavedPlanEdits:() => false,
+    savedPlanSnapshotForRecord:() => ({entry:100, stop:95, firstTarget:120}),
+    planValuesEqual:(left, right) => JSON.stringify(left || {}) === JSON.stringify(right || {}),
     planUiLabel:planValidity => planValidity === 'missing'
       ? 'No actionable plan yet'
       : (planValidity === 'valid' ? 'Plan valid' : (planValidity === 'needs_adjustment' ? 'Needs adjustment' : (planValidity === 'unrealistic_rr' ? 'Unrealistic R:R' : 'Invalid plan')))
   };
   vm.createContext(sandbox);
   [
+    'currentScannerEstimateHardBlockers',
     'hasAnyPlanFields',
     'effectivePlanForRecord',
     'planSourceForDiagnostics',
@@ -5649,7 +6162,21 @@ function runPlanSemanticsAssertions(){
     'isCurrentTechnicalInvalidation',
     'resolveCurrentScannerEstimatePlanBlockers',
     'resolveScannerEstimatePlanAuthority',
+    'planCheckStateForRecord',
+    'capSeverityFromEvaluation',
+    'buildPromotionGateTrace',
+    'capVerdictByBlockingFactors',
+    'legacyResolveFinalStateContract',
+    'resolveFinalStateContract',
+    'resolveGlobalVerdict',
     'applyGlobalVerdictGates',
+    'executionDowngradeVerdictForRecord',
+    'isAnalysisStaleForRecord',
+    'watchlistRefreshStructureGate',
+    'deriveActionStateForRecord',
+    'actionStateForRecord',
+    'nextActionTextForRecord',
+    'currentHardFailVerdictForRecord',
     'deriveCurrentPlanState',
     'planUiClass',
     'getPlanUiState',
@@ -5697,6 +6224,8 @@ function runPlanSemanticsAssertions(){
   const scannerEstimatePlanRecord = {
     ticker:'SCANNERKEEP',
     plan:{entry:100, stop:95, firstTarget:115, source:'scanner_estimate', hasValidPlan:true, riskStatus:'fits_risk', blockedReason:''},
+    setup:{},
+    marketData:{price:100, currency:'USD'},
     watchlist:{debug:{}, inWatchlist:false}
   };
   sandbox.applyGlobalVerdictGates(scannerEstimatePlanRecord, {source:'scan'});
@@ -5705,6 +6234,500 @@ function runPlanSemanticsAssertions(){
   }
   if(scannerEstimatePlanRecord.plan.hasValidPlan !== true || scannerEstimatePlanRecord.plan.riskStatus !== 'fits_risk'){
     throw new Error('Global verdict gates must not corrupt scanner_estimate plan validity metadata during monitor/watch states.');
+  }
+
+  const trowLikeRecord = {
+    ticker:'TROWLIKE',
+    plan:{
+      entry:110.27,
+      stop:102.29,
+      firstTarget:136.19,
+      source:'scanner_estimate',
+      status:'valid',
+      tradeability:'tradable',
+      riskStatus:'fits_risk',
+      blockedReason:'',
+      blockedReasonCode:'',
+      firstTargetTooClose:false,
+      planValidationState:'missed',
+      triggerState:'invalidated',
+      missedState:'missed',
+      invalidatedState:'invalidated'
+    },
+    marketData:{price:110.27, currency:'USD'},
+    setup:{},
+    watchlist:{debug:{}, inWatchlist:true}
+  };
+  sandbox.analysisDerivedStatesFromRecord = record => {
+    if(record && record.ticker === 'CURRENT_SCANNER_INVALIDATION'){
+      return {
+        structureState:'broken',
+        trendState:'broken',
+        bounceState:'attempt',
+        pullbackZone:'near_20ma',
+        stabilisationState:'none',
+        volumeState:'supportive',
+        priceabilityState:'priceable'
+      };
+    }
+    return {
+      structureState:'strong',
+      trendState:'uptrend',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      stabilisationState:'none',
+      volumeState:'supportive',
+      priceabilityState:'priceable'
+    };
+  };
+  sandbox.resolverSeedVerdictForRecord = () => 'Entry';
+  const trowLikeEffectivePlan = {entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'};
+  const trowLikeDisplayedPlan = sandbox.deriveCurrentPlanState(110.27, 102.29, 136.19, 'USD');
+  const trowLikeContract = sandbox.resolveFinalStateContract(trowLikeRecord, {
+    finalVerdict:'Entry',
+    derivedStates:sandbox.analysisDerivedStatesFromRecord(trowLikeRecord),
+    effectivePlan:trowLikeEffectivePlan,
+    displayedPlan:trowLikeDisplayedPlan
+  });
+  if(!trowLikeContract.contractDiagnostics || trowLikeContract.contractDiagnostics.softReadinessOnlyDemotion !== true){
+    throw new Error('TROW-like soft-readiness case must be detected explicitly in resolveFinalStateContract diagnostics.');
+  }
+  if(trowLikeContract.unpriceableBlockReason || trowLikeContract.blockerCode === 'bounce_not_priceable'){
+    throw new Error('Soft readiness only must not be treated as a hard unpriceable blocker in resolveFinalStateContract.');
+  }
+  const liveLikeResolvedVerdict = sandbox.resolveGlobalVerdict(trowLikeRecord);
+  if(!liveLikeResolvedVerdict.contractDiagnostics || liveLikeResolvedVerdict.contractDiagnostics.softReadinessOnlyDemotion !== true){
+    throw new Error('Dirty persisted TROW-like record must keep soft-readiness protection through the real resolveGlobalVerdict path.');
+  }
+  if(liveLikeResolvedVerdict.contractDiagnostics.structuredBlockersPresent === true){
+    throw new Error('Stale persisted plan-owned blocker metadata must not count as a current structured blocker in soft-readiness protection.');
+  }
+  const trowLikeGlobalVerdict = {
+    allow_plan:false,
+    allow_watchlist:true,
+    final_verdict:'watch',
+    priceability_state:'priceable',
+    plan_status:'valid',
+    reason:'Conditions are not strong enough for active focus.',
+    downgrade_reason:'Conditions are not strong enough for active focus.',
+    contractDiagnostics:liveLikeResolvedVerdict.contractDiagnostics
+  };
+  sandbox.resolveGlobalVerdict = () => trowLikeGlobalVerdict;
+  sandbox.applyGlobalVerdictGates(trowLikeRecord, {source:'track_focus'});
+  if(trowLikeRecord.plan.blockedReasonCode === 'resolver_block'){
+    throw new Error('Soft readiness only must not persist generic resolver_block on a valid tradable scanner_estimate plan.');
+  }
+
+  sandbox.resolveGlobalVerdict = sandbox.resolveGlobalVerdictImpl;
+  const stalePersistedInvalidationRecord = {
+    ticker:'STALE_SCANNER_INVALIDATION',
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'valid',
+      tradeability:'tradable',
+      riskStatus:'fits_risk',
+      blockedReason:'',
+      blockedReasonCode:'',
+      invalidatedState:'invalidated',
+      missedState:'missed'
+    },
+    marketData:{price:100, currency:'USD'},
+    setup:{structureState:'intact', trendState:'uptrend'},
+    lifecycle:{stage:'tracking', status:'open'},
+    watchlist:{debug:{}, inWatchlist:true}
+  };
+  const stalePersistedDisplayedPlan = sandbox.deriveCurrentPlanState(100, 95, 120, 'USD');
+  const stalePersistedDowngrade = sandbox.executionDowngradeVerdictForRecord(stalePersistedInvalidationRecord, {
+    displayedPlan:stalePersistedDisplayedPlan,
+    provisionalVerdict:'Entry',
+    globalVerdict:{
+      final_verdict:'Entry',
+      allow_plan:true,
+      allow_watchlist:true,
+      priceability_state:'priceable',
+      plan_status:'valid',
+      reason:'',
+      downgrade_reason:''
+    }
+  });
+  if(stalePersistedDowngrade === 'Watch'){
+    throw new Error('Stale persisted invalidated/missed metadata must not force Watch demotion on a fresh valid tradable scanner-estimate plan.');
+  }
+  if(sandbox.isAnalysisStaleForRecord(stalePersistedInvalidationRecord) === true){
+    throw new Error('Stale persisted invalidated/missed metadata must not mark fresh valid scanner-estimate analysis as stale.');
+  }
+  const stalePersistedRefreshGate = sandbox.watchlistRefreshStructureGate(stalePersistedInvalidationRecord);
+  if(stalePersistedRefreshGate.dead_trigger_source === 'explicit_invalidation' || stalePersistedRefreshGate.explicit_invalidation_reason !== '(none)'){
+    throw new Error('Stale persisted invalidatedState must not create explicit invalidation during watchlist refresh.');
+  }
+  const stalePersistedFinalContract = sandbox.resolveFinalStateContract(stalePersistedInvalidationRecord, {
+    finalVerdict:'Entry',
+    derivedStates:sandbox.analysisDerivedStatesFromRecord(stalePersistedInvalidationRecord),
+    effectivePlan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate'},
+    displayedPlan:stalePersistedDisplayedPlan
+  });
+  if(stalePersistedFinalContract.contractDiagnostics && stalePersistedFinalContract.contractDiagnostics.structuredBlockersPresent === true){
+    throw new Error('Stale persisted invalidated/missed metadata must not create structured blockers in resolveFinalStateContract().');
+  }
+  const stalePersistedLegacyContract = sandbox.legacyResolveFinalStateContract(stalePersistedInvalidationRecord, {
+    finalVerdict:'Entry',
+    derivedStates:sandbox.analysisDerivedStatesFromRecord(stalePersistedInvalidationRecord),
+    effectivePlan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate'},
+    displayedPlan:stalePersistedDisplayedPlan,
+    rrResolution:{rawResolverVerdict:'Entry', rr_label:'Strong', rr_value:4, remapReason:'', reason:'', status:'Entry'},
+    planCheckState:{state:'valid'},
+    qualityAdjustments:{weakRegimePenalty:false, lowControlSetup:false, tooWideForQualityPullback:false},
+    warningState:{reasons:[]},
+    planUiState:{state:'valid', label:'Plan valid'},
+    setupUiState:{state:'monitor'},
+    avoidSubtype:'',
+    deadCheck:{dead:false, reason:'', reasonCode:'', terminalTriggerUsed:false},
+    emojiPresentation:{primaryState:'entry', primaryEmoji:'\uD83D\uDE80', primaryLabel:'Entry', badgeClass:'ready', modifiers:[]}
+  });
+  if(['setup_invalidated','missed_setup'].includes(String(stalePersistedLegacyContract.blockerCode || ''))){
+    throw new Error('Stale persisted invalidated/missed metadata must not drive the action-state copy path.');
+  }
+  const stalePersistedDerivedActionState = sandbox.deriveActionStateForRecord(stalePersistedInvalidationRecord);
+  if(stalePersistedDerivedActionState.stage === 'avoid'){
+    throw new Error('Stale persisted invalidatedState must not force deriveActionStateForRecord() to Avoid.');
+  }
+  const stalePersistedNextAction = sandbox.nextActionTextForRecord(stalePersistedInvalidationRecord);
+  if(stalePersistedNextAction === 'Setup invalidated' || stalePersistedNextAction === 'Missed - do not chase'){
+    throw new Error('Stale persisted invalidated/missed metadata must not drive nextActionTextForRecord().');
+  }
+  if(sandbox.currentHardFailVerdictForRecord(stalePersistedInvalidationRecord) === 'Avoid'){
+    throw new Error('Stale persisted invalidated/missed metadata must not drive structural hard-fail Avoid.');
+  }
+
+  const currentInvalidatedLiveRecord = {
+    ticker:'CURRENT_SCANNER_INVALIDATION',
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'valid',
+      tradeability:'tradable',
+      riskStatus:'fits_risk',
+      blockedReason:'',
+      blockedReasonCode:''
+    },
+    marketData:{price:100, currency:'USD'},
+    setup:{structureState:'broken', trendState:'broken'},
+    lifecycle:{stage:'tracking', status:'open'},
+    watchlist:{debug:{}, inWatchlist:true}
+  };
+  const currentInvalidatedDisplayedPlan = sandbox.deriveCurrentPlanState(100, 95, 120, 'USD');
+  const currentInvalidatedDowngrade = sandbox.executionDowngradeVerdictForRecord(currentInvalidatedLiveRecord, {
+    displayedPlan:currentInvalidatedDisplayedPlan,
+    provisionalVerdict:'Entry',
+    globalVerdict:{
+      final_verdict:'Entry',
+      allow_plan:true,
+      allow_watchlist:true,
+      priceability_state:'priceable',
+      plan_status:'valid',
+      explicit_invalidation_reason_code:'broken_structure',
+      reason:'',
+      downgrade_reason:''
+    }
+  });
+  if(currentInvalidatedDowngrade !== 'Watch'){
+    throw new Error('Current broken-structure invalidation must still force Watch demotion on scanner-estimate plans.');
+  }
+  if(sandbox.isAnalysisStaleForRecord(currentInvalidatedLiveRecord) !== true){
+    throw new Error('Current broken-structure invalidation must still mark analysis stale.');
+  }
+  const currentInvalidatedFinalContract = sandbox.resolveFinalStateContract(currentInvalidatedLiveRecord, {
+    finalVerdict:'Entry',
+    derivedStates:sandbox.analysisDerivedStatesFromRecord(currentInvalidatedLiveRecord),
+    effectivePlan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate'},
+    displayedPlan:currentInvalidatedDisplayedPlan
+  });
+  if(!currentInvalidatedFinalContract.contractDiagnostics || currentInvalidatedFinalContract.contractDiagnostics.structuredBlockersPresent !== true){
+    throw new Error('Current invalidated scanner-estimate state must still surface as a structured blocker in resolveFinalStateContract().');
+  }
+  const currentInvalidatedLegacyContract = sandbox.legacyResolveFinalStateContract(currentInvalidatedLiveRecord, {
+    finalVerdict:'Entry',
+    derivedStates:sandbox.analysisDerivedStatesFromRecord(currentInvalidatedLiveRecord),
+    effectivePlan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate'},
+    displayedPlan:currentInvalidatedDisplayedPlan,
+    rrResolution:{rawResolverVerdict:'Entry', rr_label:'Strong', rr_value:4, remapReason:'', reason:'', status:'Entry'},
+    planCheckState:{state:'valid'},
+    qualityAdjustments:{weakRegimePenalty:false, lowControlSetup:false, tooWideForQualityPullback:false},
+    warningState:{reasons:[]},
+    planUiState:{state:'valid', label:'Plan valid'},
+    setupUiState:{state:'monitor'},
+    avoidSubtype:'',
+    deadCheck:{dead:false, reason:'', reasonCode:'', terminalTriggerUsed:false},
+    emojiPresentation:{primaryState:'entry', primaryEmoji:'\uD83D\uDE80', primaryLabel:'Entry', badgeClass:'ready', modifiers:[]}
+  });
+  if(!['setup_invalidated','broken_structure','broken_trend'].includes(String(currentInvalidatedLegacyContract.blockerCode || ''))){
+    throw new Error('Current invalidated scanner-estimate state must still drive a blocking action-state copy outcome.');
+  }
+  if(sandbox.deriveActionStateForRecord(currentInvalidatedLiveRecord).stage !== 'avoid'){
+    throw new Error('Current invalidated scanner-estimate state must still force deriveActionStateForRecord() to Avoid.');
+  }
+  if(sandbox.nextActionTextForRecord(currentInvalidatedLiveRecord) !== 'Setup invalidated'){
+    throw new Error('Current invalidated scanner-estimate state must still drive nextActionTextForRecord().');
+  }
+  if(sandbox.currentHardFailVerdictForRecord(currentInvalidatedLiveRecord) !== 'Avoid'){
+    throw new Error('Current invalidated scanner-estimate state must still drive structural hard-fail Avoid.');
+  }
+
+  const currentMissedLiveRecord = {
+    ticker:'CURRENT_SCANNER_MISSED',
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      status:'valid',
+      tradeability:'tradable',
+      riskStatus:'fits_risk',
+      blockedReason:'',
+      blockedReasonCode:''
+    },
+    marketData:{price:118, currency:'USD'},
+    setup:{structureState:'intact', trendState:'uptrend'},
+    lifecycle:{stage:'tracking', status:'open'},
+    watchlist:{debug:{}, inWatchlist:true}
+  };
+  if(sandbox.isAnalysisStaleForRecord(currentMissedLiveRecord) !== true){
+    throw new Error('Current missed scanner-estimate setup must still mark analysis stale.');
+  }
+  const currentMissedLegacyContract = sandbox.legacyResolveFinalStateContract(currentMissedLiveRecord, {
+    finalVerdict:'Entry',
+    derivedStates:sandbox.analysisDerivedStatesFromRecord(currentMissedLiveRecord),
+    effectivePlan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate'},
+    displayedPlan:sandbox.deriveCurrentPlanState(100, 95, 120, 'USD'),
+    rrResolution:{rawResolverVerdict:'Entry', rr_label:'Strong', rr_value:4, remapReason:'', reason:'', status:'Entry'},
+    planCheckState:{state:'valid'},
+    qualityAdjustments:{weakRegimePenalty:false, lowControlSetup:false, tooWideForQualityPullback:false},
+    warningState:{reasons:[]},
+    planUiState:{state:'valid', label:'Plan valid'},
+    setupUiState:{state:'monitor'},
+    avoidSubtype:'',
+    deadCheck:{dead:false, reason:'', reasonCode:'', terminalTriggerUsed:false},
+    emojiPresentation:{primaryState:'entry', primaryEmoji:'\uD83D\uDE80', primaryLabel:'Entry', badgeClass:'ready', modifiers:[]}
+  });
+  if(currentMissedLegacyContract.blockerCode !== 'missed_setup'){
+    throw new Error('Current missed scanner-estimate state must still drive action-state copy missed handling.');
+  }
+  if(sandbox.nextActionTextForRecord(currentMissedLiveRecord) !== 'Missed - do not chase'){
+    throw new Error('Current missed scanner-estimate state must still drive nextActionTextForRecord().');
+  }
+
+  const staleTargetTooCloseRecord = {
+    ticker:'STALE_TARGET_CLOSE',
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      firstTargetTooClose:true,
+      blockedReason:'',
+      blockedReasonCode:''
+    },
+    marketData:{price:100, currency:'USD'},
+    setup:{},
+    watchlist:{debug:{}, inWatchlist:true}
+  };
+  sandbox.analysisDerivedStatesFromRecord = () => ({
+    structureState:'strong',
+    trendState:'uptrend',
+    bounceState:'attempt',
+    pullbackZone:'near_20ma',
+    stabilisationState:'none',
+    volumeState:'supportive',
+    priceabilityState:'priceable'
+  });
+  sandbox.resolverSeedVerdictForRecord = () => 'Entry';
+  const staleTargetDisplayedPlan = sandbox.deriveCurrentPlanState(100, 95, 120, 'USD');
+  if(staleTargetDisplayedPlan.firstTargetTooClose === true){
+    throw new Error('Stale target-too-close regression requires current recomputed plan math to clear the target-too-close flag.');
+  }
+  const staleTargetContract = sandbox.resolveFinalStateContract(staleTargetTooCloseRecord, {
+    finalVerdict:'Entry',
+    derivedStates:sandbox.analysisDerivedStatesFromRecord(staleTargetTooCloseRecord),
+    effectivePlan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate'},
+    displayedPlan:staleTargetDisplayedPlan
+  });
+  if(staleTargetContract.contractDiagnostics && staleTargetContract.contractDiagnostics.structuredBlockersPresent === true){
+    throw new Error('Persisted firstTargetTooClose must not count as a current structured blocker when recomputed plan math clears it.');
+  }
+  const staleTargetLiveVerdict = sandbox.resolveGlobalVerdict(staleTargetTooCloseRecord);
+  if(staleTargetLiveVerdict.contractDiagnostics && staleTargetLiveVerdict.contractDiagnostics.structuredBlockersPresent === true){
+    throw new Error('resolveGlobalVerdict wrapper must ignore stale persisted firstTargetTooClose when current recomputed plan math clears it.');
+  }
+  const staleTargetAuthority = sandbox.resolveScannerEstimatePlanAuthority(staleTargetTooCloseRecord, {
+    allow_plan:true,
+    priceability_state:'priceable',
+    final_verdict:'entry'
+  }, staleTargetDisplayedPlan);
+  if(staleTargetAuthority.reasonCode === 'target_too_close'){
+    throw new Error('Stale persisted firstTargetTooClose must not create target_too_close authority when current recomputed plan math clears it.');
+  }
+  const staleTargetPlanCheckRecord = {
+    ticker:'STALE_TARGET_CLOSE_PLAN_CHECK',
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:120,
+      source:'scanner_estimate',
+      firstTargetTooClose:true,
+      planValidationState:'stale'
+    },
+    marketData:{price:100, currency:'USD'},
+    setup:{}
+  };
+  const staleTargetPlanCheckDisplayedPlan = sandbox.deriveCurrentPlanState(100, 95, 120, 'USD');
+  const staleTargetPlanCheckState = sandbox.planCheckStateForRecord(staleTargetPlanCheckRecord, {
+    effectivePlan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate'},
+    displayedPlan:staleTargetPlanCheckDisplayedPlan
+  });
+  if(staleTargetPlanCheckState === 'stale' || staleTargetPlanCheckState === 'needs_replan'){
+    throw new Error('planCheckStateForRecord must not preserve stale/needs_replan from persisted firstTargetTooClose when current recomputed plan math clears it.');
+  }
+
+  const targetTooCloseRecord = {
+    ticker:'REALBLOCK1',
+    plan:{entry:100, stop:95, firstTarget:101, source:'scanner_estimate', firstTargetTooClose:true, blockedReason:'', blockedReasonCode:''},
+    marketData:{price:100, currency:'USD'},
+    setup:{}
+  };
+  const targetTooClosePlan = sandbox.deriveCurrentPlanState(100, 95, 101, 'USD');
+  if(targetTooClosePlan.firstTargetTooClose !== true){
+    throw new Error('Current recomputed target-too-close regression requires displayed plan math to set firstTargetTooClose.');
+  }
+  const targetTooCloseAuthority = sandbox.resolveScannerEstimatePlanAuthority(targetTooCloseRecord, {
+    allow_plan:false,
+    priceability_state:'priceable',
+    final_verdict:'watch'
+  }, targetTooClosePlan);
+  if(targetTooCloseAuthority.reasonCode !== 'target_too_close'){
+    throw new Error('Structured target_too_close blocker must remain authoritative.');
+  }
+  const targetTooCloseContract = sandbox.resolveFinalStateContract(targetTooCloseRecord, {
+    finalVerdict:'Entry',
+    derivedStates:sandbox.analysisDerivedStatesFromRecord(targetTooCloseRecord),
+    effectivePlan:{entry:100, stop:95, firstTarget:101, source:'scanner_estimate'},
+    displayedPlan:targetTooClosePlan
+  });
+  if(!targetTooCloseContract.contractDiagnostics || targetTooCloseContract.contractDiagnostics.structuredBlockersPresent !== true){
+    throw new Error('Current recomputed firstTargetTooClose must still count as a structured blocker in resolveFinalStateContract.');
+  }
+  const targetTooClosePlanCheckRecord = {
+    ticker:'REALBLOCK1C',
+    plan:{entry:100, stop:95, firstTarget:101, source:'scanner_estimate', firstTargetTooClose:false, planValidationState:'stale'},
+    marketData:{price:100, currency:'USD'},
+    setup:{}
+  };
+  const targetTooClosePlanCheckState = sandbox.planCheckStateForRecord(targetTooClosePlanCheckRecord, {
+    effectivePlan:{entry:100, stop:95, firstTarget:101, source:'scanner_estimate'},
+    displayedPlan:targetTooClosePlan
+  });
+  if(targetTooClosePlanCheckState !== 'stale'){
+    throw new Error('Current recomputed firstTargetTooClose must still preserve stale/needs_replan style blocking in planCheckStateForRecord.');
+  }
+
+  const persistedAndCurrentTargetTooCloseRecord = {
+    ticker:'REALBLOCK1B',
+    plan:{entry:100, stop:95, firstTarget:101, source:'scanner_estimate', firstTargetTooClose:true, blockedReason:'', blockedReasonCode:''},
+    marketData:{price:100, currency:'USD'},
+    setup:{}
+  };
+  const persistedAndCurrentTargetTooClosePlan = sandbox.deriveCurrentPlanState(100, 95, 101, 'USD');
+  const persistedAndCurrentTargetTooCloseAuthority = sandbox.resolveScannerEstimatePlanAuthority(persistedAndCurrentTargetTooCloseRecord, {
+    allow_plan:false,
+    priceability_state:'priceable',
+    final_verdict:'watch'
+  }, persistedAndCurrentTargetTooClosePlan);
+  if(persistedAndCurrentTargetTooCloseAuthority.reasonCode !== 'target_too_close'){
+    throw new Error('Persisted true plus current true target-too-close must still remain authoritative.');
+  }
+
+  const missedRecord = {
+    ticker:'REALBLOCK2',
+    plan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate', blockedReason:'', blockedReasonCode:''},
+    marketData:{price:100, currency:'USD'}
+  };
+  const missedPlan = sandbox.deriveCurrentPlanState(100, 95, 120, 'USD');
+  missedPlan.planValidationState = 'missed';
+  const missedAuthority = sandbox.resolveScannerEstimatePlanAuthority(missedRecord, {
+    allow_plan:false,
+    priceability_state:'priceable',
+    final_verdict:'watch'
+  }, missedPlan);
+  if(missedAuthority.reasonCode !== 'missed'){
+    throw new Error('Structured missed blocker must remain authoritative.');
+  }
+
+  const invalidatedRecord = {
+    ticker:'REALBLOCK3',
+    plan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate', blockedReason:'', blockedReasonCode:''},
+    marketData:{price:100, currency:'USD'}
+  };
+  const invalidatedPlan = sandbox.deriveCurrentPlanState(100, 95, 120, 'USD');
+  invalidatedPlan.planValidationState = 'invalidated';
+  const invalidatedAuthority = sandbox.resolveScannerEstimatePlanAuthority(invalidatedRecord, {
+    allow_plan:false,
+    priceability_state:'priceable',
+    final_verdict:'watch'
+  }, invalidatedPlan);
+  if(invalidatedAuthority.reasonCode !== 'invalidated'){
+    throw new Error('Structured invalidated blocker must remain authoritative.');
+  }
+
+  sandbox.analysisDerivedStatesFromRecord = () => ({
+    structureState:'strong',
+    trendState:'uptrend',
+    bounceState:'confirmed',
+    pullbackZone:'near_20ma',
+    stabilisationState:'clear',
+    volumeState:'supportive'
+  });
+  const stopBreachRecord = {
+    ticker:'REALBLOCK4',
+    plan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate', blockedReason:'', blockedReasonCode:''},
+    marketData:{price:94, currency:'USD'}
+  };
+  const stopBreachPlan = sandbox.deriveCurrentPlanState(100, 95, 120, 'USD');
+  const stopBreachAuthority = sandbox.resolveScannerEstimatePlanAuthority(stopBreachRecord, {
+    allow_plan:false,
+    priceability_state:'priceable',
+    final_verdict:'watch',
+    explicit_invalidation_reason_code:'stop_breach'
+  }, stopBreachPlan);
+  if(!['invalidated','broken_structure'].includes(stopBreachAuthority.reasonCode)){
+    throw new Error('Authoritative stop-breach blocker must remain active.');
+  }
+
+  sandbox.analysisDerivedStatesFromRecord = () => ({
+    structureState:'broken',
+    trendState:'broken',
+    bounceState:'none',
+    pullbackZone:'near_20ma',
+    stabilisationState:'none',
+    volumeState:'weak'
+  });
+  const brokenStructureRecord = {
+    ticker:'REALBLOCK5',
+    plan:{entry:100, stop:95, firstTarget:120, source:'scanner_estimate', blockedReason:'', blockedReasonCode:''},
+    marketData:{price:100, currency:'USD'}
+  };
+  const brokenStructurePlan = sandbox.deriveCurrentPlanState(100, 95, 120, 'USD');
+  const brokenStructureAuthority = sandbox.resolveScannerEstimatePlanAuthority(brokenStructureRecord, {
+    allow_plan:false,
+    priceability_state:'priceable',
+    final_verdict:'watch',
+    explicit_invalidation_reason_code:'broken_structure'
+  }, brokenStructurePlan);
+  if(!['invalidated','broken_structure'].includes(brokenStructureAuthority.reasonCode)){
+    throw new Error('Broken-structure blocker must remain authoritative.');
   }
 
   const targetHistory = [
@@ -6013,12 +7036,36 @@ function runPlanSemanticsAssertions(){
       if(value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
       const numeric = Number(value);
       return Number.isFinite(numeric) ? numeric : null;
+    },
+    fmtPrice(value){
+      const numeric = replaySandbox.numericOrNull(value);
+      return Number.isFinite(numeric) ? numeric.toFixed(2) : 'n/a';
+    },
+    fmtPct(value, digits = 2){
+      const numeric = replaySandbox.numericOrNull(value);
+      return Number.isFinite(numeric) ? `${(numeric * 100).toFixed(digits)}%` : 'n/a';
+    },
+    fmtRatio(value, digits = 2){
+      const numeric = replaySandbox.numericOrNull(value);
+      return Number.isFinite(numeric) ? `${numeric.toFixed(digits)}R` : 'n/a';
+    },
+    pctDistance(price, average){
+      const safePrice = replaySandbox.numericOrNull(price);
+      const safeAverage = replaySandbox.numericOrNull(average);
+      if(!Number.isFinite(safePrice) || !Number.isFinite(safeAverage) || safeAverage === 0) return null;
+      return (safePrice - safeAverage) / safeAverage;
+    },
+    safeNumber(value, digits = 4){
+      const numeric = replaySandbox.numericOrNull(value);
+      return Number.isFinite(numeric) ? Number(numeric.toFixed(digits)) : null;
     }
   };
   vm.createContext(replaySandbox);
   [
     'function structureContradictionForPromotionText',
-    'function fallbackPromotionDiagnostic'
+    'function fallbackPromotionDiagnostic',
+    'function buildReplayJsonResult',
+    'function buildTickerReportLines'
   ].forEach(marker => {
     const functionName = marker.replace('function ', '');
     vm.runInContext(extractFunctionSource(replayModuleSource, functionName), replaySandbox, {filename:`scripts/replay-resolver-snapshot.js#${functionName}`});
@@ -6065,6 +7112,263 @@ function runPlanSemanticsAssertions(){
     : '';
   if(diminishedReason !== 'invalid_rr_promotion_blocked'){
     throw new Error('Watch/diminishing replay results must retain active diminishing diagnostics.');
+  }
+
+  const trowLikeReplay = {
+    ticker:'TROWLIKE',
+    proxy:{verdict:'Watch', reasons:['pullback near 20MA'], blockers:[], score:6},
+    snapshot:{price:110.27, sma20:108.52, sma50:105.14, sma200:98.77, rsi14:56.2, volume:1200000, avgVolume30d:1000000},
+    replay:{
+      scannerCanonicalVerdict:'entry',
+      scannerCanonicalVerdictLabel:'Entry',
+      scannerVisualBucket:'entry',
+      scannerSnapshotIncomplete:false,
+      reviewCanonicalVerdict:'entry',
+      reviewCanonicalVerdictLabel:'Entry',
+      reviewVisualBucket:'entry',
+      layerMutationReason:'',
+      simulatedLifecycleFromWatch:'entry',
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'confirmed',
+      stabilisationState:'confirmed',
+      priceabilityState:'priceable',
+      setupScore:9,
+      realisticTarget:118.4,
+      extendedTarget:123.9,
+      realisticRr:2.1,
+      targetStretchPct:0.02,
+      targetCapReason:'Nearest resistance already supports the first target.',
+      blockers:[],
+      blockerSource:'',
+      promotionDiagnosticsActive:false,
+      promotionBlocker:'',
+      failingGate:'',
+      blockerCopy:'',
+      watchToDiminishingReason:'',
+      diminishingReasonActive:false,
+      canonicalInputDiagnostics:null
+    }
+  };
+  const trowLikeJson = replaySandbox.buildReplayJsonResult(trowLikeReplay);
+  if(trowLikeJson.reviewCanonicalVerdict !== 'entry'){
+    throw new Error('TROW-like replay JSON must keep canonical Entry primary.');
+  }
+  if(!trowLikeJson.rawShortlistSignal || trowLikeJson.rawShortlistSignal.verdict !== 'Watch'){
+    throw new Error('TROW-like replay JSON must expose the raw shortlist signal separately.');
+  }
+  if(Object.prototype.hasOwnProperty.call(trowLikeJson, 'proxyVerdict')){
+    throw new Error('Replay JSON must not expose an ambiguous top-level proxyVerdict field.');
+  }
+  const trowLikeLines = replaySandbox.buildTickerReportLines(trowLikeReplay).join('\n');
+  if(!/TROWLIKE \| canonical Entry\/entry \| PROXY\/CANONICAL DIVERGENCE proxy=Watch/.test(trowLikeLines)){
+    throw new Error('TROW-like replay text must headline canonical Entry and frame proxy disagreement as proxy/canonical divergence.');
+  }
+  if(!/raw shortlist signal: Watch \| score 6/.test(trowLikeLines)){
+    throw new Error('TROW-like replay text must keep the proxy verdict on a diagnostic-only line.');
+  }
+  if(/MISMATCH proxy=Watch review=Entry/.test(trowLikeLines)){
+    throw new Error('Replay text must not frame proxy disagreement as equivalent review state.');
+  }
+
+  const unpLikeReplay = {
+    ticker:'UNPLIKE',
+    proxy:{verdict:'Near Entry', reasons:['pullback near 50MA'], blockers:[], score:8},
+    snapshot:{price:231.8, sma20:238.4, sma50:229.7, sma200:210.5, rsi14:49.1, volume:800000, avgVolume30d:950000},
+    replay:{
+      scannerCanonicalVerdict:'watch',
+      scannerCanonicalVerdictLabel:'Watch',
+      scannerVisualBucket:'monitor',
+      scannerSnapshotIncomplete:false,
+      reviewCanonicalVerdict:'watch',
+      reviewCanonicalVerdictLabel:'Watch',
+      reviewVisualBucket:'monitor',
+      layerMutationReason:'',
+      simulatedLifecycleFromWatch:'watch',
+      structureState:'intact',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      stabilisationState:'early',
+      priceabilityState:'provisional',
+      setupScore:5,
+      realisticTarget:236.2,
+      extendedTarget:245.5,
+      realisticRr:1.1,
+      targetStretchPct:0.05,
+      targetCapReason:'Nearby resistance keeps first-target RR too weak.',
+      blockers:['Bounce must be confirmed.'],
+      blockerSource:'gates',
+      promotionDiagnosticsActive:true,
+      promotionBlocker:'Not priceable yet.',
+      failingGate:'bounce',
+      blockerCopy:'Needs confirmation before promotion.',
+      watchToDiminishingReason:'',
+      diminishingReasonActive:false,
+      canonicalInputDiagnostics:null
+    }
+  };
+  const unpLikeJson = replaySandbox.buildReplayJsonResult(unpLikeReplay);
+  if(unpLikeJson.reviewCanonicalVerdict !== 'watch'){
+    throw new Error('UNP-like replay JSON must keep canonical Watch primary.');
+  }
+  if(!unpLikeJson.rawShortlistSignal || unpLikeJson.rawShortlistSignal.verdict !== 'Near Entry'){
+    throw new Error('UNP-like replay JSON must expose the raw shortlist signal separately.');
+  }
+  const unpLikeLines = replaySandbox.buildTickerReportLines(unpLikeReplay).join('\n');
+  if(!/UNPLIKE \| canonical Watch\/monitor \| PROXY\/CANONICAL DIVERGENCE proxy=Near Entry/.test(unpLikeLines)){
+    throw new Error('UNP-like replay text must headline canonical Watch and frame proxy disagreement as proxy/canonical divergence.');
+  }
+
+  const replayShapeSnapshotPath = path.join(os.tmpdir(), `pullback-playbook-replay-shape-${Date.now()}.json`);
+  fs.writeFileSync(replayShapeSnapshotPath, JSON.stringify({
+    snapshots:[
+      {
+        ticker:'SHAPETEST',
+        price:100.9,
+        previousClose:100.2,
+        sma20:100.1,
+        sma50:98.7,
+        sma200:92,
+        rsi14:52.4,
+        volume:1200000,
+        avgVolume30d:1050000,
+        perf1w:0.4,
+        perf1m:1.8,
+        perf3m:11,
+        perf6m:16,
+        perfYtd:9,
+        exchange:'NASDAQ',
+        currency:'USD',
+        history:dualResistanceHistory
+      }
+    ]
+  }, null, 2));
+  try{
+    const replayShapeRun = spawnSync(process.execPath, [
+      path.join(root, 'scripts', 'replay-resolver-snapshot.js'),
+      '--snapshot',
+      replayShapeSnapshotPath
+    ], {
+      cwd:root,
+      encoding:'utf8'
+    });
+    if(replayShapeRun.status !== 0){
+      throw new Error(`Replay JSON-shape regression must execute successfully, got: ${replayShapeRun.stderr || replayShapeRun.stdout}`);
+    }
+    const replayShapePayload = parseJsonPrefix(replayShapeRun.stdout);
+    if(!replayShapePayload || !Array.isArray(replayShapePayload.results) || !replayShapePayload.results.length){
+      throw new Error('Replay JSON-shape regression must parse executable replay output.');
+    }
+    const replayShapeResult = replayShapePayload.results[0];
+    if(!Object.prototype.hasOwnProperty.call(replayShapeResult, 'reviewCanonicalVerdict')
+      || !Object.prototype.hasOwnProperty.call(replayShapeResult, 'reviewVisualBucket')
+      || !Object.prototype.hasOwnProperty.call(replayShapeResult, 'scannerCanonicalVerdict')){
+      throw new Error('Replay JSON must expose canonical review/scanner fields as primary output.');
+    }
+    if(!replayShapeResult.rawShortlistSignal || typeof replayShapeResult.rawShortlistSignal !== 'object'){
+      throw new Error('Replay JSON must expose proxy data only under rawShortlistSignal.');
+    }
+    if(Object.prototype.hasOwnProperty.call(replayShapeResult, 'proxyVerdict')){
+      throw new Error('Replay JSON-shape regression must reject top-level proxyVerdict.');
+    }
+  }finally{
+    try{ fs.unlinkSync(replayShapeSnapshotPath); }catch(_error){}
+  }
+
+  const shortlistWrapperPath = path.join(os.tmpdir(), `pullback-playbook-shortlist-shape-${Date.now()}.js`);
+  fs.writeFileSync(shortlistWrapperPath, `
+const Module = require('module');
+const path = require('path');
+const childProcess = require('child_process');
+const root = ${JSON.stringify(root)};
+const targetPath = path.join(root, 'scripts', 'debug-near-entry-shortlist.js');
+const originalLoad = Module._load;
+const originalSpawnSync = childProcess.spawnSync;
+const stubSnapshot = {
+  ticker:'MERGETEST',
+  price:101,
+  sma20:100,
+  sma50:99,
+  sma200:90,
+  rsi14:58,
+  volume:1000000,
+  avgVolume30d:900000
+};
+const replayPayload = {
+  ok:true,
+  results:[{
+    ticker:'MERGETEST',
+    reviewCanonicalVerdict:'watch',
+    reviewVisualBucket:'monitor',
+    scannerCanonicalVerdict:'entry',
+    rawShortlistSignal:{verdict:'Near Entry', reasons:['proxy'], blockers:[]},
+    structureState:'intact',
+    structureEligibility:'alive',
+    bounceState:'attempt',
+    stabilisationState:'early',
+    priceabilityState:'provisional',
+    realisticRr:1.1,
+    setupScore:5,
+    blockerCopy:'Needs confirmation before promotion.',
+    blockers:['Bounce must be confirmed.'],
+    promotionDiagnostics:{promotionBlocker:'Not priceable yet.', failingGate:'bounce'}
+  }]
+};
+Module._load = function(request, parent, isMain){
+  if(parent && parent.filename === targetPath && request.includes('scan-config')){
+    return {
+      getProviderConfig(providerId){ return {id:providerId || 'fmp'}; },
+      normalizePlanId(providerId){ return providerId || 'fmp'; },
+      normalizeProviderId(value){ return String(value || 'fmp'); }
+    };
+  }
+  if(parent && parent.filename === targetPath && request.includes('/providers/fmp')){
+    return {
+      async getSnapshot(){ return stubSnapshot; }
+    };
+  }
+  if(parent && parent.filename === targetPath && request.includes('/providers/marketdata')){
+    return {
+      async getSnapshot(){ return stubSnapshot; }
+    };
+  }
+  return originalLoad.apply(this, arguments);
+};
+childProcess.spawnSync = function(command, args, options){
+  const joined = Array.isArray(args) ? args.join(' ') : '';
+  if(joined.includes('replay-resolver-snapshot.js')){
+    return {status:0, stdout:JSON.stringify(replayPayload, null, 2), stderr:''};
+  }
+  return originalSpawnSync.apply(this, arguments);
+};
+process.env.FMP_API_KEY = process.env.FMP_API_KEY || 'stub';
+process.argv = [process.execPath, targetPath, 'MERGETEST', '--provider=fmp'];
+require(targetPath);
+`);
+  try{
+    const shortlistRun = spawnSync(process.execPath, [shortlistWrapperPath], {
+      cwd:root,
+      encoding:'utf8'
+    });
+    if(shortlistRun.status !== 0){
+      throw new Error(`Shortlist JSON-shape regression must execute successfully, got: ${shortlistRun.stderr || shortlistRun.stdout}`);
+    }
+    const shortlistPayload = parseJsonPrefix(shortlistRun.stdout);
+    if(!shortlistPayload || !Array.isArray(shortlistPayload.rankedResults) || !shortlistPayload.rankedResults.length){
+      throw new Error('Shortlist JSON-shape regression must parse executable shortlist output.');
+    }
+    const shortlistResult = shortlistPayload.rankedResults[0];
+    if(shortlistResult.verdict !== 'Watch' || shortlistResult.visualBucket !== 'monitor'){
+      throw new Error('Shortlist top-level verdict/visualBucket must come from replay canonical fields after merge.');
+    }
+    if(!shortlistResult.rawProxyContext || shortlistResult.rawProxyContext.verdict !== 'Near Entry'){
+      throw new Error('Shortlist proxy verdict must remain under rawProxyContext only.');
+    }
+    if(Object.prototype.hasOwnProperty.call(shortlistResult, 'proxyVerdict')){
+      throw new Error('Shortlist ranked result must not expose proxy verdict as a top-level field.');
+    }
+  }finally{
+    try{ fs.unlinkSync(shortlistWrapperPath); }catch(_error){}
   }
 }
 

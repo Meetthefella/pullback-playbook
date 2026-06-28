@@ -14,6 +14,7 @@ function roundPct(value){
   return Number.isFinite(value) ? Number((value * 100).toFixed(2)) : null;
 }
 
+// Heuristic-only shortlist signal. Canonical resolver state must come from replay/app paths.
 function classifyShortlistCandidate(snapshot){
   const price = Number(snapshot.price);
   const sma20 = Number(snapshot.sma20);

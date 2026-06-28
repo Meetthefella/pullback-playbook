@@ -88,12 +88,22 @@ function createSandbox(){
       });
       const [safeEntry, safeStop, safeTarget] = values;
       if(values.some(value => value === null)){
-        return {status:'missing', tradeability:'watch', riskFit:{risk_status:''}};
+        return {status:'missing', tradeability:'watch', riskFit:{risk_status:''}, firstTargetTooClose:false};
       }
       if(safeEntry <= safeStop || safeTarget <= safeEntry){
-        return {status:'invalid', tradeability:'invalid', riskFit:{risk_status:'plan_blocked'}};
+        return {status:'invalid', tradeability:'invalid', riskFit:{risk_status:'plan_blocked'}, firstTargetTooClose:false};
       }
-      return {status:'valid', tradeability:'watch', riskFit:{risk_status:'fits_risk'}, entry:safeEntry, stop:safeStop, firstTarget:safeTarget};
+      const riskPerShare = safeEntry - safeStop;
+      const rewardPerShare = safeTarget - safeEntry;
+      return {
+        status:'valid',
+        tradeability:'watch',
+        riskFit:{risk_status:'fits_risk'},
+        entry:safeEntry,
+        stop:safeStop,
+        firstTarget:safeTarget,
+        firstTargetTooClose:rewardPerShare < (1.5 * riskPerShare)
+      };
     },
     resolveGlobalVerdict(record){
       return record && record._globalVerdict ? record._globalVerdict : {};
@@ -226,12 +236,15 @@ function run(){
   const blockedByTarget = baseRecord();
   blockedByTarget._globalVerdict.reason = 'friendly prose';
   blockedByTarget._globalVerdict.downgrade_reason = 'still friendly';
-  blockedByTarget.plan.firstTargetTooClose = true;
-  const targetAuthority = sandbox.resolveScannerEstimatePlanAuthority(blockedByTarget, blockedByTarget._globalVerdict, sandbox.deriveCurrentPlanState(
+  blockedByTarget.plan.firstTargetTooClose = false;
+  blockedByTarget.plan.firstTarget = 121;
+  const blockedByTargetDisplayedPlan = sandbox.deriveCurrentPlanState(
     blockedByTarget.plan.entry,
     blockedByTarget.plan.stop,
     blockedByTarget.plan.firstTarget
-  ));
+  );
+  assert.strictEqual(blockedByTargetDisplayedPlan.firstTargetTooClose, true, 'current recomputed target-too-close should remain authoritative');
+  const targetAuthority = sandbox.resolveScannerEstimatePlanAuthority(blockedByTarget, blockedByTarget._globalVerdict, blockedByTargetDisplayedPlan);
   assert.strictEqual(targetAuthority.reasonCode, 'target_too_close', 'structured target-too-close should remain blocked');
 
   const noAuthorityFromPlanProse = baseRecord();

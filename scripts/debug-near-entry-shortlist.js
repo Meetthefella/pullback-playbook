@@ -232,11 +232,11 @@ async function main(){
     if(result.ok !== true) return;
     const replay = replayByTicker.get(result.ticker);
     if(!replay) return;
-    const replayVerdict = resolverVerdictLabel(replay.resolverVerdict);
+    const replayVerdict = resolverVerdictLabel(replay.reviewCanonicalVerdict);
     result.verdict = replayVerdict;
     result.score = Number.isFinite(Number(replay.setupScore)) ? Number(replay.setupScore) : result.score;
-    result.resolverVerdict = replay.resolverVerdict;
-    result.visualBucket = replay.visualBucket;
+    result.resolverVerdict = replay.reviewCanonicalVerdict;
+    result.visualBucket = replay.reviewVisualBucket;
     result.structureState = replay.structureState;
     result.structureEligibility = replay.structureEligibility;
     result.bounceState = replay.bounceState;

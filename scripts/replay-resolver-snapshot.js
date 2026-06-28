@@ -209,6 +209,7 @@ function loadReplayRuntime(){
     normalizeScanType:sandbox.normalizeScanType,
     numericOrNull
   });
+  sandbox.hasAuthoritativeStopBreach = () => false;
 
   vm.createContext(sandbox);
   [
@@ -224,6 +225,7 @@ function loadReplayRuntime(){
     'resolveSetupTypeWithOverlap',
     'resolveSetupTypeDebug',
     'mergeDerivedChecks',
+    'currentScannerEstimateHardBlockers',
     'resolveAlivePullbackReboundGuard',
     'buildScannerChecks',
     'classifyPullbackType',
@@ -779,17 +781,58 @@ function derivedStateValue(derivedStates, camelKey, snakeKey){
   return '';
 }
 
-function printTickerReport(result){
+function buildReplayJsonResult(result){
+  return {
+    ticker:result.ticker,
+    rawShortlistSignal:{
+      verdict:result.proxy.verdict,
+      reasons:Array.isArray(result.proxy.reasons) ? result.proxy.reasons.slice() : [],
+      blockers:Array.isArray(result.proxy.blockers) ? result.proxy.blockers.slice() : []
+    },
+    scannerCanonicalVerdict:result.replay.scannerCanonicalVerdict,
+    scannerVisualBucket:result.replay.scannerVisualBucket,
+    scannerSnapshotIncomplete:result.replay.scannerSnapshotIncomplete,
+    reviewCanonicalVerdict:result.replay.reviewCanonicalVerdict,
+    reviewVisualBucket:result.replay.reviewVisualBucket,
+    layerMutationReason:result.replay.layerMutationReason,
+    simulatedLifecycleFromWatch:result.replay.simulatedLifecycleFromWatch,
+    structureState:result.replay.structureState,
+    structureEligibility:result.replay.structureEligibility,
+    bounceState:result.replay.bounceState,
+    stabilisationState:result.replay.stabilisationState,
+    priceabilityState:result.replay.priceabilityState,
+    setupScore:result.replay.setupScore,
+    realisticTarget:result.replay.realisticTarget,
+    extendedTarget:result.replay.extendedTarget,
+    realisticRr:result.replay.realisticRr,
+    targetStretchPct:result.replay.targetStretchPct,
+    targetCapReason:result.replay.targetCapReason,
+    blockers:result.replay.blockers,
+    blockerCopy:result.replay.blockerCopy,
+    watchToDiminishingReason:result.replay.watchToDiminishingReason,
+    promotionDiagnostics:result.replay.promotionDiagnosticsActive
+      ? {
+        blockerSource:result.replay.blockerSource,
+        promotionBlocker:result.replay.promotionBlocker,
+        failingGate:result.replay.failingGate
+      }
+      : null
+  };
+}
+
+function buildTickerReportLines(result){
   const {ticker, snapshot, proxy, replay} = result;
   const mismatch = proxy.verdict !== replay.reviewCanonicalVerdictLabel;
-  const mismatchLabel = mismatch ? `MISMATCH proxy=${proxy.verdict} review=${replay.reviewCanonicalVerdictLabel}/${replay.reviewVisualBucket}` : 'MATCH';
+  const headline = mismatch
+    ? `${ticker} | canonical ${replay.reviewCanonicalVerdictLabel}/${replay.reviewVisualBucket} | PROXY/CANONICAL DIVERGENCE proxy=${proxy.verdict}`
+    : `${ticker} | canonical ${replay.reviewCanonicalVerdictLabel}/${replay.reviewVisualBucket} | proxy aligned ${proxy.verdict}`;
   const lines = [
     '',
-    `${ticker} | ${mismatchLabel}`,
+    headline,
     `  price/ma: price ${fmtPrice(snapshot.price)} | 20MA ${fmtPrice(snapshot.sma20)} | 50MA ${fmtPrice(snapshot.sma50)} | 200MA ${fmtPrice(snapshot.sma200)}`,
     `  distances: 20MA ${fmtPct(pctDistance(snapshot.price, snapshot.sma20))} | 50MA ${fmtPct(pctDistance(snapshot.price, snapshot.sma50))}`,
     `  tape: RSI ${safeNumber(snapshot.rsi14, 2) ?? 'n/a'} | volume ratio ${safeNumber((numericOrNull(snapshot.volume) && numericOrNull(snapshot.avgVolume30d)) ? numericOrNull(snapshot.volume) / numericOrNull(snapshot.avgVolume30d) : null, 2) ?? 'n/a'}`,
-    `  proxy: ${proxy.verdict} | score ${proxy.score}`,
+    `  raw shortlist signal: ${proxy.verdict} | score ${proxy.score}`,
     `  scannerCanonicalVerdict: ${replay.scannerCanonicalVerdictLabel} | scannerVisualBucket: ${replay.scannerVisualBucket} | setup score ${replay.setupScore}${replay.scannerSnapshotIncomplete ? ' | scannerSnapshotIncomplete: true' : ''}`,
     `  reviewCanonicalVerdict: ${replay.reviewCanonicalVerdictLabel} | reviewVisualBucket: ${replay.reviewVisualBucket} | simulated lifecycle ${replay.simulatedLifecycleFromWatch}`,
     `  layer mutation: ${replay.layerMutationReason || 'none'}`,
@@ -808,7 +851,11 @@ function printTickerReport(result){
   if(replay.canonicalInputDiagnostics){
     lines.push(`  canonical input: plan ${replay.canonicalInputDiagnostics.selectedPlanAuthority || 'n/a'} | derived ${replay.canonicalInputDiagnostics.selectedDerivedStates || 'n/a'} | audit ${replay.canonicalInputDiagnostics.auditOnlyCount} | presentation ${replay.canonicalInputDiagnostics.presentationOnlyCount} | free-text ${replay.canonicalInputDiagnostics.blockedFreeTextCount}`);
   }
-  console.log(lines.join('\n'));
+  return lines;
+}
+
+function printTickerReport(result){
+  console.log(buildTickerReportLines(result).join('\n'));
 }
 
 async function main(){
@@ -1085,38 +1132,7 @@ async function main(){
     source:snapshotPath ? 'snapshot_file' : 'live_provider',
     provider:snapshotPath ? null : requestedProvider,
     tickers:results.map(result => result.ticker),
-    results:results.map(result => ({
-      ticker:result.ticker,
-      proxyVerdict:result.proxy.verdict,
-      scannerCanonicalVerdict:result.replay.scannerCanonicalVerdict,
-      scannerVisualBucket:result.replay.scannerVisualBucket,
-      scannerSnapshotIncomplete:result.replay.scannerSnapshotIncomplete,
-      reviewCanonicalVerdict:result.replay.reviewCanonicalVerdict,
-      reviewVisualBucket:result.replay.reviewVisualBucket,
-      layerMutationReason:result.replay.layerMutationReason,
-      simulatedLifecycleFromWatch:result.replay.simulatedLifecycleFromWatch,
-      structureState:result.replay.structureState,
-      structureEligibility:result.replay.structureEligibility,
-      bounceState:result.replay.bounceState,
-      stabilisationState:result.replay.stabilisationState,
-      priceabilityState:result.replay.priceabilityState,
-      setupScore:result.replay.setupScore,
-      realisticTarget:result.replay.realisticTarget,
-      extendedTarget:result.replay.extendedTarget,
-      realisticRr:result.replay.realisticRr,
-      targetStretchPct:result.replay.targetStretchPct,
-      targetCapReason:result.replay.targetCapReason,
-      blockers:result.replay.blockers,
-      blockerCopy:result.replay.blockerCopy,
-      watchToDiminishingReason:result.replay.watchToDiminishingReason,
-      promotionDiagnostics:result.replay.promotionDiagnosticsActive
-        ? {
-          blockerSource:result.replay.blockerSource,
-          promotionBlocker:result.replay.promotionBlocker,
-          failingGate:result.replay.failingGate
-        }
-        : null
-    }))
+    results:results.map(buildReplayJsonResult)
   }, null, 2));
 
   results.forEach(printTickerReport);

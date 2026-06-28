@@ -77,7 +77,7 @@
     return 'watch';
   }
 
-  function authoritativePlanBlock(record){
+  function authoritativePlanBlock(record, currentPlanState = {}){
     const item = record && typeof record === 'object' ? record : {};
     const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
     const status = String(plan.status || '').trim().toLowerCase();
@@ -86,16 +86,65 @@
     const blockedReason = String(plan.blockedReason || '').trim();
     const source = String(plan.source || '').trim().toLowerCase();
     const firstTargetTooClose = plan.firstTargetTooClose === true;
+    const currentPlan = currentPlanState && typeof currentPlanState === 'object' ? currentPlanState : {};
     const invalidByStatus = ['invalid','missing'].includes(status);
     const invalidByTradeability = ['invalid','too_wide','too_expensive'].includes(tradeability);
     const invalidByRisk = ['plan_blocked','invalid_plan','plan_missing','too_wide'].includes(riskStatus);
-    const blocked = !!(
-      invalidByStatus
-      || invalidByTradeability
-      || invalidByRisk
-      || blockedReason
-      || firstTargetTooClose
+    const planValidationState = String(plan.planValidationState || '').trim().toLowerCase();
+    const triggerState = String(plan.triggerState || '').trim().toLowerCase();
+    const missedState = String(plan.missedState || '').trim().toLowerCase();
+    const invalidatedState = String(plan.invalidatedState || '').trim().toLowerCase();
+    const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+    const currentStop = numericOrNull(currentPlan.stop ?? plan.stop);
+    const currentTarget = numericOrNull(currentPlan.target ?? currentPlan.firstTarget ?? plan.firstTarget ?? plan.target);
+    const structureState = String(
+      (item.setup && (item.setup.structureState || item.setup.structure_state))
+      || (item.derivedStates && (item.derivedStates.structureState || item.derivedStates.structure_state))
+      || ''
+    ).trim().toLowerCase();
+    const trendState = String(
+      (item.setup && (item.setup.trendState || item.setup.trend_state))
+      || (item.derivedStates && (item.derivedStates.trendState || item.derivedStates.trend_state))
+      || ''
+    ).trim().toLowerCase();
+    const lifecycleStage = String(item.lifecycle && item.lifecycle.stage || '').trim().toLowerCase();
+    const lifecycleStatus = String(item.lifecycle && item.lifecycle.status || '').trim().toLowerCase();
+    const currentFirstTargetTooClose = currentPlan.firstTargetTooClose === true;
+    const currentStopBreach = Number.isFinite(currentPrice)
+      && Number.isFinite(currentStop)
+      && currentPrice <= (currentStop * 0.995);
+    const currentMissed = Number.isFinite(currentPrice)
+      && Number.isFinite(currentTarget)
+      && currentPrice >= (currentTarget * 0.98);
+    const currentBrokenStructure = structureState === 'broken' || trendState === 'broken';
+    const terminalLifecycle = ['expired','dead','entered','exited','cancelled'].includes(lifecycleStage)
+      || ['closed','dead'].includes(lifecycleStatus);
+    const currentStructuredInvalidated = !!(
+      planValidationState === 'invalidated'
+      || triggerState === 'invalidated'
     );
+    const currentStructuredMissed = !!(
+      planValidationState === 'missed'
+      || triggerState === 'missed'
+    );
+    const currentStructuredBlock = !!(
+      currentFirstTargetTooClose
+      || currentStopBreach
+      || currentMissed
+      || currentStructuredInvalidated
+      || currentStructuredMissed
+      || currentBrokenStructure
+      || terminalLifecycle
+    );
+    const blocked = source === 'scanner_estimate'
+      ? currentStructuredBlock
+      : !!(
+        invalidByStatus
+        || invalidByTradeability
+        || invalidByRisk
+        || blockedReason
+        || firstTargetTooClose
+      );
     return {
       blocked,
       source,
@@ -104,6 +153,16 @@
       riskStatus,
       blockedReason,
       firstTargetTooClose,
+      missedState,
+      invalidatedState,
+      currentFirstTargetTooClose,
+      currentStopBreach,
+      currentMissed,
+      currentStructuredInvalidated,
+      currentStructuredMissed,
+      currentBrokenStructure,
+      terminalLifecycle,
+      currentStructuredBlock,
       invalidByStatus,
       invalidByTradeability,
       invalidByRisk
@@ -190,13 +249,14 @@
       })
       : '';
 
-    const authoritative = authoritativePlanBlock(item);
-    const staleScannerEstimateBlock = authoritative.source === 'scanner_estimate'
-      && status === 'valid'
-      && authoritative.firstTargetTooClose !== true;
+    const authoritative = authoritativePlanBlock(item, {
+      entry,
+      stop,
+      target,
+      firstTargetTooClose:rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false
+    });
     const shouldHonorAuthoritativeBlock = authoritative.blocked === true
-      && authoritative.source === 'scanner_estimate'
-      && !staleScannerEstimateBlock;
+      && authoritative.source === 'scanner_estimate';
 
     return {
       entry,
@@ -214,6 +274,7 @@
       hasEntry,
       hasStop,
       hasTarget,
+      firstTargetTooClose:rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false,
       rr:rewardRisk && Number.isFinite(rewardRisk.rrRatio) ? rewardRisk.rrRatio : null,
       riskPerShare:riskFit.risk_per_share,
       maxLoss:riskFit.max_loss,

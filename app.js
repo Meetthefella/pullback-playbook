@@ -5197,6 +5197,18 @@ function hasMathematicallyPriceablePlan(record){
 
 function resolveAlivePullbackReboundGuard(input = {}){
   const record = input.record && typeof input.record === 'object' ? input.record : {};
+  const displayedPlan = input.displayedPlan && typeof input.displayedPlan === 'object'
+    ? input.displayedPlan
+    : (
+      record && record.plan
+        ? deriveCurrentPlanState(
+          record.plan.entry,
+          record.plan.stop,
+          record.plan.firstTarget,
+          (record.marketData && record.marketData.currency) || record.currency || ''
+        )
+        : null
+    );
   const marketData = input.marketData && typeof input.marketData === 'object'
     ? input.marketData
     : (record.marketData && typeof record.marketData === 'object' ? record.marketData : {});
@@ -5257,10 +5269,16 @@ function resolveAlivePullbackReboundGuard(input = {}){
     || input.safeBounce === true
     || ['early','present','clear'].includes(stabilisationState)
     || positiveSession;
+  const currentHardBlockers = currentScannerEstimateHardBlockers(record, {
+    displayedPlan,
+    derivedStates:{structureState, trendState}
+  });
   const hardInvalidation = input.hardInvalidation === true
     || input.structureBroken === true
     || record.terminal_avoid_applied === true
-    || (record.plan && record.plan.invalidatedState === true);
+    || (currentHardBlockers.isScannerEstimate
+      ? currentHardBlockers.currentInvalidated
+      : (record.plan && record.plan.invalidatedState === true));
   const aliveSupportRebound = !structureHardBroken
     && !trendHardBroken
     && explicitlyConstructiveContext
@@ -17481,6 +17499,7 @@ function legacyResolveFinalStateContract(record, options = {}){
   const tradeability = String(displayedPlan.tradeability || '').toLowerCase();
   const lowControl = !!(qualityAdjustments.lowControlSetup || qualityAdjustments.tooWideForQualityPullback);
   const hardStructureBroken = deadCheck.dead || structureState === 'broken' || trendState === 'broken';
+  const currentHardBlockers = currentScannerEstimateHardBlockers(item, {displayedPlan, derivedStates});
   const planInvalid = planUiState.state === 'invalid';
   const planMissing = planUiState.state === 'missing';
   const planUnrealistic = planUiState.state === 'unrealistic_rr';
@@ -17569,7 +17588,7 @@ function legacyResolveFinalStateContract(record, options = {}){
     actionTone = 'danger';
     nextPossibleState = 'None';
     addReason(blockerReason);
-  }else if(item.plan && item.plan.invalidatedState){
+  }else if(currentHardBlockers.isScannerEstimate ? currentHardBlockers.currentInvalidated : (item.plan && item.plan.invalidatedState)){
     actionStateKey = 'hold_confirmation';
     blockerCode = 'setup_invalidated';
     blockerReason = 'Previous trigger invalidated; wait for a fresh setup';
@@ -17578,7 +17597,7 @@ function legacyResolveFinalStateContract(record, options = {}){
     actionTone = 'warning';
     nextPossibleState = '🧐 Monitor';
     addReason(blockerReason);
-  }else if(item.plan && item.plan.missedState){
+  }else if(currentHardBlockers.isScannerEstimate ? currentHardBlockers.currentMissed : (item.plan && item.plan.missedState)){
     actionStateKey = 'hold_confirmation';
     blockerCode = 'missed_setup';
     blockerReason = 'Missed entry window';
@@ -18670,6 +18689,7 @@ function executionDowngradeVerdictForRecord(record, options = {}){
   const positionSize = numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size);
   const riskStatus = String(displayedPlan.riskFit && displayedPlan.riskFit.risk_status || '');
   const planValidationState = String(item.plan && item.plan.planValidationState || '');
+  const currentHardBlockers = currentScannerEstimateHardBlockers(item, {displayedPlan, globalVerdict:options.globalVerdict});
   const provisionalVerdict = normalizeAnalysisVerdict(
     options.provisionalVerdict
     || mostConservativeVerdict(
@@ -18678,7 +18698,7 @@ function executionDowngradeVerdictForRecord(record, options = {}){
     )
   );
 
-  if(item.plan && item.plan.invalidatedState) return 'Watch';
+  if(currentHardBlockers.isScannerEstimate ? currentHardBlockers.currentInvalidated : (item.plan && item.plan.invalidatedState)) return 'Watch';
   if(executionCapitalBlocked(displayedPlan)) return provisionalVerdict === 'Entry' ? 'Near Entry' : 'Watch';
   if(executionCapitalHeavy(displayedPlan)){
     if(provisionalVerdict === 'Entry') return 'Near Entry';
@@ -18755,7 +18775,10 @@ function legacyResolveEmojiPresentation(record, options = {}){
   });
   const deadCheck = options.deadCheck || isTerminalDeadSetup(item, {derivedStates, displayedPlan});
   const context = String(options.context || 'generic').toLowerCase();
-  const invalidated = !!(item.plan && (item.plan.invalidatedState || item.plan.missedState));
+  const currentHardBlockers = currentScannerEstimateHardBlockers(item, {displayedPlan, derivedStates});
+  const invalidated = currentHardBlockers.isScannerEstimate
+    ? (currentHardBlockers.currentInvalidated || currentHardBlockers.currentMissed)
+    : !!(item.plan && (item.plan.invalidatedState || item.plan.missedState));
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stop = numericOrNull(item.plan && item.plan.stop);
   const brokenBelowStop = hasAuthoritativeStopBreach(item, {currentPrice, stopPrice:stop});
@@ -19103,6 +19126,79 @@ function isCurrentTechnicalInvalidation(record, globalVerdict, displayedPlan){
   );
 }
 
+function currentScannerEstimateHardBlockers(record, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const source = String(plan.source || '').trim().toLowerCase();
+  const persistedInvalidated = !!(plan.invalidatedState === true || String(plan.invalidatedState || '').trim() !== '');
+  const persistedMissed = !!(plan.missedState === true || String(plan.missedState || '').trim() !== '');
+  if(source !== 'scanner_estimate'){
+    return {
+      isScannerEstimate:false,
+      currentInvalidated:persistedInvalidated,
+      currentMissed:persistedMissed,
+      currentTargetTooClose:plan.firstTargetTooClose === true,
+      currentStopBreach:false,
+      currentBrokenStructure:false,
+      terminalLifecycle:false,
+      currentHardBlock:persistedInvalidated || persistedMissed
+    };
+  }
+  const displayedPlan = options.displayedPlan && typeof options.displayedPlan === 'object'
+    ? options.displayedPlan
+    : deriveCurrentPlanState(
+      plan.entry,
+      plan.stop,
+      plan.firstTarget,
+      item.marketData && item.marketData.currency
+    );
+  const derivedStates = options.derivedStates && typeof options.derivedStates === 'object'
+    ? options.derivedStates
+    : {};
+  const lifecycle = item.lifecycle && typeof item.lifecycle === 'object' ? item.lifecycle : {};
+  const explicitInvalidationReasonCode = String(
+    (options.globalVerdict && options.globalVerdict.explicit_invalidation_reason_code)
+    || options.explicitInvalidationReasonCode
+    || ''
+  ).trim().toLowerCase();
+  const currentPrice = numericOrNull(item.marketData && item.marketData.price);
+  const stopPrice = numericOrNull(displayedPlan.stop ?? plan.stop);
+  const targetPrice = numericOrNull(displayedPlan.target ?? displayedPlan.firstTarget ?? plan.firstTarget ?? plan.target);
+  const structureState = String(
+    derivedStates.structureState
+    || (item.setup && (item.setup.structureState || item.setup.structure_state))
+    || (item.derivedStates && (item.derivedStates.structureState || item.derivedStates.structure_state))
+    || ''
+  ).trim().toLowerCase();
+  const trendState = String(
+    derivedStates.trendState
+    || (item.setup && (item.setup.trendState || item.setup.trend_state))
+    || (item.derivedStates && (item.derivedStates.trendState || item.derivedStates.trend_state))
+    || ''
+  ).trim().toLowerCase();
+  const currentTargetTooClose = displayedPlan && displayedPlan.firstTargetTooClose === true;
+  const currentStopBreach = hasAuthoritativeStopBreach(item, {currentPrice, stopPrice});
+  const currentMissed = Number.isFinite(currentPrice)
+    && Number.isFinite(targetPrice)
+    && currentPrice >= (targetPrice * 0.98);
+  const currentBrokenStructure = structureState === 'broken' || trendState === 'broken';
+  const terminalLifecycle = ['expired','dead','entered','exited','cancelled'].includes(String(lifecycle.stage || '').trim().toLowerCase())
+    || ['closed','dead'].includes(String(lifecycle.status || '').trim().toLowerCase());
+  const currentInvalidated = currentStopBreach
+    || currentBrokenStructure
+    || ['invalidated','technical_invalidation','broken_structure','broken_trend','stop_breach'].includes(explicitInvalidationReasonCode);
+  return {
+    isScannerEstimate:true,
+    currentInvalidated,
+    currentMissed,
+    currentTargetTooClose,
+    currentStopBreach,
+    currentBrokenStructure,
+    terminalLifecycle,
+    currentHardBlock:currentInvalidated || currentMissed || currentTargetTooClose || terminalLifecycle
+  };
+}
+
 function scannerEstimateBlockedPlanSnapshotRecord(plan){
   const normalized = normalizeStoredPlanSnapshot(plan);
   return {
@@ -19188,7 +19284,7 @@ function resolveScannerEstimatePlanAuthority(record, globalVerdict, displayedPla
   );
   const currentPlanBlockers = resolveCurrentScannerEstimatePlanBlockers(item, resolvedVerdict, currentPlan);
   const planMathValid = !!(currentPlan && currentPlan.status === 'valid');
-  const firstTargetTooClose = plan.firstTargetTooClose === true;
+  const firstTargetTooClose = currentPlan && currentPlan.firstTargetTooClose === true;
   const terminalAvoid = item.terminal_avoid_applied === true || resolvedVerdict.terminal_avoid_applied === true;
   const explicitInvalidationReason = String(resolvedVerdict.explicit_invalidation_reason || '').trim();
   const explicitInvalidationReasonCode = String(resolvedVerdict.explicit_invalidation_reason_code || '').trim().toLowerCase();
@@ -23811,7 +23907,7 @@ function planCheckStateForRecord(record, options = {}){
   const ignoreStaleScannerEstimatePlanCheck = planSource === 'scanner_estimate'
     && displayedPlan.status === 'valid'
     && item.plan
-    && item.plan.firstTargetTooClose !== true
+    && displayedPlan.firstTargetTooClose !== true
     && ['stale','needs_replan'].includes(explicitState);
   if(['invalidated','missed','stale','needs_replan'].includes(explicitState) && !ignoreStaleScannerEstimatePlanCheck){
     return explicitState;
@@ -23956,6 +24052,7 @@ function deriveCurrentPlanState(entryValue, stopValue, targetValue, quoteCurrenc
     status,
     rewardRisk,
     rewardPerShare,
+    firstTargetTooClose:rewardRisk.valid ? rewardRisk.rewardPerShare < (1.5 * rewardRisk.riskPerShare) : false,
     riskFit,
     capitalFit,
     tradeability,
@@ -24248,9 +24345,10 @@ function deriveActionStateForRecord(record){
     item.marketData && item.marketData.currency
   );
   const planUiState = getPlanUiState(item, {displayedPlan});
+  const currentHardBlockers = currentScannerEstimateHardBlockers(item, {displayedPlan});
   const planValidationState = String(item.plan && item.plan.planValidationState || '');
   let stage = 'watch';
-  if(item.plan && item.plan.invalidatedState){
+  if(currentHardBlockers.isScannerEstimate ? currentHardBlockers.currentInvalidated : (item.plan && item.plan.invalidatedState)){
     stage = 'avoid';
   }else if(verdict === 'Avoid'){
     stage = 'avoid';
@@ -24278,8 +24376,15 @@ function deriveActionStateForRecord(record){
 
 function nextActionTextForRecord(record){
   const item = normalizeTickerRecord(record);
-  if(item.plan && item.plan.invalidatedState) return 'Setup invalidated';
-  if(item.plan && item.plan.missedState) return 'Missed - do not chase';
+  const currentDisplayedPlan = deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const currentHardBlockers = currentScannerEstimateHardBlockers(item, {displayedPlan:currentDisplayedPlan});
+  if(currentHardBlockers.isScannerEstimate ? currentHardBlockers.currentInvalidated : (item.plan && item.plan.invalidatedState)) return 'Setup invalidated';
+  if(currentHardBlockers.isScannerEstimate ? currentHardBlockers.currentMissed : (item.plan && item.plan.missedState)) return 'Missed - do not chase';
   if(item.plan && item.plan.planValidationState === 'needs_replan') return 'Replan before entry';
   if(item.plan && item.plan.exitMode === 'dynamic_exit' && item.plan.status === 'valid'){
     if(item.plan.targetReviewState === 'beyond_target' || item.plan.targetReviewState === 'at_target'){
@@ -29882,8 +29987,14 @@ function renderSuppressedAiAnalysisPanel(suppression, rawResponse, options = {})
 
 function isAnalysisStaleForRecord(record){
   const item = normalizeTickerRecord(record);
-  if(item.plan && item.plan.invalidatedState) return true;
-  if(item.plan && item.plan.missedState) return true;
+  const currentHardBlockers = currentScannerEstimateHardBlockers(item);
+  if(currentHardBlockers.isScannerEstimate){
+    if(currentHardBlockers.currentInvalidated) return true;
+    if(currentHardBlockers.currentMissed) return true;
+  }else{
+    if(item.plan && item.plan.invalidatedState) return true;
+    if(item.plan && item.plan.missedState) return true;
+  }
 
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stop = numericOrNull(item.plan && item.plan.stop);
@@ -39587,12 +39698,38 @@ function resolveFinalStateContract(record, options = {}){
     && !weakControl
     && ['strong','intact','developing_clean'].includes(structureState)
   );
+  const currentPlanValidationState = String(displayedPlan && displayedPlan.planValidationState || '').trim().toLowerCase();
+  const currentTriggerState = String(displayedPlan && displayedPlan.triggerState || '').trim().toLowerCase();
+  const currentFirstTargetTooClose = displayedPlan && displayedPlan.firstTargetTooClose === true;
+  const structuredBlockersPresent = !!(
+    hardStructureBroken
+    || avoidSubtype === 'terminal'
+    || brokenBelowStop
+    || lost50MaSupport
+    || item.plan && (
+      currentFirstTargetTooClose
+      || ['invalidated','missed','stale'].includes(currentPlanValidationState)
+      || ['invalidated','missed','stale'].includes(currentTriggerState)
+    )
+  );
+  const upstreamPriceabilityState = String(derivedStates.priceabilityState || derivedStates.priceability_state || '').trim().toLowerCase();
 
   let planStateKey = 'valid';
   if(!hasPlanValues || planUiState.state === 'missing') planStateKey = 'missing';
   else if(planUiState.state === 'invalid') planStateKey = 'invalid';
   else if(planUiState.state === 'needs_adjustment' || riskTooWide || capitalBlocked || capitalHeavy) planStateKey = 'needs_adjustment';
   else if(planUiState.state === 'unrealistic_rr') planStateKey = 'unrealistic_rr';
+  const softReadinessOnlyPriceabilityBlock = !!(
+    requestedFinalVerdict === 'Entry'
+    && upstreamPriceabilityState === 'priceable'
+    && planStateKey === 'valid'
+    && tradeability === 'tradable'
+    && !structuredBlockersPresent
+    && !!bounceGuard.unpriceableBlockReason
+  );
+  const effectiveUnpriceableBlockReason = softReadinessOnlyPriceabilityBlock
+    ? ''
+    : String(bounceGuard.unpriceableBlockReason || '').trim();
   const verdictCap = capVerdictByBlockingFactors(requestedFinalVerdict, {
     structureState,
     trendState,
@@ -39615,7 +39752,9 @@ function resolveFinalStateContract(record, options = {}){
     planStop,
     planTarget,
     rr:numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio),
-    reclaimAttempt:currentPrice != null && planEntry != null && currentPrice >= (planEntry * 0.985)
+    reclaimAttempt:currentPrice != null && planEntry != null && currentPrice >= (planEntry * 0.985),
+    unpriceableBlockReason:effectiveUnpriceableBlockReason,
+    hasClearInvalidationLevel:softReadinessOnlyPriceabilityBlock ? true : bounceGuard.hasClearInvalidationLevel
   });
   const finalVerdict = verdictCap.verdict;
   const promotionTrace = verdictCap.blockerFlags && typeof verdictCap.blockerFlags === 'object'
@@ -39685,12 +39824,12 @@ function resolveFinalStateContract(record, options = {}){
       lost50MaSupport ? 'lost_50ma_support' : 'weakening_structure'
     );
     addReason(blockerReason);
-  }else if(planStateKey !== 'valid' || !!bounceGuard.unpriceableBlockReason){
+  }else if(planStateKey !== 'valid' || !!effectiveUnpriceableBlockReason){
     actionStateKey = 'recalculate_plan';
     actionLabel = 'Hold for entry conditions';
     actionTone = 'warning';
-    const planOrBounceCode = bounceGuard.unpriceableBlockReason ? 'bounce_not_priceable' : planStateKey;
-    setPrimaryBlocker(planOrBounceCode, bounceGuard.unpriceableBlockReason || ((planStateKey === 'needs_adjustment' && (capitalBlocked || capitalHeavy))
+    const planOrBounceCode = effectiveUnpriceableBlockReason ? 'bounce_not_priceable' : planStateKey;
+    setPrimaryBlocker(planOrBounceCode, effectiveUnpriceableBlockReason || ((planStateKey === 'needs_adjustment' && (capitalBlocked || capitalHeavy))
       ? (capitalConstraintReasonForPlan(displayedPlan) || 'Capital usage is heavy for this account size.')
       : (({
         missing:'No actionable plan yet.',
@@ -39720,7 +39859,7 @@ function resolveFinalStateContract(record, options = {}){
         lost50MaSupport ? 'lost_50ma_support' : 'weakening_structure'
       );
     }else if(bounceUnconfirmed){
-      setPrimaryBlocker('bounce_not_confirmed', bounceGuard.unpriceableBlockReason || 'Developing - waiting for confirmation.', 'bounce_confirmation');
+      setPrimaryBlocker('bounce_not_confirmed', effectiveUnpriceableBlockReason || 'Developing - waiting for confirmation.', 'bounce_confirmation');
     }else if(weakVolume){
       setPrimaryBlocker('weak_volume', 'Needs stronger volume', 'volume');
     }else if(marketWeak){
@@ -39784,6 +39923,15 @@ function resolveFinalStateContract(record, options = {}){
   const remapReason = rrResolution.remapReason
     || ((tradeabilityVerdict === 'Avoid' && structuralStateKey !== 'dead') ? 'weak but still technically alive' : '');
   const reasonSummary = reasonParts.slice(0, 2).join(' + ');
+  const softReadinessOnlyDemotion = !!(
+    requestedFinalVerdict === 'Entry'
+    && upstreamPriceabilityState === 'priceable'
+    && planStateKey === 'valid'
+    && tradeability === 'tradable'
+    && !structuredBlockersPresent
+    && !!bounceGuard.unpriceableBlockReason
+    && finalVerdict !== 'Entry'
+  );
 
   return {
     finalVerdict,
@@ -39796,11 +39944,11 @@ function resolveFinalStateContract(record, options = {}){
     capBlockers:verdictCap.blockerFlags || {},
     originalBounceState:bounceGuard.originalBounceState,
     adjustedBounceState:bounceGuard.adjustedBounceState,
-    bouncePriceabilityGuardApplied:bounceGuard.bouncePriceabilityGuardApplied,
-    bouncePriceabilityGuardReason:bounceGuard.bouncePriceabilityGuardReason,
+    bouncePriceabilityGuardApplied:softReadinessOnlyPriceabilityBlock ? false : bounceGuard.bouncePriceabilityGuardApplied,
+    bouncePriceabilityGuardReason:softReadinessOnlyPriceabilityBlock ? '' : bounceGuard.bouncePriceabilityGuardReason,
     hasClearInvalidationLevel:bounceGuard.hasClearInvalidationLevel,
     hasPriceablePlan:bounceGuard.hasPriceablePlan,
-    unpriceableBlockReason:bounceGuard.unpriceableBlockReason,
+    unpriceableBlockReason:effectiveUnpriceableBlockReason,
     planPriceabilitySource:'resolveFinalStateContract:effectivePlan+marketData',
     resolvedPlanEntry:planEntry,
     resolvedPlanStop:planStop,
@@ -39837,6 +39985,30 @@ function resolveFinalStateContract(record, options = {}){
     blockerReason:blockerReason || reasonParts[0] || '',
     primaryBlockerSource:primaryBlockerSource || blockerCode || '',
     primaryBlockerReason:primaryBlockerReason || blockerReason || reasonParts[0] || '',
+    contractDiagnostics:{
+      upstreamVerdict:requestedFinalVerdict,
+      upstreamPriceabilityState,
+      planStateKey,
+      planStatus:displayedPlan.status,
+      planTradeability:tradeability,
+      planRiskStatus:riskStatus,
+      planCapitalFit:String(displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || '').trim().toLowerCase(),
+      verdictCap:{
+        verdict:finalVerdict,
+        capApplied:!!verdictCap.capApplied,
+        capCode:verdictCap.capCode || '',
+        capReason:verdictCap.capReason || ''
+      },
+      bounceGuardUnpriceableBlockReason:bounceGuard.unpriceableBlockReason || '',
+      structuredBlockersPresent,
+      softReadinessOnlyDemotion,
+      finalCanonicalVerdict:finalVerdict,
+      finalPriceabilityState:upstreamPriceabilityState === 'priceable' && !effectiveUnpriceableBlockReason
+        ? 'priceable'
+        : (effectiveUnpriceableBlockReason ? 'unpriceable' : upstreamPriceabilityState),
+      finalBlockerCode:blockerCode || '',
+      finalBlockedReasonCode:blockerCode || ''
+    },
     reasonParts,
     reasonSummary,
     nextPossibleState,
@@ -40340,6 +40512,9 @@ function resolveGlobalVerdict(record){
     derivedStates,
     displayedPlan
   });
+  verdict.contractDiagnostics = resolvedContract && resolvedContract.contractDiagnostics && typeof resolvedContract.contractDiagnostics === 'object'
+    ? {...resolvedContract.contractDiagnostics}
+    : {};
   verdict.decision_summary = buildDecisionSummary({
     finalVerdict:verdict.final_verdict,
     displayedPlan,
@@ -40413,7 +40588,10 @@ function watchlistRefreshStructureGate(record){
   const deadCheck = isTerminalDeadSetup(item, {derivedStates, displayedPlan});
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
-  const explicitInvalidation = !!(item.plan && item.plan.invalidatedState);
+  const currentHardBlockers = currentScannerEstimateHardBlockers(item, {displayedPlan, derivedStates});
+  const explicitInvalidation = currentHardBlockers.isScannerEstimate
+    ? currentHardBlockers.currentInvalidated
+    : !!(item.plan && item.plan.invalidatedState);
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const stopPrice = numericOrNull(item.plan && item.plan.stop);
   const brokenBelowStop = hasAuthoritativeStopBreach(item, {currentPrice, stopPrice});
@@ -40507,6 +40685,11 @@ function applyGlobalVerdictGates(record, options = {}){
     const scannerEstimateAuthority = scannerEstimatePlan
       ? resolveScannerEstimatePlanAuthority(item, globalVerdict, scannerEstimateDisplayedPlan)
       : null;
+    const softReadinessOnlyDemotion = !!(
+      globalVerdict
+      && globalVerdict.contractDiagnostics
+      && globalVerdict.contractDiagnostics.softReadinessOnlyDemotion === true
+    );
     if(scannerEstimateAuthority){
       item.watchlist.debug.scanner_estimate_authority_mode = scannerEstimateAuthority.mode;
       item.watchlist.debug.scanner_estimate_authority_reason_code = scannerEstimateAuthority.reasonCode || '';
@@ -40568,7 +40751,7 @@ function applyGlobalVerdictGates(record, options = {}){
         (!!String(globalVerdict.unpriceableBlockReason || '').trim() && !scannerEstimateSoftBlock)
         || (globalVerdict.priceability_state === 'unpriceable' && !scannerEstimateSoftBlock)
         || ['invalid','needs_adjustment','unrealistic_rr'].includes(planBlockState)
-        || item.plan.firstTargetTooClose === true
+        || (scannerEstimateDisplayedPlan && scannerEstimateDisplayedPlan.firstTargetTooClose === true)
         || scannerEstimateSpecificBlock
       );
       const hadPlan = !!(item.plan.entry || item.plan.stop || item.plan.firstTarget);
@@ -40619,9 +40802,23 @@ function applyGlobalVerdictGates(record, options = {}){
           changed = true;
         }
       }
+      if(scannerEstimatePlan && softReadinessOnlyDemotion && !scannerEstimateSpecificBlock){
+        if(item.plan.blockedReasonCode === 'resolver_block'){
+          item.plan.blockedReasonCode = '';
+          changed = true;
+        }
+        if(item.plan.blockedReason && /conditions are not strong enough for active focus/i.test(String(item.plan.blockedReason || ''))){
+          item.plan.blockedReason = '';
+          changed = true;
+        }
+      }
       const blockedMessage = globalVerdict.reason || globalVerdict.downgrade_reason || 'Blocked';
       const structuredPlanBlockCode = scannerEstimatePlan
-        ? String(scannerEstimateAuthority && scannerEstimateAuthority.reasonCode || '').trim().toLowerCase()
+        ? (
+          softReadinessOnlyDemotion && !scannerEstimateSpecificBlock
+            ? ''
+            : String(scannerEstimateAuthority && scannerEstimateAuthority.reasonCode || '').trim().toLowerCase()
+        )
         : (
           resolveScannerEstimateStructuredAuthorityCode(globalVerdict)
           || (
@@ -40642,7 +40839,19 @@ function applyGlobalVerdictGates(record, options = {}){
         && scannerEstimateAuthority
         && scannerEstimateAuthority.specificBlock
         && scannerEstimateAuthorityReasonPriority(existingReasonCode) >= scannerEstimateAuthorityReasonPriority(nextReasonCode);
-      if(scannerEstimatePlan && scannerEstimateAuthority && scannerEstimateAuthority.reasonCode && !preserveSpecificReason){
+      const allowGenericScannerEstimateBlockWrite = !(
+        scannerEstimatePlan
+        && softReadinessOnlyDemotion
+        && !(scannerEstimateAuthority && scannerEstimateAuthority.specificBlock)
+        && String(scannerEstimateAuthority && scannerEstimateAuthority.reasonCode || '').trim().toLowerCase() === 'resolver_block'
+      );
+      if(
+        scannerEstimatePlan
+        && scannerEstimateAuthority
+        && scannerEstimateAuthority.reasonCode
+        && !preserveSpecificReason
+        && allowGenericScannerEstimateBlockWrite
+      ){
         if(item.plan.blockedReason !== scannerEstimateAuthority.reason){
           item.plan.blockedReason = scannerEstimateAuthority.reason;
           changed = true;
@@ -40709,6 +40918,13 @@ function watchlistNextStateGuidance(record, lifecycleSnapshot, context = {}){
 function currentHardFailVerdictForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const derivedStates = analysisDerivedStatesFromRecord(item);
+  const displayedPlan = deriveCurrentPlanState(
+    item.plan && item.plan.entry,
+    item.plan && item.plan.stop,
+    item.plan && item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  const currentHardBlockers = currentScannerEstimateHardBlockers(item, {displayedPlan, derivedStates});
   const trendState = String(derivedStates.trendState || '').toLowerCase();
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
@@ -40716,8 +40932,8 @@ function currentHardFailVerdictForRecord(record){
   const structurallyDead = !!(
     structureState === 'broken'
     || trendState === 'broken'
-    || (item.plan && item.plan.invalidatedState)
-    || (item.plan && item.plan.missedState)
+    || (currentHardBlockers.isScannerEstimate ? currentHardBlockers.currentInvalidated : (item.plan && item.plan.invalidatedState))
+    || (currentHardBlockers.isScannerEstimate ? currentHardBlockers.currentMissed : (item.plan && item.plan.missedState))
     || hasAuthoritativeStopBreach(item, {currentPrice, stopPrice})
   );
   return structurallyDead ? 'Avoid' : '';
