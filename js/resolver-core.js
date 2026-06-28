@@ -1591,7 +1591,9 @@
         : null;
     const nonTrackedCanonicalVerdict = normalizeVerdict(
       nonTrackedCanonicalContract && (
-        nonTrackedCanonicalContract.finalVerdict
+        nonTrackedCanonicalContract.canonical_final_verdict
+        || (nonTrackedCanonicalDiagnostics && nonTrackedCanonicalDiagnostics.upstreamVerdict)
+        || nonTrackedCanonicalContract.finalVerdict
         || nonTrackedCanonicalContract.final_verdict
       )
     );
