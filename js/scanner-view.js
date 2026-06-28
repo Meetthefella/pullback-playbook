@@ -440,11 +440,6 @@
       monitor_watch:'early',
       lower_priority:'filtered'
     })[bucket] || legacyBucketForFinalClassification(finalClassification);
-    if(view.item && view.item.scan){
-      view.item.scan.resolvedVerdict = deps.globalVerdictLabel(scannerVerdict);
-      view.item.scan.resolvedFinalDisplayState = deps.globalVerdictLabel(scannerVerdict);
-      view.item.scan.resolvedBucket = String(bucket || '');
-    }
     return {
       ...view,
       ticker:view.item.ticker,

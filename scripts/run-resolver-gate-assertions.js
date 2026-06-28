@@ -9810,6 +9810,96 @@ function runAccepted50MaSupportThresholdAssertions(){
   }
 }
 
+function runScannerProjectionAuthorityAssertions(){
+  const scannerViewSource = fs.readFileSync(path.join(repoRoot, 'js/scanner-view.js'), 'utf8');
+  const scannerProjectionSandbox = {
+    window:{},
+    console
+  };
+  vm.createContext(scannerProjectionSandbox);
+  vm.runInContext(scannerViewSource, scannerProjectionSandbox, {filename:'js/scanner-view.js'});
+  const deps = {
+    projectTickerForCard(record){
+      return {
+        item:{
+          ...record,
+          scan:{
+            ...(record.scan || {})
+          },
+          meta:{
+            ...(record.meta || {})
+          }
+        },
+        displayedPlan:{status:'valid'},
+        setupUiState:{state:'entry'},
+        planUiState:{state:'valid', label:'Plan valid'},
+        displayStage:'Entry',
+        setupScore:6,
+        setupScoreDisplay:'Setup 6/10',
+        effectivePlan:{entry:110.27, stop:102.29, firstTarget:136.19}
+      };
+    },
+    analysisDerivedStatesFromRecord(){
+      return {structureState:'strong', bounceState:'attempt', pullbackZone:'none'};
+    },
+    primaryVerdictBadge(){
+      return {label:'Entry', className:'ready'};
+    },
+    setupUiLabel(){
+      return 'Ready';
+    },
+    setupUiClass(){
+      return 'ready';
+    },
+    resolveScannerStateWithTrace(){
+      return {setupState:'entry', reason_codes:[]};
+    },
+    resolveVisualState(){
+      return {
+        finalVerdict:'watch',
+        final_verdict:'watch',
+        badge:{text:'Watch', className:'watch'},
+        bucket:'monitor_watch'
+      };
+    },
+    normalizeGlobalVerdictKey(value){
+      return String(value || '').trim().toLowerCase();
+    },
+    globalVerdictLabel(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    },
+    getBadge(){
+      return {text:'Watch', className:'watch'};
+    },
+    getBucket(value){
+      return value === 'entry' ? 'tradeable_entry' : 'monitor_watch';
+    },
+    shouldShowActionableRR(){
+      return false;
+    },
+    structureLabelForRecord(){
+      return 'Strong';
+    }
+  };
+  const record = {
+    ticker:'TROW',
+    meta:{companyName:'T. Rowe Price'},
+    scan:{
+      resolvedVerdict:'',
+      resolvedFinalDisplayState:'',
+      resolvedBucket:''
+    }
+  };
+  const view = scannerProjectionSandbox.window.ScannerView.buildFinalSetupView(record, {}, deps);
+  if(view.item.scan.resolvedVerdict || view.item.scan.resolvedFinalDisplayState || view.item.scan.resolvedBucket){
+    throw new Error('buildFinalSetupView must not write soft scan presentation verdict fields onto its projected item.');
+  }
+}
+
 async function runAllAssertions(){
   runTrackPresentationAuthorityAssertions();
   runScannerPolicyCompatibilityAssertions();
@@ -9822,6 +9912,7 @@ async function runAllAssertions(){
   runReviewPricedButNotReadyAssertions();
   runCumulativePenaltyDisplayAssertions();
   runAccepted50MaSupportThresholdAssertions();
+  runScannerProjectionAuthorityAssertions();
   runTesterProfileResetAssertions();
   runCanonicalDecisionInvariantAssertions();
   await runTrackedStateTesterIsolationAssertions();
@@ -9843,6 +9934,7 @@ async function runAllAssertions(){
   console.log('Review priced-but-not-ready assertions passed.');
   console.log('Cumulative penalty display assertions passed.');
   console.log('Accepted 50MA support threshold assertions passed.');
+  console.log('Scanner projection authority assertions passed.');
   console.log('Tester profile reset assertions passed.');
   console.log('Canonical decision invariant assertions passed.');
   console.log('Tracked-state tester isolation assertions passed.');
