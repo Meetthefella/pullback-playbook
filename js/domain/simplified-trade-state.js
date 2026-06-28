@@ -616,14 +616,27 @@
       };
       const resolvedState = global.ResolverCore.resolveGlobalVerdict(item, resolverDeps);
       const basePresentationContract = resolverDeps.resolveFinalStateContract(item, {context:surface, derivedStates, displayedPlan:planState});
+      const canonicalPresentationVerdict = (resolvedState && (
+        resolvedState.canonical_final_verdict
+        || resolvedState.final_verdict_rendered
+        || resolvedState.final_verdict
+      )) || 'watch';
       const resolvedVerdictLabel = global.ResolverCore.globalVerdictLabel
-        ? global.ResolverCore.globalVerdictLabel(resolvedState && resolvedState.final_verdict)
-        : (resolvedState && resolvedState.final_verdict || 'Watch');
+        ? global.ResolverCore.globalVerdictLabel(canonicalPresentationVerdict)
+        : canonicalPresentationVerdict;
       const presentationContract = {
         ...(basePresentationContract && typeof basePresentationContract === 'object' ? basePresentationContract : {}),
         finalVerdict:resolvedVerdictLabel,
-        final_verdict:resolvedState && resolvedState.final_verdict,
-        final_verdict_rendered:resolvedState && resolvedState.final_verdict,
+        final_verdict:(resolvedState && (
+          resolvedState.canonical_final_verdict
+          || resolvedState.final_verdict_rendered
+          || resolvedState.final_verdict
+        )) || 'watch',
+        final_verdict_rendered:(resolvedState && (
+          resolvedState.canonical_final_verdict
+          || resolvedState.final_verdict_rendered
+          || resolvedState.final_verdict
+        )) || 'watch',
         planStatusKey:(basePresentationContract && basePresentationContract.planStatusKey) || planState.status || 'missing',
         blockerReason:(resolvedState && (resolvedState.main_blocker || resolvedState.reason)) || (basePresentationContract && basePresentationContract.blockerReason) || '',
         reasonSummary:(resolvedState && (resolvedState.reason || resolvedState.main_blocker)) || (basePresentationContract && basePresentationContract.reasonSummary) || ''

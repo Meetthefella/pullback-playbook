@@ -40565,7 +40565,7 @@ function resolveGlobalVerdict(record, deps = {}){
     derivedStates
   );
   const resolvedContract = resolverDeps.resolveFinalStateContract(item, {
-    finalVerdict:globalVerdictLabel(verdict.final_verdict || ''),
+    context:'global',
     derivedStates,
     displayedPlan
   });

@@ -22,6 +22,7 @@ function loadCanonicalResolverInput(){
 function assertResolveGlobalVerdictContractAlignment(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const resolverSource = fs.readFileSync(path.join(root, 'js/resolver-core.js'), 'utf8');
+  const simplifiedTradeStateSource = fs.readFileSync(path.join(root, 'js/domain/simplified-trade-state.js'), 'utf8');
   assert.ok(
     /function resolveGlobalVerdict\(record,\s*deps\s*=\s*\{\}\)/.test(appSource),
     'app.js resolveGlobalVerdict must accept injected deps'
@@ -48,6 +49,30 @@ function assertResolveGlobalVerdictContractAlignment(){
   assert.ok(
     appSource.includes("|| projectionValue(derivedProjection, ...field.aliases)"),
     'app.js scanner projection extraction must fall back to nested derived_states values when top-level fields are absent'
+  );
+  assert.ok(
+    appSource.includes("const resolvedContract = resolverDeps.resolveFinalStateContract(item, {\n    context:'global',\n    derivedStates,\n    displayedPlan\n  });"),
+    'app.js resolveGlobalVerdict must preserve the upstream global contract instead of overriding it with the already-demoted final verdict'
+  );
+  assert.ok(
+    appSource.includes("const riskOnlyFxEstimatedTradeability = tradeability === 'risk_only'"),
+    'app.js soft-readiness alignment must recognize the narrowed FX-estimated risk_only case'
+  );
+  assert.ok(
+    appSource.includes("&& (tradeability === 'tradable' || riskOnlyFxEstimatedTradeability)"),
+    'app.js soft-readiness alignment must allow the narrowed FX-estimated risk_only tradeability case'
+  );
+  assert.ok(
+    simplifiedTradeStateSource.includes("const canonicalPresentationVerdict = (resolvedState && (\n        resolvedState.canonical_final_verdict\n        || resolvedState.final_verdict_rendered\n        || resolvedState.final_verdict\n      )) || 'watch';"),
+    'simplified-trade-state must seed the presentation contract from canonical resolved verdict fields'
+  );
+  assert.ok(
+    simplifiedTradeStateSource.includes("final_verdict:(resolvedState && (\n          resolvedState.canonical_final_verdict\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n        )) || 'watch'"),
+    'simplified-trade-state must pass canonical final_verdict into ResolverPresentation'
+  );
+  assert.ok(
+    simplifiedTradeStateSource.includes("final_verdict_rendered:(resolvedState && (\n          resolvedState.canonical_final_verdict\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n        )) || 'watch'"),
+    'simplified-trade-state must pass canonical final_verdict_rendered into ResolverPresentation'
   );
 }
 
