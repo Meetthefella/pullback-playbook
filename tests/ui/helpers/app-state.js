@@ -278,6 +278,9 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
           badgeLabel:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`).textContent),
           technicalSummary:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`).textContent),
           decisionSummary:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__decision`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__decision`).textContent)
+        },
+        decisionTrace:{
+          panelText:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] [data-scan-decision-trace-content]`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] [data-scan-decision-trace-content]`).textContent)
         }
       },
       review:{

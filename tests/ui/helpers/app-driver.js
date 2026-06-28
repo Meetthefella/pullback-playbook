@@ -124,6 +124,21 @@ async function openReviewForTicker(page, ticker){
   }, ticker, {timeout:30000});
 }
 
+async function openScanDecisionTraceForTicker(page, ticker){
+  await page.locator('[data-workspace-tab="scan"]').click();
+  await page.waitForFunction(() => {
+    return document.querySelector('[data-workspace-tab="scan"][aria-selected="true"]') !== null;
+  }, null, {timeout:10000});
+  const card = page.locator(`#results .resultcompact[data-ticker="${ticker}"]`).first();
+  await expect(card).toBeVisible({timeout:30000});
+  const overflowButton = card.locator('[data-act="overflow-toggle"]').first();
+  await overflowButton.click();
+  const traceButton = card.locator('[data-act="open-trace"]').first();
+  await expect(traceButton).toBeVisible({timeout:10000});
+  await traceButton.click();
+  await expect(card.locator('[data-scan-decision-trace-content]')).toBeVisible({timeout:10000});
+}
+
 async function waitForUiTransitionSettle(page){
   await page.evaluate(async () => {
     await new Promise(resolve => {
@@ -162,6 +177,7 @@ module.exports = {
   resetAppState,
   addTickers,
   runScan,
+  openScanDecisionTraceForTicker,
   openReviewForTicker,
   addActiveReviewToWatchlistIfEligible,
   openTrackTab,

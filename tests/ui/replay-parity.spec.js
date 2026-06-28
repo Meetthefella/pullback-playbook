@@ -8,6 +8,7 @@ const {
   resetAppState,
   addTickers,
   runScan,
+  openScanDecisionTraceForTicker,
   openReviewForTicker,
   addActiveReviewToWatchlistIfEligible,
   openTrackTab,
@@ -37,6 +38,9 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
 
   const reports = [];
   for(const ticker of tickers){
+    await openScanDecisionTraceForTicker(page, ticker);
+    await waitForUiTransitionSettle(page);
+    await captureStage(page, testInfo, `${ticker.toLowerCase()}-scan-trace`);
     const preReviewScanAppState = await extractAppTickerState(page, ticker, consoleEvents);
     assertReplaySnapshotContract(preReviewScanAppState.snapshot, ticker);
     await openReviewForTicker(page, ticker);

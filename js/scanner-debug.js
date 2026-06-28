@@ -377,9 +377,25 @@
     const item = view && view.item ? view.item : {};
     const globalVerdict = deps.resolveGlobalVerdict(item);
     const visualState = deps.resolveVisualState ? deps.resolveVisualState(item, 'scanner') : null;
+    const simplifiedState = deps.resolveSimplifiedStateForSurface
+      ? deps.resolveSimplifiedStateForSurface(item, 'scan', {
+        source:'scanner_debug_trace',
+        mutationSource:'scanner_debug_trace',
+        log:false
+      })
+      : null;
     const nextAction = deps.getActions(globalVerdict.final_verdict || '');
-    const renderedVerdict = globalVerdict.final_verdict || '(none)';
-    const renderedBucket = resolution.bucket || globalVerdict.bucket || '(none)';
+    const canonicalVerdict = String(simplifiedState && simplifiedState.canonicalVerdict || globalVerdict.final_verdict || '').trim().toLowerCase() || 'watch';
+    const renderedVerdict = canonicalVerdict || '(none)';
+    const renderedBucket = String(simplifiedState && simplifiedState.visualBucket || resolution.bucket || globalVerdict.bucket || '').trim().toLowerCase() || '(none)';
+    const currentPlan = item && item.plan && typeof item.plan === 'object' ? item.plan : {};
+    const planStatus = String(
+      simplifiedState && simplifiedState.planStatus
+      || view && view.planUiState && view.planUiState.state
+      || currentPlan.status
+      || ''
+    ).trim().toLowerCase();
+    const planBlocked = ['invalid','missing'].includes(planStatus);
     const failedReclaimPresentation = String(resolution.remapReason || '').toLowerCase().includes('failed reclaim');
     const notPromotedReason = failedReclaimPresentation
       ? 'Recent rebound failed - wait for stabilisation.'
@@ -405,12 +421,12 @@
         ? (visualState.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')
         : (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')},
       {label:'Conflicting Legacy State Detected', value:visualState && visualState.conflicting_legacy_state_detected ? 'true' : 'false'},
-      {label:'Scanner Verdict', value:globalVerdict.base_verdict || '(none)'},
+      {label:'Scanner Verdict', value:canonicalVerdict || '(none)'},
       {label:'Tracked Verdict', value:globalVerdict.tracked_verdict || '(none)'},
-      {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
-      {label:'Tone', value:globalVerdict.tone || '(none)'},
-      {label:'Bucket', value:globalVerdict.bucket || '(none)'},
-      {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
+      {label:'Final Verdict', value:canonicalVerdict || '(none)'},
+      {label:'Tone', value:(simplifiedState && simplifiedState.tone) || globalVerdict.tone || '(none)'},
+      {label:'Bucket', value:renderedBucket},
+      {label:'Badge', value:(simplifiedState && simplifiedState.badgeLabel) || (globalVerdict.badge && globalVerdict.badge.text) || '(none)'},
       {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
       {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
       {label:'Promotion Blocked', value:(globalVerdict.downgrade_applied || failedReclaimPresentation) ? 'true' : 'false'},
@@ -421,8 +437,8 @@
     const executionSection = renderDebugSectionMarkup('Execution State', [
       {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
       {label:'Action State', value:nextAction.label || '(none)'},
-      {label:'Plan Status', value:view && view.planUiState && view.planUiState.label || 'Plan blocked'},
-      {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
+      {label:'Plan Status', value:(view && view.planUiState && view.planUiState.label) || planStatus || 'Plan blocked'},
+      {label:'Plan Blocked', value:planBlocked ? 'true' : 'false'},
       {label:'Effective Plan RR', value:globalVerdict.rr_known && Number.isFinite(globalVerdict.resolvedRR) ? Number(globalVerdict.resolvedRR).toFixed(2) : 'n/a'},
       {label:'Scanner Estimated RR', value:Number.isFinite(resolution.rr_value) ? Number(resolution.rr_value).toFixed(2) : 'n/a'},
       {label:'RR Confidence', value:resolution.rr_label || '(none)'},
@@ -477,6 +493,13 @@
     const item = view && view.item ? view.item : {};
     const globalVerdict = deps.resolveGlobalVerdict(item);
     const visualState = deps.resolveVisualState ? deps.resolveVisualState(item, 'scanner') : null;
+    const simplifiedState = deps.resolveSimplifiedStateForSurface
+      ? deps.resolveSimplifiedStateForSurface(item, 'scan', {
+        source:'scanner_visual_debug',
+        mutationSource:'scanner_visual_debug',
+        log:false
+      })
+      : null;
     const statusChip = deps.primaryShortlistStatusChip(view || {});
     const structureQuality = String(view && view.setupStates && view.setupStates.structureQuality || '').toLowerCase();
     const bounceState = String(view && view.setupStates && view.setupStates.bounceState || '').toLowerCase();
@@ -485,7 +508,16 @@
     const clickTraceHistory = deps.scannerCardClickTraceHistoryForTicker(item.ticker);
     const reviewAnalysisState = deps.reviewAnalysisUiStateForRecord ? deps.reviewAnalysisUiStateForRecord(item) : '';
     const resolution = view && view.scannerResolution ? view.scannerResolution : {};
-    const renderedBucket = resolution.bucket || globalVerdict.bucket || '(none)';
+    const canonicalVerdict = String(simplifiedState && simplifiedState.canonicalVerdict || globalVerdict.final_verdict || '').trim().toLowerCase() || 'watch';
+    const renderedBucket = String(simplifiedState && simplifiedState.visualBucket || resolution.bucket || globalVerdict.bucket || '').trim().toLowerCase() || '(none)';
+    const currentPlan = item && item.plan && typeof item.plan === 'object' ? item.plan : {};
+    const planStatus = String(
+      simplifiedState && simplifiedState.planStatus
+      || view && view.planUiState && view.planUiState.state
+      || currentPlan.status
+      || ''
+    ).trim().toLowerCase();
+    const planBlocked = ['invalid','missing'].includes(planStatus);
     const failedReclaimPresentation = String(resolution.remapReason || '').toLowerCase().includes('failed reclaim');
     const notPromotedReason = failedReclaimPresentation
       ? 'Recent rebound failed - wait for stabilisation.'
@@ -500,7 +532,7 @@
     ], deps);
     const finalSection = renderDebugSectionMarkup('Final Decision', [
       {label:'UI State Source', value:'scanner_resolution'},
-      {label:'Final Verdict Rendered', value:globalVerdict.final_verdict || '(none)'},
+      {label:'Final Verdict Rendered', value:canonicalVerdict || '(none)'},
       {label:'Bucket Rendered', value:renderedBucket},
       {label:'Dead Guard Applied', value:visualState && visualState.dead_guard_applied ? 'true' : 'false'},
       {label:'Dead Trigger Source', value:(visualState && visualState.dead_trigger_source) || '(none)'},
@@ -511,12 +543,12 @@
         ? (visualState.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')
         : (globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false')},
       {label:'Conflicting Legacy State Detected', value:visualState && visualState.conflicting_legacy_state_detected ? 'true' : 'false'},
-      {label:'Scanner Verdict', value:globalVerdict.base_verdict || '(none)'},
+      {label:'Scanner Verdict', value:canonicalVerdict || '(none)'},
       {label:'Tracked Verdict', value:globalVerdict.tracked_verdict || '(none)'},
-      {label:'Final Verdict', value:globalVerdict.final_verdict || '(none)'},
-      {label:'Tone', value:globalVerdict.tone || '(none)'},
-      {label:'Bucket', value:globalVerdict.bucket || '(none)'},
-      {label:'Badge', value:(globalVerdict.badge && globalVerdict.badge.text) || statusChip.label || '(none)'},
+      {label:'Final Verdict', value:canonicalVerdict || '(none)'},
+      {label:'Tone', value:(simplifiedState && simplifiedState.tone) || globalVerdict.tone || '(none)'},
+      {label:'Bucket', value:renderedBucket},
+      {label:'Badge', value:(simplifiedState && simplifiedState.badgeLabel) || (globalVerdict.badge && globalVerdict.badge.text) || statusChip.label || '(none)'},
       {label:'Final State Reason', value:globalVerdict.final_state_reason || '(none)'},
       {label:'Avoid Trigger Source', value:globalVerdict.avoid_trigger_source || '(none)'},
       {label:'Promotion Blocked', value:(globalVerdict.downgrade_applied || failedReclaimPresentation) ? 'true' : 'false'},
@@ -527,8 +559,8 @@
     const executionSection = renderDebugSectionMarkup('Execution State', [
       {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
       {label:'Action State', value:nextAction.label || '(none)'},
-      {label:'Plan Status', value:view && view.planUiState && view.planUiState.label || 'Plan blocked'},
-      {label:'Plan Blocked', value:globalVerdict.allow_plan ? 'false' : 'true'},
+      {label:'Plan Status', value:(view && view.planUiState && view.planUiState.label) || planStatus || 'Plan blocked'},
+      {label:'Plan Blocked', value:planBlocked ? 'true' : 'false'},
       {label:'Effective Plan RR', value:globalVerdict.rr_known && Number.isFinite(globalVerdict.resolvedRR) ? Number(globalVerdict.resolvedRR).toFixed(2) : 'n/a'},
       {label:'Scanner Estimated RR', value:Number.isFinite(resolution.rr_value) ? Number(resolution.rr_value).toFixed(2) : 'n/a'},
       {label:'RR Confidence', value:resolution.rr_label || '(none)'},
