@@ -6,11 +6,33 @@ function text(value){
   return String(value || '').trim();
 }
 
+function normalizeVisibleVerdict(value){
+  const safe = text(value).toLowerCase().replace(/\s+/g, '_');
+  if(safe === 'entry') return 'entry';
+  if(safe === 'near_entry') return 'near_entry';
+  if(safe === 'avoid') return 'avoid';
+  if(safe === 'watch') return 'watch';
+  return '';
+}
+
+function normalizeVisibleBucketFromVerdict(value){
+  const verdict = normalizeVisibleVerdict(value);
+  if(verdict === 'entry') return 'entry';
+  if(verdict === 'near_entry') return 'near_entry';
+  if(verdict === 'avoid') return 'avoid';
+  if(verdict === 'watch') return 'monitor';
+  return '';
+}
+
 function diagnoseParity(appState, replayResult){
   const review = appState.review || {};
   const track = appState.track || {};
   const scan = appState.scan || {};
   const replay = replayResult || {};
+  const scanVisibleCanonical = normalizeVisibleVerdict(scan.visibleCard && scan.visibleCard.badgeLabel);
+  const scanVisibleBucket = normalizeVisibleBucketFromVerdict(scan.visibleCard && scan.visibleCard.badgeLabel);
+  const scanCanonicalAppValue = scanVisibleCanonical || (scan.simplifiedState && scan.simplifiedState.canonicalVerdict);
+  const scanBucketAppValue = scanVisibleBucket || (scan.simplifiedState && scan.simplifiedState.visualBucket);
 
   const comparisons = [
     {
@@ -29,14 +51,14 @@ function diagnoseParity(appState, replayResult){
     },
     {
       field:'scannerCanonicalVerdict',
-      app:scan.simplifiedState && scan.simplifiedState.canonicalVerdict,
+      app:scanCanonicalAppValue,
       replay:replay.scannerCanonicalVerdict,
       source:'scan grouping / resolveSimplifiedStateForSurface()',
       file:'app.js'
     },
     {
       field:'scannerVisualBucket',
-      app:scan.simplifiedState && scan.simplifiedState.visualBucket,
+      app:scanBucketAppValue,
       replay:replay.scannerVisualBucket,
       source:'scan presentation / resolveSimplifiedStateForSurface()',
       file:'app.js'

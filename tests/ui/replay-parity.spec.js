@@ -37,6 +37,8 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
 
   const reports = [];
   for(const ticker of tickers){
+    const preReviewScanAppState = await extractAppTickerState(page, ticker, consoleEvents);
+    assertReplaySnapshotContract(preReviewScanAppState.snapshot, ticker);
     await openReviewForTicker(page, ticker);
     const reviewOpenImmediateAppState = await extractAppTickerState(page, ticker, consoleEvents);
     await waitForUiTransitionSettle(page);
@@ -54,27 +56,52 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
       await captureStage(page, testInfo, `${ticker.toLowerCase()}-track`);
     }
     const appState = await extractAppTickerState(page, ticker, consoleEvents);
-    assertReplaySnapshotContract(appState.snapshot, ticker);
-    expect(appState.snapshot, `Missing replay snapshot source for ${ticker}`).toBeTruthy();
+    if(preReviewScanAppState && preReviewScanAppState.scan){
+      appState.scan = preReviewScanAppState.scan;
+    }
+    const reviewToPostAddMutation = summarizeStageMutation(preWatchlistAppState, postAddAppState, {
+      label:'review_to_post_add',
+      addedToWatchlist
+    });
+    const scanReplaySnapshot = preReviewScanAppState.snapshot || preWatchlistAppState.snapshot || appState.snapshot;
+    const stableReviewAcrossAdd = !reviewToPostAddMutation.hasMutation;
+    const postAddProjectionAvailable = !!(
+      postAddAppState
+      && postAddAppState.snapshot
+      && postAddAppState.snapshot.review
+      && postAddAppState.snapshot.review.projectionSnapshot
+    );
+    const reviewReplaySnapshot = (addedToWatchlist && stableReviewAcrossAdd && postAddProjectionAvailable
+      ? postAddAppState.snapshot
+      : (preWatchlistAppState.snapshot || preReviewScanAppState.snapshot || appState.snapshot));
+    assertReplaySnapshotContract(scanReplaySnapshot, ticker);
+    assertReplaySnapshotContract(reviewReplaySnapshot, ticker);
+    expect(scanReplaySnapshot, `Missing scan replay snapshot source for ${ticker}`).toBeTruthy();
+    expect(reviewReplaySnapshot, `Missing review replay snapshot source for ${ticker}`).toBeTruthy();
     expect(
-      appState.snapshot.plan,
+      reviewReplaySnapshot.plan,
       `${ticker} replay snapshot must carry current plan authority from the live record.`
     ).toBeTruthy();
     expect(
-      appState.snapshot.scan && appState.snapshot.scan.analysisProjection,
+      scanReplaySnapshot.scan && scanReplaySnapshot.scan.analysisProjection,
       `${ticker} replay snapshot must carry scan.analysisProjection from the live record.`
     ).toBeTruthy();
-    const replayRun = runReplayForSnapshot(appState.snapshot);
-    const diagnosis = diagnoseParity(appState, replayRun.result);
+    const scanReplayRun = runReplayForSnapshot(scanReplaySnapshot);
+    const reviewReplayRun = runReplayForSnapshot(reviewReplaySnapshot);
+    const replayResult = {
+      ...reviewReplayRun.result,
+      scannerCanonicalVerdict:scanReplayRun.result.scannerCanonicalVerdict,
+      scannerCanonicalVerdictLabel:scanReplayRun.result.scannerCanonicalVerdictLabel,
+      scannerVisualBucket:scanReplayRun.result.scannerVisualBucket,
+      scannerSnapshotIncomplete:scanReplayRun.result.scannerSnapshotIncomplete
+    };
+    const diagnosis = diagnoseParity(appState, replayResult);
     const stageMutation = {
       reviewOpenTransition:summarizeStageMutation(reviewOpenImmediateAppState, preWatchlistAppState, {
         label:'review_open_transition',
         addedToWatchlist:false
       }),
-      reviewToPostAdd:summarizeStageMutation(preWatchlistAppState, postAddAppState, {
-        label:'review_to_post_add',
-        addedToWatchlist
-      }),
+      reviewToPostAdd:reviewToPostAddMutation,
       trackOpenTransition:summarizeStageMutation(trackOpenImmediateAppState, appState, {
         label:'track_open_transition',
         addedToWatchlist
@@ -94,7 +121,7 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
     const reviewOpenImmediateState = reviewOpenImmediateAppState && reviewOpenImmediateAppState.review && reviewOpenImmediateAppState.review.stateHealth
       ? reviewOpenImmediateAppState.review.stateHealth
       : {};
-    const replayCanonicalVerdict = String(replayRun.result && replayRun.result.reviewCanonicalVerdict || '').trim().toLowerCase();
+    const replayCanonicalVerdict = String(replayResult && replayResult.reviewCanonicalVerdict || '').trim().toLowerCase();
     const preReviewCanonicalVerdict = String(preReviewState.canonicalVerdict || '').trim().toLowerCase();
     const preReviewPriceabilityState = String(preReviewState.priceabilityState || '').trim().toLowerCase();
     const reviewOpenImmediateCanonicalVerdict = String(reviewOpenImmediateState.canonicalVerdict || '').trim().toLowerCase();
@@ -122,14 +149,17 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
     }
     reports.push({
       ticker,
+      preReviewScanAppResult:preReviewScanAppState,
       reviewOpenImmediateAppResult:reviewOpenImmediateAppState,
       preWatchlistAppResult:preWatchlistAppState,
       postAddAppResult:postAddAppState,
       trackOpenImmediateAppResult:trackOpenImmediateAppState,
       appResult:appState,
-      snapshotContract:appState.snapshotContract,
-      replayResult:replayRun.result,
-      replayReportText:replayRun.reportText,
+      scanReplaySnapshot,
+      reviewReplaySnapshot,
+      snapshotContract:preReviewScanAppState.snapshotContract,
+      replayResult,
+      replayReportText:reviewReplayRun.reportText,
       firstDivergence:diagnosis,
       stageMutation
     });
@@ -182,14 +212,18 @@ function assertReplaySnapshotContract(snapshot, ticker){
 }
 
 function summarizeStageMutation(preTrackState, postTrackState, context = {}){
+  const normalizeOptionalText = value => {
+    const text = String(value || '').trim();
+    return text || null;
+  };
   const fields = [
     ['reviewCanonicalVerdict', preTrackState && preTrackState.review && preTrackState.review.stateHealth && preTrackState.review.stateHealth.canonicalVerdict, postTrackState && postTrackState.review && postTrackState.review.stateHealth && postTrackState.review.stateHealth.canonicalVerdict, 'resolveSimplifiedStateForSurface(review)'],
     ['reviewVisualBucket', preTrackState && preTrackState.review && preTrackState.review.stateHealth && preTrackState.review.stateHealth.visualBucket, postTrackState && postTrackState.review && postTrackState.review.stateHealth && postTrackState.review.stateHealth.visualBucket, 'resolveSimplifiedStateForSurface(review)'],
     ['reviewPriceabilityState', preTrackState && preTrackState.review && preTrackState.review.stateHealth && preTrackState.review.stateHealth.priceabilityState, postTrackState && postTrackState.review && postTrackState.review.stateHealth && postTrackState.review.stateHealth.priceabilityState, 'resolveSimplifiedStateForSurface(review)'],
     ['trackCanonicalVerdict', preTrackState && preTrackState.track && preTrackState.track.simplifiedState && preTrackState.track.simplifiedState.canonicalVerdict, postTrackState && postTrackState.track && postTrackState.track.simplifiedState && postTrackState.track.simplifiedState.canonicalVerdict, 'buildSharedReviewTrackPresentation(track)'],
     ['trackPriceabilityState', preTrackState && preTrackState.track && preTrackState.track.simplifiedState && preTrackState.track.simplifiedState.priceabilityState, postTrackState && postTrackState.track && postTrackState.track.simplifiedState && postTrackState.track.simplifiedState.priceabilityState, 'buildSharedReviewTrackPresentation(track)'],
-    ['watchlistAuthorityReasonCode', preTrackState && preTrackState.track && preTrackState.track.diagnostics && preTrackState.track.diagnostics.watchlistDebug && preTrackState.track.diagnostics.watchlistDebug.scanner_estimate_authority_reason_code, postTrackState && postTrackState.track && postTrackState.track.diagnostics && postTrackState.track.diagnostics.watchlistDebug && postTrackState.track.diagnostics.watchlistDebug.scanner_estimate_authority_reason_code, 'watchlist lifecycle / authority handoff'],
-    ['watchlistDowngradeReason', preTrackState && preTrackState.track && preTrackState.track.diagnostics && preTrackState.track.diagnostics.watchlistDebug && preTrackState.track.diagnostics.watchlistDebug.downgradeReason, postTrackState && postTrackState.track && postTrackState.track.diagnostics && postTrackState.track.diagnostics.watchlistDebug && postTrackState.track.diagnostics.watchlistDebug.downgradeReason, 'watchlist lifecycle / downgrade path']
+    ['watchlistAuthorityReasonCode', normalizeOptionalText(preTrackState && preTrackState.track && preTrackState.track.diagnostics && preTrackState.track.diagnostics.watchlistDebug && preTrackState.track.diagnostics.watchlistDebug.scanner_estimate_authority_reason_code), normalizeOptionalText(postTrackState && postTrackState.track && postTrackState.track.diagnostics && postTrackState.track.diagnostics.watchlistDebug && postTrackState.track.diagnostics.watchlistDebug.scanner_estimate_authority_reason_code), 'watchlist lifecycle / authority handoff'],
+    ['watchlistDowngradeReason', normalizeOptionalText(preTrackState && preTrackState.track && preTrackState.track.diagnostics && preTrackState.track.diagnostics.watchlistDebug && preTrackState.track.diagnostics.watchlistDebug.downgradeReason), normalizeOptionalText(postTrackState && postTrackState.track && postTrackState.track.diagnostics && postTrackState.track.diagnostics.watchlistDebug && postTrackState.track.diagnostics.watchlistDebug.downgradeReason), 'watchlist lifecycle / downgrade path']
   ];
 
   const firstMutation = fields.find(([, before, after]) => JSON.stringify(before) !== JSON.stringify(after));

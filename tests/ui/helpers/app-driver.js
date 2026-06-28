@@ -124,6 +124,20 @@ async function openReviewForTicker(page, ticker){
   }, ticker, {timeout:30000});
 }
 
+async function waitForUiTransitionSettle(page){
+  await page.evaluate(async () => {
+    await new Promise(resolve => {
+      if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => resolve());
+        });
+        return;
+      }
+      setTimeout(resolve, 50);
+    });
+  });
+}
+
 async function addActiveReviewToWatchlistIfEligible(page){
   const button = page.locator('#addWatchlistActiveBtn');
   if(!(await button.count())) return false;
@@ -151,5 +165,6 @@ module.exports = {
   openReviewForTicker,
   addActiveReviewToWatchlistIfEligible,
   openTrackTab,
+  waitForUiTransitionSettle,
   artifactPath
 };

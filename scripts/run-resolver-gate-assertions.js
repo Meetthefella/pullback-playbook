@@ -8362,6 +8362,11 @@ function runTrackPresentationAuthorityAssertions(){
     || trackedLifecycleEntryPresentation.tone !== 'entry'){
     throw new Error('Track shared presentation must preserve lifecycle Entry over soft tracked watch when no hard blocker exists.');
   }
+  if(trackedLifecycleEntryPresentation.badgeLabel !== 'Entry'
+    || trackedLifecycleEntryPresentation.actionLabel !== 'Entry'
+    || trackedLifecycleEntryPresentation.headline !== 'Entry'){
+    throw new Error('Track shared presentation must align badge/action/headline labels with preserved lifecycle Entry authority.');
+  }
   const trackedLifecycleBlockedPresentation = trackLifecycleAuthoritySandbox.buildSharedReviewTrackPresentation({
     ticker:'UNP',
     watchlist:{inWatchlist:true, debug:{}},

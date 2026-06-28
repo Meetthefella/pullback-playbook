@@ -8031,15 +8031,20 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       ? (canonicalTone || String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')
       : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor'));
   const suppressingTrackedAvoid = suppressAvoidForTrackedWatch === true;
+  const preserveTrackedLifecycleLabels = preserveTrackedLifecycleCanonicalVerdict && !suppressingTrackedAvoid;
   const mainBlocker = suppressAvoidForTrackedWatch
     ? 'Trend is extended away from support - keep on monitor until price resets or repairs.'
     : String(simplifiedState.mainBlocker || '').trim();
   const finalBadgeLabel = suppressingTrackedAvoid
     ? 'Watch'
-    : String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim();
+    : (preserveTrackedLifecycleLabels
+      ? String(globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()
+      : String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim());
   const finalActionLabel = suppressingTrackedAvoid
     ? (visualBucket === 'diminishing' ? 'Diminishing' : globalVerdictLabel(canonicalVerdict || 'watch'))
-    : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim();
+    : (preserveTrackedLifecycleLabels
+      ? String(globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()
+      : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim());
   const headline = String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim();
   const primaryReason = mainBlocker || String(globalVerdict.reason || '').trim();
   const nextAction = canonicalVerdict === 'watch'

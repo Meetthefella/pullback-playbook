@@ -180,6 +180,23 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
 
   const appState = await page.evaluate(async ({ticker, consoleEvents, authoritativeRecord}) => {
     const safeText = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const withReviewProjectionSuppressed = callback => {
+      if(typeof callback !== 'function') return null;
+      const stateRef = typeof uiState === 'object' && uiState ? uiState : null;
+      if(!stateRef) return callback();
+      const previousProjectionSnapshot = stateRef.activeReviewSourceProjectionSnapshot;
+      const previousProjectionSource = stateRef.activeReviewProjectionSource;
+      try{
+        delete stateRef.activeReviewSourceProjectionSnapshot;
+        stateRef.activeReviewProjectionSource = '';
+        return callback();
+      }finally{
+        if(previousProjectionSnapshot === undefined) delete stateRef.activeReviewSourceProjectionSnapshot;
+        else stateRef.activeReviewSourceProjectionSnapshot = previousProjectionSnapshot;
+        if(previousProjectionSource === undefined) delete stateRef.activeReviewProjectionSource;
+        else stateRef.activeReviewProjectionSource = previousProjectionSource;
+      }
+    };
     const record = authoritativeRecord || (() => {
       if(typeof getTickerRecord === 'function'){
         const direct = getTickerRecord(ticker);
@@ -195,7 +212,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     })();
     const globalVerdict = record && typeof resolveGlobalVerdict === 'function' ? resolveGlobalVerdict(record) : null;
     const scanSimplified = record && typeof resolveSimplifiedStateForSurface === 'function'
-      ? resolveSimplifiedStateForSurface(record, 'scan', {source:'playwright_parity', mutationSource:'playwright_parity'})
+      ? withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(record, 'scan', {source:'playwright_parity', mutationSource:'playwright_parity'}))
       : null;
     const reviewStateHealth = record && typeof currentReviewStateHealthSnapshot === 'function'
       ? currentReviewStateHealthSnapshot(record)
@@ -213,8 +230,26 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       && String(uiState.activeReviewSourceProjectionSnapshot.ticker || '').trim().toUpperCase() === String(ticker || '').trim().toUpperCase()
         ? uiState.activeReviewSourceProjectionSnapshot
         : null;
-    const reviewProjectionSource = activeProjectionSnapshot
-      ? String(uiState.activeReviewProjectionSource || 'clicked_card_snapshot')
+    const synthesizedProjectionSnapshot = !activeProjectionSnapshot
+      && reviewStateHealth
+      && String(reviewStateHealth.sourceOfTruth || '').trim().toLowerCase() === 'review_projection_snapshot'
+        ? {
+          ticker:String(ticker || '').trim().toUpperCase(),
+          canonicalVerdict:String(reviewStateHealth.canonicalVerdict || ''),
+          finalVerdict:String(reviewStateHealth.canonicalVerdict || ''),
+          renderedVerdict:String(reviewStateHealth.canonicalVerdict || ''),
+          visualBucket:String(reviewStateHealth.visualBucket || ''),
+          renderedBucket:String(reviewStateHealth.visualBucket || ''),
+          sourceOfTruthVisualBucket:String(reviewStateHealth.visualBucket || ''),
+          tone:String(reviewStateHealth.tone || ''),
+          decisionSummary:String(reviewStateHealth.primaryBlockerReason || ''),
+          actionGuidance:safeText(document.getElementById('reviewNextActionInline') && document.getElementById('reviewNextActionInline').textContent),
+          source:'review_state_health_snapshot'
+        }
+        : null;
+    const effectiveProjectionSnapshot = activeProjectionSnapshot || synthesizedProjectionSnapshot;
+    const reviewProjectionSource = effectiveProjectionSnapshot
+      ? String((activeProjectionSnapshot && uiState && uiState.activeReviewProjectionSource) || 'clicked_card_snapshot')
       : '';
     const reviewShell = document.querySelector('#reviewWorkspace .reviewworkspace-shell');
     const activeTrackCard = document.querySelector(`[data-watchlist-ticker="${ticker}"]`);
@@ -289,7 +324,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       },
       reviewProjectionContext:{
         reviewProjectionSource,
-        reviewProjectionSnapshot:activeProjectionSnapshot
+        reviewProjectionSnapshot:effectiveProjectionSnapshot
       }
     };
   }, {ticker, consoleEvents, authoritativeRecord});
