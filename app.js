@@ -3759,8 +3759,8 @@ function currentReviewStateHealthSnapshot(record){
     uiState.activeReviewProjectionSource
     || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
   ).trim().toLowerCase();
-  const reviewSnapshotAuthority = reviewProjectionSource === 'clicked_card_snapshot'
-    || (reviewProjectionSource === 'track_projection_updated' && !!activeProjectionSnapshot);
+  const reviewSnapshotAuthority = reviewProjectionSource === 'track_projection_updated'
+    && !!activeProjectionSnapshot;
   const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {
     renderPass:0,
     source:'diagnostic_snapshot',
