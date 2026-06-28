@@ -8937,6 +8937,51 @@ function runReviewPricedButNotReadyAssertions(){
   if(entrySemantic.pricedButNotReady === true || String(entrySemantic.rrDisplay || '') === 'Priced'){
     throw new Error('Entry-ready states must retain actionable numeric plan behaviour.');
   }
+  const canonicalReviewEntrySemantic = sandbox.buildReviewSemanticStatus({
+    simplifiedState:{
+      canonicalVerdict:'entry',
+      structureState:'strong',
+      structureEligibility:'alive',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'attempt',
+      entryGatePass:false,
+      mainBlocker:'Conditions are not strong enough for active focus.'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      setup_location_state:'volatile',
+      priceability_state:'unpriceable',
+      bounce_state:'attempt',
+      main_blocker:'Repair is forming but the setup is not priceable yet.'
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'attempt',
+      stabilisationState:'none'
+    },
+    displayedPlan:{
+      status:'valid',
+      entry:110,
+      stop:102,
+      target:130,
+      rewardRisk:{valid:true, rrRatio:2.5}
+    },
+    planRealism:{raw_rr:2.5}
+  });
+  if(/not priceable yet|too far above support/i.test(String(canonicalReviewEntrySemantic.blocker || ''))){
+    throw new Error('Review semantics must not reintroduce legacy global unpriceable blocker copy when simplified Review state is priceable.');
+  }
+  if(canonicalReviewEntrySemantic.pricedButNotReady !== true || String(canonicalReviewEntrySemantic.rrDisplay || '') !== 'Priced'){
+    throw new Error('Simplified canonical Entry with pending confirmation should remain a priced-but-not-ready Review state.');
+  }
+  if(/setup remains untradable|trend is weakening/i.test(String(canonicalReviewEntrySemantic.tradeStatus && canonicalReviewEntrySemantic.tradeStatus.line1 || ''))){
+    throw new Error('Simplified canonical Entry with pending confirmation must not regress to legacy untradable or weakening Review copy.');
+  }
   const weakSemantic = sandbox.buildReviewSemanticStatus({
     simplifiedState:{
       canonicalVerdict:'watch',

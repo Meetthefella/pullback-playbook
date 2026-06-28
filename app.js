@@ -23763,11 +23763,11 @@ function buildReviewSemanticStatus({
   const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
   const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
   const verdict = String(simplified.canonicalVerdict || global.final_verdict || 'watch').trim().toLowerCase();
-  const structureState = String(derived.structureState || global.structure_state || '').trim().toLowerCase();
-  const structureEligibility = String(global.structure_eligibility || '').trim().toLowerCase();
-  const setupLocationState = String(global.setup_location_state || derived.setupLocationState || '').trim().toLowerCase();
-  const priceabilityState = String(global.priceability_state || derived.priceabilityState || '').trim().toLowerCase();
-  const bounceState = String(global.bounce_state || derived.bounceState || '').trim().toLowerCase();
+  const structureState = String(simplified.structureState || derived.structureState || global.structure_state || '').trim().toLowerCase();
+  const structureEligibility = String(simplified.structureEligibility || global.structure_eligibility || '').trim().toLowerCase();
+  const setupLocationState = String(simplified.setupLocationState || global.setup_location_state || derived.setupLocationState || '').trim().toLowerCase();
+  const priceabilityState = String(simplified.priceabilityState || global.priceability_state || derived.priceabilityState || '').trim().toLowerCase();
+  const bounceState = String(simplified.bounceState || global.bounce_state || derived.bounceState || '').trim().toLowerCase();
   const stabilisationState = String(derived.stabilisationState || '').trim().toLowerCase();
   const rawBlocker = String(simplified.mainBlocker || global.main_blocker || global.reason || '').trim();
   const planStatus = String(simplified.planStatus || plan.status || global.plan_status || '').trim().toLowerCase();
