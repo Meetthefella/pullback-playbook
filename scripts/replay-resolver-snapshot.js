@@ -390,79 +390,87 @@ async function fetchSnapshot(adapter, providerConfig, ticker){
 
 function buildReplayDeps(sandbox){
   let coreDepsCache = null;
-  const resolveGlobalVerdict = record => {
-    if(!coreDepsCache){
-      coreDepsCache = {
-        resolveFinalStateContract(item){
-          return {
-            finalVerdict:'Watch',
-            final_verdict:'watch',
-            structuralState:'developing',
-            actionStateKey:'wait_for_confirmation',
-            planStatusKey:String(item && item.displayedPlan && item.displayedPlan.status || item && item.plan && item.plan.status || 'valid').trim().toLowerCase(),
-            tradeabilityVerdict:'Watch',
-            blockerReason:'Needs stronger confirmation',
-            reasonSummary:'Needs stronger confirmation',
-            terminal:false,
-            baseVerdict:'watch'
-          };
-        },
-        resolvePreLifecycleStateContract(item){
-          return {
-            finalVerdict:'Watch',
-            final_verdict:'watch',
-            structuralState:'developing',
-            actionStateKey:'wait_for_confirmation',
-            planStatusKey:String(item && item.displayedPlan && item.displayedPlan.status || item && item.plan && item.plan.status || 'valid').trim().toLowerCase(),
-            tradeabilityVerdict:'Watch',
-            blockerReason:'Needs stronger confirmation',
-            reasonSummary:'Needs stronger confirmation',
-            terminal:false,
-            baseVerdict:'watch'
-          };
-        },
-        baseVerdictFromResolvedContract(resolved){
-          return sandbox.window.ResolverCore.normalizeVerdict(resolved && (resolved.baseVerdict || resolved.finalVerdict || resolved.tradeabilityVerdict || 'watch'));
-        },
-        analysisDerivedStatesFromRecord(item){
-          return item && item.derivedStates || {};
-        },
-        effectivePlanForRecord(item){
-          return item && item.effectivePlan || {};
-        },
-        applySetupConfirmationPlanGate(item, displayedPlan){
-          return item && item.displayedPlan || displayedPlan || {};
-        },
-        deriveCurrentPlanState(entry, stop, target, quoteCurrency){
-          return sandbox.deriveCurrentPlanState(entry, stop, target, quoteCurrency);
-        },
-        evaluatePlanRealism(item){
-          return item && item.planRealism || null;
-        },
-        setupScoreForRecord(item){
-          return numericOrNull(item && item.setupScore) ?? 0;
-        },
-        canonicalSetupScoreForRecord(item){
-          return numericOrNull(item && item.setupScore) ?? 0;
-        },
-        buildCumulativePenaltyTrace(item){
-          return item && item.cumulativePenaltyTrace && Array.isArray(item.cumulativePenaltyTrace.sources)
-            ? item.cumulativePenaltyTrace
-            : {sources:[]};
-        },
-        isHostileMarketStatus(status){
-          const safe = String(status || '').trim().toLowerCase();
-          return safe === 'weak' || safe === 'hostile' || safe.includes('below 50');
-        },
-        state:{marketStatus:sandbox.state.marketStatus},
-        scannerScoreGradientClass(){
-          return '';
+  const ensureCoreDeps = () => {
+    if(coreDepsCache) return coreDepsCache;
+    coreDepsCache = {
+      resolveFinalStateContract(item){
+        if(item && item.resolvedContract && typeof item.resolvedContract === 'object'){
+          return item.resolvedContract;
         }
-      };
-    }
-    return sandbox.window.ResolverCore.resolveGlobalVerdict(record, coreDepsCache);
+        return {
+          finalVerdict:'Watch',
+          final_verdict:'watch',
+          structuralState:'developing',
+          actionStateKey:'wait_for_confirmation',
+          planStatusKey:String(item && item.displayedPlan && item.displayedPlan.status || item && item.plan && item.plan.status || 'valid').trim().toLowerCase(),
+          tradeabilityVerdict:'Watch',
+          blockerReason:'Needs stronger confirmation',
+          reasonSummary:'Needs stronger confirmation',
+          terminal:false,
+          baseVerdict:'watch'
+        };
+      },
+      resolvePreLifecycleStateContract(item){
+        if(item && item.resolvedContract && typeof item.resolvedContract === 'object'){
+          return item.resolvedContract;
+        }
+        return {
+          finalVerdict:'Watch',
+          final_verdict:'watch',
+          structuralState:'developing',
+          actionStateKey:'wait_for_confirmation',
+          planStatusKey:String(item && item.displayedPlan && item.displayedPlan.status || item && item.plan && item.plan.status || 'valid').trim().toLowerCase(),
+          tradeabilityVerdict:'Watch',
+          blockerReason:'Needs stronger confirmation',
+          reasonSummary:'Needs stronger confirmation',
+          terminal:false,
+          baseVerdict:'watch'
+        };
+      },
+      baseVerdictFromResolvedContract(resolved){
+        return sandbox.window.ResolverCore.normalizeVerdict(resolved && (resolved.baseVerdict || resolved.finalVerdict || resolved.tradeabilityVerdict || 'watch'));
+      },
+      analysisDerivedStatesFromRecord(item){
+        return item && item.derivedStates || {};
+      },
+      effectivePlanForRecord(item){
+        return item && item.effectivePlan || {};
+      },
+      applySetupConfirmationPlanGate(item, displayedPlan){
+        return item && item.displayedPlan || displayedPlan || {};
+      },
+      deriveCurrentPlanState(entry, stop, target, quoteCurrency){
+        return sandbox.deriveCurrentPlanState(entry, stop, target, quoteCurrency);
+      },
+      evaluatePlanRealism(item){
+        return item && item.planRealism || null;
+      },
+      setupScoreForRecord(item){
+        return numericOrNull(item && item.setupScore) ?? 0;
+      },
+      canonicalSetupScoreForRecord(item){
+        return numericOrNull(item && item.setupScore) ?? 0;
+      },
+      buildCumulativePenaltyTrace(item){
+        return item && item.cumulativePenaltyTrace && Array.isArray(item.cumulativePenaltyTrace.sources)
+          ? item.cumulativePenaltyTrace
+          : {sources:[]};
+      },
+      isHostileMarketStatus(status){
+        const safe = String(status || '').trim().toLowerCase();
+        return safe === 'weak' || safe === 'hostile' || safe.includes('below 50');
+      },
+      state:{marketStatus:sandbox.state.marketStatus},
+      scannerScoreGradientClass(){
+        return '';
+      }
+    };
+    return coreDepsCache;
   };
-  return {resolveGlobalVerdict, coreDeps:() => coreDepsCache};
+  const resolveGlobalVerdict = record => {
+    return sandbox.window.ResolverCore.resolveGlobalVerdict(record, ensureCoreDeps());
+  };
+  return {resolveGlobalVerdict, coreDeps:ensureCoreDeps};
 }
 
 function buildResolvedContractSeed(chartVerdict, displayedPlan, verdictReason, globalVerdictKey = 'watch'){
@@ -1106,8 +1114,20 @@ async function main(){
         deps:coreDeps()
       })
       : null;
+    const authoritativeScannerSnapshotVerdict = String(
+      scannerRecord
+      && scannerRecord.scan
+      && (
+        scannerRecord.scan.resolvedVerdict
+        || scannerRecord.scan.verdict
+        || ''
+      )
+    ).trim();
     const scannerCanonicalVerdictRaw = String(
-      (simplifiedScannerState && simplifiedScannerState.canonicalVerdict)
+      (authoritativeScannerSnapshotVerdict
+        ? sandbox.window.ResolverCore.normalizeGlobalVerdictKey(authoritativeScannerSnapshotVerdict)
+        : '')
+      || (simplifiedScannerState && simplifiedScannerState.canonicalVerdict)
       || scannerResolvedContract.final_verdict
       || ''
     ).trim().toLowerCase();
@@ -1229,7 +1249,14 @@ async function main(){
       blockerCopy
     });
     const scannerVisualBucket = String(
-      (simplifiedScannerState && simplifiedScannerState.visualBucket)
+      (authoritativeScannerSnapshotVerdict
+        ? (
+          scannerCanonicalVerdict === 'entry'
+            ? 'entry'
+            : (scannerCanonicalVerdict === 'near_entry' ? 'near_entry' : (scannerCanonicalVerdict === 'avoid' ? 'avoid' : 'monitor'))
+        )
+        : '')
+      || (simplifiedScannerState && simplifiedScannerState.visualBucket)
       || scannerVisualState.visualBucket
       || ''
     ).trim().toLowerCase() || 'monitor';

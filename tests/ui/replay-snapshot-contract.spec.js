@@ -170,3 +170,90 @@ test('replay honors authoritative review projection snapshot when present', asyn
   expect(replay.result.reviewVisualBucket).toBe('entry');
   expect(replay.result.reviewProjectionSource).toBe('clicked_card_snapshot');
 });
+
+test('replay keeps scanner canonical state aligned with canonical simplified scan state for TROW-like soft-readiness cases', async () => {
+  const snapshot = buildReplaySnapshotFromRecord({
+    ticker:'TROW',
+    meta:{
+      companyName:'T. Rowe Price Group, Inc.',
+      exchange:'NASDAQ',
+      tradingViewSymbol:'NASDAQ:TROW'
+    },
+    marketData:{
+      currency:'USD',
+      price:110.27,
+      previousClose:106.34,
+      ma20:106.727,
+      ma50:103.852,
+      ma200:100.9815,
+      rsi:64.82,
+      volume:3831934,
+      avgVolume:2115787.96,
+      asOf:'2026-06-28T22:40:32.187Z',
+      history:[{date:'2026-06-26', open:110.27, high:110.27, low:110.27, close:110.27, volume:3831934}]
+    },
+    plan:{
+      entry:110.27,
+      stop:102.29,
+      firstTarget:136.19,
+      status:'valid',
+      tradeability:'risk_only',
+      capitalFit:'unknown',
+      capitalNote:'Capital check: FX estimated',
+      riskStatus:'fits_risk',
+      source:'scanner_estimate'
+    },
+    scan:{
+      analysisProjection:{
+        price:110.27,
+        sma20:106.727,
+        sma50:103.852,
+        sma200:100.9815,
+        rr_ratio:'3.25',
+        risk_status:'fits_risk',
+        derived_states:{
+          trend_state:'strong',
+          pullback_zone:'none',
+          setup_location_state:'off_level',
+          priceability_state:'priceable',
+          structure_state:'strong',
+          stabilisation_state:'none',
+          bounce_state:'attempt',
+          has_clear_invalidation_level:'yes',
+          has_priceable_plan:'yes',
+          unpriceable_block_reason:'Developing - waiting for confirmation.',
+          volume_state:'supportive',
+          entry_defined:'yes',
+          stop_defined:'yes',
+          target_defined:'yes'
+        }
+      },
+      resolvedVerdict:'Entry',
+      verdict:'Entry',
+      score:7,
+      riskStatus:'fits_risk',
+      summary:'trend structure is intact, pullback is close to support, trade plan is mostly defined.'
+    },
+    review:{
+      analysisState:{
+        normalized:{coach_summary:'Constructive but waiting for confirmation.'}
+      }
+    }
+  }, {
+    reviewProjectionSource:'clicked_card_snapshot',
+    reviewProjectionSnapshot:{
+      ticker:'TROW',
+      canonicalVerdict:'entry',
+      finalVerdict:'entry',
+      sourceOfTruthVisualBucket:'entry',
+      visualBucket:'entry',
+      tone:'entry'
+    }
+  });
+
+  const replay = runReplayForSnapshot(snapshot);
+
+  expect(replay.result.scannerCanonicalVerdict).toBe('entry');
+  expect(replay.result.scannerVisualBucket).toBe('entry');
+  expect(replay.result.reviewCanonicalVerdict).toBe('entry');
+});
