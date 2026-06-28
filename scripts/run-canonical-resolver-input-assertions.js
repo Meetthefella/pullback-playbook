@@ -374,7 +374,6 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
   assert.strictEqual(reviewResult.canonicalVerdict, 'entry', 'FX-estimated risk_only plan should preserve canonical Entry for TROW-like review');
   assert.strictEqual(reviewResult.priceabilityState, 'priceable', 'FX-estimated risk_only plan should reconcile stale unpriceable to priceable');
   assert.strictEqual(reviewResult.planStatus, 'valid', 'FX-estimated risk_only reconciliation should keep plan valid');
-
   const tooHeavyRecord = makeRecord({
     marketData:{price:110.27, currency:'GBP'},
     effectivePlan:{entry:110.27, stop:102.29, firstTarget:136.19, source:'scanner_estimate'},

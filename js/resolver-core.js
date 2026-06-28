@@ -1599,6 +1599,25 @@
       nonTrackedCanonicalDiagnostics && nonTrackedCanonicalDiagnostics.finalPriceabilityState
       || ''
     ).trim().toLowerCase();
+    const nonTrackedCanonicalTradeability = String(displayedPlan && displayedPlan.tradeability || '').trim().toLowerCase();
+    const nonTrackedCanonicalCapitalFit = String(
+      displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit
+      || ''
+    ).trim().toLowerCase();
+    const nonTrackedCanonicalCapitalNote = String(
+      displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.capital_note
+      || ''
+    ).trim();
+    const nonTrackedCanonicalFxStatus = String(
+      displayedPlan && displayedPlan.capitalFit && displayedPlan.capitalFit.fx_status
+      || ''
+    ).trim().toLowerCase();
+    const nonTrackedCanonicalRiskOnlyFxEstimated = nonTrackedCanonicalTradeability === 'risk_only'
+      && nonTrackedCanonicalCapitalFit === 'unknown'
+      && (
+        nonTrackedCanonicalFxStatus === 'estimated'
+        || /fx estimated|conversion unavailable|fx unavailable|capital check: fx estimated/i.test(nonTrackedCanonicalCapitalNote)
+      );
     const nonTrackedCanonicalAlignmentApplied = !!(
       !isTracked
       && nonTrackedCanonicalDiagnostics
@@ -1606,7 +1625,10 @@
       && nonTrackedCanonicalDiagnostics.structuredBlockersPresent !== true
       && displayedPlan
       && String(displayedPlan.status || '').trim().toLowerCase() === 'valid'
-      && String(displayedPlan.tradeability || '').trim().toLowerCase() === 'tradable'
+      && (
+        nonTrackedCanonicalTradeability === 'tradable'
+        || nonTrackedCanonicalRiskOnlyFxEstimated
+      )
       && ['entry','near_entry'].includes(nonTrackedCanonicalVerdict)
       && nonTrackedCanonicalPriceabilityState === 'priceable'
     );
