@@ -40703,11 +40703,11 @@ if(typeof window !== 'undefined'){
   window.runScannerVerdictResolutionAudit = runScannerVerdictResolutionAudit;
 }
 
-function resolvePreLifecycleStateContract(record){
+function resolvePreLifecycleStateContract(record, options = {}){
   const item = record && typeof record === 'object' ? record : {};
-  const derivedStates = analysisDerivedStatesFromRecord(item);
-  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
-  const displayedPlan = deriveCurrentPlanState(
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
+  const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     effectivePlan.entry,
     effectivePlan.stop,
     effectivePlan.firstTarget,
@@ -40762,14 +40762,36 @@ function resolvePreLifecycleStateContract(record){
 }
 
 function resolveGlobalVerdict(record, deps = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const analysisDerivedStates = deps.analysisDerivedStatesFromRecord || analysisDerivedStatesFromRecord;
+  const effectivePlanResolver = deps.effectivePlanForRecord || effectivePlanForRecord;
+  const deriveDisplayedPlan = deps.deriveCurrentPlanState || deriveCurrentPlanState;
+  const applyPlanGate = deps.applySetupConfirmationPlanGate || applySetupConfirmationPlanGate;
+  const derivedStates = analysisDerivedStates(item);
+  const effectivePlan = effectivePlanResolver(item, {allowScannerFallback:true});
+  const displayedPlan = applyPlanGate(
+    item,
+    deriveDisplayedPlan(
+      effectivePlan.entry,
+      effectivePlan.stop,
+      effectivePlan.firstTarget,
+      item.marketData && item.marketData.currency
+    ),
+    derivedStates
+  );
+  const preLifecycleResolver = deps.resolvePreLifecycleStateContract || resolvePreLifecycleStateContract;
   const resolverDeps = {
     resolveFinalStateContract:deps.resolveFinalStateContract || resolveFinalStateContract,
-    resolvePreLifecycleStateContract:deps.resolvePreLifecycleStateContract || resolvePreLifecycleStateContract,
+    resolvePreLifecycleStateContract:inputRecord => preLifecycleResolver(inputRecord, {
+      derivedStates,
+      effectivePlan,
+      displayedPlan
+    }),
     baseVerdictFromResolvedContract:deps.baseVerdictFromResolvedContract || baseVerdictFromResolvedContract,
-    analysisDerivedStatesFromRecord:deps.analysisDerivedStatesFromRecord || analysisDerivedStatesFromRecord,
-    effectivePlanForRecord:deps.effectivePlanForRecord || effectivePlanForRecord,
-    applySetupConfirmationPlanGate:deps.applySetupConfirmationPlanGate || applySetupConfirmationPlanGate,
-    deriveCurrentPlanState:deps.deriveCurrentPlanState || deriveCurrentPlanState,
+    analysisDerivedStatesFromRecord:() => derivedStates,
+    effectivePlanForRecord:() => effectivePlan,
+    applySetupConfirmationPlanGate:applyPlanGate,
+    deriveCurrentPlanState:() => displayedPlan,
     evaluatePlanRealism:deps.evaluatePlanRealism || evaluatePlanRealism,
     setupScoreForRecord:deps.setupScoreForRecord || setupScoreForRecord,
     canonicalSetupScoreForRecord:deps.canonicalSetupScoreForRecord || rawSetupScoreForRecord,
@@ -40779,19 +40801,6 @@ function resolveGlobalVerdict(record, deps = {}){
     scannerScoreGradientClass:deps.scannerScoreGradientClass || scannerScoreGradientClass
   };
   const verdict = resolveGlobalVerdictImpl(record, resolverDeps);
-  const item = record && typeof record === 'object' ? record : {};
-  const derivedStates = resolverDeps.analysisDerivedStatesFromRecord(item);
-  const effectivePlan = resolverDeps.effectivePlanForRecord(item, {allowScannerFallback:true});
-  const displayedPlan = resolverDeps.applySetupConfirmationPlanGate(
-    item,
-    resolverDeps.deriveCurrentPlanState(
-      effectivePlan.entry,
-      effectivePlan.stop,
-      effectivePlan.firstTarget,
-      item.marketData && item.marketData.currency
-    ),
-    derivedStates
-  );
   const resolvedContract = resolverDeps.resolveFinalStateContract(item, {
     context:'global',
     derivedStates,

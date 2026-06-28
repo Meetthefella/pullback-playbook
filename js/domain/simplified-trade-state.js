@@ -608,7 +608,13 @@
         deriveCurrentPlanState:() => planState,
         applySetupConfirmationPlanGate:deps.applySetupConfirmationPlanGate || ((unusedRecord, displayedPlan) => displayedPlan),
         baseVerdictFromResolvedContract:deps.baseVerdictFromResolvedContract || baseVerdictFromResolvedContract,
-        resolvePreLifecycleStateContract:deps.resolvePreLifecycleStateContract || ((inputRecord) => fallbackPreLifecycleContract(inputRecord, derivedStates, planState)),
+        resolvePreLifecycleStateContract:deps.resolvePreLifecycleStateContract
+          ? (() => deps.resolvePreLifecycleStateContract(item, {
+            derivedStates,
+            effectivePlan,
+            displayedPlan:planState
+          }))
+          : ((inputRecord) => fallbackPreLifecycleContract(inputRecord, derivedStates, planState)),
         resolveFinalStateContract:deps.resolveFinalStateContract || ((inputRecord) => fallbackPreLifecycleContract(inputRecord, derivedStates, planState)),
         evaluatePlanRealism:deps.evaluatePlanRealism || (() => ({credible_rr:planState.rr})),
         setupScoreForRecord:deps.setupScoreForRecord || (() => 0),
