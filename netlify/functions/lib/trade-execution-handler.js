@@ -140,7 +140,7 @@ function trading212BasicAuthHeader(apiKey, apiSecret){
 async function probeTrading212PaperConnection(event = {}, env = process.env){
   const {apiKey, apiSecret, baseUrl} = trading212PaperRuntimeConfig(event, env);
   if(!apiKey || !apiSecret){
-    return {ok:false, statusCode:503, code:'paper_trade_not_configured', message:'Trading 212 paper trading needs a tester paper API key and API secret.'};
+    return {ok:false, statusCode:503, code:'paper_trade_not_configured', message:'Trading 212 demo trading needs API credentials in the request headers or server environment.'};
   }
   const readinessUrl = `${baseUrl.replace(/\/$/, '')}${TRADING212_PAPER_READINESS_PATH}`;
   try{
@@ -156,7 +156,7 @@ async function probeTrading212PaperConnection(event = {}, env = process.env){
         ok:false,
         statusCode:upstream.status || 502,
         code:String(data && data.code || (upstream.status === 401 ? 'paper_trade_auth_failed' : 'paper_trade_probe_failed')),
-        message:String(data && (data.error || data.message) || (upstream.status === 401 ? 'Trading 212 paper credentials were rejected.' : 'Trading 212 paper readiness probe failed.'))
+        message:String(data && (data.error || data.message) || (upstream.status === 401 ? 'Trading 212 API credentials were rejected by the demo environment.' : 'Trading 212 demo readiness probe failed.'))
       };
     }
     return {
@@ -219,7 +219,7 @@ async function submitTrading212PaperOrder(body = {}, env = process.env, event = 
   if(!apiKey || !apiSecret){
     return jsonResponse(503, {
       code:'paper_trade_not_configured',
-      error:'Trading 212 paper trading needs a tester paper API key and API secret.'
+      error:'Trading 212 demo trading needs API credentials in the request headers or server environment.'
     });
   }
 

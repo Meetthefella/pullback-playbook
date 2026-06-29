@@ -353,3 +353,138 @@ test('canonical Entry presentation remains authoritative across review, trade pl
   expect(entryPanelText).not.toContain('needs confirmation');
   expect(entryPanelText).not.toContain('The app knows the maths, but the trade isn\'t ready');
 });
+
+test('canonical Entry can enable Paper Trade through backend gateway configuration without local credentials', async ({page}) => {
+  const appUrl = `file:///${path.resolve(__dirname, '..', '..', 'index.html').replace(/\\/g, '/')}`;
+  await page.goto(appUrl, {waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => {
+    if(typeof startupDebugRenderState !== 'function') return false;
+    const ready = startupDebugRenderState();
+    return !!(ready && ready.hydrationComplete === true && ready.riskRefreshComplete === true);
+  }, null, {timeout:30000});
+  await page.evaluate(() => {
+    try{
+      localStorage.clear();
+      sessionStorage.clear();
+    }catch(_error){}
+    if(typeof resetAllData === 'function') resetAllData();
+  });
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => {
+    if(typeof startupDebugRenderState !== 'function') return false;
+    const ready = startupDebugRenderState();
+    return !!(ready && ready.hydrationComplete === true && ready.riskRefreshComplete === true);
+  }, null, {timeout:30000});
+
+  await page.evaluate(() => {
+    const record = upsertTickerRecord('BKND');
+    record.meta.companyName = 'Backend Gateway Plc';
+    record.meta.exchange = 'NASDAQ';
+    record.meta.tradingViewSymbol = 'NASDAQ:BKND';
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData.currency = 'USD';
+    record.marketData.price = 75;
+    record.marketData.previousClose = 72.4;
+    record.marketData.ma20 = 73.2;
+    record.marketData.ma50 = 70.1;
+    record.marketData.ma200 = 64.8;
+    record.marketData.rsi = 63.1;
+    record.marketData.volume = 1200000;
+    record.marketData.avgVolume = 1000000;
+    record.marketData.asOf = '2026-06-29T09:00:00.000Z';
+    record.marketData.history = [
+      {date:'2026-06-27', open:73.1, high:75.3, low:72.8, close:75, volume:1200000}
+    ];
+    record.setup.structureState = 'strong';
+    record.setup.structureEligibility = 'alive';
+    record.setup.setupLocationState = 'near_20ma';
+    record.setup.pullbackZone = 'near_20ma';
+    record.setup.priceabilityState = 'priceable';
+    record.setup.bounceState = 'improving';
+    record.setup.stabilisationState = 'stabilising';
+    record.setup.volumeState = 'supportive';
+    record.setup.trendState = 'strong';
+    record.plan.entry = 75;
+    record.plan.stop = 72;
+    record.plan.firstTarget = 84;
+    record.plan.target = 84;
+    record.plan.source = 'scanner_estimate';
+    record.plan.status = 'valid';
+    record.plan.riskStatus = 'fits_risk';
+    record.plan.tradeability = 'tradable';
+    record.plan.triggerState = 'confirmed';
+    record.scan.analysisProjection = {
+      price:75,
+      sma20:73.2,
+      sma50:70.1,
+      sma200:64.8,
+      rr_ratio:'3.00',
+      risk_status:'fits_risk',
+      derived_states:{
+        trend_state:'strong',
+        pullback_zone:'near_20ma',
+        setup_location_state:'near_20ma',
+        priceability_state:'priceable',
+        structure_state:'strong',
+        stabilisation_state:'stabilising',
+        bounce_state:'improving',
+        volume_state:'supportive',
+        has_clear_invalidation_level:'yes',
+        has_priceable_plan:'yes',
+        entry_defined:'yes',
+        stop_defined:'yes',
+        target_defined:'yes'
+      }
+    };
+    record.scan.resolvedVerdict = 'Entry';
+    record.scan.verdict = 'Entry';
+    record.scan.score = 9;
+    record.scan.riskStatus = 'fits_risk';
+    record.scan.summary = 'Trend structure is intact, the bounce is improving, and the trade plan is ready.';
+    record.review.analysisState = {
+      normalized:{
+        coach_summary:'Constructive setup with buyers in control.'
+      }
+    };
+    record.review.manualReview = {
+      entry:75,
+      stop:72,
+      target:84
+    };
+    record.watchlist.inWatchlist = true;
+    record.watchlist.addedAt = '2026-06-29';
+    record.watchlist.expiryAfterTradingDays = 5;
+    record.watchlist.presentation = {
+      sharedPresentation:{
+        canonicalVerdict:'entry',
+        finalVerdict:'entry',
+        visualBucket:'entry',
+        tone:'entry',
+        badgeLabel:'Entry',
+        actionLabel:'Execute only if the trigger remains valid.'
+      }
+    };
+    state.paperTradeApiKey = '';
+    state.paperTradeApiSecret = '';
+    state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
+    trading212PaperAvailabilityChecked = true;
+    trading212PaperEnabled = true;
+    trading212PaperAvailabilityMessage = 'Trading 212 demo gateway is ready through backend configuration.';
+    uiState.activeReviewSourceProjectionSnapshot = {
+      ticker:'BKND',
+      canonicalVerdict:'entry',
+      finalVerdict:'entry',
+      sourceOfTruthVisualBucket:'entry',
+      visualBucket:'entry',
+      tone:'entry'
+    };
+    uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
+    setActiveReviewTicker('BKND');
+    renderReviewWorkspace({source:'backend_gateway_entry_contract_test'});
+  });
+
+  await expect(page.locator('#reviewWorkspace .review-summary-badges .badge')).toContainText('Entry');
+  await expect(page.locator('#tradePlanInputs')).not.toHaveClass(/review-hidden/);
+  await expect(page.locator('#paperTradeBtn')).toBeEnabled();
+  await expect(page.locator('#paperTradeDisabledReason')).toHaveCount(0);
+});

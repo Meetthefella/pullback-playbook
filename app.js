@@ -3543,19 +3543,32 @@ function storedPaperTradeCredentialsReady(){
   return !!(storedPaperTradeApiKey() && storedPaperTradeApiSecret());
 }
 
+function paperTradeGatewayReady(){
+  return trading212PaperSupported === true
+    && trading212PaperAvailabilityChecked === true
+    && trading212PaperEnabled === true;
+}
+
+function paperTradeCredentialsSourceReady(){
+  return storedPaperTradeCredentialsReady() || paperTradeGatewayReady();
+}
+
 function paperTradeTesterSetupComplete(){
-  return !!(String(state.paperTradeTesterSetupCompletedAt || '').trim() && storedPaperTradeCredentialsReady());
+  const completedAt = String(state.paperTradeTesterSetupCompletedAt || '').trim();
+  const gatewayReadyOrPending = trading212PaperAvailabilityChecked !== true || trading212PaperEnabled === true;
+  return !!(completedAt && paperTradeCredentialsSourceReady() && gatewayReadyOrPending);
 }
 
 function testerSetupHealthModel(){
   const completedAt = String(state.paperTradeTesterSetupCompletedAt || '').trim();
   const hasStoredKey = storedPaperTradeCredentialsReady();
+  const gatewayReady = paperTradeGatewayReady();
   const gatewayReadyOrPending = trading212PaperAvailabilityChecked !== true || trading212PaperEnabled === true;
-  if(completedAt && hasStoredKey && gatewayReadyOrPending){
+  if(completedAt && paperTradeCredentialsSourceReady() && gatewayReadyOrPending){
     return {
       complete:true,
       label:'Tester setup completed',
-      detail:`Completed ${formatLocalTimestamp(completedAt) || completedAt}. Paper trading stays paper-only and still depends on gateway readiness.`,
+      detail:`Completed ${formatLocalTimestamp(completedAt) || completedAt}. Trading stays paper-only and still depends on Trading 212 demo gateway readiness.`,
       className:'ok'
     };
   }
@@ -3567,23 +3580,23 @@ function testerSetupHealthModel(){
       className:'warntext'
     };
   }
-  if(!storedPaperTradeCredentialsReady()){
-    return {
-      complete:false,
-      label:'Tester setup waiting on local paper credentials',
-      detail:'Add your Trading 212 paper API key and API secret in Context Settings. They are stored only on this device.',
-      className:'warntext'
-    };
-  }
-  if(trading212PaperAvailabilityChecked !== true){
+  if(!hasStoredKey && trading212PaperAvailabilityChecked !== true){
     return {
       complete:false,
       label:'Tester setup waiting on gateway check',
-      detail:'Read the guidance now. Complete setup after the paper gateway finishes checking.',
+      detail:'The app can use either local Trading 212 API credentials for this tester or backend gateway credentials. Complete setup after the demo gateway finishes checking.',
       className:'tiny'
     };
   }
-  if(trading212PaperEnabled !== true){
+  if(hasStoredKey && trading212PaperAvailabilityChecked !== true){
+    return {
+      complete:false,
+      label:'Tester setup waiting on gateway check',
+      detail:'Read the guidance now. Complete setup after the Trading 212 demo gateway finishes checking.',
+      className:'tiny'
+    };
+  }
+  if(gatewayReady !== true){
     return {
       complete:false,
       label:'Tester setup waiting on paper gateway',
@@ -3594,7 +3607,9 @@ function testerSetupHealthModel(){
   return {
     complete:false,
     label:'Tester setup ready to confirm',
-    detail:'Paper gateway is ready. Complete tester setup to unlock paper-trade actions in Review.',
+    detail:hasStoredKey
+      ? 'Trading 212 demo gateway is ready. Complete tester setup to unlock paper-trade actions in Review.'
+      : 'Trading 212 demo gateway is ready through backend configuration. Complete tester setup to unlock paper-trade actions in Review.',
     className:'tiny'
   };
 }
@@ -3626,8 +3641,7 @@ function renderTesterSetupPanel(){
   if(detail) detail.textContent = model.detail;
   if(confirm){
     confirm.disabled = model.complete === true
-      || !storedPaperTradeCredentialsReady()
-      || !(trading212PaperAvailabilityChecked === true && trading212PaperEnabled === true);
+      || !paperTradeGatewayReady();
     confirm.textContent = model.complete === true ? 'Tester Setup Complete' : 'Complete Tester Setup';
   }
 }
@@ -4565,27 +4579,26 @@ async function submitTesterReport(){
 }
 
 function completeTesterSetup(){
-  if(!storedPaperTradeCredentialsReady()){
+  if(!paperTradeGatewayReady()){
     renderTesterSetupPanel();
-    setStatus('inputStatus', 'Add your local Trading 212 paper API key and API secret before completing tester setup.');
-    return;
-  }
-  if(!(trading212PaperAvailabilityChecked === true && trading212PaperEnabled === true)){
-    renderTesterSetupPanel();
-    setStatus('inputStatus', 'Paper gateway must be ready before tester setup can be completed.');
+    setStatus('inputStatus', 'Trading 212 demo gateway must be ready before tester setup can be completed.');
     return;
   }
   state.paperTradeTesterSetupCompletedAt = new Date().toISOString();
   recordTradeGatewayEvent('tester_setup_complete', {
     state:'ready',
-    message:'Tester setup completed. Paper-only workflow unlocked.'
+    message:storedPaperTradeCredentialsReady()
+      ? 'Tester setup completed with local Trading 212 API credentials. Paper-only workflow unlocked.'
+      : 'Tester setup completed with backend Trading 212 gateway configuration. Paper-only workflow unlocked.'
   });
   saveState();
   renderTesterSetupPanel();
   if(activeReviewTicker() || activeWorkspaceTab() === 'review'){
     renderReviewWorkspace({source:'tester_setup_complete'});
   }
-  setStatus('inputStatus', 'Tester setup completed. Review can now unlock paper-trade actions when the setup qualifies.');
+  setStatus('inputStatus', storedPaperTradeCredentialsReady()
+    ? 'Tester setup completed. Review can now unlock paper-trade actions when the setup qualifies.'
+    : 'Tester setup completed using backend Trading 212 gateway configuration. Review can now unlock paper-trade actions when the setup qualifies.');
 }
 
 function openTesterSetupGuide(){
@@ -36516,13 +36529,11 @@ function renderReviewWorkspace(options = {}){
     marketStatus:record.meta.marketStatus || state.marketStatus || ''
   });
   const paperTradeUi = paperTradeUiStateForTicker(record.ticker);
-  const paperTradeGatewayReady = trading212PaperSupported === true
-    && trading212PaperAvailabilityChecked === true
-    && trading212PaperEnabled === true;
+  const gatewayReadyForPaperTrade = paperTradeGatewayReady();
   const tradeGatewayHealth = tradeGatewayHealthModel();
   const testerSetupComplete = paperTradeTesterSetupComplete();
   const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true
-    && paperTradeGatewayReady === true
+    && gatewayReadyForPaperTrade === true
     && testerSetupComplete === true;
   const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
   if(!paperTradeEligible && paperTradeUi.previewOpen === true){
