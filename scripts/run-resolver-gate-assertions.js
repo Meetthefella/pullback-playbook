@@ -1410,6 +1410,50 @@ function runScannerPolicyCompatibilityAssertions(){
   if(JSON.stringify(policySandbox.finalScanUniverse()) !== JSON.stringify(['LEGACY']) || universeFallbackCalls !== 1){
     throw new Error('Scanner universe policy throw path must evaluate the legacy fallback exactly once.');
   }
+
+  const scannerVerdictSandbox = {
+    Number,
+    Math
+  };
+  vm.createContext(scannerVerdictSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'determineScannerVerdict'), scannerVerdictSandbox, {filename:'app.js#determineScannerVerdict'});
+  vm.runInContext(extractFunctionSource(appSource, 'buildVerdictReason'), scannerVerdictSandbox, {filename:'app.js#buildVerdictReason'});
+  const tentativeBounceVerdict = vm.runInContext(`
+    determineScannerVerdict({
+      technicalValid:true,
+      score:7,
+      checks:{stabilising:true, bounce:false},
+      riskFit:{risk_status:'fits_risk'},
+      rewardRisk:{valid:true, rrState:'strong'}
+    })
+  `, scannerVerdictSandbox);
+  if(tentativeBounceVerdict !== 'Near Entry'){
+    throw new Error('Scanner must not promote stabilising-without-bounce setups to Entry.');
+  }
+  const confirmedBounceVerdict = vm.runInContext(`
+    determineScannerVerdict({
+      technicalValid:true,
+      score:7,
+      checks:{stabilising:true, bounce:true},
+      riskFit:{risk_status:'fits_risk'},
+      rewardRisk:{valid:true, rrState:'strong'}
+    })
+  `, scannerVerdictSandbox);
+  if(confirmedBounceVerdict !== 'Entry'){
+    throw new Error('Scanner must still allow Entry when bounce is confirmed and the plan is strong.');
+  }
+  const tentativeBounceReason = vm.runInContext(`
+    buildVerdictReason({
+      suitability:{summary:'Candidate remains reviewable.'},
+      scan:{status:'Near Entry', summary:''},
+      riskFit:{risk_status:'fits_risk'},
+      rewardRisk:{valid:true, rrState:'strong', rrRatio:2.5},
+      checks:{stabilising:true, bounce:false}
+    })
+  `, scannerVerdictSandbox);
+  if(!/bounce still tentative/i.test(String(tentativeBounceReason || ''))){
+    throw new Error('Scanner must surface the tentative-bounce blocker when Entry is not yet allowed.');
+  }
 }
 
 function runTesterSetupPersistenceFallbackAssertions(){

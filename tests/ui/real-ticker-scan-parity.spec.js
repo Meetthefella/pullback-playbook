@@ -89,6 +89,15 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
       const projected = record && typeof projectTickerForCard === 'function'
         ? projectTickerForCard(record, {includeExecutionDowngrade:false, includeRuntimeFallback:false})
         : null;
+      const projectedScan = record && typeof projectTickerForCard === 'function'
+        ? projectTickerForCard(record, {surface:'scan', includeExecutionDowngrade:false, includeRuntimeFallback:false})
+        : null;
+      const authoritativeScanSnapshot = record && typeof authoritativeScanSurfaceSnapshot === 'function'
+        ? authoritativeScanSurfaceSnapshot(record)
+        : null;
+      const setupScoreTrace = record && typeof setupScoreTraceForRecord === 'function'
+        ? setupScoreTraceForRecord(record)
+        : null;
       const scanPresentation = projected && typeof ScannerView !== 'undefined' && typeof ScannerView.scanPresentationForView === 'function'
         ? ScannerView.scanPresentationForView({
           ...projected,
@@ -115,6 +124,8 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
           verdict: normalize(record.scan.verdict),
           resolvedVerdict: normalize(record.scan.resolvedVerdict),
           score: record.scan.score,
+          scoreDisplay: normalize(record.scan.scoreDisplay),
+          scoreRaw: Number.isFinite(Number(record.scan.scoreRaw)) ? Number(record.scan.scoreRaw) : null,
           summary: normalize(record.scan.summary),
           lastError: normalize(record.scan.lastError)
         } : null,
@@ -136,6 +147,22 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
           badgeLabel: normalize(scanPresentation.badgeLabel),
           summary: normalize(scanPresentation.summary)
         } : null,
+        authoritativeScanSnapshot: authoritativeScanSnapshot ? {
+          canonicalVerdict: normalize(authoritativeScanSnapshot.canonicalVerdict).toLowerCase(),
+          visualBucket: normalize(authoritativeScanSnapshot.visualBucket).toLowerCase(),
+          score: Number.isFinite(Number(authoritativeScanSnapshot.score)) ? Number(authoritativeScanSnapshot.score) : null,
+          summary: normalize(authoritativeScanSnapshot.summary)
+        } : null,
+        projectedCard: projected ? {
+          setupScore: Number.isFinite(Number(projected.setupScore)) ? Number(projected.setupScore) : null,
+          setupScoreDisplay: normalize(projected.setupScoreDisplay),
+          displayStage: normalize(projected.displayStage)
+        } : null,
+        projectedScanCard: projectedScan ? {
+          setupScore: Number.isFinite(Number(projectedScan.setupScore)) ? Number(projectedScan.setupScore) : null,
+          setupScoreDisplay: normalize(projectedScan.setupScoreDisplay),
+          displayStage: normalize(projectedScan.displayStage)
+        } : null,
         sharedPresentation: sharedPresentation ? {
           canonicalVerdict: normalize(sharedPresentation.canonicalVerdict || sharedPresentation.finalVerdict).toLowerCase(),
           visualBucket: normalize(sharedPresentation.visualBucket).toLowerCase(),
@@ -145,7 +172,17 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
         } : null,
         localTickerRecord: record ? {
           scanScore: record.scan && record.scan.score,
+          scanScoreDisplay: normalize(record.scan && record.scan.scoreDisplay),
           setupScore: record.setup && record.setup.score,
+          setupScoreDisplay: normalize(record.setup && record.setup.scoreDisplay),
+          setupScoreSource: normalize(record.setup && record.setup.scoreSource),
+          setupScoreRecomputed: Number.isFinite(Number(record.setup && record.setup.scoreRecomputed)) ? Number(record.setup && record.setup.scoreRecomputed) : null,
+          setupScoreTrace: setupScoreTrace ? {
+            score: Number.isFinite(Number(setupScoreTrace.score)) ? Number(setupScoreTrace.score) : null,
+            source: normalize(setupScoreTrace.source),
+            detail: normalize(setupScoreTrace.detail)
+          } : null,
+          canonicalSetupScore: setupScoreTrace && Number.isFinite(Number(setupScoreTrace.score)) ? Number(setupScoreTrace.score) : null,
           analysisProjectionPresent: !!(record.scan && record.scan.analysisProjection),
           marketDataPrice: record.marketData && record.marketData.price,
           marketDataProvider: normalize(record.marketData && record.marketData.sourceProvider)
@@ -154,6 +191,7 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
           tone: normalize(card.getAttribute('data-visual-tone')).toLowerCase(),
           state: normalize(card.getAttribute('data-visual-state')).toLowerCase(),
           badgeLabel: normalize(badge && badge.textContent),
+          setupScoreDisplay: normalize(card.querySelector('.score.visual-score') && card.querySelector('.score.visual-score').textContent),
           text: normalize(card.textContent)
         } : null,
         replayOutput: replay ? {
@@ -240,11 +278,19 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
       `${label} visible scan badge must match scan presentation badge.\n${JSON.stringify(tickerResult, null, 2)}`
     ).toBe(tickerResult.scanPresentation.badgeLabel);
 
-    if(Number.isFinite(expectedSetupScore) && Number.isFinite(tickerResult.localTickerRecord.setupScore)){
+    if(Number.isFinite(expectedSetupScore)){
       expect(
-        Math.abs(tickerResult.localTickerRecord.setupScore - expectedSetupScore),
-        `${label} setup score must not materially diverge from replay.\n${JSON.stringify(tickerResult, null, 2)}`
-      ).toBeLessThanOrEqual(1);
+        tickerResult.projectedScanCard && tickerResult.projectedScanCard.setupScore,
+        `${label} scan card projection score must match replay.\n${JSON.stringify(tickerResult, null, 2)}`
+      ).toBe(expectedSetupScore);
+      expect(
+        tickerResult.authoritativeScanSnapshot && tickerResult.authoritativeScanSnapshot.score,
+        `${label} authoritative scan snapshot score must match replay.\n${JSON.stringify(tickerResult, null, 2)}`
+      ).toBe(expectedSetupScore);
+      expect(
+        tickerResult.visibleCard && tickerResult.visibleCard.setupScoreDisplay,
+        `${label} visible setup score must match scan projection score.\n${JSON.stringify(tickerResult, null, 2)}`
+      ).toBe(`Setup ${expectedSetupScore}/10`);
     }
 
     if(expectedCanonicalVerdict === 'entry'){

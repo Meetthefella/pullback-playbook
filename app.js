@@ -17636,6 +17636,34 @@ function setupScoreTraceForRecord(record){
   const refreshReplacedReviewedScore = !!(record && record.setup && record.setup.refreshReplacedReviewedScore);
   const canonicalBase = canonicalBaseSetupScore(record);
   const scanScore = numericOrNull(record && record.scan && record.scan.score);
+  const recomputedScoreAuthoritative = setupScoreSource === 'recomputed.chartQuality'
+    && Number.isFinite(setupScoreRecomputed)
+    && (!Number.isFinite(displayScore) || Math.round(setupScoreRecomputed) !== Math.round(displayScore));
+  if(recomputedScoreAuthoritative){
+    return {
+      score:Math.max(0, Math.min(10, Math.round(setupScoreRecomputed))),
+      source:'setup.scoreRecomputed',
+      detail:setupScoreChangeReason || 'Displayed setup score refreshed from full recomputation inputs.',
+      inputs:{
+        setup_score:displayScore,
+        base_score:canonicalBase,
+        scan_score:scanScore,
+        previous_score:setupScorePrevious,
+        recomputed_score:setupScoreRecomputed,
+        fallback_applied:setupScoreFallbackApplied ? 1 : 0,
+        reviewed_score_preserved:reviewedScorePreserved ? 1 : 0,
+        refresh_replaced_reviewed:refreshReplacedReviewedScore ? 1 : 0
+      },
+      sourceMeta:{
+        score_source_used:'setup.scoreRecomputed',
+        previous_stored_score:setupScorePrevious,
+        recomputed_score:setupScoreRecomputed,
+        fallback_applied:setupScoreFallbackApplied,
+        score_change_reason:setupScoreChangeReason || 'Recomputed setup score superseded a stale displayed score.',
+        refresh_replaced_reviewed_state:refreshReplacedReviewedScore
+      }
+    };
+  }
   if(Number.isFinite(displayScore)){
     return {
       score:Math.max(0, Math.min(10, Math.round(displayScore))),
@@ -18814,8 +18842,8 @@ function currentRuntimeVerdictForRecord(record){
 }
 
 function authoritativeScanSurfaceSnapshot(record){
-  const verdictLabel = currentRuntimeVerdictForRecord(record);
-  const canonicalVerdict = normalizeGlobalVerdictKey(verdictLabel || '');
+  const runtimeVerdictLabel = currentRuntimeVerdictForRecord(record);
+  const canonicalVerdict = normalizeGlobalVerdictKey(runtimeVerdictLabel || '');
   if(!canonicalVerdict) return null;
   const score = currentRuntimeScoreForRecord(record);
   const summary = currentRuntimeSummaryForRecord(record);
@@ -19054,9 +19082,19 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
       ? authoritativeScanSurfaceSnapshot(item)
       : null;
     if(authoritativeScanSurface){
+      const resolvedVisualBucket = normalizeVisualBucketForPairing(resolved.visualBucket || resolved.presentationBucket || '');
+      const shouldForceAuthoritativeVisualBucket = ['entry','near_entry','avoid'].includes(authoritativeScanSurface.canonicalVerdict)
+        || !resolvedVisualBucket
+        || !isAllowedCanonicalVisualPair(authoritativeScanSurface.canonicalVerdict, resolvedVisualBucket);
       resolved.canonicalVerdict = authoritativeScanSurface.canonicalVerdict;
-      resolved.visualBucket = authoritativeScanSurface.visualBucket;
-      resolved.tone = authoritativeScanSurface.tone;
+      if(shouldForceAuthoritativeVisualBucket){
+        resolved.visualBucket = authoritativeScanSurface.visualBucket;
+        resolved.tone = authoritativeScanSurface.tone;
+      }
+      if(Number.isFinite(authoritativeScanSurface.score)){
+        resolved.setupScore = authoritativeScanSurface.score;
+        resolved.setup_score = authoritativeScanSurface.score;
+      }
       resolved.badgeLabel = authoritativeScanSurface.canonicalVerdict === 'watch'
         ? 'Watch'
         : globalVerdictLabel(authoritativeScanSurface.canonicalVerdict);
@@ -27294,7 +27332,7 @@ function determineScannerVerdict({technicalValid, score, checks, riskFit, reward
   if(riskFit.risk_status !== 'fits_risk') return 'Watch';
   if(!rewardRisk.valid || rewardRisk.rrState === 'invalid' || rewardRisk.rrState === 'weak') return 'Watch';
   if(!(checks.stabilising || checks.bounce)) return 'Watch';
-  if(rewardRisk.rrState === 'strong') return 'Entry';
+  if(rewardRisk.rrState === 'strong' && checks.bounce) return 'Entry';
   return 'Near Entry';
 }
 
@@ -27321,6 +27359,7 @@ function buildVerdictReason({suitability, scan, riskFit, rewardRisk, checks}){
   if(riskFit.risk_status === 'too_wide') return 'Risk does not fit the current account rule.';
   if(!rewardRisk.valid) return 'Reward:risk is invalid because the first target is not usable.';
   if(rewardRisk.rrState === 'weak') return `First target is too close at ${rewardRisk.rrRatio.toFixed(2)}R.`;
+  if(!checks.bounce && checks.stabilising) return 'Bounce still tentative. Wait for stronger confirmation before considering entry.';
   if(!(checks.stabilising || checks.bounce)) return 'Technicals are promising, but stabilisation or bounce is not confirmed yet.';
   return suitability ? suitability.summary : 'Candidate remains reviewable.';
 }
