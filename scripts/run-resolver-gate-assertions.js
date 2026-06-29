@@ -1422,7 +1422,7 @@ function runScannerPolicyCompatibilityAssertions(){
     determineScannerVerdict({
       technicalValid:true,
       score:7,
-      checks:{stabilising:true, bounce:false},
+      checks:{stabilising:true, bounce:false, volume:true},
       riskFit:{risk_status:'fits_risk'},
       rewardRisk:{valid:true, rrState:'strong'}
     })
@@ -1430,11 +1430,23 @@ function runScannerPolicyCompatibilityAssertions(){
   if(tentativeBounceVerdict !== 'Near Entry'){
     throw new Error('Scanner must not promote stabilising-without-bounce setups to Entry.');
   }
+  const weakVolumeTentativeBounceVerdict = vm.runInContext(`
+    determineScannerVerdict({
+      technicalValid:true,
+      score:7,
+      checks:{stabilising:true, bounce:false, volume:false},
+      riskFit:{risk_status:'fits_risk'},
+      rewardRisk:{valid:true, rrState:'strong'}
+    })
+  `, scannerVerdictSandbox);
+  if(weakVolumeTentativeBounceVerdict !== 'Watch'){
+    throw new Error('Scanner must keep weak-volume tentative-bounce setups at Watch when lifecycle would resolve Watch.');
+  }
   const confirmedBounceVerdict = vm.runInContext(`
     determineScannerVerdict({
       technicalValid:true,
       score:7,
-      checks:{stabilising:true, bounce:true},
+      checks:{stabilising:true, bounce:true, volume:false},
       riskFit:{risk_status:'fits_risk'},
       rewardRisk:{valid:true, rrState:'strong'}
     })
@@ -1448,11 +1460,23 @@ function runScannerPolicyCompatibilityAssertions(){
       scan:{status:'Near Entry', summary:''},
       riskFit:{risk_status:'fits_risk'},
       rewardRisk:{valid:true, rrState:'strong', rrRatio:2.5},
-      checks:{stabilising:true, bounce:false}
+      checks:{stabilising:true, bounce:false, volume:true}
     })
   `, scannerVerdictSandbox);
   if(!/bounce still tentative/i.test(String(tentativeBounceReason || ''))){
     throw new Error('Scanner must surface the tentative-bounce blocker when Entry is not yet allowed.');
+  }
+  const weakVolumeTentativeBounceReason = vm.runInContext(`
+    buildVerdictReason({
+      suitability:{summary:'Candidate remains reviewable.'},
+      scan:{status:'Watch', summary:''},
+      riskFit:{risk_status:'fits_risk'},
+      rewardRisk:{valid:true, rrState:'strong', rrRatio:2.5},
+      checks:{stabilising:true, bounce:false, volume:false}
+    })
+  `, scannerVerdictSandbox);
+  if(!/weak volume caution/i.test(String(weakVolumeTentativeBounceReason || '')) || !/bounce still tentative/i.test(String(weakVolumeTentativeBounceReason || ''))){
+    throw new Error('Scanner must surface weak-volume tentative-bounce blockers when lifecycle would hold the setup at Watch.');
   }
 }
 
@@ -8402,6 +8426,9 @@ function runTrackPresentationAuthorityAssertions(){
       base_verdict:'watch',
       structure_eligibility:'alive',
       structure_state:'strong',
+      contractDiagnostics:{
+        softReadinessOnlyDemotion:true
+      },
       terminal_avoid_applied:false,
       rejected_by_viability_gate:false
     }
@@ -8445,6 +8472,9 @@ function runTrackPresentationAuthorityAssertions(){
       base_verdict:'watch',
       structure_eligibility:'alive',
       structure_state:'strong',
+      contractDiagnostics:{
+        softReadinessOnlyDemotion:false
+      },
       terminal_avoid_applied:false,
       rejected_by_viability_gate:false
     }

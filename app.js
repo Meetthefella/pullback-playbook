@@ -8197,6 +8197,11 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       || persistedSharedPresentation.finalVerdict
     ) || ''
   );
+  const softReadinessOnlyDemotion = !!(
+    globalVerdict
+    && globalVerdict.contractDiagnostics
+    && globalVerdict.contractDiagnostics.softReadinessOnlyDemotion === true
+  );
   const softTrackedWatchSuppression = !!(
     item.watchlist
     && item.watchlist.inWatchlist
@@ -8221,6 +8226,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const preserveTrackedEntryAuthority = !!(
     item.watchlist
     && item.watchlist.inWatchlist
+    && softReadinessOnlyDemotion
     && simplifiedVerdict === 'near_entry'
     && trackedLifecycleHardStructuredBlock !== true
     && trackedPlanStatus === 'valid'
@@ -8230,6 +8236,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const preserveTrackedLifecycleCanonicalVerdict = !!(
     item.watchlist
     && item.watchlist.inWatchlist
+    && softReadinessOnlyDemotion
     && ['entry','near_entry'].includes(lifecycleVerdict)
     && simplifiedVerdict === 'watch'
     && trackedLifecycleHardStructuredBlock !== true
@@ -8237,6 +8244,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const preserveTrackedPresentationCanonicalVerdict = !!(
     item.watchlist
     && item.watchlist.inWatchlist
+    && softReadinessOnlyDemotion
     && ['entry','near_entry'].includes(persistedPresentationVerdict)
     && trackedLifecycleHardStructuredBlock !== true
   );
@@ -8346,6 +8354,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       source:String(options.source || 'shared_presentation'),
       reason:String(options.reason || 'shared_presentation'),
       surface:String(options.surface || 'track'),
+      softReadinessOnlyDemotion,
       preserveTrackedLifecycleCanonicalVerdict,
       suppressAvoidForTrackedWatch,
       suppressingTrackedAvoid
@@ -27332,6 +27341,7 @@ function determineScannerVerdict({technicalValid, score, checks, riskFit, reward
   if(riskFit.risk_status !== 'fits_risk') return 'Watch';
   if(!rewardRisk.valid || rewardRisk.rrState === 'invalid' || rewardRisk.rrState === 'weak') return 'Watch';
   if(!(checks.stabilising || checks.bounce)) return 'Watch';
+  if(!checks.bounce && checks.volume === false) return 'Watch';
   if(rewardRisk.rrState === 'strong' && checks.bounce) return 'Entry';
   return 'Near Entry';
 }
@@ -27359,6 +27369,7 @@ function buildVerdictReason({suitability, scan, riskFit, rewardRisk, checks}){
   if(riskFit.risk_status === 'too_wide') return 'Risk does not fit the current account rule.';
   if(!rewardRisk.valid) return 'Reward:risk is invalid because the first target is not usable.';
   if(rewardRisk.rrState === 'weak') return `First target is too close at ${rewardRisk.rrRatio.toFixed(2)}R.`;
+  if(!checks.bounce && checks.volume === false) return 'Weak volume caution. Bounce still tentative.';
   if(!checks.bounce && checks.stabilising) return 'Bounce still tentative. Wait for stronger confirmation before considering entry.';
   if(!(checks.stabilising || checks.bounce)) return 'Technicals are promising, but stabilisation or bounce is not confirmed yet.';
   return suitability ? suitability.summary : 'Candidate remains reviewable.';

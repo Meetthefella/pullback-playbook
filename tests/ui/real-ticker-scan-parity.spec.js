@@ -308,3 +308,107 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
     }
   }
 });
+
+test('real ticker review-track-review authority stays stable across first open and reopen', async ({page}) => {
+  await bootRealTickerApp(page);
+  await dismissOptionalOverlays(page);
+  await page.locator('[data-workspace-tab="scan"]').click();
+  await page.waitForFunction(() => document.querySelector('[data-workspace-tab="scan"][aria-selected="true"]') !== null, null, {timeout:10000});
+
+  await page.locator('#tvImportInput').fill('AMZN');
+  await page.locator('#importTvBtn').click();
+  await Promise.all([
+    page.waitForResponse(response => /market-data/i.test(response.url()) && response.status() === 200, {timeout:90000}),
+    page.locator('#buildBtn').click()
+  ]);
+  await page.waitForFunction(() => {
+    if(typeof getTickerRecord !== 'function') return false;
+    const record = getTickerRecord('AMZN');
+    return !!(
+      record
+      && record.marketData
+      && Number.isFinite(Number(record.marketData.price))
+      && record.scan
+      && String(record.scan.resolvedVerdict || '').trim()
+    );
+  }, null, {timeout:90000});
+
+  const trace = await page.evaluate(async () => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const waitFrame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const capture = stage => {
+      const ticker = 'AMZN';
+      const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+      const reviewState = typeof currentReviewStateHealthSnapshot === 'function' ? currentReviewStateHealthSnapshot(record) : null;
+      const trackState = typeof buildTrackDiagnosticSnapshot === 'function' ? buildTrackDiagnosticSnapshot(record) : null;
+      const sharedPresentation = record && record.watchlist && record.watchlist.presentation && record.watchlist.presentation.sharedPresentation
+        ? record.watchlist.presentation.sharedPresentation
+        : null;
+      const lifecycle = record && record.lifecycle ? record.lifecycle : {};
+      const watchlistDebug = record && record.watchlist && record.watchlist.debug ? record.watchlist.debug : {};
+      const reviewVisible = document.querySelector('.reviewworkspace');
+      const trackCard = document.querySelector(`[data-watchlist-ticker="${ticker}"]`);
+      return {
+        stage,
+        canonicalVerdict: normalize(reviewState && reviewState.canonicalVerdict).toLowerCase(),
+        visualBucket: normalize(reviewState && reviewState.visualBucket).toLowerCase(),
+        scanResolvedVerdict: normalize(record && record.scan && record.scan.resolvedVerdict).toLowerCase(),
+        reviewProjectionVerdict: normalize(
+          window.uiState && window.uiState.activeReviewSourceProjectionSnapshot && window.uiState.activeReviewSourceProjectionSnapshot.canonicalVerdict
+          || window.uiState && window.uiState.activeReviewSourceProjectionSnapshot && window.uiState.activeReviewSourceProjectionSnapshot.finalVerdict
+        ).toLowerCase(),
+        trackProjectionVerdict: normalize(trackState && trackState.sharedPresentation && trackState.sharedPresentation.canonicalVerdict).toLowerCase(),
+        sharedPresentationVerdict: normalize(sharedPresentation && (sharedPresentation.canonicalVerdict || sharedPresentation.finalVerdict)).toLowerCase(),
+        stateHealthSourceOfTruth: normalize(reviewState && reviewState.sourceOfTruth),
+        watchlistDebugFinalVerdict: normalize(watchlistDebug.finalVerdict).toLowerCase(),
+        downgradeApplied: watchlistDebug.downgradeApplied === true,
+        downgradeReason: normalize(watchlistDebug.downgradeReason),
+        entryGatePass: reviewState && reviewState.entryGatePass === true,
+        nearEntryGatePass: reviewState && reviewState.nearEntryGatePass === true,
+        primaryBlockerReason: normalize(reviewState && reviewState.primaryBlockerReason),
+        bounceState: normalize(reviewState && reviewState.bounceState).toLowerCase(),
+        volumeState: normalize(record && record.scan && record.scan.analysisProjection && record.scan.analysisProjection.derived_states && record.scan.analysisProjection.derived_states.volume_state).toLowerCase(),
+        savedReviewVerdict: normalize(record && record.review && record.review.savedVerdict).toLowerCase(),
+        lifecycleStatus: normalize(lifecycle.status).toLowerCase(),
+        lifecycleStage: normalize(lifecycle.stage).toLowerCase(),
+        visibleReviewText: normalize(reviewVisible && reviewVisible.textContent),
+        visibleTrackText: normalize(trackCard && trackCard.textContent)
+      };
+    };
+
+    const record = getTickerRecord('AMZN');
+    const traceRows = [];
+    traceRows.push(capture('scan_result'));
+    addToWatchlist({
+      ticker:'AMZN',
+      dateAdded:todayIsoDate(),
+      scoreWhenAdded:preferredScoreForRecord(record),
+      verdictWhenAdded:preferredVerdictForRecord(record),
+      expiryAfterTradingDays:5
+    });
+    await waitFrame();
+    traceRows.push(capture('add_to_watchlist'));
+    traceRows.push(capture('first_review_open_before_render'));
+    reviewWatchlistTicker('AMZN');
+    await waitFrame();
+    traceRows.push(capture('first_review_open_after_render'));
+    if(typeof setActiveWorkspaceTab === 'function') setActiveWorkspaceTab('track');
+    if(typeof renderWatchlist === 'function') renderWatchlist();
+    await waitFrame();
+    traceRows.push(capture('track_open'));
+    reviewWatchlistTicker('AMZN');
+    traceRows.push(capture('second_review_open_before_render'));
+    await waitFrame();
+    traceRows.push(capture('second_review_open_after_render'));
+    return traceRows;
+  });
+
+  const firstReview = trace.find(entry => entry.stage === 'first_review_open_after_render');
+  const trackOpen = trace.find(entry => entry.stage === 'track_open');
+  const secondReview = trace.find(entry => entry.stage === 'second_review_open_after_render');
+  expect(firstReview, JSON.stringify(trace, null, 2)).toBeTruthy();
+  expect(trackOpen, JSON.stringify(trace, null, 2)).toBeTruthy();
+  expect(secondReview, JSON.stringify(trace, null, 2)).toBeTruthy();
+  expect(trackOpen.canonicalVerdict, `Track must not diverge from first Review on the same snapshot.\n${JSON.stringify(trace, null, 2)}`).toBe(firstReview.canonicalVerdict);
+  expect(secondReview.canonicalVerdict, `Second Review must not diverge from first Review on the same snapshot.\n${JSON.stringify(trace, null, 2)}`).toBe(firstReview.canonicalVerdict);
+});
