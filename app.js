@@ -33847,6 +33847,19 @@ function setPaperTradeUiState(ticker, next = {}){
 function currentPaperTradeContextForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return null;
+  const sourceProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === symbol
+    ? uiState.activeReviewSourceProjectionSnapshot
+    : null;
+  const projectionCanonicalVerdict = sourceProjectionSnapshot
+    ? normalizeGlobalVerdictKey(
+      sourceProjectionSnapshot.canonicalVerdict
+      || sourceProjectionSnapshot.finalVerdict
+      || sourceProjectionSnapshot.renderedVerdict
+      || ''
+    )
+    : '';
   const refreshed = refreshTrackedTickerState(symbol, {
     source:'review',
     sourceSurface:'review',
@@ -33867,12 +33880,33 @@ function currentPaperTradeContextForTicker(ticker){
   const visualState = refreshed.visualState;
   const derivedStates = refreshed.derivedStates;
   const finalVerdict = reviewHeaderVerdictForRecord(record);
-  const reviewFinalVerdict = normalizeAnalysisVerdict(
-    visualState.finalVerdict || visualState.final_verdict || finalVerdict
-  );
+  const projectedEntryAuthority = projectionCanonicalVerdict === 'entry';
+  const planMathLooksValid = displayedPlan
+    && displayedPlan.status === 'valid'
+    && displayedPlan.rewardRisk
+    && displayedPlan.rewardRisk.valid === true
+    && Number.isFinite(numericOrNull(displayedPlan.entry))
+    && Number.isFinite(numericOrNull(displayedPlan.stop))
+    && Number.isFinite(numericOrNull(displayedPlan.target || displayedPlan.firstTarget))
+    && Number.isFinite(numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size))
+    && Number.isFinite(numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.max_loss));
+  const reviewFinalVerdict = projectedEntryAuthority
+    ? 'Entry'
+    : normalizeAnalysisVerdict(
+      visualState.finalVerdict || visualState.final_verdict || finalVerdict
+    );
+  const planStatusForEligibility = projectedEntryAuthority && planMathLooksValid
+    ? 'valid'
+    : displayedPlan.status;
+  const primaryStateForEligibility = projectedEntryAuthority
+    ? 'entry'
+    : resolvedContract.primaryState;
+  const hardBlockerForEligibility = projectedEntryAuthority
+    ? ''
+    : resolvedContract.blockerReason;
   const eligibility = paperTradeEligibility.evaluatePaperTradeEligibility({
     finalVerdict:reviewFinalVerdict,
-    planStatus:displayedPlan.status,
+    planStatus:planStatusForEligibility,
     entry:displayedPlan.entry,
     stop:displayedPlan.stop,
     target:displayedPlan.target,
@@ -33882,8 +33916,8 @@ function currentPaperTradeContextForTicker(ticker){
     riskStatus:displayedPlan.riskFit && displayedPlan.riskFit.risk_status,
     tradeability:displayedPlan.tradeability,
     capitalFit:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit,
-    primaryState:resolvedContract.primaryState,
-    hardBlocker:resolvedContract.blockerReason
+    primaryState:primaryStateForEligibility,
+    hardBlocker:hardBlockerForEligibility
   });
   const mergedEligibility = applyPaperTradeEligibilityDebugOverride(eligibility, {
     ticker:symbol,
@@ -33892,9 +33926,11 @@ function currentPaperTradeContextForTicker(ticker){
   const debugSnapshot = {
     ticker:symbol,
     finalVerdict:reviewFinalVerdict,
+    projectionCanonicalVerdict,
+    projectedEntryAuthority,
     reviewHeaderVerdict:finalVerdict,
     visualFinalVerdict:String(visualState.finalVerdict || visualState.final_verdict || '').trim(),
-    planStatus:String(displayedPlan.status || '').trim(),
+    planStatus:String(planStatusForEligibility || displayedPlan.status || '').trim(),
     entry:displayedPlan.entry,
     stop:displayedPlan.stop,
     target:displayedPlan.target,
@@ -33904,8 +33940,8 @@ function currentPaperTradeContextForTicker(ticker){
     riskStatus:displayedPlan.riskFit && displayedPlan.riskFit.risk_status,
     tradeability:displayedPlan.tradeability,
     capitalFit:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit,
-    primaryState:resolvedContract.primaryState,
-    blockerReason:resolvedContract.blockerReason,
+    primaryState:primaryStateForEligibility,
+    blockerReason:hardBlockerForEligibility,
     reasons:Array.isArray(mergedEligibility.reasons) ? mergedEligibility.reasons.slice() : []
   };
   return {
