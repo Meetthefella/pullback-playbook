@@ -12795,6 +12795,7 @@ function watchlistRecordRenderSignature(record, pendingMap = {}, manualRefreshMa
     String(review.lastReviewedAt || ''),
     String(analysisState.reviewedAt || ''),
     String(marketData.updatedAt || ''),
+    setupScoreForRecord(record),
     pendingMap[ticker] ? 1 : 0,
     manualRefreshMap[ticker] ? 1 : 0
   ].join('~');
@@ -12840,7 +12841,7 @@ function trackCardRenderSignatureSnapshot(record){
     derivedStates,
     displayedPlan,
     pendingResolution:false,
-    setupScore:numericOrNull(item.scan && item.scan.score)
+    setupScore:setupScoreForRecord(item)
   });
   const watchlistVisualState = reconcileWatchlistPresentation({
     record:item,
@@ -12879,7 +12880,7 @@ function trackCardRenderSignatureSnapshot(record){
     viabilityBranchLabel:String(globalVerdict && globalVerdict.viabilityBranchLabel || ''),
     viabilityBranchReason:String(globalVerdict && globalVerdict.viabilityBranchReason || ''),
     viabilityInputs:globalVerdict && globalVerdict.viabilityInputs || null,
-    score:String((item.scan && item.scan.score) ?? ''),
+    score:String(setupScoreForRecord(item) ?? ''),
     decisionSummary,
     actionGuidance,
     structure:String(derivedStates.structureState || ''),
@@ -36877,9 +36878,9 @@ function renderReviewWorkspace(options = {}){
   });
   const displayedReviewChecks = resolvedReviewChecksForDisplay(reviewChecks, reviewChecklistContext);
   const reviewSetupQuality = scoreAndStatusFromChecks(displayedReviewChecks, reviewChecklistContext);
-  const setupScore = reviewSetupQuality.score;
+  const setupScore = setupScoreForRecord(record);
   const setupScoreDisplay = `Setup ${setupScore}/10`;
-  const setupQualityLabel = reviewSetupQuality.qualityLabel || setupQualityLabelForScore(setupScore);
+  const setupQualityLabel = setupQualityLabelForScore(setupScore);
   const setupQualitySummary = reviewSetupQualitySummary(displayedReviewChecks, reviewSetupQuality, reviewChecklistContext);
   const setupQualityEvidence = 'Weighted by resolver state, current structure, bounce, plan validity, and priceability. Raw checklist evidence is kept internally only.';
   const convictionTier = convictionTierLabel(record.setup.convictionTier || '');
@@ -38348,6 +38349,10 @@ function refreshReview(options = {}){
   const checklistContext = reviewChecklistContextForActiveTicker();
   const checks = resolvedReviewChecksForDisplay(rawChecks, checklistContext);
   const result = scoreAndStatusFromChecks(checks, checklistContext);
+  const ticker = activeReviewTicker();
+  const canonicalRecord = ticker && typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+  const canonicalSetupScore = canonicalRecord ? setupScoreForRecord(canonicalRecord) : result.score;
+  const canonicalSetupQualityLabel = setupQualityLabelForScore(canonicalSetupScore);
   if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
     window.requestAnimationFrame(() => {
       if(!isCurrentReviewRender(reviewSeq)) return;
@@ -38360,7 +38365,7 @@ function refreshReview(options = {}){
       });
       if(!refreshReview._missingTextTargetsLogged) refreshReview._missingTextTargetsLogged = new Set();
       if(setupQualityText){
-        setupQualityText.textContent = `${result.qualityLabel || setupQualityLabelForScore(result.score)} (${result.score}/10)`;
+        setupQualityText.textContent = `${canonicalSetupQualityLabel} (${canonicalSetupScore}/10)`;
       }else if(!refreshReview._missingTextTargetsLogged.has('setupQualityText')){
         refreshReview._missingTextTargetsLogged.add('setupQualityText');
         if(isPerfDebugEnabled()) console.debug('[Review] skipped text update; element missing', {label:'setupQualityText', selector:'#setupQualityText'});

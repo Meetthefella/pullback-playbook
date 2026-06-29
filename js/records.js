@@ -722,9 +722,11 @@
     const preserveReviewedScore = Number.isFinite(reviewedScore) && fallbackApplied;
     const selectedScore = preserveReviewedScore
       ? reviewedScore
-      : (Number.isFinite(recomputedChartScore)
-        ? recomputedChartScore
-        : (Number.isFinite(previousStoredScore) ? previousStoredScore : (Number.isFinite(reviewedScore) ? reviewedScore : 0)));
+      : (Number.isFinite(recomputedPenaltyAdjustedScore)
+        ? recomputedPenaltyAdjustedScore
+        : (Number.isFinite(recomputedChartScore)
+          ? recomputedChartScore
+          : (Number.isFinite(previousStoredScore) ? previousStoredScore : (Number.isFinite(reviewedScore) ? reviewedScore : 0))));
     const setupScoreContext = {
       preservedReviewedScore:preserveReviewedScore,
       recomputedScore:recomputedChartScore,

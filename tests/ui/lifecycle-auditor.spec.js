@@ -523,6 +523,73 @@ async function openReviewDirect(page, ticker){
   await waitForUiTransitionSettle(page);
 }
 
+async function capturePaperTradeDiaryVerdictTrace(page, ticker){
+  return page.evaluate(symbol => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const matchTicker = entry => String(entry && entry.ticker || '').trim().toUpperCase() === String(symbol || '').trim().toUpperCase();
+    const tradeDiary = Array.isArray(state && state.tradeDiary) ? state.tradeDiary.filter(matchTicker) : [];
+    const tickerRecord = typeof getTickerRecord === 'function' ? getTickerRecord(symbol) : null;
+    const tickerDiaryRows = tickerRecord && tickerRecord.diary && Array.isArray(tickerRecord.diary.records)
+      ? tickerRecord.diary.records.filter(matchTicker)
+      : [];
+    const reviewState = tickerRecord && typeof currentReviewStateHealthSnapshot === 'function'
+      ? currentReviewStateHealthSnapshot(tickerRecord)
+      : null;
+    const paperTradeContext = typeof currentPaperTradeContextForTicker === 'function'
+      ? currentPaperTradeContextForTicker(symbol)
+      : null;
+    const watchlistPresentation = tickerRecord && tickerRecord.watchlist && tickerRecord.watchlist.presentation && tickerRecord.watchlist.presentation.sharedPresentation
+      ? tickerRecord.watchlist.presentation.sharedPresentation
+      : null;
+    const visibleDiaryBadge = (() => {
+      const card = document.querySelector('#tradeDiary .diarycard .badge, #tradeDiary .diaryitem .badge, #tradeDiary .badge');
+      return normalize(card && card.textContent);
+    })();
+    const latestTradeDiary = tradeDiary[0] || null;
+    const latestTickerDiary = tickerDiaryRows[0] || null;
+    return {
+      paperTradeContext:{
+        finalVerdict:normalize(paperTradeContext && paperTradeContext.finalVerdict),
+        eligibilityEligible:!!(paperTradeContext && paperTradeContext.eligibility && paperTradeContext.eligibility.eligible === true),
+        displayedPlanStatus:normalize(paperTradeContext && paperTradeContext.displayedPlan && paperTradeContext.displayedPlan.status)
+      },
+      canonicalVerdict:normalize(reviewState && reviewState.canonicalVerdict),
+      reviewVerdict:normalize(reviewState && reviewState.canonicalVerdict),
+      sharedPresentationVerdict:normalize(watchlistPresentation && (watchlistPresentation.canonicalVerdict || watchlistPresentation.finalVerdict)),
+      replayVerdict:normalize(
+        tickerRecord && typeof buildReplaySnapshotForTicker === 'function'
+          ? (buildReplaySnapshotForTicker(symbol) && buildReplaySnapshotForTicker(symbol).reviewCanonicalVerdict)
+          : ''
+      ),
+      tradePlanState:normalize(reviewState && reviewState.planStatus),
+      paperTradeEnabled:!!(document.getElementById('paperTradeBtn') && !document.getElementById('paperTradeBtn').disabled),
+      latestTradeDiary:latestTradeDiary ? {
+        id:normalize(latestTradeDiary.id),
+        ticker:normalize(latestTradeDiary.ticker),
+        verdict:normalize(latestTradeDiary.verdict),
+        chartVerdict:normalize(latestTradeDiary.chartVerdict),
+        status:normalize(latestTradeDiary.status || latestTradeDiary.executionMeta && latestTradeDiary.executionMeta.status),
+        sourceType:normalize(latestTradeDiary.sourceType),
+        sourceRef:normalize(latestTradeDiary.sourceRef),
+        submittedAt:normalize(latestTradeDiary.executionMeta && latestTradeDiary.executionMeta.submittedAt || latestTradeDiary.updatedAt || latestTradeDiary.createdAt),
+        plannedEntry:normalize(latestTradeDiary.plannedEntry)
+      } : null,
+      latestTickerDiary:latestTickerDiary ? {
+        id:normalize(latestTickerDiary.id),
+        ticker:normalize(latestTickerDiary.ticker),
+        verdict:normalize(latestTickerDiary.verdict),
+        chartVerdict:normalize(latestTickerDiary.chartVerdict),
+        status:normalize(latestTickerDiary.status || latestTickerDiary.executionMeta && latestTickerDiary.executionMeta.status),
+        sourceType:normalize(latestTickerDiary.sourceType),
+        sourceRef:normalize(latestTickerDiary.sourceRef),
+        submittedAt:normalize(latestTickerDiary.executionMeta && latestTickerDiary.executionMeta.submittedAt || latestTickerDiary.updatedAt || latestTickerDiary.createdAt),
+        plannedEntry:normalize(latestTickerDiary.plannedEntry)
+      } : null,
+      visibleDiaryBadge
+    };
+  }, ticker);
+}
+
 function assertSnapshotConsistency(snapshot){
   const label = `${snapshot.ticker} @ ${snapshot.stage}`;
   if(snapshot.stage !== 'launch_ready'){
@@ -611,11 +678,26 @@ test('Lifecycle Auditor proves scan-to-diary consistency with replay parity and 
   await expect(page.locator('#paperTradePreview')).toBeVisible();
   await captureAuditedStage(page, testInfo, stageSnapshots, JOURNEY_TICKER, 'paper_trade_preview', consoleEvents, networkEvents);
 
+  const preSubmitDiaryTrace = await capturePaperTradeDiaryVerdictTrace(page, JOURNEY_TICKER);
+  expect(preSubmitDiaryTrace.paperTradeContext.finalVerdict, 'finalVerdict immediately before submit must be Entry.').toBe('Entry');
+  expect(preSubmitDiaryTrace.canonicalVerdict, 'canonical verdict immediately before submit must be Entry.').toBe('entry');
+  expect(preSubmitDiaryTrace.tradePlanState, 'trade plan state immediately before submit must be valid.').toBe('valid');
+  expect(preSubmitDiaryTrace.paperTradeEnabled, 'paperTradeEnabled immediately before submit must be true.').toBe(true);
+
   await page.locator('#paperTradeConfirmBtn').click();
   await page.waitForFunction(() => {
     const node = document.getElementById('paperTradeStatusLine');
     return !!(node && /submitted/i.test(node.textContent || ''));
   }, null, {timeout:15000});
+  const postSubmitDiaryTrace = await capturePaperTradeDiaryVerdictTrace(page, JOURNEY_TICKER);
+  expect(postSubmitDiaryTrace.latestTradeDiary, 'paper-trade submit must create a raw diary row in state.tradeDiary.').toBeTruthy();
+  expect(postSubmitDiaryTrace.latestTickerDiary, 'paper-trade submit must create a raw diary row in tickerRecord.diary.records.').toBeTruthy();
+  expect(postSubmitDiaryTrace.latestTradeDiary.verdict, `raw diary verdict immediately after submit must stay Entry.\n${JSON.stringify(postSubmitDiaryTrace, null, 2)}`).toBe('Entry');
+  expect(postSubmitDiaryTrace.latestTradeDiary.chartVerdict, `raw diary chartVerdict immediately after submit must stay Entry.\n${JSON.stringify(postSubmitDiaryTrace, null, 2)}`).toBe('Entry');
+  expect(postSubmitDiaryTrace.latestTradeDiary.status, 'raw diary status immediately after submit must be submitted.').toBe('submitted');
+  expect(postSubmitDiaryTrace.latestTradeDiary.sourceType, 'raw diary sourceType immediately after submit must identify paper trade.').toBe('paper_trade');
+  expect(postSubmitDiaryTrace.latestTickerDiary.verdict, `ticker diary verdict immediately after submit must stay Entry.\n${JSON.stringify(postSubmitDiaryTrace, null, 2)}`).toBe('Entry');
+  expect(postSubmitDiaryTrace.latestTickerDiary.chartVerdict, `ticker diary chartVerdict immediately after submit must stay Entry.\n${JSON.stringify(postSubmitDiaryTrace, null, 2)}`).toBe('Entry');
   await captureAuditedStage(page, testInfo, stageSnapshots, JOURNEY_TICKER, 'paper_trade_submitted', consoleEvents, networkEvents);
 
   await openTrackTab(page);
@@ -626,6 +708,8 @@ test('Lifecycle Auditor proves scan-to-diary consistency with replay parity and 
     const tradeDiary = Array.isArray(state.tradeDiary) ? state.tradeDiary : [];
     return tradeDiary.some(entry => String(entry && entry.ticker || '').trim().toUpperCase() === ticker);
   }, JOURNEY_TICKER, {timeout:15000});
+  const diaryOpenTrace = await capturePaperTradeDiaryVerdictTrace(page, JOURNEY_TICKER);
+  expect(diaryOpenTrace.visibleDiaryBadge, `visible Diary verdict must display Entry for the newly submitted paper trade.\n${JSON.stringify(diaryOpenTrace, null, 2)}`).toContain('Entry');
   await captureAuditedStage(page, testInfo, stageSnapshots, JOURNEY_TICKER, 'diary_open', consoleEvents, networkEvents);
 
   const baselineDiarySnapshot = stageSnapshots[stageSnapshots.length - 1];
