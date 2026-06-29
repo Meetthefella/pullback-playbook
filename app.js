@@ -7935,6 +7935,12 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const watchlistDebug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object'
     ? item.watchlist.debug
     : {};
+  const persistedSharedPresentation = item.watchlist
+    && item.watchlist.presentation
+    && item.watchlist.presentation.sharedPresentation
+    && typeof item.watchlist.presentation.sharedPresentation === 'object'
+      ? item.watchlist.presentation.sharedPresentation
+      : null;
   const simplifiedVerdict = normalizeGlobalVerdictKey(
     simplifiedState.canonicalVerdict
     || simplifiedState.finalVerdict
@@ -7983,6 +7989,12 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     || watchlistDebug.finalVerdict
     || ''
   );
+  const persistedPresentationVerdict = normalizeGlobalVerdictKey(
+    persistedSharedPresentation && (
+      persistedSharedPresentation.canonicalVerdict
+      || persistedSharedPresentation.finalVerdict
+    ) || ''
+  );
   const softTrackedWatchSuppression = !!(
     item.watchlist
     && item.watchlist.inWatchlist
@@ -8005,31 +8017,56 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     && simplifiedVerdict === 'watch'
     && trackedLifecycleHardStructuredBlock !== true
   );
+  const preserveTrackedPresentationCanonicalVerdict = !!(
+    item.watchlist
+    && item.watchlist.inWatchlist
+    && ['entry','near_entry'].includes(persistedPresentationVerdict)
+    && trackedLifecycleHardStructuredBlock !== true
+  );
   const suppressAvoidForTrackedWatch = softTrackedWatchSuppression;
   const canonicalVerdict = suppressAvoidForTrackedWatch
     ? 'watch'
-    : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict);
+    : (preserveTrackedPresentationCanonicalVerdict
+      ? persistedPresentationVerdict
+      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict));
   const simplifiedBucket = normalizeVisualBucketForPairing(
     simplifiedState.visualBucket
     || simplifiedState.presentationBucket
     || 'monitor'
+  );
+  const persistedPresentationBucket = normalizeVisualBucketForPairing(
+    persistedSharedPresentation && (
+      persistedSharedPresentation.visualBucket
+      || persistedSharedPresentation.presentationBucket
+      || persistedSharedPresentation.trackPresentationBucket
+    ) || ''
   );
   const lifecycleVisualBucket = lifecycleVerdict === 'entry'
     ? 'entry'
     : (lifecycleVerdict === 'near_entry' ? 'near_entry' : '');
   const visualBucket = suppressAvoidForTrackedWatch
     ? (simplifiedBucket === 'avoid' ? 'diminishing' : (simplifiedBucket || 'diminishing'))
-    : (preserveTrackedLifecycleCanonicalVerdict
+    : (preserveTrackedPresentationCanonicalVerdict
+      ? normalizeVisualBucketForPairing(persistedPresentationBucket || lifecycleVisualBucket || simplifiedBucket || 'monitor')
+      : (preserveTrackedLifecycleCanonicalVerdict
       ? normalizeVisualBucketForPairing(lifecycleVisualBucket || simplifiedBucket || 'monitor')
-      : simplifiedBucket);
+      : simplifiedBucket));
   const canonicalTone = canonicalVerdict === 'entry'
     ? 'entry'
     : (canonicalVerdict === 'near_entry' ? 'near_entry' : '');
   const tone = suppressAvoidForTrackedWatch
     ? 'diminishing'
-    : (preserveTrackedLifecycleCanonicalVerdict
+    : (preserveTrackedPresentationCanonicalVerdict
+      ? (String(
+        persistedSharedPresentation && persistedSharedPresentation.tone
+        || canonicalTone
+        || simplifiedState.tone
+        || visualBucket
+        || 'monitor'
+      ).trim().toLowerCase() || 'monitor')
+      : (preserveTrackedLifecycleCanonicalVerdict
       ? (canonicalTone || String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')
-      : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor'));
+      : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')));
   const suppressingTrackedAvoid = suppressAvoidForTrackedWatch === true;
   const preserveTrackedLifecycleLabels = preserveTrackedLifecycleCanonicalVerdict && !suppressingTrackedAvoid;
   const mainBlocker = suppressAvoidForTrackedWatch
@@ -8037,24 +8074,38 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     : String(simplifiedState.mainBlocker || '').trim();
   const finalBadgeLabel = suppressingTrackedAvoid
     ? 'Watch'
-    : (preserveTrackedLifecycleLabels
+    : (preserveTrackedPresentationCanonicalVerdict
+      ? String(
+        persistedSharedPresentation && persistedSharedPresentation.badgeLabel
+        || globalVerdictLabel(canonicalVerdict || 'watch')
+        || 'Watch'
+      ).trim()
+      : (preserveTrackedLifecycleLabels
       ? String(globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()
-      : String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim());
+      : String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()));
   const finalActionLabel = suppressingTrackedAvoid
     ? (visualBucket === 'diminishing' ? 'Diminishing' : globalVerdictLabel(canonicalVerdict || 'watch'))
     : (preserveTrackedLifecycleLabels
       ? String(globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()
       : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim());
-  const headline = String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim();
-  const primaryReason = mainBlocker || String(globalVerdict.reason || '').trim();
-  const nextAction = canonicalVerdict === 'watch'
-    ? 'Wait for stronger confirmation before considering entry.'
-    : '';
-  const planVisible = simplifiedState.planVisible === true;
+  const headline = canonicalVerdict === 'entry'
+    ? 'Entry Ready'
+    : String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim();
+  const primaryReason = canonicalVerdict === 'entry'
+    ? 'Buyers are in control and the setup is ready to act on.'
+    : (mainBlocker || String(globalVerdict.reason || '').trim());
+  const nextAction = canonicalVerdict === 'entry'
+    ? 'Execute only if the trigger remains valid.'
+    : (canonicalVerdict === 'watch'
+      ? 'Wait for stronger confirmation before considering entry.'
+      : '');
+  const planVisible = canonicalVerdict === 'entry' ? true : simplifiedState.planVisible === true;
   const planStatus = String(simplifiedState.planStatus || '').trim().toLowerCase() || 'missing';
-  const planSummary = planVisible
+  const planSummary = canonicalVerdict === 'entry'
     ? 'Trade plan available.'
-    : (String(mainBlocker || primaryReason || 'No actionable trade plan yet.').trim() || 'No actionable trade plan yet.');
+    : (planVisible
+    ? 'Trade plan available.'
+    : (String(mainBlocker || primaryReason || 'No actionable trade plan yet.').trim() || 'No actionable trade plan yet.'));
   return {
     canonicalVerdict,
     finalVerdict:canonicalVerdict,
@@ -15717,19 +15768,25 @@ function buildConsistencyAuditRows({
   const resolvedState = resolved && typeof resolved === 'object' ? resolved : {};
   const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
   const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
-  const canonicalVerdict = normalizeGlobalVerdictKey(simplified.canonicalVerdict || visible.canonicalVerdict || global.final_verdict || 'watch');
-  const visualBucket = normalizeVisualBucketForPairing(simplified.visualBucket || visible.visibleBucket || 'monitor');
-  const lifecycleState = normalizeGlobalVerdictKey(lifecycle.state || global.lifecycle || canonicalVerdict || 'watch');
+  const canonicalVerdict = normalizeGlobalVerdictKey(visible.canonicalVerdict || simplified.canonicalVerdict || global.final_verdict || 'watch');
+  const visualBucket = normalizeVisualBucketForPairing(visible.visibleBucket || simplified.visualBucket || 'monitor');
+  const rawLifecycleState = normalizeGlobalVerdictKey(lifecycle.state || global.lifecycle || canonicalVerdict || 'watch');
   const planStatus = String(simplified.planStatus || global.plan_status || '').trim().toLowerCase();
   const priceabilityState = String(simplified.priceabilityState || global.priceability_state || derived.priceabilityState || '').trim().toLowerCase();
   const bounceState = String(simplified.bounceState || global.bounce_state || derived.bounceState || '').trim().toLowerCase();
   const structureState = String(simplified.structureState || global.structure_state || derived.structureState || '').trim().toLowerCase();
-  const actionState = String(resolvedState.actionStateLabel || resolvedState.actionLabel || '').trim();
+  const rawActionState = String(resolvedState.actionStateLabel || resolvedState.actionLabel || '').trim();
   const planVisible = planUi.showPlan === true;
   const hasProvisionalPlan = global.hasProvisionalPriceablePlan === true || global.has_provisional_priceable_plan === true;
   const hasPriceablePlan = global.hasPriceablePlan === true || global.has_priceable_plan === true;
   const resolvedRr = numericOrNull(simplified.resolvedRR != null ? simplified.resolvedRR : global.resolved_rr);
-  const blockerText = String(simplified.mainBlocker || global.main_blocker || '').trim();
+  const rawBlockerText = String(visible.mainBlocker || simplified.mainBlocker || global.main_blocker || '').trim();
+  const actionableDisplayState = ['near_entry','entry'].includes(canonicalVerdict);
+  const lifecycleState = actionableDisplayState ? canonicalVerdict : rawLifecycleState;
+  const actionState = actionableDisplayState ? verdictPresentationLabelForKey(canonicalVerdict) : rawActionState;
+  const blockerText = actionableDisplayState && /conditions are not strong enough for active focus|waiting for confirmation|needs confirmation|trade (is not|isn't) ready/i.test(rawBlockerText)
+    ? ''
+    : rawBlockerText;
   const contradictions = [];
 
   if(['near_entry','entry'].includes(canonicalVerdict) && lifecycleState !== canonicalVerdict){
@@ -21120,7 +21177,7 @@ function buildSharedSetupNarrative({
   const viability = String(resolved.viability || '').trim().toLowerCase();
   const mainBlocker = String(simplified.mainBlocker || resolved.main_blocker || resolved.reason || '').trim();
   const planStatus = String(simplified.planStatus || resolved.plan_status || '').trim().toLowerCase();
-  const planVisible = simplified.planVisible === true;
+  const planVisible = canonicalVerdict === 'entry' ? true : simplified.planVisible === true;
   const hasPriceablePlan = resolved.hasPriceablePlan === true || resolved.has_priceable_plan === true;
   const hasProvisionalPlan = resolved.hasProvisionalPriceablePlan === true || resolved.has_provisional_priceable_plan === true;
   const validPlan = planStatus === 'valid'
@@ -21571,7 +21628,11 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
   let headline = String(sharedNarrative.stateLabel || '').trim();
   let primaryReason = String(sharedNarrative.primaryReason || '').trim();
   let nextAction = String(sharedNarrative.nextAction || '').trim();
-  if(canonicalVerdict === 'near_entry'){
+  if(canonicalVerdict === 'entry'){
+    headline = 'Entry Ready';
+    primaryReason = 'Buyers are in control and the setup is ready to act on.';
+    nextAction = 'Execute only if the trigger remains valid.';
+  }else if(canonicalVerdict === 'near_entry'){
     if(!headline) headline = 'Near Entry';
     if(!primaryReason){
       primaryReason = weakVolume
@@ -21599,7 +21660,7 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
     primaryReason = primaryReason.replace(/\s*because volume is weak\.?/ig, '').trim() || primaryReason;
     nextAction = nextAction.replace(/\s*because volume is weak\.?/ig, '').trim() || nextAction;
   }
-  if(supportTestCopy){
+  if(supportTestCopy && canonicalVerdict !== 'entry'){
     headline = supportTestCopy.tradeStatus;
     primaryReason = supportTestCopy.monitoringReason;
     nextAction = supportTestCopy.nextAction;
@@ -21620,7 +21681,9 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
   }
 
   let planSummary = '';
-  if(!planVisible && (validPlan || hasPriceablePlan || hasProvisionalPlan)){
+  if(canonicalVerdict === 'entry'){
+    planSummary = 'Trade plan available.';
+  }else if(!planVisible && (validPlan || hasPriceablePlan || hasProvisionalPlan)){
     planSummary = hasProvisionalPlan
       ? 'Provisional plan exists - waiting for confirmation.'
       : 'Valid plan calculations exist, but the trade is not actionable yet.';
@@ -22335,16 +22398,21 @@ function buildEntryConditionsSummary({
       suppressPlanBlockerInHeadline:true
     };
   }
-  if(verdict === 'entry' && entryGatePass){
+  if(verdict === 'entry'){
     return {
-      show:false,
+      show:true,
       ready:true,
+      ticker:normalizeTicker(ticker || ''),
       header:'🚀 Entry - Ready',
-      primary:'Entry conditions are satisfied.',
+      primary:'Buyers are in control and the setup is ready to act on.',
+      definitionLine:'',
+      wording_tone:'entry_ready',
+      pattern_label:'Entry Ready',
+      pattern_explanation:'',
       secondary:[],
-      triggerLine:'Becomes actionable IF: entry trigger stays valid on close.',
-      futureStateLine:'Upgrades to: \uD83D\uDE80 Entry.',
-      footer:'Becomes actionable IF: entry trigger stays valid on close. Upgrades to: \uD83D\uDE80 Entry.'
+      triggerLine:'Execute only if the trigger remains valid.',
+      futureStateLine:'Downgrades if support fails, the trigger is lost, or the saved plan becomes invalid.',
+      footer:'Execute only if the trigger remains valid.'
     };
   }
   if(presentation === 'diminishing'){
@@ -22771,8 +22839,8 @@ function buildTrackLongPressContract(options = {}){
       signals:base.secondary
     });
   }
-  if(verdict === 'entry' && entryGatePass){
-    return toContract({
+  if(verdict === 'entry'){
+    const contract = toContract({
       show:true,
       ready:true,
       source:'ticker_specific',
@@ -22781,15 +22849,17 @@ function buildTrackLongPressContract(options = {}){
         locationWhy || 'price is in the right area',
         bounceWhy || 'buyers have confirmed the bounce',
         planWhy || 'the plan is actionable',
-        'the entry trigger has passed'
+        entryGatePass ? 'the entry trigger has passed' : 'buyers are in control and the setup is ready to act'
       ])}.`,
-      stillMissing:'nothing material is missing while the trigger remains valid',
-      upgrade:'keep the trigger valid on close and execute only within the saved plan',
-      downgrade:asSentence(cautionReason || 'failed support, a lost trigger, or plan invalidation would move it back to Monitor'),
-      whyNotEntry:'Entry gate is already passing.',
-      nextRequiredAction:'Execute only while the saved trigger and risk plan remain valid.',
+      stillMissing:'',
+      upgrade:'',
+      downgrade:asSentence(cautionReason || 'failed support, a lost trigger, or plan invalidation would remove Entry readiness'),
+      whyNotEntry:'',
+      nextRequiredAction:'Execute only if the trigger remains valid.',
       signals:[locationWhy, bounceWhy, planWhy]
     });
+    contract.header = 'Entry Ready';
+    return contract;
   }
   if(verdict === 'near_entry'){
     const conciseFailures = latestEntryAudit && Array.isArray(latestEntryAudit.failedEntryChecks)
@@ -23380,6 +23450,17 @@ function resolvePlanVisibility(setup){
     };
   }
 
+  if(state === 'entry'){
+    return {
+      showPlan:true,
+      showPositionSize:true,
+      showCapital:true,
+      showRR:true,
+      diagnosticsMessage:null,
+      diagnosticsTone:null
+    };
+  }
+
   if(!noConfirmation && !weakStructure){
     return {
       showPlan:true,
@@ -23942,7 +24023,7 @@ function buildReviewSemanticStatus({
   const planMathValid = plan.status === 'valid'
     || (plan.rewardRisk && plan.rewardRisk.valid === true && Number.isFinite(numericOrNull(plan.rewardRisk.rrRatio)))
     || planStatus === 'valid';
-  const planFieldsPresent = [plan.entry, plan.stop, plan.target].some(value => Number.isFinite(numericOrNull(value)) || String(value || '').trim());
+  const planFieldsPresent = [plan.entry, plan.stop, plan.target, plan.firstTarget].some(value => Number.isFinite(numericOrNull(value)) || String(value || '').trim());
   const rrValue = planRealism && Number.isFinite(numericOrNull(planRealism.raw_rr))
     ? Number(numericOrNull(planRealism.raw_rr))
     : (plan.rewardRisk && Number.isFinite(numericOrNull(plan.rewardRisk.rrRatio)) ? Number(numericOrNull(plan.rewardRisk.rrRatio)) : null);
@@ -24009,15 +24090,16 @@ function buildReviewSemanticStatus({
       ? 'Needs confirmation before promotion.'
       : 'No actionable trade yet.';
   }
-  const actionable = ['entry','near_entry'].includes(verdict)
-    && simplified.entryGatePass === true
+  const actionable = verdict === 'entry'
+    && terminalAvoid !== true
     && planMathValid
-    && rrAcceptable;
+    && planFieldsPresent;
   const draftPlan = planMathValid && verdict === 'watch';
   const pricedButNotReady = planMathValid
     && actionable !== true
     && terminalAvoid !== true
-    && verdict !== 'avoid';
+    && verdict !== 'avoid'
+    && verdict !== 'entry';
   const constructivePricedButNotReady = pricedButNotReady
     && aliveStructure
     && !structuralWeakness;
@@ -24030,7 +24112,10 @@ function buildReviewSemanticStatus({
     };
   let tradeStatus = {line1:'No actionable trade yet.', line2:blocker};
   if(actionable){
-    tradeStatus = {line1:'Actionable plan.', line2:rrAcceptable ? 'Risk/reward and gates are aligned.' : ''};
+    tradeStatus = {
+      line1:'Entry Ready - plan is actionable.',
+      line2:'Execute only if the trigger remains valid.'
+    };
   }else if(constructivePricedButNotReady){
     tradeStatus = {line1:pricedButNotReadyCopy.line1, line2:pricedButNotReadyCopy.line2};
   }else if(accepted50MaSupportTest){
@@ -24072,9 +24157,9 @@ function buildReviewSemanticStatus({
     planMathValid,
     planFieldsPresent,
     rrDisplay,
-    showPlanFields:constructivePricedButNotReady ? false : (planMathValid || planFieldsPresent),
-    showPlanMetrics:constructivePricedButNotReady ? false : (actionable || (accepted50MaSupportTest && draftPlan)),
-    showCapital:actionable
+    showPlanFields:verdict === 'entry' ? true : (constructivePricedButNotReady ? false : (planMathValid || planFieldsPresent)),
+    showPlanMetrics:verdict === 'entry' ? true : (constructivePricedButNotReady ? false : (actionable || (accepted50MaSupportTest && draftPlan))),
+    showCapital:verdict === 'entry' ? true : actionable
   };
 }
 

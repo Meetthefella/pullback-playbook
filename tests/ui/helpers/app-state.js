@@ -40,6 +40,72 @@ function mapHistoryRows(history){
     : [];
 }
 
+function normalizeCopyText(value){
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function buildVisibleCopySnapshot(appState = {}){
+  const scan = appState.scan || {};
+  const review = appState.review || {};
+  const track = appState.track || {};
+  const reviewVisible = review.visible || {};
+  const reviewState = review.stateHealth || {};
+  const trackVisible = track.visible || {};
+  const trackState = track.simplifiedState || {};
+  const diagnostics = track.diagnostics || {};
+  const watchlistVisual = diagnostics.watchlistVisualState || {};
+  const entryConditions = watchlistVisual.entryConditionsSummary || {};
+  const entryPanel = entryConditions && typeof entryConditions === 'object'
+    ? {
+      status:normalizeCopyText(entryConditions.header),
+      why:normalizeCopyText(entryConditions.why || entryConditions.primary),
+      signals:Array.isArray(entryConditions.signals)
+        ? entryConditions.signals.map(normalizeCopyText).filter(Boolean)
+        : [],
+      stillMissing:normalizeCopyText(entryConditions.stillMissing || entryConditions.definitionLine),
+      upgrade:normalizeCopyText(entryConditions.upgrade || entryConditions.triggerLine),
+      nextAction:normalizeCopyText(entryConditions.nextRequiredAction),
+      downgrade:normalizeCopyText(entryConditions.downgrade || entryConditions.futureStateLine),
+      whyNotEntry:normalizeCopyText(entryConditions.whyNotEntry)
+    }
+    : null;
+  return {
+    scan:{
+      badge:normalizeCopyText(scan.visibleCard && scan.visibleCard.badgeLabel),
+      technical:normalizeCopyText(scan.visibleCard && scan.visibleCard.technicalSummary),
+      decision:normalizeCopyText(scan.visibleCard && scan.visibleCard.decisionSummary),
+      trace:normalizeCopyText(scan.decisionTrace && scan.decisionTrace.panelText)
+    },
+    review:{
+      canonicalVerdict:normalizeCopyText(reviewState.canonicalVerdict),
+      visualBucket:normalizeCopyText(reviewState.visualBucket),
+      badge:normalizeCopyText(reviewVisible.badgeLabel),
+      headline:normalizeCopyText(reviewVisible.reviewHeadline),
+      tradeStatus:normalizeCopyText(reviewVisible.reviewStatus),
+      workspaceStatus:normalizeCopyText(reviewVisible.workspaceStatus),
+      nextActionInline:normalizeCopyText(reviewVisible.actionLabel),
+      nextActionPrimary:normalizeCopyText(reviewVisible.actionPrimary),
+      technical:normalizeCopyText(reviewVisible.technicalSummary),
+      rr:normalizeCopyText(reviewVisible.rr),
+      entry:normalizeCopyText(reviewVisible.entry),
+      stop:normalizeCopyText(reviewVisible.stop),
+      target:normalizeCopyText(reviewVisible.target),
+      entryVisible:reviewVisible.entryVisible === true,
+      capitalVisible:reviewVisible.capitalVisible === true,
+      rrVisible:reviewVisible.rrVisible === true
+    },
+    track:{
+      canonicalVerdict:normalizeCopyText(trackState.canonicalVerdict),
+      visualBucket:normalizeCopyText(trackState.visualBucket),
+      badge:normalizeCopyText(trackVisible.badgeLabel),
+      decision:normalizeCopyText(trackVisible.decisionSummary),
+      planMeta:normalizeCopyText(trackVisible.planMeta),
+      cardText:normalizeCopyText(trackVisible.cardText),
+      entryPanel
+    }
+  };
+}
+
 function buildReplaySnapshotFromRecord(record, runtimeContext = {}){
   const item = record && typeof record === 'object' ? cloneJsonValue(record) : null;
   if(!item) return null;
@@ -214,6 +280,9 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     const scanSimplified = record && typeof resolveSimplifiedStateForSurface === 'function'
       ? withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(record, 'scan', {source:'playwright_parity', mutationSource:'playwright_parity'}))
       : null;
+    const scanRenderPathSimplified = record && typeof resolveSimplifiedStateForSurface === 'function'
+      ? withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(record, 'scan', {source:'scan_grouping', mutationSource:'scan_grouping'}))
+      : null;
     const reviewStateHealth = record && typeof currentReviewStateHealthSnapshot === 'function'
       ? currentReviewStateHealthSnapshot(record)
       : null;
@@ -274,6 +343,15 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
           planStatus:String(scanSimplified.planStatus || ''),
           mainBlocker:String(scanSimplified.mainBlocker || '')
         } : null,
+        renderPathSimplifiedState:scanRenderPathSimplified ? {
+          canonicalVerdict:String(scanRenderPathSimplified.canonicalVerdict || ''),
+          visualBucket:String(scanRenderPathSimplified.visualBucket || ''),
+          tone:String(scanRenderPathSimplified.tone || ''),
+          badgeLabel:String(scanRenderPathSimplified.badgeLabel || ''),
+          actionLabel:String(scanRenderPathSimplified.actionLabel || ''),
+          planStatus:String(scanRenderPathSimplified.planStatus || ''),
+          mainBlocker:String(scanRenderPathSimplified.mainBlocker || '')
+        } : null,
         visibleCard:{
           badgeLabel:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`).textContent),
           technicalSummary:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`).textContent),
@@ -288,7 +366,14 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         visible:{
           currentVerdict:String(reviewShell && reviewShell.dataset && reviewShell.dataset.visualState || reviewVisible && reviewVisible.currentVerdict || ''),
           currentTone:String(reviewShell && reviewShell.dataset && reviewShell.dataset.visualTone || reviewVisible && reviewVisible.currentTone || ''),
-          badgeLabel:safeText(document.querySelector('#reviewWorkspace .badge.state-pill') && document.querySelector('#reviewWorkspace .badge.state-pill').textContent),
+          badgeLabel:safeText(
+            (document.querySelector('#reviewWorkspace .review-summary-badges .badge')
+              || document.querySelector('#reviewWorkspace .badge.state-pill'))
+            && (
+              (document.querySelector('#reviewWorkspace .review-summary-badges .badge')
+                || document.querySelector('#reviewWorkspace .badge.state-pill')).textContent
+            )
+          ),
           reviewHeadline:safeText(document.querySelector('#reviewWorkspace .summary') && document.querySelector('#reviewWorkspace .summary').textContent),
           reviewStatus:safeText(document.getElementById('tradeStatusBox') && document.getElementById('tradeStatusBox').textContent),
           workspaceStatus:safeText(document.getElementById('reviewWorkspaceStatus') && document.getElementById('reviewWorkspaceStatus').textContent),
@@ -340,12 +425,14 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     excludesWatchlistPresentation:!(appState.snapshot && appState.snapshot.watchlist && appState.snapshot.watchlist.presentation),
     excludesTrackDiagnostics:appState.snapshot && appState.snapshot.track === undefined
   };
+  appState.visibleCopy = buildVisibleCopySnapshot(appState);
   delete appState.authoritativeRecord;
   return appState;
 }
 
 module.exports = {
   buildReplaySnapshotFromRecord,
+  buildVisibleCopySnapshot,
   extractAppTickerState,
   normalizeNumber
 };

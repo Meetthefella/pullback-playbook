@@ -63,6 +63,7 @@ test('deployed app stays in parity with replay output for supplied tickers', asy
     if(preReviewScanAppState && preReviewScanAppState.scan){
       appState.scan = preReviewScanAppState.scan;
     }
+    assertVisibleCopyContract(appState, ticker);
     const reviewToPostAddMutation = summarizeStageMutation(preWatchlistAppState, postAddAppState, {
       label:'review_to_post_add',
       addedToWatchlist
@@ -226,6 +227,40 @@ function assertReplaySnapshotContract(snapshot, ticker){
     snapshot.track,
     `${ticker} replay snapshot must not include track presentation/debug authority.`
   ).toBeUndefined();
+}
+
+function assertVisibleCopyContract(appState, ticker){
+  const visibleCopy = appState && appState.visibleCopy ? appState.visibleCopy : {};
+  const review = visibleCopy.review || {};
+  const track = visibleCopy.track || {};
+  const entryPanel = track.entryPanel || {};
+  const canonicalVerdict = String(review.canonicalVerdict || '').trim().toLowerCase();
+  if(canonicalVerdict !== 'entry') return;
+
+  expect(review.badge, `${ticker} review badge must render Entry when canonical verdict is entry.`).toContain('Entry');
+  expect(review.tradeStatus, `${ticker} review trade status must not show legacy not-ready copy for canonical Entry.`).not.toContain('The app knows the maths, but the trade isn\'t ready');
+  expect(review.tradeStatus, `${ticker} review trade status must not show needs-confirmation copy for canonical Entry.`).not.toMatch(/needs confirmation/i);
+  expect(review.entryVisible, `${ticker} review trade plan inputs must be visible for canonical Entry.`).toBe(true);
+  expect(review.capitalVisible, `${ticker} review capital block must be visible for canonical Entry.`).toBe(true);
+  expect(review.rrVisible, `${ticker} review RR must be visible for canonical Entry.`).toBe(true);
+  expect(review.rr, `${ticker} review RR must not collapse to Priced for canonical Entry.`).not.toBe('Priced');
+
+  if(track.badge){
+    expect(track.badge, `${ticker} track badge must render Entry when canonical verdict is entry.`).toContain('Entry');
+  }
+  if(entryPanel.status){
+    expect(entryPanel.status, `${ticker} track expanded status must render Entry Ready for canonical Entry.`).toContain('Entry Ready');
+  }
+  if(entryPanel.why){
+    expect(entryPanel.why, `${ticker} track expanded Why must not fall back to Monitor wording for canonical Entry.`).not.toContain('Monitor');
+    expect(entryPanel.why, `${ticker} track expanded Why must not mention needs confirmation for canonical Entry.`).not.toMatch(/needs confirmation/i);
+  }
+  if(entryPanel.stillMissing){
+    expect(entryPanel.stillMissing, `${ticker} track expanded Still Missing must not claim confirmation is missing for canonical Entry.`).not.toMatch(/needs confirmation/i);
+  }
+  if(entryPanel.nextAction){
+    expect(entryPanel.nextAction, `${ticker} track expanded Next Action must stay executable for canonical Entry.`).toContain('Execute only if the trigger remains valid.');
+  }
 }
 
 function summarizeStageMutation(preTrackState, postTrackState, context = {}){

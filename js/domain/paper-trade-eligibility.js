@@ -68,7 +68,7 @@
       if(tradeability && !['tradable', 'risk_only'].includes(tradeability)) reasons.push(`Tradeability is ${tradeability}.`);
       if(capitalFit && !['fits_capital', 'unknown'].includes(capitalFit)) reasons.push(`Capital fit is ${capitalFit}.`);
       if(primaryState === 'dead') reasons.push('Setup is in dead state.');
-      if(hardBlocker) reasons.push(hardBlocker);
+      if(hardBlocker && !isEntryReadyVerdict(finalVerdict)) reasons.push(hardBlocker);
 
       const plan = {
         valid:planStatus === 'valid',
@@ -82,7 +82,7 @@
           (tradeability && !['tradable', 'risk_only'].includes(tradeability))
           || (capitalFit && !['fits_capital', 'unknown'].includes(capitalFit))
           || primaryState === 'dead'
-          || !!hardBlocker
+          || (!!hardBlocker && !isEntryReadyVerdict(finalVerdict))
         )
       };
 
