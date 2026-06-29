@@ -4587,7 +4587,13 @@ async function submitTesterReport(){
   }
 }
 
-function completeTesterSetup(){
+async function completeTesterSetup(){
+  if(!paperTradeGatewayReady()){
+    try{
+      setStatus('inputStatus', 'Checking Trading 212 demo gateway before completing tester setup...');
+      await refreshTrading212PaperAvailability({force:true, render:true});
+    }catch(_error){}
+  }
   if(!paperTradeGatewayReady()){
     renderTesterSetupPanel();
     setStatus('inputStatus', 'Trading 212 demo gateway must be ready before tester setup can be completed.');
