@@ -33889,6 +33889,25 @@ function currentPaperTradeContextForTicker(ticker){
     ticker:symbol,
     marketStatus:record.meta.marketStatus || state.marketStatus || ''
   });
+  const debugSnapshot = {
+    ticker:symbol,
+    finalVerdict:reviewFinalVerdict,
+    reviewHeaderVerdict:finalVerdict,
+    visualFinalVerdict:String(visualState.finalVerdict || visualState.final_verdict || '').trim(),
+    planStatus:String(displayedPlan.status || '').trim(),
+    entry:displayedPlan.entry,
+    stop:displayedPlan.stop,
+    target:displayedPlan.target,
+    positionSize:displayedPlan.riskFit && displayedPlan.riskFit.position_size,
+    maxLoss:displayedPlan.riskFit && displayedPlan.riskFit.max_loss,
+    rrRatio:displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio,
+    riskStatus:displayedPlan.riskFit && displayedPlan.riskFit.risk_status,
+    tradeability:displayedPlan.tradeability,
+    capitalFit:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit,
+    primaryState:resolvedContract.primaryState,
+    blockerReason:resolvedContract.blockerReason,
+    reasons:Array.isArray(mergedEligibility.reasons) ? mergedEligibility.reasons.slice() : []
+  };
   return {
     ticker:symbol,
     record,
@@ -33897,8 +33916,23 @@ function currentPaperTradeContextForTicker(ticker){
     derivedStates,
     setupScore:setupScoreForRecord(record),
     resolvedContract,
-    eligibility:mergedEligibility
+    eligibility:mergedEligibility,
+    debugSnapshot
   };
+}
+
+function logPaperTradeContextDiagnostics(context, source = 'paper_trade'){
+  const snapshot = context && context.debugSnapshot && typeof context.debugSnapshot === 'object'
+    ? context.debugSnapshot
+    : null;
+  if(!snapshot) return;
+  pushRuntimeDebugEntry(`${source}.eligibility`, {
+    message:`${snapshot.ticker || 'ticker'} | verdict=${snapshot.finalVerdict || '(none)'} | plan=${snapshot.planStatus || '(none)'}`,
+    extra:snapshot
+  });
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[PAPER_TRADE_ELIGIBILITY]', snapshot);
+  }
 }
 
 function isPaperTradeDebugForceEnabled(){
@@ -34034,10 +34068,15 @@ function isDuplicatePaperTradeSubmission({
 function openPaperTradePreview(ticker){
   const context = currentPaperTradeContextForTicker(ticker);
   if(!context) return;
+  logPaperTradeContextDiagnostics(context, 'paper_trade_click');
   if(!context.eligibility.eligible){
     const reason = context.eligibility.reasons[0] || 'Setup is not eligible for paper trading.';
+    const snapshot = context.debugSnapshot && typeof context.debugSnapshot === 'object' ? context.debugSnapshot : null;
+    const compactTrace = snapshot
+      ? `paper-trade trace | verdict=${snapshot.finalVerdict || '(none)'} | plan=${snapshot.planStatus || '(none)'} | size=${Number.isFinite(Number(snapshot.positionSize)) ? String(snapshot.positionSize) : 'n/a'} | rr=${Number.isFinite(Number(snapshot.rrRatio)) ? Number(snapshot.rrRatio).toFixed(2) : 'n/a'}`
+      : '';
     setPaperTradeUiState(context.ticker, {state:'idle', previewOpen:false, snapshot:null, message:reason});
-    setStatus('reviewWorkspaceStatus', `<span class="warntext">${escapeHtml(reason)}</span>`);
+    setStatus('reviewWorkspaceStatus', `<span class="warntext">${escapeHtml(reason)}</span>${compactTrace ? `<div class="tiny">${escapeHtml(compactTrace)}</div>` : ''}`);
     renderReviewWorkspace();
     return;
   }
