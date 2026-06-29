@@ -314,9 +314,13 @@ test('canonical Entry presentation remains authoritative across review, trade pl
   expect(contract.paperTrade.reasons).toEqual([]);
 
   const reviewStateHealth = await page.evaluate(() => currentReviewStateHealthSnapshot(getTickerRecord('TROW')));
+  expect(reviewStateHealth.sourceOfTruth).toBe('review_projection_snapshot');
   expect(reviewStateHealth.resolvedRR).toBeCloseTo(2.5, 6);
   if(reviewStateHealth.plannedRR != null) expect(reviewStateHealth.plannedRR).toBeCloseTo(2.5, 6);
   if(reviewStateHealth.resolverRR != null) expect(reviewStateHealth.resolverRR).toBeCloseTo(2.5, 6);
+  expect(reviewStateHealth.entryGatePass).toBe(true);
+  expect(reviewStateHealth.nearEntryGatePass).toBe(true);
+  expect(reviewStateHealth.primaryBlockerReason).toBe('');
 
   await expect(page.locator('#reviewWorkspace .review-summary-badges .badge')).toContainText('Entry');
   await expect(page.locator('#reviewNextActionInline')).toContainText('Execute only if the trigger remains valid.');

@@ -3773,8 +3773,10 @@ function currentReviewStateHealthSnapshot(record){
     uiState.activeReviewProjectionSource
     || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
   ).trim().toLowerCase();
-  const reviewSnapshotAuthority = reviewProjectionSource === 'track_projection_updated'
-    && !!activeProjectionSnapshot;
+  const reviewSnapshotAuthority = (
+    reviewProjectionSource === 'clicked_card_snapshot'
+    || reviewProjectionSource === 'track_projection_updated'
+  ) && !!activeProjectionSnapshot;
   const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {
     renderPass:0,
     source:'diagnostic_snapshot',
@@ -3813,6 +3815,8 @@ function currentReviewStateHealthSnapshot(record){
   const simplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
   const simplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
   const derivedTone = projectionTone || (String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor');
+  const authoritativeEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'entry';
+  const authoritativeNearEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'near_entry';
   const plannedRr = item.plan && String(item.plan.status || '').trim().toLowerCase() === 'valid'
     && Number.isFinite(numericOrNull(item.plan.plannedRR))
     ? Number(numericOrNull(item.plan.plannedRR))
@@ -3871,9 +3875,11 @@ function currentReviewStateHealthSnapshot(record){
     resolvedRR:plannedRr != null ? plannedRr : simplifiedResolvedRr,
     resolverRR:simplifiedResolvedRr,
     plannedRR:plannedRr,
-    entryGatePass:effectiveSimplifiedState.entryGatePass === true,
-    nearEntryGatePass:effectiveSimplifiedState.nearEntryGatePass === true,
-    primaryBlockerReason:String(effectiveSimplifiedState.mainBlocker || ''),
+    entryGatePass:authoritativeEntryPresentation ? true : (effectiveSimplifiedState.entryGatePass === true),
+    nearEntryGatePass:authoritativeEntryPresentation || authoritativeNearEntryPresentation ? true : (effectiveSimplifiedState.nearEntryGatePass === true),
+    primaryBlockerReason:authoritativeEntryPresentation
+      ? ''
+      : String(effectiveSimplifiedState.mainBlocker || ''),
     avoidTriggerSource:String(effectiveSimplifiedState.avoidTriggerSource || ''),
     terminalAvoidApplied:effectiveSimplifiedState.terminalAvoidApplied === true,
     divergenceDetected,
