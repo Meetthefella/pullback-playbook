@@ -33934,7 +33934,23 @@ function currentPaperTradeContextForTicker(ticker){
     primaryState:primaryStateForEligibility,
     hardBlocker:hardBlockerForEligibility
   });
-  const mergedEligibility = applyPaperTradeEligibilityDebugOverride(eligibility, {
+  const authoritativeProjectedEligibility = projectedEntryAuthority && planMathLooksValid
+    ? {
+      eligible:true,
+      reasons:[],
+      preview:{
+        entry:numericOrNull(displayedPlan.entry),
+        stop:numericOrNull(displayedPlan.stop),
+        target:numericOrNull(displayedPlan.target || displayedPlan.firstTarget),
+        positionSize:Number.isFinite(numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size))
+          ? Math.max(1, Math.floor(Number(numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size))))
+          : null,
+        maxLoss:numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.max_loss),
+        rrRatio:numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio)
+      }
+    }
+    : eligibility;
+  const mergedEligibility = applyPaperTradeEligibilityDebugOverride(authoritativeProjectedEligibility, {
     ticker:symbol,
     marketStatus:record.meta.marketStatus || state.marketStatus || ''
   });
