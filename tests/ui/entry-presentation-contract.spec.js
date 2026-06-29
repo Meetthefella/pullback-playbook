@@ -330,6 +330,16 @@ test('canonical Entry presentation remains authoritative across review, trade pl
   await expect(page.locator('#rrValue')).not.toContainText('Priced');
   await expect(page.locator('#paperTradeBtn')).toBeEnabled();
   await expect(page.locator('#paperTradeDisabledReason')).toHaveCount(0);
+  const clickContextFallback = await page.evaluate(() => {
+    uiState.activeReviewSourceProjectionSnapshot = null;
+    uiState.activeReviewProjectionSource = 'non_watchlist_direct_resolve';
+    setActiveReviewTicker('TROW');
+    return currentPaperTradeContextForTicker('TROW');
+  });
+  expect(clickContextFallback && clickContextFallback.finalVerdict).toBe('Entry');
+  expect(clickContextFallback && clickContextFallback.eligibility && clickContextFallback.eligibility.eligible).toBe(true);
+  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.authoritativeReviewVerdict).toBe('entry');
+  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.reasons).toEqual([]);
 
   await page.evaluate(() => {
     renderWatchlist({source:'entry_contract_test'});

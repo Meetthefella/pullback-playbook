@@ -33890,19 +33890,11 @@ function setPaperTradeDebugSnapshotForTicker(ticker, snapshot = null){
 function currentPaperTradeContextForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return null;
-  const sourceProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+  let sourceProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
     && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
     && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === symbol
     ? uiState.activeReviewSourceProjectionSnapshot
     : null;
-  const projectionCanonicalVerdict = sourceProjectionSnapshot
-    ? normalizeGlobalVerdictKey(
-      sourceProjectionSnapshot.canonicalVerdict
-      || sourceProjectionSnapshot.finalVerdict
-      || sourceProjectionSnapshot.renderedVerdict
-      || ''
-    )
-    : '';
   const refreshed = refreshTrackedTickerState(symbol, {
     source:'review',
     sourceSurface:'review',
@@ -33914,6 +33906,17 @@ function currentPaperTradeContextForTicker(ticker){
   const liveRecord = refreshed.record;
   if(!liveRecord) return null;
   const record = normalizeTickerRecord(liveRecord);
+  if(!sourceProjectionSnapshot && activeReviewTicker() === symbol){
+    sourceProjectionSnapshot = buildStableReviewProjectionSnapshot(record, 'paper_trade_context_fallback');
+  }
+  const projectionCanonicalVerdict = sourceProjectionSnapshot
+    ? normalizeGlobalVerdictKey(
+      sourceProjectionSnapshot.canonicalVerdict
+      || sourceProjectionSnapshot.finalVerdict
+      || sourceProjectionSnapshot.renderedVerdict
+      || ''
+    )
+    : '';
   const effectivePlan = refreshed.effectivePlan;
   const displayedPlan = applySetupConfirmationPlanGate(
     record,
@@ -33922,7 +33925,17 @@ function currentPaperTradeContextForTicker(ticker){
   const resolvedContract = refreshed.resolvedContract;
   const visualState = refreshed.visualState;
   const derivedStates = refreshed.derivedStates;
-  const finalVerdict = reviewHeaderVerdictForRecord(record);
+  const globalVerdict = refreshed.globalVerdict || resolveGlobalVerdict(record);
+  const lifecycleSnapshot = refreshed.lifecycleSnapshot || watchlistLifecycleSnapshot(record);
+  const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+  const reviewEffectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(
+    record,
+    simplifiedState,
+    globalVerdict,
+    lifecycleSnapshot
+  );
+  const authoritativeReviewVerdictKey = projectionCanonicalVerdict || normalizeGlobalVerdictKey(reviewEffectiveSimplifiedState.canonicalVerdict || 'watch');
+  const finalVerdict = normalizeReviewPresentationVerdict(authoritativeReviewVerdictKey || reviewHeaderVerdictForRecord(record));
   const projectedEntryAuthority = projectionCanonicalVerdict === 'entry';
   const planMathLooksValid = displayedPlan
     && displayedPlan.status === 'valid'
@@ -33933,11 +33946,7 @@ function currentPaperTradeContextForTicker(ticker){
     && Number.isFinite(numericOrNull(displayedPlan.target || displayedPlan.firstTarget))
     && Number.isFinite(numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size))
     && Number.isFinite(numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.max_loss));
-  const reviewFinalVerdict = projectedEntryAuthority
-    ? 'Entry'
-    : normalizeAnalysisVerdict(
-      visualState.finalVerdict || visualState.final_verdict || finalVerdict
-    );
+  const reviewFinalVerdict = normalizeAnalysisVerdict(finalVerdict || visualState.finalVerdict || visualState.final_verdict || 'Watch');
   const planStatusForEligibility = projectedEntryAuthority && planMathLooksValid
     ? 'valid'
     : displayedPlan.status;
@@ -33988,6 +33997,7 @@ function currentPaperTradeContextForTicker(ticker){
     projectionCanonicalVerdict,
     projectedEntryAuthority,
     reviewHeaderVerdict:finalVerdict,
+    authoritativeReviewVerdict:authoritativeReviewVerdictKey,
     visualFinalVerdict:String(visualState.finalVerdict || visualState.final_verdict || '').trim(),
     planStatus:String(planStatusForEligibility || displayedPlan.status || '').trim(),
     entry:displayedPlan.entry,
