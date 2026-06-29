@@ -1490,6 +1490,9 @@ function runTesterSetupPersistenceFallbackAssertions(){
     'withPersistMeta',
     'stripPersistMeta',
     'persistedAtMs',
+    'persistableWatchlistState',
+    'persistableMetaState',
+    'buildPersistableTickerRecordsMap',
     'buildFullPersistedState',
     'buildSettingsPersistedState',
     'buildRecordsLitePersistedState',
@@ -1499,6 +1502,8 @@ function runTesterSetupPersistenceFallbackAssertions(){
     'storedPaperTradeApiKey',
     'storedPaperTradeApiSecret',
     'storedPaperTradeCredentialsReady',
+    'paperTradeGatewayReady',
+    'paperTradeCredentialsSourceReady',
     'paperTradeTesterSetupComplete',
     'testerSetupHealthModel',
     'completeTesterSetup'
@@ -1540,12 +1545,12 @@ function runTesterSetupPersistenceFallbackAssertions(){
   }
   persistSandbox.state.paperTradeApiKey = '';
   persistSandbox.state.paperTradeApiSecret = '';
-  if(persistSandbox.paperTradeTesterSetupComplete() !== false){
-    throw new Error('Deleting the local API credentials must make the shared tester setup completion predicate false.');
+  if(persistSandbox.paperTradeTesterSetupComplete() !== true){
+    throw new Error('Deleting the local API credentials must not clear shared tester setup completion when paper gateway support remains available.');
   }
   const resetModel = persistSandbox.testerSetupHealthModel();
-  if(resetModel.complete !== false || !/local paper credentials/i.test(String(resetModel.label || '') + String(resetModel.detail || ''))){
-    throw new Error('Deleting the local API credentials must reset visible tester setup status.');
+  if(resetModel.complete !== true){
+    throw new Error('Deleting the local API credentials must preserve visible tester setup completion when gateway-backed paper trading remains available.');
   }
   persistSandbox.completeTesterSetup();
   if(persistSandbox.state.paperTradeTesterSetupCompletedAt !== '2026-06-23T12:34:56.000Z'){
@@ -8731,8 +8736,8 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/trackDebug\s*=\s*\{/.test(appSource) || !/visibleModel:\s*\{/.test(appSource) || !/resolverTrace:\s*\{/.test(appSource) || !/planTrace:\s*\{/.test(appSource) || !/gateTrace:\s*\{/.test(appSource) || !/lifecycleTrace:\s*\{/.test(appSource)){
     throw new Error('Track debug output must use one namespaced trackDebug structure.');
   }
-  if(!/const trackedLifecycleHardStructuredBlock = \['invalidated','missed','target_too_close','broken_structure'\]\.includes\(explicitInvalidationAuthorityCode\)[\s\S]*?\|\| \['invalidated','missed','target_too_close','broken_structure','terminal','expired'\]\.includes\(planBlockedReasonCode\)[\s\S]*?const preserveTrackedLifecycleCanonicalVerdict = !!\([\s\S]*?\['entry','near_entry'\]\.includes\(lifecycleVerdict\)[\s\S]*?simplifiedVerdict === 'watch'[\s\S]*?trackedLifecycleHardStructuredBlock !== true[\s\S]*?\);[\s\S]*?const canonicalVerdict = suppressAvoidForTrackedWatch[\s\S]*?\: \(preserveTrackedLifecycleCanonicalVerdict \? lifecycleVerdict : simplifiedVerdict\);/s.test(appSource)){
-    throw new Error('Track shared presentation must allow lifecycle entry/near_entry to outrank soft tracked watch only when no hard structured blocker exists.');
+  if(!/const trackedLifecycleHardStructuredBlock = \['invalidated','missed','target_too_close','broken_structure'\]\.includes\(explicitInvalidationAuthorityCode\)[\s\S]*?\|\| \['invalidated','missed','target_too_close','broken_structure','terminal','expired'\]\.includes\(planBlockedReasonCode\)[\s\S]*?const preserveTrackedEntryAuthority = !!\([\s\S]*?simplifiedVerdict === 'near_entry'[\s\S]*?trackedPlanStatus === 'valid'[\s\S]*?trackedPriceabilityState === 'priceable'[\s\S]*?\(persistedPresentationVerdict === 'entry' \|\| lifecycleVerdict === 'entry'\)[\s\S]*?\);[\s\S]*?const preserveTrackedLifecycleCanonicalVerdict = !!\([\s\S]*?\['entry','near_entry'\]\.includes\(lifecycleVerdict\)[\s\S]*?simplifiedVerdict === 'watch'[\s\S]*?trackedLifecycleHardStructuredBlock !== true[\s\S]*?\);[\s\S]*?const canonicalVerdict = suppressAvoidForTrackedWatch[\s\S]*?\: \(preserveTrackedEntryAuthority[\s\S]*?\? 'entry'[\s\S]*?\: \(preserveTrackedLifecycleCanonicalVerdict \? lifecycleVerdict : simplifiedVerdict\)\);/s.test(appSource)){
+    throw new Error('Track shared presentation must promote tracked Entry authority from persisted/lifecycle state when valid-plan near_entry would otherwise remain stale, while still allowing lifecycle entry/near_entry to outrank soft tracked watch only when no hard structured blocker exists.');
   }
   if(/Final Verdict Rendered|Canonical Final Verdict|Track Visual Bucket|Scan Visual Bucket|Presentation Reason/.test(appSource)){
     throw new Error('Watchlist debug output must not print redundant flat Track state aliases.');
@@ -9127,8 +9132,8 @@ function runReviewPricedButNotReadyAssertions(){
   if(/not priceable yet|too far above support/i.test(String(canonicalReviewEntrySemantic.blocker || ''))){
     throw new Error('Review semantics must not reintroduce legacy global unpriceable blocker copy when simplified Review state is priceable.');
   }
-  if(canonicalReviewEntrySemantic.pricedButNotReady !== true || String(canonicalReviewEntrySemantic.rrDisplay || '') !== 'Priced'){
-    throw new Error('Simplified canonical Entry with pending confirmation should remain a priced-but-not-ready Review state.');
+  if(canonicalReviewEntrySemantic.pricedButNotReady === true || String(canonicalReviewEntrySemantic.rrDisplay || '') === 'Priced'){
+    throw new Error('Simplified canonical Entry with valid maths must stay actionable in Review even when stale global pending-confirmation fields still exist.');
   }
   if(/setup remains untradable|trend is weakening/i.test(String(canonicalReviewEntrySemantic.tradeStatus && canonicalReviewEntrySemantic.tradeStatus.line1 || ''))){
     throw new Error('Simplified canonical Entry with pending confirmation must not regress to legacy untradable or weakening Review copy.');
@@ -9811,7 +9816,7 @@ function runAccepted50MaSupportThresholdAssertions(){
 }
 
 function runScannerProjectionAuthorityAssertions(){
-  const scannerViewSource = fs.readFileSync(path.join(repoRoot, 'js/scanner-view.js'), 'utf8');
+  const scannerViewSource = fs.readFileSync(path.join(root, 'js/scanner-view.js'), 'utf8');
   const scannerProjectionSandbox = {
     window:{},
     console
@@ -9862,8 +9867,19 @@ function runScannerProjectionAuthorityAssertions(){
         bucket:'monitor_watch'
       };
     },
+    resolveEmojiPresentation(){
+      return {
+        primaryText:'Watch',
+        shortLabel:'Watch'
+      };
+    },
     normalizeGlobalVerdictKey(value){
       return String(value || '').trim().toLowerCase();
+    },
+    numericOrNull(value){
+      if(value === null || value === undefined || String(value).trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
     },
     globalVerdictLabel(value){
       const safe = String(value || '').trim().toLowerCase();

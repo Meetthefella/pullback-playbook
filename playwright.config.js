@@ -1,6 +1,6 @@
 const {defineConfig} = require('@playwright/test');
 
-const baseURL = process.env.PP_BASE_URL || 'https://velvety-clafoutis-8a92bf.netlify.app';
+const baseURL = process.env.PP_BASE_URL || 'http://127.0.0.1:4173';
 
 module.exports = defineConfig({
   testDir:'./tests/ui',
@@ -12,6 +12,12 @@ module.exports = defineConfig({
     ['list'],
     ['html', {open:'never', outputFolder:'playwright-report'}]
   ],
+  webServer:{
+    command:'node scripts/playwright-static-server.js',
+    url:baseURL,
+    reuseExistingServer:true,
+    timeout:30000
+  },
   use:{
     baseURL,
     headless:true,

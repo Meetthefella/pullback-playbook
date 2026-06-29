@@ -120,6 +120,7 @@ if(typeof window !== 'undefined'){
 const startupCoordinator = {
   shellRendered:false,
   localStateLoaded:false,
+  canonicalStateHydrated:false,
   deferredHydrationStarted:false,
   deferredHydrationComplete:false,
   trackedStateHydrationPromise:null,
@@ -142,6 +143,8 @@ const startupCoordinator = {
   startupWatchlistRefreshTimer:null,
   lastStartupScanSignature:'',
   startupEmptyScanRendered:false,
+  lastLoadStateError:'',
+  loadStateTrace:[],
   lastTrackUserOpenedAt:0,
   nextAllowedStartupTrackRefreshAt:0
 };
@@ -545,8 +548,61 @@ async function measureTrackRenderAsync(kind, source, callback){
 
 function startupDebugRenderState(){
   return {
+    localStateLoaded:startupCoordinator.localStateLoaded === true,
+    canonicalStateHydrated:startupCoordinator.canonicalStateHydrated === true,
     hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
-    riskRefreshComplete:startupCoordinator.startupRiskRefreshRunning !== true
+    riskRefreshComplete:startupCoordinator.startupRiskRefreshRunning !== true,
+    lastLoadStateError:String(startupCoordinator.lastLoadStateError || ''),
+    loadStateTrace:Array.isArray(startupCoordinator.loadStateTrace)
+      ? startupCoordinator.loadStateTrace.slice(-40)
+      : []
+  };
+}
+
+function resetLoadStateTrace(){
+  startupCoordinator.loadStateTrace = [];
+  startupCoordinator.lastLoadStateError = '';
+}
+
+function loadStateTraceTickerPresence(targetTicker = 'TROW'){
+  const symbol = normalizeTicker(targetTicker);
+  const records = state && state.tickerRecords && typeof state.tickerRecords === 'object'
+    ? state.tickerRecords
+    : {};
+  const tickers = Array.isArray(state && state.tickers) ? state.tickers : [];
+  return {
+    ticker:symbol,
+    tickerCount:Array.isArray(tickers) ? tickers.length : 0,
+    tickerPresent:Array.isArray(tickers) && tickers.some(item => normalizeTicker(item) === symbol),
+    recordCount:Object.keys(records).length,
+    recordPresent:!!(symbol && records[symbol])
+  };
+}
+
+function pushLoadStateTrace(stage, extra = {}){
+  const entry = {
+    stage:String(stage || ''),
+    at:new Date().toISOString(),
+    localStateLoaded:startupCoordinator.localStateLoaded === true,
+    canonicalStateHydrated:startupCoordinator.canonicalStateHydrated === true,
+    hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
+    ...loadStateTraceTickerPresence('TROW'),
+    ...extra
+  };
+  startupCoordinator.loadStateTrace = [
+    ...(Array.isArray(startupCoordinator.loadStateTrace) ? startupCoordinator.loadStateTrace : []),
+    entry
+  ].slice(-40);
+  return entry;
+}
+
+function boundedStartupError(error){
+  const message = error && error.message ? String(error.message) : String(error || 'unknown_error');
+  const stack = error && error.stack ? String(error.stack).split('\n').slice(0, 6).join('\n') : '';
+  return {
+    name:String(error && error.name || 'Error'),
+    message:message.slice(0, 400),
+    stack:stack.slice(0, 1000)
   };
 }
 
@@ -2889,16 +2945,14 @@ function classifyCapitalUsage({position_cost_gbp, account_size_gbp}){
 
 function persistState(){
   const persistedAt = new Date().toISOString();
-  const fullSaved = safeStorageSet(key, buildFullPersistedState(state, {persistedAt}));
-  if(fullSaved) return;
-
   const settingsSaved = safeStorageSet(settingsKey, buildSettingsPersistedState(state, {persistedAt}));
   const recordsSaved = safeStorageSet(recordsLiteKey, buildRecordsLitePersistedState(state, {persistedAt}));
   const liteSaved = safeStorageSet(liteKey, buildLitePersistedState(state, {persistedAt}));
+  const fullSaved = safeStorageSet(key, buildFullPersistedState(state, {persistedAt}));
 
-  if(!liteSaved && !settingsSaved && !recordsSaved){
+  if(!liteSaved && !settingsSaved && !recordsSaved && !fullSaved){
     console.warn('STATE_PERSIST_FAILED', {key, liteKey, settingsKey, recordsLiteKey});
-  }else{
+  }else if(!liteSaved || !settingsSaved || !recordsSaved || !fullSaved){
     logDebugWarn('DEBUG_STORAGE', 'STATE_PERSIST_FALLBACK_ONLY', {
       key,
       liteKey,
@@ -2906,7 +2960,8 @@ function persistState(){
       recordsLiteKey,
       liteSaved,
       settingsSaved,
-      recordsSaved
+      recordsSaved,
+      fullSaved
     });
   }
 }
@@ -2996,7 +3051,7 @@ function buildFullPersistedState(sourceState, meta = {}){
   const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
   return withPersistMeta({
     ...baseState,
-    tickerRecords:normalizeTickerRecordsMap(baseState.tickerRecords || {}),
+    tickerRecords:buildPersistableTickerRecordsMap(baseState.tickerRecords || {}, {includeLiteFields:false}),
     cards:[],
     scannerResults:[],
     watchlist:[],
@@ -3074,12 +3129,40 @@ function buildSettingsPersistedState(sourceState, meta = {}){
   });
 }
 
-function buildRecordsLitePersistedState(sourceState, meta = {}){
-  const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
-  const liteTickerRecords = Object.fromEntries(
-    Object.entries(normalizeTickerRecordsMap(baseState.tickerRecords || {})).map(([ticker, record]) => {
+function persistableWatchlistState(value = {}){
+  const watchlist = value && typeof value === 'object' ? value : {};
+  return {
+    inWatchlist:!!watchlist.inWatchlist,
+    addedAt:String(watchlist.addedAt || ''),
+    addedScore:Number.isFinite(Number(watchlist.addedScore)) ? Number(watchlist.addedScore) : null,
+    expiryAt:String(watchlist.expiryAt || ''),
+    status:String(watchlist.status || ''),
+    expiryAfterTradingDays:Number.isFinite(Number(watchlist.expiryAfterTradingDays)) ? Number(watchlist.expiryAfterTradingDays) : null,
+    updatedAt:String(watchlist.updatedAt || ''),
+    lifecycleState:String(watchlist.lifecycleState || ''),
+    lifecycleLabel:String(watchlist.lifecycleLabel || ''),
+    watchlist_priority_score:Number.isFinite(Number(watchlist.watchlist_priority_score)) ? Number(watchlist.watchlist_priority_score) : null,
+    watchlist_priority_bucket:String(watchlist.watchlist_priority_bucket || '')
+  };
+}
+
+function persistableMetaState(value = {}){
+  const meta = value && typeof value === 'object' ? value : {};
+  return {
+    companyName:String(meta.companyName || ''),
+    exchange:String(meta.exchange || ''),
+    tradingViewSymbol:String(meta.tradingViewSymbol || ''),
+    marketStatus:String(meta.marketStatus || ''),
+    updatedAt:String(meta.updatedAt || '')
+  };
+}
+
+function buildPersistableTickerRecordsMap(recordsMap = {}, options = {}){
+  const includeLiteFields = options.includeLiteFields !== false;
+  return Object.fromEntries(
+    Object.entries(normalizeTickerRecordsMap(recordsMap || {})).map(([ticker, record]) => {
       const item = normalizeTickerRecord(record);
-      return [ticker, {
+      const persistedRecord = {
         ticker:item.ticker,
         marketData:{
           price:item.marketData.price,
@@ -3096,7 +3179,9 @@ function buildRecordsLitePersistedState(sourceState, meta = {}){
           perf3m:item.marketData.perf3m,
           perf6m:item.marketData.perf6m,
           perfYtd:item.marketData.perfYtd,
-          currency:item.marketData.currency
+          currency:item.marketData.currency,
+          history:Array.isArray(item.marketData.history) ? cloneData(item.marketData.history, []) : [],
+          previousClose:item.marketData.previousClose
         },
         scan:{
           scanType:item.scan.scanType,
@@ -3112,6 +3197,9 @@ function buildRecordsLitePersistedState(sourceState, meta = {}){
           trendStatus:item.scan.trendStatus,
           pullbackStatus:item.scan.pullbackStatus,
           pullbackType:item.scan.pullbackType,
+          analysisProjection:item.scan.analysisProjection && typeof item.scan.analysisProjection === 'object'
+            ? cloneData(item.scan.analysisProjection, null)
+            : null,
           lastScannedAt:item.scan.lastScannedAt,
           updatedAt:item.scan.updatedAt
         },
@@ -3124,6 +3212,12 @@ function buildRecordsLitePersistedState(sourceState, meta = {}){
           manualReview:item.review.manualReview && typeof item.review.manualReview === 'object' ? cloneData(item.review.manualReview, null) : null,
           cardOpen:!!item.review.cardOpen,
           source:item.review.source,
+          analysisState:item.review.analysisState && typeof item.review.analysisState === 'object'
+            ? cloneData({
+              normalized:item.review.analysisState.normalized || null,
+              reviewedAt:item.review.analysisState.reviewedAt || ''
+            }, null)
+            : null,
           chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
         },
         plan:{
@@ -3156,7 +3250,8 @@ function buildRecordsLitePersistedState(sourceState, meta = {}){
           invalidatedState:item.plan.invalidatedState,
           firstTargetTooClose:item.plan.firstTargetTooClose,
           lastPlannedAt:item.plan.lastPlannedAt,
-          source:item.plan.source
+          source:item.plan.source,
+          target:item.plan.target
         },
         setup:{
           rawScore:item.setup.rawScore,
@@ -3167,13 +3262,22 @@ function buildRecordsLitePersistedState(sourceState, meta = {}){
           reasons:Array.isArray(item.setup.reasons) ? [...item.setup.reasons] : [],
           marketCaution:item.setup.marketCaution
         },
-        watchlist:item.watchlist && typeof item.watchlist === 'object' ? cloneData(item.watchlist, {}) : {},
+        watchlist:persistableWatchlistState(item.watchlist),
         lifecycle:item.lifecycle && typeof item.lifecycle === 'object' ? cloneData(item.lifecycle, {}) : {},
-        diary:item.diary && typeof item.diary === 'object' ? cloneData(item.diary, {}) : {},
-        meta:item.meta && typeof item.meta === 'object' ? cloneData(item.meta, {}) : {}
-      }];
+        diary:item.diary && typeof item.diary === 'object' ? cloneData({records:item.diary.records || []}, {}) : {},
+        meta:persistableMetaState(item.meta)
+      };
+      if(includeLiteFields !== true){
+        delete persistedRecord.review.analysisState;
+      }
+      return [ticker, persistedRecord];
     })
   );
+}
+
+function buildRecordsLitePersistedState(sourceState, meta = {}){
+  const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
+  const liteTickerRecords = buildPersistableTickerRecordsMap(baseState.tickerRecords || {});
   return withPersistMeta({
     tickerRecords:liteTickerRecords,
     watchlist:Array.isArray(baseState.watchlist) ? cloneData(baseState.watchlist, []) : [],
@@ -3188,31 +3292,7 @@ function buildRecordsLitePersistedState(sourceState, meta = {}){
 
 function buildLitePersistedState(sourceState, meta = {}){
   const baseState = sourceState && typeof sourceState === 'object' ? sourceState : {};
-  const liteTickerRecords = Object.fromEntries(
-    Object.entries(normalizeTickerRecordsMap(baseState.tickerRecords || {})).map(([ticker, record]) => {
-      const item = normalizeTickerRecord(record);
-      return [ticker, {
-        ...item,
-        review:{
-          ...item.review,
-          chartAvailable:false,
-          chartRef:null,
-          analysisState:{
-            ...item.review.analysisState,
-            raw:'',
-            normalized:null,
-            prompt:'',
-            error:''
-          },
-          aiAnalysisRaw:'',
-          normalizedAnalysis:null,
-          lastPrompt:'',
-          lastError:'',
-          chartAnalysisPipeline:cloneData(item.review.chartAnalysisPipeline, null)
-        }
-      }];
-    })
-  );
+  const liteTickerRecords = buildPersistableTickerRecordsMap(baseState.tickerRecords || {});
   return withPersistMeta({
     accountSize:baseState.accountSize,
     maxRisk:baseState.maxRisk,
@@ -3555,21 +3635,43 @@ function paperTradeCredentialsSourceReady(){
 
 function paperTradeTesterSetupComplete(){
   const completedAt = String(state.paperTradeTesterSetupCompletedAt || '').trim();
-  const gatewayReadyOrPending = trading212PaperAvailabilityChecked !== true || trading212PaperEnabled === true;
-  return !!(completedAt && paperTradeCredentialsSourceReady() && gatewayReadyOrPending);
+  if(!completedAt) return false;
+  if(trading212PaperSupported !== true) return false;
+  return true;
 }
 
 function testerSetupHealthModel(){
   const completedAt = String(state.paperTradeTesterSetupCompletedAt || '').trim();
   const hasStoredKey = storedPaperTradeCredentialsReady();
-  const gatewayReady = paperTradeGatewayReady();
+  const gatewayReady = typeof paperTradeGatewayReady === 'function'
+    ? paperTradeGatewayReady()
+    : (trading212PaperEnabled === true && trading212PaperAvailabilityChecked === true);
+  const credentialsSourceReady = typeof paperTradeCredentialsSourceReady === 'function'
+    ? paperTradeCredentialsSourceReady()
+    : hasStoredKey;
   const gatewayReadyOrPending = trading212PaperAvailabilityChecked !== true || trading212PaperEnabled === true;
-  if(completedAt && paperTradeCredentialsSourceReady() && gatewayReadyOrPending){
+  if(completedAt && trading212PaperSupported === true && trading212PaperAvailabilityChecked !== true){
+    return {
+      complete:true,
+      label:'Tester setup completed',
+      detail:`Completed ${formatLocalTimestamp(completedAt) || completedAt}. Waiting for Trading 212 demo gateway readiness check to finish.`,
+      className:'ok'
+    };
+  }
+  if(completedAt && credentialsSourceReady && gatewayReadyOrPending){
     return {
       complete:true,
       label:'Tester setup completed',
       detail:`Completed ${formatLocalTimestamp(completedAt) || completedAt}. Trading stays paper-only and still depends on Trading 212 demo gateway readiness.`,
       className:'ok'
+    };
+  }
+  if(completedAt && !hasStoredKey){
+    return {
+      complete:false,
+      label:'Tester setup requires local paper credentials',
+      detail:'Local paper credentials were removed on this device. Re-enter them before tester setup can be treated as completed again.',
+      className:'warntext'
     };
   }
   if(trading212PaperSupported !== true){
@@ -3631,6 +3733,9 @@ function renderTradeGatewayHealth(){
 
 function renderTesterSetupPanel(){
   const model = testerSetupHealthModel();
+  const gatewayReady = typeof paperTradeGatewayReady === 'function'
+    ? paperTradeGatewayReady()
+    : (trading212PaperEnabled === true && trading212PaperAvailabilityChecked === true);
   const label = $('testerSetupStatusLabel');
   const detail = $('testerSetupStatusDetail');
   const confirm = $('testerSetupConfirmBtn');
@@ -3641,9 +3746,38 @@ function renderTesterSetupPanel(){
   if(detail) detail.textContent = model.detail;
   if(confirm){
     confirm.disabled = model.complete === true
-      || !paperTradeGatewayReady();
+      || !gatewayReady
+      || !storedPaperTradeCredentialsReady();
     confirm.textContent = model.complete === true ? 'Tester Setup Complete' : 'Complete Tester Setup';
   }
+}
+
+function preferredStartupReviewRecord(){
+  const savedReviewRecords = openCardTickerRecords();
+  if(savedReviewRecords.length) return savedReviewRecords[0];
+  return null;
+}
+
+function restoreStartupReviewSessionState(context = 'startup_local_restore'){
+  const preferredRecord = preferredStartupReviewRecord();
+  const symbol = normalizeTicker(preferredRecord && preferredRecord.ticker || '');
+  if(!symbol) return null;
+  setActiveReviewTicker(symbol);
+  uiState.activeReviewSourceProjectionSnapshot = null;
+  uiState.activeReviewProjectionSource = 'startup_direct_rehydrate';
+  uiState.reviewPendingLoadError = null;
+  uiState.pendingReviewRequest = null;
+  uiState.pendingReviewTicker = '';
+  uiState.queuedReviewTicker = '';
+  uiState.pendingReviewCandidate = null;
+  if(typeof console !== 'undefined' && console.info){
+    console.info('[REVIEW_STARTUP_REHYDRATE]', {
+      context,
+      ticker:symbol,
+      source:'review.cardOpen'
+    });
+  }
+  return preferredRecord;
 }
 
 function redactDiagnosticPayload(value, parentKey = ''){
@@ -3938,6 +4072,8 @@ function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedStat
     || structureEligibility === 'broken'
     || ['broken','failed'].includes(structureState);
   if(hardStructuredBlock) return simplified;
+  const entryAuthorityAligned = overrideVerdict === 'entry';
+  const nearEntryAuthorityAligned = overrideVerdict === 'entry' || overrideVerdict === 'near_entry';
   return {
     ...simplified,
     canonicalVerdict:overrideVerdict,
@@ -3949,6 +4085,12 @@ function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedStat
       persistedSharedPresentation && persistedSharedPresentation.tone
       || getTone(overrideVerdict)
     ).trim().toLowerCase() || getTone(overrideVerdict),
+    entryGatePass:entryAuthorityAligned ? true : (simplified.entryGatePass === true),
+    nearEntryGatePass:nearEntryAuthorityAligned ? true : (simplified.nearEntryGatePass === true),
+    mainBlocker:entryAuthorityAligned ? '' : String(simplified.mainBlocker || '').trim(),
+    actionLabel:entryAuthorityAligned
+      ? 'Execute only if the trigger remains valid.'
+      : String(simplified.actionLabel || '').trim(),
     debug:{
       ...(simplified.debug || {}),
       reviewWatchlistSoftReadinessDisplayOverrideApplied:true,
@@ -4595,33 +4737,43 @@ async function submitTesterReport(){
   }
 }
 
-async function completeTesterSetup(){
-  if(!paperTradeGatewayReady()){
-    try{
-      setStatus('inputStatus', 'Checking Trading 212 demo gateway before completing tester setup...');
-      await refreshTrading212PaperAvailability({force:true, render:true});
-    }catch(_error){}
-  }
-  if(!paperTradeGatewayReady()){
+function completeTesterSetup(){
+  const gatewayReady = () => typeof paperTradeGatewayReady === 'function'
+    ? paperTradeGatewayReady()
+    : (trading212PaperEnabled === true && trading212PaperAvailabilityChecked === true);
+  const finalizeSetup = () => {
+    if(!gatewayReady() || !storedPaperTradeCredentialsReady()){
+      renderTesterSetupPanel();
+      setStatus('inputStatus', !storedPaperTradeCredentialsReady()
+        ? 'A local Trading 212 paper API key and API secret are required before tester setup can be completed.'
+        : 'Trading 212 demo gateway must be ready before tester setup can be completed.');
+      return;
+    }
+    state.paperTradeTesterSetupCompletedAt = new Date().toISOString();
+    recordTradeGatewayEvent('tester_setup_complete', {
+      state:'ready',
+      message:storedPaperTradeCredentialsReady()
+        ? 'Tester setup completed with local Trading 212 API credentials. Paper-only workflow unlocked.'
+        : 'Tester setup completed with backend Trading 212 gateway configuration. Paper-only workflow unlocked.'
+    });
+    saveState();
     renderTesterSetupPanel();
-    setStatus('inputStatus', 'Trading 212 demo gateway must be ready before tester setup can be completed.');
-    return;
+    if(activeReviewTicker() || activeWorkspaceTab() === 'review'){
+      renderReviewWorkspace({source:'tester_setup_complete'});
+    }
+    setStatus('inputStatus', storedPaperTradeCredentialsReady()
+      ? 'Tester setup completed. Review can now unlock paper-trade actions when the setup qualifies.'
+      : 'Tester setup completed using backend Trading 212 gateway configuration. Review can now unlock paper-trade actions when the setup qualifies.');
+  };
+  if(!gatewayReady()){
+    setStatus('inputStatus', 'Checking Trading 212 demo gateway before completing tester setup...');
+    return Promise.resolve(refreshTrading212PaperAvailability({force:true, render:true}))
+      .catch(() => {})
+      .then(() => {
+        finalizeSetup();
+      });
   }
-  state.paperTradeTesterSetupCompletedAt = new Date().toISOString();
-  recordTradeGatewayEvent('tester_setup_complete', {
-    state:'ready',
-    message:storedPaperTradeCredentialsReady()
-      ? 'Tester setup completed with local Trading 212 API credentials. Paper-only workflow unlocked.'
-      : 'Tester setup completed with backend Trading 212 gateway configuration. Paper-only workflow unlocked.'
-  });
-  saveState();
-  renderTesterSetupPanel();
-  if(activeReviewTicker() || activeWorkspaceTab() === 'review'){
-    renderReviewWorkspace({source:'tester_setup_complete'});
-  }
-  setStatus('inputStatus', storedPaperTradeCredentialsReady()
-    ? 'Tester setup completed. Review can now unlock paper-trade actions when the setup qualifies.'
-    : 'Tester setup completed using backend Trading 212 gateway configuration. Review can now unlock paper-trade actions when the setup qualifies.');
+  finalizeSetup();
 }
 
 function openTesterSetupGuide(){
@@ -8046,6 +8198,21 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     || globalVerdict.rejected_by_viability_gate === true
     || structureEligibility === 'broken'
     || ['broken','failed'].includes(structureState);
+  const trackedPlanStatus = String(simplifiedState.planStatus || '').trim().toLowerCase();
+  const trackedPriceabilityState = String(
+    simplifiedState.priceabilityState
+    || globalVerdict.priceability_state
+    || ''
+  ).trim().toLowerCase();
+  const preserveTrackedEntryAuthority = !!(
+    item.watchlist
+    && item.watchlist.inWatchlist
+    && simplifiedVerdict === 'near_entry'
+    && trackedLifecycleHardStructuredBlock !== true
+    && trackedPlanStatus === 'valid'
+    && trackedPriceabilityState === 'priceable'
+    && (persistedPresentationVerdict === 'entry' || lifecycleVerdict === 'entry')
+  );
   const preserveTrackedLifecycleCanonicalVerdict = !!(
     item.watchlist
     && item.watchlist.inWatchlist
@@ -8062,8 +8229,8 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const suppressAvoidForTrackedWatch = softTrackedWatchSuppression;
   const canonicalVerdict = suppressAvoidForTrackedWatch
     ? 'watch'
-    : (preserveTrackedPresentationCanonicalVerdict
-      ? persistedPresentationVerdict
+    : (preserveTrackedEntryAuthority
+      ? 'entry'
       : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict));
   const simplifiedBucket = normalizeVisualBucketForPairing(
     simplifiedState.visualBucket
@@ -8125,7 +8292,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       ? String(globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()
       : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim());
   const headline = canonicalVerdict === 'entry'
-    ? 'Entry Ready'
+    ? String((preserveTrackedLifecycleLabels ? finalActionLabel : 'Entry Ready') || 'Entry').trim()
     : String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim();
   const primaryReason = canonicalVerdict === 'entry'
     ? 'Buyers are in control and the setup is ready to act on.'
@@ -8762,27 +8929,72 @@ function setScannerSessionResults(tickers, scannedAt){
 function loadState(){
   perfMark('pp_local_state_restore_start');
   startStartupStatusContextCycle();
-  const fullStorageInfo = inspectStorageKey(key);
-  const liteStorageInfo = inspectStorageKey(liteKey);
-  const settingsStorageInfo = inspectStorageKey(settingsKey);
-  const recordsLiteStorageInfo = inspectStorageKey(recordsLiteKey);
-  const settingsState = safeStorageGet(settingsKey, {}) || {};
-  const recordsLiteState = safeStorageGet(recordsLiteKey, {}) || {};
-  const liteState = safeStorageGet(liteKey, {}) || {};
-  const fullState = safeStorageGet(key, {}) || {};
-  const persistedLayers = [
-    {name:'settings', priority:1, data:settingsState, info:settingsStorageInfo},
-    {name:'recordsLite', priority:2, data:recordsLiteState, info:recordsLiteStorageInfo},
-    {name:'lite', priority:3, data:liteState, info:liteStorageInfo},
-    {name:'full', priority:4, data:fullState, info:fullStorageInfo}
-  ];
-  const mergedPersistedState = mergePersistedStateLayers(persistedLayers);
-  const orderedPersistenceSources = orderedPersistedLayerSummaries(persistedLayers);
-  const winningPersistenceSource = orderedPersistenceSources.length
-    ? orderedPersistenceSources[orderedPersistenceSources.length - 1]
-    : null;
-  uiState.lastStartupPersistenceSource = winningPersistenceSource;
-  Object.assign(state, createDefaultState(), mergedPersistedState);
+  startupCoordinator.localStateLoaded = false;
+  startupCoordinator.canonicalStateHydrated = false;
+  resetLoadStateTrace();
+  pushLoadStateTrace('loadState:start');
+  const readLayer = (storageKey, fallback, stageName) => {
+    pushLoadStateTrace(`${stageName}:start`);
+    try{
+      const data = safeStorageGet(storageKey, fallback);
+      pushLoadStateTrace(`${stageName}:success`, {
+        storageKey:String(storageKey || ''),
+        layerPresent:inspectStorageKey(storageKey).present === true
+      });
+      return data == null ? fallback : data;
+    }catch(error){
+      const boundedError = boundedStartupError(error);
+      pushLoadStateTrace(`${stageName}:fail`, boundedError);
+      return fallback;
+    }
+  };
+  try{
+    const fullStorageInfo = inspectStorageKey(key);
+    const liteStorageInfo = inspectStorageKey(liteKey);
+    const settingsStorageInfo = inspectStorageKey(settingsKey);
+    const recordsLiteStorageInfo = inspectStorageKey(recordsLiteKey);
+    const modernPersistencePresent = liteStorageInfo.present || settingsStorageInfo.present || recordsLiteStorageInfo.present;
+    const settingsState = readLayer(settingsKey, {}, 'settings_read');
+    const recordsLiteState = readLayer(recordsLiteKey, {}, 'recordsLite_read');
+    const liteState = readLayer(liteKey, {}, 'lite_read');
+    let fullState = {};
+    if(modernPersistencePresent){
+      pushLoadStateTrace('full_read:skipped', {reason:'modern_layers_present'});
+    }else{
+      fullState = readLayer(key, {}, 'full_read');
+    }
+    const persistedLayers = [
+      {name:'full', priority:1, data:fullState, info:modernPersistencePresent ? {...fullStorageInfo, skipped:true} : fullStorageInfo},
+      {name:'lite', priority:2, data:liteState, info:liteStorageInfo},
+      {name:'recordsLite', priority:3, data:recordsLiteState, info:recordsLiteStorageInfo},
+      {name:'settings', priority:4, data:settingsState, info:settingsStorageInfo}
+    ];
+    let mergedPersistedState = {};
+    pushLoadStateTrace('modern_layer_merge:start');
+    try{
+      mergedPersistedState = mergePersistedStateLayers(persistedLayers);
+      pushLoadStateTrace('modern_layer_merge:success');
+    }catch(error){
+      const boundedError = boundedStartupError(error);
+      startupCoordinator.lastLoadStateError = boundedError.message;
+      pushLoadStateTrace('modern_layer_merge:fail', boundedError);
+      mergedPersistedState = {};
+    }
+    const orderedPersistenceSources = orderedPersistedLayerSummaries(persistedLayers);
+    const winningPersistenceSource = orderedPersistenceSources.length
+      ? orderedPersistenceSources[orderedPersistenceSources.length - 1]
+      : null;
+    uiState.lastStartupPersistenceSource = winningPersistenceSource;
+    pushLoadStateTrace('default_state_merge:start');
+    try{
+      Object.assign(state, createDefaultState(), mergedPersistedState);
+      pushLoadStateTrace('default_state_merge:success');
+    }catch(error){
+      const boundedError = boundedStartupError(error);
+      startupCoordinator.lastLoadStateError = boundedError.message;
+      pushLoadStateTrace('default_state_merge:fail', boundedError);
+      throw error;
+    }
   // Keep risk/account controls resilient when full-state persists lag behind
   // quick settings writes (for example immediate reload after a risk change).
   if(Object.prototype.hasOwnProperty.call(settingsState, 'accountSize')) state.accountSize = settingsState.accountSize;
@@ -8856,8 +9068,17 @@ function loadState(){
     restoredLegacyWatchlistCount:Array.isArray(state.watchlist) ? state.watchlist.length : 0,
     preSyncCanonicalWatchlistCount:countCanonicalWatchlistRecords(state.tickerRecords)
   };
-  syncTickerRecordsFromLegacyCollections();
-  syncLegacyCollectionsFromTickerRecords();
+  pushLoadStateTrace('tickerRecords_reconstruction:start');
+  try{
+    syncTickerRecordsFromLegacyCollections();
+    syncLegacyCollectionsFromTickerRecords();
+    pushLoadStateTrace('tickerRecords_reconstruction:success');
+  }catch(error){
+    const boundedError = boundedStartupError(error);
+    startupCoordinator.lastLoadStateError = boundedError.message;
+    pushLoadStateTrace('tickerRecords_reconstruction:fail', boundedError);
+    throw error;
+  }
   const startupTrace = {
     ...preSyncTrace,
     postSyncCanonicalWatchlistCount:countCanonicalWatchlistRecords(state.tickerRecords),
@@ -8917,13 +9138,51 @@ function loadState(){
   clearOcrReview();
   syncOcrReviewVisibility();
   clearStartupReviewSessionState('startup_local_restore');
-  renderActiveWorkspaceSurface({reason:'startup_local_restore'});
+  const restoredStartupReviewRecord = restoreStartupReviewSessionState('startup_local_restore');
+  startupCoordinator.localStateLoaded = true;
+  pushLoadStateTrace('localStateLoaded:set');
+  startupCoordinator.canonicalStateHydrated = true;
+  pushLoadStateTrace('canonicalStateHydrated:set');
+  stopStartupStatusContextCycle();
+  try{
+    pushLoadStateTrace('first_render_after_loadState:start');
+    renderActiveWorkspaceSurface({reason:'startup_local_restore'});
+    pushLoadStateTrace('first_render_after_loadState:success');
+  }catch(error){
+    const boundedError = boundedStartupError(error);
+    startupCoordinator.lastLoadStateError = boundedError.message;
+    pushLoadStateTrace('first_render_after_loadState:fail', boundedError);
+    if(typeof console !== 'undefined' && typeof console.error === 'function'){
+      console.error('[STARTUP_LOCAL_RENDER_FAILED]', {
+        message:error && error.message ? String(error.message) : 'unknown_startup_render_failure'
+      });
+    }
+    try{
+      renderWorkspaceSurface('scan', {reason:'startup_local_restore_fallback'});
+    }catch(_error){}
+  }
   uiState.watchlistLiveRefreshPending = {};
   uiState.watchlistManualRefreshInProgress = {};
   perfMark('pp_local_state_restore_end');
   perfMeasure('pp_local_state_restore', 'pp_local_state_restore_start', 'pp_local_state_restore_end');
-  startupCoordinator.localStateLoaded = true;
-  scheduleDeferredStartupHydration();
+  if(restoredStartupReviewRecord){
+    scheduleDeferredStartupTask(() => {
+      renderReviewWorkspace({
+        source:'startup_review_rehydrate',
+        requestedTicker:restoredStartupReviewRecord.ticker
+      });
+      renderReviewLifecycleSummary(restoredStartupReviewRecord.ticker);
+    }, {idle:false});
+  }
+    scheduleDeferredStartupHydration();
+  }catch(error){
+    const boundedError = boundedStartupError(error);
+    startupCoordinator.lastLoadStateError = boundedError.message;
+    pushLoadStateTrace('loadState:fail', boundedError);
+    stopStartupStatusContextCycle();
+    setLiveProcessStatus('error', 'Startup restore failed.');
+    throw error;
+  }
 }
 
 function renderStats(){
@@ -9337,6 +9596,13 @@ function applyTrackedStateHydrationMerge(){
     });
   }
   renderActiveWorkspaceSurface({reason:'startup_remote_merge'});
+  if(activeReviewTicker()){
+    renderReviewWorkspace({
+      source:'startup_remote_merge_review_rehydrate',
+      requestedTicker:activeReviewTicker()
+    });
+    renderReviewLifecycleSummary(activeReviewTicker());
+  }
   perfMark('pp_remote_merge_end');
   const hydrationEntry = perfMeasure('pp_remote_merge', 'pp_remote_merge_start', 'pp_remote_merge_end');
   if(PP_PERF_DEBUG){
@@ -15695,7 +15961,6 @@ function renderScannerDecisionTraceContent(view){
   const host = document.createElement('div');
   host.innerHTML = markup;
   const replacements = {
-    'Final Verdict Rendered':canonicalVerdict,
     'Bucket Rendered':visualBucket || 'monitor',
     'Scanner Verdict':canonicalVerdict,
     'Final Verdict':canonicalVerdict,
@@ -15927,7 +16192,6 @@ function renderScannerVisualDebugContent(view){
   const host = document.createElement('div');
   host.innerHTML = markup;
   const replacements = {
-    'Final Verdict Rendered':canonicalVerdict,
     'Bucket Rendered':visualBucket || 'monitor',
     'Scanner Verdict':canonicalVerdict,
     'Final Verdict':canonicalVerdict,
@@ -22733,6 +22997,11 @@ function buildTrackLongPressContract(options = {}){
       (globalVerdict.resolvedRR ?? globalVerdict.resolved_rr)
       ?? resolvedContract.resolvedRR
     );
+  const formatNarrativeRr = value => {
+    const numeric = Number(value);
+    if(!Number.isFinite(numeric)) return '';
+    return `${numeric.toFixed(2).replace(/(\.\d)0$/, '$1')}R`;
+  };
   const latestTickerSummary = String(
     resolvedContract.latestTickerSummary
     || ((typeof currentRuntimeSummaryForRecord === 'function') ? currentRuntimeSummaryForRecord(record) : '')
@@ -22807,7 +23076,7 @@ function buildTrackLongPressContract(options = {}){
       ? 'bounce is improving'
       : (['none','unconfirmed'].includes(bounceState) ? 'bounce confirmation has not passed yet' : ''));
   const planWhy = planStatus === 'valid' && Number.isFinite(resolvedRR)
-    ? `the plan is valid at ${resolvedRR.toFixed(2)}R`
+    ? `the plan is valid at ${formatNarrativeRr(resolvedRR)}`
     : (planStatus === 'valid'
       ? 'the trade plan is valid'
       : (['missing','invalid'].includes(planStatus)
@@ -24099,10 +24368,8 @@ function buildReviewSemanticStatus({
     || (plan.rewardRisk && plan.rewardRisk.valid === true && Number.isFinite(numericOrNull(plan.rewardRisk.rrRatio)))
     || planStatus === 'valid';
   const planFieldsPresent = [plan.entry, plan.stop, plan.target, plan.firstTarget].some(value => Number.isFinite(numericOrNull(value)) || String(value || '').trim());
-  const rrValue = planRealism && Number.isFinite(numericOrNull(planRealism.raw_rr))
-    ? Number(numericOrNull(planRealism.raw_rr))
-    : (plan.rewardRisk && Number.isFinite(numericOrNull(plan.rewardRisk.rrRatio)) ? Number(numericOrNull(plan.rewardRisk.rrRatio)) : null);
-  const rrAcceptable = Number.isFinite(rrValue) && rrValue >= currentRrThreshold();
+  const entryGatePass = simplified.entryGatePass === true
+    || global.entry_gate_pass === true;
   const terminalAvoid = verdict === 'avoid' && (
     global.terminal_avoid_applied === true
     || global.rejected_by_viability_gate === true
@@ -24113,6 +24380,17 @@ function buildReviewSemanticStatus({
     || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
   const aliveStructure = ['alive','messy'].includes(structureEligibility)
     || ['strong','intact','developing_clean'].includes(structureState);
+  const canonicalEntryPlanAuthority = verdict === 'entry'
+    && terminalAvoid !== true
+    && structuralWeakness !== true
+    && planMathValid
+    && planFieldsPresent
+    && priceabilityState !== 'unpriceable';
+  const effectiveEntryGatePass = entryGatePass || canonicalEntryPlanAuthority;
+  const rrValue = planRealism && Number.isFinite(numericOrNull(planRealism.raw_rr))
+    ? Number(numericOrNull(planRealism.raw_rr))
+    : (plan.rewardRisk && Number.isFinite(numericOrNull(plan.rewardRisk.rrRatio)) ? Number(numericOrNull(plan.rewardRisk.rrRatio)) : null);
+  const rrAcceptable = Number.isFinite(rrValue) && rrValue >= currentRrThreshold();
   const staleWeakCopy = /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(rawBlocker);
   const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
     record,
@@ -24166,15 +24444,12 @@ function buildReviewSemanticStatus({
       : 'No actionable trade yet.';
   }
   const actionable = verdict === 'entry'
-    && terminalAvoid !== true
-    && planMathValid
-    && planFieldsPresent;
+    && effectiveEntryGatePass;
   const draftPlan = planMathValid && verdict === 'watch';
   const pricedButNotReady = planMathValid
     && actionable !== true
     && terminalAvoid !== true
-    && verdict !== 'avoid'
-    && verdict !== 'entry';
+    && verdict !== 'avoid';
   const constructivePricedButNotReady = pricedButNotReady
     && aliveStructure
     && !structuralWeakness;
@@ -24234,7 +24509,8 @@ function buildReviewSemanticStatus({
     rrDisplay,
     showPlanFields:verdict === 'entry' ? true : (constructivePricedButNotReady ? false : (planMathValid || planFieldsPresent)),
     showPlanMetrics:verdict === 'entry' ? true : (constructivePricedButNotReady ? false : (actionable || (accepted50MaSupportTest && draftPlan))),
-    showCapital:verdict === 'entry' ? true : actionable
+    showCapital:verdict === 'entry' ? true : actionable,
+    entryGatePass:effectiveEntryGatePass
   };
 }
 
@@ -31825,12 +32101,24 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
     nextCanonical.presentationLabel = verdictPresentationLabelForKey(canonicalKey);
     nextGlobal.final_verdict = canonicalKey;
     nextGlobal.finalVerdict = canonicalKey;
+    if(canonicalKey === 'entry'){
+      nextGlobal.entry_gate_pass = true;
+      nextGlobal.near_entry_gate_pass = true;
+    }else if(canonicalKey === 'near_entry'){
+      nextGlobal.near_entry_gate_pass = true;
+    }
   }
   if(finalKey){
     nextResolved.finalVerdict = finalKey;
     nextResolved.final_verdict = finalKey;
     nextResolved.final_verdict_rendered = renderedKey || finalKey;
     nextResolved.tradeabilityVerdict = finalKey;
+    if(finalKey === 'entry' || finalKey === 'near_entry'){
+      nextResolved.primaryState = finalKey;
+    }
+    if(finalKey === 'entry'){
+      nextResolved.blockerReason = '';
+    }
     nextVisual.canonicalVerdict = canonicalKey || finalKey;
     nextVisual.finalVerdict = finalKey;
     nextVisual.final_verdict = finalKey;
@@ -33962,6 +34250,19 @@ function currentPaperTradeContextForTicker(ticker){
   const hardBlockerForEligibility = projectedEntryAuthority
     ? ''
     : resolvedContract.blockerReason;
+  const authoritativeResolvedContract = {
+    ...(resolvedContract && typeof resolvedContract === 'object' ? resolvedContract : {}),
+    primaryState:primaryStateForEligibility,
+    blockerReason:hardBlockerForEligibility
+  };
+  if(projectedEntryAuthority && planMathLooksValid){
+    authoritativeResolvedContract.actionStateKey = 'ready_to_act';
+    authoritativeResolvedContract.actionLabel = 'Execute only if the trigger remains valid.';
+    authoritativeResolvedContract.actionShortLabel = 'Execute only if the trigger remains valid.';
+    authoritativeResolvedContract.finalVerdict = 'entry';
+    authoritativeResolvedContract.final_verdict = 'entry';
+    authoritativeResolvedContract.final_verdict_rendered = 'entry';
+  }
   const eligibility = paperTradeEligibility.evaluatePaperTradeEligibility({
     finalVerdict:reviewFinalVerdict,
     planStatus:planStatusForEligibility,
@@ -34026,7 +34327,7 @@ function currentPaperTradeContextForTicker(ticker){
     finalVerdict:reviewFinalVerdict,
     derivedStates,
     setupScore:setupScoreForRecord(record),
-    resolvedContract,
+    resolvedContract:authoritativeResolvedContract,
     eligibility:mergedEligibility,
     debugSnapshot
   };
@@ -36817,6 +37118,9 @@ function renderReviewWorkspace(options = {}){
     rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
     hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
     hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
+    entry_gate_pass:reviewEffectiveSimplifiedState.entryGatePass === true
+      || globalVerdict.entry_gate_pass === true
+      || effectiveSimplifiedCanonicalVerdict === 'entry',
     near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true,
     review_lifecycle_bias:reviewLifecycleBias.review_lifecycle_bias,
     review_lifecycle_copy_override_applied:reviewLifecycleBias.review_lifecycle_copy_override_applied,
@@ -38391,6 +38695,9 @@ function syncPlanDisplayMeta(options = {}){
     rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate === true,
     hasPriceablePlan:globalVerdict.hasPriceablePlan === true,
     hasProvisionalPriceablePlan:globalVerdict.hasProvisionalPriceablePlan === true,
+    entry_gate_pass:effectiveMetaSimplifiedState.entryGatePass === true
+      || metaGlobalVerdict.entry_gate_pass === true
+      || normalizeGlobalVerdictKey(effectiveMetaSimplifiedState.canonicalVerdict || '') === 'entry',
     near_entry_gate_pass:globalVerdict.near_entry_gate_pass === true,
     review_lifecycle_bias:reviewLifecycleBias.review_lifecycle_bias,
     review_lifecycle_copy_override_applied:reviewLifecycleBias.review_lifecycle_copy_override_applied,

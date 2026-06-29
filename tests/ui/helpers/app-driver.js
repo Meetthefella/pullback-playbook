@@ -162,10 +162,20 @@ async function addActiveReviewToWatchlistIfEligible(page){
 }
 
 async function openTrackTab(page){
-  await page.locator('[data-workspace-tab="track"]').click();
-  await page.waitForFunction(() => {
-    return document.querySelector('[data-workspace-tab="track"][aria-selected="true"]') !== null;
-  }, null, {timeout:10000});
+  await openWorkspaceTab(page, 'track');
+}
+
+async function openWorkspaceTab(page, tab){
+  await page.locator(`[data-workspace-tab="${tab}"]`).click();
+  await page.waitForFunction(activeTab => {
+    return document.querySelector(`[data-workspace-tab="${activeTab}"][aria-selected="true"]`) !== null;
+  }, tab, {timeout:10000});
+}
+
+async function reloadApp(page){
+  await page.reload({waitUntil:'domcontentloaded'});
+  await waitForAppReady(page);
+  await dismissOptionalOverlays(page);
 }
 
 module.exports = {
@@ -180,7 +190,9 @@ module.exports = {
   openScanDecisionTraceForTicker,
   openReviewForTicker,
   addActiveReviewToWatchlistIfEligible,
+  openWorkspaceTab,
   openTrackTab,
+  reloadApp,
   waitForUiTransitionSettle,
   artifactPath
 };

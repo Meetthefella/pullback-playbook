@@ -253,6 +253,11 @@
     if(accepted50MaSupportTest && /trend is weakening|structure is broken|diminishing/i.test(mainBlocker)){
       mainBlocker = 'Testing 50MA support - waiting for buyers to confirm.';
     }
+    const actionLabel = verdict === 'entry'
+      ? 'Execute only if the trigger remains valid.'
+      : (verdict === 'near_entry'
+        ? 'Wait for stronger confirmation before considering an entry.'
+        : String(action.label || resolved.actionLabel || visual.decision_summary || '').trim());
 
     return {
       ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
@@ -260,7 +265,7 @@
       visualBucket:normalizedVisualBucket,
       tone:normalizedTone,
       badgeLabel:String(badge.text || badge.label || resolved.badgeLabel || (global.ResolverCore && global.ResolverCore.globalVerdictLabel ? global.ResolverCore.globalVerdictLabel(verdict) : 'Watch')).trim(),
-      actionLabel:String(action.label || resolved.actionLabel || visual.decision_summary || '').trim(),
+      actionLabel,
       planVisible:plan.planVisible === true || String(plan.status || '').toLowerCase() === 'valid',
       planStatus:String(plan.status || 'missing').trim().toLowerCase() || 'missing',
       mainBlocker,

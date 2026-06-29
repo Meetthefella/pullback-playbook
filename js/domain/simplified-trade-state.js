@@ -600,9 +600,10 @@
         : fallbackDerivedStates(item);
       const derivedStates = reconcileDerivedPriceabilityState(rawDerivedStates, planState);
       const validation = global.SimplifiedPlanState.validateCurrentPlan(item, planState, {derivedStates, deps});
+      const preserveCanonicalForSoftReadiness = ['review', 'scan', 'track'].includes(String(surface || '').trim().toLowerCase());
       const resolverDeps = {
         ...deps,
-        preserveReviewCanonicalForSoftReadiness:surface === 'review',
+        preserveReviewCanonicalForSoftReadiness:preserveCanonicalForSoftReadiness,
         analysisDerivedStatesFromRecord:() => derivedStates,
         effectivePlanForRecord:() => effectivePlan,
         deriveCurrentPlanState:() => planState,

@@ -44,6 +44,12 @@ function normalizeCopyText(value){
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeVerdictKey(value){
+  const safe = normalizeCopyText(value).toLowerCase().replace(/\s+/g, '_');
+  if(['watch', 'near_entry', 'entry', 'avoid', 'monitor', 'diminishing'].includes(safe)) return safe;
+  return safe;
+}
+
 function buildVisibleCopySnapshot(appState = {}){
   const scan = appState.scan || {};
   const review = appState.review || {};
@@ -217,16 +223,40 @@ function buildReplaySnapshotFromRecord(record, runtimeContext = {}){
 async function extractAppTickerState(page, ticker, consoleEvents = []){
   const resolveAppRecord = targetTicker => page.evaluate(({ticker}) => {
     const normalizedTicker = String(ticker || '').trim().toUpperCase();
-    if(typeof getTickerRecord === 'function'){
-      const direct = getTickerRecord(normalizedTicker);
-      if(direct) return direct;
-    }
-    if(typeof allTickerRecords === 'function'){
-      const records = allTickerRecords();
-      if(Array.isArray(records)){
-        return records.find(item => String(item && item.ticker || '').trim().toUpperCase() === normalizedTicker) || null;
+    const cloneValue = (value, seen = new WeakSet(), depth = 0) => {
+      if(value === null || value === undefined) return value ?? null;
+      if(depth > 8) return '[depth_limited]';
+      if(typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+      if(value instanceof Date) return value.toISOString();
+      if(Array.isArray(value)) return value.map(entry => cloneValue(entry, seen, depth + 1));
+      if(typeof value !== 'object') return String(value);
+      if(seen.has(value)) return '[circular]';
+      seen.add(value);
+      const output = {};
+      Object.keys(value).forEach(key => {
+        try{
+          output[key] = cloneValue(value[key], seen, depth + 1);
+        }catch(_error){
+          output[key] = '[unclonable]';
+        }
+      });
+      seen.delete(value);
+      return output;
+    };
+    try{
+      if(typeof getTickerRecord === 'function'){
+        const direct = getTickerRecord(normalizedTicker);
+        if(direct) return cloneValue(direct);
       }
-    }
+    }catch(_error){}
+    try{
+      if(typeof allTickerRecords === 'function'){
+        const records = allTickerRecords();
+        if(Array.isArray(records)){
+          return cloneValue(records.find(item => String(item && item.ticker || '').trim().toUpperCase() === normalizedTicker) || null);
+        }
+      }
+    }catch(_error){}
     return null;
   }, {ticker:targetTicker});
 
@@ -234,11 +264,15 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
   if(!authoritativeRecord){
     await page.waitForFunction(targetTicker => {
       const normalizedTicker = String(targetTicker || '').trim().toUpperCase();
-      if(typeof getTickerRecord === 'function' && getTickerRecord(normalizedTicker)) return true;
-      if(typeof allTickerRecords === 'function'){
-        const records = allTickerRecords();
-        return Array.isArray(records) && records.some(item => String(item && item.ticker || '').trim().toUpperCase() === normalizedTicker);
-      }
+      try{
+        if(typeof getTickerRecord === 'function' && getTickerRecord(normalizedTicker)) return true;
+      }catch(_error){}
+      try{
+        if(typeof allTickerRecords === 'function'){
+          const records = allTickerRecords();
+          return Array.isArray(records) && records.some(item => String(item && item.ticker || '').trim().toUpperCase() === normalizedTicker);
+        }
+      }catch(_error){}
       return false;
     }, ticker, {timeout:2000}).catch(() => null);
     authoritativeRecord = await resolveAppRecord(ticker);
@@ -246,9 +280,59 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
 
   const appState = await page.evaluate(async ({ticker, consoleEvents, authoritativeRecord}) => {
     const safeText = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const cloneValue = (value, seen = new WeakSet(), depth = 0) => {
+      if(value === null || value === undefined) return value ?? null;
+      if(depth > 8) return '[depth_limited]';
+      if(typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+      if(value instanceof Date) return value.toISOString();
+      if(Array.isArray(value)){
+        return value.map(entry => cloneValue(entry, seen, depth + 1));
+      }
+      if(typeof value !== 'object') return String(value);
+      if(seen.has(value)) return '[circular]';
+      seen.add(value);
+      const output = {};
+      Object.keys(value).forEach(key => {
+        try{
+          output[key] = cloneValue(value[key], seen, depth + 1);
+        }catch(_error){
+          output[key] = '[unclonable]';
+        }
+      });
+      seen.delete(value);
+      return output;
+    };
+    const searchNamedFields = (value, targetKeys, path = '', output = []) => {
+      if(!value || typeof value !== 'object') return output;
+      if(Array.isArray(value)){
+        value.forEach((entry, index) => {
+          searchNamedFields(entry, targetKeys, `${path}[${index}]`, output);
+        });
+        return output;
+      }
+      Object.keys(value).forEach(key => {
+        const nextPath = path ? `${path}.${key}` : key;
+        const current = value[key];
+        if(targetKeys.includes(key)){
+          output.push({
+            path:nextPath,
+            key,
+            value:typeof current === 'string' || typeof current === 'number' || typeof current === 'boolean'
+              ? current
+              : cloneValue(current)
+          });
+        }
+        if(current && typeof current === 'object'){
+          searchNamedFields(current, targetKeys, nextPath, output);
+        }
+      });
+      return output;
+    };
     const withReviewProjectionSuppressed = callback => {
       if(typeof callback !== 'function') return null;
-      const stateRef = typeof uiState === 'object' && uiState ? uiState : null;
+      const stateRef = typeof window !== 'undefined' && window && typeof window.uiState === 'object' && window.uiState
+        ? window.uiState
+        : null;
       if(!stateRef) return callback();
       const previousProjectionSnapshot = stateRef.activeReviewSourceProjectionSnapshot;
       const previousProjectionSource = stateRef.activeReviewProjectionSource;
@@ -264,16 +348,20 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       }
     };
     const record = authoritativeRecord || (() => {
-      if(typeof getTickerRecord === 'function'){
-        const direct = getTickerRecord(ticker);
-        if(direct) return direct;
-      }
-      if(typeof allTickerRecords === 'function'){
-        const records = allTickerRecords();
-        if(Array.isArray(records)){
-          return records.find(item => String(item && item.ticker || '').trim().toUpperCase() === String(ticker || '').trim().toUpperCase()) || null;
+      try{
+        if(typeof getTickerRecord === 'function'){
+          const direct = getTickerRecord(ticker);
+          if(direct) return direct;
         }
-      }
+      }catch(_error){}
+      try{
+        if(typeof allTickerRecords === 'function'){
+          const records = allTickerRecords();
+          if(Array.isArray(records)){
+            return records.find(item => String(item && item.ticker || '').trim().toUpperCase() === String(ticker || '').trim().toUpperCase()) || null;
+          }
+        }
+      }catch(_error){}
       return null;
     })();
     const globalVerdict = record && typeof resolveGlobalVerdict === 'function' ? resolveGlobalVerdict(record) : null;
@@ -292,12 +380,31 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     const trackSnapshot = record && typeof buildTrackDiagnosticSnapshot === 'function'
       ? buildTrackDiagnosticSnapshot(record)
       : null;
-    const activeProjectionSnapshot = typeof uiState === 'object'
-      && uiState
-      && uiState.activeReviewSourceProjectionSnapshot
-      && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
-      && String(uiState.activeReviewSourceProjectionSnapshot.ticker || '').trim().toUpperCase() === String(ticker || '').trim().toUpperCase()
-        ? uiState.activeReviewSourceProjectionSnapshot
+    const lexicalUiStateRef = (() => {
+      try{
+        return typeof uiState === 'object' && uiState ? uiState : null;
+      }catch(_error){
+        return null;
+      }
+    })();
+    const lexicalStateRef = (() => {
+      try{
+        return typeof state === 'object' && state ? state : null;
+      }catch(_error){
+        return null;
+      }
+    })();
+    const uiStateRef = lexicalUiStateRef || (typeof window !== 'undefined' && window && typeof window.uiState === 'object' && window.uiState
+      ? window.uiState
+      : null);
+    const stateRef = lexicalStateRef || (typeof window !== 'undefined' && window && typeof window.state === 'object' && window.state
+      ? window.state
+      : {});
+    const activeProjectionSnapshot = uiStateRef
+      && uiStateRef.activeReviewSourceProjectionSnapshot
+      && typeof uiStateRef.activeReviewSourceProjectionSnapshot === 'object'
+      && String(uiStateRef.activeReviewSourceProjectionSnapshot.ticker || '').trim().toUpperCase() === String(ticker || '').trim().toUpperCase()
+        ? uiStateRef.activeReviewSourceProjectionSnapshot
         : null;
     const synthesizedProjectionSnapshot = !activeProjectionSnapshot
       && reviewStateHealth
@@ -318,16 +425,66 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         : null;
     const effectiveProjectionSnapshot = activeProjectionSnapshot || synthesizedProjectionSnapshot;
     const reviewProjectionSource = effectiveProjectionSnapshot
-      ? String((activeProjectionSnapshot && uiState && uiState.activeReviewProjectionSource) || 'clicked_card_snapshot')
+      ? String((activeProjectionSnapshot && uiStateRef && uiStateRef.activeReviewProjectionSource) || 'clicked_card_snapshot')
       : '';
     const reviewShell = document.querySelector('#reviewWorkspace .reviewworkspace-shell');
     const activeTrackCard = document.querySelector(`[data-watchlist-ticker="${ticker}"]`);
+    const diaryEntries = Array.isArray(stateRef.tradeDiary)
+      ? stateRef.tradeDiary.filter(entry => String(entry && entry.ticker || '').trim().toUpperCase() === String(ticker || '').trim().toUpperCase())
+      : [];
     const watchlistPresentation = record && record.watchlist && record.watchlist.presentation && typeof record.watchlist.presentation === 'object'
       ? record.watchlist.presentation
       : null;
-    return {
+    let paperTradeContext = null;
+    try{
+      paperTradeContext = typeof currentPaperTradeContextForTicker === 'function'
+        ? currentPaperTradeContextForTicker(ticker)
+        : null;
+    }catch(_error){}
+    let paperTradeDebug = null;
+    try{
+      paperTradeDebug = typeof currentPaperTradeDebugSnapshotForTicker === 'function'
+        ? currentPaperTradeDebugSnapshotForTicker(ticker)
+        : null;
+    }catch(_error){}
+    let paperTradeUi = null;
+    try{
+      paperTradeUi = typeof paperTradeUiStateForTicker === 'function'
+        ? paperTradeUiStateForTicker(ticker)
+        : null;
+    }catch(_error){}
+    let paperTradeGateway = null;
+    try{
+      paperTradeGateway = typeof tradeGatewayHealthModel === 'function'
+        ? tradeGatewayHealthModel()
+        : null;
+    }catch(_error){}
+    const paperTradeBtn = document.getElementById('paperTradeBtn');
+    const staleFieldTargets = [
+      'savedVerdict',
+      'resolvedVerdict',
+      'reviewVerdict',
+      'badgeLabel',
+      'actionLabel',
+      'headline',
+      'summary',
+      'presentation',
+      'sharedPresentation',
+      'scannerEstimate',
+      'reviewPresentation',
+      'trackPresentation'
+    ];
+    const staleFieldScanRoots = {
+      record:record || null,
+      reviewStateHealth,
+      reviewVisible,
+      trackSnapshot,
+      watchlistPresentation,
+      paperTradeContext
+    };
+    return cloneValue({
       ticker,
-      authoritativeRecord:record,
+      authoritativeRecord:cloneValue(record),
       recordFlags:{
         inWatchlist:!!(record && record.watchlist && record.watchlist.inWatchlist),
         hasManualReview:!!(record && record.review && record.review.manualReview),
@@ -362,7 +519,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         }
       },
       review:{
-        stateHealth:reviewStateHealth,
+        stateHealth:cloneValue(reviewStateHealth),
         visible:{
           currentVerdict:String(reviewShell && reviewShell.dataset && reviewShell.dataset.visualState || reviewVisible && reviewVisible.currentVerdict || ''),
           currentTone:String(reviewShell && reviewShell.dataset && reviewShell.dataset.visualTone || reviewVisible && reviewVisible.currentTone || ''),
@@ -396,15 +553,99 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
           planStatus:String(globalVerdict.planStateKey || globalVerdict.plan_status || '')
         } : null
       },
+      paperTrade:{
+        button:{
+          visible:!!paperTradeBtn,
+          enabled:!!(paperTradeBtn && !paperTradeBtn.disabled),
+          text:safeText(paperTradeBtn && paperTradeBtn.textContent),
+          disabledReason:safeText(document.getElementById('paperTradeDisabledReason') && document.getElementById('paperTradeDisabledReason').textContent),
+          statusText:safeText(document.getElementById('paperTradeStatusLine') && document.getElementById('paperTradeStatusLine').textContent),
+          previewText:safeText(document.getElementById('paperTradePreview') && document.getElementById('paperTradePreview').textContent)
+        },
+        gateway:paperTradeGateway ? cloneValue(paperTradeGateway) : null,
+        uiState:paperTradeUi ? cloneValue(paperTradeUi) : null,
+        context:paperTradeContext ? cloneValue({
+          ticker:paperTradeContext.ticker,
+          finalVerdict:paperTradeContext.finalVerdict,
+          setupScore:paperTradeContext.setupScore,
+          eligibility:paperTradeContext.eligibility,
+          displayedPlan:paperTradeContext.displayedPlan,
+          resolvedContract:paperTradeContext.resolvedContract,
+          derivedStates:paperTradeContext.derivedStates,
+          debugSnapshot:paperTradeContext.debugSnapshot
+        }) : null,
+        debug:cloneValue(paperTradeDebug)
+      },
       track:{
-        simplifiedState:trackSnapshot && trackSnapshot.simplifiedState ? trackSnapshot.simplifiedState : null,
+        simplifiedState:trackSnapshot && trackSnapshot.simplifiedState ? cloneValue(trackSnapshot.simplifiedState) : null,
         visible:{
           badgeLabel:safeText(activeTrackCard && activeTrackCard.querySelector('.badge.state-pill') && activeTrackCard.querySelector('.badge.state-pill').textContent),
           decisionSummary:safeText(activeTrackCard && activeTrackCard.querySelector('.decision-summary') && activeTrackCard.querySelector('.decision-summary').textContent),
           planMeta:safeText(activeTrackCard && activeTrackCard.querySelector('.watchlist-plan-meta') && activeTrackCard.querySelector('.watchlist-plan-meta').textContent),
           cardText:safeText(activeTrackCard && activeTrackCard.textContent)
         },
-        diagnostics:trackSnapshot
+        diagnostics:cloneValue(trackSnapshot)
+      },
+      diary:{
+        entries:cloneValue(diaryEntries) || [],
+        visibleCards:Array.from(document.querySelectorAll('#tradeDiary .diaryitem, #tradeDiary > div')).map(node => safeText(node.textContent)).filter(Boolean)
+      },
+      authority:{
+        scanner:scanSimplified ? {
+          canonicalVerdict:String(scanSimplified.canonicalVerdict || ''),
+          visualBucket:String(scanSimplified.visualBucket || ''),
+          actionState:String(scanSimplified.actionLabel || ''),
+          tradePlanStatus:String(scanSimplified.planStatus || '')
+        } : null,
+        resolver:reviewStateHealth ? {
+          canonicalVerdict:String(reviewStateHealth.canonicalVerdict || ''),
+          visualBucket:String(reviewStateHealth.visualBucket || ''),
+          actionState:String(reviewStateHealth.actionState || reviewStateHealth.actionLabel || ''),
+          tradePlanStatus:String(reviewStateHealth.planStatus || '')
+        } : null,
+        review:reviewVisible ? {
+          canonicalVerdict:String(reviewStateHealth && reviewStateHealth.canonicalVerdict || ''),
+          visualBucket:String(reviewStateHealth && reviewStateHealth.visualBucket || ''),
+          actionState:safeText(document.getElementById('reviewNextActionInline') && document.getElementById('reviewNextActionInline').textContent),
+          tradePlanStatus:String(reviewStateHealth && reviewStateHealth.planStatus || '')
+        } : null,
+        sharedPresentation:watchlistPresentation && watchlistPresentation.sharedPresentation ? cloneValue(watchlistPresentation.sharedPresentation) : null,
+        trackPresentation:trackSnapshot && trackSnapshot.sharedPresentation ? cloneValue(trackSnapshot.sharedPresentation) : null,
+        watchlist:watchlistPresentation ? cloneValue(watchlistPresentation) : null,
+        paperTrade:paperTradeContext ? cloneValue({
+          finalVerdict:paperTradeContext.finalVerdict,
+          actionState:(paperTradeContext.eligibility && paperTradeContext.eligibility.eligible === true)
+            || (/^entry$/i.test(String(paperTradeContext.finalVerdict || '')) && paperTradeContext.displayedPlan && paperTradeContext.displayedPlan.status === 'valid')
+            ? 'entry_ready'
+            : 'wait_for_confirmation',
+          tradePlanStatus:paperTradeContext.displayedPlan && paperTradeContext.displayedPlan.status
+        }) : null,
+        history:diaryEntries.length ? cloneValue({
+          canonicalVerdict:diaryEntries[diaryEntries.length - 1].verdict || diaryEntries[diaryEntries.length - 1].chartVerdict || '',
+          lifecycleStatus:diaryEntries[diaryEntries.length - 1].status
+            || diaryEntries[diaryEntries.length - 1].executionMeta && diaryEntries[diaryEntries.length - 1].executionMeta.status
+            || '',
+          sourceType:diaryEntries[diaryEntries.length - 1].sourceType || '',
+          sourceRef:diaryEntries[diaryEntries.length - 1].sourceRef || '',
+          eventRecorded:true,
+          submittedAt:diaryEntries[diaryEntries.length - 1].executionMeta && diaryEntries[diaryEntries.length - 1].executionMeta.submittedAt
+            || diaryEntries[diaryEntries.length - 1].updatedAt
+            || diaryEntries[diaryEntries.length - 1].date
+            || ''
+        }) : null
+      },
+      staleFieldCandidates:searchNamedFields(staleFieldScanRoots, staleFieldTargets),
+      startup:{
+        debugRenderState:typeof startupDebugRenderState === 'function' ? cloneValue(startupDebugRenderState()) : null,
+        tickerRecordCount:Object.keys(stateRef && stateRef.tickerRecords && typeof stateRef.tickerRecords === 'object' ? stateRef.tickerRecords : {}).length,
+        trackedTickers:Array.isArray(stateRef && stateRef.tickers) ? stateRef.tickers.slice() : [],
+        activeReviewTicker:(() => {
+          try{
+            return typeof activeReviewTicker === 'function' ? String(activeReviewTicker() || '') : '';
+          }catch(_error){
+            return '';
+          }
+        })()
       },
       console:{
         warnings:consoleEvents.filter(entry => entry.type === 'warning').map(entry => entry.text),
@@ -412,9 +653,9 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       },
       reviewProjectionContext:{
         reviewProjectionSource,
-        reviewProjectionSnapshot:effectiveProjectionSnapshot
+        reviewProjectionSnapshot:cloneValue(effectiveProjectionSnapshot)
       }
-    };
+    });
   }, {ticker, consoleEvents, authoritativeRecord});
   appState.snapshot = buildReplaySnapshotFromRecord(appState.authoritativeRecord, appState.reviewProjectionContext);
   appState.snapshotContract = {
@@ -426,6 +667,14 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     excludesTrackDiagnostics:appState.snapshot && appState.snapshot.track === undefined
   };
   appState.visibleCopy = buildVisibleCopySnapshot(appState);
+  appState.normalized = {
+    reviewCanonicalVerdict:normalizeVerdictKey(appState.review && appState.review.stateHealth && appState.review.stateHealth.canonicalVerdict),
+    reviewVisualBucket:normalizeVerdictKey(appState.review && appState.review.stateHealth && appState.review.stateHealth.visualBucket),
+    trackCanonicalVerdict:normalizeVerdictKey(appState.track && appState.track.simplifiedState && appState.track.simplifiedState.canonicalVerdict),
+    trackVisualBucket:normalizeVerdictKey(appState.track && appState.track.simplifiedState && appState.track.simplifiedState.visualBucket),
+    scanCanonicalVerdict:normalizeVerdictKey(appState.scan && appState.scan.simplifiedState && appState.scan.simplifiedState.canonicalVerdict),
+    scanVisualBucket:normalizeVerdictKey(appState.scan && appState.scan.simplifiedState && appState.scan.simplifiedState.visualBucket)
+  };
   delete appState.authoritativeRecord;
   return appState;
 }
