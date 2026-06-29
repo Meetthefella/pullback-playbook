@@ -12250,12 +12250,49 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
   const planTrace = trackDebug.planTrace && typeof trackDebug.planTrace === 'object' ? trackDebug.planTrace : {};
   const gateTrace = trackDebug.gateTrace && typeof trackDebug.gateTrace === 'object' ? trackDebug.gateTrace : {};
   const lifecycleTrace = trackDebug.lifecycleTrace && typeof trackDebug.lifecycleTrace === 'object' ? trackDebug.lifecycleTrace : {};
+  const finalDisplayVerdict = normalizeGlobalVerdictKey(
+    trackVisibleModel.canonicalVerdict
+    || visibleModel.canonicalVerdict
+    || globalVisual.finalVerdict
+    || globalVisual.final_verdict
+    || simplifiedState.canonicalVerdict
+    || 'watch'
+  );
+  const suppressLegacyEntryDebug = finalDisplayVerdict === 'entry';
   const staleViabilityBranchReason = /needs structure repair/i.test(String(resolverTrace.viabilityBranchReason || ''))
     && resolverTrace.structureEligibility === 'alive'
     && ['strong','intact'].includes(String(resolverTrace.structureState || '').toLowerCase());
   const safeViabilityBranchReason = staleViabilityBranchReason
     ? 'Low-priority watch - confirmation still required. (stale branch reason suppressed)'
     : String(resolverTrace.viabilityBranchReason || '(none)');
+  const entryDebugSuppressedValue = '(suppressed for Entry display state)';
+  const entryGateReasonsValue = suppressLegacyEntryDebug
+    ? entryDebugSuppressedValue
+    : ((globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)');
+  const nearEntryGateReasonsValue = suppressLegacyEntryDebug
+    ? entryDebugSuppressedValue
+    : ((globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)');
+  const nearEntryProvisionalBounceReasonValue = suppressLegacyEntryDebug
+    ? entryDebugSuppressedValue
+    : (globalVerdict.nearEntryProvisionalBounceReason || '(none)');
+  const provisionalPlanBlockReasonValue = suppressLegacyEntryDebug
+    ? entryDebugSuppressedValue
+    : (globalVerdict.provisionalPlanBlockReason || '(none)');
+  const unpriceableBlockReasonValue = suppressLegacyEntryDebug
+    ? entryDebugSuppressedValue
+    : (globalVerdict.unpriceableBlockReason || '(none)');
+  const entryGateChecksValue = suppressLegacyEntryDebug
+    ? entryDebugSuppressedValue
+    : (JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)');
+  const nearEntryGateChecksValue = suppressLegacyEntryDebug
+    ? entryDebugSuppressedValue
+    : (JSON.stringify(globalVerdict.near_entry_gate_checks || {}) || '(none)');
+  const whyNotEntryValue = suppressLegacyEntryDebug
+    ? entryDebugSuppressedValue
+    : (latestEntryAudit && Array.isArray(latestEntryAudit.whyNotEntry) && latestEntryAudit.whyNotEntry.length ? latestEntryAudit.whyNotEntry.join(' | ') : '(none)');
+  const reasonValue = suppressLegacyEntryDebug && /waiting for confirmation|needs confirmation|trade (?:is not|isn't) ready/i.test(String(globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || ''))
+    ? trackVisibleModel.primaryReason || entryDebugSuppressedValue
+    : (globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a');
   const consistencyAuditRows = buildConsistencyAuditRows({
     simplifiedState,
     globalVerdict,
@@ -12267,22 +12304,22 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     displayedPlan
   });
   return `<div class="diagnostic-panel-shell watchlist-debug-pane-shell watchlist-debug-block" data-diagnostic-panel="Track Diagnostics Bundle" data-track-ticker="${escapeHtml(item.ticker || '')}"><details class="compact-details watchlist-debug-pane"><summary>Watchlist Debug</summary><div class="panelbox" data-diagnostic-panel="Track Diagnostics Bundle" style="margin-top:10px"><strong>Track Diagnostics Bundle</strong><div class="tiny" style="margin-top:8px">Copies the full Track debug snapshot for this ticker, including state health, lifecycle, downgrade reason, and watchlist trace.</div><div class="actions" style="margin-top:10px"><button class="primary compactbutton no-card-click" type="button" data-act="copy-track-diagnostics-bundle" data-track-ticker="${escapeHtml(item.ticker || '')}">Copy Track Diagnostics</button></div></div>${renderDebugSectionMarkup('Consistency Audit', consistencyAuditRows)}${renderAdvancedDebugMarkup([
-    {label:'Entry Gate Reasons', value:(globalVerdict.entry_gate_reasons || []).join(' | ') || '(none)'},
-    {label:'Near Entry Gate Reasons', value:(globalVerdict.near_entry_gate_reasons || []).join(' | ') || '(none)'},
+    {label:'Entry Gate Reasons', value:entryGateReasonsValue},
+    {label:'Near Entry Gate Reasons', value:nearEntryGateReasonsValue},
     {label:'Original Bounce State', value:debugStateLabel(globalVerdict.originalBounceState)},
     {label:'Adjusted Bounce State', value:debugStateLabel(globalVerdict.adjustedBounceState)},
     {label:'nearEntryProvisionalBounceApplied', value:globalVerdict.nearEntryProvisionalBounceApplied ? 'true' : 'false'},
     {label:'nearEntryPullbackZoneAccepted', value:globalVerdict.nearEntryPullbackZoneAccepted ? 'true' : 'false'},
     {label:'nearEntryTerminalBlockApplied', value:globalVerdict.nearEntryTerminalBlockApplied ? 'true' : 'false'},
-    {label:'nearEntryProvisionalBounceReason', value:globalVerdict.nearEntryProvisionalBounceReason || '(none)'},
+    {label:'nearEntryProvisionalBounceReason', value:nearEntryProvisionalBounceReasonValue},
     {label:'Bounce Priceability Guard Applied', value:globalVerdict.bouncePriceabilityGuardApplied ? 'true' : 'false'},
     {label:'Bounce Priceability Guard Reason', value:globalVerdict.bouncePriceabilityGuardReason || '(none)'},
-    {label:'provisionalPlanBlockReason', value:globalVerdict.provisionalPlanBlockReason || '(none)'},
-    {label:'Unpriceable Block Reason', value:globalVerdict.unpriceableBlockReason || '(none)'},
+    {label:'provisionalPlanBlockReason', value:provisionalPlanBlockReasonValue},
+    {label:'Unpriceable Block Reason', value:unpriceableBlockReasonValue},
     {label:'Priceability Context Source', value:globalVerdict.planPriceabilitySource || '(none)'},
     {label:'Duplicate validateCurrentPlan Removed', value:globalVerdict.duplicateValidateCurrentPlanRemoved ? 'true' : 'false'},
-    {label:'Entry Gate Checks', value:JSON.stringify(globalVerdict.entry_gate_checks || {}) || '(none)'},
-    {label:'Near Entry Gate Checks', value:JSON.stringify(globalVerdict.near_entry_gate_checks || {}) || '(none)'},
+    {label:'Entry Gate Checks', value:entryGateChecksValue},
+    {label:'Near Entry Gate Checks', value:nearEntryGateChecksValue},
     {label:'Setup Score Trace', value:`${setupScoreTrace.detail} setup=${Number.isFinite(setupScoreTrace.inputs.setup_score) ? setupScoreTrace.inputs.setup_score : 'n/a'} | base=${Number.isFinite(setupScoreTrace.inputs.base_score) ? setupScoreTrace.inputs.base_score : 'n/a'} | scan=${Number.isFinite(setupScoreTrace.inputs.scan_score) ? setupScoreTrace.inputs.scan_score : 'n/a'}`},
     {label:'Previous', value:debugStateLabel(debug.previousState, {kind:'lifecycle'})},
     {label:'Priority', value:String(priority.score)},
@@ -12302,11 +12339,11 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Resolved Scanner Verdict', value:debugStateLabel(String(item.scan.resolvedVerdict || '').trim(), {kind:'verdict'})},
     {label:'Entry Audit Snapshots', value:Array.isArray(entryPromotionAudit.history) ? String(entryPromotionAudit.history.length) : '0'},
     {label:'Latest Entry Audit', value:latestEntryAudit && latestEntryAudit.timestamp ? `${latestEntryAudit.timestamp} | ${debugStateLabel(latestEntryAudit.currentVerdict, {kind:'verdict'})}` : '(none)'},
-    {label:'Why Not Entry', value:latestEntryAudit && Array.isArray(latestEntryAudit.whyNotEntry) && latestEntryAudit.whyNotEntry.length ? latestEntryAudit.whyNotEntry.join(' | ') : '(none)'},
+    {label:'Why Not Entry', value:whyNotEntryValue},
     {label:'Circular Trigger Suspected', value:latestEntryAudit && latestEntryAudit.circularTriggerSuspected === true ? 'true' : 'false'},
     {label:'Stale Data Prevented Pass', value:latestEntryAudit && latestEntryAudit.staleDataPreventedFreshPromotionPass === true ? 'true' : 'false'},
     {label:'Base Resolver Verdict', value:debugStateLabel(resolved.rawResolverVerdict || rrResolution.rawResolverVerdict || rrResolution.status, {kind:'verdict'})},
-    {label:'Reason', value:globalVerdict.reason || debug.reason || resolved.reasonSummary || lifecycleSnapshot.reason || 'n/a'}
+    {label:'Reason', value:reasonValue}
   ])}<div class="watchlist-debug-block tiny"><strong>Watchlist Hold Trace</strong><div data-watchlist-hold-trace="${escapeHtml(item.ticker)}">${escapeHtml(debug.holdTrace || '(none)')}</div><div data-watchlist-hold-trace-history="${escapeHtml(item.ticker)}">${escapeHtml(holdTraceHistory.length ? holdTraceHistory.join(' || ') : '(none)')}</div></div>${renderRecomputeDiagnostics(debug)}${warnings.length ? `<div class="watchlist-debug-block tiny"><strong>Warnings</strong><div>${warnings.map(warning => escapeHtml(warning)).join(' | ')}</div></div>` : ''}${auditTrail.length ? `<div class="watchlist-debug-block tiny"><strong>Recent events</strong>${auditTrail.map(entry => `<div>${escapeHtml(formatLocalTimestamp(entry.at) || entry.at || 'n/a')} | ${escapeHtml(entry.source || 'n/a')} | ${escapeHtml(entry.result || 'n/a')}</div>`).join('')}</div>` : ''}</details></div>`;
 }
 
@@ -13112,7 +13149,7 @@ function updateWatchlistCardForTicker(ticker){
 
 function watchlistRenderGroups(showExpired){
   const groups = [
-    {key:'active', title:'Monitor', hint:'Setups waiting for confirmation.', collapsible:false},
+    {key:'active', title:'Tracked Setups', hint:'Current tracked setups across Entry, Near Entry, and Watch.', collapsible:false},
     {key:'diminishing', title:'Diminishing', hint:'Weakening setups kept for review, not active focus.', collapsible:true},
     {key:'avoid_dead', title:'Avoid', hint:'Failed or invalid setups.', collapsible:true}
   ];
@@ -22653,11 +22690,13 @@ function buildTrackLongPressContract(options = {}){
     globalVerdict,
     derivedStates
   }) ? review50MaSupportTestPresentationCopy() : null;
-  const resolvedRR = numericOrNull(
-    (globalVerdict.resolvedRR ?? globalVerdict.resolved_rr)
-    ?? (displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio)
-    ?? resolvedContract.resolvedRR
-  );
+  const actualPlanRR = numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
+  const resolvedRR = Number.isFinite(actualPlanRR)
+    ? actualPlanRR
+    : numericOrNull(
+      (globalVerdict.resolvedRR ?? globalVerdict.resolved_rr)
+      ?? resolvedContract.resolvedRR
+    );
   const latestTickerSummary = String(
     resolvedContract.latestTickerSummary
     || ((typeof currentRuntimeSummaryForRecord === 'function') ? currentRuntimeSummaryForRecord(record) : '')
@@ -22732,7 +22771,7 @@ function buildTrackLongPressContract(options = {}){
       ? 'bounce is improving'
       : (['none','unconfirmed'].includes(bounceState) ? 'bounce confirmation has not passed yet' : ''));
   const planWhy = planStatus === 'valid' && Number.isFinite(resolvedRR)
-    ? `the plan is valid at ${resolvedRR.toFixed(1)}R`
+    ? `the plan is valid at ${resolvedRR.toFixed(2)}R`
     : (planStatus === 'valid'
       ? 'the trade plan is valid'
       : (['missing','invalid'].includes(planStatus)
@@ -24693,11 +24732,13 @@ function formatPlanState(planState, record = null){
 }
 
 function formatActionState(actionState){
-  if(actionState === 'action_now') return 'Action Now';
-  if(actionState === 'near_entry') return 'Near Entry';
-  if(actionState === 'needs_plan') return 'Needs Plan';
-  if(actionState === 'watch') return 'Watch';
-  if(actionState === 'avoid') return 'Avoid';
+  const normalized = String(actionState || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if(normalized === 'action_now') return 'Action Now';
+  if(normalized === 'near_entry') return 'Near Entry';
+  if(normalized === 'entry') return 'Entry';
+  if(normalized === 'needs_plan') return 'Needs Plan';
+  if(normalized === 'watch') return 'Watch';
+  if(normalized === 'avoid') return 'Avoid';
   return 'Watch';
 }
 
