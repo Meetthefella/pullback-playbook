@@ -4089,6 +4089,7 @@ function buildTesterDiagnosticSnapshot(options = {}){
       ticker:String(record && record.ticker || activeReviewTicker() || 'general'),
       review:currentVisibleReviewDiagnostics(record),
       stateHealth:currentReviewStateHealthSnapshot(record),
+      paperTradeDebug:record ? currentPaperTradeDebugSnapshotForTicker(record.ticker) : null,
       resolverTrace:record ? {
         scan:safeDiagnosticClone(record.scan || {}, {}),
         setup:safeDiagnosticClone(record.setup || {}, {}),
@@ -4107,6 +4108,7 @@ function buildTesterDiagnosticSnapshot(options = {}){
         review:rawSnapshot.review,
         stateHealth:rawSnapshot.stateHealth,
         chartVerification:currentReviewChartVerificationSnapshot(record),
+        paperTradeDebug:rawSnapshot.paperTradeDebug,
         gateway:rawSnapshot.gateway
       };
     }
@@ -33859,6 +33861,32 @@ function setPaperTradeUiState(ticker, next = {}){
   };
 }
 
+function currentPaperTradeDebugSnapshotForTicker(ticker){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return null;
+  const map = uiState.paperTradeDebugByTicker && typeof uiState.paperTradeDebugByTicker === 'object'
+    ? uiState.paperTradeDebugByTicker
+    : {};
+  const entry = map[symbol];
+  return entry && typeof entry === 'object' ? safeDiagnosticClone(entry, {}) : null;
+}
+
+function setPaperTradeDebugSnapshotForTicker(ticker, snapshot = null){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return;
+  uiState.paperTradeDebugByTicker = uiState.paperTradeDebugByTicker && typeof uiState.paperTradeDebugByTicker === 'object'
+    ? uiState.paperTradeDebugByTicker
+    : {};
+  if(snapshot && typeof snapshot === 'object'){
+    uiState.paperTradeDebugByTicker[symbol] = {
+      ...safeDiagnosticClone(snapshot, {}),
+      capturedAt:new Date().toISOString()
+    };
+    return;
+  }
+  delete uiState.paperTradeDebugByTicker[symbol];
+}
+
 function currentPaperTradeContextForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return null;
@@ -33993,6 +34021,10 @@ function logPaperTradeContextDiagnostics(context, source = 'paper_trade'){
     ? context.debugSnapshot
     : null;
   if(!snapshot) return;
+  setPaperTradeDebugSnapshotForTicker(context && context.ticker || snapshot.ticker, {
+    source,
+    ...snapshot
+  });
   pushRuntimeDebugEntry(`${source}.eligibility`, {
     message:`${snapshot.ticker || 'ticker'} | verdict=${snapshot.finalVerdict || '(none)'} | plan=${snapshot.planStatus || '(none)'}`,
     extra:snapshot
