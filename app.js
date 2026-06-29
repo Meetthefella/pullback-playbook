@@ -564,8 +564,22 @@ function resetLoadStateTrace(){
   startupCoordinator.lastLoadStateError = '';
 }
 
-function loadStateTraceTickerPresence(targetTicker = 'TROW'){
-  const symbol = normalizeTicker(targetTicker);
+function currentStartupTraceTicker(targetTicker = ''){
+  const explicit = normalizeTicker(targetTicker);
+  if(explicit) return explicit;
+  const activeTicker = typeof activeReviewTicker === 'function' ? normalizeTicker(activeReviewTicker()) : '';
+  if(activeTicker) return activeTicker;
+  const tickers = Array.isArray(state && state.tickers) ? state.tickers : [];
+  const firstTicker = tickers.find(item => normalizeTicker(item));
+  if(firstTicker) return normalizeTicker(firstTicker);
+  const shortlist = Array.isArray(state && state.shortlist) ? state.shortlist : [];
+  const firstShortlistTicker = shortlist.find(item => normalizeTicker(item));
+  if(firstShortlistTicker) return normalizeTicker(firstShortlistTicker);
+  return '';
+}
+
+function loadStateTraceTickerPresence(targetTicker = ''){
+  const symbol = currentStartupTraceTicker(targetTicker);
   const records = state && state.tickerRecords && typeof state.tickerRecords === 'object'
     ? state.tickerRecords
     : {};
@@ -586,7 +600,7 @@ function pushLoadStateTrace(stage, extra = {}){
     localStateLoaded:startupCoordinator.localStateLoaded === true,
     canonicalStateHydrated:startupCoordinator.canonicalStateHydrated === true,
     hydrationComplete:startupCoordinator.trackedStateHydrationResolved === true,
-    ...loadStateTraceTickerPresence('TROW'),
+    ...loadStateTraceTickerPresence(),
     ...extra
   };
   startupCoordinator.loadStateTrace = [

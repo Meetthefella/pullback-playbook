@@ -18,7 +18,7 @@ const {
 } = require('./helpers/lifecycle-auditor');
 const {writeJsonReport, writeArtifactJson} = require('./helpers/report');
 
-const JOURNEY_TICKER = 'TROW';
+const JOURNEY_TICKER = String(process.env.PP_JOURNEY_TICKER || 'TROW').trim().toUpperCase() || 'TROW';
 const API_PATH_PATTERN = /^\/(?:api|\.netlify\/functions)\//i;
 const API_TARGET_PATTERN = /(trade-execution|paper-trade|tracked-state|market-data)/i;
 
@@ -471,7 +471,7 @@ function assertPostReloadReviewRehydration(snapshot, baselineSnapshot){
     recordPresent:entry.recordPresent === true
   }));
   expect(Number(startup.tickerRecordCount || 0), `${stage} must restore persisted tickerRecords before reload auditing can continue.`).toBeGreaterThan(0);
-  expect(Array.isArray(startup.trackedTickers) && startup.trackedTickers.includes(JOURNEY_TICKER), `${stage} must restore the canonical TROW ticker list.`).toBe(true);
+  expect(Array.isArray(startup.trackedTickers) && startup.trackedTickers.includes(JOURNEY_TICKER), `${stage} must restore the canonical ${JOURNEY_TICKER} ticker list.`).toBe(true);
   expect(startup.activeReviewTicker, `${stage} must restore activeReviewTicker from persisted review.cardOpen.`).toBe(JOURNEY_TICKER);
   expect(
     startupDebug.localStateLoaded,
