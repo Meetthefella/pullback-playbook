@@ -1,4 +1,13 @@
 (function(){
+  function scanBadgeClassForPresentation(presentation, fallbackClassName){
+    const safePresentation = presentation && typeof presentation === 'object' ? presentation : {};
+    const bucket = String(safePresentation.presentationBucket || safePresentation.visualBucket || '').trim().toLowerCase();
+    if(bucket === 'entry') return 'ready';
+    if(bucket === 'near_entry') return 'near';
+    if(bucket === 'avoid') return 'avoid';
+    return String(fallbackClassName || 'watch').trim() || 'watch';
+  }
+
   function renderScanCardSecondaryUi(view, deps){
     const {
       currentScanCardMenuState,
@@ -49,9 +58,17 @@
       pendingResolution:!!(view && view.resolutionPending),
       setupScore:view && view.setupScore
     });
+    const scanPresentation = view && view.scanPresentation && typeof view.scanPresentation === 'object'
+      ? view.scanPresentation
+      : null;
     const sourceVerdict = globalVerdictLabel(visualState.finalVerdict || visualState.final_verdict);
     const scoreLabel = view.setupScoreDisplay;
-    const resolvedBadge = visualState.badge || statusChip;
+    const resolvedBadge = scanPresentation && String(scanPresentation.badgeLabel || '').trim()
+      ? {
+        text:String(scanPresentation.badgeLabel || '').trim(),
+        className:scanBadgeClassForPresentation(scanPresentation, statusChip.className)
+      }
+      : (visualState.badge || statusChip);
     const companyLine = [item.meta.companyName || '', item.meta.exchange || ''].filter(Boolean).join(' | ');
     const summary = visualState.decision_summary || scanCardPrimaryActionLabel(view);
     const secondaryUiMarkup = renderScanCardSecondaryUi(view);

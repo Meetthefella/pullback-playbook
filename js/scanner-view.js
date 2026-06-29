@@ -381,7 +381,7 @@
   }
 
   function buildFinalSetupView(record, options = {}, deps = {}){
-    const view = deps.projectTickerForCard(record, {...options, includeExecutionDowngrade:false, includeRuntimeFallback:false});
+    const view = deps.projectTickerForCard(record, {...options, surface:'scan', includeExecutionDowngrade:false, includeRuntimeFallback:false});
     const derivedStates = deps.analysisDerivedStatesFromRecord(view.item);
     const rrCategory = rrCategoryForView(view, deps);
     const structureQuality = finalStructureQualityForView({
@@ -567,7 +567,7 @@
   }
 
   function resultReasonForRecord(record, deps = {}){
-    const view = deps.projectTickerForCard(record);
+    const view = deps.projectTickerForCard(record, {surface:'scan'});
     return resultReasonForView(view, deps);
   }
 
@@ -603,7 +603,7 @@
   }
 
   function resultSupportLineForRecord(record, deps = {}){
-    const view = deps.projectTickerForCard(record);
+    const view = deps.projectTickerForCard(record, {surface:'scan'});
     return resultSupportLineForView(view, deps);
   }
 

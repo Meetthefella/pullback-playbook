@@ -40,6 +40,7 @@
   function resolveScannerStateWithTrace(record, options = {}, deps = {}){
     const item = deps.normalizeTickerRecord(record);
     const baseView = options.baseView || deps.projectTickerForCard(item, {
+      surface:'scan',
       includeExecutionDowngrade:false,
       includeRuntimeFallback:false
     });

@@ -18813,6 +18813,27 @@ function currentRuntimeVerdictForRecord(record){
   return scanVerdict ? normalizeImportedStatus(scanVerdict, {preserveEmpty:true}) : '';
 }
 
+function authoritativeScanSurfaceSnapshot(record){
+  const verdictLabel = currentRuntimeVerdictForRecord(record);
+  const canonicalVerdict = normalizeGlobalVerdictKey(verdictLabel || '');
+  if(!canonicalVerdict) return null;
+  const score = currentRuntimeScoreForRecord(record);
+  const summary = currentRuntimeSummaryForRecord(record);
+  let visualBucket = canonicalVerdict;
+  if(canonicalVerdict === 'watch'){
+    visualBucket = Number.isFinite(score) && score <= 4 ? 'diminishing' : 'monitor';
+  }else if(canonicalVerdict === 'dead'){
+    visualBucket = 'avoid';
+  }
+  return {
+    canonicalVerdict,
+    visualBucket,
+    tone:visualBucket,
+    score:Number.isFinite(score) ? Math.max(0, Math.min(10, Math.round(score))) : null,
+    summary
+  };
+}
+
 function runtimeFallbackVerdictForRecord(record){
   return savedReviewVerdictForRecord(record);
 }
@@ -19001,7 +19022,7 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
   const item = record && typeof record === 'object' ? record : {};
   const ticker = normalizeTicker(item.ticker || item.symbol || '');
   if(window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'){
-    return window.SimplifiedTradeState.resolveRecordState(item, {
+    const resolved = window.SimplifiedTradeState.resolveRecordState(item, {
       surface,
       log:options.log !== false,
       renderPass:options.renderPass,
@@ -19024,11 +19045,36 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
         normalizeGlobalVerdictKey,
         normalizeVerdict,
         getBadge,
-        getActions,
-        deriveTradeability,
-        evaluateRiskFit
+          getActions,
+          deriveTradeability,
+          evaluateRiskFit
+        }
+      });
+    const authoritativeScanSurface = String(surface || '').trim().toLowerCase() === 'scan'
+      ? authoritativeScanSurfaceSnapshot(item)
+      : null;
+    if(authoritativeScanSurface){
+      resolved.canonicalVerdict = authoritativeScanSurface.canonicalVerdict;
+      resolved.visualBucket = authoritativeScanSurface.visualBucket;
+      resolved.tone = authoritativeScanSurface.tone;
+      resolved.badgeLabel = authoritativeScanSurface.canonicalVerdict === 'watch'
+        ? 'Watch'
+        : globalVerdictLabel(authoritativeScanSurface.canonicalVerdict);
+      if(authoritativeScanSurface.summary){
+        resolved.mainBlocker = authoritativeScanSurface.summary;
       }
-    });
+      resolved.debug = {
+        ...(resolved.debug || {}),
+        scanSurfaceAuthority:'scan.resolvedVerdict',
+        authoritativeScanSurfaceSnapshot:{
+          canonicalVerdict:authoritativeScanSurface.canonicalVerdict,
+          visualBucket:authoritativeScanSurface.visualBucket,
+          score:authoritativeScanSurface.score,
+          summary:authoritativeScanSurface.summary
+        }
+      };
+    }
+    return resolved;
   }
   return {
     ticker,
@@ -24889,6 +24935,10 @@ function shouldShowActionableRR(view){
 
 function projectTickerForCard(record, options = {}){
   const item = normalizeTickerRecord(record);
+  const surface = String(options.surface || '').trim().toLowerCase();
+  const authoritativeScanSurface = surface === 'scan'
+    ? authoritativeScanSurfaceSnapshot(item)
+    : null;
   const allowScannerFallback = options.allowScannerFallback !== false;
   const analysisState = getReviewAnalysisState(item);
   const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
@@ -24901,17 +24951,23 @@ function projectTickerForCard(record, options = {}){
     deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, item.marketData.currency),
     derivedStates
   );
-  const displayStage = displayStageForRecord(item, {
-    includeExecutionDowngrade:options.includeExecutionDowngrade !== false,
-    includeRuntimeFallback:options.includeRuntimeFallback !== false
-  });
-  const provisionalSetupUiState = getSetupUiState(item, {displayStage, derivedStates});
-  const planCheckState = planCheckStateForRecord(item, {effectivePlan, displayedPlan});
-  const planUiState = getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState, setupState:provisionalSetupUiState.state});
-  const setupUiState = getSetupUiState(item, {displayStage, derivedStates, planUiState});
-  const rrValue = displayedPlan.status === 'valid'
-    ? displayedPlan.rewardRisk.rrRatio
-    : numericOrNull(item.scan.estimatedRR);
+    const displayStage = displayStageForRecord(item, {
+      includeExecutionDowngrade:options.includeExecutionDowngrade !== false,
+      includeRuntimeFallback:options.includeRuntimeFallback !== false
+    });
+    const effectiveDisplayStage = authoritativeScanSurface
+      ? normalizeAnalysisVerdict(authoritativeScanSurface.canonicalVerdict)
+      : displayStage;
+    const provisionalSetupUiState = getSetupUiState(item, {displayStage, derivedStates});
+    const planCheckState = planCheckStateForRecord(item, {effectivePlan, displayedPlan});
+    const planUiState = getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState, setupState:provisionalSetupUiState.state});
+    const setupUiState = getSetupUiState(item, {displayStage:effectiveDisplayStage, derivedStates, planUiState});
+    const effectiveSetupScore = authoritativeScanSurface && Number.isFinite(authoritativeScanSurface.score)
+      ? authoritativeScanSurface.score
+      : setupScoreForRecord(item);
+    const rrValue = displayedPlan.status === 'valid'
+      ? displayedPlan.rewardRisk.rrRatio
+      : numericOrNull(item.scan.estimatedRR);
   const actionableRrValue = actionableRrValueForPlan(displayedPlan);
   const derivedActionState = deriveActionStateForRecord(item);
   const actionLabel = displayedPlan.affordability === 'not_affordable'
@@ -24925,19 +24981,19 @@ function projectTickerForCard(record, options = {}){
         : formatActionState(derivedActionState.stage))));
   return {
     item,
-    analysisState,
-    warningState,
-    effectivePlan,
-    displayedPlan,
-    displayStage,
-    finalVerdict:displayStage,
-    setupUiState,
-    planUiState,
-    setupScore:setupScoreForRecord(item),
-    setupScoreDisplay:setupScoreDisplayForRecord(item),
-    convictionTier:convictionTierLabel(item.setup.convictionTier || ''),
-    planState:displayedPlan.status,
-    planStateLabel:planUiState.label,
+      analysisState,
+      warningState,
+      effectivePlan,
+      displayedPlan,
+      displayStage:effectiveDisplayStage,
+      finalVerdict:effectiveDisplayStage,
+      setupUiState,
+      planUiState,
+      setupScore:effectiveSetupScore,
+      setupScoreDisplay:`Setup ${effectiveSetupScore}/10`,
+      convictionTier:convictionTierLabel(item.setup.convictionTier || ''),
+      planState:displayedPlan.status,
+      planStateLabel:planUiState.label,
     rrValue,
     actionableRrValue,
     positionSize:displayedPlan.status === 'valid' ? displayedPlan.riskFit.position_size : null,
@@ -25557,8 +25613,31 @@ function uniqueStrings(values){
   return [...new Set((values || []).map(value => String(value || '').trim()).filter(Boolean))];
 }
 
+function runtimeApiOriginOverride(){
+  if(typeof window === 'undefined' || !window.location) return '';
+  try{
+    const params = new URLSearchParams(window.location.search || '');
+    const raw = String(params.get('pp_api_origin') || '').trim();
+    if(!raw) return '';
+    const parsed = new URL(raw);
+    return parsed.origin;
+  }catch(_error){
+    return '';
+  }
+}
+
+function resolveApiEndpointWithOrigin(origin, endpoint){
+  const safeOrigin = String(origin || '').trim().replace(/\/+$/g, '');
+  const safeEndpoint = String(endpoint || '').trim();
+  if(!safeOrigin || !safeEndpoint || !safeEndpoint.startsWith('/')) return '';
+  return `${safeOrigin}${safeEndpoint}`;
+}
+
 function marketDataEndpoints(){
+  const apiOriginOverride = runtimeApiOriginOverride();
   return uniqueStrings([
+    resolveApiEndpointWithOrigin(apiOriginOverride, '/.netlify/functions/market-data'),
+    resolveApiEndpointWithOrigin(apiOriginOverride, defaultMarketDataEndpoint),
     '/.netlify/functions/market-data',
     state.marketDataEndpoint,
     defaultMarketDataEndpoint
