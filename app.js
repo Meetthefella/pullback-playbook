@@ -3813,6 +3813,13 @@ function currentReviewStateHealthSnapshot(record){
   const simplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
   const simplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
   const derivedTone = projectionTone || (String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor');
+  const plannedRr = item.plan && String(item.plan.status || '').trim().toLowerCase() === 'valid'
+    && Number.isFinite(numericOrNull(item.plan.plannedRR))
+    ? Number(numericOrNull(item.plan.plannedRR))
+    : null;
+  const simplifiedResolvedRr = Number.isFinite(Number(effectiveSimplifiedState.resolvedRR))
+    ? Number(effectiveSimplifiedState.resolvedRR)
+    : null;
   let divergenceDetected = false;
   try{
     const derivedStates = analysisDerivedStatesFromRecord(item);
@@ -3861,7 +3868,9 @@ function currentReviewStateHealthSnapshot(record){
     priceabilityState:String(effectiveSimplifiedState.priceabilityState || ''),
     bounceState:String(effectiveSimplifiedState.bounceState || ''),
     planStatus:String(effectiveSimplifiedState.planStatus || ''),
-    resolvedRR:Number.isFinite(Number(effectiveSimplifiedState.resolvedRR)) ? Number(effectiveSimplifiedState.resolvedRR) : null,
+    resolvedRR:plannedRr != null ? plannedRr : simplifiedResolvedRr,
+    resolverRR:simplifiedResolvedRr,
+    plannedRR:plannedRr,
     entryGatePass:effectiveSimplifiedState.entryGatePass === true,
     nearEntryGatePass:effectiveSimplifiedState.nearEntryGatePass === true,
     primaryBlockerReason:String(effectiveSimplifiedState.mainBlocker || ''),

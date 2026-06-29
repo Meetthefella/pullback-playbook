@@ -313,6 +313,11 @@ test('canonical Entry presentation remains authoritative across review, trade pl
   expect(contract.paperTrade.eligible).toBe(true);
   expect(contract.paperTrade.reasons).toEqual([]);
 
+  const reviewStateHealth = await page.evaluate(() => currentReviewStateHealthSnapshot(getTickerRecord('TROW')));
+  expect(reviewStateHealth.resolvedRR).toBeCloseTo(2.5, 6);
+  if(reviewStateHealth.plannedRR != null) expect(reviewStateHealth.plannedRR).toBeCloseTo(2.5, 6);
+  if(reviewStateHealth.resolverRR != null) expect(reviewStateHealth.resolverRR).toBeCloseTo(2.5, 6);
+
   await expect(page.locator('#reviewWorkspace .review-summary-badges .badge')).toContainText('Entry');
   await expect(page.locator('#reviewNextActionInline')).toContainText('Execute only if the trigger remains valid.');
   await expect(page.locator('#tradeStatusBox')).toContainText('Entry Ready');
@@ -487,4 +492,7 @@ test('canonical Entry can enable Paper Trade through backend gateway configurati
   await expect(page.locator('#tradePlanInputs')).not.toHaveClass(/review-hidden/);
   await expect(page.locator('#paperTradeBtn')).toBeEnabled();
   await expect(page.locator('#paperTradeDisabledReason')).toHaveCount(0);
+
+  const reviewStateHealth = await page.evaluate(() => currentReviewStateHealthSnapshot(getTickerRecord('BKND')));
+  expect(reviewStateHealth.resolvedRR).toBeCloseTo(3, 6);
 });
