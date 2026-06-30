@@ -103,7 +103,9 @@ sandbox.globalThis = sandbox;
   'buildFullPersistedState',
   'mergePersistedStateLayers',
   'orderedPersistedLayerSummaries',
-  'buildSettingsPersistedState'
+  'buildSettingsPersistedState',
+  'normalizeRiskPercentInput',
+  'canonicalizeRestoredRiskSettings'
 ].forEach(name => {
   vm.runInNewContext(extractFunction(name), sandbox, {filename:appPath});
 });
@@ -223,10 +225,32 @@ function testDraftOnlyReviewDoesNotCreateAuthorityDuringFullPersist(){
   assert(review && review.savedScore == null, 'Full persisted state must keep savedScore empty for draft-only reviews.');
 }
 
+function testStaleDerivedRiskDoesNotOverrideCanonicalSettings(){
+  const restored = {
+    accountSize:4000,
+    riskPercent:1,
+    maxLossOverride:'',
+    userRiskPerTrade:4000,
+    maxRisk:4000
+  };
+  sandbox.canonicalizeRestoredRiskSettings(restored, {
+    accountSize:4000,
+    riskPercent:1,
+    maxLossOverride:'',
+    userRiskPerTrade:4000,
+    maxRisk:4000
+  });
+  assert(restored.maxLossOverride === '', 'Stale derived full-account risk must not become maxLossOverride during restore.');
+  assert(restored.riskPercent === 1, 'Canonical explicit riskPercent must survive stale derived maxRisk restore.');
+  assert(restored.userRiskPerTrade === 0, 'Derived userRiskPerTrade must be cleared before recomputation during restore.');
+  assert(restored.maxRisk === 0, 'Derived maxRisk must be cleared before recomputation during restore.');
+}
+
 testFreshFallbackBeatsStaleFull();
 testFullSnapshotTrimsDuplicateProjections();
 testPersistenceOrderingDiagnostics();
 testDraftOnlyReviewSurvivesNormalization();
 testDraftOnlyReviewDoesNotCreateAuthorityDuringFullPersist();
+testStaleDerivedRiskDoesNotOverrideCanonicalSettings();
 
 console.log('Storage persistence assertions passed.');

@@ -2980,6 +2980,53 @@ function persistState(){
   }
 }
 
+function canonicalizeRestoredRiskSettings(sourceState = {}, settingsState = {}){
+  const base = sourceState && typeof sourceState === 'object' ? sourceState : {};
+  const persisted = settingsState && typeof settingsState === 'object' ? settingsState : {};
+  const accountSize = numericOrNull(base.accountSize);
+  const explicitRiskPercent = Object.prototype.hasOwnProperty.call(persisted, 'riskPercent')
+    ? normalizeRiskPercentInput(persisted.riskPercent, 0)
+    : numericOrNull(base.riskPercent);
+  const explicitMaxLossOverride = Object.prototype.hasOwnProperty.call(persisted, 'maxLossOverride')
+    ? numericOrNull(persisted.maxLossOverride)
+    : numericOrNull(base.maxLossOverride);
+  const legacySelectedRisk = Object.prototype.hasOwnProperty.call(persisted, 'userRiskPerTrade')
+    ? numericOrNull(persisted.userRiskPerTrade)
+    : numericOrNull(base.userRiskPerTrade);
+  const legacyMaxRisk = Object.prototype.hasOwnProperty.call(persisted, 'maxRisk')
+    ? numericOrNull(persisted.maxRisk)
+    : numericOrNull(base.maxRisk);
+  const legacyDerivedRisk = Number.isFinite(legacySelectedRisk) && legacySelectedRisk > 0
+    ? legacySelectedRisk
+    : (Number.isFinite(legacyMaxRisk) && legacyMaxRisk > 0 ? legacyMaxRisk : null);
+  const explicitRiskPercentPresent = Number.isFinite(explicitRiskPercent) && explicitRiskPercent > 0;
+  const explicitOverridePresent = Number.isFinite(explicitMaxLossOverride) && explicitMaxLossOverride > 0;
+  const legacyLooksLikeFullAccountRisk = !!(
+    Number.isFinite(accountSize)
+    && accountSize > 0
+    && Number.isFinite(legacyDerivedRisk)
+    && legacyDerivedRisk >= accountSize
+  );
+  if(!explicitOverridePresent && !explicitRiskPercentPresent && Number.isFinite(legacyDerivedRisk) && legacyDerivedRisk > 0 && !legacyLooksLikeFullAccountRisk){
+    base.maxLossOverride = String(legacyDerivedRisk);
+  }
+  if(!explicitRiskPercentPresent){
+    const derivedRiskPercent = Number.isFinite(accountSize) && accountSize > 0
+      ? Number((((numericOrNull(base.maxLossOverride) || legacyDerivedRisk || 0) / accountSize) * 100).toFixed(4))
+      : null;
+    base.riskPercent = Number.isFinite(derivedRiskPercent) && derivedRiskPercent > 0
+      ? derivedRiskPercent
+      : 1;
+  }else{
+    base.riskPercent = normalizeRiskPercentInput(explicitRiskPercent, 1);
+  }
+  if(!explicitOverridePresent && legacyLooksLikeFullAccountRisk){
+    base.maxLossOverride = '';
+  }
+  base.userRiskPerTrade = 0;
+  base.maxRisk = 0;
+}
+
 function inspectStorageKey(storageKey){
   try{
     const raw = localStorage.getItem(storageKey);
@@ -9026,6 +9073,7 @@ function loadState(){
   if(Object.prototype.hasOwnProperty.call(settingsState, 'wholeSharesOnly')) state.wholeSharesOnly = settingsState.wholeSharesOnly;
   if(Object.prototype.hasOwnProperty.call(settingsState, 'userRiskPerTrade')) state.userRiskPerTrade = settingsState.userRiskPerTrade;
   if(Object.prototype.hasOwnProperty.call(settingsState, 'maxRisk')) state.maxRisk = settingsState.maxRisk;
+  canonicalizeRestoredRiskSettings(state, settingsState);
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
   clearScannerSessionState({suppressed:false});
