@@ -19,6 +19,10 @@
       return normalizeVerdictToken(verdict) === 'entry';
     }
 
+    function isEligibleCapitalFit(capitalFit){
+      return ['', 'ideal', 'acceptable', 'fits_capital', 'unknown'].includes(String(capitalFit || '').trim().toLowerCase());
+    }
+
     function isPaperTradeEligible({finalVerdict, plan} = {}){
       if(!plan || typeof plan !== 'object') return false;
       const entry = numericOrNull(plan.entry);
@@ -66,7 +70,7 @@
       if(!Number.isFinite(maxLoss) || maxLoss <= 0) reasons.push('Risk amount is missing.');
       if(riskStatus && riskStatus !== 'fits_risk') reasons.push(`Risk status is ${riskStatus}.`);
       if(tradeability && !['tradable', 'risk_only'].includes(tradeability)) reasons.push(`Tradeability is ${tradeability}.`);
-      if(capitalFit && !['fits_capital', 'unknown'].includes(capitalFit)) reasons.push(`Capital fit is ${capitalFit}.`);
+      if(capitalFit && !isEligibleCapitalFit(capitalFit)) reasons.push(`Capital fit is ${capitalFit}.`);
       if(primaryState === 'dead') reasons.push('Setup is in dead state.');
       if(hardBlocker && !isEntryReadyVerdict(finalVerdict)) reasons.push(hardBlocker);
 
@@ -80,7 +84,7 @@
         riskTooWide:Boolean(riskStatus && riskStatus !== 'fits_risk'),
         invalid:Boolean(
           (tradeability && !['tradable', 'risk_only'].includes(tradeability))
-          || (capitalFit && !['fits_capital', 'unknown'].includes(capitalFit))
+          || (capitalFit && !isEligibleCapitalFit(capitalFit))
           || primaryState === 'dead'
           || (!!hardBlocker && !isEntryReadyVerdict(finalVerdict))
         )

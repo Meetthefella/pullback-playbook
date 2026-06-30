@@ -308,9 +308,9 @@ test('canonical Entry presentation remains authoritative across review, trade pl
 
   expect(contract.planVisibility.showPlan).toBe(true);
   expect(contract.planVisibility.showRR).toBe(true);
-  expect(contract.planVisibility.showCapital).toBe(true);
-
   expect(contract.paperTrade.eligible).toBe(true);
+  expect(contract.paperTrade.reasons).toEqual([]);
+  expect(contract.planVisibility.showCapital).toBe(true);
   expect(contract.paperTrade.reasons).toEqual([]);
 
   const reviewStateHealth = await page.evaluate(() => currentReviewStateHealthSnapshot(getTickerRecord('TROW')));
