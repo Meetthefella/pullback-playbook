@@ -87,8 +87,150 @@ const sandbox = {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;
   },
+  calculateMaxLossFromRiskPercent(accountSize, riskPercent){
+    const size = Number(accountSize);
+    const percent = Number(riskPercent);
+    if(!Number.isFinite(size) || !Number.isFinite(percent)) return 0;
+    return size * (percent / 100);
+  },
   normalizeTickerRecordsMap(value){
     return value && typeof value === 'object' ? value : {};
+  },
+  cloneData(value, fallback = null){
+    const target = value == null ? fallback : value;
+    return target == null ? target : JSON.parse(JSON.stringify(target));
+  },
+  persistableWatchlistState(value){
+    const safe = value && typeof value === 'object' ? value : {};
+    return {
+      inWatchlist:!!safe.inWatchlist,
+      addedAt:safe.addedAt || '',
+      source:safe.source || ''
+    };
+  },
+  persistableMetaState(value){
+    const safe = value && typeof value === 'object' ? value : {};
+    return {
+      createdAt:safe.createdAt || '',
+      updatedAt:safe.updatedAt || ''
+    };
+  },
+  normalizeTickerRecord(record){
+    const safe = record && typeof record === 'object' ? record : {};
+    const ticker = String(safe.ticker || '').trim().toUpperCase();
+    const marketData = safe.marketData && typeof safe.marketData === 'object' ? safe.marketData : {};
+    const scan = safe.scan && typeof safe.scan === 'object' ? safe.scan : {};
+    const review = safe.review && typeof safe.review === 'object' ? safe.review : {};
+    const plan = safe.plan && typeof safe.plan === 'object' ? safe.plan : {};
+    const watchlist = safe.watchlist && typeof safe.watchlist === 'object' ? safe.watchlist : {};
+    const journal = safe.journal && typeof safe.journal === 'object' ? safe.journal : {};
+    return {
+      ticker,
+      marketData:{
+        price:marketData.price ?? null,
+        asOf:marketData.asOf || '',
+        source:marketData.source || '',
+        ma20:marketData.ma20 ?? null,
+        ma50:marketData.ma50 ?? null,
+        ma200:marketData.ma200 ?? null,
+        rsi:marketData.rsi ?? null,
+        avgVolume:marketData.avgVolume ?? null,
+        volume:marketData.volume ?? null,
+        perf1w:marketData.perf1w ?? null,
+        perf1m:marketData.perf1m ?? null,
+        perf3m:marketData.perf3m ?? null,
+        perf6m:marketData.perf6m ?? null,
+        perfYtd:marketData.perfYtd ?? null,
+        currency:marketData.currency || '',
+        history:Array.isArray(marketData.history) ? marketData.history : [],
+        previousClose:marketData.previousClose ?? null
+      },
+      scan:{
+        scanType:scan.scanType || '',
+        scanSetupType:scan.scanSetupType || '',
+        setupOrigin:scan.setupOrigin || '',
+        score:scan.score ?? null,
+        resolvedVerdict:scan.resolvedVerdict || '',
+        verdict:scan.verdict || '',
+        reasons:Array.isArray(scan.reasons) ? scan.reasons : [],
+        flags:scan.flags && typeof scan.flags === 'object' ? scan.flags : {},
+        summary:scan.summary || '',
+        riskStatus:scan.riskStatus || '',
+        trendStatus:scan.trendStatus || '',
+        pullbackStatus:scan.pullbackStatus || '',
+        pullbackType:scan.pullbackType || '',
+        analysisProjection:scan.analysisProjection && typeof scan.analysisProjection === 'object' ? scan.analysisProjection : null,
+        lastScannedAt:scan.lastScannedAt || '',
+        updatedAt:scan.updatedAt || ''
+      },
+      review:{
+        notes:review.notes || '',
+        savedVerdict:review.savedVerdict || '',
+        savedSummary:review.savedSummary || '',
+        savedScore:review.savedScore ?? null,
+        lastReviewedAt:review.lastReviewedAt || '',
+        manualReview:review.manualReview && typeof review.manualReview === 'object' ? review.manualReview : null,
+        cardOpen:!!review.cardOpen,
+        source:review.source || '',
+        analysisState:review.analysisState && typeof review.analysisState === 'object' ? review.analysisState : null,
+        chartAnalysisPipeline:review.chartAnalysisPipeline ?? null,
+        draft:review.draft && typeof review.draft === 'object' ? review.draft : null
+      },
+      plan:{
+        hasValidPlan:!!plan.hasValidPlan,
+        entry:plan.entry || '',
+        stop:plan.stop || '',
+        firstTarget:plan.firstTarget || '',
+        exitMode:plan.exitMode || '',
+        targetReviewState:plan.targetReviewState || '',
+        targetActionRecommendation:plan.targetActionRecommendation || '',
+        targetAlert:plan.targetAlert && typeof plan.targetAlert === 'object' ? plan.targetAlert : {},
+        riskPerShare:plan.riskPerShare ?? null,
+        rewardPerShare:plan.rewardPerShare ?? null,
+        plannedRR:plan.plannedRR ?? null,
+        positionSize:plan.positionSize ?? null,
+        positionCost:plan.positionCost ?? null,
+        positionCostGbp:plan.positionCostGbp ?? null,
+        quoteCurrency:plan.quoteCurrency || '',
+        maxLoss:plan.maxLoss ?? null,
+        riskStatus:plan.riskStatus || '',
+        capitalFit:plan.capitalFit || '',
+        tradeability:plan.tradeability || '',
+        capitalNote:plan.capitalNote || '',
+        affordability:plan.affordability || '',
+        status:plan.status || '',
+        triggerState:plan.triggerState || '',
+        planValidationState:plan.planValidationState || '',
+        needsReplan:!!plan.needsReplan,
+        missedState:plan.missedState || '',
+        invalidatedState:plan.invalidatedState || '',
+        firstTargetTooClose:!!plan.firstTargetTooClose,
+        source:plan.source || '',
+        target:plan.target || '',
+        lastValidatedAt:plan.lastValidatedAt || ''
+      },
+      setup:{
+        rawScore:safe.setup && typeof safe.setup === 'object' ? safe.setup.rawScore ?? null : null,
+        score:safe.setup && typeof safe.setup === 'object' ? safe.setup.score ?? null : null,
+        convictionTier:safe.setup && typeof safe.setup === 'object' ? safe.setup.convictionTier || '' : '',
+        practicalSizeFlag:safe.setup && typeof safe.setup === 'object' ? safe.setup.practicalSizeFlag || '' : '',
+        verdict:safe.setup && typeof safe.setup === 'object' ? safe.setup.verdict || '' : '',
+        reasons:safe.setup && typeof safe.setup === 'object' && Array.isArray(safe.setup.reasons) ? safe.setup.reasons : [],
+        marketCaution:safe.setup && typeof safe.setup === 'object' ? safe.setup.marketCaution || '' : ''
+      },
+      watchlist:{
+        inWatchlist:!!watchlist.inWatchlist,
+        addedAt:watchlist.addedAt || '',
+        source:watchlist.source || ''
+      },
+      lifecycle:safe.lifecycle && typeof safe.lifecycle === 'object' ? safe.lifecycle : {},
+      diary:safe.diary && typeof safe.diary === 'object' ? {records:Array.isArray(safe.diary.records) ? safe.diary.records : []} : {records:[]},
+      meta:safe.meta && typeof safe.meta === 'object' ? safe.meta : {},
+      journal:{
+        lastResult:journal.lastResult || '',
+        lastTradedAt:journal.lastTradedAt || ''
+      }
+    };
   }
 };
 sandbox.globalThis = sandbox;
@@ -100,6 +242,7 @@ sandbox.globalThis = sandbox;
   'stripPersistMeta',
   'persistedAtMs',
   'persistedFormatLabel',
+  'buildPersistableTickerRecordsMap',
   'buildFullPersistedState',
   'mergePersistedStateLayers',
   'orderedPersistedLayerSummaries',

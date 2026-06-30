@@ -600,13 +600,12 @@
         : fallbackDerivedStates(item);
       const derivedStates = reconcileDerivedPriceabilityState(rawDerivedStates, planState);
       const validation = global.SimplifiedPlanState.validateCurrentPlan(item, planState, {derivedStates, deps});
-      const preserveCanonicalForSoftReadiness = ['review', 'scan', 'track'].includes(String(surface || '').trim().toLowerCase());
-      const resolverDeps = {
-        ...deps,
-        preserveReviewCanonicalForSoftReadiness:preserveCanonicalForSoftReadiness,
-        analysisDerivedStatesFromRecord:() => derivedStates,
-        effectivePlanForRecord:() => effectivePlan,
-        deriveCurrentPlanState:() => planState,
+        const resolverDeps = {
+          ...deps,
+          preserveReviewCanonicalForSoftReadiness:surface === 'review',
+          analysisDerivedStatesFromRecord:() => derivedStates,
+          effectivePlanForRecord:() => effectivePlan,
+          deriveCurrentPlanState:() => planState,
         applySetupConfirmationPlanGate:deps.applySetupConfirmationPlanGate || ((unusedRecord, displayedPlan) => displayedPlan),
         baseVerdictFromResolvedContract:deps.baseVerdictFromResolvedContract || baseVerdictFromResolvedContract,
         resolvePreLifecycleStateContract:deps.resolvePreLifecycleStateContract

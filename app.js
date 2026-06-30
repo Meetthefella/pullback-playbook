@@ -3276,6 +3276,7 @@ function buildPersistableTickerRecordsMap(recordsMap = {}, options = {}){
           savedSummary:item.review.savedSummary,
           savedScore:item.review.savedScore,
           lastReviewedAt:item.review.lastReviewedAt,
+          draft:item.review.draft && typeof item.review.draft === 'object' ? cloneData(item.review.draft, null) : null,
           manualReview:item.review.manualReview && typeof item.review.manualReview === 'object' ? cloneData(item.review.manualReview, null) : null,
           cardOpen:!!item.review.cardOpen,
           source:item.review.source,
