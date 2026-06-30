@@ -1830,7 +1830,7 @@ function runTradeExecutionRoutingAssertions(){
     || !/Paper-trading-only status: tester mode supports paper submissions only after this setup is confirmed/.test(indexSource)
     || !/Live-trading lockout: live execution is disabled in this build/.test(indexSource)
     || !/id="testerSetupConfirmBtn"/.test(indexSource)
-    || !/Complete tester setup in Context Settings before using paper trading\./.test(appSource)){
+    || !/Complete tester setup(?: in Context Settings)? to unlock paper-trade actions in Review\./.test(appSource)){
     throw new Error('Tester onboarding copy and paper-trade setup gate must remain visible.');
   }
   if(!/function handleTradeExecution\(event\)/.test(handlerSource) || !/if\(action === 'test_connection'\)/.test(handlerSource)){
@@ -1913,6 +1913,7 @@ function runReviewProjectionAssertions(){
     'nonPlanCalcNoteText',
     'isAccepted50MaSupportTestDisplayState',
     'review50MaSupportTestPresentationCopy',
+    'resolveCanonicalTradePlanAuthority',
     'buildReviewSemanticStatus',
     'reviewSetupQualitySummary',
     'clampReviewChecklistScore',
@@ -2828,6 +2829,7 @@ function runSharedNarrativeConsistencyAssertions(){
     'isAccepted50MaSupportTestDisplayState',
     'review50MaSupportTestPresentationCopy',
     'resolveTrackCardVisibleModel',
+    'resolveCanonicalTradePlanAuthority',
     'buildReviewSemanticStatus',
     'resolveSetupPatternUi',
     'entryTriggerConditionForSummary',
@@ -6451,6 +6453,15 @@ function runPlanSemanticsAssertions(){
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});
   });
+  const stampedPlan = (plan = {}) => ({
+    authoritySource:'applyPlanCandidateToRecord',
+    authorityVersion:'trade_plan_v1',
+    authorityReason:'test_fixture',
+    writtenBy:'test_fixture',
+    writtenAt:'2026-06-30T00:00:00.000Z',
+    candidateSource:String(plan.source || 'manual'),
+    ...plan
+  });
 
   const noPlanRecord = {ticker:'NOPLAN', plan:{entry:null, stop:null, firstTarget:null, source:'manual'}, review:{manualReview:null}, scan:{}, marketData:{currency:'USD'}};
   const noPlanEffective = sandbox.effectivePlanForRecord(noPlanRecord, {allowScannerFallback:false});
@@ -6464,7 +6475,7 @@ function runPlanSemanticsAssertions(){
     throw new Error('Missing generated plan must display as pending/no actionable plan with RR realism N/A.');
   }
 
-  const partialManualRecord = {ticker:'PARTIAL', plan:{entry:100, stop:null, firstTarget:null, source:'manual'}, review:{manualReview:null}, scan:{}, marketData:{currency:'USD'}};
+  const partialManualRecord = {ticker:'PARTIAL', plan:stampedPlan({entry:100, stop:null, firstTarget:null, source:'manual'}), review:{manualReview:null}, scan:{}, marketData:{currency:'USD'}};
   const partialEffective = sandbox.effectivePlanForRecord(partialManualRecord, {allowScannerFallback:false});
   const partialState = sandbox.deriveCurrentPlanState(partialEffective.entry, partialEffective.stop, partialEffective.firstTarget, 'USD');
   const partialUi = sandbox.getPlanUiState(partialManualRecord, {displayedPlan:partialState, effectivePlan:partialEffective});
@@ -6472,7 +6483,7 @@ function runPlanSemanticsAssertions(){
     throw new Error('User-entered incomplete plan fields may remain manual and invalid/incomplete.');
   }
 
-  const validManualRecord = {ticker:'VALIDMANUAL', plan:{entry:100, stop:95, firstTarget:115, source:'manual'}, review:{manualReview:null}, scan:{}, marketData:{price:100, currency:'USD'}};
+  const validManualRecord = {ticker:'VALIDMANUAL', plan:stampedPlan({entry:100, stop:95, firstTarget:115, source:'manual'}), review:{manualReview:null}, scan:{}, marketData:{price:100, currency:'USD'}};
   const validEffective = sandbox.effectivePlanForRecord(validManualRecord, {allowScannerFallback:false});
   const validState = sandbox.deriveCurrentPlanState(validEffective.entry, validEffective.stop, validEffective.firstTarget, 'USD');
   if(sandbox.planSourceForDiagnostics(validManualRecord, validEffective) !== 'manual' || validState.status !== 'valid'){
@@ -6481,7 +6492,7 @@ function runPlanSemanticsAssertions(){
 
   const scannerEstimatePlanRecord = {
     ticker:'SCANNERKEEP',
-    plan:{entry:100, stop:95, firstTarget:115, source:'scanner_estimate', hasValidPlan:true, riskStatus:'fits_risk', blockedReason:''},
+    plan:stampedPlan({entry:100, stop:95, firstTarget:115, source:'scanner_estimate', hasValidPlan:true, riskStatus:'fits_risk', blockedReason:''}),
     setup:{},
     marketData:{price:100, currency:'USD'},
     watchlist:{debug:{}, inWatchlist:false}
@@ -6496,7 +6507,7 @@ function runPlanSemanticsAssertions(){
 
   const trowLikeRecord = {
     ticker:'TROWLIKE',
-    plan:{
+    plan:stampedPlan({
       entry:110.27,
       stop:102.29,
       firstTarget:136.19,
@@ -6511,7 +6522,7 @@ function runPlanSemanticsAssertions(){
       triggerState:'invalidated',
       missedState:'missed',
       invalidatedState:'invalidated'
-    },
+    }),
     marketData:{price:110.27, currency:'USD'},
     setup:{},
     watchlist:{debug:{}, inWatchlist:true}
@@ -9051,6 +9062,7 @@ function runReviewPricedButNotReadyAssertions(){
   };
   vm.createContext(sandbox);
   [
+    'resolveCanonicalTradePlanAuthority',
     'buildReviewSemanticStatus',
     'buildResolvedReviewDisplayModel'
   ].forEach(functionName => {
@@ -9082,7 +9094,11 @@ function runReviewPricedButNotReadyAssertions(){
       entry:220,
       stop:215,
       target:230,
-      rewardRisk:{valid:true, rrRatio:2}
+      rewardRisk:{valid:true, rrRatio:2},
+      riskFit:{risk_status:'fits_risk', position_size:8, max_loss:40},
+      capitalFit:{capital_fit:'acceptable', quote_currency:'USD'},
+      tradeability:'tradable',
+      affordability:'affordable'
     },
     planRealism:{raw_rr:2}
   });
@@ -9160,7 +9176,11 @@ function runReviewPricedButNotReadyAssertions(){
       entry:220,
       stop:215,
       target:230,
-      rewardRisk:{valid:true, rrRatio:2}
+      rewardRisk:{valid:true, rrRatio:2},
+      riskFit:{risk_status:'fits_risk', position_size:8, max_loss:40},
+      capitalFit:{capital_fit:'acceptable', quote_currency:'USD'},
+      tradeability:'tradable',
+      affordability:'affordable'
     },
     planRealism:{raw_rr:2}
   });
@@ -9199,7 +9219,11 @@ function runReviewPricedButNotReadyAssertions(){
       entry:110,
       stop:102,
       target:130,
-      rewardRisk:{valid:true, rrRatio:2.5}
+      rewardRisk:{valid:true, rrRatio:2.5},
+      riskFit:{risk_status:'fits_risk', position_size:5, max_loss:40},
+      capitalFit:{capital_fit:'acceptable', quote_currency:'USD'},
+      tradeability:'tradable',
+      affordability:'affordable'
     },
     planRealism:{raw_rr:2.5}
   });

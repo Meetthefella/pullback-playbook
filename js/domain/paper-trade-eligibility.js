@@ -20,7 +20,7 @@
     }
 
     function isEligibleCapitalFit(capitalFit){
-      return ['', 'ideal', 'acceptable', 'fits_capital', 'unknown'].includes(String(capitalFit || '').trim().toLowerCase());
+      return ['ideal', 'acceptable', 'fits_capital', 'borderline'].includes(String(capitalFit || '').trim().toLowerCase());
     }
 
     function isPaperTradeEligible({finalVerdict, plan} = {}){
@@ -69,7 +69,7 @@
       if(!Number.isFinite(positionSize) || positionSize < 1) reasons.push('Position size is missing or below 1 share.');
       if(!Number.isFinite(maxLoss) || maxLoss <= 0) reasons.push('Risk amount is missing.');
       if(riskStatus && riskStatus !== 'fits_risk') reasons.push(`Risk status is ${riskStatus}.`);
-      if(tradeability && !['tradable', 'risk_only'].includes(tradeability)) reasons.push(`Tradeability is ${tradeability}.`);
+      if(tradeability && !['tradable', 'entry', 'ready', 'action_now'].includes(tradeability)) reasons.push(`Tradeability is ${tradeability}.`);
       if(capitalFit && !isEligibleCapitalFit(capitalFit)) reasons.push(`Capital fit is ${capitalFit}.`);
       if(primaryState === 'dead') reasons.push('Setup is in dead state.');
       if(hardBlocker && !isEntryReadyVerdict(finalVerdict)) reasons.push(hardBlocker);
@@ -83,7 +83,7 @@
         maxLoss,
         riskTooWide:Boolean(riskStatus && riskStatus !== 'fits_risk'),
         invalid:Boolean(
-          (tradeability && !['tradable', 'risk_only'].includes(tradeability))
+          (tradeability && !['tradable', 'entry', 'ready', 'action_now'].includes(tradeability))
           || (capitalFit && !isEligibleCapitalFit(capitalFit))
           || primaryState === 'dead'
           || (!!hardBlocker && !isEntryReadyVerdict(finalVerdict))

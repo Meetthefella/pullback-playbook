@@ -105,7 +105,10 @@ sandbox.globalThis = sandbox;
   'orderedPersistedLayerSummaries',
   'buildSettingsPersistedState',
   'normalizeRiskPercentInput',
-  'canonicalizeRestoredRiskSettings'
+  'canonicalizeRestoredRiskSettings',
+  'currentMaxLoss',
+  'canonicalRiskAmount',
+  'currentRiskSettings'
 ].forEach(name => {
   vm.runInNewContext(extractFunction(name), sandbox, {filename:appPath});
 });
@@ -246,11 +249,25 @@ function testStaleDerivedRiskDoesNotOverrideCanonicalSettings(){
   assert(restored.maxRisk === 0, 'Derived maxRisk must be cleared before recomputation during restore.');
 }
 
+function testCurrentRiskSettingsIgnoresStaleDerivedRisk(){
+  sandbox.state = {
+    accountSize:4000,
+    riskPercent:1,
+    maxLossOverride:'',
+    userRiskPerTrade:4000,
+    maxRisk:4000,
+    wholeSharesOnly:true
+  };
+  const settings = sandbox.currentRiskSettings();
+  assert(settings.max_loss_override === 40, 'Risk recompute must derive max_loss_override from canonical settings, not stale derived userRiskPerTrade.');
+}
+
 testFreshFallbackBeatsStaleFull();
 testFullSnapshotTrimsDuplicateProjections();
 testPersistenceOrderingDiagnostics();
 testDraftOnlyReviewSurvivesNormalization();
 testDraftOnlyReviewDoesNotCreateAuthorityDuringFullPersist();
 testStaleDerivedRiskDoesNotOverrideCanonicalSettings();
+testCurrentRiskSettingsIgnoresStaleDerivedRisk();
 
 console.log('Storage persistence assertions passed.');

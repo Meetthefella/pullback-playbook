@@ -4018,6 +4018,63 @@ function currentReviewStateHealthSnapshot(record){
   const derivedTone = projectionTone || (String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor');
   const authoritativeEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'entry';
   const authoritativeNearEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'near_entry';
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+  const displayedPlan = applySetupConfirmationPlanGate(
+    item,
+    deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, item.marketData && item.marketData.currency),
+    analysisDerivedStatesFromRecord(item)
+  );
+  const planCandidates = collectTradePlanAuthorityCandidates(item);
+  const planAuthority = resolveCanonicalTradePlanAuthority({
+    record:item,
+    simplifiedState:effectiveSimplifiedState,
+    globalVerdict,
+    displayedPlan,
+    derivedStates:analysisDerivedStatesFromRecord(item),
+    context:'review_diagnostic'
+  });
+  const planTrace = {
+    authorityId:planAuthority.authorityId,
+    source:planAuthority.source,
+    verdict:planAuthority.verdict,
+    reasonCode:planAuthority.reasonCode,
+    fields:{
+      tradeStatus:{
+        finalDisplayedValue:planAuthority.actionable ? 'Entry Ready - plan is actionable.' : (planAuthority.reasonCode === 'capital_not_affordable' ? 'Setup valid but unaffordable.' : 'No actionable trade yet.'),
+        rawSourceValue:simplifiedCanonicalVerdict,
+        sourcePath:'buildReviewSemanticStatus -> resolveCanonicalTradePlanAuthority',
+        authorityRank:1,
+        resolution:planAuthority.actionable ? 'accepted' : 'suppressed'
+      },
+      plannedEntry:{finalDisplayedValue:displayedPlan.entry ?? null, rawSourceValue:displayedPlan.entry ?? null, sourcePath:'displayedPlan.entry', authorityRank:1, resolution:Number.isFinite(numericOrNull(displayedPlan.entry)) ? 'accepted' : 'suppressed'},
+      plannedStop:{finalDisplayedValue:displayedPlan.stop ?? null, rawSourceValue:displayedPlan.stop ?? null, sourcePath:'displayedPlan.stop', authorityRank:1, resolution:Number.isFinite(numericOrNull(displayedPlan.stop)) ? 'accepted' : 'suppressed'},
+      plannedFirstTarget:{finalDisplayedValue:(displayedPlan.target ?? displayedPlan.firstTarget) ?? null, rawSourceValue:(displayedPlan.target ?? displayedPlan.firstTarget) ?? null, sourcePath:'displayedPlan.target', authorityRank:1, resolution:Number.isFinite(numericOrNull(displayedPlan.target ?? displayedPlan.firstTarget)) ? 'accepted' : 'suppressed'},
+      riskPerShare:{finalDisplayedValue:displayedPlan.riskFit && displayedPlan.riskFit.risk_per_share, rawSourceValue:displayedPlan.riskFit && displayedPlan.riskFit.risk_per_share, sourcePath:'displayedPlan.riskFit.risk_per_share', authorityRank:1, resolution:'accepted'},
+      maxLoss:{finalDisplayedValue:displayedPlan.riskFit && displayedPlan.riskFit.max_loss, rawSourceValue:displayedPlan.riskFit && displayedPlan.riskFit.max_loss, sourcePath:'displayedPlan.riskFit.max_loss', authorityRank:1, resolution:'accepted'},
+      positionSize:{finalDisplayedValue:displayedPlan.riskFit && displayedPlan.riskFit.position_size, rawSourceValue:displayedPlan.riskFit && displayedPlan.riskFit.position_size, sourcePath:'displayedPlan.riskFit.position_size', authorityRank:1, resolution:planAuthority.actionable ? 'accepted' : 'suppressed'},
+      positionCost:{finalDisplayedValue:displayedPlan.capitalFit && displayedPlan.capitalFit.position_cost, rawSourceValue:displayedPlan.capitalFit && displayedPlan.capitalFit.position_cost, sourcePath:'displayedPlan.capitalFit.position_cost', authorityRank:1, resolution:'accepted'},
+      capitalFit:{finalDisplayedValue:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit, rawSourceValue:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit, sourcePath:'displayedPlan.capitalFit.capital_fit', authorityRank:1, resolution:planAuthority.capitalAffordable ? 'accepted' : 'suppressed'},
+      capitalFitReason:{finalDisplayedValue:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_note, rawSourceValue:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_note, sourcePath:'displayedPlan.capitalFit.capital_note', authorityRank:1, resolution:'accepted'},
+      rr:{finalDisplayedValue:displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio, rawSourceValue:displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio, sourcePath:'displayedPlan.rewardRisk.rrRatio', authorityRank:1, resolution:'accepted'},
+      paperTradeEligibility:{finalDisplayedValue:planAuthority.actionable, rawSourceValue:planAuthority.actionable, sourcePath:'resolveCanonicalTradePlanAuthority.actionable', authorityRank:1, resolution:planAuthority.actionable ? 'accepted' : 'suppressed'},
+      quoteCurrency:{finalDisplayedValue:planAuthority.quoteCurrency, rawSourceValue:planAuthority.quoteCurrency, sourcePath:'displayedPlan.capitalFit.quote_currency', authorityRank:1, resolution:'accepted'},
+      gbpVsGbx:{finalDisplayedValue:planAuthority.gbpVsGbxMode, rawSourceValue:planAuthority.gbpVsGbxMode, sourcePath:'resolveCanonicalTradePlanAuthority.gbpVsGbxMode', authorityRank:1, resolution:'accepted'},
+      planAuthorityStamp:{
+        finalDisplayedValue:hasCanonicalTradePlanStamp(item.plan),
+        rawSourceValue:{
+          authoritySource:String(item.plan && item.plan.authoritySource || ''),
+          authorityVersion:String(item.plan && item.plan.authorityVersion || ''),
+          authorityReason:String(item.plan && item.plan.authorityReason || ''),
+          writtenBy:String(item.plan && item.plan.writtenBy || ''),
+          writtenAt:String(item.plan && item.plan.writtenAt || ''),
+          candidateSource:String(item.plan && item.plan.candidateSource || '')
+        },
+        sourcePath:'record.plan authority stamp',
+        authorityRank:1,
+        resolution:hasCanonicalTradePlanStamp(item.plan) ? 'accepted' : 'suppressed'
+      }
+    }
+  };
   const plannedRr = item.plan && String(item.plan.status || '').trim().toLowerCase() === 'valid'
     && Number.isFinite(numericOrNull(item.plan.plannedRR))
     ? Number(numericOrNull(item.plan.plannedRR))
@@ -4076,7 +4133,7 @@ function currentReviewStateHealthSnapshot(record){
     resolvedRR:plannedRr != null ? plannedRr : simplifiedResolvedRr,
     resolverRR:simplifiedResolvedRr,
     plannedRR:plannedRr,
-    entryGatePass:authoritativeEntryPresentation ? true : (effectiveSimplifiedState.entryGatePass === true),
+    entryGatePass:planAuthority.actionable === true ? true : (authoritativeEntryPresentation ? true : (effectiveSimplifiedState.entryGatePass === true)),
     nearEntryGatePass:authoritativeEntryPresentation || authoritativeNearEntryPresentation ? true : (effectiveSimplifiedState.nearEntryGatePass === true),
     primaryBlockerReason:authoritativeEntryPresentation
       ? ''
@@ -4084,7 +4141,10 @@ function currentReviewStateHealthSnapshot(record){
     avoidTriggerSource:String(effectiveSimplifiedState.avoidTriggerSource || ''),
     terminalAvoidApplied:effectiveSimplifiedState.terminalAvoidApplied === true,
     divergenceDetected,
-    lastReviewedAt:String(item.review && item.review.lastReviewedAt || '')
+    lastReviewedAt:String(item.review && item.review.lastReviewedAt || ''),
+    planAuthority,
+    planTrace,
+    planCandidates
   };
 }
 
@@ -7617,6 +7677,30 @@ function resolvePlanSource(record, planCandidate = {}, requestedSource = ''){
   return source || String(record && record.plan && record.plan.source || '');
 }
 
+function canonicalTradePlanAuthorityVersion(){
+  return 'trade_plan_v1';
+}
+
+function hasCanonicalTradePlanStamp(plan){
+  const safePlan = plan && typeof plan === 'object' ? plan : {};
+  return String(safePlan.authorityVersion || '').trim() === canonicalTradePlanAuthorityVersion()
+    && !!String(safePlan.authoritySource || '').trim()
+    && !!String(safePlan.writtenBy || '').trim()
+    && !!String(safePlan.writtenAt || '').trim();
+}
+
+function stampCanonicalTradePlan(record, context = {}){
+  if(!(record && record.plan && typeof record.plan === 'object')) return;
+  const candidateSource = String(context.source || record.plan.source || '').trim().toLowerCase();
+  const writtenAt = String(context.updatedAt || context.lastPlannedAt || new Date().toISOString());
+  record.plan.authoritySource = 'applyPlanCandidateToRecord';
+  record.plan.authorityVersion = canonicalTradePlanAuthorityVersion();
+  record.plan.authorityReason = String(context.reason || candidateSource || 'canonical_trade_plan_write');
+  record.plan.writtenBy = String(context.writtenBy || 'applyPlanCandidateToRecord');
+  record.plan.writtenAt = writtenAt;
+  record.plan.candidateSource = candidateSource;
+}
+
 function applyPlanCandidateToRecord(record, planCandidate = {}, context = {}){
   if(!record) return;
   const previousFirstTarget = numericOrNull(record.plan && record.plan.firstTarget);
@@ -7676,6 +7760,7 @@ function applyPlanCandidateToRecord(record, planCandidate = {}, context = {}){
     level:executionState.targetAlertLevel,
     lastState:executionState.targetReviewState
   };
+  stampCanonicalTradePlan(record, context);
   if(context.source && context.source !== 'scanner'){
     applyLifecycleStageFromPlan(record, context.source);
   }
@@ -24389,6 +24474,7 @@ function buildResolvedReviewDisplayModel({
   const semanticDraftPlan = semantic.draftPlan === true;
   const semanticPlanActionable = semantic.planActionable === true;
   const pricedButNotReady = semantic.pricedButNotReady === true;
+  const unaffordableCanonicalPlan = semantic.unaffordableCanonicalPlan === true;
   const pricedButNotReadyCopy = typeof reviewPricedButNotReadyCopy === 'function'
     ? reviewPricedButNotReadyCopy()
     : {
@@ -24428,7 +24514,7 @@ function buildResolvedReviewDisplayModel({
     : (planUI.showRR && plan.status === 'valid' && Number.isFinite(realism.raw_rr)
     ? `${Number(realism.raw_rr).toFixed(2)}R`
     : (semantic.rrDisplay || 'No actionable plan yet.'));
-  const positionCostVisible = planUI.showCapital === true;
+  const positionCostVisible = planUI.showCapital === true || unaffordableCanonicalPlan === true;
   const positionCostText = positionCostVisible && Number.isFinite(plan.capitalFit && plan.capitalFit.position_cost)
     ? `${Number(plan.capitalFit.position_cost.toFixed(2))}${plan.capitalFit.quote_currency ? ` ${plan.capitalFit.quote_currency}` : ''}`
     : '-';
@@ -24520,6 +24606,110 @@ function buildResolvedReviewDisplayModel({
   };
 }
 
+// Single-authority contract: only the canonical resolver/displayed plan may decide
+// actionability, affordability, sizing, and paper-trade eligibility. Presentation may format only.
+function resolveCanonicalTradePlanAuthority({
+  record,
+  simplifiedState,
+  globalVerdict,
+  displayedPlan,
+  derivedStates,
+  context = 'generic'
+} = {}){
+  const normalizeVerdict = typeof normalizeGlobalVerdictKey === 'function'
+    ? normalizeGlobalVerdictKey
+    : (value => {
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    });
+  const item = record && typeof record === 'object' ? record : {};
+  const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
+  const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+  const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const verdict = normalizeVerdict(simplified.canonicalVerdict || global.final_verdict || global.finalVerdict || 'watch');
+  const planStatus = String(plan.status || simplified.planStatus || global.plan_status || '').trim().toLowerCase();
+  const riskStatus = String(plan.riskFit && plan.riskFit.risk_status || '').trim().toLowerCase();
+  const capitalFit = String(plan.capitalFit && plan.capitalFit.capital_fit || '').trim().toLowerCase();
+  const affordability = String(plan.affordability || '').trim().toLowerCase();
+  const tradeability = String(plan.tradeability || '').trim().toLowerCase();
+  const quoteCurrency = String(
+    (plan.capitalFit && plan.capitalFit.quote_currency)
+    || (item.plan && item.plan.quoteCurrency)
+    || (item.marketData && item.marketData.currency)
+    || ''
+  ).trim().toUpperCase();
+  const structureState = String(simplified.structureState || derived.structureState || global.structure_state || '').trim().toLowerCase();
+  const structureEligibility = String(simplified.structureEligibility || global.structure_eligibility || '').trim().toLowerCase();
+  const terminalAvoid = verdict === 'avoid' && (
+    global.terminal_avoid_applied === true
+    || global.rejected_by_viability_gate === true
+    || ['broken','dead','failed'].includes(structureState)
+    || String(global.viability || '').trim().toLowerCase() === 'reject'
+  );
+  const structuralWeakness = ['damaged','broken'].includes(structureEligibility)
+    || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
+  const planFieldsPresent = Number.isFinite(numericOrNull(plan.entry))
+    && Number.isFinite(numericOrNull(plan.stop))
+    && Number.isFinite(numericOrNull(plan.target ?? plan.firstTarget));
+  const capitalAffordable = ['ideal','acceptable','borderline','fits_capital'].includes(capitalFit)
+    && affordability !== 'not_affordable';
+  const tradeabilityActionable = ['tradable','entry','ready','action_now'].includes(tradeability);
+  const riskFits = riskStatus === 'fits_risk';
+  const actionable = verdict === 'entry'
+    && terminalAvoid !== true
+    && structuralWeakness !== true
+    && planStatus === 'valid'
+    && planFieldsPresent
+    && riskFits
+    && capitalAffordable
+    && tradeabilityActionable;
+  const source = String(
+    plan.planSourceUsedForRisk
+    || plan.source
+    || (item.plan && item.plan.source)
+    || 'canonical_displayed_plan'
+  ).trim().toLowerCase() || 'canonical_displayed_plan';
+  let reasonCode = 'ok';
+  if(planStatus !== 'valid') reasonCode = 'plan_not_valid';
+  else if(!planFieldsPresent) reasonCode = 'plan_fields_missing';
+  else if(riskFits !== true) reasonCode = 'risk_not_fit';
+  else if(capitalAffordable !== true) reasonCode = 'capital_not_affordable';
+  else if(tradeabilityActionable !== true) reasonCode = 'tradeability_not_actionable';
+  else if(verdict !== 'entry') reasonCode = 'verdict_not_entry';
+  else if(terminalAvoid === true) reasonCode = 'terminal_avoid';
+  else if(structuralWeakness === true) reasonCode = 'structural_weakness';
+  const authorityId = [
+    'resolver',
+    context,
+    source || 'canonical_displayed_plan',
+    verdict || 'watch',
+    planStatus || 'missing',
+    tradeability || 'unknown',
+    capitalFit || 'unknown'
+  ].join(':');
+  return {
+    authorityId,
+    source,
+    verdict,
+    planStatus,
+    riskStatus,
+    tradeability,
+    capitalFit,
+    affordability,
+    quoteCurrency,
+    gbpVsGbxMode:quoteCurrency === 'GBX' ? 'gbx' : (quoteCurrency === 'GBP' ? 'gbp' : 'fx'),
+    capitalAffordable,
+    tradeabilityActionable,
+    riskFits,
+    actionable,
+    planFieldsPresent,
+    terminalAvoid,
+    structuralWeakness,
+    reasonCode
+  };
+}
+
 function buildReviewSemanticStatus({
   record,
   simplifiedState,
@@ -24557,13 +24747,15 @@ function buildReviewSemanticStatus({
     || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
   const aliveStructure = ['alive','messy'].includes(structureEligibility)
     || ['strong','intact','developing_clean'].includes(structureState);
-  const canonicalEntryPlanAuthority = verdict === 'entry'
-    && terminalAvoid !== true
-    && structuralWeakness !== true
-    && planMathValid
-    && planFieldsPresent
-    && priceabilityState !== 'unpriceable';
-  const effectiveEntryGatePass = entryGatePass || canonicalEntryPlanAuthority;
+  const canonicalPlanAuthority = resolveCanonicalTradePlanAuthority({
+    record,
+    simplifiedState:simplified,
+    globalVerdict:global,
+    displayedPlan:plan,
+    derivedStates:derived,
+    context:'review'
+  });
+  const effectiveEntryGatePass = canonicalPlanAuthority.actionable === true;
   const rrValue = planRealism && Number.isFinite(numericOrNull(planRealism.raw_rr))
     ? Number(numericOrNull(planRealism.raw_rr))
     : (plan.rewardRisk && Number.isFinite(numericOrNull(plan.rewardRisk.rrRatio)) ? Number(numericOrNull(plan.rewardRisk.rrRatio)) : null);
@@ -24620,11 +24812,15 @@ function buildReviewSemanticStatus({
       ? 'Needs confirmation before promotion.'
       : 'No actionable trade yet.';
   }
-  const actionable = verdict === 'entry'
-    && effectiveEntryGatePass;
+  const actionable = canonicalPlanAuthority.actionable === true;
+  const unaffordableCanonicalPlan = planMathValid
+    && planFieldsPresent
+    && canonicalPlanAuthority.riskFits === true
+    && canonicalPlanAuthority.reasonCode === 'capital_not_affordable';
   const draftPlan = planMathValid && verdict === 'watch';
   const pricedButNotReady = planMathValid
     && actionable !== true
+    && unaffordableCanonicalPlan !== true
     && terminalAvoid !== true
     && verdict !== 'avoid';
   const constructivePricedButNotReady = pricedButNotReady
@@ -24642,6 +24838,11 @@ function buildReviewSemanticStatus({
     tradeStatus = {
       line1:'Entry Ready - plan is actionable.',
       line2:'Execute only if the trigger remains valid.'
+    };
+  }else if(unaffordableCanonicalPlan){
+    tradeStatus = {
+      line1:'Setup valid but unaffordable.',
+      line2:'The setup structure is valid, but the position is too expensive for current account limits.'
     };
   }else if(constructivePricedButNotReady){
     tradeStatus = {line1:pricedButNotReadyCopy.line1, line2:pricedButNotReadyCopy.line2};
@@ -24681,12 +24882,14 @@ function buildReviewSemanticStatus({
     planActionable:actionable,
     draftPlan,
     pricedButNotReady:constructivePricedButNotReady,
+    unaffordableCanonicalPlan,
     planMathValid,
     planFieldsPresent,
+    canonicalPlanAuthority,
     rrDisplay,
-    showPlanFields:verdict === 'entry' ? true : (constructivePricedButNotReady ? false : (planMathValid || planFieldsPresent)),
-    showPlanMetrics:verdict === 'entry' ? true : (constructivePricedButNotReady ? false : (actionable || (accepted50MaSupportTest && draftPlan))),
-    showCapital:verdict === 'entry' ? true : actionable,
+    showPlanFields:verdict === 'entry' || unaffordableCanonicalPlan ? true : (constructivePricedButNotReady ? false : (planMathValid || planFieldsPresent)),
+    showPlanMetrics:verdict === 'entry' || unaffordableCanonicalPlan ? true : (constructivePricedButNotReady ? false : (actionable || (accepted50MaSupportTest && draftPlan))),
+    showCapital:verdict === 'entry' || unaffordableCanonicalPlan ? true : actionable,
     entryGatePass:effectiveEntryGatePass
   };
 }
@@ -29345,17 +29548,126 @@ function fallbackPlanProposalForCard(cardLike){
   };
 }
 
-function effectivePlanForRecord(record, options = {}){
-  const allowScannerFallback = options.allowScannerFallback === true;
+function tradePlanCandidateSnapshot(label, fields = {}, extra = {}){
+  const entry = numericOrNull(fields.entry);
+  const stop = numericOrNull(fields.stop);
+  const firstTarget = numericOrNull(fields.firstTarget ?? fields.target);
+  const present = Number.isFinite(entry) || Number.isFinite(stop) || Number.isFinite(firstTarget);
+  const complete = Number.isFinite(entry) && Number.isFinite(stop) && Number.isFinite(firstTarget);
+  return {
+    label:String(label || '').trim().toLowerCase(),
+    present,
+    complete,
+    entry,
+    stop,
+    firstTarget,
+    source:String(extra.source || '').trim().toLowerCase(),
+    capableBeforeFix:extra.capableBeforeFix === true,
+    rejectionReason:String(extra.rejectionReason || '').trim(),
+    affectedSurfaces:Array.isArray(extra.affectedSurfaces) ? extra.affectedSurfaces.slice() : []
+  };
+}
+
+function collectTradePlanAuthorityCandidates(record){
   const item = record && typeof record === 'object' ? record : {};
-  const manualReview = item.review && item.review.manualReview && typeof item.review.manualReview === 'object'
-    ? item.review.manualReview
-    : null;
-  const reviewDraft = item.review && item.review.draft && typeof item.review.draft === 'object'
-    ? item.review.draft
-    : null;
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const manualReview = review.manualReview && typeof review.manualReview === 'object' ? review.manualReview : {};
+  const reviewDraft = review.draft && typeof review.draft === 'object' ? review.draft : {};
+  const sharedPresentation = item.watchlist
+    && item.watchlist.presentation
+    && item.watchlist.presentation.sharedPresentation
+    && typeof item.watchlist.presentation.sharedPresentation === 'object'
+      ? item.watchlist.presentation.sharedPresentation
+      : {};
+  const lifecycle = item.lifecycle && typeof item.lifecycle === 'object' ? item.lifecycle : {};
+  const fallbackPlan = fallbackPlanProposalForCard({
+    ticker:item.ticker,
+    status:resolverSeedVerdictForRecord(item),
+    chartVerdict:resolverSeedVerdictForRecord(item),
+    riskStatus:(item.plan && item.plan.riskStatus) || (item.scan && item.scan.riskStatus) || 'plan_missing',
+    score:Number.isFinite(numericOrNull(item.scan && item.scan.score)) ? Number(item.scan.score) : 0,
+    summary:(item.scan && item.scan.summary) || ((item.scan && item.scan.reasons && item.scan.reasons[0]) || ''),
+    checks:cloneData((item.scan && item.scan.flags && item.scan.flags.checks) || {}, {}),
+    marketData:cloneData(item.marketData || {}, {})
+  });
+  const canonical = tradePlanCandidateSnapshot('canonical_plan', {
+    entry:item.plan && item.plan.entry,
+    stop:item.plan && item.plan.stop,
+    firstTarget:item.plan && item.plan.firstTarget
+  }, {
+    source:item.plan && item.plan.source || 'record.plan',
+    rejectionReason:item.plan && hasCanonicalTradePlanStamp(item.plan)
+      ? ''
+      : 'Stored record.plan is unstamped or downgraded and cannot act as canonical authority.',
+    affectedSurfaces:['review','track','paper_trade']
+  });
+  const manual = tradePlanCandidateSnapshot('manual_review', manualReview, {
+    source:'review.manualReview',
+    capableBeforeFix:true,
+    rejectionReason:'Legacy manual review candidate is not canonical until committed into record.plan.',
+    affectedSurfaces:['review','track']
+  });
+  const draft = tradePlanCandidateSnapshot('review_draft', reviewDraft, {
+    source:'review.draft',
+    capableBeforeFix:true,
+    rejectionReason:'Draft plan is local editing state only and cannot drive display authority.',
+    affectedSurfaces:['review']
+  });
+  const scannerEstimate = tradePlanCandidateSnapshot('scanner_estimate', fallbackPlan ? {
+    entry:fallbackPlan.entry,
+    stop:fallbackPlan.stop,
+    firstTarget:fallbackPlan.first_target
+  } : {}, {
+    source:'fallbackPlanProposalForCard',
+    capableBeforeFix:true,
+    rejectionReason:'Scanner estimate remains diagnostic until committed into record.plan by an explicit mutation path.',
+    affectedSurfaces:['scan','review','track']
+  });
+  const lifecycleCandidate = tradePlanCandidateSnapshot('tracked_lifecycle', {
+    entry:item.plan && item.plan.entry,
+    stop:item.plan && item.plan.stop,
+    firstTarget:item.plan && item.plan.firstTarget
+  }, {
+    source:`lifecycle:${String(lifecycle.stage || '').trim().toLowerCase() || 'none'}`,
+    capableBeforeFix:true,
+    rejectionReason:'Lifecycle may preserve labels/history but cannot create plan authority independently of record.plan.',
+    affectedSurfaces:['track','review']
+  });
+  const presentationCandidate = tradePlanCandidateSnapshot('presentation_cache', {
+    entry:sharedPresentation.entry,
+    stop:sharedPresentation.stop,
+    firstTarget:sharedPresentation.firstTarget
+  }, {
+    source:'watchlist.presentation.sharedPresentation',
+    capableBeforeFix:true,
+    rejectionReason:'Persisted presentation is cache-only and may not contribute plan values.',
+    affectedSurfaces:['track','review']
+  });
+  return {
+    canonical,
+    rejected:[
+      manual,
+      draft,
+      scannerEstimate,
+      lifecycleCandidate,
+      presentationCandidate
+    ]
+  };
+}
+
+function effectivePlanForRecord(record, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const stampedCanonicalPlan = typeof hasCanonicalTradePlanStamp === 'function'
+    ? hasCanonicalTradePlanStamp(item.plan)
+    : (
+      item.plan
+      && String(item.plan.authorityVersion || '').trim() === 'trade_plan_v1'
+      && !!String(item.plan.authoritySource || '').trim()
+      && !!String(item.plan.writtenBy || '').trim()
+      && !!String(item.plan.writtenAt || '').trim()
+    );
   const hasCanonicalPlan = [item.plan.entry, item.plan.stop, item.plan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
-  if(hasCanonicalPlan){
+  if(hasCanonicalPlan && stampedCanonicalPlan){
     return {
       entry:Number.isFinite(item.plan.entry) ? String(Number(item.plan.entry.toFixed(2))) : '',
       stop:Number.isFinite(item.plan.stop) ? String(Number(item.plan.stop.toFixed(2))) : '',
@@ -29363,69 +29675,13 @@ function effectivePlanForRecord(record, options = {}){
       source:String(item.plan.source || 'manual')
     };
   }
-  const hasCompleteManualPlan = manualReview && [manualReview.entry, manualReview.stop, manualReview.target].every(value => Number.isFinite(numericOrNull(value)));
-  if(hasCompleteManualPlan){
-    return {
-      entry:String(manualReview.entry || ''),
-      stop:String(manualReview.stop || ''),
-      firstTarget:String(manualReview.target || ''),
-      source:'manual'
-    };
-  }
-  const hasCompleteDraftPlan = reviewDraft && [reviewDraft.entry, reviewDraft.stop, reviewDraft.target].every(value => Number.isFinite(numericOrNull(value)));
-  if(hasCompleteDraftPlan){
-    return {
-      entry:String(reviewDraft.entry || ''),
-      stop:String(reviewDraft.stop || ''),
-      firstTarget:String(reviewDraft.target || ''),
-      source:'draft'
-    };
-  }
   const hasPartialCanonicalPlan = [item.plan.entry, item.plan.stop, item.plan.firstTarget].some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
-  if(hasPartialCanonicalPlan){
+  if(hasPartialCanonicalPlan && stampedCanonicalPlan){
     return {
       entry:String(item.plan.entry ?? ''),
       stop:String(item.plan.stop ?? ''),
       firstTarget:String(item.plan.firstTarget ?? ''),
       source:String(item.plan.source || 'manual')
-    };
-  }
-  const hasPartialManualPlan = manualReview && [manualReview.entry, manualReview.stop, manualReview.target].some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
-  if(hasPartialManualPlan){
-    return {
-      entry:String(manualReview.entry ?? ''),
-      stop:String(manualReview.stop ?? ''),
-      firstTarget:String(manualReview.target ?? ''),
-      source:'manual'
-    };
-  }
-  const hasPartialDraftPlan = reviewDraft && [reviewDraft.entry, reviewDraft.stop, reviewDraft.target].some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
-  if(hasPartialDraftPlan){
-    return {
-      entry:String(reviewDraft.entry ?? ''),
-      stop:String(reviewDraft.stop ?? ''),
-      firstTarget:String(reviewDraft.target ?? ''),
-      source:'draft'
-    };
-  }
-  const fallbackPlan = allowScannerFallback
-    ? fallbackPlanProposalForCard({
-      ticker:item.ticker,
-      status:resolverSeedVerdictForRecord(item),
-      chartVerdict:resolverSeedVerdictForRecord(item),
-      riskStatus:(item.plan && item.plan.riskStatus) || (item.scan && item.scan.riskStatus) || 'plan_missing',
-      score:Number.isFinite(numericOrNull(item.scan && item.scan.score)) ? Number(item.scan.score) : 0,
-      summary:(item.scan && item.scan.summary) || ((item.scan && item.scan.reasons && item.scan.reasons[0]) || ''),
-      checks:cloneData((item.scan && item.scan.flags && item.scan.flags.checks) || {}, {}),
-      marketData:cloneData(item.marketData || {}, {})
-    })
-    : null;
-  if(fallbackPlan){
-    return {
-      entry:String(fallbackPlan.entry || ''),
-      stop:String(fallbackPlan.stop || ''),
-      firstTarget:String(fallbackPlan.first_target || ''),
-      source:'scanner_estimate'
     };
   }
   return {
@@ -34491,23 +34747,15 @@ function currentPaperTradeContextForTicker(ticker){
     primaryState:primaryStateForEligibility,
     hardBlocker:hardBlockerForEligibility
   });
-  const authoritativeProjectedEligibility = projectedEntryAuthority && planMathLooksValid
-    ? {
-      eligible:true,
-      reasons:[],
-      preview:{
-        entry:numericOrNull(displayedPlan.entry),
-        stop:numericOrNull(displayedPlan.stop),
-        target:numericOrNull(displayedPlan.target || displayedPlan.firstTarget),
-        positionSize:Number.isFinite(numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size))
-          ? Math.max(1, Math.floor(Number(numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.position_size))))
-          : null,
-        maxLoss:numericOrNull(displayedPlan.riskFit && displayedPlan.riskFit.max_loss),
-        rrRatio:numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio)
-      }
-    }
-    : eligibility;
-  const mergedEligibility = applyPaperTradeEligibilityDebugOverride(authoritativeProjectedEligibility, {
+  const planAuthority = resolveCanonicalTradePlanAuthority({
+    record,
+    simplifiedState:simplifiedStateForReview,
+    globalVerdict:authoritativeGlobalVerdict,
+    displayedPlan,
+    derivedStates,
+    context:'paper_trade_context'
+  });
+  const mergedEligibility = applyPaperTradeEligibilityDebugOverride(eligibility, {
     ticker:symbol,
     marketStatus:record.meta.marketStatus || state.marketStatus || ''
   });
@@ -34529,8 +34777,10 @@ function currentPaperTradeContextForTicker(ticker){
     riskStatus:displayedPlan.riskFit && displayedPlan.riskFit.risk_status,
     tradeability:displayedPlan.tradeability,
     capitalFit:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit,
+    affordability:displayedPlan.affordability,
     primaryState:primaryStateForEligibility,
     blockerReason:hardBlockerForEligibility,
+    planAuthority,
     reasons:Array.isArray(mergedEligibility.reasons) ? mergedEligibility.reasons.slice() : []
   };
   return {
@@ -37192,6 +37442,14 @@ function renderReviewWorkspace(options = {}){
     primaryState:safeResolvedContract.primaryState,
     hardBlocker:safeResolvedContract.blockerReason
   });
+  const paperTradePlanAuthority = resolveCanonicalTradePlanAuthority({
+    record,
+    simplifiedState:simplifiedState,
+    globalVerdict:globalVerdict,
+    displayedPlan,
+    derivedStates,
+    context:'review_render_paper_trade'
+  });
   const mergedPaperTradeEligibilityState = applyPaperTradeEligibilityDebugOverride(paperTradeEligibilityState, {
     ticker:record.ticker,
     marketStatus:record.meta.marketStatus || state.marketStatus || ''
@@ -37220,10 +37478,12 @@ function renderReviewWorkspace(options = {}){
     : (trading212PaperEnabled !== true
     ? trading212PaperAvailabilityMessage
     : (!paperTradeEligible
-    ? (
-      String(reviewFinalVerdictForPaperTrade || '').trim().toLowerCase() !== 'entry'
+      ? (
+      paperTradePlanAuthority.reasonCode === 'capital_not_affordable'
+        ? 'Setup may be valid, but the position is not affordable within account limits'
+        : (String(reviewFinalVerdictForPaperTrade || '').trim().toLowerCase() !== 'entry'
         ? 'Not actionable - setup is not Entry-ready'
-        : 'Trade plan not valid'
+        : 'Trade plan not valid')
     )
     : '')));
   const paperTradeHasRuntimeStatus = !!paperTradeUi.message
@@ -41838,6 +42098,24 @@ function applyGlobalVerdictGates(record, options = {}){
   item.watchlist.debug.explicit_invalidation_reason = structureGate.explicit_invalidation_reason || globalVerdict.explicit_invalidation_reason || '(none)';
   item.watchlist.debug.lifecycle_drop_reason = structureGate.lifecycle_drop_reason || globalVerdict.lifecycle_drop_reason || '(none)';
   item.watchlist.debug.avoid_allowed_by_structure_consistency_guard = globalVerdict.avoid_allowed_by_structure_consistency_guard ? 'true' : 'false';
+  const stampedCanonicalPlan = typeof hasCanonicalTradePlanStamp === 'function'
+    ? hasCanonicalTradePlanStamp(item.plan)
+    : (
+      item.plan
+      && String(item.plan.authorityVersion || '').trim() === 'trade_plan_v1'
+      && !!String(item.plan.authoritySource || '').trim()
+      && !!String(item.plan.writtenBy || '').trim()
+      && !!String(item.plan.writtenAt || '').trim()
+    );
+  const stampedCanonicalPlanComplete = stampedCanonicalPlan
+    && Number.isFinite(numericOrNull(item.plan && item.plan.entry))
+    && Number.isFinite(numericOrNull(item.plan && item.plan.stop))
+    && Number.isFinite(numericOrNull(item.plan && item.plan.firstTarget));
+  const stampedCanonicalPlanUnaffordable = stampedCanonicalPlanComplete && (
+    String(item.plan && item.plan.tradeability || '').trim().toLowerCase() === 'too_expensive'
+    || String(item.plan && item.plan.capitalFit || '').trim().toLowerCase() === 'too_expensive'
+    || String(item.plan && item.plan.affordability || '').trim().toLowerCase() === 'not_affordable'
+  );
   if(item.watchlist && item.watchlist.inWatchlist && !globalVerdict.allow_watchlist){
     if(!structureGate.avoid_allowed_by_structure_gate){
       appendWatchlistDebugEvent(item, {
@@ -41956,13 +42234,16 @@ function applyGlobalVerdictGates(record, options = {}){
         || scannerEstimateSpecificBlock
       );
       const hadPlan = !!(item.plan.entry || item.plan.stop || item.plan.firstTarget);
-      if(hadPlan && !preserveScannerEstimatePlan){
+      if(hadPlan && !preserveScannerEstimatePlan && !stampedCanonicalPlanUnaffordable){
         item.plan.entry = '';
         item.plan.stop = '';
         item.plan.firstTarget = '';
         item.plan.hasValidPlan = false;
         item.plan.riskStatus = 'plan_blocked';
         changed = true;
+      }else if(stampedCanonicalPlanUnaffordable){
+        item.watchlist.debug.planAuthorityPreserved = 'canonical_unaffordable';
+        item.watchlist.debug.planAuthorityPreservedReason = 'Stamped canonical plan remains valid but unaffordable.';
       }else if(scannerEstimateMustDemote){
         if(item.plan.hasValidPlan !== false){
           item.plan.hasValidPlan = false;

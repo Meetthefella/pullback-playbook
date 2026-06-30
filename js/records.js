@@ -185,7 +185,13 @@
         invalidatedState: '',
         firstTargetTooClose: false,
         lastPlannedAt: '',
-        source: ''
+        source: '',
+        authoritySource: '',
+        authorityVersion: '',
+        authorityReason: '',
+        writtenBy: '',
+        writtenAt: '',
+        candidateSource: ''
       },
       setup: {
         rawScore: null,
@@ -365,6 +371,38 @@
 
     const normalized = record && typeof record === 'object' ? record : {};
     const base = createBaseTickerRecord(normalizeTicker(normalized.ticker));
+    const canonicalTradePlanAuthorityVersion = 'trade_plan_v1';
+    const hasCanonicalTradePlanStamp = plan => {
+      const safePlan = plan && typeof plan === 'object' ? plan : {};
+      return String(safePlan.authorityVersion || '').trim() === canonicalTradePlanAuthorityVersion
+        && !!String(safePlan.authoritySource || '').trim()
+        && !!String(safePlan.writtenBy || '').trim()
+        && !!String(safePlan.writtenAt || '').trim();
+    };
+    const clearNonCanonicalPlanFields = plan => {
+      if(!(plan && typeof plan === 'object')) return;
+      plan.hasValidPlan = false;
+      plan.entry = null;
+      plan.stop = null;
+      plan.firstTarget = null;
+      plan.riskPerShare = null;
+      plan.rewardPerShare = null;
+      plan.plannedRR = null;
+      plan.positionSize = null;
+      plan.positionCost = null;
+      plan.positionCostGbp = null;
+      plan.quoteCurrency = '';
+      plan.maxLoss = null;
+      plan.riskStatus = 'plan_missing';
+      plan.capitalFit = 'unknown';
+      plan.tradeability = 'invalid';
+      plan.capitalNote = '';
+      plan.affordability = '';
+      plan.status = 'missing';
+      plan.firstTargetTooClose = false;
+      plan.lastPlannedAt = '';
+      plan.source = '';
+    };
     const reviewObjectIdentityId = value => {
       if(!value || typeof value !== 'object' || typeof WeakMap !== 'function') return '';
       if(!normalizeTickerRecord._reviewObjectIdentityRegistry){
@@ -546,14 +584,36 @@
     merged.plan.rewardPerShare = numericOrNull(merged.plan.rewardPerShare);
     merged.plan.plannedRR = numericOrNull(merged.plan.plannedRR);
     merged.plan.positionSize = numericOrNull(merged.plan.positionSize);
+    merged.plan.positionCost = numericOrNull(merged.plan.positionCost);
+    merged.plan.positionCostGbp = numericOrNull(merged.plan.positionCostGbp);
+    merged.plan.quoteCurrency = String(merged.plan.quoteCurrency || '');
     merged.plan.maxLoss = numericOrNull(merged.plan.maxLoss);
     merged.plan.firstTargetTooClose = !!merged.plan.firstTargetTooClose;
     merged.plan.status = String(merged.plan.status || '');
+    merged.plan.authoritySource = String(merged.plan.authoritySource || '');
+    merged.plan.authorityVersion = String(merged.plan.authorityVersion || '');
+    merged.plan.authorityReason = String(merged.plan.authorityReason || '');
+    merged.plan.writtenBy = String(merged.plan.writtenBy || '');
+    merged.plan.writtenAt = String(merged.plan.writtenAt || '');
+    merged.plan.candidateSource = String(merged.plan.candidateSource || '');
     merged.plan.triggerState = String(merged.plan.triggerState || 'waiting_for_trigger');
     merged.plan.planValidationState = String(merged.plan.planValidationState || '');
     merged.plan.needsReplan = !!merged.plan.needsReplan;
     merged.plan.missedState = String(merged.plan.missedState || '');
     merged.plan.invalidatedState = String(merged.plan.invalidatedState || '');
+    const mergedPlanFieldsPresent = hasAnyPlanFields(merged);
+    if(mergedPlanFieldsPresent && !hasCanonicalTradePlanStamp(merged.plan)){
+      clearNonCanonicalPlanFields(merged.plan);
+      merged.plan.authoritySource = 'rejected_unstamped_plan';
+      merged.plan.authorityVersion = canonicalTradePlanAuthorityVersion;
+      merged.plan.authorityReason = 'legacy_unstamped_plan_downgraded';
+      merged.plan.writtenBy = 'normalizeTickerRecord';
+      merged.plan.writtenAt = new Date().toISOString();
+      merged.plan.candidateSource = String(normalized.plan && normalized.plan.source || '');
+      merged.watchlist = merged.watchlist && typeof merged.watchlist === 'object' ? merged.watchlist : {};
+      merged.watchlist.debug = merged.watchlist.debug && typeof merged.watchlist.debug === 'object' ? merged.watchlist.debug : {};
+      merged.watchlist.debug.planSnapshotMismatch = 'Unstamped persisted plan downgraded before canonical display.';
+    }
     merged.setup.rawScore = numericOrNull(merged.setup.rawScore);
     merged.setup.baseScore = numericOrNull(merged.setup.baseScore);
     merged.setup.score = numericOrNull(merged.setup.score);
