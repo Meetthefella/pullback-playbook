@@ -4040,7 +4040,13 @@ function currentReviewStateHealthSnapshot(record){
     reasonCode:planAuthority.reasonCode,
     fields:{
       tradeStatus:{
-        finalDisplayedValue:planAuthority.actionable ? 'Entry Ready - plan is actionable.' : (planAuthority.reasonCode === 'capital_not_affordable' ? 'Setup valid but unaffordable.' : 'No actionable trade yet.'),
+        finalDisplayedValue:planAuthority.actionable
+          ? 'Entry Ready - plan is actionable.'
+          : (planAuthority.reasonCode === 'capital_not_affordable'
+            ? 'Setup valid but unaffordable.'
+            : (isResolverBlockedEstimatedPlanAuthority(planAuthority)
+              ? 'Estimated plan maths are valid, but setup is not actionable.'
+              : 'No actionable trade yet.')),
         rawSourceValue:simplifiedCanonicalVerdict,
         sourcePath:'buildReviewSemanticStatus -> resolveCanonicalTradePlanAuthority',
         authorityRank:1,
@@ -24474,6 +24480,7 @@ function buildResolvedReviewDisplayModel({
   const semanticDraftPlan = semantic.draftPlan === true;
   const semanticPlanActionable = semantic.planActionable === true;
   const pricedButNotReady = semantic.pricedButNotReady === true;
+  const resolverBlockedEstimatedPlan = semantic.resolverBlockedEstimatedPlan === true;
   const unaffordableCanonicalPlan = semantic.unaffordableCanonicalPlan === true;
   const pricedButNotReadyCopy = typeof reviewPricedButNotReadyCopy === 'function'
     ? reviewPricedButNotReadyCopy()
@@ -24552,6 +24559,9 @@ function buildResolvedReviewDisplayModel({
   const genericDraftPlanSummary = semantic.blocker
     ? `Draft plan exists, but setup is not actionable yet. ${semantic.blocker}`
     : 'Draft plan exists, but setup is not actionable yet.';
+  const resolverBlockedEstimatedPlanSummary = semantic.blocker
+    ? `Estimated plan maths exist, but the resolver still blocks Entry. ${semantic.blocker}`
+    : 'Estimated plan maths exist, but the resolver still blocks Entry.';
   const planSummary = supportTestCopy && !pricedButNotReady
     ? (planUI.showPlan
       ? ((semanticDraftPlan || semanticPlanMathValid)
@@ -24561,9 +24571,11 @@ function buildResolvedReviewDisplayModel({
     : (pricedButNotReady
       ? ''
     : (planUI.showPlan
-      ? (hasValidDraftPlanDisplay
+      ? (resolverBlockedEstimatedPlan
+        ? resolverBlockedEstimatedPlanSummary
+        : (hasValidDraftPlanDisplay
         ? genericDraftPlanSummary
-        : (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.'))
+        : (realism.plan_realism_reason || 'Planner realism will appear after a complete plan is entered.')))
       : (explanatoryReason || diagnosticsMessage || 'No actionable plan yet.')));
   if(typeof console !== 'undefined' && console.info){
     console.info('[REVIEW_PULLBACK_BOUNCE_RECONCILE]', {
@@ -24710,6 +24722,17 @@ function resolveCanonicalTradePlanAuthority({
   };
 }
 
+function isResolverBlockedEstimatedPlanAuthority(authority = {}){
+  const safeAuthority = authority && typeof authority === 'object' ? authority : {};
+  return String(safeAuthority.source || '').trim().toLowerCase() === 'scanner_estimate'
+    && safeAuthority.actionable !== true
+    && safeAuthority.planStatus === 'valid'
+    && safeAuthority.planFieldsPresent === true
+    && safeAuthority.riskFits === true
+    && safeAuthority.tradeabilityActionable === true
+    && safeAuthority.reasonCode === 'verdict_not_entry';
+}
+
 function buildReviewSemanticStatus({
   record,
   simplifiedState,
@@ -24755,6 +24778,18 @@ function buildReviewSemanticStatus({
     derivedStates:derived,
     context:'review'
   });
+  const resolverBlockedEstimatedPlanCheck = typeof isResolverBlockedEstimatedPlanAuthority === 'function'
+    ? isResolverBlockedEstimatedPlanAuthority
+    : (authority => {
+      const safeAuthority = authority && typeof authority === 'object' ? authority : {};
+      return String(safeAuthority.source || '').trim().toLowerCase() === 'scanner_estimate'
+        && safeAuthority.actionable !== true
+        && safeAuthority.planStatus === 'valid'
+        && safeAuthority.planFieldsPresent === true
+        && safeAuthority.riskFits === true
+        && safeAuthority.tradeabilityActionable === true
+        && safeAuthority.reasonCode === 'verdict_not_entry';
+    });
   const effectiveEntryGatePass = canonicalPlanAuthority.actionable === true;
   const rrValue = planRealism && Number.isFinite(numericOrNull(planRealism.raw_rr))
     ? Number(numericOrNull(planRealism.raw_rr))
@@ -24813,6 +24848,7 @@ function buildReviewSemanticStatus({
       : 'No actionable trade yet.';
   }
   const actionable = canonicalPlanAuthority.actionable === true;
+  const resolverBlockedEstimatedPlan = resolverBlockedEstimatedPlanCheck(canonicalPlanAuthority);
   const unaffordableCanonicalPlan = planMathValid
     && planFieldsPresent
     && canonicalPlanAuthority.riskFits === true
@@ -24838,6 +24874,11 @@ function buildReviewSemanticStatus({
     tradeStatus = {
       line1:'Entry Ready - plan is actionable.',
       line2:'Execute only if the trigger remains valid.'
+    };
+  }else if(resolverBlockedEstimatedPlan){
+    tradeStatus = {
+      line1:'Estimated plan maths are valid, but setup is not actionable.',
+      line2:blocker || 'The scanner estimate is stored for reference only until price returns to a valid entry zone.'
     };
   }else if(unaffordableCanonicalPlan){
     tradeStatus = {
@@ -24882,6 +24923,7 @@ function buildReviewSemanticStatus({
     planActionable:actionable,
     draftPlan,
     pricedButNotReady:constructivePricedButNotReady,
+    resolverBlockedEstimatedPlan,
     unaffordableCanonicalPlan,
     planMathValid,
     planFieldsPresent,
@@ -37481,9 +37523,11 @@ function renderReviewWorkspace(options = {}){
       ? (
       paperTradePlanAuthority.reasonCode === 'capital_not_affordable'
         ? 'Setup may be valid, but the position is not affordable within account limits'
+        : (isResolverBlockedEstimatedPlanAuthority(paperTradePlanAuthority)
+          ? 'Estimated plan maths exist, but the resolver still blocks Entry for this setup'
         : (String(reviewFinalVerdictForPaperTrade || '').trim().toLowerCase() !== 'entry'
         ? 'Not actionable - setup is not Entry-ready'
-        : 'Trade plan not valid')
+        : 'Trade plan not valid'))
     )
     : '')));
   const paperTradeHasRuntimeStatus = !!paperTradeUi.message
@@ -42174,6 +42218,49 @@ function applyGlobalVerdictGates(record, options = {}){
       item.watchlist.debug.scanner_estimate_authority_reason_code = scannerEstimateAuthority.reasonCode || '';
       item.watchlist.debug.scanner_estimate_authority_reason = scannerEstimateAuthority.reason || '';
     }
+    const refreshStoredScannerEstimateMath = planState => {
+      const safePlanState = planState && typeof planState === 'object' ? planState : null;
+      if(!safePlanState) return;
+      const nextEntry = numericOrNull(safePlanState.entry);
+      const nextStop = numericOrNull(safePlanState.stop);
+      const nextFirstTarget = numericOrNull(safePlanState.target ?? safePlanState.firstTarget);
+      const nextPlannedRr = numericOrNull(safePlanState.rewardRisk && safePlanState.rewardRisk.rrRatio);
+      const nextRiskPerShare = numericOrNull(safePlanState.riskFit && safePlanState.riskFit.risk_per_share);
+      const nextPositionSize = numericOrNull(safePlanState.riskFit && safePlanState.riskFit.position_size);
+      const nextPositionCost = numericOrNull(safePlanState.capitalFit && safePlanState.capitalFit.position_cost);
+      const nextPositionCostGbp = numericOrNull(safePlanState.capitalFit && safePlanState.capitalFit.position_cost_gbp);
+      const nextMaxLoss = numericOrNull(safePlanState.riskFit && safePlanState.riskFit.max_loss);
+      const nextQuoteCurrency = String(safePlanState.capitalFit && safePlanState.capitalFit.quote_currency || '');
+      const nextCapitalFit = String(safePlanState.capitalFit && safePlanState.capitalFit.capital_fit || 'unknown');
+      const nextCapitalNote = String(safePlanState.capitalFit && safePlanState.capitalFit.capital_note || '');
+      const nextAffordability = String(safePlanState.affordability || '');
+      const unchanged = numericOrNull(item.plan.entry) === nextEntry
+        && numericOrNull(item.plan.stop) === nextStop
+        && numericOrNull(item.plan.firstTarget) === nextFirstTarget
+        && numericOrNull(item.plan.plannedRR) === nextPlannedRr
+        && numericOrNull(item.plan.riskPerShare) === nextRiskPerShare
+        && numericOrNull(item.plan.positionSize) === nextPositionSize
+        && numericOrNull(item.plan.positionCost) === nextPositionCost
+        && numericOrNull(item.plan.positionCostGbp) === nextPositionCostGbp
+        && numericOrNull(item.plan.maxLoss) === nextMaxLoss
+        && String(item.plan.quoteCurrency || '') === nextQuoteCurrency
+        && String(item.plan.capitalFit || '') === nextCapitalFit
+        && String(item.plan.capitalNote || '') === nextCapitalNote
+        && String(item.plan.affordability || '') === nextAffordability;
+      if(unchanged) return;
+      applyPlanCandidateToRecord(item, {
+        entry:nextEntry,
+        stop:nextStop,
+        firstTarget:nextFirstTarget
+      }, {
+        source:'scanner_estimate',
+        reason:'scanner_estimate_reference_refresh',
+        writtenBy:'applyGlobalVerdictGates',
+        updatedAt:new Date().toISOString(),
+        lastPlannedAt:String(item.scan && item.scan.updatedAt || item.plan && item.plan.lastPlannedAt || new Date().toISOString())
+      });
+      changed = true;
+    };
     if(scannerEstimateAuthority && scannerEstimateAuthority.mode === 'recover' && scannerEstimateDisplayedPlan){
       if(item.plan.hasValidPlan !== true){
         item.plan.hasValidPlan = true;
@@ -42191,6 +42278,7 @@ function applyGlobalVerdictGates(record, options = {}){
         item.plan.riskStatus = String(scannerEstimateDisplayedPlan.riskFit && scannerEstimateDisplayedPlan.riskFit.risk_status || '');
         changed = true;
       }
+      refreshStoredScannerEstimateMath(scannerEstimateDisplayedPlan);
       if(scannerEstimateAuthority.stalePlanBlockers && scannerEstimateAuthority.stalePlanBlockers.planValidationState && item.plan.planValidationState){
         item.plan.planValidationState = '';
         changed = true;
@@ -42283,6 +42371,7 @@ function applyGlobalVerdictGates(record, options = {}){
           item.plan.riskStatus = softBlockRiskStatus;
           changed = true;
         }
+        refreshStoredScannerEstimateMath(scannerEstimateDisplayedPlan);
       }
       if(scannerEstimatePlan && softReadinessOnlyDemotion && !scannerEstimateSpecificBlock){
         if(item.plan.blockedReasonCode === 'resolver_block'){

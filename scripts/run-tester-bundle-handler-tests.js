@@ -205,6 +205,72 @@ async function run(){
   assert(storedReview.summary.canonicalVerdict === 'Avoid', 'Review bundle must extract summary from stateHealth.');
   assert(Array.isArray(storedReview.contradictions) && storedReview.contradictions.length >= 1, 'Review contradictions must be derived.');
 
+  const alignedWatchResponse = await testerBundle.handler(eventFor('POST', JSON.stringify({
+    category:'Other',
+    snapshot:{
+      ticker:'TROW',
+      panelTitle:'Review diagnostics',
+      stateHealth:{
+        canonicalVerdict:'watch',
+        visualBucket:'monitor',
+        tone:'monitor',
+        setupLocationState:'off_level',
+        planStatus:'valid',
+        planAuthority:{
+          source:'scanner_estimate',
+          planStatus:'valid',
+          actionable:false,
+          reasonCode:'verdict_not_entry'
+        },
+        planTrace:{
+          fields:{
+            paperTradeEligibility:{
+              finalDisplayedValue:false
+            }
+          }
+        }
+      }
+    }
+  }), {'x-pullback-tester-id':testerId}));
+  const alignedWatchBody = parseBody(alignedWatchResponse);
+  const storedAlignedWatch = bundleStore.get(alignedWatchBody.fullKey);
+  assert(!storedAlignedWatch.contradictions.some(item => item.type === 'verdict_visual_bucket_mismatch'), 'Watch/monitor alignment must not be reported as a mismatch.');
+  assert(storedAlignedWatch.contradictions.some(item => item.type === 'resolver_blocked_estimated_plan'), 'Resolver-blocked estimated plan diagnostic must be derived for TROW-like bundles.');
+
+  const olderAlignedWatchResponse = await testerBundle.handler(eventFor('POST', JSON.stringify({
+    category:'Other',
+    snapshot:{
+      ticker:'TROW',
+      panelTitle:'Review diagnostics',
+      stateHealth:{
+        canonicalVerdict:'watch',
+        visualBucket:'monitor',
+        tone:'monitor',
+        setupLocationState:'near_20ma',
+        planStatus:'valid',
+        primaryBlockerReason:'Valid scanner maths exist, but the resolver still blocks Entry until confirmation improves.',
+        planAuthority:{
+          source:'scanner_estimate',
+          planStatus:'valid',
+          actionable:false,
+          reasonCode:'verdict_not_entry'
+        }
+      },
+      resolverTrace:{
+        plan:{
+          source:'scanner_estimate',
+          status:'valid',
+          planValidationState:'needs_replan',
+          blockedReasonCode:'resolver_block',
+          blockedReason:'Valid scanner maths exist, but the resolver still blocks Entry until confirmation improves.'
+        }
+      }
+    }
+  }), {'x-pullback-tester-id':testerId}));
+  const olderAlignedWatchBody = parseBody(olderAlignedWatchResponse);
+  const storedOlderAlignedWatch = bundleStore.get(olderAlignedWatchBody.fullKey);
+  assert(storedOlderAlignedWatch.contradictions.some(item => item.type === 'resolver_blocked_estimated_plan'), 'Older bundles without explicit paper-trade trace must still derive resolver-blocked estimated-plan diagnostics.');
+
   const trackResponse = await testerBundle.handler(eventFor('POST', JSON.stringify({
     category:'Other',
     snapshot:{

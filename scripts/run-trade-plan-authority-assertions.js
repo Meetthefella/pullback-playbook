@@ -138,6 +138,7 @@ vm.runInContext(extractFunction('collectTradePlanAuthorityCandidates'), sandbox,
 vm.runInContext(extractFunction('effectivePlanForRecord'), sandbox, {filename:appPath});
 vm.runInContext(extractFunction('applyPlanCandidateToRecord'), sandbox, {filename:appPath});
 vm.runInContext(extractFunction('resolveCanonicalTradePlanAuthority'), sandbox, {filename:appPath});
+vm.runInContext(extractFunction('isResolverBlockedEstimatedPlanAuthority'), sandbox, {filename:appPath});
 vm.runInContext(extractFunction('buildReviewSemanticStatus'), sandbox, {filename:appPath});
 
 sandbox.evaluateRewardRisk = function(entry, stop, firstTarget){
@@ -263,6 +264,36 @@ function makeContext(overrides = {}){
 
 {
   const context = makeContext({
+    record:{ticker:'TROW', marketData:{currency:'USD'}, plan:{source:'scanner_estimate'}},
+    simplifiedState:{
+      ...makeContext().simplifiedState,
+      canonicalVerdict:'watch',
+      setupLocationState:'off_level',
+      bounceState:'attempt',
+      entryGatePass:false,
+      nearEntryGatePass:false,
+      mainBlocker:'Trend is strong but extended beyond a safe entry zone. No low-risk entry is available yet.'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      entry_gate_pass:false,
+      near_entry_gate_pass:false,
+      main_blocker:'Trend is strong but extended beyond a safe entry zone. No low-risk entry is available yet.'
+    },
+    displayedPlan:makeDisplayedPlan({
+      source:'scanner_estimate',
+      planSourceUsedForRisk:'scanner_estimate'
+    })
+  });
+  const authority = sandbox.resolveCanonicalTradePlanAuthority({...context, context:'test'});
+  const semantic = sandbox.buildReviewSemanticStatus(context);
+  assert(sandbox.isResolverBlockedEstimatedPlanAuthority(authority) === true, 'Resolver-blocked scanner estimate must be identified explicitly.');
+  assert(authority.actionable === false, 'Resolver-blocked scanner estimate must not be actionable.');
+  assert(/Estimated plan maths are valid, but setup is not actionable\./i.test(String(semantic.tradeStatus.line1 || '')), 'Review copy must label resolver-blocked scanner maths as estimated and non-actionable.');
+}
+
+{
+  const context = makeContext({
     displayedPlan:makeDisplayedPlan({
       tradeability:'tradable',
       capitalFit:{capital_fit:'acceptable', capital_note:'Capital check: ok', quote_currency:'GBX'}
@@ -352,6 +383,8 @@ function makeContext(overrides = {}){
   assert(canonicalTargetWrites === 1, `Expected exactly one record.plan.firstTarget writer, found ${canonicalTargetWrites}.`);
   assert(canonicalPositionSizeWrites === 1, `Expected exactly one record.plan.positionSize writer, found ${canonicalPositionSizeWrites}.`);
   assert(canonicalCapitalFitWrites === 1, `Expected exactly one record.plan.capitalFit writer, found ${canonicalCapitalFitWrites}.`);
+  assert(!/function syncStoredScannerEstimateMath/.test(source), 'Scanner-estimate refresh must not directly mutate canonical plan maths fields.');
+  assert(/applyPlanCandidateToRecord\(item, \{[\s\S]*source:'scanner_estimate'[\s\S]*reason:'scanner_estimate_reference_refresh'/.test(source), 'Scanner-estimate refresh must route through applyPlanCandidateToRecord with an explicit non-review refresh reason.');
 }
 
 {

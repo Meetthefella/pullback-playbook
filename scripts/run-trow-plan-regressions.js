@@ -75,6 +75,54 @@ function loadAppHarness(rootDir){
     escapeHtml(value){ return String(value || ''); },
     activeReviewTicker(){ return ''; },
     globalVerdictLabel(value){ return String(value || ''); },
+    currentRiskSettings(){
+      return {account_size:4000, risk_percent:1, max_loss_override:40, whole_shares_only:true};
+    },
+    evaluateRewardRisk(entry, stop, firstTarget){
+      const riskPerShare = Number(entry) - Number(stop);
+      const rewardPerShare = Number(firstTarget) - Number(entry);
+      return {
+        valid:Number.isFinite(riskPerShare) && Number.isFinite(rewardPerShare) && riskPerShare > 0 && rewardPerShare > 0,
+        riskPerShare,
+        rewardPerShare,
+        rrRatio:rewardPerShare / riskPerShare
+      };
+    },
+    evaluateRiskFit({entry, stop}){
+      const riskPerShare = Number(entry) - Number(stop);
+      return riskPerShare > 0
+        ? {position_size:Math.floor(40 / riskPerShare), max_loss:40, risk_status:'fits_risk'}
+        : {position_size:0, max_loss:40, risk_status:'invalid_plan'};
+    },
+    normalizeQuoteCurrency(value){ return String(value || '').trim().toUpperCase(); },
+    evaluateCapitalFit({entry, position_size, quote_currency}){
+      const positionCost = Number(entry) * Number(position_size || 0);
+      return {
+        capital_fit:positionCost <= 4000 ? 'ideal' : 'too_heavy',
+        capital_note:'',
+        position_cost:positionCost,
+        position_cost_gbp:positionCost,
+        quote_currency:String(quote_currency || 'USD')
+      };
+    },
+    currentAccountSizeGbp(){ return 4000; },
+    normalizeExitMode(value){ return value || 'fixed_target'; },
+    currentMaxLoss(){ return 40; },
+    deriveTradeability(status, riskStatus, capitalFit){
+      return status === 'valid' && riskStatus === 'fits_risk' && !['too_heavy','too_expensive'].includes(String(capitalFit || '').toLowerCase()) ? 'tradable' : 'invalid';
+    },
+    deriveAffordability(){ return 'affordable'; },
+    deriveExecutionPlanState(){
+      return {
+        targetReviewState:'not_near_target',
+        targetActionRecommendation:'',
+        targetAlertLevel:null
+      };
+    },
+    resolvePlanSource(_record, _candidate, requestedSource){
+      return String(requestedSource || '');
+    },
+    applyLifecycleStageFromPlan(){},
     watchlistRefreshStructureGate(){
       return {
         refresh_demote_reason:'Structurally alive; keep on monitor.',
@@ -145,6 +193,9 @@ function loadAppHarness(rootDir){
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   [
+    'canonicalTradePlanAuthorityVersion',
+    'stampCanonicalTradePlan',
+    'applyPlanCandidateToRecord',
     'scannerEstimateAuthorityReasonPriority',
     'scannerEstimateAuthorityReasonFromText',
     'resolveScannerEstimateStructuredAuthorityCode',
@@ -212,10 +263,15 @@ function run(){
   assert(trowLikeRecord.plan.status === 'valid', `Expected scanner_estimate plan to remain valid, got ${trowLikeRecord.plan.status}.`);
   assert(trowLikeRecord.plan.tradeability === 'tradable', `Expected tradeability to remain tradable, got ${trowLikeRecord.plan.tradeability}.`);
   assert(trowLikeRecord.plan.riskStatus === 'fits_risk', `Expected riskStatus to remain fits_risk, got ${trowLikeRecord.plan.riskStatus}.`);
+  assert(trowLikeRecord.plan.capitalFit === 'ideal', `Expected refreshed capitalFit to come from canonical writer, got ${trowLikeRecord.plan.capitalFit}.`);
+  assert(trowLikeRecord.plan.capitalNote === '', `Expected refreshed capital note to match derived canonical plan state, got ${trowLikeRecord.plan.capitalNote}.`);
   assert(trowLikeRecord.plan.planValidationState === '', `Expected planValidationState to stay clear, got ${trowLikeRecord.plan.planValidationState}.`);
   assert(trowLikeRecord.plan.triggerState === '', `Expected stale triggerState to clear, got ${trowLikeRecord.plan.triggerState}.`);
   assert(trowLikeRecord.plan.missedState === '', `Expected stale missedState to clear, got ${trowLikeRecord.plan.missedState}.`);
   assert(trowLikeRecord.plan.blockedReason === '', `Expected blockedReason to stay clear, got ${trowLikeRecord.plan.blockedReason}.`);
+  assert(trowLikeRecord.plan.authorityReason === 'scanner_estimate_reference_refresh', `Expected refreshed scanner-estimate plan to keep explicit non-review authorityReason, got ${trowLikeRecord.plan.authorityReason}.`);
+  assert(trowLikeRecord.plan.writtenBy === 'applyGlobalVerdictGates', `Expected refreshed scanner-estimate plan to keep stamped writtenBy, got ${trowLikeRecord.plan.writtenBy}.`);
+  assert(trowLikeRecord.plan.candidateSource === 'scanner_estimate', `Expected refreshed scanner-estimate plan to keep stamped candidateSource, got ${trowLikeRecord.plan.candidateSource}.`);
   assert(!trowLikeRecord.plan.recoverySource, 'Recovery must not persist transient recoverySource on the plan.');
 
   const blockedSnapshot = sandbox.blockedScannerEstimatePlanSnapshot({

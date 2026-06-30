@@ -114,12 +114,52 @@ function normalizeExtractedSections(snapshot){
   };
 }
 
-function deriveContradictions(summary){
+function deriveContradictions(summary, snapshot){
   const contradictions = [];
-  if(summary.canonicalVerdict && summary.visualBucket && summary.canonicalVerdict.toLowerCase() !== summary.visualBucket.toLowerCase()){
+  const safeSnapshot = asObject(snapshot);
+  const stateHealth = asObject(safeSnapshot.stateHealth);
+  const planAuthority = asObject(stateHealth.planAuthority);
+  const planTraceFields = asObject(asObject(stateHealth.planTrace).fields);
+  const paperTradeEligibility = asObject(planTraceFields.paperTradeEligibility);
+  const resolverTrace = asObject(safeSnapshot.resolverTrace);
+  const resolverPlan = asObject(resolverTrace.plan);
+  const resolverWatchlistDebug = asObject(resolverTrace.watchlistDebug);
+  const canonicalVerdict = stringOrEmpty(summary.canonicalVerdict).trim().toLowerCase();
+  const visualBucket = stringOrEmpty(summary.visualBucket).trim().toLowerCase();
+  const watchMonitorAligned = canonicalVerdict === 'watch' && visualBucket === 'monitor';
+  if(summary.canonicalVerdict && summary.visualBucket && summary.canonicalVerdict.toLowerCase() !== summary.visualBucket.toLowerCase() && !watchMonitorAligned){
     contradictions.push({
       type:'verdict_visual_bucket_mismatch',
       message:`Canonical verdict ${summary.canonicalVerdict} differs from visual bucket ${summary.visualBucket}.`
+    });
+  }
+  const planStatus = stringOrEmpty(planAuthority.planStatus || summary.planStatus || resolverPlan.status).trim().toLowerCase();
+  const planSource = stringOrEmpty(planAuthority.source || resolverPlan.source).trim().toLowerCase();
+  const authorityReasonCode = stringOrEmpty(planAuthority.reasonCode).trim().toLowerCase();
+  const blockedReasonCode = stringOrEmpty(resolverPlan.blockedReasonCode || resolverWatchlistDebug.scanner_estimate_authority_reason_code).trim().toLowerCase();
+  const blockedReason = stringOrEmpty(resolverPlan.blockedReason || resolverWatchlistDebug.scanner_estimate_authority_reason || summary.primaryBlockerReason).trim().toLowerCase();
+  const planValidationState = stringOrEmpty(resolverPlan.planValidationState).trim().toLowerCase();
+  const setupLocationState = stringOrEmpty(summary.setupLocationState).trim().toLowerCase();
+  const explicitPaperTradeDisabled = paperTradeEligibility.finalDisplayedValue === false;
+  const impliedPaperTradeDisabled = paperTradeEligibility.finalDisplayedValue === undefined
+    ? (canonicalVerdict !== 'entry' || planAuthority.actionable === false)
+    : false;
+  const resolverBlockedEstimatedPlan = planSource === 'scanner_estimate'
+    && planStatus === 'valid'
+    && (planAuthority.actionable === false || canonicalVerdict !== 'entry')
+    && (
+      authorityReasonCode === 'verdict_not_entry'
+      || authorityReasonCode === 'resolver_block'
+      || blockedReasonCode === 'resolver_block'
+      || ['needs_replan','pending_validation','stale'].includes(planValidationState)
+      || ['off_level','volatile','extended','none'].includes(setupLocationState)
+      || /extended|off-level|off level|not actionable|unsafe|not priceable|wait for confirmation|no low-risk entry|resolver block/.test(blockedReason)
+    )
+    && (explicitPaperTradeDisabled || impliedPaperTradeDisabled);
+  if(resolverBlockedEstimatedPlan){
+    contradictions.push({
+      type:'resolver_blocked_estimated_plan',
+      message:'Valid scanner-estimated plan maths remain stored, but the resolver blocks Entry for this off-level or extended setup and paper trade stays disabled.'
     });
   }
   if(summary.entryGatePass === true && /avoid/i.test(summary.planStatus || '')){
@@ -218,7 +258,7 @@ function normalizeIssueBundle({ issueId, receivedAt, testerId, body, indexKey, f
         'extractedSections.review.chartVerification'
       ]
     },
-    contradictions:deriveContradictions(summary),
+    contradictions:deriveContradictions(summary, snapshot),
     expectedVsActual:normalizeExpectedVsActual(safeBody),
     stateHealth:cloneJson(snapshot.stateHealth, {}),
     presentation:{

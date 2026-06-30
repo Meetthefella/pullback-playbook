@@ -6311,6 +6311,8 @@ function runPlanSemanticsAssertions(){
     currentRiskSettings:() => ({}),
     currentMaxLoss:() => 40,
     currentAccountSizeGbp:() => 4000,
+    normalizeQuoteCurrency:value => String(value || '').trim().toUpperCase(),
+    normalizeExitMode:value => value || 'fixed_target',
     evaluateRewardRisk:(entry, stop, target) => {
       const values = [entry, stop, target].map(Number);
       if(values.some(value => !Number.isFinite(value))) return {valid:false, rrRatio:null, riskPerShare:null, rewardPerShare:null, rrState:'invalid'};
@@ -6325,6 +6327,13 @@ function runPlanSemanticsAssertions(){
     evaluateCapitalFit:() => ({capital_fit:'acceptable', capital_ok:true, position_cost:800, position_cost_gbp:800}),
     deriveTradeability:(status, riskStatus) => status === 'valid' && riskStatus === 'fits_risk' ? 'tradable' : 'invalid',
     deriveAffordability:() => 'affordable',
+    deriveExecutionPlanState:() => ({
+      targetReviewState:'not_near_target',
+      targetActionRecommendation:'',
+      targetAlertLevel:null
+    }),
+    resolvePlanSource:(_record, _candidate, requestedSource) => String(requestedSource || ''),
+    applyLifecycleStageFromPlan(){},
     scanTypeForEvaluation:value => String(value || '20MA'),
     analysisDerivedStatesFromRecord:() => ({structureState:'intact', trendState:'uptrend', bounceState:'none', pullbackZone:'near_50ma', stabilisationState:'none', volumeState:'neutral'}),
     resolveGlobalVerdict:() => ({allow_plan:false, allow_watchlist:true, final_verdict:'watch', reason:'Wait', downgrade_reason:'Wait'}),
@@ -6415,6 +6424,9 @@ function runPlanSemanticsAssertions(){
     'hasAnyPlanFields',
     'effectivePlanForRecord',
     'planSourceForDiagnostics',
+    'canonicalTradePlanAuthorityVersion',
+    'stampCanonicalTradePlan',
+    'applyPlanCandidateToRecord',
     'scannerEstimateAuthorityReasonPriority',
     'scannerEstimateAuthorityReasonFromText',
     'resolveScannerEstimateStructuredAuthorityCode',
