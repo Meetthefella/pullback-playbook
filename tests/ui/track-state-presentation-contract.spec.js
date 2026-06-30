@@ -1,6 +1,7 @@
 const {test, expect} = require('@playwright/test');
 const path = require('path');
 const {openTrackTab, waitForUiTransitionSettle} = require('./helpers/app-driver');
+const {extractAppTickerState} = require('./helpers/app-state');
 
 async function bootApp(page){
   const appUrl = `file:///${path.resolve(__dirname, '..', '..', 'index.html').replace(/\\/g, '/')}`;
@@ -523,4 +524,109 @@ test('persisted debug currentState Entry cannot override live canonical Watch', 
   });
   expect(entryPanelText).not.toContain('Status: Entry Ready');
   expect(entryPanelText).not.toContain('This setup is Entry because');
+});
+
+test('speculative prepared Track render state does not change non-render cache resolution', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+
+  const result = await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    uiState.watchlistRenderSignature = 'committed-render-signature';
+    uiState.watchlistPreparedModelCache = {
+      mode:'full',
+      showExpired:false,
+      dirtyEpoch:Number(uiState.watchlistDirtyEpoch || 0),
+      renderSignature:'speculative-render-signature',
+      records:[record]
+    };
+    uiState.watchlistPresentationStateCache = {
+      renderSignature:'committed-render-signature',
+      byKey:new Map(),
+      hits:0,
+      misses:0
+    };
+    const staleKey = buildWatchlistSimplifiedStateCacheKey(record, {
+      surface:'track',
+      source:'renderWatchlistCardElement',
+      reason:'renderWatchlistCardElement'
+    });
+    uiState.watchlistPresentationStateCache.byKey.set(staleKey, {
+      canonicalVerdict:'near_entry',
+      visualBucket:'near_entry',
+      tone:'near_entry',
+      badgeLabel:'Near Entry',
+      actionLabel:'Wait for stronger confirmation before considering an entry.',
+      mainBlocker:'STALE TRACK CACHE SHOULD NOT WIN'
+    });
+    const resolved = resolveSimplifiedStateForWatchlistPresentation(record, {
+      surface:'track',
+      source:'renderWatchlistCardElement',
+      reason:'renderWatchlistCardElement'
+    });
+    return {
+      currentRenderSignature:uiState.watchlistPresentationStateCache.renderSignature,
+      canonicalVerdict:String(resolved && resolved.canonicalVerdict || ''),
+      mainBlocker:String(resolved && resolved.mainBlocker || '')
+    };
+  });
+
+  expect(result.currentRenderSignature).toBe('committed-render-signature');
+  expect(result.canonicalVerdict).toBe('near_entry');
+  expect(result.mainBlocker).toContain('STALE TRACK CACHE SHOULD NOT WIN');
+});
+
+test('rendered Track card authority overrides stale committed cache during a new render pass', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    uiState.watchlistRenderSignature = 'stale-render-signature';
+    uiState.watchlistPreparedModelCache = {
+      mode:'full',
+      showExpired:false,
+      dirtyEpoch:Number(uiState.watchlistDirtyEpoch || 0),
+      renderSignature:'fresh-render-signature',
+      records:[record]
+    };
+    uiState.watchlistPresentationStateCache = {
+      renderSignature:'stale-render-signature',
+      byKey:new Map(),
+      hits:0,
+      misses:0
+    };
+    const staleKey = buildWatchlistSimplifiedStateCacheKey(record, {
+      surface:'track',
+      source:'renderWatchlistCardElement',
+      reason:'renderWatchlistCardElement'
+    });
+    uiState.watchlistPresentationStateCache.byKey.set(staleKey, {
+      canonicalVerdict:'near_entry',
+      visualBucket:'near_entry',
+      tone:'near_entry',
+      badgeLabel:'Near Entry',
+      actionLabel:'Wait for stronger confirmation before considering an entry.',
+      mainBlocker:'STALE TRACK CACHE SHOULD NOT WIN'
+    });
+    renderWatchlist({
+      source:'track_state_contract_test',
+      allowCachedReturn:false
+    });
+  });
+
+  await waitForUiTransitionSettle(page);
+
+  const state = await extractAppTickerState(page, 'WATC');
+  expect(state.normalized.trackRenderedCanonicalVerdict).toBe('watch');
+  expect(state.normalized.trackRenderedVisualBucket).toBe('watch');
+  expect(state.normalized.trackDiagnosticCanonicalVerdict).toBe('watch');
+  expect(state.authority.trackPresentation && state.authority.trackPresentation.canonicalVerdict).toBe('watch');
+  expect(state.authority.trackPresentation && state.authority.trackPresentation.badgeLabel).toBe('Watch');
+  expect(state.visibleCopy.track.badge).toBe('Watch');
+  expect(state.visibleCopy.track.entryPanel && state.visibleCopy.track.entryPanel.status).toContain('Watch');
+  expect(state.visibleCopy.track.cardText).not.toContain('STALE TRACK CACHE SHOULD NOT WIN');
 });

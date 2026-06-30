@@ -8262,7 +8262,9 @@ function resolveSimplifiedStateForWatchlistPresentation(record, options = {}){
   }
 
   const currentRenderSignature = String(
-    (uiState && uiState.watchlistRenderSignature) || (uiState && uiState.watchlistPreparedModelCache && uiState.watchlistPreparedModelCache.renderSignature) || ''
+    options.renderPass
+    || (uiState && uiState.watchlistRenderSignature)
+    || ''
   );
   const cacheRoot = uiState.watchlistPresentationStateCache && typeof uiState.watchlistPresentationStateCache === 'object'
     ? uiState.watchlistPresentationStateCache
@@ -13384,7 +13386,8 @@ function renderWatchlistCardElement(record, options = {}){
     surface:'track',
     source:'renderWatchlistCardElement',
     reason:'renderWatchlistCardElement',
-    passCache
+    passCache,
+    renderPass:String(options.renderPass || '')
   });
   const simplifiedDebug = simplifiedState && simplifiedState.debug && typeof simplifiedState.debug === 'object'
     ? simplifiedState.debug
@@ -14336,6 +14339,7 @@ function renderWatchlistSectionCardsSync(records, container, options = {}){
     const cardElement = renderWatchlistCardElement(record, {
       passCache,
       parentSectionKey,
+      renderPass:String(options.renderPass || ''),
       trackScoreTransportByTicker,
       usedProjectionBundle:false,
       recomputedDuringRender:true,
@@ -14397,6 +14401,7 @@ async function renderWatchlistSectionCardsChunked(records, container, options = 
         precomputedView:item.precomputedView,
         passCache,
         parentSectionKey,
+        renderPass:String(options.renderPass || ''),
         trackScoreTransportByTicker,
         usedProjectionBundle:true,
         recomputedDuringRender:false,
@@ -14573,6 +14578,7 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
       renderWatchlistSectionCardsSync(sortedGroupRecords, body, {
         passCache,
         parentSectionKey:group.key,
+        renderPass:String(options.renderPass || ''),
         source:'watchlist_render_sync',
         trackScoreTransportByTicker,
         tourAnchorState
@@ -14602,6 +14608,7 @@ function buildWatchlistSectionsFragment(records, showExpired, options = {}){
           renderWatchlistSectionCardsSync(sortedGroupRecords, body, {
             passCache,
             parentSectionKey:group.key,
+            renderPass:String(options.renderPass || ''),
             source:'watchlist_render_sync_expand',
             tourAnchorState
           });
@@ -14729,6 +14736,7 @@ async function renderWatchlistChunked(options = {}){
               source:`${source}_${meta.groupKey}_expand`,
               passCache:modelPassCache,
               parentSectionKey:meta.groupKey,
+              renderPass:renderSignature,
               tourAnchorState
             }).then(() => {
               meta.rendered = true;
@@ -14744,6 +14752,7 @@ async function renderWatchlistChunked(options = {}){
               renderWatchlistSectionCardsSync(meta.records, meta.body, {
                 passCache:modelPassCache,
                 parentSectionKey:meta.groupKey,
+                renderPass:renderSignature,
                 source:`${source}_${meta.groupKey}_expand_fallback`,
                 tourAnchorState
               });
@@ -14771,6 +14780,7 @@ async function renderWatchlistChunked(options = {}){
           source:`${source}_${meta.groupKey}`,
           passCache:modelPassCache,
           parentSectionKey:meta.groupKey,
+          renderPass:renderSignature,
           trackScoreTransportByTicker,
           tourAnchorState
         });
@@ -14784,6 +14794,7 @@ async function renderWatchlistChunked(options = {}){
         renderWatchlistSectionCardsSync(meta.records, meta.body, {
           passCache:modelPassCache,
           parentSectionKey:meta.groupKey,
+          renderPass:renderSignature,
           source:`${source}_${meta.groupKey}_fallback`,
           trackScoreTransportByTicker,
           tourAnchorState
@@ -14878,7 +14889,11 @@ function renderWatchlist(options = {}){
       if(grouped[groupKey]) grouped[groupKey].push(record);
     });
     box.innerHTML = '';
-    box.appendChild(buildWatchlistSectionsFragment(records, showExpired, {passCache:modelPassCache, trackScoreTransportByTicker}));
+    box.appendChild(buildWatchlistSectionsFragment(records, showExpired, {
+      passCache:modelPassCache,
+      renderPass:renderSignature,
+      trackScoreTransportByTicker
+    }));
     uiState.watchlistRenderSignature = renderSignature;
     box.dataset.watchlistSignature = renderSignature;
     clearWatchlistDirtyForRecords(records);
