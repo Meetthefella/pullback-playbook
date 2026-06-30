@@ -8986,6 +8986,21 @@ function saveState(){
   renderFinalUniversePreview();
 }
 
+function syncApiSettingsFromDom(){
+  if($('apiKey')) state.apiKey = $('apiKey').readOnly ? '' : $('apiKey').value.trim();
+  if($('paperTradeApiKey')) state.paperTradeApiKey = $('paperTradeApiKey').value.trim();
+  if($('paperTradeApiSecret')) state.paperTradeApiSecret = $('paperTradeApiSecret').value.trim();
+  if($('dataProvider')) state.dataProvider = normalizeDataProvider($('dataProvider').value);
+  if($('apiPlan')) state.apiPlan = String($('apiPlan').value || DEFAULT_API_PLAN);
+  state.aiEndpoint = $('aiEndpoint').value.trim() || defaultAiEndpoint;
+  state.marketDataEndpoint = defaultMarketDataEndpoint;
+}
+
+function saveApiSettings(){
+  syncApiSettingsFromDom();
+  persistState();
+}
+
 function clearScannerSessionState(options = {}){
   uiState.scannerSessionTickers = [];
   uiState.scannerLastScanAt = '';
@@ -40017,7 +40032,7 @@ click('copyScannerPolicyDiagnosticsBtn', () => {
   });
 });
 click('submitTesterReportBtn', () => { submitTesterReport().catch(() => {}); });
-click('saveApiBtn', () => { saveState(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
+click('saveApiBtn', () => { saveApiSettings(); setStatus('apiStatus', '<span class="ok">API settings saved on this device.</span>'); });
 click('testApiBtn', testApiConnection);
 click('clearRuntimeDebugBtn', clearRuntimeDebugLog);
 click('contextSettingsToggle', () => setContextSettingsPanelOpen(!(uiState.contextSettingsOpen === true)));
@@ -40371,7 +40386,8 @@ on('advancedScannerSetupType', 'change', event => {
 on('wholeSharesOnly', 'change', () => {
   handleRiskSettingsChange('whole_shares_change');
 });
-['listName','apiKey','paperTradeApiKey','paperTradeApiSecret','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveState));
+on('listName', 'change', saveState);
+['apiKey','paperTradeApiKey','paperTradeApiSecret','dataProvider','apiPlan','aiEndpoint'].forEach(id => on(id, 'change', saveApiSettings));
 on('paperTradeApiKey', 'change', () => {
   refreshTrading212PaperAvailability({force:true}).catch(() => {});
 });
