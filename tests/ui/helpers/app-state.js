@@ -60,10 +60,12 @@ function buildVisibleCopySnapshot(appState = {}){
   const trackState = track.simplifiedState || {};
   const diagnostics = track.diagnostics || {};
   const watchlistVisual = diagnostics.watchlistVisualState || {};
-  const entryConditions = watchlistVisual.entryConditionsSummary || {};
+  const entryConditions = (trackVisible.entryPanel && typeof trackVisible.entryPanel === 'object')
+    ? trackVisible.entryPanel
+    : (watchlistVisual.entryConditionsSummary || {});
   const entryPanel = entryConditions && typeof entryConditions === 'object'
     ? {
-      status:normalizeCopyText(entryConditions.header),
+      status:normalizeCopyText(entryConditions.status || entryConditions.header),
       why:normalizeCopyText(entryConditions.why || entryConditions.primary),
       signals:Array.isArray(entryConditions.signals)
         ? entryConditions.signals.map(normalizeCopyText).filter(Boolean)
@@ -101,8 +103,8 @@ function buildVisibleCopySnapshot(appState = {}){
       rrVisible:reviewVisible.rrVisible === true
     },
     track:{
-      canonicalVerdict:normalizeCopyText(trackState.canonicalVerdict),
-      visualBucket:normalizeCopyText(trackState.visualBucket),
+      canonicalVerdict:normalizeCopyText(trackVisible.badgeLabel || trackState.canonicalVerdict),
+      visualBucket:normalizeCopyText(trackVisible.visualState || trackState.visualBucket),
       badge:normalizeCopyText(trackVisible.badgeLabel),
       decision:normalizeCopyText(trackVisible.decisionSummary),
       planMeta:normalizeCopyText(trackVisible.planMeta),
@@ -429,6 +431,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       : '';
     const reviewShell = document.querySelector('#reviewWorkspace .reviewworkspace-shell');
     const activeTrackCard = document.querySelector(`[data-watchlist-ticker="${ticker}"]`);
+    const activeTrackEntryPanel = activeTrackCard && activeTrackCard.querySelector('.entry-conditions-panel');
     const diaryEntries = Array.isArray(stateRef.tradeDiary)
       ? stateRef.tradeDiary.filter(entry => String(entry && entry.ticker || '').trim().toUpperCase() === String(ticker || '').trim().toUpperCase())
       : [];
@@ -495,6 +498,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
           canonicalVerdict:String(scanSimplified.canonicalVerdict || ''),
           visualBucket:String(scanSimplified.visualBucket || ''),
           tone:String(scanSimplified.tone || ''),
+          setupScore:Number.isFinite(Number(scanSimplified.setupScore)) ? Number(scanSimplified.setupScore) : null,
           badgeLabel:String(scanSimplified.badgeLabel || ''),
           actionLabel:String(scanSimplified.actionLabel || ''),
           planStatus:String(scanSimplified.planStatus || ''),
@@ -504,6 +508,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
           canonicalVerdict:String(scanRenderPathSimplified.canonicalVerdict || ''),
           visualBucket:String(scanRenderPathSimplified.visualBucket || ''),
           tone:String(scanRenderPathSimplified.tone || ''),
+          setupScore:Number.isFinite(Number(scanRenderPathSimplified.setupScore)) ? Number(scanRenderPathSimplified.setupScore) : null,
           badgeLabel:String(scanRenderPathSimplified.badgeLabel || ''),
           actionLabel:String(scanRenderPathSimplified.actionLabel || ''),
           planStatus:String(scanRenderPathSimplified.planStatus || ''),
@@ -511,6 +516,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         } : null,
         visibleCard:{
           badgeLabel:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`).textContent),
+          scoreLabel:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .visual-score, #results .resultcompact[data-ticker="${ticker}"] .score`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .visual-score, #results .resultcompact[data-ticker="${ticker}"] .score`).textContent),
           technicalSummary:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`).textContent),
           decisionSummary:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__decision`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__decision`).textContent)
         },
@@ -580,9 +586,16 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         simplifiedState:trackSnapshot && trackSnapshot.simplifiedState ? cloneValue(trackSnapshot.simplifiedState) : null,
         visible:{
           badgeLabel:safeText(activeTrackCard && activeTrackCard.querySelector('.badge.state-pill') && activeTrackCard.querySelector('.badge.state-pill').textContent),
+          visualState:String(activeTrackCard && activeTrackCard.dataset && activeTrackCard.dataset.visualState || ''),
+          scoreLabel:safeText(activeTrackCard && activeTrackCard.querySelector('.watchlistscore, .watchlist-card__status .visual-score, .watchlist-card__status .score') && activeTrackCard.querySelector('.watchlistscore, .watchlist-card__status .visual-score, .watchlist-card__status .score').textContent),
           decisionSummary:safeText(activeTrackCard && activeTrackCard.querySelector('.decision-summary') && activeTrackCard.querySelector('.decision-summary').textContent),
           planMeta:safeText(activeTrackCard && activeTrackCard.querySelector('.watchlist-plan-meta') && activeTrackCard.querySelector('.watchlist-plan-meta').textContent),
-          cardText:safeText(activeTrackCard && activeTrackCard.textContent)
+          cardText:safeText(activeTrackCard && activeTrackCard.textContent),
+          entryPanel:activeTrackEntryPanel ? {
+            status:safeText(activeTrackEntryPanel.querySelector('.entry-conditions-header') && activeTrackEntryPanel.querySelector('.entry-conditions-header').textContent).replace(/^Status:\s*/i, ''),
+            why:safeText(activeTrackEntryPanel.querySelector('.entry-conditions-pattern') && activeTrackEntryPanel.querySelector('.entry-conditions-pattern').textContent).replace(/^Why:\s*/i, ''),
+            text:safeText(activeTrackEntryPanel.textContent)
+          } : null
         },
         diagnostics:cloneValue(trackSnapshot)
       },
@@ -667,11 +680,25 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     excludesTrackDiagnostics:appState.snapshot && appState.snapshot.track === undefined
   };
   appState.visibleCopy = buildVisibleCopySnapshot(appState);
+  const trackDiagnosticCanonicalVerdict = normalizeVerdictKey(appState.track && appState.track.simplifiedState && appState.track.simplifiedState.canonicalVerdict);
+  const trackRenderedCanonicalVerdict = normalizeVerdictKey(appState.track && appState.track.visible && appState.track.visible.badgeLabel);
+  const trackDiagnosticVisualBucket = normalizeVerdictKey(appState.track && appState.track.simplifiedState && appState.track.simplifiedState.visualBucket);
+  const trackRenderedVisualBucket = normalizeVerdictKey(appState.track && appState.track.visible && appState.track.visible.visualState);
   appState.normalized = {
     reviewCanonicalVerdict:normalizeVerdictKey(appState.review && appState.review.stateHealth && appState.review.stateHealth.canonicalVerdict),
     reviewVisualBucket:normalizeVerdictKey(appState.review && appState.review.stateHealth && appState.review.stateHealth.visualBucket),
-    trackCanonicalVerdict:normalizeVerdictKey(appState.track && appState.track.simplifiedState && appState.track.simplifiedState.canonicalVerdict),
-    trackVisualBucket:normalizeVerdictKey(appState.track && appState.track.simplifiedState && appState.track.simplifiedState.visualBucket),
+    trackCanonicalVerdict:trackRenderedCanonicalVerdict || trackDiagnosticCanonicalVerdict,
+    trackVisualBucket:trackRenderedVisualBucket || trackDiagnosticVisualBucket,
+    trackDiagnosticCanonicalVerdict,
+    trackRenderedCanonicalVerdict,
+    trackDiagnosticVisualBucket,
+    trackRenderedVisualBucket,
+    trackDiagnosticMatchesRenderedAuthority:!!(
+      trackDiagnosticCanonicalVerdict
+      && trackRenderedCanonicalVerdict
+      && trackDiagnosticCanonicalVerdict === trackRenderedCanonicalVerdict
+      && (!trackRenderedVisualBucket || trackDiagnosticVisualBucket === trackRenderedVisualBucket)
+    ),
     scanCanonicalVerdict:normalizeVerdictKey(appState.scan && appState.scan.simplifiedState && appState.scan.simplifiedState.canonicalVerdict),
     scanVisualBucket:normalizeVerdictKey(appState.scan && appState.scan.simplifiedState && appState.scan.simplifiedState.visualBucket)
   };

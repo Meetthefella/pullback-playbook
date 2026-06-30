@@ -78,8 +78,8 @@ test('canonical Entry presentation remains authoritative across review, trade pl
     record.setup.setupLocationState = 'near_20ma';
     record.setup.pullbackZone = 'near_20ma';
     record.setup.priceabilityState = 'priceable';
-    record.setup.bounceState = 'improving';
-    record.setup.stabilisationState = 'stabilising';
+    record.setup.bounceState = 'confirmed';
+    record.setup.stabilisationState = 'clear';
     record.setup.volumeState = 'supportive';
     record.setup.trendState = 'strong';
     record.plan.entry = seed.entry;
@@ -104,8 +104,8 @@ test('canonical Entry presentation remains authoritative across review, trade pl
         setup_location_state:'near_20ma',
         priceability_state:'priceable',
         structure_state:'strong',
-        stabilisation_state:'stabilising',
-        bounce_state:'improving',
+        stabilisation_state:'clear',
+        bounce_state:'confirmed',
         volume_state:'supportive',
         has_clear_invalidation_level:'yes',
         has_priceable_plan:'yes',
@@ -146,6 +146,10 @@ test('canonical Entry presentation remains authoritative across review, trade pl
     state.paperTradeApiKey = 'paper-key';
     state.paperTradeApiSecret = 'paper-secret';
     state.paperTradeTesterSetupCompletedAt = '';
+    fxRateCache.set('USD', {
+      gbpPerUnit:0.79,
+      fetchedAt:new Date().toISOString()
+    });
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Paper gateway ready.';
@@ -159,7 +163,7 @@ test('canonical Entry presentation remains authoritative across review, trade pl
       pullbackState:'near_20ma',
       priceabilityState:'priceable',
       bounceState:'improving',
-      stabilisationState:'stabilising',
+      stabilisationState:'clear',
       volumeState:'supportive',
       trendState:'strong'
     };
@@ -171,12 +175,12 @@ test('canonical Entry presentation remains authoritative across review, trade pl
       actionLabel:'Ready to act',
       planStatus:'valid',
       planVisible:false,
-      mainBlocker:'Developing - waiting for confirmation.',
+      mainBlocker:'',
       structureState:'strong',
       structureEligibility:'alive',
       setupLocationState:'near_20ma',
       priceabilityState:'priceable',
-      bounceState:'improving',
+      bounceState:'confirmed',
       volumeState:'supportive',
       entryGatePass:false,
       nearEntryGatePass:true
@@ -190,11 +194,11 @@ test('canonical Entry presentation remains authoritative across review, trade pl
       priceability_state:'priceable',
       bounce_state:'improving',
       volume_state:'supportive',
-      main_blocker:'Developing - waiting for confirmation.',
+      main_blocker:'',
       hasPriceablePlan:true,
       has_priceable_plan:true,
       hasClearInvalidationLevel:true,
-      entry_gate_pass:false,
+      entry_gate_pass:true,
       near_entry_gate_pass:true,
       resolvedRR:2.5,
       viability:'accept'
@@ -205,7 +209,7 @@ test('canonical Entry presentation remains authoritative across review, trade pl
       planStatusKey:'valid',
       structuralState:'entry',
       primaryState:'entry',
-      blockerReason:'Developing - waiting for confirmation.',
+      blockerReason:'',
       actionStateKey:'ready_to_act',
       actionLabel:'Ready to act',
       resolvedRR:2.5
@@ -257,7 +261,7 @@ test('canonical Entry presentation remains authoritative across review, trade pl
       tradeability:displayedPlan.tradeability,
       capitalFit:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit,
       primaryState:'entry',
-      hardBlocker:'Developing - waiting for confirmation.'
+      hardBlocker:''
     });
 
     uiState.activeReviewSourceProjectionSnapshot = {
@@ -419,8 +423,8 @@ test('canonical Entry can enable Paper Trade through backend gateway configurati
     record.setup.setupLocationState = 'near_20ma';
     record.setup.pullbackZone = 'near_20ma';
     record.setup.priceabilityState = 'priceable';
-    record.setup.bounceState = 'improving';
-    record.setup.stabilisationState = 'stabilising';
+    record.setup.bounceState = 'confirmed';
+    record.setup.stabilisationState = 'clear';
     record.setup.volumeState = 'supportive';
     record.setup.trendState = 'strong';
     record.plan.entry = 75;
@@ -445,8 +449,8 @@ test('canonical Entry can enable Paper Trade through backend gateway configurati
         setup_location_state:'near_20ma',
         priceability_state:'priceable',
         structure_state:'strong',
-        stabilisation_state:'stabilising',
-        bounce_state:'improving',
+        stabilisation_state:'clear',
+        bounce_state:'confirmed',
         volume_state:'supportive',
         has_clear_invalidation_level:'yes',
         has_priceable_plan:'yes',
@@ -486,6 +490,10 @@ test('canonical Entry can enable Paper Trade through backend gateway configurati
     state.paperTradeApiKey = '';
     state.paperTradeApiSecret = '';
     state.paperTradeTesterSetupCompletedAt = '';
+    fxRateCache.set('USD', {
+      gbpPerUnit:0.79,
+      fetchedAt:new Date().toISOString()
+    });
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Trading 212 demo gateway is ready through backend configuration.';

@@ -44,7 +44,7 @@ async function seedScenario(page, scenario){
     record.meta.exchange = 'NASDAQ';
     record.meta.tradingViewSymbol = `NASDAQ:${seed.ticker}`;
     record.meta.marketStatus = 'S&P above 50 MA';
-    record.marketData.currency = 'USD';
+    record.marketData.currency = seed.currency || 'USD';
     record.marketData.price = seed.price;
     record.marketData.previousClose = seed.previousClose;
     record.marketData.ma20 = seed.ma20;
@@ -130,6 +130,10 @@ async function seedScenario(page, scenario){
     state.paperTradeApiKey = 'paper-key';
     state.paperTradeApiSecret = 'paper-secret';
     state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
+    fxRateCache.set('USD', {
+      gbpPerUnit:0.79,
+      fetchedAt:new Date().toISOString()
+    });
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Paper gateway ready.';
@@ -174,8 +178,8 @@ function entryScenario(){
     setupLocationState:'near_20ma',
     pullbackZone:'near_20ma',
     priceabilityState:'priceable',
-    bounceState:'improving',
-    stabilisationState:'stabilising',
+    bounceState:'confirmed',
+    stabilisationState:'clear',
     volumeState:'supportive',
     trendState:'strong',
     entry:110.27,
@@ -185,7 +189,8 @@ function entryScenario(){
     riskStatus:'fits_risk',
     tradeability:'tradable',
     triggerState:'confirmed',
-    scannerResolvedRR:2.5
+    scannerResolvedRR:2.5,
+    currency:'USD'
   };
 }
 
@@ -343,6 +348,179 @@ test('canonical Near Entry stays distinct from Entry', async ({page}) => {
     return String(panel && panel.textContent || '').replace(/\s+/g, ' ').trim();
   });
 
+  expect(entryPanelText).not.toContain('Status: Entry Ready');
+  expect(entryPanelText).not.toContain('This setup is Entry because');
+});
+
+test('debug card text cannot promote the Track long-press panel to Entry', async ({page}) => {
+  await bootApp(page);
+  const scenario = nearEntryScenario();
+  scenario.companyName = 'Entry Ready Debug Text Inc.';
+  await seedScenario(page, scenario);
+
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  const entryPanelText = await page.evaluate(() => {
+    const panel = document.querySelector('[data-watchlist-ticker="NEAR"] .entry-conditions-panel');
+    return String(panel && panel.textContent || '').replace(/\s+/g, ' ').trim();
+  });
+
+  expect(entryPanelText).not.toContain('Status: Entry Ready');
+  expect(entryPanelText).toContain('Status: Near Entry');
+});
+
+test('Track long-press ignores Entry label text without canonical Entry authority', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, nearEntryScenario());
+
+  const summary = await page.evaluate(() => {
+    const record = getTickerRecord('NEAR');
+    const displayedPlan = deriveCurrentPlanState(record.plan.entry, record.plan.stop, record.plan.firstTarget, record.marketData.currency);
+    return buildTrackTickerSpecificEntryConditionsSummary({
+      record,
+      ticker:'NEAR',
+      finalVerdict:'watch',
+      presentationState:'monitor',
+      currentTrackPresentation:{
+        canonicalVerdict:'watch',
+        finalVerdict:'watch',
+        visualBucket:'monitor',
+        badgeLabel:'Entry',
+        headline:'Entry Ready',
+        statusText:'Entry Ready',
+        authoritativeEntryPanel:false
+      },
+      resolvedContract:{
+        planStatusKey:'valid',
+        blockerReason:'Needs confirmation before promotion.'
+      },
+      globalVerdict:{
+        final_verdict:'watch',
+        structure_state:'strong',
+        structure_eligibility:'alive',
+        setup_location_state:'near_20ma',
+        pullback_zone:'near_20ma',
+        bounce_state:'attempt',
+        priceability_state:'priceable',
+        main_blocker:'Needs confirmation before promotion.'
+      },
+      derivedStates:{
+        structureState:'strong',
+        structureEligibility:'alive',
+        setupLocationState:'near_20ma',
+        pullbackZone:'near_20ma',
+        bounceState:'attempt',
+        priceabilityState:'priceable'
+      },
+      displayedPlan
+    });
+  });
+
+  expect(summary.header, 'text-only Entry labels must not promote the panel header').not.toBe('Entry Ready');
+  expect(summary.canonicalVerdict, 'text-only Entry labels must not promote canonical panel verdict').not.toBe('entry');
+  expect(summary.why || summary.primary || '', 'text-only Entry labels must not use Entry explanatory copy').not.toContain('This setup is Entry because');
+});
+
+test('Track long-press fallback uses current Track reason, not stale saved summaries', async ({page}) => {
+  await bootApp(page);
+
+  const result = await page.evaluate(() => {
+    const record = upsertTickerRecord('COPY');
+    record.review.savedSummary = 'STALE ENTRY SAVED REVIEW SUMMARY DO NOT SHOW';
+    record.scan.summary = 'STALE ENTRY SCAN SUMMARY DO NOT SHOW';
+    const summary = buildTrackTickerSpecificEntryConditionsSummary({
+      record,
+      ticker:'COPY',
+      finalVerdict:'watch',
+      presentationState:'monitor',
+      currentTrackPresentation:{
+        canonicalVerdict:'watch',
+        finalVerdict:'watch',
+        visualBucket:'monitor',
+        primaryReason:'Current Track blocker: bounce is still tentative.',
+        mainBlocker:'Current Track blocker: bounce is still tentative.',
+        nextAction:'Wait for buyers to confirm the bounce.'
+      },
+      resolvedContract:{
+        planStatusKey:'',
+        blockerReason:''
+      },
+      globalVerdict:{
+        final_verdict:'watch'
+      },
+      derivedStates:{},
+      displayedPlan:{}
+    });
+    const markup = renderEntryConditionsHoldHelper(summary, 'watchlist', 'COPY', {mode:'card'});
+    return {
+      summary,
+      markup
+    };
+  });
+
+  const panelText = String(result.markup || '').replace(/\s+/g, ' ');
+  expect(result.summary.source, 'fallback source should be current Track presentation, not saved summaries').toBe('current_track_presentation_fallback');
+  expect(panelText, 'long-press panel should show the current Track blocker').toContain('Current Track blocker: bounce is still tentative.');
+  expect(panelText, 'long-press panel must not show stale saved Review copy').not.toContain('STALE ENTRY SAVED REVIEW SUMMARY DO NOT SHOW');
+  expect(panelText, 'long-press panel must not show stale Scan copy').not.toContain('STALE ENTRY SCAN SUMMARY DO NOT SHOW');
+});
+
+test('persisted sharedPresentation Entry cannot override live canonical Watch', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+  await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    record.watchlist.presentation = {
+      sharedPresentation:{
+        canonicalVerdict:'entry',
+        finalVerdict:'entry',
+        visualBucket:'entry',
+        tone:'entry',
+        badgeLabel:'Entry',
+        headline:'Entry Ready',
+        statusText:'Entry Ready',
+        actionLabel:'Execute only if the trigger remains valid.'
+      }
+    };
+  });
+
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  const trackCard = page.locator('[data-watchlist-ticker="WATC"]').first();
+  await expect(trackCard.locator('.badge.state-pill').first()).toContainText('Watch');
+  const entryPanelText = await page.evaluate(() => {
+    const panel = document.querySelector('[data-watchlist-ticker="WATC"] .entry-conditions-panel');
+    return String(panel && panel.textContent || '').replace(/\s+/g, ' ').trim();
+  });
+  expect(entryPanelText).not.toContain('Status: Entry Ready');
+});
+
+test('persisted debug currentState Entry cannot override live canonical Watch', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+  await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    record.watchlist.debug = {
+      ...(record.watchlist.debug || {}),
+      currentState:'Entry',
+      lifecycleState:'Entry',
+      previousState:'Entry'
+    };
+  });
+
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  const trackCard = page.locator('[data-watchlist-ticker="WATC"]').first();
+  await expect(trackCard.locator('.badge.state-pill').first()).toContainText('Watch');
+  await expect(trackCard).not.toContainText('Entry Ready');
+
+  const entryPanelText = await page.evaluate(() => {
+    const panel = document.querySelector('[data-watchlist-ticker="WATC"] .entry-conditions-panel');
+    return String(panel && panel.textContent || '').replace(/\s+/g, ' ').trim();
+  });
   expect(entryPanelText).not.toContain('Status: Entry Ready');
   expect(entryPanelText).not.toContain('This setup is Entry because');
 });

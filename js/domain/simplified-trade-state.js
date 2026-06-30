@@ -429,19 +429,10 @@
       || feedback.badgeConflict
       || feedback.actionConflict
       || feedback.mainBlockerConflict;
-    if(!conflictsDetected && !String(result.badgeLabel || '').trim() && String(persisted.badgeLabel || '').trim()){
-      result.badgeLabel = String(persisted.badgeLabel || '').trim();
-    }
-    if(!conflictsDetected && !String(result.actionLabel || '').trim() && String(persisted.actionLabel || '').trim()){
-      result.actionLabel = String(persisted.actionLabel || '').trim();
-    }
-    if(!conflictsDetected && !String(result.mainBlocker || '').trim() && String(persisted.mainBlocker || persisted.primaryReason || '').trim()){
-      result.mainBlocker = String(persisted.mainBlocker || persisted.primaryReason || '').trim();
-    }
     result.debug = {
       ...(result.debug || {}),
       persistedPresentationAvailable:true,
-      persistedPresentationOverlayApplied:true,
+      persistedPresentationOverlayApplied:false,
       persistedPresentationAuthorityDisabled:'global_non_authoritative',
       persistedPresentationConflictSuppressed:conflictsDetected,
       persistedPresentationSnapshot:stableDebugValue({
@@ -602,7 +593,7 @@
       const validation = global.SimplifiedPlanState.validateCurrentPlan(item, planState, {derivedStates, deps});
         const resolverDeps = {
           ...deps,
-          preserveReviewCanonicalForSoftReadiness:surface === 'review',
+          preserveReviewCanonicalForSoftReadiness:false,
           analysisDerivedStatesFromRecord:() => derivedStates,
           effectivePlanForRecord:() => effectivePlan,
           deriveCurrentPlanState:() => planState,
