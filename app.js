@@ -255,7 +255,7 @@ function normalizeRiskCalcText(value){
 function riskSettingsFingerprintFromState(){
   return JSON.stringify({
     accountSize:normalizeRiskCalcNumber(state.accountSize, 4),
-    selectedRiskAmount:normalizeRiskCalcNumber(state.userRiskPerTrade || currentMaxLoss(), 4),
+    selectedRiskAmount:normalizeRiskCalcNumber(canonicalRiskAmount(), 4),
     selectedRiskPercent:normalizeRiskCalcNumber(normalizeRiskPercentInput(state.riskPercent, 1), 4),
     maxLossOverride:normalizeRiskCalcNumber(state.maxLossOverride, 4),
     wholeSharesOnly:state.wholeSharesOnly !== false ? 1 : 0
@@ -270,7 +270,7 @@ function riskCalcSnapshotForRecord(record){
   const fxCached = quoteCurrency && !['GBP','GBX'].includes(quoteCurrency) ? fxRateCache.get(quoteCurrency) : null;
   return {
     accountSize:normalizeRiskCalcNumber(state.accountSize, 4),
-    selectedRiskAmount:normalizeRiskCalcNumber(state.userRiskPerTrade || currentMaxLoss(), 4),
+    selectedRiskAmount:normalizeRiskCalcNumber(canonicalRiskAmount(), 4),
     selectedRiskPercent:normalizeRiskCalcNumber(normalizeRiskPercentInput(state.riskPercent, 1), 4),
     maxLossOverride:normalizeRiskCalcNumber(state.maxLossOverride, 4),
     wholeSharesOnly:state.wholeSharesOnly !== false ? 1 : 0,
@@ -2837,6 +2837,12 @@ function currentMaxLoss(){
   return state.userRiskPerTrade;
 }
 
+function canonicalRiskAmount(){
+  const override = numericOrNull(state.maxLossOverride);
+  if(Number.isFinite(override) && override > 0) return override;
+  return currentMaxLoss();
+}
+
 function riskSettingsValid(){
   return currentMaxLoss() > 0;
 }
@@ -2845,7 +2851,7 @@ function currentRiskSettings(){
   return {
     account_size:numericOrNull(state.accountSize) || 0,
     risk_percent:normalizeRiskPercentInput(state.riskPercent, 1),
-    max_loss_override:numericOrNull(state.userRiskPerTrade || currentMaxLoss()),
+    max_loss_override:numericOrNull(canonicalRiskAmount()),
     whole_shares_only:state.wholeSharesOnly !== false
   };
 }
@@ -37178,10 +37184,8 @@ function renderReviewWorkspace(options = {}){
   const paperTradeUi = paperTradeUiStateForTicker(record.ticker);
   const gatewayReadyForPaperTrade = paperTradeGatewayReady();
   const tradeGatewayHealth = tradeGatewayHealthModel();
-  const testerSetupComplete = paperTradeTesterSetupComplete();
   const paperTradeEligible = mergedPaperTradeEligibilityState.eligible === true
-    && gatewayReadyForPaperTrade === true
-    && testerSetupComplete === true;
+    && gatewayReadyForPaperTrade === true;
   const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
   if(!paperTradeEligible && paperTradeUi.previewOpen === true){
     setPaperTradeUiState(record.ticker, {previewOpen:false, snapshot:null});
@@ -37194,9 +37198,7 @@ function renderReviewWorkspace(options = {}){
   const paperTradePanelOpen = paperTradeEligible && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
   const paperTradePreviewVisible = paperTradePanelOpen;
   const paperTradePrimaryReason = mergedPaperTradeEligibilityState.reasons[0] || '';
-  const paperTradeDisabledReason = testerSetupComplete !== true
-    ? 'Complete tester setup in Context Settings before using paper trading.'
-    : (trading212PaperSupported !== true
+  const paperTradeDisabledReason = trading212PaperSupported !== true
     ? 'Paper trading gateway is unavailable.'
     : (trading212PaperAvailabilityChecked !== true
     ? 'Checking paper trading gateway...'
@@ -37208,7 +37210,7 @@ function renderReviewWorkspace(options = {}){
         ? 'Not actionable - setup is not Entry-ready'
         : 'Trade plan not valid'
     )
-    : ''))));
+    : '')));
   const paperTradeHasRuntimeStatus = !!paperTradeUi.message
     || paperTradeUi.state === 'submitting'
     || paperTradeUi.state === 'submit_success'
@@ -38178,7 +38180,6 @@ function renderReviewWorkspace(options = {}){
       <div class="review-action-row review-action-row--watchlist" data-advanced-debug-trigger="review-watchlist"><button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button></div>
       <div class="tiny review-next-action-primary" id="reviewNextActionPrimary">Can I trade this now? ${escapeHtml(reviewNextActionLabel)}</div>
       <div class="tiny ${escapeHtml(tradeGatewayHealth.className)}" id="paperTradeGatewayHealth">Paper Gateway: ${escapeHtml(tradeGatewayHealth.label)}${tradeGatewayHealth.detail ? ` | ${escapeHtml(tradeGatewayHealth.detail)}` : ''}</div>
-      ${testerSetupComplete !== true ? '<div class="actions" style="margin-top:8px"><button class="secondary compactbutton" id="paperTradeSetupBtn" type="button">Open Tester Setup</button></div>' : ''}
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}
       ${paperTradeHasRuntimeStatus ? `<div class="${paperTradeStatusClass}" id="paperTradeStatusLine">${escapeHtml(paperTradeStatusText)}</div>` : ''}

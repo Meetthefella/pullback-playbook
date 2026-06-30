@@ -145,7 +145,7 @@ test('canonical Entry presentation remains authoritative across review, trade pl
 
     state.paperTradeApiKey = 'paper-key';
     state.paperTradeApiSecret = 'paper-secret';
-    state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
+    state.paperTradeTesterSetupCompletedAt = '';
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Paper gateway ready.';
@@ -485,7 +485,7 @@ test('canonical Entry can enable Paper Trade through backend gateway configurati
     };
     state.paperTradeApiKey = '';
     state.paperTradeApiSecret = '';
-    state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
+    state.paperTradeTesterSetupCompletedAt = '';
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Trading 212 demo gateway is ready through backend configuration.';
