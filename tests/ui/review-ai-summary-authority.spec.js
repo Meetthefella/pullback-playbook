@@ -194,7 +194,7 @@ async function applyAnalysis(page, normalizedAnalysis){
   }, normalizedAnalysis);
 }
 
-test('Review AI Summary card follows structured authority order in rendered UI', async ({page}) => {
+test('Chart Coach renders deterministic teaching sections in the review UI', async ({page}) => {
   await bootApp(page);
   await seedReviewScenario(page);
 
@@ -229,10 +229,14 @@ test('Review AI Summary card follows structured authority order in rendered UI',
     }
   });
 
-  await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('AI Summary');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Price is below the 20MA, below the 50MA, above the 200MA.');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Recent candles show a bounce attempt, but confirmation is still missing.');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('This still belongs in Watch until the candles show cleaner confirmation.');
+  await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('Chart Coach');
+  await expect(page.locator('#reviewWorkspace')).not.toContainText('AI Summary');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Candle');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('buyers finished the session stronger');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('💡 Learning point');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📈 Trend');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('below the short-term average');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('AI analysis failed');
 
@@ -263,9 +267,15 @@ test('Review AI Summary card follows structured authority order in rendered UI',
     }
   });
 
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Price is below the 20MA and 50MA but above the 200MA.');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Recent candles show a bounce attempt, and follow-through is still missing.');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Candle');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📈 Trend');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
+
+  await page.setViewportSize({width:390, height:844});
+  await expect.poll(async () => {
+    return await page.locator('#reviewAiSummaryPreview').evaluate(node => node.scrollWidth <= node.clientWidth + 1);
+  }).toBe(true);
 
   await applyAnalysis(page, {
     coach_summary:'observe how price behaves around key moving averages',
@@ -297,7 +307,70 @@ test('Review AI Summary card follows structured authority order in rendered UI',
     }
   });
 
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Estimated maths exist, but confirmation is still missing before any entry is valid.');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('Interesting setup. Monitor.');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
+});
+
+test('Chart Coach does not render before verification passes and stays mobile-safe', async ({page}) => {
+  await bootApp(page);
+  await page.setViewportSize({width:390, height:844});
+  await page.evaluate(() => {
+    const record = upsertTickerRecord('MSFT');
+    record.meta.companyName = 'Microsoft Corporation';
+    record.meta.exchange = 'NASDAQ';
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData.price = 510.25;
+    record.marketData.ma20 = 505.1;
+    record.marketData.ma50 = 498.4;
+    record.marketData.ma200 = 430.2;
+    const chartRef = {
+      dataUrl:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7d8AAAAASUVORK5CYII=',
+      name:'msft-chart.png',
+      ticker:'MSFT',
+      imageId:'chart-msft-preverify'
+    };
+    record.review.chartRef = chartRef;
+    record.review.chartImagePreview = chartRef;
+    record.review.chartImageOriginal = chartRef;
+    record.review.chartAvailable = true;
+    record.review.chartAnalysisPipeline = {
+      ticker:'MSFT',
+      imageId:'chart-msft-preverify',
+      requestId:'verify-msft-preverify',
+      phase:'possible_mismatch',
+      verifiedMatch:false,
+      manualConfirmed:false,
+      aiAllowed:false,
+      expectedFacts:{ticker:'MSFT', timeframe:'1D', price:510.25},
+      readFacts:{ticker:'MIST', timeframe:'1D', price:510.25},
+      evidence:['Visible ticker does not match the selected ticker.'],
+      source:'chart_coach_preverify_spec',
+      updatedAt:'2026-07-01T10:00:00.000Z'
+    };
+    record.review.analysisState = {
+      raw:'',
+      normalized:{
+        chartCoach:{
+          sections:[
+            {key:'candle', icon:'🟢', label:'Candle', text:'This should not render before verification.', confidence:0.9, teachingFocus:true}
+          ],
+          summaryText:'This should not render before verification.',
+          source:'ai_chart_coach',
+          renderVersion:'chart-coach-v1'
+        }
+      },
+      error:'',
+      reviewedAt:'2026-07-01T10:00:00.000Z',
+      chartImageId:'chart-msft-preverify',
+      requestId:'analysis-msft-preverify',
+      ticker:'MSFT'
+    };
+    record.review.normalizedAnalysis = record.review.analysisState.normalized;
+    setActiveReviewTicker('MSFT');
+    renderReviewWorkspace({source:'chart_coach_preverify_spec'});
+  });
+  await page.locator('[data-workspace-tab="review"]').click();
+  await expect(page.locator('#reviewAiSummaryTitle')).toHaveCount(0);
+  await expect(page.locator('#reviewWorkspace')).toContainText('Chart Verification Failed');
 });

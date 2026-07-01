@@ -1700,6 +1700,36 @@ body.debug-advanced .advanced-debug-only{
   padding-right:12px;
   padding-bottom:10px;
 }
+.review-ai-preview--chart-coach{
+  display:grid;
+  gap:10px;
+}
+.chart-coach-section{
+  display:grid;
+  gap:4px;
+  padding:8px 0;
+  border-top:1px solid rgba(159,176,198,.12);
+}
+.chart-coach-section:first-child{
+  border-top:0;
+  padding-top:2px;
+}
+.chart-coach-heading{
+  font-weight:700;
+  color:var(--text-primary);
+}
+.chart-coach-copy{
+  line-height:1.45;
+  color:var(--text-secondary);
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.chart-coach-copy--lesson{
+  color:var(--text-primary);
+}
+.chart-coach-section--teaching .chart-coach-heading{
+  color:var(--accent-2, var(--text-primary));
+}
 .reviewworkspace .review-checklist-panel{
   margin-top:2px;
 }

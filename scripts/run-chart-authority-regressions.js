@@ -288,6 +288,16 @@ function runDeterministicCandleFallbackRegression(){
   };
   vm.createContext(sandbox);
   [
+    'chartCoachPriorityForKey',
+    'chartCoachProximityLabel',
+    'finalizeChartCoachSections',
+    'chartCoachDiagnosticsForSections',
+    'chartCoachConfidenceSentence',
+    'chartCoachBodyDescriptor',
+    'chartCoachStructureSignals',
+    'chartCoachPrimaryOpportunityScore',
+    'buildDeterministicChartCoach',
+    'chartCoachModelIsUsable',
     'describeCandleBodyDirection',
     'candleWickRejectionState',
     'isGenericAiCandleCommentary',
@@ -341,8 +351,10 @@ function runDeterministicCandleFallbackRegression(){
 
   const finalRead = sandbox.finalDisplayedAnalysisChartRead(bounceRecord, bounceAnalysis);
   assert.strictEqual(finalRead.usedDeterministicFallback, true, 'Generic AI output should be replaced by deterministic fallback');
-  assert.ok(/This still belongs in Watch/i.test(finalRead.text), 'Fallback should respect watch verdict framing');
-  assert.strictEqual(finalRead.selectedSummarySource, 'deterministic_generic_or_conflict_fallback', 'Generic legacy text should fall through to deterministic fallback');
+  assert.ok(/🎯 What next\?:/i.test(finalRead.text), 'Fallback should include a What next section');
+  assert.strictEqual(finalRead.selectedSummarySource, 'deterministic_chart_coach', 'Fallback should use deterministic Chart Coach');
+  assert.ok(finalRead.chartCoach && Array.isArray(finalRead.chartCoach.sections) && finalRead.chartCoach.sections.length >= 2, 'Fallback should expose structured Chart Coach sections');
+  assert.ok(finalRead.chartCoach.diagnostics && Array.isArray(finalRead.chartCoach.diagnostics.sectionConfidence), 'Chart Coach should expose section confidence diagnostics');
 
   const shortSpecificRead = sandbox.finalDisplayedAnalysisChartRead(
     bounceRecord,
@@ -351,8 +363,8 @@ function runDeterministicCandleFallbackRegression(){
       plain_english_chart_read:'Below 20/50, above 200; follow-through still missing.'
     }
   );
-  assert.strictEqual(shortSpecificRead.usedDeterministicFallback, false, 'Short specific AI candle read should be preserved');
-  assert.ok(/Below 20\/50, above 200; follow-through still missing\./.test(shortSpecificRead.text), 'Short specific AI candle read should remain visible');
+  assert.strictEqual(shortSpecificRead.usedDeterministicFallback, true, 'Chart Coach should stay deterministic even when short AI prose exists');
+  assert.ok(/📈 Trend:/i.test(shortSpecificRead.text), 'Deterministic Chart Coach should render trend guidance');
 
   const structuredBeatsLegacy = sandbox.finalDisplayedAnalysisChartRead(
     bounceRecord,
@@ -365,8 +377,8 @@ function runDeterministicCandleFallbackRegression(){
       }
     }
   );
-  assert.strictEqual(structuredBeatsLegacy.selectedSummarySource, 'candle_structure_analysis', 'candleStructureAnalysis.summary should beat legacy coach summary');
-  assert.ok(/below the 20MA and 50MA but above the 200MA/i.test(structuredBeatsLegacy.text), 'Structured candle summary should render in Review');
+  assert.strictEqual(structuredBeatsLegacy.selectedSummarySource, 'deterministic_chart_coach', 'Deterministic Chart Coach should replace legacy summary authority ordering');
+  assert.ok(/🟢 Candle:/i.test(structuredBeatsLegacy.text), 'Structured Chart Coach should render in Review');
 
   const tradePlanBeatsGenericLegacy = sandbox.finalDisplayedAnalysisChartRead(
     bounceRecord,
@@ -378,8 +390,8 @@ function runDeterministicCandleFallbackRegression(){
       plain_english_chart_read:'observe how price behaves around key moving averages'
     }
   );
-  assert.strictEqual(tradePlanBeatsGenericLegacy.selectedSummarySource, 'trade_plan_commentary', 'tradePlanCommentary should beat generic legacy summary when candle summary is thin');
-  assert.ok(/Estimated maths exist/i.test(tradePlanBeatsGenericLegacy.text), 'Trade plan commentary should surface in Review when selected');
+  assert.strictEqual(tradePlanBeatsGenericLegacy.selectedSummarySource, 'deterministic_chart_coach', 'Trade plan commentary should not override deterministic Chart Coach');
+  assert.ok(/🎯 What next\?:/i.test(tradePlanBeatsGenericLegacy.text), 'Chart Coach should still finish with What next');
 
   const shortVagueRead = sandbox.finalDisplayedAnalysisChartRead(
     bounceRecord,
@@ -397,8 +409,8 @@ function runDeterministicCandleFallbackRegression(){
       plain_english_chart_read:'Price is above the 20MA with confirmed follow-through.'
     }
   );
-  assert.ok(!/\bready for entry\b|\bthis is an entry signal\b|\bgo long\b|\bexecute entry\b/i.test(nearEntryRead.text), 'Fallback must not promote Entry by itself');
-  assert.ok(/Near Entry/i.test(nearEntryRead.text) || /does not create an entry signal/i.test(nearEntryRead.text), 'Fallback may only support Near Entry when resolver already allows it');
+  assert.ok(!/\bready for entry\b|\bthis is an entry signal\b|\bgo long\b|\bexecute entry\b/i.test(nearEntryRead.text), 'Chart Coach must not promote Entry by itself');
+  assert.ok(/🎯 What next\?:/i.test(nearEntryRead.text), 'Chart Coach should keep the next-step framing');
 
   const descending = [
     {date:'2026-06-30', open:198.4, high:201.2, low:197.9, close:200.09, volume:1000},
@@ -434,6 +446,99 @@ function runDeterministicCandleFallbackRegression(){
     {globalVerdict:{final_verdict:'watch'}}
   );
   assert.strictEqual(failedDescendingSummary.facts.failedBounce, failedAscendingSummary.facts.failedBounce, 'Fallback summary must not flip failed-bounce direction because of order');
+
+  const supportRead = sandbox.finalDisplayedAnalysisChartRead(
+    {
+      marketData:{price:100.4, ma20:100.1, ma50:98.8, ma200:90},
+      _globalVerdict:{final_verdict:'watch'}
+    },
+    {
+      canonicalValues:{price:100.4, ma20:100.1, ma50:98.8, ma200:90, volume:1500000},
+      trustedMarketContext:{
+        recentCandleSequence:[
+          {date:'2026-07-01', open:99.95, high:100.7, low:99.2, close:100.4, volume:1500000},
+          {date:'2026-06-30', open:100.9, high:101.0, low:99.8, close:99.9, volume:1300000},
+          {date:'2026-06-29', open:101.6, high:101.9, low:100.3, close:100.8, volume:1200000}
+        ]
+      }
+    }
+  );
+  assert.ok(supportRead.chartCoach.sections.some(section => section.key === 'support'), 'Chart Coach should explain support when buyers step in near support');
+
+  const resistanceRead = sandbox.finalDisplayedAnalysisChartRead(
+    {
+      marketData:{price:101.0, ma20:100.2, ma50:99.1, ma200:92},
+      _globalVerdict:{final_verdict:'watch'}
+    },
+    {
+      canonicalValues:{price:101.0, ma20:100.2, ma50:99.1, ma200:92, volume:1600000},
+      trustedMarketContext:{
+        recentCandleSequence:[
+          {date:'2026-07-01', open:100.9, high:102.7, low:100.8, close:101.1, volume:1600000},
+          {date:'2026-06-30', open:100.1, high:101.7, low:99.9, close:101.3, volume:1400000},
+          {date:'2026-06-29', open:99.7, high:101.1, low:99.4, close:100.6, volume:1300000}
+        ]
+      }
+    }
+  );
+  assert.ok(resistanceRead.chartCoach.sections.some(section => section.key === 'resistance'), 'Chart Coach should explain resistance rejection when sellers push price back');
+
+  const dojiRead = sandbox.finalDisplayedAnalysisChartRead(
+    bounceRecord,
+    {
+      canonicalValues:{price:200.01, ma20:205.74, ma50:209.99, ma200:190.84, volume:1000},
+      trustedMarketContext:{
+        recentCandleSequence:[
+          {date:'2026-07-01', open:200.0, high:201.2, low:198.9, close:200.01, volume:1000},
+          {date:'2026-06-30', open:198.2, high:200.9, low:197.7, close:199.8, volume:1200},
+          {date:'2026-06-29', open:197.8, high:199.7, low:197.3, close:198.4, volume:1100}
+        ]
+      }
+    }
+  );
+  assert.ok(/⚪ Indecision:/i.test(dojiRead.text), 'Chart Coach should explain doji or indecision candles');
+  assert.ok(/neither buyers nor sellers proved much control/i.test(dojiRead.text), 'Indecision explanation should be beginner-friendly');
+
+  const rankingModel = sandbox.buildDeterministicChartCoach(
+    bounceRecord,
+    {
+      canonicalValues:{price:100, ma20:101, ma50:103, ma200:90, volume:2500000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:99.9, high:100.6, low:98.7, close:100.4, volume:2500000},
+          {date:'2026-06-30', open:100.8, high:101.3, low:99.6, close:100.1, volume:1500000},
+          {date:'2026-06-29', open:101.7, high:102.1, low:100.4, close:101.0, volume:1200000}
+        ]
+      }
+    },
+    {globalVerdict:{final_verdict:'watch'}}
+  );
+  assert.strictEqual(rankingModel.diagnostics.priorityOrder.slice(0, 3).join('|'), 'candle|trend|wicks', 'Section ranking order should remain stable for core educational sections');
+  assert.strictEqual(rankingModel.sections.filter(section => section.teachingFocus === true).length, 1, 'Only one section should receive the extra teaching expansion');
+  assert.ok(rankingModel.sections.some(section => section.key === 'what_next'), 'What next should be preserved when more than six candidate sections exist');
+
+  const mergedAiCoach = sandbox.selectReviewAiSummary(
+    bounceRecord,
+    {
+      chartCoach:{
+        source:'ai_chart_coach',
+        sections:[
+          {key:'volume', icon:'📊', label:'Volume', text:'Volume was unusually light, so the move still needs stronger backing.', confidence:0.61, source:'ai_chart_coach'},
+          {key:'candle', icon:'🟢', label:'Candle', text:'The green candle shows buyers pushed back into the close.', confidence:0.82, source:'ai_chart_coach', teachingFocus:true},
+          {key:'what_next', icon:'🎯', label:'What next?', text:'Look for another strong close to prove buyers can keep control.', confidence:0.66, source:'ai_chart_coach'}
+        ],
+        summaryText:'AI supplied chart coach.'
+      }
+    },
+    {
+      derivedStates:sandbox.analysisDerivedStatesFromRecord(bounceRecord),
+      globalVerdict:bounceRecord._globalVerdict
+    }
+  );
+  assert.strictEqual(mergedAiCoach.chartCoach.diagnostics.priorityOrder.join('|'), mergedAiCoach.chartCoach.sections.map(section => section.key).join('|'), 'Merged AI Chart Coach diagnostics priority order must match final rendered sections');
+  assert.strictEqual(mergedAiCoach.chartCoach.diagnostics.sectionConfidence.length, mergedAiCoach.chartCoach.sections.length, 'Merged AI Chart Coach section confidence diagnostics must match final rendered sections');
+  assert.strictEqual(mergedAiCoach.chartCoach.diagnostics.sectionConfidence.filter(section => section.teachingFocus === true).length, 1, 'Merged AI Chart Coach diagnostics must preserve a single teaching-focus section');
 }
 
 function runClientNormalizerRegression(){
@@ -466,6 +571,7 @@ function runClientNormalizerRegression(){
   assert.strictEqual(normalized.parseWarning, 'Model response was malformed JSON. Deterministic chart summary used instead.', 'Client normalizer should preserve parseWarning without throwing');
   assert.strictEqual(normalized.legacy_summary, '', 'Client normalizer should not invent a legacy summary when only structured fields exist');
   assert.strictEqual(normalized.candleStructureAnalysis.summary, 'Price is below the 20MA and 50MA but above the 200MA. Recent candles show a bounce attempt, but follow-through is still missing.', 'Structured candle summary should survive client normalization');
+  assert.ok(normalized.chartCoach && Array.isArray(normalized.chartCoach.sections), 'Client normalizer should preserve structured Chart Coach data');
 }
 
 function runServerCandleOrderRegression(){
@@ -525,9 +631,10 @@ function runSourceAssertions(){
   const serverSource = fs.readFileSync(path.join(root, 'netlify', 'functions', 'analyse-setup.js'), 'utf8');
   assert(appSource.includes('trustedMarketContext:'), 'App prompt payload must include trustedMarketContext');
   assert(appSource.includes("'candleStructureAnalysis'"), 'Prompt output keys must include candleStructureAnalysis');
+  assert(appSource.includes("'chartCoach'"), 'Prompt output keys must include chartCoach');
   assert(appSource.includes("chartVerificationNumberOrNull(read.ma20) === null && chartVerificationNumberOrNull(expected.ma20) === null"), 'Review diagnostics must suppress unreadable MA copy when trusted MA exists');
   assert(serverSource.includes('Use trustedMarketContext for all numeric values and canonical market facts.'), 'Server prompt must instruct AI to trust canonical market context');
-  assert(appSource.includes('function deterministicCandleStructureSummary'), 'App must include deterministic candle fallback helper');
+  assert(appSource.includes('function buildDeterministicChartCoach'), 'App must include deterministic Chart Coach helper');
   assert(appSource.includes('function selectReviewAiSummary'), 'App must include the Review AI summary authority selector');
 }
 

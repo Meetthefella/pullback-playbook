@@ -317,6 +317,16 @@ function buildMalformedJsonFallbackAnalysis(payload = {}, rawText = ''){
   const trustedMarketContext = normalizeObject(payload.trustedMarketContext);
   const canonicalValues = normalizeCanonicalValues({}, trustedMarketContext, {});
   const summary = deterministicServerCandleSummary(trustedMarketContext, canonicalValues);
+  const chartCoach = {
+    sections:[
+      {key:'trend', icon:'📈', label:'Trend', text:summary, confidence:0.72, teachingFocus:false, source:'deterministic_parse_fallback'},
+      {key:'what_next', icon:'🎯', label:'What next?', text:'Look for the next close to confirm whether buyers are improving or sellers are still in control.', confidence:0.62, teachingFocus:false, source:'deterministic_parse_fallback'}
+    ],
+    summaryText:`📈 Trend: ${summary}\n🎯 What next?: Look for the next close to confirm whether buyers are improving or sellers are still in control.`,
+    source:'deterministic_parse_fallback',
+    renderVersion:'chart-coach-v1',
+    explanationFacts:['parse_fallback']
+  };
   return {
     setup_type:'',
     verdict:'Watch',
@@ -338,6 +348,7 @@ function buildMalformedJsonFallbackAnalysis(payload = {}, rawText = ''){
       'Model response could not be parsed as JSON.',
       rawText ? 'Deterministic summary used from trusted market context.' : 'No structured model output was available.'
     ],
+    chartCoach,
     ai_observation_only:true,
     final_verdict:''
   };
@@ -349,6 +360,7 @@ function normaliseAnalysis(obj, payload = {}){
   const canonicalValues = normalizeCanonicalValues(obj?.canonicalValues || obj?.canonical_values, trustedMarketContext, imageFacts);
   const candleStructureAnalysis = normalizeObject(obj?.candleStructureAnalysis || obj?.candle_structure_analysis);
   const tradePlanCommentary = normalizeObject(obj?.tradePlanCommentary || obj?.trade_plan_commentary);
+  const chartCoachSource = normalizeObject(obj?.chartCoach || obj?.chart_coach);
   const confidenceWarnings = Array.isArray(obj?.confidenceWarnings || obj?.confidence_warnings)
     ? (obj.confidenceWarnings || obj.confidence_warnings).map(item => String(item))
     : [];
@@ -379,6 +391,26 @@ function normaliseAnalysis(obj, payload = {}){
     || candleStructureAnalysis?.summary,
     ''
   );
+  const chartCoach = {
+    sections:Array.isArray(chartCoachSource?.sections)
+      ? chartCoachSource.sections.map(section => {
+        const safe = normalizeObject(section);
+        return {
+          key:normaliseString(safe?.key, ''),
+          icon:normaliseString(safe?.icon, ''),
+          label:normaliseString(safe?.label, ''),
+          text:normaliseString(safe?.text, ''),
+          confidence:normaliseNumber(safe?.confidence),
+          teachingFocus:safe?.teachingFocus === true,
+          source:normaliseString(safe?.source, '')
+        };
+      }).filter(section => section.icon && section.label && section.text)
+      : [],
+    summaryText:normaliseString(chartCoachSource?.summaryText || chartCoachSource?.summary_text, ''),
+    source:normaliseString(chartCoachSource?.source, ''),
+    renderVersion:normaliseString(chartCoachSource?.renderVersion || chartCoachSource?.render_version, ''),
+    explanationFacts:normaliseStringArray(chartCoachSource?.explanationFacts || chartCoachSource?.explanation_facts)
+  };
   return {
     setup_type: normaliseString(obj?.setup_type, ''),
     verdict: 'Watch',
@@ -414,6 +446,7 @@ function normaliseAnalysis(obj, payload = {}){
     canonicalValues,
     candleStructureAnalysis,
     tradePlanCommentary,
+    chartCoach,
     confidenceWarnings,
     entry: '',
     stop: '',
@@ -538,11 +571,11 @@ exports.handler = async function handler(event){
       'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
       'Return exactly one JSON object.',
       'Return evidence fields only; ai_observation_only must be true.',
-      'Set coach_summary, plain_english_chart_read, constructive_evidence, risk_evidence, and what_needs_to_improve to empty values.',
+      'Set coach_summary, plain_english_chart_read, constructive_evidence, risk_evidence, what_needs_to_improve, and chartCoach to empty values.',
       'If a field is unknown, return null.'
     ].join('\n')
     : [
-      'Analyse a Quality Pullback chart as an observation-only chart coach.',
+      'Analyse a Quality Pullback chart as Chart Coach, an observation-only educational feature.',
       'Use plain English for a novice retail trader.',
       'Be honest about uncertainty.',
       'Do not invent chart details that are not provided.',
@@ -559,7 +592,11 @@ exports.handler = async function handler(event){
       'Do not fabricate MA values. Visibility can be partial/inferred; numeric values require readable text.',
       'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',
       'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
-      'Return extractedFromImage, trustedMarketContext, canonicalValues, candleStructureAnalysis, tradePlanCommentary, confidenceWarnings, and a short novice-friendly candle read.',
+      'Return extractedFromImage, trustedMarketContext, canonicalValues, candleStructureAnalysis, tradePlanCommentary, chartCoach, confidenceWarnings, and a short novice-friendly candle read.',
+      'chartCoach is the main educational output.',
+      'chartCoach.sections must contain at most 6 relevant emoji-led sections.',
+      'The final section should usually be What next?.',
+      'Expand only the strongest teaching opportunity with one extra beginner-friendly learning sentence.',
       'Return exactly one JSON object.',
       'Return evidence fields only; ai_observation_only must be true.',
       'If a field is unknown, return null.'

@@ -2004,7 +2004,7 @@ function ensureOnboardingDisplayBridge(){
           <button class="ghost" type="button" disabled>Remove</button>
         </div>
         <details class="responsepanel compact-open-on-demand" data-tour="ai-summary" open>
-          <summary>AI Summary</summary>
+          <summary>Chart Coach</summary>
           <div class="tiny review-ai-preview">The setup looks constructive, but the bounce is not confirmed yet.</div>
         </details>
         <div class="review-action-row review-action-row--bottom">
@@ -22668,7 +22668,7 @@ function finalDisplayedAnalysisChartRead(record, analysis){
     derivedStates,
     globalVerdict
   });
-  const candleFallback = selectedSummary.fallback || deterministicCandleStructureSummary(item, analysisState, {
+  const chartCoachFallback = selectedSummary.fallback || buildDeterministicChartCoach(item, analysisState, {
     derivedStates,
     globalVerdict
   });
@@ -22705,7 +22705,7 @@ function finalDisplayedAnalysisChartRead(record, analysis){
     text:sanitizedText,
     applied:correction.applied || useFallback,
     reason:useFallback
-      ? `Deterministic candle fallback used: ${candleFallback.reason}`
+      ? 'Deterministic Chart Coach used.'
       : (sanitizedText !== baseText ? 'AI structural/bounce wording sanitized against resolver state.' : correction.reason),
     priceVs20:correction.priceVs20,
     priceVs50:correction.priceVs50,
@@ -22715,9 +22715,26 @@ function finalDisplayedAnalysisChartRead(record, analysis){
     outputChanged:correction.outputChanged || sanitizedText !== baseText,
     usedDeterministicFallback:useFallback,
     selectedSummarySource:String(selectedSummary.source || ''),
-    fallbackReason:candleFallback.reason,
-    fallbackFacts:candleFallback.facts || null
+    fallbackReason:'deterministic_chart_coach',
+    fallbackFacts:chartCoachFallback.facts || null,
+    chartCoach:selectedSummary.chartCoach || chartCoachFallback
   };
+}
+
+function renderChartCoachMarkup(display = {}){
+  const chartCoach = display && display.chartCoach && typeof display.chartCoach === 'object'
+    ? display.chartCoach
+    : null;
+  const sections = chartCoach && Array.isArray(chartCoach.sections) ? chartCoach.sections : [];
+  if(!sections.length){
+    return escapeHtml(String(display && display.text || '').trim());
+  }
+  return sections.map(section => {
+    const lines = String(section.text || '').split('\n').map(line => String(line || '').trim()).filter(Boolean);
+    const copy = lines.map((line, index) => `<div class="chart-coach-copy${index > 0 ? ' chart-coach-copy--lesson' : ''}">${escapeHtml(line)}</div>`).join('');
+    const confidenceAttr = Number.isFinite(Number(section.confidence)) ? ` data-chart-coach-confidence="${escapeHtml(Number(section.confidence).toFixed(2))}"` : '';
+    return `<div class="chart-coach-section${section.teachingFocus === true ? ' chart-coach-section--teaching' : ''}" data-chart-coach-key="${escapeHtml(String(section.key || ''))}"${confidenceAttr}><div class="chart-coach-heading">${escapeHtml(`${section.icon} ${section.label}`)}</div>${copy}</div>`;
+  }).join('');
 }
 
 function describeCandleBodyDirection(candle = {}){
@@ -22959,34 +22976,437 @@ function deterministicCandleStructureSummary(record = {}, analysis = {}, options
   };
 }
 
+function chartCoachWordCount(text = ''){
+  return String(text || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+const CHART_COACH_SECTION_PRIORITY = Object.freeze({
+  candle:100,
+  indecision:96,
+  trend:90,
+  wicks:85,
+  support:82,
+  resistance:82,
+  volume:75,
+  strength:70,
+  weakness:70,
+  what_next:0
+});
+
+function chartCoachConfidenceSentence(confidence, strongText, softText){
+  return Number(confidence) >= 0.8 ? strongText : softText;
+}
+
+function chartCoachBodyDescriptor(candle = {}){
+  const open = numericOrNull(candle.open);
+  const high = numericOrNull(candle.high);
+  const low = numericOrNull(candle.low);
+  const close = numericOrNull(candle.close);
+  if(![open, high, low, close].every(Number.isFinite)) return 'normal';
+  const range = Math.max(0, high - low);
+  if(range <= 0) return 'small';
+  const body = Math.abs(close - open);
+  const ratio = body / range;
+  if(ratio >= 0.65) return 'strong';
+  if(ratio <= 0.2) return 'small';
+  return 'normal';
+}
+
+function chartCoachStructureSignals(sequence = []){
+  const recent = Array.isArray(sequence) ? sequence.slice(0, 4) : [];
+  const highs = recent.map(item => numericOrNull(item && item.high));
+  const lows = recent.map(item => numericOrNull(item && item.low));
+  let higherHighs = 0;
+  let higherLows = 0;
+  let lowerHighs = 0;
+  let lowerLows = 0;
+  for(let index = 0; index < recent.length - 1; index += 1){
+    const currentHigh = highs[index];
+    const nextHigh = highs[index + 1];
+    const currentLow = lows[index];
+    const nextLow = lows[index + 1];
+    if(Number.isFinite(currentHigh) && Number.isFinite(nextHigh)){
+      if(currentHigh > nextHigh) higherHighs += 1;
+      if(currentHigh < nextHigh) lowerHighs += 1;
+    }
+    if(Number.isFinite(currentLow) && Number.isFinite(nextLow)){
+      if(currentLow > nextLow) higherLows += 1;
+      if(currentLow < nextLow) lowerLows += 1;
+    }
+  }
+  return {higherHighs, higherLows, lowerHighs, lowerLows};
+}
+
+function chartCoachPrimaryOpportunityScore(section = {}){
+  const key = String(section.key || '').trim();
+  if(key === 'wicks') return 95;
+  if(key === 'indecision') return 92;
+  if(key === 'candle') return 90;
+  if(key === 'volume') return 85;
+  if(key === 'support' || key === 'resistance') return 83;
+  if(key === 'strength') return 80;
+  if(key === 'weakness') return 80;
+  if(key === 'trend') return 75;
+  return 10;
+}
+
+function chartCoachPriorityForKey(key = ''){
+  const normalized = String(key || '').trim();
+  const priorityMap = {
+    candle:100,
+    indecision:96,
+    trend:90,
+    wicks:85,
+    support:82,
+    resistance:82,
+    volume:75,
+    strength:70,
+    weakness:70,
+    what_next:0
+  };
+  return Object.prototype.hasOwnProperty.call(priorityMap, normalized)
+    ? priorityMap[normalized]
+    : 10;
+}
+
+function chartCoachProximityLabel(price, level, tolerancePct = 0.015){
+  if(!Number.isFinite(price) || !Number.isFinite(level) || level === 0) return '';
+  const distancePct = Math.abs(price - level) / Math.abs(level);
+  return distancePct <= tolerancePct ? 'near' : '';
+}
+
+function finalizeChartCoachSections(sections = []){
+  const input = (Array.isArray(sections) ? sections : [])
+    .map((section, index) => ({
+      key:String(section && section.key || '').trim(),
+      icon:String(section && section.icon || '').trim(),
+      label:String(section && section.label || '').trim(),
+      text:String(section && section.text || '').trim(),
+      confidence:Number.isFinite(Number(section && section.confidence)) ? Number(section.confidence) : 0.65,
+      teachingFocus:section && section.teachingFocus === true,
+      source:String(section && section.source || 'deterministic').trim(),
+      _index:index
+    }))
+    .filter(section => section.icon && section.label && section.text);
+  const sortSections = list => list.sort((left, right) => {
+    const priorityDelta = chartCoachPriorityForKey(right.key) - chartCoachPriorityForKey(left.key);
+    if(priorityDelta !== 0) return priorityDelta;
+    const scoreDelta = chartCoachPrimaryOpportunityScore(right) - chartCoachPrimaryOpportunityScore(left);
+    if(scoreDelta !== 0) return scoreDelta;
+    return left._index - right._index;
+  });
+  const whatNextSections = input.filter(section => section.key === 'what_next');
+  const nonWhatNextSections = input.filter(section => section.key !== 'what_next');
+  const rankedNonWhatNext = sortSections(nonWhatNextSections).slice(0, 5);
+  const rankedWhatNext = sortSections(whatNextSections).slice(0, 1);
+  const ranked = sortSections([...rankedNonWhatNext, ...rankedWhatNext])
+    .slice(0, rankedWhatNext.length ? 6 : 5)
+    .map(section => {
+      const cloned = {...section};
+      delete cloned._index;
+      return cloned;
+    });
+  let teachingAssigned = false;
+  ranked.forEach(section => {
+    if(section.teachingFocus === true && !teachingAssigned){
+      teachingAssigned = true;
+      return;
+    }
+    section.teachingFocus = false;
+  });
+  return ranked;
+}
+
+function chartCoachDiagnosticsForSections(sections = []){
+  const finalSections = Array.isArray(sections) ? sections : [];
+  return {
+    sectionConfidence:finalSections.map(section => ({
+      key:String(section && section.key || '').trim(),
+      confidence:Number.isFinite(Number(section && section.confidence)) ? Number(section.confidence) : null,
+      teachingFocus:section && section.teachingFocus === true
+    })),
+    priorityOrder:finalSections.map(section => String(section && section.key || '').trim())
+  };
+}
+
+function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
+  const item = normalizeTickerRecord(record || {});
+  const state = analysis && typeof analysis === 'object' ? analysis : {};
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : resolveGlobalVerdict(item);
+  const facts = canonicalCandleContext(item, state);
+  const derivedStates = options.derivedStates && typeof options.derivedStates === 'object' ? options.derivedStates : analysisDerivedStatesFromRecord(item);
+  const sections = [];
+  const explanationFacts = [];
+  const latest = facts.latest && typeof facts.latest === 'object' ? facts.latest : {};
+  const latestDirection = facts.latestDirection || 'unknown';
+  const bodyDescriptor = chartCoachBodyDescriptor(latest);
+  const volume = numericOrNull((state.canonicalValues && state.canonicalValues.volume) || (state.trustedMarketContext && state.trustedMarketContext.volume) || (item.marketData && item.marketData.volume));
+  const avgVolume30d = numericOrNull((item.marketData && (item.marketData.avgVolume30d || item.marketData.avgVolume)) || (state.trustedMarketContext && state.trustedMarketContext.avgVolume30d));
+  const volumeRatio = Number.isFinite(volume) && Number.isFinite(avgVolume30d) && avgVolume30d > 0 ? volume / avgVolume30d : null;
+  const structureSignals = chartCoachStructureSignals((state.trustedMarketContext && state.trustedMarketContext.recentCandleSequence) || []);
+  const recentHigh = numericOrNull(latest.high);
+  const recentLow = numericOrNull(latest.low);
+  const near20 = chartCoachProximityLabel(facts.currentPrice, facts.ma20);
+  const near50 = chartCoachProximityLabel(facts.currentPrice, facts.ma50);
+  const addSection = (section = {}) => {
+    if(!section || !section.icon || !section.label || !section.text) return;
+    sections.push({
+      key:String(section.key || '').trim(),
+      icon:String(section.icon || '').trim(),
+      label:String(section.label || '').trim(),
+      text:String(section.text || '').trim(),
+      confidence:Number.isFinite(Number(section.confidence)) ? Number(section.confidence) : 0.65,
+      teachingFocus:false,
+      source:'deterministic'
+    });
+    if(section.fact) explanationFacts.push(String(section.fact).trim());
+  };
+
+  if(latestDirection === 'green' || latestDirection === 'red' || latestDirection === 'flat'){
+    let candleText = latestDirection === 'green'
+      ? chartCoachConfidenceSentence(0.92, 'The latest green candle shows buyers finished the session stronger.', 'The latest green candle suggests buyers improved into the close.')
+      : (latestDirection === 'red'
+        ? chartCoachConfidenceSentence(0.92, 'The latest red candle shows sellers had more control into the close.', 'The latest red candle suggests sellers still had the edge by the close.')
+        : 'The latest candle closed near where it opened, which shows neither side had clear control.');
+    if(bodyDescriptor === 'strong'){
+      candleText += latestDirection === 'green'
+        ? ' The body is wide, so the buying move was decisive.'
+        : (latestDirection === 'red' ? ' The body is wide, so the selling pressure was decisive.' : '');
+    }else if(bodyDescriptor === 'small'){
+      candleText += ' The small body shows hesitation rather than commitment.';
+    }
+    addSection({
+      key:'candle',
+      icon:latestDirection === 'red' ? '🔴' : (latestDirection === 'flat' ? '⚪' : '🟢'),
+      label:'Candle',
+      text:candleText,
+      confidence:0.92,
+      fact:`latest_${latestDirection}_candle`
+    });
+  }
+
+  if(bodyDescriptor === 'small' || latestDirection === 'flat'){
+    addSection({
+      key:'indecision',
+      icon:'⚪',
+      label:'Indecision',
+      text:'The latest candle is small, so neither buyers nor sellers proved much control by the close.',
+      confidence:0.86,
+      fact:'doji_or_small_body'
+    });
+  }
+
+  if(facts.latestWickRejection === 'lower_rejection' || facts.latestWickRejection === 'upper_rejection'){
+    const wickText = facts.latestWickRejection === 'lower_rejection'
+      ? chartCoachConfidenceSentence(0.9, 'The long lower wick shows buyers stepped in after early selling.', 'The lower wick suggests buyers were willing to defend lower prices.')
+      : chartCoachConfidenceSentence(0.9, 'The long upper wick shows sellers pushed the price back before the close.', 'The upper wick suggests sellers were active before the close.');
+    addSection({
+      key:'wicks',
+      icon:'🕯',
+      label:'Wicks',
+      text:wickText,
+      confidence:0.9,
+      fact:`${facts.latestWickRejection}`
+    });
+  }
+
+  if((facts.latestWickRejection === 'lower_rejection' && (near20 === 'near' || near50 === 'near'))
+    || (facts.bounceAttempt && (near20 === 'near' || near50 === 'near'))){
+    const supportLabel = near20 === 'near' ? 'short-term average' : 'medium-term average';
+    addSection({
+      key:'support',
+      icon:'➕',
+      label:'Support',
+      text:`Buyers stepped in near the ${supportLabel}, which can act like a support area when demand returns there.`,
+      confidence:0.8,
+      fact:`support_${supportLabel.replace(/[^a-z]/gi, '_').toLowerCase()}`
+    });
+  }
+
+  if(facts.latestWickRejection === 'upper_rejection' && Number.isFinite(recentHigh)){
+    addSection({
+      key:'resistance',
+      icon:'⚠️',
+      label:'Resistance',
+      text:'The upper wick shows price was pushed back near a recent ceiling, which suggests sellers were active there.',
+      confidence:0.81,
+      fact:'resistance_rejection'
+    });
+  }
+
+  const trendParts = [];
+  if(facts.maRelation.above20 === true) trendParts.push('above the short-term average');
+  else if(facts.maRelation.above20 === false) trendParts.push('below the short-term average');
+  if(facts.maRelation.above50 === true) trendParts.push('above the medium-term average');
+  else if(facts.maRelation.above50 === false) trendParts.push('below the medium-term average');
+  if(structureSignals.higherHighs >= 2 || structureSignals.higherLows >= 2){
+    trendParts.push('recent swings are still stepping higher');
+  }else if(structureSignals.lowerHighs >= 2 || structureSignals.lowerLows >= 2){
+    trendParts.push('recent swings are still slipping lower');
+  }
+  if(trendParts.length){
+    const trendText = `The price is ${trendParts.join(', ')}, which ${facts.maRelation.above20 === false || facts.maRelation.above50 === false ? 'shows the pullback still needs repair.' : 'keeps the trend picture healthier.'}`;
+    addSection({
+      key:'trend',
+      icon:'📈',
+      label:'Trend',
+      text:trendText,
+      confidence:(facts.maRelation.above20 === false || facts.maRelation.above50 === false) ? 0.84 : 0.88,
+      fact:'trend_context'
+    });
+  }
+
+  if(facts.followThroughConfirmed || facts.higherClose || (structureSignals.higherHighs >= 1 && structureSignals.higherLows >= 1)){
+    const strengthText = facts.followThroughConfirmed
+      ? 'Recent candles are following through higher, so buyers are doing more than just bouncing for one day.'
+      : (facts.higherClose
+        ? 'The latest close improved on the prior candle, which is an early sign buyers are pushing back.'
+        : 'Recent swings are starting to improve, which could be an early sign the chart is firming up.');
+    addSection({
+      key:'strength',
+      icon:'📏',
+      label:'Strength',
+      text:strengthText,
+      confidence:facts.followThroughConfirmed ? 0.88 : 0.72,
+      fact:'strength_signal'
+    });
+  }
+
+  if(facts.failedBounce || facts.lowerClose || (structureSignals.lowerHighs >= 1 && structureSignals.lowerLows >= 1)){
+    const weaknessText = facts.failedBounce
+      ? 'The bounce attempt faded quickly, so sellers have not really lost control yet.'
+      : (facts.lowerClose
+        ? 'The latest close slipped under the prior candle, which keeps the chart vulnerable.'
+        : 'Lower highs or lower lows are still showing up, so the pullback is not fully repaired.');
+    addSection({
+      key:'weakness',
+      icon:'📉',
+      label:'Weakness',
+      text:weaknessText,
+      confidence:facts.failedBounce ? 0.87 : 0.72,
+      fact:'weakness_signal'
+    });
+  }
+
+  if(volumeRatio !== null && (volumeRatio >= 1.2 || volumeRatio <= 0.8)){
+    const volumeText = volumeRatio >= 1.2
+      ? 'Volume is running above normal, which means more traders were involved in this move.'
+      : 'Volume is lighter than normal, which means this move has less backing behind it.';
+    addSection({
+      key:'volume',
+      icon:'📊',
+      label:'Volume',
+      text:volumeText,
+      confidence:0.83,
+      fact:volumeRatio >= 1.2 ? 'high_volume' : 'low_volume'
+    });
+  }
+
+  let whatNextText = 'Look for another strong close to show the move is gaining support.';
+  if(facts.followThroughConfirmed){
+    whatNextText = 'Look for another higher low or another firm close to show buyers can keep control.';
+  }else if(facts.failedBounce){
+    whatNextText = 'Look for a steadier base or a stronger reclaim before trusting this bounce attempt.';
+  }else if(facts.maRelation.above20 === false){
+    whatNextText = 'Look for the price to reclaim the short-term average with a stronger close.';
+  }else if(volumeRatio !== null && volumeRatio <= 0.8){
+    whatNextText = 'Look for stronger volume to prove the move has more conviction behind it.';
+  }
+  addSection({
+    key:'what_next',
+    icon:'🎯',
+    label:'What next?',
+    text:whatNextText,
+    confidence:0.7,
+    fact:'next_check'
+  });
+
+  const rankedSections = finalizeChartCoachSections(sections);
+  const primaryTeachingSection = rankedSections
+    .filter(section => section.key !== 'what_next')
+    .sort((left, right) => chartCoachPrimaryOpportunityScore(right) - chartCoachPrimaryOpportunityScore(left))[0] || null;
+  if(primaryTeachingSection){
+    let learningText = '';
+    if(primaryTeachingSection.key === 'wicks'){
+      learningText = primaryTeachingSection.text.toLowerCase().includes('lower wick')
+        ? 'Long lower wicks often appear where buyers see value and refuse lower prices.'
+        : 'Long upper wicks often appear where sellers are willing to hit the price back down.';
+    }else if(primaryTeachingSection.key === 'candle'){
+      learningText = latestDirection === 'green'
+        ? 'A strong green candle matters more when the close finishes near the top of the range.'
+        : (latestDirection === 'red' ? 'A strong red candle matters more when it closes near the low of the session.' : 'Small-bodied candles often appear when the market is undecided.');
+    }else if(primaryTeachingSection.key === 'volume'){
+      learningText = volumeRatio !== null && volumeRatio >= 1.2
+        ? 'Higher volume can make a move more believable because more traders took part.'
+        : 'Low volume can make a move easier to reverse because fewer traders backed it.';
+    }else if(primaryTeachingSection.key === 'trend'){
+      learningText = 'Higher highs and higher lows usually mean buyers are still guiding the bigger picture.';
+    }else if(primaryTeachingSection.key === 'strength'){
+      learningText = 'Follow-through matters because one good candle is less useful than repeated strength.';
+    }else if(primaryTeachingSection.key === 'weakness'){
+      learningText = 'Failed bounce attempts often warn that sellers are still active on rallies.';
+    }else if(primaryTeachingSection.key === 'support'){
+      learningText = 'Support is an area where buyers have shown they are willing to step in again.';
+    }else if(primaryTeachingSection.key === 'resistance'){
+      learningText = 'Resistance is an area where sellers have recently been willing to push price back down.';
+    }
+    if(learningText){
+      primaryTeachingSection.text = `${primaryTeachingSection.text}\n💡 Learning point: ${learningText}`.trim();
+      primaryTeachingSection.teachingFocus = true;
+    }
+  }
+  const finalizedSections = finalizeChartCoachSections(rankedSections);
+  const summaryText = finalizedSections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n');
+  return {
+    sections:finalizedSections,
+    summaryText,
+    source:'deterministic',
+    renderVersion:'chart-coach-v1',
+    explanationFacts:[...new Set(explanationFacts)].filter(Boolean),
+    confidence:0.78,
+    facts,
+    diagnostics:chartCoachDiagnosticsForSections(finalizedSections)
+  };
+}
+
+function chartCoachModelIsUsable(value){
+  return !!(
+    value
+    && typeof value === 'object'
+    && Array.isArray(value.sections)
+    && value.sections.some(section => section && section.icon && section.label && section.text)
+  );
+}
+
 function selectReviewAiSummary(record, analysis = {}, options = {}){
   const item = normalizeTickerRecord(record || {});
   const state = analysis && typeof analysis === 'object' ? analysis : {};
-  const candleStructureAnalysis = state.candleStructureAnalysis && typeof state.candleStructureAnalysis === 'object' ? state.candleStructureAnalysis : {};
-  const tradePlanCommentary = state.tradePlanCommentary && typeof state.tradePlanCommentary === 'object' ? state.tradePlanCommentary : {};
-  const candleSummary = String(candleStructureAnalysis.summary || candleStructureAnalysis.noviceFriendlyCandleRead || candleStructureAnalysis.novice_friendly_candle_read || '').trim();
-  const tradePlanSummary = String(tradePlanCommentary.summary || '').trim();
-  const legacySummary = String(state.legacy_summary || state.plain_english_chart_read || state.chart_read || state.coach_summary || '').trim();
-  const parseWarning = String(state.parseWarning || state.parse_warning || '').trim();
   const derivedStates = options.derivedStates && typeof options.derivedStates === 'object' ? options.derivedStates : analysisDerivedStatesFromRecord(item);
   const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : resolveGlobalVerdict(item);
-  const candleFallback = deterministicCandleStructureSummary(item, state, {
-    derivedStates,
-    globalVerdict
-  });
-  if(candleFallback.available && (parseWarning || !state || !Object.keys(state).length)){
-    return {text:String(candleFallback.text || '').trim(), source:'deterministic_parse_or_missing_fallback', fallback:candleFallback};
+  const deterministicCoach = buildDeterministicChartCoach(item, state, {derivedStates, globalVerdict});
+  const chartCoach = state.chartCoach && typeof state.chartCoach === 'object' ? state.chartCoach : null;
+  if(chartCoachModelIsUsable(chartCoach)){
+    const mergedSections = finalizeChartCoachSections(Array.isArray(chartCoach.sections) && chartCoach.sections.length ? chartCoach.sections : deterministicCoach.sections);
+    const mergedChartCoach = {
+      ...deterministicCoach,
+      ...chartCoach,
+      sections:mergedSections,
+      summaryText:String(chartCoach.summaryText || mergedSections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n') || deterministicCoach.summaryText || '').trim(),
+      diagnostics:chartCoachDiagnosticsForSections(mergedSections)
+    };
+    return {
+      text:String(mergedChartCoach.summaryText || '').trim(),
+      source:String(chartCoach.source || 'ai_chart_coach'),
+      chartCoach:mergedChartCoach,
+      fallback:deterministicCoach
+    };
   }
-  if(candleSummary && !isGenericAiCandleCommentary(candleSummary) && !aiCandleCommentaryContradictsCanonical(candleSummary, candleFallback.facts || {})){
-    return {text:candleSummary, source:'candle_structure_analysis', fallback:candleFallback};
-  }
-  if(tradePlanSummary && !isGenericTradePlanCommentary(tradePlanSummary)){
-    return {text:tradePlanSummary, source:'trade_plan_commentary', fallback:candleFallback};
-  }
-  if(candleFallback.available && (!legacySummary || isGenericAiCandleCommentary(legacySummary) || aiCandleCommentaryContradictsCanonical(legacySummary, candleFallback.facts || {}))){
-    return {text:String(candleFallback.text || '').trim(), source:'deterministic_generic_or_conflict_fallback', fallback:candleFallback};
-  }
-  return {text:legacySummary, source:'legacy_summary_fallback', fallback:candleFallback};
+  return {
+    text:String(deterministicCoach.summaryText || '').trim(),
+    source:'deterministic_chart_coach',
+    chartCoach:deterministicCoach,
+    fallback:deterministicCoach
+  };
 }
 
 function savedAiNoPlanMarkup(chartReadDisplay){
@@ -27409,7 +27829,7 @@ function renderCardStatusLine(card, loading, analysisBusy){
   }
   if(card.lastResponse) return 'Latest prompt and response saved to this ticker.';
   if(analysisBusy) return 'Another setup is being analysed right now.';
-  return 'No AI analysis saved yet.';
+  return 'No Chart Coach saved yet.';
 }
 
 function renderCardStatusLineFromRecord(record, loading, analysisBusy){
@@ -27423,7 +27843,7 @@ function renderCardStatusLineFromRecord(record, loading, analysisBusy){
   }
   if(analysisState.hasSavedAnalysis) return 'Latest prompt and response saved to this ticker.';
   if(analysisBusy) return 'Another setup is being analysed right now.';
-  return 'No AI analysis saved yet.';
+  return 'No Chart Coach saved yet.';
 }
 
 function setReviewAnalysisState(record, nextState = {}){
@@ -29869,11 +30289,38 @@ function normalizeAnalysisResponse(raw){
     return Number.isFinite(numeric) ? numeric : null;
   };
   const normalizeObject = value => value && typeof value === 'object' && !Array.isArray(value) ? cloneData(value, {}) : null;
+  const normalizeChartCoach = value => {
+    const safe = normalizeObject(value) || {};
+    const sections = Array.isArray(safe.sections)
+      ? safe.sections.map(section => {
+        const item = normalizeObject(section) || {};
+        return {
+          key:String(item.key || '').trim(),
+          icon:String(item.icon || '').trim(),
+          label:String(item.label || '').trim(),
+          text:String(item.text || '').trim(),
+          confidence:Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : null,
+          teachingFocus:item.teachingFocus === true,
+          source:String(item.source || '').trim()
+        };
+      }).filter(section => section.icon && section.label && section.text)
+      : [];
+    return {
+      sections,
+      summaryText:String(safe.summaryText || safe.summary_text || '').trim(),
+      source:String(safe.source || '').trim(),
+      renderVersion:String(safe.renderVersion || safe.render_version || '').trim(),
+      explanationFacts:Array.isArray(safe.explanationFacts || safe.explanation_facts)
+        ? (safe.explanationFacts || safe.explanation_facts).map(item => String(item || '').trim()).filter(Boolean)
+        : []
+    };
+  };
   const imageFacts = normalizeObject(raw.extractedFromImage || raw.extracted_from_image) || {};
   const trustedMarketContext = normalizeObject(raw.trustedMarketContext || raw.trusted_market_context) || {};
   const rawCanonicalValues = normalizeObject(raw.canonicalValues || raw.canonical_values) || {};
   const candleStructureAnalysis = normalizeObject(raw.candleStructureAnalysis || raw.candle_structure_analysis) || {};
   const tradePlanCommentary = normalizeObject(raw.tradePlanCommentary || raw.trade_plan_commentary) || {};
+  const chartCoach = normalizeChartCoach(raw.chartCoach || raw.chart_coach);
   const confidenceWarnings = Array.isArray(raw.confidenceWarnings || raw.confidence_warnings)
     ? (raw.confidenceWarnings || raw.confidence_warnings).map(item => String(item || '').trim()).filter(Boolean)
     : [];
@@ -29972,6 +30419,7 @@ function normalizeAnalysisResponse(raw){
     canonicalValues:canonicalValues,
     candleStructureAnalysis:candleStructureAnalysis,
     tradePlanCommentary:tradePlanCommentary,
+    chartCoach,
     confidenceWarnings:confidenceWarnings,
     entry:'',
     stop:'',
@@ -30501,6 +30949,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     canonicalValues:{},
     candleStructureAnalysis:{},
     tradePlanCommentary:{},
+    chartCoach:{sections:[], summaryText:'', source:'', renderVersion:'v1', explanationFacts:[]},
     confidenceWarnings:[],
     final_verdict:''
   };
@@ -30553,6 +31002,9 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   const tradePlanCommentary = parsed.tradePlanCommentary && typeof parsed.tradePlanCommentary === 'object'
     ? cloneData(parsed.tradePlanCommentary, {})
     : {};
+  const chartCoach = parsed.chartCoach && typeof parsed.chartCoach === 'object'
+    ? cloneData(parsed.chartCoach, {})
+    : {sections:[], summaryText:'', source:'', renderVersion:'v1', explanationFacts:[]};
   const confidenceWarnings = Array.isArray(parsed.confidenceWarnings) ? parsed.confidenceWarnings.slice() : [];
   if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
     const failureReason = !parsed.visible_ticker && !parsed.visible_timeframe && parsed.visible_latest_price == null
@@ -30615,6 +31067,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     canonicalValues,
     candleStructureAnalysis,
     tradePlanCommentary,
+    chartCoach,
     confidenceWarnings,
     entry,
     stop,
@@ -38994,39 +39447,64 @@ function renderReviewWorkspace(options = {}){
     ? `<details class="compact-details review-chart-controls"><summary>Change chart</summary>${chartControlsFullMarkup}</details>`
     : chartControlsFullMarkup;
   let aiSummaryConflictDetected = false;
-  const aiSummaryPreview = (() => {
+  const chartCoachDisplay = (() => {
     const manualConfirmedMismatch = chartPipelineHasManualConfirmedMismatch(simplifiedChartPipeline || {}, record.ticker || '');
     if(manualConfirmedMismatch){
       const mismatchReadTicker = normaliseVisibleTicker(simplifiedChartPipeline && simplifiedChartPipeline.readFacts && simplifiedChartPipeline.readFacts.ticker || '') || 'Unknown';
       const mismatchExpectedTicker = normaliseVisibleTicker(record.ticker || '') || 'Unknown';
-      return `AI summary withheld: chart was manually confirmed despite a ticker mismatch (read ${mismatchReadTicker}, expected ${mismatchExpectedTicker}). Upload the correct chart for a reliable AI summary.`;
+      return {
+        text:`Chart Coach is withheld because the chart was manually confirmed despite a ticker mismatch (read ${mismatchReadTicker}, expected ${mismatchExpectedTicker}). Upload the correct chart for reliable coaching.`,
+        markup:'',
+        title:'Chart Coach'
+      };
     }
-    if(chartVerificationBlocksAiReview) return String(chartUiDecision && (chartUiDecision.summary || chartUiDecision.title) || 'AI chart analysis is blocked until you confirm this chart manually.').trim();
-    if(!aiSummaryGuard.allowedToRender) return 'No AI analysis saved yet.';
-    if(aiAnalysisSuppressedByChartMismatch) return aiSuppressionText;
-    if(analysisState.error) return `AI analysis failed: ${analysisState.error}`;
-    if(analysisUiState === 'running') return `🤖 ${analysisLoadingStage}`;
-    if(analysisUiState === 'idle' || analysisUiState === 'ready') return 'No AI analysis saved yet.';
+    if(chartVerificationBlocksAiReview) return {
+      text:String(chartUiDecision && (chartUiDecision.summary || chartUiDecision.title) || 'Chart Coach is blocked until you confirm this chart manually.').trim(),
+      markup:'',
+      title:'Chart Coach'
+    };
+    if(!aiSummaryGuard.allowedToRender) return {text:'No Chart Coach saved yet.', markup:'', title:'Chart Coach'};
+    if(aiAnalysisSuppressedByChartMismatch) return {text:aiSuppressionText, markup:'', title:'Chart Coach'};
+    if(analysisState.error) return {text:`Chart Coach failed: ${analysisState.error}`, markup:'', title:'Chart Coach'};
+    if(analysisUiState === 'running') return {text:`Chart Coach is building: ${analysisLoadingStage}`, markup:'', title:'Chart Coach'};
+    if(analysisUiState === 'idle' || analysisUiState === 'ready') return {text:'No Chart Coach saved yet.', markup:'', title:'Chart Coach'};
     if(analysisState.normalizedAnalysis){
       const chartRead = finalDisplayedAnalysisChartRead(record, analysisState.normalizedAnalysis);
       const text = String(chartRead && chartRead.text || '').trim();
       if(reviewAiSummaryConflictsWithResolvedState(text, resolvedReviewDisplay)){
         aiSummaryConflictDetected = true;
-        return resolvedReviewDisplay.resolvedNarrative || 'Resolved review state takes precedence over raw AI notes.';
+        return {
+          text:resolvedReviewDisplay.resolvedNarrative || 'Resolved review state takes precedence over raw notes.',
+          markup:'',
+          title:'Chart Coach Notes'
+        };
       }
-      return text || 'No AI analysis saved yet.';
+      return {
+        text:text || 'No Chart Coach saved yet.',
+        markup:renderChartCoachMarkup(chartRead),
+        title:'Chart Coach'
+      };
     }
     const fallback = String(analysisState.rawAnalysis || '').trim();
     if(reviewAiSummaryConflictsWithResolvedState(fallback, resolvedReviewDisplay)){
       aiSummaryConflictDetected = true;
-      return resolvedReviewDisplay.resolvedNarrative || 'Resolved review state takes precedence over raw AI notes.';
+      return {
+        text:resolvedReviewDisplay.resolvedNarrative || 'Resolved review state takes precedence over raw notes.',
+        markup:'',
+        title:'Chart Coach Notes'
+      };
     }
-    return fallback || 'No AI analysis saved yet.';
+    return {text:fallback || 'No Chart Coach saved yet.', markup:'', title:'Chart Coach'};
   })();
   const aiSummaryTitle = aiSummaryConflictDetected
-    ? 'AI Notes'
-    : 'AI Summary';
-  const aiSummaryVisible = !!String(aiSummaryPreview || '').trim() && aiSummaryPreview !== 'No AI analysis saved yet.';
+    ? 'Chart Coach Notes'
+    : (chartCoachDisplay.title || 'Chart Coach');
+  const aiSummaryPreview = String(chartCoachDisplay.text || '').trim();
+  const chartCoachMarkup = String(chartCoachDisplay.markup || '').trim();
+  const aiSummaryVisible = !!String(aiSummaryPreview || '').trim()
+    && aiSummaryPreview !== 'No Chart Coach saved yet.'
+    && !chartVerificationBlocksAiReview
+    && !aiAnalysisSuppressedByChartMismatch;
   if(chartVerificationBlocksAiReview && !loading && !analysisBusy){
     analyseDisabled = true;
     analyseLabel = 'Confirm chart first';
@@ -39246,7 +39724,7 @@ function renderReviewWorkspace(options = {}){
       ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
       ${aiSummaryVisible ? `<details class="responsepanel compact-open-on-demand" id="reviewResponse" data-tour="ai-summary" ${analysisResponseOpen}>
         <summary id="reviewAiSummaryTitle">${escapeHtml(aiSummaryTitle)}</summary>
-        <div class="tiny review-ai-preview" id="reviewAiSummaryPreview">${escapeHtml(aiSummaryPreview)}</div>
+        <div class="tiny review-ai-preview${chartCoachMarkup ? ' review-ai-preview--chart-coach' : ''}" id="reviewAiSummaryPreview">${chartCoachMarkup || escapeHtml(aiSummaryPreview)}</div>
         <div class="tiny review-ai-overflow-hint" id="reviewAiSummaryOverflowHint" hidden>Scroll for more</div>
       </details>` : ''}
       <details class="compact-details review-advanced-panel advanced-debug-only" id="reviewAdvancedDetails" ${advancedOpen ? 'open' : ''}>
@@ -40776,6 +41254,7 @@ function buildPromptBody(payload){
     'canonicalValues',
     'candleStructureAnalysis',
     'tradePlanCommentary',
+    'chartCoach',
     'confidenceWarnings',
     'coach_summary',
     'constructive_evidence',
@@ -40817,8 +41296,15 @@ function buildPromptBody(payload){
     '- trustedMarketContext must be echoed back from the prompt context, not re-invented',
     '- canonicalValues must prefer trustedMarketContext whenever a trusted numeric value exists',
     '- extractedFromImage must contain only image-derived observations',
-    '- candleStructureAnalysis must comment on recent bounce attempt, rejection/follow-through/indecision/failed bounce, moving-average relationship, whether price is reclaiming or still below key MAs, verdict support, resolver alignment, and include a short novice-friendly candle read',
+    '- candleStructureAnalysis must comment on recent bounce attempt, rejection/follow-through/indecision/failed bounce, moving-average relationship, whether price is reclaiming or still below key MAs, and include a short novice-friendly candle read',
     '- tradePlanCommentary must explain whether estimated maths exist and whether confirmation is still missing',
+    '- chartCoach must be the primary educational output',
+    '- chartCoach.sections must contain at most 6 relevant emoji-led sections',
+    '- chartCoach should explain what is visible first, what it means second, and what to watch next last',
+    '- chartCoach.sections should prioritize the strongest teaching opportunity on the chart and expand only that one with one extra beginner-friendly learning sentence',
+    '- chartCoach must end with a What next? section unless the visible evidence is too incomplete to do so safely',
+    '- chartCoach must not reveal the resolver verdict or give buy/sell instructions',
+    '- chartCoach language must stay plain-English and beginner-friendly',
     '- confidenceWarnings must capture conflicts, unreadable labels, and disagreements between image extraction and trusted data',
     '- visible_ticker and visible_timeframe must be extracted only if visible in the image',
     '- visible_latest_price and visible_ma* values must be numbers or null',
