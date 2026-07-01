@@ -668,10 +668,10 @@ function runDeterministicCandleFallbackRegression(){
 
   const bounceAttemptOnlyCoach = sandbox.buildDeterministicChartCoach(
     {
-      marketData:{price:100.4, ma20:97.2, ma50:95.8, ma200:90, avgVolume30d:1000000}
+      marketData:{price:100.4, ma20:100.1, ma50:95.8, ma200:90, avgVolume30d:1000000}
     },
     {
-      canonicalValues:{price:100.4, ma20:97.2, ma50:95.8, ma200:90, volume:1500000},
+      canonicalValues:{price:100.4, ma20:100.1, ma50:95.8, ma200:90, volume:1500000},
       trustedMarketContext:{
         avgVolume30d:1000000,
         recentCandleSequence:[
@@ -685,7 +685,7 @@ function runDeterministicCandleFallbackRegression(){
       derivedStates:{
         structureState:'intact',
         structureEligibility:'alive',
-        pullbackZone:'none',
+        pullbackZone:'near_20ma',
         setupLocationState:'supportive',
         bounceState:'attempt',
         volumeState:'supportive',
@@ -694,15 +694,18 @@ function runDeterministicCandleFallbackRegression(){
       globalVerdict:{final_verdict:'watch'}
     }
   );
-  assert.strictEqual(bounceAttemptOnlyCoach.primaryStory.key, 'bounce_confirmation_pending', 'Bounce attempt without a lower wick should still use bounce_confirmation_pending');
-  assert.strictEqual(bounceAttemptOnlyCoach.primaryStory.evidenceFactIds.join('|'), 'bounce_attempt', 'Bounce-attempt-only story should preserve only bounce_attempt evidence');
+  assert.ok(
+    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(bounceAttemptOnlyCoach.primaryStory.key),
+    'Bounce attempt near valid support should still keep a constructive support-context headline'
+  );
+  assert.ok(bounceAttemptOnlyCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Bounce-attempt headline near support should preserve bounce_attempt evidence');
 
   const lowerWickOnlyCoach = sandbox.buildDeterministicChartCoach(
     {
-      marketData:{price:100.2, ma20:97.0, ma50:95.8, ma200:90, avgVolume30d:1000000}
+      marketData:{price:100.2, ma20:100.0, ma50:95.8, ma200:90, avgVolume30d:1000000}
     },
     {
-      canonicalValues:{price:100.2, ma20:97.0, ma50:95.8, ma200:90, volume:1500000},
+      canonicalValues:{price:100.2, ma20:100.0, ma50:95.8, ma200:90, volume:1500000},
       trustedMarketContext:{
         avgVolume30d:1000000,
         recentCandleSequence:[
@@ -716,7 +719,7 @@ function runDeterministicCandleFallbackRegression(){
       derivedStates:{
         structureState:'intact',
         structureEligibility:'alive',
-        pullbackZone:'none',
+        pullbackZone:'near_20ma',
         setupLocationState:'supportive',
         bounceState:'none',
         volumeState:'supportive',
@@ -725,18 +728,26 @@ function runDeterministicCandleFallbackRegression(){
       globalVerdict:{final_verdict:'watch'}
     }
   );
-  assert.strictEqual(lowerWickOnlyCoach.primaryStory.key, 'bounce_confirmation_pending', 'Lower-wick-only defence should still use bounce_confirmation_pending');
-  assert.strictEqual(lowerWickOnlyCoach.primaryStory.evidenceFactIds.join('|'), 'lower_rejection_wick', 'Lower-wick-only story should preserve only lower_rejection_wick evidence');
-  assert.ok(/lower wick shows buyers pushed back from the lows|need to follow through/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence should describe the wick honestly without claiming a bounce');
+  assert.ok(
+    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(lowerWickOnlyCoach.primaryStory.key),
+    'Lower-wick-only defence near valid support should still keep a constructive support-context headline'
+  );
+  assert.ok(
+    lowerWickOnlyCoach.primaryStory.evidenceFactIds.includes('lower_rejection_wick')
+      || lowerWickOnlyCoach.primaryStory.evidenceFactIds.includes('support_short_term_average')
+      || lowerWickOnlyCoach.primaryStory.evidenceFactIds.includes('support_medium_term_average'),
+    'Lower-wick-only headline near support should preserve either wick evidence or explicit support-context evidence'
+  );
+  assert.ok(/lower wick shows buyers pushed back from the lows|buyers still need to defend|support area|need to follow through/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence should stay support-based without claiming a bounce');
   assert.ok(!/the bounce still needs/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence must not claim that a bounce has already started');
   assert.ok(!/bounce is not ready yet/i.test((lowerWickOnlyCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Lower-wick-only what-next copy must not refer to a bounce that has not started');
 
   const bounceAndLowerWickCoach = sandbox.buildDeterministicChartCoach(
     {
-      marketData:{price:100.4, ma20:97.2, ma50:95.8, ma200:90, avgVolume30d:1000000}
+      marketData:{price:100.4, ma20:100.1, ma50:95.8, ma200:90, avgVolume30d:1000000}
     },
     {
-      canonicalValues:{price:100.4, ma20:97.2, ma50:95.8, ma200:90, volume:1500000},
+      canonicalValues:{price:100.4, ma20:100.1, ma50:95.8, ma200:90, volume:1500000},
       trustedMarketContext:{
         avgVolume30d:1000000,
         recentCandleSequence:[
@@ -750,7 +761,7 @@ function runDeterministicCandleFallbackRegression(){
       derivedStates:{
         structureState:'intact',
         structureEligibility:'alive',
-        pullbackZone:'none',
+        pullbackZone:'near_20ma',
         setupLocationState:'supportive',
         bounceState:'attempt',
         volumeState:'supportive',
@@ -759,8 +770,17 @@ function runDeterministicCandleFallbackRegression(){
       globalVerdict:{final_verdict:'watch'}
     }
   );
-  assert.strictEqual(bounceAndLowerWickCoach.primaryStory.key, 'bounce_confirmation_pending', 'Combined bounce-attempt and wick defence should still use bounce_confirmation_pending');
-  assert.strictEqual(bounceAndLowerWickCoach.primaryStory.evidenceFactIds.join('|'), 'bounce_attempt|lower_rejection_wick', 'Combined bounce/defence story should preserve both evidence facts');
+  assert.ok(
+    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(bounceAndLowerWickCoach.primaryStory.key),
+    'Combined bounce-attempt and wick defence near valid support should still keep a constructive support-context headline'
+  );
+  assert.ok(bounceAndLowerWickCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Combined bounce/defence headline near support should preserve bounce_attempt evidence');
+  assert.ok(
+    bounceAndLowerWickCoach.primaryStory.evidenceFactIds.includes('lower_rejection_wick')
+      || bounceAndLowerWickCoach.primaryStory.evidenceFactIds.includes('support_short_term_average')
+      || bounceAndLowerWickCoach.primaryStory.evidenceFactIds.includes('support_medium_term_average'),
+    'Combined bounce/defence headline near support should preserve either wick or explicit support evidence'
+  );
 
   const repairingCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -793,6 +813,108 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual(repairingCoach.primaryStory.key, 'pullback_still_repairing', 'Weakening pullbacks should choose the repair story before isolated candle commentary');
   assert.ok(/repair/i.test(repairingCoach.sections[0].text), 'Repairing pullback story should explain that the setup still needs repair');
   assert.ok(/reclaim/i.test((repairingCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Repairing pullback should tell the user to reclaim support before trusting it');
+
+  const intactOffLevelCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:108.4, ma20:101.1, ma50:97.2, ma200:90.6, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:108.4, ma20:101.1, ma50:97.2, ma200:90.6, volume:940000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:109.0, high:109.4, low:107.8, close:108.4, volume:940000},
+          {date:'2026-06-30', open:109.4, high:109.9, low:108.3, close:109.0, volume:980000},
+          {date:'2026-06-29', open:110.0, high:110.4, low:108.8, close:109.5, volume:1010000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'strong',
+        structureEligibility:'alive',
+        pullbackZone:'left_support_zone',
+        setupLocationState:'off_level',
+        bounceState:'none',
+        volumeState:'weak',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(intactOffLevelCoach.primaryStory.key, 'off_level_wait_for_clearer_support', 'Intact off-level charts should use a neutral setup-location story instead of a negative structural headline');
+  assert.notStrictEqual(intactOffLevelCoach.primaryStory.key, 'pullback_still_repairing', 'Intact structure must not use the repair headline just because price recently left support');
+  assert.notStrictEqual(intactOffLevelCoach.primaryStory.key, 'structure_breaking_down', 'Intact structure must not use the breakdown headline just because price is off-level');
+  assert.ok(/not in the ideal support area|clearer pullback/i.test(intactOffLevelCoach.primaryStory.text), 'Neutral off-level story should explain that the setup is not in the ideal support area yet');
+  assert.ok(!/repair|weakening|breaking down|failed bounce|lost support/i.test(intactOffLevelCoach.primaryStory.text), 'Neutral off-level story must avoid structural damage language on intact charts');
+
+  const intactLostSupportCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:114.6, ma20:106.2, ma50:101.4, ma200:92.3, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:114.6, ma20:106.2, ma50:101.4, ma200:92.3, volume:910000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:115.2, high:115.5, low:114.0, close:114.6, volume:910000},
+          {date:'2026-06-30', open:115.8, high:116.1, low:114.7, close:115.1, volume:950000},
+          {date:'2026-06-29', open:116.4, high:116.8, low:115.3, close:115.9, volume:990000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'none',
+        setupLocationState:'lost_support',
+        bounceState:'none',
+        volumeState:'weak',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(intactLostSupportCoach.primaryStory.key, 'off_level_wait_for_clearer_support', 'Intact lost-support location should use the neutral setup-location story');
+  assert.notStrictEqual(intactLostSupportCoach.primaryStory.key, 'pullback_still_repairing', 'Lost-support location alone must not imply structural repair when structure is intact');
+  assert.notStrictEqual(intactLostSupportCoach.primaryStory.key, 'structure_breaking_down', 'Lost-support location alone must not imply a breakdown when structure is intact');
+  assert.notStrictEqual(intactLostSupportCoach.primaryStory.key, 'failed_bounce', 'Lost-support location alone must not headline failed bounce when structure is intact');
+  assert.ok(/not in the ideal support area|clearer pullback/i.test(intactLostSupportCoach.primaryStory.text), 'Intact lost-support location should explain that the setup needs clearer support');
+  assert.ok(!/repair|weakening|breaking down|failed bounce/i.test(intactLostSupportCoach.primaryStory.text), 'Neutral lost-support story must avoid structural damage language on intact charts');
+
+  const intactOffLevelBounceAttemptCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:112.8, ma20:105.1, ma50:100.3, ma200:91.7, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:112.8, ma20:105.1, ma50:100.3, ma200:91.7, volume:930000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:111.9, high:113.1, low:111.4, close:112.8, volume:930000},
+          {date:'2026-06-30', open:113.0, high:113.4, low:111.0, close:111.8, volume:980000},
+          {date:'2026-06-29', open:114.1, high:114.6, low:112.5, close:113.1, volume:1005000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'strong',
+        structureEligibility:'alive',
+        pullbackZone:'off_level',
+        setupLocationState:'lost_support',
+        bounceState:'attempt',
+        volumeState:'weak',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(intactOffLevelBounceAttemptCoach.primaryStory.key, 'off_level_wait_for_clearer_support', 'Off-level intact bounce attempts should still use the neutral setup-location story');
+  assert.notStrictEqual(intactOffLevelBounceAttemptCoach.primaryStory.key, 'bounce_confirmation_pending', 'A bounce attempt away from support must not headline as bounce confirmation');
+  assert.ok(/not in the ideal support area|clearer pullback/i.test(intactOffLevelBounceAttemptCoach.primaryStory.text), 'Off-level intact bounce attempts should still explain that support needs to become clearer');
+  assert.ok(!/bounce still needs|buyers are trying to defend support/i.test(intactOffLevelBounceAttemptCoach.primaryStory.text), 'Off-level intact bounce attempts must not imply the setup is valid just because a bounce attempt exists');
 
   const breakdownCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -857,6 +979,75 @@ function runDeterministicCandleFallbackRegression(){
   );
   assert.strictEqual(failedBounceBreakdownCoach.primaryStory.key, 'structure_breaking_down', 'Failed bounce below key averages should still choose the breakdown story');
   assert.ok(failedBounceBreakdownCoach.primaryStory.evidenceFactIds.includes('failed_bounce'), 'Failed-bounce breakdown story should preserve failed_bounce evidence');
+
+  const intactOffLevelFailedBounceCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:108.7, ma20:101.2, ma50:97.4, ma200:90.8, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:108.7, ma20:101.2, ma50:97.4, ma200:90.8, volume:1030000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:109.6, high:110.0, low:108.2, close:108.7, volume:1030000},
+          {date:'2026-06-30', open:110.2, high:110.5, low:108.9, close:109.5, volume:1080000},
+          {date:'2026-06-29', open:110.8, high:111.2, low:109.7, close:110.4, volume:1110000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'left_support_zone',
+        setupLocationState:'off_level',
+        bounceState:'failed',
+        volumeState:'active',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.notStrictEqual(intactOffLevelFailedBounceCoach.primaryStory.key, 'failed_bounce', 'Intact structure must not use failed_bounce as the primary story');
+  assert.notStrictEqual(intactOffLevelFailedBounceCoach.primaryStory.key, 'structure_breaking_down', 'Intact structure must not use a breakdown headline just because one bounce failed');
+  assert.notStrictEqual(intactOffLevelFailedBounceCoach.primaryStory.key, 'pullback_still_repairing', 'Intact structure must not use a repair headline just because one bounce failed off-level');
+  assert.strictEqual(intactOffLevelFailedBounceCoach.primaryStory.key, 'off_level_wait_for_clearer_support', 'Intact off-level failed-bounce charts should use the neutral setup-location story');
+  assert.ok(!/failed bounce|faded quickly/i.test(intactOffLevelFailedBounceCoach.primaryStory.text), 'Intact off-level failed-bounce story must not headline failed-bounce wording');
+  const intactFailedBounceSupportSection = intactOffLevelFailedBounceCoach.sections.find(section => section.key === 'weakness');
+  if(intactFailedBounceSupportSection){
+    assert.notStrictEqual(intactFailedBounceSupportSection.key, 'biggest_clue', 'Failed-bounce weakness, when rendered, must stay subordinate to the neutral headline');
+  }
+
+  const intactFailedBounceCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:96.4, ma20:99.1, ma50:96.8, ma200:88.3, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:96.4, ma20:99.1, ma50:96.8, ma200:88.3, volume:1020000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:97.3, high:98.0, low:96.1, close:96.4, volume:1020000},
+          {date:'2026-06-30', open:98.6, high:99.4, low:97.0, close:97.6, volume:1080000},
+          {date:'2026-06-29', open:99.8, high:100.3, low:98.1, close:98.9, volume:1110000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'near_50ma',
+        setupLocationState:'supportive',
+        bounceState:'failed',
+        volumeState:'active',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.notStrictEqual(intactFailedBounceCoach.primaryStory.key, 'structure_breaking_down', 'Intact structure must not use a breakdown headline just because one bounce failed below the short-term averages');
+  assert.strictEqual(intactFailedBounceCoach.primaryStory.key, 'constructive_pullback_near_50ma', 'Intact structure should keep the constructive pullback headline and relegate weakness to supporting detail');
 
   const structureBrokenOnlyCoach = sandbox.buildDeterministicChartCoach(
     {

@@ -23257,6 +23257,7 @@ function chartCoachLearningPointForStory(storyKey = '', context = {}){
       : 'Constructive pullbacks work best when support holds first and buyers confirm the turn after the pause.';
   }
   if(storyKey === 'pullback_still_repairing') return 'A pullback still needs repair when price starts losing key averages instead of finding support quickly.';
+  if(storyKey === 'off_level_wait_for_clearer_support') return 'A good chart can still be early if price is not testing a support area where buyers usually step in.';
   if(storyKey === 'bounce_confirmation_pending'){
     return context.bounceAttempt === true
       ? 'Early bounce attempts matter more when buyers add a second sign of strength instead of stalling after one day.'
@@ -23291,6 +23292,9 @@ function chartCoachWhatNextForStory(storyKey = '', context = {}){
   }
   if(storyKey === 'pullback_still_repairing'){
     return `Watch for price to reclaim the ${supportLabel} and hold it before trusting the pullback. Another decisive loss of support would keep the chart in repair mode.`;
+  }
+  if(storyKey === 'off_level_wait_for_clearer_support'){
+    return 'Watch for price to move back into the 20-day average, the 50-day average, or another clear support area before treating the setup as lower risk.';
   }
   if(storyKey === 'bounce_confirmation_pending'){
     return context.bounceAttempt === true
@@ -23344,6 +23348,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
   const pullbackNear20 = context.pullbackNear20 === true;
   const pullbackNear50 = context.pullbackNear50 === true;
   const recentlyLeftSupportZone = context.recentlyLeftSupportZone === true;
+  const offLevelWithoutStructureDamage = context.offLevelWithoutStructureDamage === true;
   const bounceAttempt = context.bounceAttempt === true;
   const followThroughConfirmed = context.followThroughConfirmed === true;
   const failedBounce = context.failedBounce === true;
@@ -23375,7 +23380,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:118
     });
   }
-  if(structureBroken || (failedBounce && maRelation.above20 === false && maRelation.above50 === false)){
+  if(structureBroken || (structureWeakening && failedBounce && maRelation.above20 === false && maRelation.above50 === false)){
     const evidenceFactIds = ['trend_context', 'weakness_signal'];
     if(structureBroken) evidenceFactIds.push('structure_broken');
     if(failedBounce) evidenceFactIds.push('failed_bounce');
@@ -23432,7 +23437,19 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:112
     });
   }
-  if((structureWeakening || recentlyLeftSupportZone) && !structureBroken){
+  if(structureIntact && offLevelWithoutStructureDamage && !pullbackNear20 && !pullbackNear50 && !followThroughConfirmed && !actionable){
+    candidates.push({
+      key:'off_level_wait_for_clearer_support',
+      label:'Biggest clue',
+      icon:'🟡',
+      text:'The chart still looks structurally healthy, but price is not in the ideal support area yet, so this setup needs a clearer pullback before it becomes more useful.',
+      evidenceFactIds:['trend_context'],
+      confidence:0.79,
+      rankReason:'structure_intact_but_setup_not_in_ideal_support_area',
+      score:109
+    });
+  }
+  if(structureWeakening && !structureBroken){
     candidates.push({
       key:'pullback_still_repairing',
       label:'Biggest clue',
@@ -23444,7 +23461,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:107
     });
   }
-  if(structureIntact && (bounceAttempt || latestWickRejection === 'lower_rejection') && !followThroughConfirmed && !failedBounce){
+  if(structureIntact && (bounceAttempt || latestWickRejection === 'lower_rejection') && (pullbackNear20 || pullbackNear50) && !followThroughConfirmed && !failedBounce){
     const evidenceFactIds = [];
     if(bounceAttempt) evidenceFactIds.push('bounce_attempt');
     if(latestWickRejection === 'lower_rejection') evidenceFactIds.push('lower_rejection_wick');
@@ -23509,7 +23526,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:104
     });
   }
-  if(failedBounce === true && !structureBroken){
+  if(failedBounce === true && structureWeakening && !structureBroken){
     candidates.push({
       key:'failed_bounce',
       label:'Biggest clue',
@@ -23604,12 +23621,16 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     || resolvedStructureEligibility === 'broken';
   const structureWeakening = !structureBroken && (
     resolvedStructureState === 'weakening'
-    || resolvedSetupLocationState === 'lost_support'
-    || resolvedPullbackZone === 'left_support_zone'
+    || resolvedStructureEligibility === 'damaged'
   );
   const pullbackNear20 = near20 === 'near' || resolvedPullbackZone === 'near_20ma';
   const pullbackNear50 = near50 === 'near' || resolvedPullbackZone === 'near_50ma';
-  const recentlyLeftSupportZone = ['left_support_zone', 'off_level'].includes(resolvedPullbackZone) || resolvedSetupLocationState === 'off_level';
+  const recentlyLeftSupportZone = ['left_support_zone', 'off_level'].includes(resolvedPullbackZone)
+    || ['off_level', 'lost_support'].includes(resolvedSetupLocationState);
+  const offLevelWithoutStructureDamage = structureIntact
+    && !structureWeakening
+    && !structureBroken
+    && recentlyLeftSupportZone;
   const weakVolume = ['weak', 'light', 'low', 'below_average'].includes(resolvedVolumeState) || volumeRatio !== null && volumeRatio <= 0.8;
   const activeVolume = ['active', 'strong', 'above_average'].includes(resolvedVolumeState) || volumeRatio !== null && volumeRatio >= 1.05;
   const actionable = resolvedFinalVerdict === 'entry';
@@ -23833,6 +23854,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     pullbackNear20,
     pullbackNear50,
     recentlyLeftSupportZone,
+    offLevelWithoutStructureDamage,
     weakVolume,
     activeVolume,
     actionable,
@@ -23843,6 +23865,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   const primaryStorySupportExclusions = {
     constructive_pullback_near_20ma:['strength'],
     constructive_pullback_near_50ma:['strength'],
+    off_level_wait_for_clearer_support:['strength'],
     pullback_still_repairing:[],
     bounce_confirmation_pending:['strength'],
     structure_breaking_down:['strength'],
@@ -23878,6 +23901,13 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
       if(key === 'support') return 116;
       if(key === 'volume' && weakVolume) return 112;
       if(key === 'indecision' || key === 'candle') return 78;
+    }
+    if(primaryStory.key === 'off_level_wait_for_clearer_support'){
+      if(key === 'trend') return 128;
+      if(key === 'volume' && weakVolume) return 112;
+      if(key === 'support') return 108;
+      if(key === 'indecision' || key === 'wicks') return 102;
+      if(key === 'candle') return 72;
     }
     if(primaryStory.key === 'bounce_confirmation_pending'){
       if(key === 'trend') return 128;
