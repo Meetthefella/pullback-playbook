@@ -23129,6 +23129,27 @@ function chartCoachDiagnosticsForSections(sections = []){
   };
 }
 
+function mergeChartCoachSections(deterministicSections = [], aiSections = []){
+  const deterministicList = Array.isArray(deterministicSections) ? deterministicSections : [];
+  const aiList = Array.isArray(aiSections) ? aiSections : [];
+  const aiByKey = new Map();
+  aiList.forEach(section => {
+    const key = String(section && section.key || '').trim();
+    if(!key || !section || !section.icon || !section.label || !section.text) return;
+    aiByKey.set(key, section);
+  });
+  const merged = deterministicList.map(section => {
+    const key = String(section && section.key || '').trim();
+    return aiByKey.has(key) ? aiByKey.get(key) : section;
+  });
+  aiList.forEach(section => {
+    const key = String(section && section.key || '').trim();
+    if(!key || deterministicList.some(candidate => String(candidate && candidate.key || '').trim() === key)) return;
+    if(section && section.icon && section.label && section.text) merged.push(section);
+  });
+  return merged;
+}
+
 function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   const item = normalizeTickerRecord(record || {});
   const state = analysis && typeof analysis === 'object' ? analysis : {};
@@ -23163,18 +23184,11 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   };
 
   if(latestDirection === 'green' || latestDirection === 'red' || latestDirection === 'flat'){
-    let candleText = latestDirection === 'green'
-      ? chartCoachConfidenceSentence(0.92, 'The latest green candle shows buyers finished the session stronger.', 'The latest green candle suggests buyers improved into the close.')
+    const candleText = latestDirection === 'green'
+      ? 'The latest candle is green, showing buyers finished stronger than sellers.'
       : (latestDirection === 'red'
-        ? chartCoachConfidenceSentence(0.92, 'The latest red candle shows sellers had more control into the close.', 'The latest red candle suggests sellers still had the edge by the close.')
-        : 'The latest candle closed near where it opened, which shows neither side had clear control.');
-    if(bodyDescriptor === 'strong'){
-      candleText += latestDirection === 'green'
-        ? ' The body is wide, so the buying move was decisive.'
-        : (latestDirection === 'red' ? ' The body is wide, so the selling pressure was decisive.' : '');
-    }else if(bodyDescriptor === 'small'){
-      candleText += ' The small body shows hesitation rather than commitment.';
-    }
+        ? 'The latest candle is red, showing sellers finished stronger than buyers.'
+        : 'The latest candle closed near where it opened, so neither side had clear control.');
     addSection({
       key:'candle',
       icon:latestDirection === 'red' ? '🔴' : (latestDirection === 'flat' ? '⚪' : '🟢'),
@@ -23235,17 +23249,22 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   }
 
   const trendParts = [];
-  if(facts.maRelation.above20 === true) trendParts.push('above the short-term average');
-  else if(facts.maRelation.above20 === false) trendParts.push('below the short-term average');
-  if(facts.maRelation.above50 === true) trendParts.push('above the medium-term average');
-  else if(facts.maRelation.above50 === false) trendParts.push('below the medium-term average');
-  if(structureSignals.higherHighs >= 2 || structureSignals.higherLows >= 2){
-    trendParts.push('recent swings are still stepping higher');
-  }else if(structureSignals.lowerHighs >= 2 || structureSignals.lowerLows >= 2){
-    trendParts.push('recent swings are still slipping lower');
+  if(facts.maRelation.above20 === true && facts.maRelation.above50 === true && facts.maRelation.above200 === true){
+    trendParts.push('Price is above the short, medium, and long-term averages, so the chart is still climbing strongly.');
+  }else if(facts.maRelation.above20 === false && facts.maRelation.above50 === false && facts.maRelation.above200 === false){
+    trendParts.push('Price is below the short, medium, and long-term averages, so the chart is still trending lower.');
+  }else{
+    if(facts.maRelation.above20 === true) trendParts.push('above the short-term average');
+    else if(facts.maRelation.above20 === false) trendParts.push('below the short-term average');
+    if(facts.maRelation.above50 === true) trendParts.push('above the medium-term average');
+    else if(facts.maRelation.above50 === false) trendParts.push('below the medium-term average');
+    if(facts.maRelation.above200 === true) trendParts.push('above the long-term average');
+    else if(facts.maRelation.above200 === false) trendParts.push('below the long-term average');
   }
   if(trendParts.length){
-    const trendText = `The price is ${trendParts.join(', ')}, which ${facts.maRelation.above20 === false || facts.maRelation.above50 === false ? 'shows the pullback still needs repair.' : 'keeps the trend picture healthier.'}`;
+    const trendText = trendParts.length === 1
+      ? trendParts[0]
+      : `Price is ${trendParts.join(', ')}, which ${facts.maRelation.above20 === false || facts.maRelation.above50 === false ? 'shows the pullback still needs repair.' : 'keeps the trend structure in better shape.'}`;
     addSection({
       key:'trend',
       icon:'📈',
@@ -23256,18 +23275,27 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     });
   }
 
-  if(facts.followThroughConfirmed || facts.higherClose || (structureSignals.higherHighs >= 1 && structureSignals.higherLows >= 1)){
-    const strengthText = facts.followThroughConfirmed
-      ? 'Recent candles are following through higher, so buyers are doing more than just bouncing for one day.'
-      : (facts.higherClose
-        ? 'The latest close improved on the prior candle, which is an early sign buyers are pushing back.'
-        : 'Recent swings are starting to improve, which could be an early sign the chart is firming up.');
+  if(
+    bodyDescriptor === 'strong'
+    || facts.followThroughConfirmed
+    || facts.higherClose
+    || (structureSignals.higherHighs >= 1 && structureSignals.higherLows >= 1)
+  ){
+    const strengthText = bodyDescriptor === 'strong'
+      ? (latestDirection === 'green'
+        ? 'The tall body shows buyers pushed price higher with conviction.'
+        : 'The tall body shows sellers pushed price lower with conviction.')
+      : (facts.followThroughConfirmed
+        ? 'Recent candles are still following through higher, so buyers are doing more than just bouncing for one day.'
+        : (facts.higherClose
+          ? 'The latest close finished above the prior close, which shows buyers are still pressing higher.'
+          : 'Recent swings are starting to improve, which could be an early sign the chart is firming up.'));
     addSection({
       key:'strength',
       icon:'📏',
       label:'Strength',
       text:strengthText,
-      confidence:facts.followThroughConfirmed ? 0.88 : 0.72,
+      confidence:bodyDescriptor === 'strong' || facts.followThroughConfirmed ? 0.88 : 0.72,
       fact:'strength_signal'
     });
   }
@@ -23288,9 +23316,9 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     });
   }
 
-  if(volumeRatio !== null && (volumeRatio >= 1.2 || volumeRatio <= 0.8)){
-    const volumeText = volumeRatio >= 1.2
-      ? 'Volume is running above normal, which means more traders were involved in this move.'
+  if(volumeRatio !== null && (volumeRatio >= 1.05 || volumeRatio <= 0.8)){
+    const volumeText = volumeRatio >= 1.05
+      ? 'Volume is active, which makes the move more convincing.'
       : 'Volume is lighter than normal, which means this move has less backing behind it.';
     addSection({
       key:'volume',
@@ -23298,12 +23326,21 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
       label:'Volume',
       text:volumeText,
       confidence:0.83,
-      fact:volumeRatio >= 1.2 ? 'high_volume' : 'low_volume'
+      fact:volumeRatio >= 1.05 ? 'high_volume' : 'low_volume'
     });
   }
 
   let whatNextText = 'Look for another strong close to show the move is gaining support.';
-  if(facts.followThroughConfirmed){
+  if(
+    latestDirection === 'green'
+    && bodyDescriptor === 'strong'
+    && facts.higherClose
+    && facts.maRelation.above20 === true
+    && facts.maRelation.above50 === true
+    && facts.maRelation.above200 === true
+  ){
+    whatNextText = `Watch for another strong close above today's range, or a controlled pullback that holds above the 20-day average.`;
+  }else if(facts.followThroughConfirmed){
     whatNextText = 'Look for another higher low or another firm close to show buyers can keep control.';
   }else if(facts.failedBounce){
     whatNextText = 'Look for a steadier base or a stronger reclaim before trusting this bounce attempt.';
@@ -23336,7 +23373,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
         ? 'A strong green candle matters more when the close finishes near the top of the range.'
         : (latestDirection === 'red' ? 'A strong red candle matters more when it closes near the low of the session.' : 'Small-bodied candles often appear when the market is undecided.');
     }else if(primaryTeachingSection.key === 'volume'){
-      learningText = volumeRatio !== null && volumeRatio >= 1.2
+      learningText = volumeRatio !== null && volumeRatio >= 1.05
         ? 'Higher volume can make a move more believable because more traders took part.'
         : 'Low volume can make a move easier to reverse because fewer traders backed it.';
     }else if(primaryTeachingSection.key === 'trend'){
@@ -23386,7 +23423,10 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
   const deterministicCoach = buildDeterministicChartCoach(item, state, {derivedStates, globalVerdict});
   const chartCoach = state.chartCoach && typeof state.chartCoach === 'object' ? state.chartCoach : null;
   if(chartCoachModelIsUsable(chartCoach)){
-    const mergedSections = finalizeChartCoachSections(Array.isArray(chartCoach.sections) && chartCoach.sections.length ? chartCoach.sections : deterministicCoach.sections);
+    const mergedSections = finalizeChartCoachSections(mergeChartCoachSections(
+      deterministicCoach.sections,
+      Array.isArray(chartCoach.sections) && chartCoach.sections.length ? chartCoach.sections : []
+    ));
     const mergedChartCoach = {
       ...deterministicCoach,
       ...chartCoach,

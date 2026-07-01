@@ -232,7 +232,7 @@ test('Chart Coach renders deterministic teaching sections in the review UI', asy
   await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('Chart Coach');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('AI Summary');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Candle');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('buyers finished the session stronger');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('showing buyers finished stronger than sellers');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('💡 Learning point');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📈 Trend');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('below the short-term average');

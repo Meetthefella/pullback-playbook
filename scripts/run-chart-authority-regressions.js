@@ -292,6 +292,7 @@ function runDeterministicCandleFallbackRegression(){
     'chartCoachProximityLabel',
     'finalizeChartCoachSections',
     'chartCoachDiagnosticsForSections',
+    'mergeChartCoachSections',
     'chartCoachConfidenceSentence',
     'chartCoachBodyDescriptor',
     'chartCoachStructureSignals',
@@ -539,6 +540,39 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual(mergedAiCoach.chartCoach.diagnostics.priorityOrder.join('|'), mergedAiCoach.chartCoach.sections.map(section => section.key).join('|'), 'Merged AI Chart Coach diagnostics priority order must match final rendered sections');
   assert.strictEqual(mergedAiCoach.chartCoach.diagnostics.sectionConfidence.length, mergedAiCoach.chartCoach.sections.length, 'Merged AI Chart Coach section confidence diagnostics must match final rendered sections');
   assert.strictEqual(mergedAiCoach.chartCoach.diagnostics.sectionConfidence.filter(section => section.teachingFocus === true).length, 1, 'Merged AI Chart Coach diagnostics must preserve a single teaching-focus section');
+
+  const amatRead = sandbox.finalDisplayedAnalysisChartRead(
+    {
+      marketData:{price:186.4, ma20:180.2, ma50:174.1, ma200:156.8, avgVolume30d:1000000},
+      _globalVerdict:{final_verdict:'watch'}
+    },
+    {
+      canonicalValues:{price:186.4, ma20:180.2, ma50:174.1, ma200:156.8, volume:1900000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:178.6, high:186.9, low:177.9, close:186.4, volume:1900000},
+          {date:'2026-06-30', open:176.2, high:179.8, low:175.7, close:178.1, volume:1200000},
+          {date:'2026-06-29', open:173.5, high:176.8, low:172.9, close:175.6, volume:980000}
+        ]
+      }
+    }
+  );
+  const amatKeys = amatRead.chartCoach.sections.map(section => section.key);
+  ['candle', 'strength', 'trend', 'volume', 'what_next'].forEach(key => {
+    assert.ok(amatKeys.includes(key), `AMAT-style Chart Coach should include ${key}`);
+  });
+  const amatCandle = amatRead.chartCoach.sections.find(section => section.key === 'candle');
+  const amatStrength = amatRead.chartCoach.sections.find(section => section.key === 'strength');
+  const amatTrend = amatRead.chartCoach.sections.find(section => section.key === 'trend');
+  const amatVolume = amatRead.chartCoach.sections.find(section => section.key === 'volume');
+  const amatNext = amatRead.chartCoach.sections.find(section => section.key === 'what_next');
+  assert.ok(/green, showing buyers finished stronger than sellers/i.test(amatCandle.text), 'AMAT-style Chart Coach should explain candle colour separately');
+  assert.ok(/tall body shows buyers pushed price higher with conviction/i.test(amatStrength.text), 'AMAT-style Chart Coach should explain candle body strength separately');
+  assert.ok(/above the short, medium, and long-term averages/i.test(amatTrend.text), 'AMAT-style Chart Coach should explain the MA trend state');
+  assert.ok(!/prior close|follow(?:ing)? through|latest close|green candle|buyers finished/i.test(amatTrend.text), 'Trend section must not contain candle-close or follow-through commentary');
+  assert.ok(/Volume is active, which makes the move more convincing\./i.test(amatVolume.text), 'AMAT-style Chart Coach should explain supportive volume');
+  assert.ok(/another strong close above today's range/i.test(amatNext.text), 'AMAT-style Chart Coach should give a specific next-step confirmation');
 }
 
 function runClientNormalizerRegression(){
