@@ -194,7 +194,7 @@ async function applyAnalysis(page, normalizedAnalysis){
   }, normalizedAnalysis);
 }
 
-test('Chart Coach renders deterministic teaching sections in the review UI', async ({page}) => {
+test('Chart Guru renders deterministic teaching sections in the review UI', async ({page}) => {
   await bootApp(page);
   await seedReviewScenario(page);
 
@@ -229,10 +229,12 @@ test('Chart Coach renders deterministic teaching sections in the review UI', asy
     }
   });
 
-  await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('Chart Coach');
+  await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('🧘 Chart Guru');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('AI Summary');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Candle');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('showing buyers finished stronger than sellers');
+  await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Guru Notes');
+  await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Coach');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Biggest clue');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('bounce still needs confirmation');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('💡 Learning point');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📈 Trend');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('below the short-term average');
@@ -267,7 +269,7 @@ test('Chart Coach renders deterministic teaching sections in the review UI', asy
     }
   });
 
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Candle');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Biggest clue');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📈 Trend');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
@@ -312,7 +314,7 @@ test('Chart Coach renders deterministic teaching sections in the review UI', asy
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
 });
 
-test('Chart Coach does not render before verification passes and stays mobile-safe', async ({page}) => {
+test('Chart Guru does not render before verification passes and stays mobile-safe', async ({page}) => {
   await bootApp(page);
   await page.setViewportSize({width:390, height:844});
   await page.evaluate(() => {
@@ -357,7 +359,7 @@ test('Chart Coach does not render before verification passes and stays mobile-sa
           ],
           summaryText:'This should not render before verification.',
           source:'ai_chart_coach',
-          renderVersion:'chart-coach-v1'
+          renderVersion:'chart-guru-v1'
         }
       },
       error:'',

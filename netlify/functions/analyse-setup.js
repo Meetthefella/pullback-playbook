@@ -318,13 +318,11 @@ function buildMalformedJsonFallbackAnalysis(payload = {}, rawText = ''){
   const canonicalValues = normalizeCanonicalValues({}, trustedMarketContext, {});
   const summary = deterministicServerCandleSummary(trustedMarketContext, canonicalValues);
   const chartCoach = {
-    sections:[
-      {key:'trend', icon:'📈', label:'Trend', text:summary, confidence:0.72, teachingFocus:false, source:'deterministic_parse_fallback'},
-      {key:'what_next', icon:'🎯', label:'What next?', text:'Look for the next close to confirm whether buyers are improving or sellers are still in control.', confidence:0.62, teachingFocus:false, source:'deterministic_parse_fallback'}
-    ],
-    summaryText:`📈 Trend: ${summary}\n🎯 What next?: Look for the next close to confirm whether buyers are improving or sellers are still in control.`,
-    source:'deterministic_parse_fallback',
-    renderVersion:'chart-coach-v1',
+    primaryStory:null,
+    sections:[],
+    summaryText:'',
+    source:'',
+    renderVersion:'chart-guru-v1',
     explanationFacts:['parse_fallback']
   };
   return {
@@ -360,7 +358,17 @@ function normaliseAnalysis(obj, payload = {}){
   const canonicalValues = normalizeCanonicalValues(obj?.canonicalValues || obj?.canonical_values, trustedMarketContext, imageFacts);
   const candleStructureAnalysis = normalizeObject(obj?.candleStructureAnalysis || obj?.candle_structure_analysis);
   const tradePlanCommentary = normalizeObject(obj?.tradePlanCommentary || obj?.trade_plan_commentary);
-  const chartCoachSource = normalizeObject(obj?.chartCoach || obj?.chart_coach);
+  const chartCoachSource = normalizeObject(obj?.chartGuru || obj?.chart_guru || obj?.chartCoach || obj?.chart_coach);
+  const primaryStorySource = normalizeObject(chartCoachSource?.primaryStory || chartCoachSource?.primary_story);
+  const hasPrimaryStory = !!(
+    primaryStorySource
+    && (
+      normaliseString(primaryStorySource.key, '')
+      || normaliseString(primaryStorySource.label, '')
+      || normaliseString(primaryStorySource.icon, '')
+      || normaliseString(primaryStorySource.text, '')
+    )
+  );
   const confidenceWarnings = Array.isArray(obj?.confidenceWarnings || obj?.confidence_warnings)
     ? (obj.confidenceWarnings || obj.confidence_warnings).map(item => String(item))
     : [];
@@ -392,6 +400,17 @@ function normaliseAnalysis(obj, payload = {}){
     ''
   );
   const chartCoach = {
+    primaryStory:hasPrimaryStory
+      ? {
+        key:normaliseString(primaryStorySource?.key, ''),
+        label:normaliseString(primaryStorySource?.label, ''),
+        icon:normaliseString(primaryStorySource?.icon, ''),
+        text:normaliseString(primaryStorySource?.text, ''),
+        evidenceFactIds:normaliseStringArray(primaryStorySource?.evidenceFactIds || primaryStorySource?.evidence_fact_ids),
+        confidence:normaliseNumber(primaryStorySource?.confidence),
+        rankReason:normaliseString(primaryStorySource?.rankReason || primaryStorySource?.rank_reason, '')
+      }
+      : null,
     sections:Array.isArray(chartCoachSource?.sections)
       ? chartCoachSource.sections.map(section => {
         const safe = normalizeObject(section);
@@ -575,7 +594,7 @@ exports.handler = async function handler(event){
       'If a field is unknown, return null.'
     ].join('\n')
     : [
-      'Analyse a Quality Pullback chart as Chart Coach, an observation-only educational feature.',
+      'Analyse a Quality Pullback chart as Chart Guru, an observation-only educational feature.',
       'Use plain English for a novice retail trader.',
       'Be honest about uncertainty.',
       'Do not invent chart details that are not provided.',
@@ -593,10 +612,13 @@ exports.handler = async function handler(event){
       'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',
       'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
       'Return extractedFromImage, trustedMarketContext, canonicalValues, candleStructureAnalysis, tradePlanCommentary, chartCoach, confidenceWarnings, and a short novice-friendly candle read.',
-      'chartCoach is the main educational output.',
-      'chartCoach.sections must contain at most 6 relevant emoji-led sections.',
-      'The final section should usually be What next?.',
-      'Expand only the strongest teaching opportunity with one extra beginner-friendly learning sentence.',
+      'chartCoach is the main educational output for Chart Guru.',
+      'chartCoach must include a deterministic primaryStory object with key, label, icon, text, evidenceFactIds, confidence, and rankReason.',
+      'Use the supplied chart evidence to explain one primary story first, then supporting evidence, then one learning point, then What next?.',
+      'chartCoach.sections must contain at most 5 relevant emoji-led sections.',
+      'The first section should usually be Biggest clue and should follow primaryStory.',
+      'Include only one Learning point section and one What next? section.',
+      'You may make the wording clearer and more beginner-friendly, but do not change primaryStory key, section order, evidence facts, numeric values, confidence, or resolver authority.',
       'Return exactly one JSON object.',
       'Return evidence fields only; ai_observation_only must be true.',
       'If a field is unknown, return null.'
