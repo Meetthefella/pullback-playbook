@@ -54,6 +54,21 @@
       resolvedVerdict === 'watch'
       && aliveStructure
       && !structuralWeakness
+      && /^structure is broken\.?$/i.test(text)
+    ){
+      const hasPlanMath = state.hasProvisionalPriceablePlan === true
+        || state.has_provisional_priceable_plan === true
+        || state.hasPriceablePlan === true
+        || state.has_priceable_plan === true
+        || String(state.plan_status || state.planStatus || '').trim().toLowerCase() === 'valid';
+      return hasPlanMath
+        ? 'Estimated maths exist, but confirmation is still missing before any entry is valid.'
+        : 'Structure is still alive. Confirmation is missing, so the setup is not actionable yet.';
+    }
+    if(
+      resolvedVerdict === 'watch'
+      && aliveStructure
+      && !structuralWeakness
       && /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(text)
     ){
       if(setupLocationState === 'volatile' || priceabilityState === 'unpriceable'){

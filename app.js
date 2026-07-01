@@ -6511,9 +6511,9 @@ function ensureSimplifiedChartPipelineForRender(record = {}, options = {}){
     diagnostics:[
       !String(recoveredReadFacts.timeframe || '').trim() ? 'timeframe unreadable' : '',
       chartVerificationNumberOrNull(recoveredReadFacts.price) === null ? 'price unreadable' : '',
-      chartVerificationNumberOrNull(recoveredReadFacts.ma20) === null ? '20 MA unreadable' : '',
-      chartVerificationNumberOrNull(recoveredReadFacts.ma50) === null ? '50 MA unreadable' : '',
-      chartVerificationNumberOrNull(recoveredReadFacts.ma200) === null ? '200 MA unreadable' : ''
+      chartVerificationNumberOrNull(recoveredReadFacts.ma20) === null && chartVerificationNumberOrNull(expectedFacts.ma20) === null ? '20 MA unreadable' : '',
+      chartVerificationNumberOrNull(recoveredReadFacts.ma50) === null && chartVerificationNumberOrNull(expectedFacts.ma50) === null ? '50 MA unreadable' : '',
+      chartVerificationNumberOrNull(recoveredReadFacts.ma200) === null && chartVerificationNumberOrNull(expectedFacts.ma200) === null ? '200 MA unreadable' : ''
     ].filter(Boolean),
     evidence:mismatch
       ? [`Expected ${expectedTicker || 'ticker'} but read ${recoveredTicker || 'n/a'}.`]
@@ -6565,9 +6565,9 @@ function buildChartPipelineFromVerification(record = {}, options = {}){
   const diagnostics = [];
   if(!read.timeframe) diagnostics.push('timeframe unreadable');
   if(chartVerificationNumberOrNull(read.price) === null) diagnostics.push('price unreadable');
-  if(chartVerificationNumberOrNull(read.ma20) === null) diagnostics.push('20 MA unreadable');
-  if(chartVerificationNumberOrNull(read.ma50) === null) diagnostics.push('50 MA unreadable');
-  if(chartVerificationNumberOrNull(read.ma200) === null) diagnostics.push('200 MA unreadable');
+  if(chartVerificationNumberOrNull(read.ma20) === null && chartVerificationNumberOrNull(expected.ma20) === null) diagnostics.push('20 MA unreadable');
+  if(chartVerificationNumberOrNull(read.ma50) === null && chartVerificationNumberOrNull(expected.ma50) === null) diagnostics.push('50 MA unreadable');
+  if(chartVerificationNumberOrNull(read.ma200) === null && chartVerificationNumberOrNull(expected.ma200) === null) diagnostics.push('200 MA unreadable');
   const evidence = [];
   if(phase === 'possible_mismatch'){
     evidence.push(`Expected ${expectedTicker || 'ticker'} but read ${readTicker || 'n/a'}.`);
@@ -22664,6 +22664,10 @@ function finalDisplayedAnalysisChartRead(record, analysis){
   const analysisState = analysis && typeof analysis === 'object' ? analysis : {};
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const globalVerdict = resolveGlobalVerdict(item);
+  const candleFallback = deterministicCandleStructureSummary(item, analysisState, {
+    derivedStates,
+    globalVerdict
+  });
   const correction = guardAnalysisMovingAverageLanguage(
     analysisState.plain_english_chart_read || analysisState.chart_read || '',
     {
@@ -22673,7 +22677,14 @@ function finalDisplayedAnalysisChartRead(record, analysis){
       structureState:derivedStates.structureState
     }
   );
-  const baseText = correction.text || String(analysisState.plain_english_chart_read || analysisState.chart_read || '').trim();
+  const aiBaseText = correction.text || String(analysisState.plain_english_chart_read || analysisState.chart_read || '').trim();
+  const useFallback = candleFallback.available && (
+    !aiBaseText
+    || candleFallback.aiMissing
+    || candleFallback.aiGeneric
+    || candleFallback.aiContradictsCanonical
+  );
+  const baseText = useFallback ? String(candleFallback.text || '').trim() : aiBaseText;
   const sanitizedText = sanitizeAliveWatchSemanticCopy(
     baseText,
     {
@@ -22693,14 +22704,250 @@ function finalDisplayedAnalysisChartRead(record, analysis){
   );
   return {
     text:sanitizedText,
-    applied:correction.applied,
-    reason:sanitizedText !== baseText ? 'AI structural/bounce wording sanitized against resolver state.' : correction.reason,
+    applied:correction.applied || useFallback,
+    reason:useFallback
+      ? `Deterministic candle fallback used: ${candleFallback.reason}`
+      : (sanitizedText !== baseText ? 'AI structural/bounce wording sanitized against resolver state.' : correction.reason),
     priceVs20:correction.priceVs20,
     priceVs50:correction.priceVs50,
     price:correction.price,
     sma50:correction.sma50,
     matchedPhrase:correction.matchedPhrase,
-    outputChanged:correction.outputChanged || sanitizedText !== baseText
+    outputChanged:correction.outputChanged || sanitizedText !== baseText,
+    usedDeterministicFallback:useFallback,
+    fallbackReason:candleFallback.reason,
+    fallbackFacts:candleFallback.facts || null
+  };
+}
+
+function describeCandleBodyDirection(candle = {}){
+  const open = numericOrNull(candle.open);
+  const close = numericOrNull(candle.close);
+  if(!Number.isFinite(open) || !Number.isFinite(close)) return 'unknown';
+  if(close > open) return 'green';
+  if(close < open) return 'red';
+  return 'flat';
+}
+
+function candleWickRejectionState(candle = {}){
+  const open = numericOrNull(candle.open);
+  const high = numericOrNull(candle.high);
+  const low = numericOrNull(candle.low);
+  const close = numericOrNull(candle.close);
+  if(!Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) return 'none';
+  const bodyTop = Math.max(open, close);
+  const bodyBottom = Math.min(open, close);
+  const body = Math.abs(close - open);
+  const upperWick = Math.max(0, high - bodyTop);
+  const lowerWick = Math.max(0, bodyBottom - low);
+  const baseline = body > 0 ? body : Math.max(0.01, (high - low) * 0.15);
+  if(upperWick >= baseline * 1.5 && upperWick > lowerWick * 1.1) return 'upper_rejection';
+  if(lowerWick >= baseline * 1.5 && lowerWick > upperWick * 1.1) return 'lower_rejection';
+  return 'none';
+}
+
+function isGenericAiCandleCommentary(text = ''){
+  const safe = String(text || '').trim().toLowerCase();
+  if(!safe) return true;
+  const hasConcreteSignal = /20ma|50ma|200ma|below 20|below 50|above 200|above 20|above 50|below 200|wick|candle|close|open|higher|lower|rejection|follow-?through|bounce|failed bounce|green|red|buyers|sellers|reclaim/i.test(safe);
+  const boilerplateOnly = /looks constructive|mixed picture|monitor closely|wait for confirmation|needs confirmation|not ready yet|caution is warranted|uncertain setup|developing setup|watch for follow-through|keep watching|worth monitoring|interesting setup|something to watch/i.test(safe);
+  if(hasConcreteSignal) return false;
+  return boilerplateOnly || !/[0-9]/.test(safe);
+}
+
+function normalizeCandleSequenceOrder(candles = []){
+  const rows = Array.isArray(candles) ? candles.slice() : [];
+  const parsed = rows.map((candle, index) => {
+    const item = candle && typeof candle === 'object' ? candle : {};
+    const rawDate = String(item.datetime || item.timestamp || item.date || '').trim();
+    const timeValue = rawDate ? Date.parse(rawDate) : NaN;
+    return {
+      candle:item,
+      index,
+      timestamp:Number.isFinite(timeValue) ? timeValue : null
+    };
+  });
+  const datedCount = parsed.filter(entry => entry.timestamp !== null).length;
+  const allDated = datedCount === parsed.length && parsed.length > 0;
+  if(!datedCount){
+    return {
+      candles:rows,
+      orderConfidence:'low'
+    };
+  }
+  parsed.sort((a, b) => {
+    if(a.timestamp === null && b.timestamp === null) return a.index - b.index;
+    if(a.timestamp === null) return 1;
+    if(b.timestamp === null) return -1;
+    if(b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
+    return a.index - b.index;
+  });
+  return {
+    candles:parsed.map(entry => entry.candle),
+    orderConfidence:allDated ? 'high' : 'medium'
+  };
+}
+
+function aiCandleCommentaryContradictsCanonical(text = '', facts = {}){
+  const safe = String(text || '').trim().toLowerCase();
+  if(!safe) return false;
+  const ma = facts.maRelation || {};
+  if(ma.above20 === false && /\babove (?:the )?20\s*ma\b|\breclaim(?:ing|ed)? (?:the )?20\s*ma\b/i.test(safe)) return true;
+  if(ma.above50 === false && /\babove (?:the )?50\s*ma\b|\breclaim(?:ing|ed)? (?:the )?50\s*ma\b/i.test(safe)) return true;
+  if(ma.above200 === false && /\babove (?:the )?200\s*ma\b/i.test(safe)) return true;
+  if(ma.above200 === true && /\bbelow (?:the )?200\s*ma\b/i.test(safe)) return true;
+  if(facts.followThroughConfirmed === false && /\bconfirmed follow-?through\b|\bbounce confirmed\b/i.test(safe)) return true;
+  if(facts.failedBounce === true && /\bclean bounce\b|\bhealthy reclaim\b/i.test(safe)) return true;
+  return false;
+}
+
+function canonicalCandleContext(record = {}, analysis = {}){
+  const item = normalizeTickerRecord(record || {});
+  const state = analysis && typeof analysis === 'object' ? analysis : {};
+  const trusted = state.trustedMarketContext && typeof state.trustedMarketContext === 'object' ? state.trustedMarketContext : {};
+  const canonical = state.canonicalValues && typeof state.canonicalValues === 'object' ? state.canonicalValues : {};
+  const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
+  const recentInput = Array.isArray(trusted.recentCandleSequence)
+    ? trusted.recentCandleSequence
+    : (Array.isArray(marketData.history) ? marketData.history.slice(0, 6) : []);
+  const normalizedOrder = normalizeCandleSequenceOrder(recentInput);
+  const recent = normalizedOrder.candles.slice(0, 6);
+  const latest = recent[0] || {};
+  const prior = recent[1] || {};
+  const currentPrice = numericOrNull(canonical.price ?? trusted.currentPrice ?? marketData.price);
+  const ma20 = numericOrNull(canonical.ma20 ?? trusted.ma20 ?? marketData.ma20 ?? marketData.sma20);
+  const ma50 = numericOrNull(canonical.ma50 ?? trusted.ma50 ?? marketData.ma50 ?? marketData.sma50);
+  const ma200 = numericOrNull(canonical.ma200 ?? trusted.ma200 ?? marketData.ma200 ?? marketData.sma200);
+  const latestClose = numericOrNull(latest.close);
+  const priorClose = numericOrNull(prior.close);
+  const latestDirection = describeCandleBodyDirection(latest);
+  const priorDirection = describeCandleBodyDirection(prior);
+  const latestWickRejection = candleWickRejectionState(latest);
+  const higherClose = Number.isFinite(latestClose) && Number.isFinite(priorClose) ? latestClose > priorClose : false;
+  const lowerClose = Number.isFinite(latestClose) && Number.isFinite(priorClose) ? latestClose < priorClose : false;
+  const bounceAttempt = !!(
+    recent.length >= 2
+    && higherClose
+    && latestDirection === 'green'
+    && (priorDirection === 'red' || latestWickRejection === 'lower_rejection')
+  );
+  const followThroughConfirmed = !!(
+    recent.length >= 3
+    && latestDirection === 'green'
+    && priorDirection === 'green'
+    && higherClose
+    && Number.isFinite(priorClose)
+    && Number.isFinite(numericOrNull(recent[2] && recent[2].close))
+    && priorClose > numericOrNull(recent[2].close)
+  );
+  const failedBounce = !!(
+    recent.length >= 2
+    && lowerClose
+    && (latestDirection === 'red' || latestWickRejection === 'upper_rejection')
+    && priorDirection === 'green'
+  );
+  return {
+    currentPrice,
+    ma20,
+    ma50,
+    ma200,
+    latest,
+    prior,
+    latestDirection,
+    priorDirection,
+    latestWickRejection,
+    higherClose,
+    lowerClose,
+    bounceAttempt,
+    followThroughConfirmed,
+    failedBounce,
+    orderConfidence:normalizedOrder.orderConfidence,
+    maRelation:{
+      above20:Number.isFinite(currentPrice) && Number.isFinite(ma20) ? currentPrice > ma20 : null,
+      above50:Number.isFinite(currentPrice) && Number.isFinite(ma50) ? currentPrice > ma50 : null,
+      above200:Number.isFinite(currentPrice) && Number.isFinite(ma200) ? currentPrice > ma200 : null
+    }
+  };
+}
+
+function deterministicCandleStructureSummary(record = {}, analysis = {}, options = {}){
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : resolveGlobalVerdict(record);
+  const facts = canonicalCandleContext(record, analysis);
+  const hasContext = Number.isFinite(facts.currentPrice)
+    && (Number.isFinite(facts.ma20) || Number.isFinite(facts.ma50) || Number.isFinite(facts.ma200))
+    && facts.latest && typeof facts.latest === 'object';
+  const aiText = String(
+    analysis && (
+      analysis.plain_english_chart_read
+      || analysis.chart_read
+      || analysis.coach_summary
+      || analysis.candleStructureAnalysis && (analysis.candleStructureAnalysis.summary || analysis.candleStructureAnalysis.noviceFriendlyCandleRead || analysis.candleStructureAnalysis.novice_friendly_candle_read)
+    ) || ''
+  ).trim();
+  if(!hasContext){
+    return {
+      available:false,
+      text:'',
+      reason:'insufficient canonical candle context',
+      aiMissing:!aiText,
+      aiGeneric:false,
+      aiContradictsCanonical:false,
+      facts:null
+    };
+  }
+  const positionBits = [];
+  if(facts.maRelation.above20 === true) positionBits.push('above the 20MA');
+  else if(facts.maRelation.above20 === false) positionBits.push('below the 20MA');
+  if(facts.maRelation.above50 === true) positionBits.push('above the 50MA');
+  else if(facts.maRelation.above50 === false) positionBits.push('below the 50MA');
+  if(facts.maRelation.above200 === true) positionBits.push('above the 200MA');
+  else if(facts.maRelation.above200 === false) positionBits.push('below the 200MA');
+  const positionLine = positionBits.length ? `Price is ${positionBits.join(', ')}.` : 'Price is moving around key moving averages.';
+  let candleLine = facts.latestDirection === 'green'
+    ? 'The latest candle closed green.'
+    : (facts.latestDirection === 'red' ? 'The latest candle closed red.' : 'The latest candle closed flat.');
+  if(facts.higherClose) candleLine += ' It closed above the prior candle.';
+  else if(facts.lowerClose) candleLine += ' It closed below the prior candle.';
+  if(facts.latestWickRejection === 'lower_rejection') candleLine += ' There is lower-wick rejection, which shows buyers defended the low.';
+  else if(facts.latestWickRejection === 'upper_rejection') candleLine += ' There is upper-wick rejection, which shows sellers pushed it back down.';
+  let bounceLine = 'Follow-through is still missing.';
+  if(facts.followThroughConfirmed){
+    bounceLine = 'Recent candles show follow-through after the bounce attempt.';
+  }else if(facts.failedBounce){
+    bounceLine = 'The recent bounce attempt has faded and looks like a failed bounce.';
+  }else if(facts.bounceAttempt){
+    bounceLine = 'Recent candles show a bounce attempt, but confirmation is still missing.';
+  }
+  const verdictKey = normalizeGlobalVerdictKey(globalVerdict.final_verdict || 'watch');
+  let verdictLine = '';
+  if(verdictKey === 'near_entry'){
+    verdictLine = facts.followThroughConfirmed
+      ? 'This can support Near Entry monitoring, but candle structure alone does not create an entry signal.'
+      : 'This can stay in Near Entry monitoring only if buyers add stronger follow-through.';
+  }else if(verdictKey === 'watch'){
+    verdictLine = 'This still belongs in Watch until the candles show cleaner confirmation.';
+  }else if(verdictKey === 'avoid'){
+    verdictLine = 'This candle read does not repair the resolver Avoid state.';
+  }else{
+    verdictLine = 'This candle read is descriptive only and does not change the resolver state.';
+  }
+  const text = [positionLine, candleLine, bounceLine, verdictLine].filter(Boolean).join(' ').trim();
+  const aiMissing = !aiText;
+  const aiGeneric = isGenericAiCandleCommentary(aiText);
+  const aiContradictsCanonical = aiCandleCommentaryContradictsCanonical(aiText, facts);
+  const reason = aiMissing
+    ? 'AI candle commentary missing'
+    : (aiGeneric
+      ? 'AI candle commentary was too generic'
+      : (aiContradictsCanonical ? 'AI candle commentary contradicted canonical values' : 'fallback available'));
+  return {
+    available:true,
+    text,
+    reason,
+    aiMissing,
+    aiGeneric,
+    aiContradictsCanonical,
+    facts
   };
 }
 
@@ -29482,6 +29729,11 @@ function buildAnalysisPayload(card){
   const scanType = resolveScanType(safeCard, marketData, mergeDerivedChecks(safeCard.checks || {}, baseChecks));
   const tradePlan = deriveTradePlan(marketData, scanTypeForEvaluation(scanType));
   const derivedStates = deriveSetupStates(safeCard, marketData, safeCard.checks || baseChecks, tradePlan);
+  const trustedMarketContext = buildTrustedMarketContextPayload(safeCard, {
+    scanType,
+    tradePlan,
+    derivedStates
+  });
   return {
     ticker:safeCard.ticker,
     marketStatus:state.marketStatus,
@@ -29505,6 +29757,7 @@ function buildAnalysisPayload(card){
     entry:safeCard.entry || '',
     stop:safeCard.stop || '',
     target:safeCard.target || '',
+    trustedMarketContext,
     marketData:safeCard.marketData ? {
       price:safeCard.price,
       sma20:safeCard.sma20,
@@ -29577,6 +29830,41 @@ function normalizeAnalysisResponse(raw){
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;
   };
+  const normalizeObject = value => value && typeof value === 'object' && !Array.isArray(value) ? cloneData(value, {}) : null;
+  const imageFacts = normalizeObject(raw.extractedFromImage || raw.extracted_from_image) || {};
+  const trustedMarketContext = normalizeObject(raw.trustedMarketContext || raw.trusted_market_context) || {};
+  const rawCanonicalValues = normalizeObject(raw.canonicalValues || raw.canonical_values) || {};
+  const candleStructureAnalysis = normalizeObject(raw.candleStructureAnalysis || raw.candle_structure_analysis) || {};
+  const tradePlanCommentary = normalizeObject(raw.tradePlanCommentary || raw.trade_plan_commentary) || {};
+  const confidenceWarnings = Array.isArray(raw.confidenceWarnings || raw.confidence_warnings)
+    ? (raw.confidenceWarnings || raw.confidence_warnings).map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  const canonicalValues = {
+    ticker:String(rawCanonicalValues.ticker || trustedMarketContext.ticker || '').trim().toUpperCase(),
+    timeframe:String(rawCanonicalValues.timeframe || trustedMarketContext.timeframe || '').trim(),
+    price:analysisNumberOrNull(rawCanonicalValues.price ?? rawCanonicalValues.currentPrice ?? trustedMarketContext.currentPrice),
+    ma20:analysisNumberOrNull(rawCanonicalValues.ma20 ?? trustedMarketContext.ma20),
+    ma50:analysisNumberOrNull(rawCanonicalValues.ma50 ?? trustedMarketContext.ma50),
+    ma200:analysisNumberOrNull(rawCanonicalValues.ma200 ?? trustedMarketContext.ma200),
+    volume:analysisNumberOrNull(rawCanonicalValues.volume ?? trustedMarketContext.volume),
+    latestCandleOHLC:normalizeObject(rawCanonicalValues.latestCandleOHLC || rawCanonicalValues.latest_candle_ohlc || trustedMarketContext.latestCandleOHLC) || {},
+    currentAppDerivedTradePlan:normalizeObject(rawCanonicalValues.currentAppDerivedTradePlan || rawCanonicalValues.current_app_derived_trade_plan || trustedMarketContext.currentAppDerivedTradePlan) || {},
+    imageDisagreement:{
+      price:analysisNumberOrNull(imageFacts.visible_latest_price ?? imageFacts.price),
+      ma20:analysisNumberOrNull(imageFacts.visible_ma20 ?? imageFacts.ma20),
+      ma50:analysisNumberOrNull(imageFacts.visible_ma50 ?? imageFacts.ma50),
+      ma200:analysisNumberOrNull(imageFacts.visible_ma200 ?? imageFacts.ma200)
+    }
+  };
+  const fallbackCoachSummary = String(
+    raw.coach_summary
+    || raw.plain_english_chart_read
+    || raw.chart_read
+    || candleStructureAnalysis.noviceFriendlyCandleRead
+    || candleStructureAnalysis.novice_friendly_candle_read
+    || candleStructureAnalysis.summary
+    || ''
+  ).trim();
   const coachSummary = String(raw.coach_summary || raw.plain_english_chart_read || raw.chart_read || '').trim();
   const constructiveEvidence = Array.isArray(raw.constructive_evidence) ? raw.constructive_evidence.map(item => String(item).trim()).filter(Boolean) : [];
   const riskEvidence = Array.isArray(raw.risk_evidence) ? raw.risk_evidence.map(item => String(item).trim()).filter(Boolean) : [];
@@ -29612,14 +29900,14 @@ function normalizeAnalysisResponse(raw){
   return {
     setup_type:String(raw.setup_type || '').trim(),
     verdict:'Watch',
-    coach_summary:coachSummary,
-    plain_english_chart_read:coachSummary,
-    visible_ticker:String(raw.visible_ticker || '').trim().toUpperCase(),
-    visible_timeframe:String(raw.visible_timeframe || '').trim(),
-    visible_latest_price:analysisNumberOrNull(raw.visible_latest_price),
-    visible_ma20:analysisNumberOrNull(raw.visible_ma20),
-    visible_ma50:analysisNumberOrNull(raw.visible_ma50),
-    visible_ma200:analysisNumberOrNull(raw.visible_ma200),
+    coach_summary:fallbackCoachSummary,
+    plain_english_chart_read:fallbackCoachSummary,
+    visible_ticker:String(raw.visible_ticker || imageFacts.visible_ticker || imageFacts.ticker || '').trim().toUpperCase(),
+    visible_timeframe:String(raw.visible_timeframe || imageFacts.visible_timeframe || imageFacts.timeframe || '').trim(),
+    visible_latest_price:analysisNumberOrNull(raw.visible_latest_price ?? imageFacts.visible_latest_price ?? imageFacts.price),
+    visible_ma20:analysisNumberOrNull(raw.visible_ma20 ?? imageFacts.visible_ma20 ?? imageFacts.ma20),
+    visible_ma50:analysisNumberOrNull(raw.visible_ma50 ?? imageFacts.visible_ma50 ?? imageFacts.ma50),
+    visible_ma200:analysisNumberOrNull(raw.visible_ma200 ?? imageFacts.visible_ma200 ?? imageFacts.ma200),
     visible_numeric_labels:Array.isArray(raw.visible_numeric_labels)
       ? raw.visible_numeric_labels.map(item => analysisNumberOrNull(item)).filter(value => value !== null)
       : [],
@@ -29648,6 +29936,12 @@ function normalizeAnalysisResponse(raw){
     // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
     chart_match_status:String(raw.chart_match_status || '').trim().toLowerCase(),
     chart_match_warning:String(raw.chart_match_warning || '').trim(),
+    extractedFromImage:imageFacts,
+    trustedMarketContext:trustedMarketContext,
+    canonicalValues:canonicalValues,
+    candleStructureAnalysis:candleStructureAnalysis,
+    tradePlanCommentary:tradePlanCommentary,
+    confidenceWarnings:confidenceWarnings,
     entry:'',
     stop:'',
     first_target:'',
@@ -29880,6 +30174,91 @@ function fallbackPlanProposalForCard(cardLike){
   };
 }
 
+function trustedContextConfidenceLabel(value, preferredLabel, missingLabel = 'unavailable'){
+  return value == null || value === '' ? missingLabel : preferredLabel;
+}
+
+function trustedContextRecentCandles(history, limit = 5){
+  const rows = Array.isArray(history) ? history : [];
+  return rows
+    .filter(row => row && typeof row === 'object')
+    .slice(0, limit)
+    .map(row => ({
+      date:String(row.date || '').trim(),
+      open:numericOrNull(row.open),
+      high:numericOrNull(row.high),
+      low:numericOrNull(row.low),
+      close:numericOrNull(row.close ?? row.price),
+      volume:numericOrNull(row.volume)
+    }))
+    .filter(row => row.date || row.open !== null || row.high !== null || row.low !== null || row.close !== null || row.volume !== null);
+}
+
+function buildTrustedMarketContextPayload(card, options = {}){
+  const safeCard = normalizeCard(card);
+  const marketData = safeCard.marketData && typeof safeCard.marketData === 'object' ? safeCard.marketData : {};
+  const history = trustedContextRecentCandles(marketData.history, 6);
+  const latestCandle = history.length ? history[0] : null;
+  const entry = numericOrNull(safeCard.entry);
+  const stop = numericOrNull(safeCard.stop);
+  const firstTarget = numericOrNull(safeCard.target);
+  const rewardRisk = evaluateRewardRisk(entry, stop, firstTarget);
+  const riskFit = rewardRisk.valid
+    ? evaluateRiskFit({entry, stop, ...currentRiskSettings()})
+    : {risk_per_share:null, position_size:0, max_loss:currentMaxLoss(), risk_status:'plan_missing'};
+  const scanType = String(options.scanType || safeCard.scanType || '').trim();
+  const tradePlan = options.tradePlan && typeof options.tradePlan === 'object' ? options.tradePlan : {};
+  const timeframe = '1D';
+  const currentPrice = numericOrNull(marketData.price ?? safeCard.price);
+  const ma20 = numericOrNull(marketData.ma20 ?? marketData.sma20 ?? safeCard.sma20);
+  const ma50 = numericOrNull(marketData.ma50 ?? marketData.sma50 ?? safeCard.sma50);
+  const ma200 = numericOrNull(marketData.ma200 ?? marketData.sma200 ?? safeCard.sma200);
+  const volume = numericOrNull(marketData.volume ?? safeCard.volume);
+  const avgVolume30d = numericOrNull(marketData.avgVolume ?? marketData.avgVolume30d ?? safeCard.avgVolume30d);
+  const planStatus = rewardRisk.valid ? 'valid' : ((entry !== null || stop !== null || firstTarget !== null) ? 'invalid' : 'missing');
+  return {
+    ticker:String(safeCard.ticker || '').trim().toUpperCase(),
+    timeframe,
+    currentPrice,
+    ma20,
+    ma50,
+    ma200,
+    volume,
+    avgVolume30d,
+    latestCandleOHLC:latestCandle ? {...latestCandle} : null,
+    recentCandleSequence:history,
+    currentAppDerivedTradePlan:{
+      source:entry !== null || stop !== null || firstTarget !== null ? 'review_plan' : 'scanner_estimate',
+      scanType,
+      entry,
+      stop,
+      firstTarget,
+      riskPerShare:rewardRisk.valid ? rewardRisk.riskPerShare : null,
+      rewardPerShare:rewardRisk.valid ? rewardRisk.rewardPerShare : null,
+      rewardRiskRatio:rewardRisk.valid ? rewardRisk.rrRatio : numericOrNull(safeCard.rrRatio ?? tradePlan.rr),
+      positionSize:rewardRisk.valid && Number.isFinite(riskFit.position_size) && riskFit.position_size > 0 ? Number(riskFit.position_size) : null,
+      maxLossGbp:Number.isFinite(riskFit.max_loss) ? Number(riskFit.max_loss) : currentMaxLoss(),
+      status:planStatus,
+      riskStatus:String(riskFit.risk_status || (rewardRisk.valid ? 'fits_risk' : 'plan_missing'))
+    },
+    sourceConfidence:{
+      ticker:'record_ticker',
+      timeframe:'review_default_daily',
+      currentPrice:trustedContextConfidenceLabel(currentPrice, 'trusted_market_data'),
+      ma20:trustedContextConfidenceLabel(ma20, 'trusted_market_data'),
+      ma50:trustedContextConfidenceLabel(ma50, 'trusted_market_data'),
+      ma200:trustedContextConfidenceLabel(ma200, 'trusted_market_data'),
+      volume:trustedContextConfidenceLabel(volume, 'trusted_market_data'),
+      avgVolume30d:trustedContextConfidenceLabel(avgVolume30d, 'trusted_market_data'),
+      latestCandleOHLC:latestCandle ? 'trusted_market_history' : 'unavailable',
+      recentCandleSequence:history.length ? 'trusted_market_history' : 'unavailable',
+      currentAppDerivedTradePlan:(entry !== null || stop !== null || firstTarget !== null)
+        ? 'current_review_plan'
+        : (tradePlan && Object.keys(tradePlan).length ? 'scanner_estimate' : 'unavailable')
+    }
+  };
+}
+
 function tradePlanCandidateSnapshot(label, fields = {}, extra = {}){
   const entry = numericOrNull(fields.entry);
   const stop = numericOrNull(fields.stop);
@@ -30086,6 +30465,12 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     confidence_score:null,
     key_reasons:[],
     risks:[],
+    extractedFromImage:{},
+    trustedMarketContext:{},
+    canonicalValues:{},
+    candleStructureAnalysis:{},
+    tradePlanCommentary:{},
+    confidenceWarnings:[],
     final_verdict:''
   };
   const entry = '';
@@ -30122,6 +30507,22 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   if(mismatchStatus === 'unclear' && mismatchWarning && !safeRisks.includes(mismatchWarning)) safeRisks.unshift(mismatchWarning);
   const inferredRisks = safeRisks.length ? [] : inferRisksFromAnalysisText(chartReadGuard.text, keyReasons);
   const finalRisks = safeRisks.length ? safeRisks : inferredRisks;
+  const canonicalValues = parsed.canonicalValues && typeof parsed.canonicalValues === 'object'
+    ? cloneData(parsed.canonicalValues, {})
+    : {};
+  const trustedMarketContext = parsed.trustedMarketContext && typeof parsed.trustedMarketContext === 'object'
+    ? cloneData(parsed.trustedMarketContext, {})
+    : {};
+  const extractedFromImage = parsed.extractedFromImage && typeof parsed.extractedFromImage === 'object'
+    ? cloneData(parsed.extractedFromImage, {})
+    : {};
+  const candleStructureAnalysis = parsed.candleStructureAnalysis && typeof parsed.candleStructureAnalysis === 'object'
+    ? cloneData(parsed.candleStructureAnalysis, {})
+    : {};
+  const tradePlanCommentary = parsed.tradePlanCommentary && typeof parsed.tradePlanCommentary === 'object'
+    ? cloneData(parsed.tradePlanCommentary, {})
+    : {};
+  const confidenceWarnings = Array.isArray(parsed.confidenceWarnings) ? parsed.confidenceWarnings.slice() : [];
   if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
     const failureReason = !parsed.visible_ticker && !parsed.visible_timeframe && parsed.visible_latest_price == null
       ? 'no_extractable_chart_facts'
@@ -30178,6 +30579,12 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     extraction_warnings:parsed.extraction_warnings || [],
     chart_match_status:mismatchStatus,
     chart_match_warning:mismatchWarning,
+    extractedFromImage,
+    trustedMarketContext,
+    canonicalValues,
+    candleStructureAnalysis,
+    tradePlanCommentary,
+    confidenceWarnings,
     entry,
     stop,
     first_target:firstTarget,
@@ -40260,6 +40667,9 @@ function buildPromptBody(payload){
     '- Do not assign final readiness/verdict labels or buy/sell/hold-style decisions.',
     '- Do not assign final app score, tone, bucket, promotion/demotion state, readiness, tradeability, or trade decision.',
     '- Do not override the deterministic resolver.',
+    '- Use trustedMarketContext as the authority for ticker, timeframe, price, moving averages, volume, candle OHLC, and trade-plan maths.',
+    '- Use the image only for visual structure, candle behaviour, and whether the chart appearance supports or contradicts trusted data.',
+    '- If image or OCR guesses disagree with trustedMarketContext, report both but keep trustedMarketContext canonical.',
     '',
     'Context:',
     `ticker=${payload.ticker}`,
@@ -40269,6 +40679,7 @@ function buildPromptBody(payload){
     `max_loss_gbp=${payload.maxRisk}`,
     `chart_attached=${chartAttached ? 'yes' : 'no'}`,
     `chart_filename=${payload.chartFileName || 'none'}`,
+    `trusted_market_context_present=${payload.trustedMarketContext ? 'yes' : 'no'}`,
     '',
     'Inputs:',
     `trend_state=${payload.trendState}`,
@@ -40329,6 +40740,12 @@ function buildPromptBody(payload){
     `- Current chart_match_warning context: ${chartWarning || 'none'}`,
     '',
     'Output keys:',
+    'extractedFromImage',
+    'trustedMarketContext',
+    'canonicalValues',
+    'candleStructureAnalysis',
+    'tradePlanCommentary',
+    'confidenceWarnings',
     'coach_summary',
     'constructive_evidence',
     'risk_evidence',
@@ -40365,6 +40782,13 @@ function buildPromptBody(payload){
     '',
     'Rules:',
     '- ai_observation_only must be true',
+    '- Return JSON only',
+    '- trustedMarketContext must be echoed back from the prompt context, not re-invented',
+    '- canonicalValues must prefer trustedMarketContext whenever a trusted numeric value exists',
+    '- extractedFromImage must contain only image-derived observations',
+    '- candleStructureAnalysis must comment on recent bounce attempt, rejection/follow-through/indecision/failed bounce, moving-average relationship, whether price is reclaiming or still below key MAs, verdict support, resolver alignment, and include a short novice-friendly candle read',
+    '- tradePlanCommentary must explain whether estimated maths exist and whether confirmation is still missing',
+    '- confidenceWarnings must capture conflicts, unreadable labels, and disagreements between image extraction and trusted data',
     '- visible_ticker and visible_timeframe must be extracted only if visible in the image',
     '- visible_latest_price and visible_ma* values must be numbers or null',
     '- visible_numeric_labels should include readable chart/axis/indicator numeric labels that are visible but cannot be confidently assigned to a specific field',
@@ -40386,6 +40810,9 @@ function buildPromptBody(payload){
   }
   if(payload.marketData !== undefined){
     lines.push(payload.marketData ? `Market data: ${JSON.stringify(payload.marketData)}` : 'Market data: none');
+  }
+  if(payload.trustedMarketContext !== undefined){
+    lines.push(payload.trustedMarketContext ? `trustedMarketContext: ${JSON.stringify(payload.trustedMarketContext)}` : 'trustedMarketContext: none');
   }
   lines.push('', 'Return valid JSON only.');
   return lines;

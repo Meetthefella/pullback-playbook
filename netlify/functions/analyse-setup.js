@@ -196,7 +196,49 @@ function normaliseNumber(value){
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function normaliseAnalysis(obj){
+function normalizeObject(value){
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function normalizeCanonicalValues(canonicalValues = {}, trustedMarketContext = {}, imageFacts = {}){
+  const trustedPlan = normalizeObject(trustedMarketContext.currentAppDerivedTradePlan);
+  const canonical = normalizeObject(canonicalValues);
+  return {
+    ticker: normaliseString(canonical.ticker || trustedMarketContext.ticker, ''),
+    timeframe: normaliseString(canonical.timeframe || trustedMarketContext.timeframe, ''),
+    price: normaliseNumber(canonical.price ?? canonical.currentPrice ?? trustedMarketContext.currentPrice),
+    ma20: normaliseNumber(canonical.ma20 ?? trustedMarketContext.ma20),
+    ma50: normaliseNumber(canonical.ma50 ?? trustedMarketContext.ma50),
+    ma200: normaliseNumber(canonical.ma200 ?? trustedMarketContext.ma200),
+    volume: normaliseNumber(canonical.volume ?? trustedMarketContext.volume),
+    latestCandleOHLC: normalizeObject(canonical.latestCandleOHLC || canonical.latest_candle_ohlc || trustedMarketContext.latestCandleOHLC),
+    currentAppDerivedTradePlan: {
+      entry: normaliseNumber(canonical.entry ?? canonical.planEntry ?? trustedPlan.entry),
+      stop: normaliseNumber(canonical.stop ?? canonical.planStop ?? trustedPlan.stop),
+      firstTarget: normaliseNumber(canonical.firstTarget ?? canonical.first_target ?? canonical.target ?? trustedPlan.firstTarget),
+      rewardRiskRatio: normaliseNumber(canonical.rewardRiskRatio ?? canonical.reward_risk_ratio ?? trustedPlan.rewardRiskRatio),
+      positionSize: normaliseNumber(canonical.positionSize ?? canonical.position_size ?? trustedPlan.positionSize),
+      status: normaliseString(canonical.status || trustedPlan.status, ''),
+      riskStatus: normaliseString(canonical.riskStatus || canonical.risk_status || trustedPlan.riskStatus, '')
+    },
+    imageDisagreement: {
+      price: normaliseNumber(imageFacts.visible_latest_price ?? imageFacts.price),
+      ma20: normaliseNumber(imageFacts.visible_ma20 ?? imageFacts.ma20),
+      ma50: normaliseNumber(imageFacts.visible_ma50 ?? imageFacts.ma50),
+      ma200: normaliseNumber(imageFacts.visible_ma200 ?? imageFacts.ma200)
+    }
+  };
+}
+
+function normaliseAnalysis(obj, payload = {}){
+  const imageFacts = normalizeObject(obj?.extractedFromImage || obj?.extracted_from_image);
+  const trustedMarketContext = normalizeObject(obj?.trustedMarketContext || obj?.trusted_market_context || payload?.trustedMarketContext);
+  const canonicalValues = normalizeCanonicalValues(obj?.canonicalValues || obj?.canonical_values, trustedMarketContext, imageFacts);
+  const candleStructureAnalysis = normalizeObject(obj?.candleStructureAnalysis || obj?.candle_structure_analysis);
+  const tradePlanCommentary = normalizeObject(obj?.tradePlanCommentary || obj?.trade_plan_commentary);
+  const confidenceWarnings = Array.isArray(obj?.confidenceWarnings || obj?.confidence_warnings)
+    ? (obj.confidenceWarnings || obj.confidence_warnings).map(item => String(item))
+    : [];
   const rawOpinion = {
     verdict: normaliseString(obj?.verdict, ''),
     final_verdict: normaliseString(obj?.final_verdict, ''),
@@ -215,18 +257,26 @@ function normaliseAnalysis(obj){
     first_target: normaliseString(obj?.first_target || obj?.target || obj?.proposed_first_target, ''),
     reward_risk: obj?.reward_risk == null || obj?.reward_risk === '' ? null : normaliseString(obj?.reward_risk, '')
   };
-  const coachSummary = normaliseString(obj?.coach_summary || obj?.plain_english_chart_read || obj?.chart_read, '');
+  const coachSummary = normaliseString(
+    obj?.coach_summary
+    || obj?.plain_english_chart_read
+    || obj?.chart_read
+    || candleStructureAnalysis?.noviceFriendlyCandleRead
+    || candleStructureAnalysis?.novice_friendly_candle_read
+    || candleStructureAnalysis?.summary,
+    ''
+  );
   return {
     setup_type: normaliseString(obj?.setup_type, ''),
     verdict: 'Watch',
     coach_summary: coachSummary,
     plain_english_chart_read: coachSummary,
-    visible_ticker: normaliseString(obj?.visible_ticker, ''),
-    visible_timeframe: normaliseString(obj?.visible_timeframe, ''),
-    visible_latest_price: normaliseNumber(obj?.visible_latest_price),
-    visible_ma20: normaliseNumber(obj?.visible_ma20),
-    visible_ma50: normaliseNumber(obj?.visible_ma50),
-    visible_ma200: normaliseNumber(obj?.visible_ma200),
+    visible_ticker: normaliseString(obj?.visible_ticker || imageFacts?.visible_ticker || imageFacts?.ticker, ''),
+    visible_timeframe: normaliseString(obj?.visible_timeframe || imageFacts?.visible_timeframe || imageFacts?.timeframe, ''),
+    visible_latest_price: normaliseNumber(obj?.visible_latest_price ?? imageFacts?.visible_latest_price ?? imageFacts?.price),
+    visible_ma20: normaliseNumber(obj?.visible_ma20 ?? imageFacts?.visible_ma20 ?? imageFacts?.ma20),
+    visible_ma50: normaliseNumber(obj?.visible_ma50 ?? imageFacts?.visible_ma50 ?? imageFacts?.ma50),
+    visible_ma200: normaliseNumber(obj?.visible_ma200 ?? imageFacts?.visible_ma200 ?? imageFacts?.ma200),
     visible_numeric_labels: Array.isArray(obj?.visible_numeric_labels)
       ? obj.visible_numeric_labels.map(item => normaliseNumber(item)).filter(value => value !== null)
       : [],
@@ -245,6 +295,12 @@ function normaliseAnalysis(obj){
     // TODO(chart-verification): legacy_ai_chart_match is fallback-only. Remove after deterministic extraction is validated.
     chart_match_status: normaliseString(obj?.chart_match_status, ''),
     chart_match_warning: normaliseString(obj?.chart_match_warning, ''),
+    extractedFromImage: imageFacts,
+    trustedMarketContext,
+    canonicalValues,
+    candleStructureAnalysis,
+    tradePlanCommentary,
+    confidenceWarnings,
     entry: '',
     stop: '',
     first_target: '',
@@ -379,12 +435,17 @@ exports.handler = async function handler(event){
       'Do not issue buy/sell advice.',
       'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
       'The deterministic app resolver will decide final state.',
+      'Use trustedMarketContext for all numeric values and canonical market facts.',
+      'Do not replace trusted ticker, timeframe, price, MA values, volume, candle OHLC, or trade-plan maths with visual guesses from the image.',
+      'Use the image only for visual structure, candle interpretation, and disagreement detection.',
+      'If the image disagrees with trustedMarketContext, return both but keep trustedMarketContext canonical.',
       'If a chart image is attached, extract visible facts only: visible ticker, timeframe, latest price, moving average values, visible price/date range, and confidence.',
       'If numeric chart labels are visible but cannot be confidently assigned to latest price or a specific moving average, include them in visible_numeric_labels.',
       'TradingView mobile/narrow screenshots may crop MA legend text or numeric labels. If an MA line is visible but its value is unreadable, report the line as visible and keep the numeric value null.',
       'Do not fabricate MA values. Visibility can be partial/inferred; numeric values require readable text.',
       'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',
       'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
+      'Return extractedFromImage, trustedMarketContext, canonicalValues, candleStructureAnalysis, tradePlanCommentary, confidenceWarnings, and a short novice-friendly candle read.',
       'Return exactly one JSON object.',
       'Return evidence fields only; ai_observation_only must be true.',
       'If a field is unknown, return null.'
@@ -509,7 +570,7 @@ exports.handler = async function handler(event){
     });
   }
 
-  const analysis = normaliseAnalysis(parsed);
+  const analysis = normaliseAnalysis(parsed, payload);
 
   console.log('OPENAI_ANALYSIS_SUCCESS_PAYLOAD', JSON.stringify({
     ok: true,

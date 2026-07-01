@@ -147,8 +147,12 @@
       };
     }
     if(aliveStructure && !structuralWeakness && /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(mainBlocker)){
+      const nonStructuralBlock = /^structure is broken\.?$/i.test(mainBlocker)
+        || /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(mainBlocker);
       return {
-        line1:aliveUnconfirmedCopy,
+        line1:nonStructuralBlock && planMathValid
+          ? REVIEW_PRICED_BUT_NOT_READY_LINE1
+          : aliveUnconfirmedCopy,
         line2:'No actionable trade yet.'
       };
     }
