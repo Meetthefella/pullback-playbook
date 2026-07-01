@@ -6487,6 +6487,7 @@ function ensureSimplifiedChartPipelineForRender(record = {}, options = {}){
   const mismatch = !!(recoveredTicker && expectedTicker && recoveredTicker !== expectedTicker);
   const verifiedMatch = !!(recoveredTicker && expectedTicker && recoveredTicker === expectedTicker);
   const existingPhase = String(existing && existing.phase || '').trim();
+  const existingHasVerifiedIdentity = chartPipelineHasVerifiedIdentity(existing || {});
   const shouldReuseExistingCurrentRequest = !!(
     existingMatchesCurrentRequest
     && !(
@@ -6496,6 +6497,35 @@ function ensureSimplifiedChartPipelineForRender(record = {}, options = {}){
   );
   if(shouldReuseExistingCurrentRequest){
     return normalizeChartPipelineForRender(item, existing);
+  }
+  const shouldPreserveExistingVerifiedPipeline = !!(
+    existingMatchesCurrentImage
+    && existingHasVerifiedIdentity
+    && ['verified', 'analysis_running', 'analysis_complete', 'analysis_failed'].includes(existingPhase)
+    && (
+      !currentRequestId
+      || !existingRequestId
+      || currentRequestId !== existingRequestId
+    )
+  );
+  if(shouldPreserveExistingVerifiedPipeline){
+    if(typeof console !== 'undefined' && console.info){
+      console.info('[REVIEW_CHART_PIPELINE_VERIFIED_STATE_PRESERVED]', {
+        ticker:currentTicker,
+        imageId:currentImageId,
+        existingRequestId,
+        currentRequestId,
+        existingPhase
+      });
+    }
+    const preservedPipeline = {
+      ...existing,
+      imageId:currentImageId,
+      requestId:existingRequestId || currentRequestId || '',
+      source:String(options.source || existing.source || 'chart_pipeline_verified_state_preserved'),
+      updatedAt:String(existing && existing.updatedAt || new Date().toISOString())
+    };
+    return normalizeChartPipelineForRender(item, preservedPipeline);
   }
   const nextPipeline = {
     version:1,

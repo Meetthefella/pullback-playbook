@@ -575,6 +575,102 @@ function runDeterministicCandleFallbackRegression(){
   assert.ok(/another strong close above today's range/i.test(amatNext.text), 'AMAT-style Chart Coach should give a specific next-step confirmation');
 }
 
+function runChartPipelinePreservationRegression(){
+  const sandbox = {
+    console,
+    cloneData(value, fallback){
+      return value == null ? fallback : JSON.parse(JSON.stringify(value));
+    },
+    normalizeTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
+    normaliseVisibleTicker(value){
+      return String(value || '').trim().toUpperCase();
+    },
+    chartVerificationNumberOrNull(value){
+      if(value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    chartImageDimensionsFromRef(){
+      return {width:null, height:null};
+    },
+    chartImageDimensionsLabel(){
+      return 'unknown';
+    },
+    simpleStableHash(value){
+      return String(value || '');
+    },
+    getReviewAiRuntime(){
+      return null;
+    }
+  };
+  vm.createContext(sandbox);
+  [
+    'chartImageIdForReview',
+    'buildChartImageSourceTrace',
+    'currentReviewChartContext',
+    'getReviewChartAnalysisPipeline',
+    'buildChartPipelineExpectedFacts',
+    'buildChartPipelineReadFacts',
+    'chartPipelineHasAnyReadFacts',
+    'chartPipelineAllowsAi',
+    'chartPipelineHasVerifiedIdentity',
+    'recoverChartPipelineReadFacts',
+    'normalizeChartPipelineForRender',
+    'ensureSimplifiedChartPipelineForRender',
+    'upsertReviewChartAnalysisPipeline'
+  ].forEach(name => {
+    vm.runInContext(extractFunctionSource(appSource, name), sandbox, {filename:`app.js#${name}`});
+  });
+
+  const record = {
+    ticker:'AMAT',
+    marketData:{price:186.4, ma20:180.2, ma50:174.1, ma200:156.8},
+    review:{
+      chartRef:{
+        imageId:'chart-amat-1',
+        requestId:'request-new',
+        dataUrl:'data:image/png;base64,amat'
+      },
+      chartImageOriginal:{
+        imageId:'chart-amat-1',
+        requestId:'request-new',
+        dataUrl:'data:image/png;base64,amat'
+      },
+      chartImagePreview:{
+        imageId:'chart-amat-1',
+        requestId:'request-new',
+        dataUrl:'data:image/png;base64,amat-preview'
+      },
+      chartAttachmentContext:{
+        imageId:'chart-amat-1',
+        requestId:'request-new',
+        expectedTicker:'AMAT',
+        name:'amat.png'
+      },
+      chartAnalysisPipeline:{
+        ticker:'AMAT',
+        imageId:'chart-amat-1',
+        requestId:'request-old',
+        phase:'analysis_running',
+        expectedFacts:{ticker:'AMAT', timeframe:'1D', price:186.4, ma20:180.2, ma50:174.1, ma200:156.8},
+        readFacts:{ticker:'AMAT', timeframe:'1D', price:186.4, ma20:180.2, ma50:174.1, ma200:156.8},
+        aiAllowed:true,
+        manualConfirmed:false,
+        verifiedMatch:true,
+        mismatch:false,
+        updatedAt:'2026-07-01T12:00:00.000Z'
+      }
+    }
+  };
+
+  const pipeline = sandbox.ensureSimplifiedChartPipelineForRender(record, {source:'test_preserve_verified_pipeline'});
+  assert.strictEqual(pipeline.phase, 'analysis_running', 'Same-image verified pipeline should not fall back to cant_read when request ids drift');
+  assert.strictEqual(pipeline.verifiedMatch, true, 'Same-image verified pipeline should preserve verified match');
+  assert.strictEqual(String(pipeline.readFacts && pipeline.readFacts.ticker || ''), 'AMAT', 'Same-image verified pipeline should preserve readable ticker facts');
+}
+
 function runClientNormalizerRegression(){
   const sandbox = {
     console,
@@ -677,6 +773,7 @@ async function run(){
   runReviewPresentationRegression();
   runPresentationModelRegression();
   runDeterministicCandleFallbackRegression();
+  runChartPipelinePreservationRegression();
   runClientNormalizerRegression();
   runServerCandleOrderRegression();
   runSourceAssertions();
