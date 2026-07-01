@@ -1139,8 +1139,11 @@ function runChartPipelinePreservationRegression(){
     'chartPipelineHasAnyReadFacts',
     'chartPipelineAllowsAi',
     'chartPipelineHasVerifiedIdentity',
+    'preserveManualConfirmIdentityReadFacts',
     'recoverChartPipelineReadFacts',
     'normalizeChartPipelineForRender',
+    'buildChartPipelineFromVerification',
+    'mergePromotedChartPipelineIdentity',
     'ensureSimplifiedChartPipelineForRender',
     'upsertReviewChartAnalysisPipeline'
   ].forEach(name => {
@@ -1192,6 +1195,46 @@ function runChartPipelinePreservationRegression(){
   assert.strictEqual(pipeline.phase, 'analysis_running', 'Same-image verified pipeline should not fall back to cant_read when request ids drift');
   assert.strictEqual(pipeline.verifiedMatch, true, 'Same-image verified pipeline should preserve verified match');
   assert.strictEqual(String(pipeline.readFacts && pipeline.readFacts.ticker || ''), 'AMAT', 'Same-image verified pipeline should preserve readable ticker facts');
+
+  const existingVerifiedPipeline = {
+    ticker:'AMAT',
+    imageId:'chart-amat-1',
+    requestId:'request-new',
+    phase:'analysis_running',
+    expectedFacts:{ticker:'AMAT', timeframe:'1D', price:186.4, ma20:180.2, ma50:174.1, ma200:156.8},
+    readFacts:{ticker:'AMAT', timeframe:'1D', price:186.4, ma20:180.2, ma50:174.1, ma200:156.8},
+    evidence:['Read ticker AMAT from the chart image.'],
+    aiAllowed:true,
+    manualConfirmed:false,
+    verifiedMatch:true,
+    mismatch:false,
+    hasFacts:true
+  };
+  const promotedWeakerPipeline = sandbox.buildChartPipelineFromVerification(record, {
+    imageId:'chart-amat-1',
+    requestId:'request-new',
+    source:'chart_pipeline_quick_check',
+    analysis:{
+      visible_ticker:'',
+      visible_timeframe:'',
+      visible_latest_price:null,
+      ma20_visible:false,
+      ma50_visible:false,
+      ma200_visible:false
+    },
+    chartAssessorInput:{},
+    chartImageSource:{sourceKind:'review_chart'}
+  });
+  const mergedPreservedPipeline = sandbox.mergePromotedChartPipelineIdentity(
+    record,
+    existingVerifiedPipeline,
+    promotedWeakerPipeline,
+    {imageId:'chart-amat-1', requestId:'request-new'}
+  );
+  assert.strictEqual(mergedPreservedPipeline.phase, 'analysis_running', 'Weaker post-AI chart facts must not demote an already verified pipeline');
+  assert.strictEqual(mergedPreservedPipeline.verifiedMatch, true, 'Weaker post-AI chart facts must preserve verified match');
+  assert.strictEqual(mergedPreservedPipeline.mismatch, false, 'Weaker post-AI chart facts must not create a synthetic mismatch');
+  assert.strictEqual(String(mergedPreservedPipeline.readFacts && mergedPreservedPipeline.readFacts.ticker || ''), 'AMAT', 'Weaker post-AI chart facts must preserve the verified ticker');
 }
 
 function runClientNormalizerRegression(){

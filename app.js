@@ -6639,6 +6639,78 @@ function buildChartPipelineFromVerification(record = {}, options = {}){
   };
 }
 
+function mergePromotedChartPipelineIdentity(record = {}, existingPipeline = {}, promotedPipeline = {}, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const existing = existingPipeline && typeof existingPipeline === 'object' ? existingPipeline : {};
+  const promoted = promotedPipeline && typeof promotedPipeline === 'object' ? promotedPipeline : {};
+  const requestId = String(options.requestId || promoted.requestId || existing.requestId || '').trim();
+  const imageId = String(options.imageId || promoted.imageId || existing.imageId || '').trim();
+  const updatedAt = new Date().toISOString();
+  if(existing.manualConfirmed === true){
+    const existingPhase = String(existing.phase || '').trim();
+    const preservedReadFacts = preserveManualConfirmIdentityReadFacts(
+      existing.readFacts || {},
+      promoted.readFacts || {},
+      item.ticker || ''
+    );
+    const preservedTicker = normaliseVisibleTicker(preservedReadFacts.ticker || '');
+    const expectedTicker = normaliseVisibleTicker(item.ticker || '');
+    const preservedMismatch = !!(preservedTicker && expectedTicker && preservedTicker !== expectedTicker);
+    const preservedVerifiedMatch = !!(preservedTicker && expectedTicker && preservedTicker === expectedTicker);
+    const preservedEvidence = preservedMismatch && Array.isArray(existing.evidence) && existing.evidence.length
+      ? existing.evidence.slice()
+      : (Array.isArray(promoted.evidence) ? promoted.evidence.slice() : []);
+    return {
+      ...existing,
+      imageId:String(imageId || existing.imageId || ''),
+      requestId:String(requestId || existing.requestId || ''),
+      source:String(existing.source || 'chart_pipeline_manual_confirm'),
+      phase:existingPhase || 'verified',
+      readFacts:preservedReadFacts,
+      missing:Array.isArray(promoted.missing) ? promoted.missing.slice() : [],
+      diagnostics:Array.isArray(promoted.diagnostics) ? promoted.diagnostics.slice() : [],
+      evidence:preservedEvidence,
+      chartAssessorInput:cloneData(promoted.chartAssessorInput || existing.chartAssessorInput || null, null),
+      chartImageSource:cloneData(promoted.chartImageSource || existing.chartImageSource || null, null),
+      hasFacts:promoted.hasFacts === true || existing.hasFacts === true,
+      mismatch:preservedMismatch,
+      verifiedMatch:preservedVerifiedMatch,
+      aiAllowed:chartPipelineAllowsAi(existingPhase || 'verified'),
+      manualConfirmed:true,
+      updatedAt,
+      debug:promoted.debug
+    };
+  }
+  const existingHasVerifiedIdentity = chartPipelineHasVerifiedIdentity(existing);
+  const promotedHasVerifiedIdentity = chartPipelineHasVerifiedIdentity(promoted);
+  if(existingHasVerifiedIdentity && (!promotedHasVerifiedIdentity || promoted.mismatch === true || promoted.verifiedMatch !== true)){
+    const existingPhase = String(existing.phase || '').trim();
+    const preservedEvidence = Array.isArray(existing.evidence) && existing.evidence.length
+      ? existing.evidence.slice()
+      : (Array.isArray(promoted.evidence) ? promoted.evidence.slice() : []);
+    return {
+      ...existing,
+      imageId:String(imageId || existing.imageId || ''),
+      requestId:String(requestId || existing.requestId || ''),
+      source:String(existing.source || promoted.source || 'chart_pipeline_verified_identity_preserved'),
+      phase:existingPhase || 'verified',
+      missing:Array.isArray(promoted.missing) ? promoted.missing.slice() : (Array.isArray(existing.missing) ? existing.missing.slice() : []),
+      diagnostics:Array.isArray(promoted.diagnostics) ? promoted.diagnostics.slice() : (Array.isArray(existing.diagnostics) ? existing.diagnostics.slice() : []),
+      evidence:preservedEvidence,
+      chartAssessorInput:cloneData(promoted.chartAssessorInput || existing.chartAssessorInput || null, null),
+      chartImageSource:cloneData(promoted.chartImageSource || existing.chartImageSource || null, null),
+      hasFacts:promoted.hasFacts === true || existing.hasFacts === true,
+      mismatch:false,
+      verifiedMatch:true,
+      aiAllowed:chartPipelineAllowsAi(existingPhase || 'verified'),
+      manualConfirmed:false,
+      updatedAt,
+      debug:promoted.debug
+    };
+  }
+  return promoted;
+}
+
 function buildSimplifiedTickerGateAnalysis(record = {}, sanitizedAnalysis = null, rawAnalysis = null, options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const sanitized = sanitizedAnalysis && typeof sanitizedAnalysis === 'object'
@@ -32715,43 +32787,10 @@ async function analyseSetup(ticker, options = {}){
           sanitizedReadFacts:buildChartPipelineReadFacts(analysis),
           gatedReadFacts:buildChartPipelineReadFacts(simplifiedGateAnalysis)
         };
-        if(existingPipeline.manualConfirmed === true){
-          const existingPhase = String(existingPipeline.phase || '').trim();
-          const preservedReadFacts = preserveManualConfirmIdentityReadFacts(
-            existingPipeline.readFacts || {},
-            promotedPipeline.readFacts || {},
-            record.ticker || ''
-          );
-          const preservedTicker = normaliseVisibleTicker(preservedReadFacts.ticker || '');
-          const expectedTicker = normaliseVisibleTicker(record.ticker || '');
-          const preservedMismatch = !!(preservedTicker && expectedTicker && preservedTicker !== expectedTicker);
-          const preservedVerifiedMatch = !!(preservedTicker && expectedTicker && preservedTicker === expectedTicker);
-          const preservedEvidence = preservedMismatch && Array.isArray(existingPipeline.evidence) && existingPipeline.evidence.length
-            ? existingPipeline.evidence.slice()
-            : (Array.isArray(promotedPipeline.evidence) ? promotedPipeline.evidence.slice() : []);
-          upsertReviewChartAnalysisPipeline(record, {
-            ...existingPipeline,
-            imageId:String(requestChartImageId || existingPipeline.imageId || ''),
-            requestId:String(analysisRequestId || existingPipeline.requestId || ''),
-            source:String(existingPipeline.source || 'chart_pipeline_manual_confirm'),
-            phase:existingPhase || 'verified',
-            readFacts:preservedReadFacts,
-            missing:Array.isArray(promotedPipeline.missing) ? promotedPipeline.missing.slice() : [],
-            diagnostics:Array.isArray(promotedPipeline.diagnostics) ? promotedPipeline.diagnostics.slice() : [],
-            evidence:preservedEvidence,
-            chartAssessorInput:cloneData(promotedPipeline.chartAssessorInput || existingPipeline.chartAssessorInput || null, null),
-            chartImageSource:cloneData(promotedPipeline.chartImageSource || existingPipeline.chartImageSource || null, null),
-            hasFacts:promotedPipeline.hasFacts === true || existingPipeline.hasFacts === true,
-            mismatch:preservedMismatch,
-            verifiedMatch:preservedVerifiedMatch,
-            aiAllowed:chartPipelineAllowsAi(existingPhase || 'verified'),
-            manualConfirmed:true,
-            updatedAt:new Date().toISOString(),
-            debug:promotedPipeline.debug
-          });
-        }else{
-          upsertReviewChartAnalysisPipeline(record, promotedPipeline);
-        }
+        upsertReviewChartAnalysisPipeline(record, mergePromotedChartPipelineIdentity(record, existingPipeline, promotedPipeline, {
+          imageId:requestChartImageId,
+          requestId:analysisRequestId
+        }));
       }
       const shouldCommitMergedTrace = !!(
         requestChartImageId &&
