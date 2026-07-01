@@ -314,6 +314,203 @@ test('Chart Guru renders deterministic teaching sections in the review UI', asyn
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
 });
 
+test('Chart Guru renders the structure_breaking_down branch in the Review UI', async ({page}) => {
+  await bootApp(page);
+  await page.evaluate(() => {
+    const chartRef = {
+      dataUrl:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7d8AAAAASUVORK5CYII=',
+      name:'amd-breakdown-chart.png',
+      ticker:'AMD',
+      imageId:'chart-amd-breakdown'
+    };
+    const record = upsertTickerRecord('AMD');
+    record.meta.companyName = 'Advanced Micro Devices';
+    record.meta.exchange = 'NASDAQ';
+    record.meta.marketStatus = 'S&P below 50 MA';
+    record.marketData.currency = 'USD';
+    record.marketData.price = 82.4;
+    record.marketData.previousClose = 88.0;
+    record.marketData.ma20 = 88.6;
+    record.marketData.ma50 = 92.1;
+    record.marketData.ma200 = 104.4;
+    record.marketData.volume = 1650000;
+    record.marketData.avgVolume = 1000000;
+    record.marketData.asOf = '2026-07-01T20:00:00.000Z';
+    record.marketData.history = [
+      {date:'2026-07-01', open:87.9, high:88.1, low:82.0, close:82.4, volume:1650000},
+      {date:'2026-06-30', open:90.4, high:90.8, low:87.3, close:88.0, volume:1410000},
+      {date:'2026-06-29', open:92.1, high:92.3, low:89.4, close:90.2, volume:1230000}
+    ];
+    record.setup.structureState = 'broken';
+    record.setup.structureEligibility = 'broken';
+    record.setup.setupLocationState = 'lost_support';
+    record.setup.pullbackZone = 'off_level';
+    record.setup.priceabilityState = 'unpriceable';
+    record.setup.bounceState = 'failed';
+    record.setup.stabilisationState = 'none';
+    record.setup.volumeState = 'active';
+    record.setup.trendState = 'weakening';
+    record.plan.entry = '';
+    record.plan.stop = '';
+    record.plan.firstTarget = '';
+    record.plan.target = '';
+    record.plan.source = 'none';
+    record.plan.status = 'missing';
+    record.plan.riskStatus = 'unpriceable';
+    record.plan.tradeability = 'unpriceable';
+    record.plan.triggerState = 'invalid';
+    record.scan.analysisProjection = {
+      price:82.4,
+      sma20:88.6,
+      sma50:92.1,
+      sma200:104.4,
+      derived_states:{
+        trend_state:'weakening',
+        pullback_zone:'off_level',
+        setup_location_state:'lost_support',
+        priceability_state:'unpriceable',
+        structure_state:'broken',
+        stabilisation_state:'none',
+        bounce_state:'failed',
+        volume_state:'active',
+        has_clear_invalidation_level:'no',
+        has_priceable_plan:'no'
+      }
+    };
+    record.scan.resolvedVerdict = 'Avoid';
+    record.scan.verdict = 'Avoid';
+    record.scan.score = 2;
+    record.scan.riskStatus = 'unpriceable';
+    record.scan.summary = 'Support has failed and the setup is breaking down.';
+    record.review.chartRef = chartRef;
+    record.review.chartImagePreview = chartRef;
+    record.review.chartAvailable = true;
+    record.review.chartAnalysisPipeline = {
+      ticker:'AMD',
+      imageId:'chart-amd-breakdown',
+      requestId:'verify-amd-breakdown',
+      phase:'analysis_complete',
+      verifiedMatch:true,
+      manualConfirmed:false,
+      expectedFacts:{
+        ticker:'AMD',
+        timeframe:'1D',
+        price:82.4,
+        ma20:88.6,
+        ma50:92.1,
+        ma200:104.4
+      },
+      readFacts:{
+        ticker:'AMD',
+        timeframe:'1D',
+        price:82.4,
+        ma20:88.6,
+        ma50:92.1,
+        ma200:104.4
+      },
+      evidence:['Ticker matched the uploaded chart context.'],
+      diagnostics:[],
+      aiAllowed:true,
+      source:'review_chart_guru_breakdown_spec',
+      updatedAt:'2026-07-01T10:00:00.000Z'
+    };
+    const baseProjection = {
+      ticker:'AMD',
+      canonicalVerdict:'avoid',
+      finalVerdict:'avoid',
+      sourceOfTruthVisualBucket:'avoid',
+      visualBucket:'avoid',
+      tone:'avoid'
+    };
+    record.watchlist.presentation = {
+      sharedPresentation:{
+        canonicalVerdict:'avoid',
+        finalVerdict:'avoid',
+        visualBucket:'avoid',
+        tone:'avoid',
+        badgeLabel:'Avoid',
+        actionLabel:'Leave it alone until a new base forms.'
+      }
+    };
+    record.review.analysisState = {
+      raw:'',
+      normalized:{
+        parseWarning:'Model response was malformed JSON. Deterministic chart summary used instead.',
+        coach_summary:'generic fallback that should not render',
+        plain_english_chart_read:'generic fallback that should not render',
+        trustedMarketContext:{
+          ticker:'AMD',
+          timeframe:'1D',
+          currentPrice:82.4,
+          ma20:88.6,
+          ma50:92.1,
+          ma200:104.4,
+          avgVolume30d:1000000,
+          recentCandleSequence:[
+            {date:'2026-07-01', open:87.9, high:88.1, low:82.0, close:82.4, volume:1650000},
+            {date:'2026-06-30', open:90.4, high:90.8, low:87.3, close:88.0, volume:1410000},
+            {date:'2026-06-29', open:92.1, high:92.3, low:89.4, close:90.2, volume:1230000}
+          ]
+        },
+        canonicalValues:{
+          price:82.4,
+          ma20:88.6,
+          ma50:92.1,
+          ma200:104.4,
+          volume:1650000
+        },
+        candleStructureAnalysis:{
+          summary:'Heavy selling has damaged the chart and support is no longer holding.'
+        },
+        tradePlanCommentary:{
+          summary:'No actionable trade plan is available.'
+        }
+      },
+      prompt:'',
+      error:'',
+      reviewedAt:'2026-07-01T10:00:00.000Z',
+      chartImageId:'chart-amd-breakdown',
+      requestId:'analysis-amd-breakdown',
+      ticker:'AMD'
+    };
+    record.review.normalizedAnalysis = record.review.analysisState.normalized;
+    uiState.activeReviewSourceProjectionSnapshot = baseProjection;
+    uiState.activeReviewProjectionSource = 'review_chart_guru_breakdown_spec';
+    setActiveReviewTicker('AMD');
+    renderReviewWorkspace({source:'review_chart_guru_breakdown_spec'});
+  });
+  await page.locator('[data-workspace-tab="review"]').click();
+
+  const deterministicModel = await page.evaluate(() => {
+    const record = getTickerRecord('AMD');
+    const chartRead = finalDisplayedAnalysisChartRead(record, record.review.normalizedAnalysis);
+    const biggestClue = chartRead.chartCoach.sections.find(section => section.key === 'biggest_clue');
+    const whatNext = chartRead.chartCoach.sections.find(section => section.key === 'what_next');
+    return {
+      primaryStoryKey:String(chartRead.chartCoach.primaryStory && chartRead.chartCoach.primaryStory.key || ''),
+      biggestClueText:String(biggestClue && biggestClue.text || ''),
+      whatNextText:String(whatNext && whatNext.text || ''),
+      renderedText:String(chartRead.text || '')
+    };
+  });
+
+  await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('🧘 Chart Guru');
+  await expect(page.locator('#reviewWorkspace')).not.toContainText('AI Summary');
+  await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Guru Notes');
+  await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Coach');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📉 Biggest clue');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText(deterministicModel.biggestClueText);
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText(deterministicModel.whatNextText);
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('rebuild a proper base');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('The latest candle is red');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('The latest candle is small');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('Wait for stronger confirmation before considering an entry.');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('generic fallback that should not render');
+
+  expect(deterministicModel.primaryStoryKey).toBe('structure_breaking_down');
+});
+
 test('Chart Guru does not render before verification passes and stays mobile-safe', async ({page}) => {
   await bootApp(page);
   await page.setViewportSize({width:390, height:844});

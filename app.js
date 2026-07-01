@@ -23179,6 +23179,19 @@ function chartCoachLargeBodyRun(sequence = []){
 
 function chartCoachLearningPointForStory(storyKey = '', context = {}){
   const volumeRatio = Number(context.volumeRatio);
+  if(storyKey === 'constructive_pullback_near_20ma' || storyKey === 'constructive_pullback_near_50ma'){
+    return volumeRatio <= 0.8
+      ? 'Constructive pullbacks are healthier when selling pressure stays controlled instead of expanding aggressively.'
+      : 'Constructive pullbacks work best when support holds first and buyers confirm the turn after the pause.';
+  }
+  if(storyKey === 'pullback_still_repairing') return 'A pullback still needs repair when price starts losing key averages instead of finding support quickly.';
+  if(storyKey === 'bounce_confirmation_pending'){
+    return context.bounceAttempt === true
+      ? 'Early bounce attempts matter more when buyers add a second sign of strength instead of stalling after one day.'
+      : 'A lower wick matters more when the next candle also closes stronger instead of slipping back again.';
+  }
+  if(storyKey === 'structure_breaking_down') return 'Once support stops holding, the chart usually needs time to rebuild before a safer pullback can form.';
+  if(storyKey === 'extended_after_run') return 'A strong trend is easier to manage after it pulls back into support than when price is still stretched above it.';
   if(storyKey === 'strong_upside_acceleration'){
     return volumeRatio >= 1.05
       ? 'Big moves on higher volume are usually more reliable than big moves on quiet volume.'
@@ -23195,8 +23208,28 @@ function chartCoachLearningPointForStory(storyKey = '', context = {}){
 
 function chartCoachWhatNextForStory(storyKey = '', context = {}){
   const maRelation = context.maRelation && typeof context.maRelation === 'object' ? context.maRelation : {};
+  const supportLabel = context.near20 === 'near' || context.pullbackNear20 === true
+    ? '20-day average'
+    : ((context.near50 === 'near' || context.pullbackNear50 === true) ? '50-day average' : 'support');
   if(storyKey === 'strong_upside_acceleration'){
     return `After a strong run, a calm pullback that holds above the 20-day average would be healthier than the price racing straight up.`;
+  }
+  if(storyKey === 'constructive_pullback_near_20ma' || storyKey === 'constructive_pullback_near_50ma'){
+    return `Watch for buyers to confirm support with a firmer close from the ${supportLabel}. A decisive close below that area would weaken the setup.`;
+  }
+  if(storyKey === 'pullback_still_repairing'){
+    return `Watch for price to reclaim the ${supportLabel} and hold it before trusting the pullback. Another decisive loss of support would keep the chart in repair mode.`;
+  }
+  if(storyKey === 'bounce_confirmation_pending'){
+    return context.bounceAttempt === true
+      ? `Watch for buyers to defend the ${supportLabel} and add a second stronger close. A decisive break below support would tell you the bounce is not ready yet.`
+      : `Watch for buyers to defend the ${supportLabel} and close stronger on the next candle. A decisive break below support would show that defence has failed.`;
+  }
+  if(storyKey === 'structure_breaking_down'){
+    return 'Watch for the chart to stop making weaker closes and rebuild a proper base before treating any bounce as meaningful.';
+  }
+  if(storyKey === 'extended_after_run'){
+    return 'Watch for a calmer pullback into the 20-day average or another clear support area before treating the move as lower risk.';
   }
   if(storyKey === 'sharp_selloff'){
     return 'Watch for selling to slow down, or for the price to stop closing near the low before trusting any bounce attempt.';
@@ -23233,6 +23266,19 @@ function chartCoachPrimaryStoryCandidates(context = {}){
   const latestWickRejection = String(context.latestWickRejection || '').trim();
   const bodyDescriptor = String(context.bodyDescriptor || '').trim();
   const maRelation = context.maRelation && typeof context.maRelation === 'object' ? context.maRelation : {};
+  const structureIntact = context.structureIntact === true;
+  const structureBroken = context.structureBroken === true;
+  const structureWeakening = context.structureWeakening === true;
+  const pullbackNear20 = context.pullbackNear20 === true;
+  const pullbackNear50 = context.pullbackNear50 === true;
+  const recentlyLeftSupportZone = context.recentlyLeftSupportZone === true;
+  const bounceAttempt = context.bounceAttempt === true;
+  const followThroughConfirmed = context.followThroughConfirmed === true;
+  const failedBounce = context.failedBounce === true;
+  const weakVolume = context.weakVolume === true;
+  const activeVolume = context.activeVolume === true;
+  const extendedAfterRun = context.extendedAfterRun === true;
+  const actionable = context.actionable === true;
   if(latestDirection === 'green' && bodyDescriptor === 'strong' && greenRun >= 2 && largeBodyRun >= 2){
     candidates.push({
       key:'strong_upside_acceleration',
@@ -23257,7 +23303,105 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:118
     });
   }
-  if(latestWickRejection === 'lower_rejection'){
+  if(structureBroken || (failedBounce && maRelation.above20 === false && maRelation.above50 === false)){
+    const evidenceFactIds = ['trend_context', 'weakness_signal'];
+    if(structureBroken) evidenceFactIds.push('structure_broken');
+    if(failedBounce) evidenceFactIds.push('failed_bounce');
+    candidates.push({
+      key:'structure_breaking_down',
+      label:'Biggest clue',
+      icon:'📉',
+      text:'Support is starting to give way, so this looks more like structure damage than a healthy pullback.',
+      evidenceFactIds,
+      confidence:0.92,
+      rankReason:'structure_break_is_clearest_setup_story',
+      score:126
+    });
+  }
+  if(structureIntact && pullbackNear20 && !followThroughConfirmed && !actionable){
+    const evidenceFactIds = ['trend_context', 'support_short_term_average'];
+    if(bounceAttempt) evidenceFactIds.push('bounce_attempt');
+    const supportText = bounceAttempt
+      ? (weakVolume
+        ? 'The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but the bounce still needs confirmation and volume is not helping yet.'
+        : 'The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but the bounce still needs confirmation.')
+      : (weakVolume
+        ? 'The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but buyers still need to defend this support area and volume is not helping yet.'
+        : 'The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but buyers still need to defend this support area.');
+    candidates.push({
+      key:'constructive_pullback_near_20ma',
+      label:'Biggest clue',
+      icon:'🟢',
+      text:supportText,
+      evidenceFactIds,
+      confidence:0.91,
+      rankReason:'trend_intact_pullback_into_20ma_support',
+      score:114
+    });
+  }
+  if(structureIntact && pullbackNear50 && !followThroughConfirmed && !actionable){
+    const evidenceFactIds = ['trend_context', 'support_medium_term_average'];
+    if(bounceAttempt) evidenceFactIds.push('bounce_attempt');
+    const supportText = bounceAttempt
+      ? (weakVolume
+        ? 'The main clue is a constructive pullback into the 50-day average while the wider uptrend is still intact, but the bounce still needs confirmation and support must hold clearly.'
+        : 'The main clue is a constructive pullback into the 50-day average while the wider uptrend is still intact, but the bounce still needs confirmation.')
+      : (weakVolume
+        ? 'The main clue is a constructive pullback into the 50-day average while the wider uptrend is still intact, but buyers still need to defend this support area and support must hold clearly.'
+        : 'The main clue is a constructive pullback into the 50-day average while the wider uptrend is still intact, but buyers still need to defend this support area.');
+    candidates.push({
+      key:'constructive_pullback_near_50ma',
+      label:'Biggest clue',
+      icon:'🟢',
+      text:supportText,
+      evidenceFactIds,
+      confidence:0.89,
+      rankReason:'trend_intact_pullback_into_50ma_support',
+      score:112
+    });
+  }
+  if((structureWeakening || recentlyLeftSupportZone) && !structureBroken){
+    candidates.push({
+      key:'pullback_still_repairing',
+      label:'Biggest clue',
+      icon:'🟠',
+      text:'The pullback is still trying to repair itself, so the chart needs to prove support again before the setup improves.',
+      evidenceFactIds:['trend_context', 'weakness_signal'],
+      confidence:0.86,
+      rankReason:'pullback_has_not_repaired_structure',
+      score:107
+    });
+  }
+  if(structureIntact && (bounceAttempt || latestWickRejection === 'lower_rejection') && !followThroughConfirmed && !failedBounce){
+    const evidenceFactIds = [];
+    if(bounceAttempt) evidenceFactIds.push('bounce_attempt');
+    if(latestWickRejection === 'lower_rejection') evidenceFactIds.push('lower_rejection_wick');
+    candidates.push({
+      key:'bounce_confirmation_pending',
+      label:'Biggest clue',
+      icon:'🟢',
+      text:bounceAttempt
+        ? 'Buyers are trying to defend support, but the bounce still needs a firmer confirmation candle.'
+        : 'The lower wick shows buyers pushed back from the lows, but they still need to follow through.',
+      evidenceFactIds,
+      confidence:0.84,
+      rankReason:bounceAttempt ? 'bounce_started_but_follow_through_missing' : 'support_defense_started_but_follow_through_missing',
+      score:106
+    });
+  }
+  if(structureIntact && extendedAfterRun && !pullbackNear20 && !pullbackNear50){
+    candidates.push({
+      key:'extended_after_run',
+      label:'Biggest clue',
+      icon:'📈',
+      text:'The trend is still strong, but price is stretched after the run and would look healthier after a calmer pullback.',
+      evidenceFactIds:['trend_context', 'price_accelerating_higher'],
+      confidence:0.82,
+      rankReason:'trend_is_extended_above_support',
+      score:105
+    });
+  }
+  if(latestWickRejection === 'lower_rejection' && !structureIntact){
     candidates.push({
       key:'long_lower_wick_support_test',
       label:'Biggest clue',
@@ -23269,7 +23413,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:108
     });
   }
-  if(latestWickRejection === 'upper_rejection'){
+  if(latestWickRejection === 'upper_rejection' && !structureIntact){
     candidates.push({
       key:'long_upper_wick_rejection',
       label:'Biggest clue',
@@ -23281,7 +23425,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:108
     });
   }
-  if(bodyDescriptor === 'small' || latestDirection === 'flat'){
+  if((bodyDescriptor === 'small' || latestDirection === 'flat') && (!structureIntact || structureBroken)){
     candidates.push({
       key:'doji_indecision',
       label:'Biggest clue',
@@ -23293,7 +23437,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:104
     });
   }
-  if(context.failedBounce === true){
+  if(failedBounce === true && !structureBroken){
     candidates.push({
       key:'failed_bounce',
       label:'Biggest clue',
@@ -23305,7 +23449,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:100
     });
   }
-  if(context.bounceAttempt === true){
+  if(bounceAttempt === true && !structureIntact){
     candidates.push({
       key:'bounce_attempt',
       label:'Biggest clue',
@@ -23372,6 +23516,41 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   const recentLow = numericOrNull(latest.low);
   const near20 = chartCoachProximityLabel(facts.currentPrice, facts.ma20);
   const near50 = chartCoachProximityLabel(facts.currentPrice, facts.ma50);
+  const lower = value => String(value || '').trim().toLowerCase();
+  const resolvedStructureState = lower(derivedStates.structureState || globalVerdict.structure_state || globalVerdict.structureState);
+  const resolvedStructureEligibility = lower(derivedStates.structureEligibility || globalVerdict.structure_eligibility || globalVerdict.structureEligibility);
+  const resolvedSetupLocationState = lower(derivedStates.setupLocationState || globalVerdict.setup_location_state || globalVerdict.setupLocationState);
+  const resolvedPullbackZone = lower(derivedStates.pullbackZone || globalVerdict.pullback_zone || globalVerdict.pullbackZone);
+  const resolvedBounceState = lower(derivedStates.bounceState || globalVerdict.bounce_state || globalVerdict.bounceState);
+  const resolvedVolumeState = lower(derivedStates.volumeState || globalVerdict.volume_state || globalVerdict.volumeState);
+  const resolvedPriceabilityState = lower(derivedStates.priceabilityState || globalVerdict.priceability_state || globalVerdict.priceabilityState);
+  const resolvedFinalVerdict = lower(globalVerdict.final_verdict || globalVerdict.finalVerdict || '');
+  const marketStatusText = lower(item.marketStatus || state.marketStatus || '');
+  const structureIntact = ['strong', 'intact', 'developing_clean'].includes(resolvedStructureState)
+    || ['alive', 'messy'].includes(resolvedStructureEligibility);
+  const structureBroken = ['broken', 'failed', 'dead', 'invalid'].includes(resolvedStructureState)
+    || resolvedStructureEligibility === 'broken';
+  const structureWeakening = !structureBroken && (
+    resolvedStructureState === 'weakening'
+    || resolvedSetupLocationState === 'lost_support'
+    || resolvedPullbackZone === 'left_support_zone'
+  );
+  const pullbackNear20 = near20 === 'near' || resolvedPullbackZone === 'near_20ma';
+  const pullbackNear50 = near50 === 'near' || resolvedPullbackZone === 'near_50ma';
+  const recentlyLeftSupportZone = ['left_support_zone', 'off_level'].includes(resolvedPullbackZone) || resolvedSetupLocationState === 'off_level';
+  const weakVolume = ['weak', 'light', 'low', 'below_average'].includes(resolvedVolumeState) || volumeRatio !== null && volumeRatio <= 0.8;
+  const activeVolume = ['active', 'strong', 'above_average'].includes(resolvedVolumeState) || volumeRatio !== null && volumeRatio >= 1.05;
+  const actionable = resolvedFinalVerdict === 'entry';
+  const extendedAfterRun = resolvedSetupLocationState === 'extended'
+    || resolvedPullbackZone === 'extended'
+    || (
+      facts.maRelation.above20 === true
+      && facts.maRelation.above50 === true
+      && Number.isFinite(facts.currentPrice)
+      && Number.isFinite(facts.ma20)
+      && facts.currentPrice > facts.ma20 * 1.04
+    );
+  const marketSupportive = /above 50/.test(marketStatusText) || /supportive/.test(marketStatusText);
   const addSection = (section = {}) => {
     if(!section || !section.icon || !section.label || !section.text) return;
     sections.push({
@@ -23568,10 +23747,34 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     recentSequence,
     volumeRatio,
     near20,
-    near50
+    near50,
+    structureState:resolvedStructureState,
+    structureEligibility:resolvedStructureEligibility,
+    setupLocationState:resolvedSetupLocationState,
+    pullbackZone:resolvedPullbackZone,
+    bounceState:resolvedBounceState,
+    volumeState:resolvedVolumeState,
+    priceabilityState:resolvedPriceabilityState,
+    structureIntact,
+    structureBroken,
+    structureWeakening,
+    pullbackNear20,
+    pullbackNear50,
+    recentlyLeftSupportZone,
+    weakVolume,
+    activeVolume,
+    actionable,
+    extendedAfterRun,
+    marketSupportive
   };
   const primaryStory = chartCoachPrimaryStoryCandidates(storyContext)[0] || null;
   const primaryStorySupportExclusions = {
+    constructive_pullback_near_20ma:['strength'],
+    constructive_pullback_near_50ma:['strength'],
+    pullback_still_repairing:[],
+    bounce_confirmation_pending:['strength'],
+    structure_breaking_down:['strength'],
+    extended_after_run:['strength'],
     strong_upside_acceleration:['candle', 'strength'],
     sharp_selloff:['candle', 'strength'],
     long_lower_wick_support_test:['wicks', 'support'],
@@ -23583,11 +23786,60 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   const supportExclusions = primaryStory && primaryStorySupportExclusions[primaryStory.key]
     ? primaryStorySupportExclusions[primaryStory.key]
     : [];
+  const supportScoreForPrimaryStory = section => {
+    const key = String(section && section.key || '').trim();
+    const base = chartCoachPriorityForKey(key);
+    if(!primaryStory) return base;
+    if(key === 'support' && facts.latestWickRejection === 'lower_rejection' && (near20 === 'near' || near50 === 'near')) return 126;
+    if(key === 'resistance' && facts.latestWickRejection === 'upper_rejection') return 126;
+    if(['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma'].includes(primaryStory.key)){
+      if(key === 'trend') return 130;
+      if(key === 'support') return 126;
+      if(key === 'volume' && weakVolume) return 118;
+      if(key === 'indecision' || key === 'wicks') return 112;
+      if(key === 'weakness') return 106;
+      if(key === 'candle') return 72;
+    }
+    if(primaryStory.key === 'pullback_still_repairing'){
+      if(key === 'weakness') return 130;
+      if(key === 'trend') return 122;
+      if(key === 'support') return 116;
+      if(key === 'volume' && weakVolume) return 112;
+      if(key === 'indecision' || key === 'candle') return 78;
+    }
+    if(primaryStory.key === 'bounce_confirmation_pending'){
+      if(key === 'trend') return 128;
+      if(key === 'support') return 124;
+      if(key === 'indecision' || key === 'wicks') return 118;
+      if(key === 'volume' && weakVolume) return 114;
+      if(key === 'candle') return 76;
+    }
+    if(primaryStory.key === 'structure_breaking_down'){
+      if(key === 'weakness') return 132;
+      if(key === 'trend') return 124;
+      if(key === 'support') return 96;
+      if(key === 'volume') return activeVolume ? 116 : 100;
+    }
+    if(primaryStory.key === 'extended_after_run'){
+      if(key === 'trend') return 128;
+      if(key === 'volume') return activeVolume ? 118 : 104;
+      if(key === 'indecision' || key === 'candle') return 74;
+    }
+    return base;
+  };
   const supportSections = sections
     .filter(section => !['what_next'].includes(String(section.key || '').trim()))
     .filter(section => !supportExclusions.includes(String(section.key || '').trim()))
-    .filter(section => !['candle'].includes(String(section.key || '').trim()))
-    .sort((left, right) => chartCoachPriorityForKey(String(right.key || '').trim()) - chartCoachPriorityForKey(String(left.key || '').trim()))
+    .filter(section => {
+      const key = String(section.key || '').trim();
+      if(key !== 'candle') return true;
+      return primaryStory && ['doji_indecision', 'strong_upside_acceleration', 'sharp_selloff'].includes(primaryStory.key);
+    })
+    .sort((left, right) => {
+      const priorityDelta = supportScoreForPrimaryStory(right) - supportScoreForPrimaryStory(left);
+      if(priorityDelta !== 0) return priorityDelta;
+      return chartCoachPriorityForKey(String(right.key || '').trim()) - chartCoachPriorityForKey(String(left.key || '').trim());
+    })
     .slice(0, 2)
     .map(section => ({
       ...section,
@@ -39884,7 +40136,6 @@ function renderReviewWorkspace(options = {}){
     analysisLoadingStage,
     resolvedReviewDisplay
   });
-  const aiSummaryConflictDetected = chartGuruDisplayState.conflictDetected === true;
   const chartCoachDisplay = chartGuruDisplayState.display || {text:'No Chart Guru saved yet.', markup:'', title:'🧘 Chart Guru'};
   const aiSummaryTitle = chartCoachDisplay.title || '🧘 Chart Guru';
   const aiSummaryPreview = String(chartCoachDisplay.text || '').trim();

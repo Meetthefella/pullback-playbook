@@ -561,6 +561,367 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual(rankingModel.sections.filter(section => section.key === 'learning_point').length, 1, 'Only one Learning point section should render');
   assert.ok(rankingModel.sections.some(section => section.key === 'what_next'), 'What next should still be rendered');
 
+  const hwmStyleCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:144.1, ma20:143.6, ma50:138.4, ma200:121.8, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:144.1, ma20:143.6, ma50:138.4, ma200:121.8, volume:720000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:144.0, high:144.8, low:143.2, close:144.1, volume:720000},
+          {date:'2026-06-30', open:145.6, high:146.2, low:143.8, close:144.2, volume:810000},
+          {date:'2026-06-29', open:146.4, high:147.0, low:145.0, close:145.7, volume:930000},
+          {date:'2026-06-28', open:142.2, high:146.8, low:141.9, close:146.5, volume:1250000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'near_20ma',
+        setupLocationState:'supportive',
+        bounceState:'attempt',
+        volumeState:'weak',
+        priceabilityState:'unpriceable'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(hwmStyleCoach.primaryStory.key, 'constructive_pullback_near_20ma', 'Constructive pullback near the 20MA should outrank isolated indecision candles');
+  assert.strictEqual(hwmStyleCoach.sections[0].key, 'biggest_clue', 'Constructive pullback story should still render first');
+  assert.ok(/pullback/i.test(hwmStyleCoach.sections[0].text) && /20-day average/i.test(hwmStyleCoach.sections[0].text), 'First rendered section should explain pullback support context');
+  assert.ok(hwmStyleCoach.sections.every(section => section.key !== 'indecision' || /small|neither/i.test(section.text)), 'Indecision, if present, should remain supporting detail only');
+  const hwmWhatNext = hwmStyleCoach.sections.find(section => section.key === 'what_next');
+  assert.ok(/confirm support|firmer close/i.test(hwmWhatNext.text), 'What next should require bullish confirmation from support');
+  assert.ok(/decisive close below/i.test(hwmWhatNext.text), 'What next should explain the support-loss invalidation');
+  assert.ok(!hwmStyleCoach.primaryStory.evidenceFactIds.includes('bounce_attempt') || /bounce/i.test(hwmStyleCoach.sections[0].text), 'Constructive pullback evidence should only claim a bounce attempt when one exists');
+
+  const constructiveSupportOnlyCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:143.9, ma20:143.4, ma50:138.4, ma200:121.8, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:143.9, ma20:143.4, ma50:138.4, ma200:121.8, volume:760000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:144.6, high:145.0, low:143.2, close:143.9, volume:760000},
+          {date:'2026-06-30', open:145.7, high:146.1, low:144.1, close:144.8, volume:820000},
+          {date:'2026-06-29', open:146.5, high:147.0, low:145.0, close:145.9, volume:910000},
+          {date:'2026-06-28', open:142.2, high:146.8, low:141.9, close:146.5, volume:1250000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'near_20ma',
+        setupLocationState:'supportive',
+        bounceState:'none',
+        volumeState:'weak',
+        priceabilityState:'unpriceable'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(constructiveSupportOnlyCoach.primaryStory.key, 'constructive_pullback_near_20ma', 'Near-20MA intact pullbacks should still use the constructive pullback story without a bounce attempt');
+  assert.notStrictEqual(constructiveSupportOnlyCoach.primaryStory.key, 'pullback_still_repairing', 'Unpriceable trade maths alone must not turn an intact pullback into a repair story');
+  assert.ok(!/bounce still needs confirmation/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Constructive support-only story must not claim a bounce has already started');
+  assert.ok(/buyers still need to defend|support area/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Constructive support-only story should use support-confirmation wording');
+  assert.ok(!constructiveSupportOnlyCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Constructive support-only story must not claim bounce_attempt evidence');
+
+  const constructiveBounceCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:144.5, ma20:143.6, ma50:138.4, ma200:121.8, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:144.5, ma20:143.6, ma50:138.4, ma200:121.8, volume:720000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:144.0, high:145.0, low:143.2, close:144.5, volume:720000},
+          {date:'2026-06-30', open:145.6, high:146.2, low:143.8, close:144.2, volume:810000},
+          {date:'2026-06-29', open:146.4, high:147.0, low:145.0, close:145.7, volume:930000},
+          {date:'2026-06-28', open:142.2, high:146.8, low:141.9, close:146.5, volume:1250000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'near_20ma',
+        setupLocationState:'supportive',
+        bounceState:'attempt',
+        volumeState:'weak',
+        priceabilityState:'unpriceable'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.ok(/bounce still needs confirmation/i.test(constructiveBounceCoach.primaryStory.text), 'Constructive pullback story may mention bounce confirmation when a bounce attempt exists');
+  assert.ok(constructiveBounceCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Constructive bounce story should preserve bounce_attempt evidence');
+
+  const bounceAttemptOnlyCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:100.4, ma20:97.2, ma50:95.8, ma200:90, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:100.4, ma20:97.2, ma50:95.8, ma200:90, volume:1500000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:99.95, high:100.5, low:99.7, close:100.4, volume:1500000},
+          {date:'2026-06-30', open:100.9, high:101.0, low:99.8, close:99.9, volume:1300000},
+          {date:'2026-06-29', open:101.6, high:101.9, low:100.3, close:100.8, volume:1200000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'none',
+        setupLocationState:'supportive',
+        bounceState:'attempt',
+        volumeState:'supportive',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(bounceAttemptOnlyCoach.primaryStory.key, 'bounce_confirmation_pending', 'Bounce attempt without a lower wick should still use bounce_confirmation_pending');
+  assert.strictEqual(bounceAttemptOnlyCoach.primaryStory.evidenceFactIds.join('|'), 'bounce_attempt', 'Bounce-attempt-only story should preserve only bounce_attempt evidence');
+
+  const lowerWickOnlyCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:100.2, ma20:97.0, ma50:95.8, ma200:90, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:100.2, ma20:97.0, ma50:95.8, ma200:90, volume:1500000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:100.3, high:100.6, low:99.2, close:100.2, volume:1500000},
+          {date:'2026-06-30', open:100.8, high:101.0, low:99.7, close:100.4, volume:1300000},
+          {date:'2026-06-29', open:101.2, high:101.6, low:100.1, close:100.9, volume:1200000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'none',
+        setupLocationState:'supportive',
+        bounceState:'none',
+        volumeState:'supportive',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(lowerWickOnlyCoach.primaryStory.key, 'bounce_confirmation_pending', 'Lower-wick-only defence should still use bounce_confirmation_pending');
+  assert.strictEqual(lowerWickOnlyCoach.primaryStory.evidenceFactIds.join('|'), 'lower_rejection_wick', 'Lower-wick-only story should preserve only lower_rejection_wick evidence');
+  assert.ok(/lower wick shows buyers pushed back from the lows|need to follow through/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence should describe the wick honestly without claiming a bounce');
+  assert.ok(!/the bounce still needs/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence must not claim that a bounce has already started');
+  assert.ok(!/bounce is not ready yet/i.test((lowerWickOnlyCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Lower-wick-only what-next copy must not refer to a bounce that has not started');
+
+  const bounceAndLowerWickCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:100.4, ma20:97.2, ma50:95.8, ma200:90, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:100.4, ma20:97.2, ma50:95.8, ma200:90, volume:1500000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:99.95, high:100.7, low:99.2, close:100.4, volume:1500000},
+          {date:'2026-06-30', open:100.9, high:101.0, low:99.8, close:99.9, volume:1300000},
+          {date:'2026-06-29', open:101.6, high:101.9, low:100.3, close:100.8, volume:1200000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'none',
+        setupLocationState:'supportive',
+        bounceState:'attempt',
+        volumeState:'supportive',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(bounceAndLowerWickCoach.primaryStory.key, 'bounce_confirmation_pending', 'Combined bounce-attempt and wick defence should still use bounce_confirmation_pending');
+  assert.strictEqual(bounceAndLowerWickCoach.primaryStory.evidenceFactIds.join('|'), 'bounce_attempt|lower_rejection_wick', 'Combined bounce/defence story should preserve both evidence facts');
+
+  const repairingCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:96.2, ma20:98.4, ma50:101.1, ma200:90.5, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:96.2, ma20:98.4, ma50:101.1, ma200:90.5, volume:760000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:96.6, high:97.3, low:95.8, close:96.2, volume:760000},
+          {date:'2026-06-30', open:98.1, high:98.4, low:96.4, close:96.8, volume:820000},
+          {date:'2026-06-29', open:99.2, high:99.6, low:97.8, close:98.5, volume:910000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'weakening',
+        structureEligibility:'alive',
+        pullbackZone:'left_support_zone',
+        setupLocationState:'off_level',
+        bounceState:'none',
+        volumeState:'weak',
+        priceabilityState:'unpriceable'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(repairingCoach.primaryStory.key, 'pullback_still_repairing', 'Weakening pullbacks should choose the repair story before isolated candle commentary');
+  assert.ok(/repair/i.test(repairingCoach.sections[0].text), 'Repairing pullback story should explain that the setup still needs repair');
+  assert.ok(/reclaim/i.test((repairingCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Repairing pullback should tell the user to reclaim support before trusting it');
+
+  const breakdownCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:82.4, ma20:88.6, ma50:92.1, ma200:104.4, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:82.4, ma20:88.6, ma50:92.1, ma200:104.4, volume:1650000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:87.9, high:88.1, low:82.0, close:82.4, volume:1650000},
+          {date:'2026-06-30', open:90.4, high:90.8, low:87.3, close:88.0, volume:1410000},
+          {date:'2026-06-29', open:92.1, high:92.3, low:89.4, close:90.2, volume:1230000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'broken',
+        structureEligibility:'broken',
+        pullbackZone:'off_level',
+        setupLocationState:'lost_support',
+        bounceState:'failed',
+        volumeState:'active',
+        priceabilityState:'unpriceable'
+      },
+      globalVerdict:{final_verdict:'avoid'}
+    }
+  );
+  assert.strictEqual(breakdownCoach.primaryStory.key, 'structure_breaking_down', 'Broken structure should surface the breakdown story first');
+  assert.ok(!breakdownCoach.primaryStory.evidenceFactIds.includes('failed_bounce'), 'Broken-structure breakdown story must not claim failed_bounce evidence when no failed bounce occurred');
+  assert.ok(/structure damage|support is starting to give way/i.test(breakdownCoach.sections[0].text), 'Breakdown story should explain that support is failing');
+  assert.ok(/rebuild a proper base/i.test((breakdownCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Breakdown story should tell the user to wait for a rebuild');
+
+  const failedBounceBreakdownCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:89.8, ma20:92.4, ma50:96.1, ma200:108.2, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:89.8, ma20:92.4, ma50:96.1, ma200:108.2, volume:1480000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:91.6, high:92.0, low:89.4, close:89.8, volume:1480000},
+          {date:'2026-06-30', open:90.7, high:92.4, low:90.3, close:91.9, volume:1320000},
+          {date:'2026-06-29', open:93.6, high:93.9, low:90.8, close:91.1, volume:1260000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'weakening',
+        structureEligibility:'alive',
+        pullbackZone:'off_level',
+        setupLocationState:'lost_support',
+        bounceState:'failed',
+        volumeState:'active',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(failedBounceBreakdownCoach.primaryStory.key, 'structure_breaking_down', 'Failed bounce below key averages should still choose the breakdown story');
+  assert.ok(failedBounceBreakdownCoach.primaryStory.evidenceFactIds.includes('failed_bounce'), 'Failed-bounce breakdown story should preserve failed_bounce evidence');
+
+  const structureBrokenOnlyCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:81.7, ma20:87.9, ma50:91.4, ma200:103.8, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:81.7, ma20:87.9, ma50:91.4, ma200:103.8, volume:1520000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:84.3, high:84.6, low:81.1, close:81.7, volume:1520000},
+          {date:'2026-06-30', open:86.5, high:86.9, low:83.8, close:84.2, volume:1370000},
+          {date:'2026-06-29', open:88.4, high:88.8, low:85.9, close:86.4, volume:1190000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'broken',
+        structureEligibility:'broken',
+        pullbackZone:'off_level',
+        setupLocationState:'lost_support',
+        bounceState:'none',
+        volumeState:'active',
+        priceabilityState:'provisional'
+      },
+      globalVerdict:{final_verdict:'avoid'}
+    }
+  );
+  assert.strictEqual(structureBrokenOnlyCoach.primaryStory.key, 'structure_breaking_down', 'Broken structure should still choose the breakdown story without a failed bounce');
+  assert.ok(!structureBrokenOnlyCoach.primaryStory.evidenceFactIds.includes('failed_bounce'), 'Broken-structure-only story must not claim failed_bounce evidence');
+  assert.ok(/structure damage|support is starting to give way/i.test(structureBrokenOnlyCoach.primaryStory.text), 'Broken-structure-only story should stay focused on support failing');
+  assert.ok(!/failed bounce/i.test(structureBrokenOnlyCoach.primaryStory.text), 'Broken-structure-only copy must not imply a failed bounce occurred');
+
+  const nonStructuralAvoidCoach = sandbox.buildDeterministicChartCoach(
+    {
+      marketData:{price:130.2, ma20:128.7, ma50:123.9, ma200:111.1, avgVolume30d:1000000}
+    },
+    {
+      canonicalValues:{price:130.2, ma20:128.7, ma50:123.9, ma200:111.1, volume:890000},
+      trustedMarketContext:{
+        avgVolume30d:1000000,
+        recentCandleSequence:[
+          {date:'2026-07-01', open:130.3, high:130.8, low:129.2, close:130.2, volume:890000},
+          {date:'2026-06-30', open:131.2, high:131.4, low:129.7, close:130.4, volume:910000},
+          {date:'2026-06-29', open:131.6, high:132.0, low:130.5, close:130.9, volume:950000}
+        ]
+      }
+    },
+    {
+      derivedStates:{
+        structureState:'intact',
+        structureEligibility:'alive',
+        pullbackZone:'near_20ma',
+        setupLocationState:'supportive',
+        bounceState:'none',
+        volumeState:'weak',
+        priceabilityState:'unpriceable'
+      },
+      globalVerdict:{final_verdict:'avoid'}
+    }
+  );
+  assert.notStrictEqual(nonStructuralAvoidCoach.primaryStory.key, 'structure_breaking_down', 'Avoid verdict alone must not force a breakdown story when structure is still intact');
+  assert.ok(!nonStructuralAvoidCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Constructive pullback story should not claim a bounce attempt when bounce state is absent');
+
   const strongGreenDescending = {
     canonicalValues:{price:186.4, ma20:180.2, ma50:174.1, ma200:156.8, volume:1900000},
     trustedMarketContext:{
@@ -943,6 +1304,7 @@ function runReviewChartGuruDisplayRegression(){
   };
   vm.createContext(sandbox);
   vm.runInContext(extractFunctionSource(appSource, 'buildReviewChartGuruDisplay'), sandbox, {filename:'app.js#buildReviewChartGuruDisplay'});
+  assert.ok(appSource.includes("const title = '🧘 Chart Guru';"), 'Review Chart Guru helper source should pin the live title string');
 
   const assertGuruDisplay = (result, expectedText) => {
     assert.strictEqual(result.display.title, '🧘 Chart Guru', 'Review Chart Guru helper should always return the Chart Guru title');
@@ -1036,8 +1398,10 @@ function runSourceAssertions(){
   assert(appSource.includes('function buildDeterministicChartCoach'), 'App must include deterministic Chart Coach helper');
   assert(appSource.includes('function selectReviewAiSummary'), 'App must include the Review AI summary authority selector');
   assert(appSource.includes('function buildReviewChartGuruDisplay'), 'App must expose a dedicated Review Chart Guru display helper');
+  assert(appSource.includes("const title = '🧘 Chart Guru';"), 'Review helper source should pin the Chart Guru title');
   assert(!appSource.includes('primaryTeachingSection'), 'Dead legacy Chart Guru teaching-section variable should be removed');
   assert(!appSource.includes('const finalizedSections = finalizeChartCoachSections(rankedSections);'), 'Dead finalizedSections recomputation should be removed');
+  assert(!appSource.includes('aiSummaryConflictDetected'), 'Dead aiSummaryConflictDetected review state should be removed');
   assert(!appSource.includes('Chart Coach'), 'Review source should not reintroduce the legacy Chart Coach label');
   assert(!appSource.includes('AI Summary'), 'Review source should not reintroduce the legacy AI Summary label');
   assert(!appSource.includes('Chart Guru Notes'), 'Review should not expose legacy Chart Guru Notes user-facing copy');
