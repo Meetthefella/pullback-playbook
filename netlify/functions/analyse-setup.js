@@ -230,6 +230,119 @@ function normalizeCanonicalValues(canonicalValues = {}, trustedMarketContext = {
   };
 }
 
+function genericSummaryText(text = ''){
+  const safe = String(text || '').trim().toLowerCase();
+  if(!safe) return true;
+  const hasConcreteSignal = /20ma|50ma|200ma|below 20|below 50|above 200|above 20|above 50|below 200|wick|candle|close|open|higher|lower|rejection|follow-?through|bounce|failed bounce|green|red|buyers|sellers|reclaim|entry|stop|target|reward|risk|math/i.test(safe);
+  if(hasConcreteSignal) return false;
+  return /observe how price behaves around key moving averages|interesting setup|needs confirmation|monitor closely|wait and see|mixed picture|worth monitoring|something to watch/i.test(safe);
+}
+
+function normalizeServerCandleSequenceOrder(candles = []){
+  const rows = Array.isArray(candles) ? candles.slice() : [];
+  const parsed = rows.map((candle, index) => {
+    const item = candle && typeof candle === 'object' ? candle : {};
+    const rawDate = String(item.datetime || item.timestamp || item.date || '').trim();
+    const timeValue = rawDate ? Date.parse(rawDate) : NaN;
+    return {
+      candle:item,
+      index,
+      timestamp:Number.isFinite(timeValue) ? timeValue : null
+    };
+  });
+  const datedCount = parsed.filter(entry => entry.timestamp !== null).length;
+  if(!datedCount){
+    return {
+      candles:rows,
+      orderConfidence:'low'
+    };
+  }
+  parsed.sort((a, b) => {
+    if(a.timestamp === null && b.timestamp === null) return a.index - b.index;
+    if(a.timestamp === null) return 1;
+    if(b.timestamp === null) return -1;
+    if(b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
+    return a.index - b.index;
+  });
+  return {
+    candles:parsed.map(entry => entry.candle),
+    orderConfidence:datedCount === parsed.length ? 'high' : 'medium'
+  };
+}
+
+function deterministicServerCandleSummary(trustedMarketContext = {}, canonicalValues = {}){
+  const latest = canonicalValues.latestCandleOHLC && typeof canonicalValues.latestCandleOHLC === 'object'
+    ? canonicalValues.latestCandleOHLC
+    : normalizeObject(trustedMarketContext.latestCandleOHLC);
+  const recentInput = Array.isArray(trustedMarketContext.recentCandleSequence) ? trustedMarketContext.recentCandleSequence : [];
+  const recent = normalizeServerCandleSequenceOrder(recentInput).candles;
+  const prior = recent[1] && typeof recent[1] === 'object' ? recent[1] : {};
+  const price = normaliseNumber(canonicalValues.price ?? trustedMarketContext.currentPrice);
+  const ma20 = normaliseNumber(canonicalValues.ma20 ?? trustedMarketContext.ma20);
+  const ma50 = normaliseNumber(canonicalValues.ma50 ?? trustedMarketContext.ma50);
+  const ma200 = normaliseNumber(canonicalValues.ma200 ?? trustedMarketContext.ma200);
+  const open = normaliseNumber(latest.open);
+  const close = normaliseNumber(latest.close);
+  const high = normaliseNumber(latest.high);
+  const low = normaliseNumber(latest.low);
+  const priorClose = normaliseNumber(prior.close);
+  const bits = [];
+  const relation = [];
+  if(price !== null && ma20 !== null) relation.push(price > ma20 ? 'above the 20MA' : 'below the 20MA');
+  if(price !== null && ma50 !== null) relation.push(price > ma50 ? 'above the 50MA' : 'below the 50MA');
+  if(price !== null && ma200 !== null) relation.push(price > ma200 ? 'above the 200MA' : 'below the 200MA');
+  if(relation.length) bits.push(`Price is ${relation.join(', ')}.`);
+  if(open !== null && close !== null){
+    bits.push(close > open ? 'The latest candle closed green.' : (close < open ? 'The latest candle closed red.' : 'The latest candle closed flat.'));
+  }
+  if(close !== null && priorClose !== null){
+    bits.push(close > priorClose ? 'It closed above the prior candle.' : (close < priorClose ? 'It closed below the prior candle.' : 'It closed in line with the prior candle.'));
+  }
+  if(open !== null && close !== null && high !== null && low !== null){
+    const bodyTop = Math.max(open, close);
+    const bodyBottom = Math.min(open, close);
+    const body = Math.abs(close - open);
+    const upperWick = Math.max(0, high - bodyTop);
+    const lowerWick = Math.max(0, bodyBottom - low);
+    const baseline = body > 0 ? body : Math.max(0.01, (high - low) * 0.15);
+    if(lowerWick >= baseline * 1.5 && lowerWick > upperWick * 1.1) bits.push('There is lower-wick rejection, which shows buyers defended the low.');
+    if(upperWick >= baseline * 1.5 && upperWick > lowerWick * 1.1) bits.push('There is upper-wick rejection, which shows sellers pushed it back down.');
+  }
+  const bounceAttempt = close !== null && priorClose !== null && open !== null && close > open && close > priorClose;
+  bits.push(bounceAttempt ? 'Recent candles show a bounce attempt, but follow-through is still missing.' : 'Follow-through is still missing.');
+  return bits.join(' ').trim() || 'Price is moving around key moving averages. Follow-through is still missing.';
+}
+
+function buildMalformedJsonFallbackAnalysis(payload = {}, rawText = ''){
+  const trustedMarketContext = normalizeObject(payload.trustedMarketContext);
+  const canonicalValues = normalizeCanonicalValues({}, trustedMarketContext, {});
+  const summary = deterministicServerCandleSummary(trustedMarketContext, canonicalValues);
+  return {
+    setup_type:'',
+    verdict:'Watch',
+    coach_summary:'',
+    plain_english_chart_read:'',
+    parseWarning:'Model response was malformed JSON. Deterministic chart summary used instead.',
+    extractedFromImage:{},
+    trustedMarketContext,
+    canonicalValues,
+    candleStructureAnalysis:{
+      summary,
+      noviceFriendlyCandleRead:summary,
+      source:'deterministic_parse_fallback'
+    },
+    tradePlanCommentary:{
+      summary:'Estimated maths can still be reviewed, but candle confirmation must come from the canonical chart context.'
+    },
+    confidenceWarnings:[
+      'Model response could not be parsed as JSON.',
+      rawText ? 'Deterministic summary used from trusted market context.' : 'No structured model output was available.'
+    ],
+    ai_observation_only:true,
+    final_verdict:''
+  };
+}
+
 function normaliseAnalysis(obj, payload = {}){
   const imageFacts = normalizeObject(obj?.extractedFromImage || obj?.extracted_from_image);
   const trustedMarketContext = normalizeObject(obj?.trustedMarketContext || obj?.trusted_market_context || payload?.trustedMarketContext);
@@ -271,6 +384,7 @@ function normaliseAnalysis(obj, payload = {}){
     verdict: 'Watch',
     coach_summary: coachSummary,
     plain_english_chart_read: coachSummary,
+    parseWarning: normaliseString(obj?.parseWarning || obj?.parse_warning, ''),
     visible_ticker: normaliseString(obj?.visible_ticker || imageFacts?.visible_ticker || imageFacts?.ticker, ''),
     visible_timeframe: normaliseString(obj?.visible_timeframe || imageFacts?.visible_timeframe || imageFacts?.timeframe, ''),
     visible_latest_price: normaliseNumber(obj?.visible_latest_price ?? imageFacts?.visible_latest_price ?? imageFacts?.price),
@@ -563,7 +677,14 @@ exports.handler = async function handler(event){
       ticker: String(payload.ticker || ''),
       raw: rawText || null
     });
-
+    if(payload && payload.trustedMarketContext && typeof payload.trustedMarketContext === 'object'){
+      const analysis = normaliseAnalysis(buildMalformedJsonFallbackAnalysis(payload, rawText), payload);
+      return jsonResponse(200, {
+        ok:true,
+        model,
+        analysis
+      });
+    }
     return jsonResponse(502, {
       error: 'OpenAI response could not be parsed as JSON.',
       raw: rawText || null

@@ -22664,12 +22664,16 @@ function finalDisplayedAnalysisChartRead(record, analysis){
   const analysisState = analysis && typeof analysis === 'object' ? analysis : {};
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const globalVerdict = resolveGlobalVerdict(item);
-  const candleFallback = deterministicCandleStructureSummary(item, analysisState, {
+  const selectedSummary = selectReviewAiSummary(item, analysisState, {
+    derivedStates,
+    globalVerdict
+  });
+  const candleFallback = selectedSummary.fallback || deterministicCandleStructureSummary(item, analysisState, {
     derivedStates,
     globalVerdict
   });
   const correction = guardAnalysisMovingAverageLanguage(
-    analysisState.plain_english_chart_read || analysisState.chart_read || '',
+    selectedSummary.text || '',
     {
       price:item.marketData && item.marketData.price,
       sma20:item.marketData && item.marketData.sma20,
@@ -22677,14 +22681,9 @@ function finalDisplayedAnalysisChartRead(record, analysis){
       structureState:derivedStates.structureState
     }
   );
-  const aiBaseText = correction.text || String(analysisState.plain_english_chart_read || analysisState.chart_read || '').trim();
-  const useFallback = candleFallback.available && (
-    !aiBaseText
-    || candleFallback.aiMissing
-    || candleFallback.aiGeneric
-    || candleFallback.aiContradictsCanonical
-  );
-  const baseText = useFallback ? String(candleFallback.text || '').trim() : aiBaseText;
+  const aiBaseText = correction.text || String(selectedSummary.text || '').trim();
+  const useFallback = /^deterministic_/.test(String(selectedSummary.source || ''));
+  const baseText = aiBaseText;
   const sanitizedText = sanitizeAliveWatchSemanticCopy(
     baseText,
     {
@@ -22715,6 +22714,7 @@ function finalDisplayedAnalysisChartRead(record, analysis){
     matchedPhrase:correction.matchedPhrase,
     outputChanged:correction.outputChanged || sanitizedText !== baseText,
     usedDeterministicFallback:useFallback,
+    selectedSummarySource:String(selectedSummary.source || ''),
     fallbackReason:candleFallback.reason,
     fallbackFacts:candleFallback.facts || null
   };
@@ -22799,6 +22799,14 @@ function aiCandleCommentaryContradictsCanonical(text = '', facts = {}){
   if(facts.followThroughConfirmed === false && /\bconfirmed follow-?through\b|\bbounce confirmed\b/i.test(safe)) return true;
   if(facts.failedBounce === true && /\bclean bounce\b|\bhealthy reclaim\b/i.test(safe)) return true;
   return false;
+}
+
+function isGenericTradePlanCommentary(text = ''){
+  const safe = String(text || '').trim().toLowerCase();
+  if(!safe) return true;
+  const hasConcreteSignal = /entry|stop|target|reward|risk|math|confirmation|follow-?through|trigger|priceable|plan|usable|invalidat/i.test(safe);
+  if(hasConcreteSignal) return false;
+  return /interesting setup|monitor closely|worth monitoring|observe|wait and see|mixed picture|something to watch/i.test(safe);
 }
 
 function canonicalCandleContext(record = {}, analysis = {}){
@@ -22949,6 +22957,36 @@ function deterministicCandleStructureSummary(record = {}, analysis = {}, options
     aiContradictsCanonical,
     facts
   };
+}
+
+function selectReviewAiSummary(record, analysis = {}, options = {}){
+  const item = normalizeTickerRecord(record || {});
+  const state = analysis && typeof analysis === 'object' ? analysis : {};
+  const candleStructureAnalysis = state.candleStructureAnalysis && typeof state.candleStructureAnalysis === 'object' ? state.candleStructureAnalysis : {};
+  const tradePlanCommentary = state.tradePlanCommentary && typeof state.tradePlanCommentary === 'object' ? state.tradePlanCommentary : {};
+  const candleSummary = String(candleStructureAnalysis.summary || candleStructureAnalysis.noviceFriendlyCandleRead || candleStructureAnalysis.novice_friendly_candle_read || '').trim();
+  const tradePlanSummary = String(tradePlanCommentary.summary || '').trim();
+  const legacySummary = String(state.legacy_summary || state.plain_english_chart_read || state.chart_read || state.coach_summary || '').trim();
+  const parseWarning = String(state.parseWarning || state.parse_warning || '').trim();
+  const derivedStates = options.derivedStates && typeof options.derivedStates === 'object' ? options.derivedStates : analysisDerivedStatesFromRecord(item);
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : resolveGlobalVerdict(item);
+  const candleFallback = deterministicCandleStructureSummary(item, state, {
+    derivedStates,
+    globalVerdict
+  });
+  if(candleFallback.available && (parseWarning || !state || !Object.keys(state).length)){
+    return {text:String(candleFallback.text || '').trim(), source:'deterministic_parse_or_missing_fallback', fallback:candleFallback};
+  }
+  if(candleSummary && !isGenericAiCandleCommentary(candleSummary) && !aiCandleCommentaryContradictsCanonical(candleSummary, candleFallback.facts || {})){
+    return {text:candleSummary, source:'candle_structure_analysis', fallback:candleFallback};
+  }
+  if(tradePlanSummary && !isGenericTradePlanCommentary(tradePlanSummary)){
+    return {text:tradePlanSummary, source:'trade_plan_commentary', fallback:candleFallback};
+  }
+  if(candleFallback.available && (!legacySummary || isGenericAiCandleCommentary(legacySummary) || aiCandleCommentaryContradictsCanonical(legacySummary, candleFallback.facts || {}))){
+    return {text:String(candleFallback.text || '').trim(), source:'deterministic_generic_or_conflict_fallback', fallback:candleFallback};
+  }
+  return {text:legacySummary, source:'legacy_summary_fallback', fallback:candleFallback};
 }
 
 function savedAiNoPlanMarkup(chartReadDisplay){
@@ -29856,16 +29894,7 @@ function normalizeAnalysisResponse(raw){
       ma200:analysisNumberOrNull(imageFacts.visible_ma200 ?? imageFacts.ma200)
     }
   };
-  const fallbackCoachSummary = String(
-    raw.coach_summary
-    || raw.plain_english_chart_read
-    || raw.chart_read
-    || candleStructureAnalysis.noviceFriendlyCandleRead
-    || candleStructureAnalysis.novice_friendly_candle_read
-    || candleStructureAnalysis.summary
-    || ''
-  ).trim();
-  const coachSummary = String(raw.coach_summary || raw.plain_english_chart_read || raw.chart_read || '').trim();
+  const legacySummary = String(raw.coach_summary || raw.plain_english_chart_read || raw.chart_read || '').trim();
   const constructiveEvidence = Array.isArray(raw.constructive_evidence) ? raw.constructive_evidence.map(item => String(item).trim()).filter(Boolean) : [];
   const riskEvidence = Array.isArray(raw.risk_evidence) ? raw.risk_evidence.map(item => String(item).trim()).filter(Boolean) : [];
   const needsImprove = Array.isArray(raw.what_needs_to_improve) ? raw.what_needs_to_improve.map(item => String(item).trim()).filter(Boolean) : [];
@@ -29900,8 +29929,10 @@ function normalizeAnalysisResponse(raw){
   return {
     setup_type:String(raw.setup_type || '').trim(),
     verdict:'Watch',
-    coach_summary:fallbackCoachSummary,
-    plain_english_chart_read:fallbackCoachSummary,
+    coach_summary:String(raw.coach_summary || '').trim(),
+    plain_english_chart_read:String(raw.plain_english_chart_read || raw.chart_read || '').trim(),
+    legacy_summary:legacySummary,
+    parseWarning:String(raw.parseWarning || raw.parse_warning || '').trim(),
     visible_ticker:String(raw.visible_ticker || imageFacts.visible_ticker || imageFacts.ticker || '').trim().toUpperCase(),
     visible_timeframe:String(raw.visible_timeframe || imageFacts.visible_timeframe || imageFacts.timeframe || '').trim(),
     visible_latest_price:analysisNumberOrNull(raw.visible_latest_price ?? imageFacts.visible_latest_price ?? imageFacts.price),

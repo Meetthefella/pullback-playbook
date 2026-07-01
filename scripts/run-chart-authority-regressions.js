@@ -5,6 +5,7 @@ const assert = require('assert');
 
 const root = path.resolve(__dirname, '..');
 const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const serverSource = fs.readFileSync(path.join(root, 'netlify', 'functions', 'analyse-setup.js'), 'utf8');
 
 function loadBrowserModule(relativePath, sandbox){
   const source = fs.readFileSync(path.join(root, relativePath), 'utf8');
@@ -153,6 +154,30 @@ async function runNetlifyCanonicalizationRegression(){
   assert.strictEqual(body.analysis.visible_ma20, null, 'Unreadable image MA should remain unreadable in extracted image facts');
   assert.ok(/below the 20MA and 50MA but above the 200MA/i.test(body.analysis.coach_summary), 'Summary should reflect canonical MA relationship');
   assert.ok(/bounce attempt/i.test(body.analysis.coach_summary), 'Summary should mention bounce attempt');
+
+  global.fetch = async () => ({
+    ok:true,
+    status:200,
+    json:async () => ({
+      output_text:'{"broken": true'
+    })
+  });
+  const malformedResponse = await handler({
+    httpMethod:'POST',
+    body:JSON.stringify({
+      payload:{
+        ticker:'NVDA',
+        marketStatus:'S&P above 50 MA',
+        trustedMarketContext
+      },
+      prompt:'Return JSON only.'
+    })
+  });
+  const malformedBody = JSON.parse(malformedResponse.body);
+  assert.strictEqual(malformedResponse.statusCode, 200, 'Malformed JSON with trusted market context should still return usable analysis');
+  assert.ok(/malformed json/i.test(String(malformedBody.analysis.parseWarning || '')), 'Malformed JSON fallback should record a parse warning');
+  const malformedSummary = String(malformedBody.analysis.candleStructureAnalysis && malformedBody.analysis.candleStructureAnalysis.summary || '');
+  assert.ok(/below the 20MA/i.test(malformedSummary) && /below the 50MA/i.test(malformedSummary) && /above the 200MA/i.test(malformedSummary), 'Malformed JSON fallback should include deterministic candle summary with canonical MA relationships');
 }
 
 function runReviewPresentationRegression(){
@@ -268,8 +293,10 @@ function runDeterministicCandleFallbackRegression(){
     'isGenericAiCandleCommentary',
     'normalizeCandleSequenceOrder',
     'aiCandleCommentaryContradictsCanonical',
+    'isGenericTradePlanCommentary',
     'canonicalCandleContext',
     'deterministicCandleStructureSummary',
+    'selectReviewAiSummary',
     'finalDisplayedAnalysisChartRead'
   ].forEach(name => {
     vm.runInContext(extractFunctionSource(appSource, name), sandbox, {filename:`app.js#${name}`});
@@ -315,6 +342,7 @@ function runDeterministicCandleFallbackRegression(){
   const finalRead = sandbox.finalDisplayedAnalysisChartRead(bounceRecord, bounceAnalysis);
   assert.strictEqual(finalRead.usedDeterministicFallback, true, 'Generic AI output should be replaced by deterministic fallback');
   assert.ok(/This still belongs in Watch/i.test(finalRead.text), 'Fallback should respect watch verdict framing');
+  assert.strictEqual(finalRead.selectedSummarySource, 'deterministic_generic_or_conflict_fallback', 'Generic legacy text should fall through to deterministic fallback');
 
   const shortSpecificRead = sandbox.finalDisplayedAnalysisChartRead(
     bounceRecord,
@@ -325,6 +353,33 @@ function runDeterministicCandleFallbackRegression(){
   );
   assert.strictEqual(shortSpecificRead.usedDeterministicFallback, false, 'Short specific AI candle read should be preserved');
   assert.ok(/Below 20\/50, above 200; follow-through still missing\./.test(shortSpecificRead.text), 'Short specific AI candle read should remain visible');
+
+  const structuredBeatsLegacy = sandbox.finalDisplayedAnalysisChartRead(
+    bounceRecord,
+    {
+      ...bounceAnalysis,
+      coach_summary:'observe how price behaves around key moving averages',
+      plain_english_chart_read:'observe how price behaves around key moving averages',
+      candleStructureAnalysis:{
+        summary:'Price is below the 20MA and 50MA but above the 200MA. Recent candles show a bounce attempt, and follow-through is still missing.'
+      }
+    }
+  );
+  assert.strictEqual(structuredBeatsLegacy.selectedSummarySource, 'candle_structure_analysis', 'candleStructureAnalysis.summary should beat legacy coach summary');
+  assert.ok(/below the 20MA and 50MA but above the 200MA/i.test(structuredBeatsLegacy.text), 'Structured candle summary should render in Review');
+
+  const tradePlanBeatsGenericLegacy = sandbox.finalDisplayedAnalysisChartRead(
+    bounceRecord,
+    {
+      ...bounceAnalysis,
+      candleStructureAnalysis:{summary:'Interesting setup. Monitor.'},
+      tradePlanCommentary:{summary:'Estimated maths exist, but confirmation is still missing before any entry is valid.'},
+      coach_summary:'observe how price behaves around key moving averages',
+      plain_english_chart_read:'observe how price behaves around key moving averages'
+    }
+  );
+  assert.strictEqual(tradePlanBeatsGenericLegacy.selectedSummarySource, 'trade_plan_commentary', 'tradePlanCommentary should beat generic legacy summary when candle summary is thin');
+  assert.ok(/Estimated maths exist/i.test(tradePlanBeatsGenericLegacy.text), 'Trade plan commentary should surface in Review when selected');
 
   const shortVagueRead = sandbox.finalDisplayedAnalysisChartRead(
     bounceRecord,
@@ -381,6 +436,90 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual(failedDescendingSummary.facts.failedBounce, failedAscendingSummary.facts.failedBounce, 'Fallback summary must not flip failed-bounce direction because of order');
 }
 
+function runClientNormalizerRegression(){
+  const sandbox = {
+    console,
+    cloneData(value, fallback){
+      return value == null ? fallback : JSON.parse(JSON.stringify(value));
+    },
+    analysisNumberOrNull(value){
+      if(value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    }
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'normalizeAnalysisResponse'), sandbox, {filename:'app.js#normalizeAnalysisResponse'});
+
+  const normalized = sandbox.normalizeAnalysisResponse({
+    parseWarning:'Model response was malformed JSON. Deterministic chart summary used instead.',
+    candleStructureAnalysis:{
+      summary:'Price is below the 20MA and 50MA but above the 200MA. Recent candles show a bounce attempt, but follow-through is still missing.'
+    },
+    tradePlanCommentary:{
+      summary:'Estimated maths exist, but confirmation is still missing before any entry is valid.'
+    },
+    canonicalValues:{price:200.09, ma20:205.74, ma50:209.99, ma200:190.84},
+    trustedMarketContext:{currentPrice:200.09, ma20:205.74, ma50:209.99, ma200:190.84}
+  });
+
+  assert.strictEqual(normalized.parseWarning, 'Model response was malformed JSON. Deterministic chart summary used instead.', 'Client normalizer should preserve parseWarning without throwing');
+  assert.strictEqual(normalized.legacy_summary, '', 'Client normalizer should not invent a legacy summary when only structured fields exist');
+  assert.strictEqual(normalized.candleStructureAnalysis.summary, 'Price is below the 20MA and 50MA but above the 200MA. Recent candles show a bounce attempt, but follow-through is still missing.', 'Structured candle summary should survive client normalization');
+}
+
+function runServerCandleOrderRegression(){
+  const sandbox = {
+    console,
+    normaliseNumber(value){
+      if(value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    normalizeObject(value){
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    }
+  };
+  vm.createContext(sandbox);
+  [
+    'normalizeServerCandleSequenceOrder',
+    'deterministicServerCandleSummary'
+  ].forEach(name => {
+    vm.runInContext(extractFunctionSource(serverSource, name), sandbox, {filename:`analyse-setup.js#${name}`});
+  });
+
+  const canonicalValues = {
+    price:100,
+    ma20:105,
+    ma50:110,
+    ma200:90,
+    latestCandleOHLC:{date:'2026-06-30', open:99, high:101, low:98, close:100}
+  };
+  const descending = {
+    currentPrice:100,
+    ma20:105,
+    ma50:110,
+    ma200:90,
+    recentCandleSequence:[
+      {date:'2026-06-30', open:99, high:101, low:98, close:100},
+      {date:'2026-06-29', open:102, high:103, low:99, close:101},
+      {date:'2026-06-28', open:100, high:101, low:97, close:98},
+      {date:'2026-06-27', open:95, high:100, low:94, close:99}
+    ]
+  };
+  const ascending = {
+    ...descending,
+    recentCandleSequence:descending.recentCandleSequence.slice().reverse()
+  };
+
+  const descendingSummary = sandbox.deterministicServerCandleSummary(descending, canonicalValues);
+  const ascendingSummary = sandbox.deterministicServerCandleSummary(ascending, canonicalValues);
+
+  assert.ok(/closed below the prior candle/i.test(descendingSummary), 'Server fallback should compare against the actual prior candle');
+  assert.strictEqual(ascendingSummary, descendingSummary, 'Server fallback summary should be stable for ascending or descending candle input');
+  assert.ok(!/bounce attempt/i.test(descendingSummary), 'Server fallback should not invent a bounce attempt when the latest close is below the actual prior close');
+}
+
 function runSourceAssertions(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const serverSource = fs.readFileSync(path.join(root, 'netlify', 'functions', 'analyse-setup.js'), 'utf8');
@@ -389,6 +528,7 @@ function runSourceAssertions(){
   assert(appSource.includes("chartVerificationNumberOrNull(read.ma20) === null && chartVerificationNumberOrNull(expected.ma20) === null"), 'Review diagnostics must suppress unreadable MA copy when trusted MA exists');
   assert(serverSource.includes('Use trustedMarketContext for all numeric values and canonical market facts.'), 'Server prompt must instruct AI to trust canonical market context');
   assert(appSource.includes('function deterministicCandleStructureSummary'), 'App must include deterministic candle fallback helper');
+  assert(appSource.includes('function selectReviewAiSummary'), 'App must include the Review AI summary authority selector');
 }
 
 async function run(){
@@ -396,6 +536,8 @@ async function run(){
   runReviewPresentationRegression();
   runPresentationModelRegression();
   runDeterministicCandleFallbackRegression();
+  runClientNormalizerRegression();
+  runServerCandleOrderRegression();
   runSourceAssertions();
   console.log('run-chart-authority-regressions: ok');
 }
