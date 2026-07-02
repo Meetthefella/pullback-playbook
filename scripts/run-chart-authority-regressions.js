@@ -251,6 +251,48 @@ function runPresentationModelRegression(){
 }
 
 function runDeterministicCandleFallbackRegression(){
+  const knownDeterministicFactIds = new Set([
+    'trend_context',
+    'structure_broken',
+    'support_short_term_average',
+    'support_medium_term_average',
+    'bounce_attempt',
+    'lower_rejection_wick',
+    'upper_rejection_wick',
+    'resistance_rejection',
+    'weakness_signal',
+    'low_volume',
+    'high_volume',
+    'price_accelerating_higher',
+    'price_accelerating_lower',
+    'failed_bounce',
+    'extended_above_support',
+    'doji_or_small_body',
+    'latest_green_candle',
+    'latest_red_candle',
+    'large_green_run',
+    'large_red_run'
+  ]);
+  const assertStepDetailsUseKnownFacts = (coach, label) => {
+    const details = Array.isArray(coach && coach.recentStory && coach.recentStory.stepDetails) ? coach.recentStory.stepDetails : [];
+    details.forEach(detail => {
+      const evidence = Array.isArray(detail && detail.evidenceFactIds) ? detail.evidenceFactIds : [];
+      evidence.forEach(id => {
+        assert.ok(knownDeterministicFactIds.has(id), `${label} should only use known deterministic fact ids, received ${id}`);
+      });
+    });
+  };
+  const assertDerivedSupportPresent = (coach, stepKey, label) => {
+    const detail = Array.isArray(coach && coach.recentStory && coach.recentStory.stepDetails)
+      ? coach.recentStory.stepDetails.find(entry => entry && entry.key === stepKey)
+      : null;
+    assert.ok(detail, `${label} should expose step detail for ${stepKey}`);
+    assert.ok(
+      (Array.isArray(detail.derivedFromSteps) && detail.derivedFromSteps.length > 0)
+        || (Array.isArray(detail.derivedFromConditions) && detail.derivedFromConditions.length > 0),
+      `${label} should expose derived support for ${stepKey}`
+    );
+  };
   const sandbox = {
     console,
     numericOrNull(value){
@@ -301,6 +343,21 @@ function runDeterministicCandleFallbackRegression(){
     'chartCoachPrimaryOpportunityScore',
     'chartCoachRecentColorRun',
     'chartCoachLargeBodyRun',
+    'chartNarratorDeterministicPick',
+    'chartNarratorSupportLabel',
+    'chartNarratorTrendLabel',
+    'chartNarratorBiasForStory',
+    'chartNarratorToneModeForStorySteps',
+    'chartNarratorConfidenceModeForStorySteps',
+    'chartNarratorStepEvidenceFactIds',
+    'chartNarratorStepDerivedSupport',
+    'chartNarratorEvidenceForStorySteps',
+    'chartNarratorHasStep',
+    'chartNarratorRecentStoryForPrimaryStory',
+    'chartNarratorStoryTextForPrimaryStory',
+    'chartNarratorWhyItMattersForStory',
+    'chartNarratorSupportSectionsForStory',
+    'buildChartNarrator',
     'chartCoachLearningPointForStory',
     'chartCoachWhatNextForStory',
     'chartCoachPrimaryStoryCandidates',
@@ -363,6 +420,10 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual(finalRead.selectedSummarySource, 'deterministic_chart_coach', 'Fallback should use deterministic Chart Coach');
   assert.ok(finalRead.chartCoach && Array.isArray(finalRead.chartCoach.sections) && finalRead.chartCoach.sections.length >= 2, 'Fallback should expose structured Chart Coach sections');
   assert.ok(finalRead.chartCoach.diagnostics && Array.isArray(finalRead.chartCoach.diagnostics.sectionConfidence), 'Chart Coach should expose section confidence diagnostics');
+  assert.ok(finalRead.chartCoach.diagnostics && finalRead.chartCoach.diagnostics.storyContract, 'Chart Coach diagnostics should expose the story contract');
+  assert.strictEqual((finalRead.chartCoach.diagnostics.storyContract.steps || []).join('|'), (finalRead.chartCoach.recentStory.steps || []).join('|'), 'Chart Coach diagnostics should expose the same story steps used by the rendered model');
+  assert.strictEqual(finalRead.chartCoach.diagnostics.storyContract.toneMode, finalRead.chartCoach.recentStory.toneMode, 'Chart Coach diagnostics should expose the same tone mode used by the rendered model');
+  assert.strictEqual(finalRead.chartCoach.diagnostics.storyContract.confidenceMode, finalRead.chartCoach.recentStory.confidenceMode, 'Chart Coach diagnostics should expose the same confidence mode used by the rendered model');
 
   const shortSpecificRead = sandbox.finalDisplayedAnalysisChartRead(
     bounceRecord,
@@ -372,7 +433,7 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   assert.strictEqual(shortSpecificRead.usedDeterministicFallback, true, 'Chart Coach should stay deterministic even when short AI prose exists');
-  assert.ok(/Biggest clue:/i.test(shortSpecificRead.text), 'Deterministic Chart Guru should render a primary story first');
+  assert.ok(/Chart Story:/i.test(shortSpecificRead.text), 'Deterministic Chart Guru should render a Chart Story first');
 
   const malformedFallbackRead = sandbox.finalDisplayedAnalysisChartRead(
     bounceRecord,
@@ -413,7 +474,7 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   assert.strictEqual(structuredBeatsLegacy.selectedSummarySource, 'deterministic_chart_coach', 'Deterministic Chart Coach should replace legacy summary authority ordering');
-  assert.ok(/Biggest clue:/i.test(structuredBeatsLegacy.text), 'Structured Chart Guru should render in Review');
+  assert.ok(/Chart Story:/i.test(structuredBeatsLegacy.text), 'Structured Chart Guru should render in Review');
 
   const tradePlanBeatsGenericLegacy = sandbox.finalDisplayedAnalysisChartRead(
     bounceRecord,
@@ -539,7 +600,7 @@ function runDeterministicCandleFallbackRegression(){
       }
     }
   );
-  assert.ok(/Indecision:|Biggest clue:/i.test(dojiRead.text), 'Chart Guru should explain doji or indecision candles');
+  assert.ok(/Indecision:|Chart Story:/i.test(dojiRead.text), 'Chart Guru should explain doji or indecision candles');
   assert.ok(/neither buyers nor sellers proved much control|neither side showed clear control/i.test(dojiRead.text), 'Indecision explanation should be beginner-friendly');
 
   const rankingModel = sandbox.buildDeterministicChartCoach(
@@ -557,7 +618,7 @@ function runDeterministicCandleFallbackRegression(){
     },
     {globalVerdict:{final_verdict:'watch'}}
   );
-  assert.strictEqual(rankingModel.sections[0].key, 'biggest_clue', 'Primary story should render first as Biggest clue');
+  assert.strictEqual(rankingModel.sections[0].key, 'biggest_clue', 'Primary story should still render first as the Chart Story section');
   assert.strictEqual(rankingModel.sections.filter(section => section.key === 'learning_point').length, 1, 'Only one Learning point section should render');
   assert.ok(rankingModel.sections.some(section => section.key === 'what_next'), 'What next should still be rendered');
 
@@ -592,12 +653,19 @@ function runDeterministicCandleFallbackRegression(){
   );
   assert.strictEqual(hwmStyleCoach.primaryStory.key, 'constructive_pullback_near_20ma', 'Constructive pullback near the 20MA should outrank isolated indecision candles');
   assert.strictEqual(hwmStyleCoach.sections[0].key, 'biggest_clue', 'Constructive pullback story should still render first');
-  assert.ok(/pullback/i.test(hwmStyleCoach.sections[0].text) && /20-day average/i.test(hwmStyleCoach.sections[0].text), 'First rendered section should explain pullback support context');
+  assert.strictEqual(hwmStyleCoach.sections[0].label, 'Chart Story', 'Primary section should be labeled as Chart Story');
+  assert.ok(/pullback|recent dip/i.test(hwmStyleCoach.sections[0].text) && /20-day average/i.test(hwmStyleCoach.sections[0].text), 'First rendered section should explain pullback support context');
   assert.ok(hwmStyleCoach.sections.every(section => section.key !== 'indecision' || /small|neither/i.test(section.text)), 'Indecision, if present, should remain supporting detail only');
   const hwmWhatNext = hwmStyleCoach.sections.find(section => section.key === 'what_next');
   assert.ok(/confirm support|firmer close/i.test(hwmWhatNext.text), 'What next should require bullish confirmation from support');
   assert.ok(/decisive close below/i.test(hwmWhatNext.text), 'What next should explain the support-loss invalidation');
   assert.ok(!hwmStyleCoach.primaryStory.evidenceFactIds.includes('bounce_attempt') || /bounce/i.test(hwmStyleCoach.sections[0].text), 'Constructive pullback evidence should only claim a bounce attempt when one exists');
+  assert.strictEqual(hwmStyleCoach.recentStory.steps.join('|'), 'strong_uptrend|pullback_to_20ma|support_test|weak_volume|support_still_unproven', 'Constructive near-support story should expose the expected recent-story skeleton when buyers have not fully proven the turn yet');
+  assertStepDetailsUseKnownFacts(hwmStyleCoach, 'Constructive near-support story');
+  assert.strictEqual(hwmStyleCoach.recentStory.toneMode, 'cautious_support_test', 'Constructive near-support story should expose a deterministic tone mode');
+  assert.strictEqual(hwmStyleCoach.recentStory.confidenceMode, 'support_test_needs_buyer_proof', 'Constructive near-support story should expose a deterministic confidence mode');
+  assertDerivedSupportPresent(hwmStyleCoach, 'support_still_unproven', 'Constructive near-support story');
+  assert.strictEqual(hwmStyleCoach.primaryStory.readerTest.tone, 'good', 'Constructive near-support story should pass the Reader Test with a constructive tone');
 
   const constructiveSupportOnlyCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -631,8 +699,16 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual(constructiveSupportOnlyCoach.primaryStory.key, 'constructive_pullback_near_20ma', 'Near-20MA intact pullbacks should still use the constructive pullback story without a bounce attempt');
   assert.notStrictEqual(constructiveSupportOnlyCoach.primaryStory.key, 'pullback_still_repairing', 'Unpriceable trade maths alone must not turn an intact pullback into a repair story');
   assert.ok(!/bounce still needs confirmation/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Constructive support-only story must not claim a bounce has already started');
-  assert.ok(/buyers still need to defend|support area/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Constructive support-only story should use support-confirmation wording');
+  assert.ok(/pulled back toward the 20-day average|buyers to show up/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Constructive support-only story should explain what the reader can see near support');
+  assert.ok(!/That is encouraging/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Support-still-unproven story must not borrow buyer-response encouragement');
+  assert.ok(/buyers still need to step in|buyers still need to prove|still needs more proof/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Support-still-unproven story should stay cautious and explain that buyers still need to prove the area');
   assert.ok(!constructiveSupportOnlyCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Constructive support-only story must not claim bounce_attempt evidence');
+  assert.strictEqual(constructiveSupportOnlyCoach.recentStory.steps.join('|'), 'strong_uptrend|pullback_to_20ma|support_test|weak_volume|support_still_unproven', 'Support-only constructive pullback should expose the right recent-story skeleton');
+  assertStepDetailsUseKnownFacts(constructiveSupportOnlyCoach, 'Support-only constructive pullback');
+  assert.strictEqual(constructiveSupportOnlyCoach.recentStory.toneMode, 'cautious_support_test', 'Support-only constructive pullback should expose a cautious tone mode');
+  assert.strictEqual(constructiveSupportOnlyCoach.recentStory.confidenceMode, 'support_test_needs_buyer_proof', 'Support-only constructive pullback should expose a cautious confidence mode');
+  assertDerivedSupportPresent(constructiveSupportOnlyCoach, 'support_still_unproven', 'Support-only constructive pullback');
+  assert.ok(!/dynamic support|bullish continuation|confirmation candle|price action equilibrium/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Constructive support-only story should follow the show-don’t-label rule');
 
   const constructiveBounceCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -663,8 +739,15 @@ function runDeterministicCandleFallbackRegression(){
       globalVerdict:{final_verdict:'watch'}
     }
   );
-  assert.ok(/bounce still needs confirmation/i.test(constructiveBounceCoach.primaryStory.text), 'Constructive pullback story may mention bounce confirmation when a bounce attempt exists');
+  assert.ok(/buyers stepped back in|buyers have started to respond/i.test(constructiveBounceCoach.primaryStory.text), 'Constructive bounce story should explain the buyer response after the pullback');
+  assert.ok(/volume is still a bit light|move needs more proof/i.test(constructiveBounceCoach.primaryStory.text), 'Constructive bounce story should keep weak volume as a confidence qualifier');
   assert.ok(constructiveBounceCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Constructive bounce story should preserve bounce_attempt evidence');
+  assert.ok(!/not in the ideal support area yet|needs a clearer pullback/i.test(constructiveBounceCoach.primaryStory.text), 'Constructive bounce story must not fall back to off-level wording once the pullback has already happened');
+  assert.strictEqual(constructiveBounceCoach.recentStory.steps.join('|'), 'strong_uptrend|pullback_to_20ma|buyer_response|weak_volume|confirmation_needed', 'Constructive bounce story should expose the buyer-response recent-story skeleton');
+  assertStepDetailsUseKnownFacts(constructiveBounceCoach, 'Constructive bounce story');
+  assert.strictEqual(constructiveBounceCoach.recentStory.toneMode, 'constructive_buyer_response', 'Constructive bounce story should expose a constructive tone mode');
+  assert.strictEqual(constructiveBounceCoach.recentStory.confidenceMode, 'buyer_response_needs_volume_proof', 'Constructive bounce story should expose a buyer-response confidence mode');
+  assertDerivedSupportPresent(constructiveBounceCoach, 'confirmation_needed', 'Constructive bounce story');
 
   const bounceAttemptOnlyCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -738,7 +821,7 @@ function runDeterministicCandleFallbackRegression(){
       || lowerWickOnlyCoach.primaryStory.evidenceFactIds.includes('support_medium_term_average'),
     'Lower-wick-only headline near support should preserve either wick evidence or explicit support-context evidence'
   );
-  assert.ok(/lower wick shows buyers pushed back from the lows|buyers still need to defend|support area|need to follow through/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence should stay support-based without claiming a bounce');
+  assert.ok(/pulled back toward the 20-day average|buyers still need to prove they can hold this area|buyers have shown up/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence should stay support-based without claiming a bounce');
   assert.ok(!/the bounce still needs/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence must not claim that a bounce has already started');
   assert.ok(!/bounce is not ready yet/i.test((lowerWickOnlyCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Lower-wick-only what-next copy must not refer to a bounce that has not started');
 
@@ -811,7 +894,7 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   assert.strictEqual(repairingCoach.primaryStory.key, 'pullback_still_repairing', 'Weakening pullbacks should choose the repair story before isolated candle commentary');
-  assert.ok(/repair/i.test(repairingCoach.sections[0].text), 'Repairing pullback story should explain that the setup still needs repair');
+  assert.ok(/needs repair|needs to rebuild|not settled yet|buyers have not really taken control again/i.test(repairingCoach.sections[0].text), 'Repairing pullback story should explain that the setup still needs repair');
   assert.ok(/reclaim/i.test((repairingCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Repairing pullback should tell the user to reclaim support before trusting it');
 
   const intactOffLevelCoach = sandbox.buildDeterministicChartCoach(
@@ -845,8 +928,11 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual(intactOffLevelCoach.primaryStory.key, 'off_level_wait_for_clearer_support', 'Intact off-level charts should use a neutral setup-location story instead of a negative structural headline');
   assert.notStrictEqual(intactOffLevelCoach.primaryStory.key, 'pullback_still_repairing', 'Intact structure must not use the repair headline just because price recently left support');
   assert.notStrictEqual(intactOffLevelCoach.primaryStory.key, 'structure_breaking_down', 'Intact structure must not use the breakdown headline just because price is off-level');
-  assert.ok(/not in the ideal support area|clearer pullback/i.test(intactOffLevelCoach.primaryStory.text), 'Neutral off-level story should explain that the setup is not in the ideal support area yet');
+  assert.ok(/not sitting near a support area|wait-and-see spot|clean pullback/i.test(intactOffLevelCoach.primaryStory.text), 'Neutral off-level story should explain that the setup is away from useful support');
   assert.ok(!/repair|weakening|breaking down|failed bounce|lost support/i.test(intactOffLevelCoach.primaryStory.text), 'Neutral off-level story must avoid structural damage language on intact charts');
+  assert.strictEqual(intactOffLevelCoach.recentStory.steps.join('|'), 'intact_structure|off_level|wait_for_clearer_support', 'Neutral off-level story should expose the expected recent-story skeleton');
+  assert.ok(Array.isArray(intactOffLevelCoach.recentStory.stepDetails) && intactOffLevelCoach.recentStory.stepDetails.some(detail => detail.key === 'off_level'), 'Neutral off-level story should expose step-level contract details');
+  assert.strictEqual(intactOffLevelCoach.primaryStory.readerTest.tone, 'neutral', 'Neutral off-level story should pass the Reader Test with a neutral tone');
 
   const intactLostSupportCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -880,7 +966,7 @@ function runDeterministicCandleFallbackRegression(){
   assert.notStrictEqual(intactLostSupportCoach.primaryStory.key, 'pullback_still_repairing', 'Lost-support location alone must not imply structural repair when structure is intact');
   assert.notStrictEqual(intactLostSupportCoach.primaryStory.key, 'structure_breaking_down', 'Lost-support location alone must not imply a breakdown when structure is intact');
   assert.notStrictEqual(intactLostSupportCoach.primaryStory.key, 'failed_bounce', 'Lost-support location alone must not headline failed bounce when structure is intact');
-  assert.ok(/not in the ideal support area|clearer pullback/i.test(intactLostSupportCoach.primaryStory.text), 'Intact lost-support location should explain that the setup needs clearer support');
+  assert.ok(/not sitting near a support area|wait-and-see spot|clean pullback/i.test(intactLostSupportCoach.primaryStory.text), 'Intact lost-support location should explain that the setup needs clearer support');
   assert.ok(!/repair|weakening|breaking down|failed bounce/i.test(intactLostSupportCoach.primaryStory.text), 'Neutral lost-support story must avoid structural damage language on intact charts');
 
   const intactOffLevelBounceAttemptCoach = sandbox.buildDeterministicChartCoach(
@@ -913,7 +999,7 @@ function runDeterministicCandleFallbackRegression(){
   );
   assert.strictEqual(intactOffLevelBounceAttemptCoach.primaryStory.key, 'off_level_wait_for_clearer_support', 'Off-level intact bounce attempts should still use the neutral setup-location story');
   assert.notStrictEqual(intactOffLevelBounceAttemptCoach.primaryStory.key, 'bounce_confirmation_pending', 'A bounce attempt away from support must not headline as bounce confirmation');
-  assert.ok(/not in the ideal support area|clearer pullback/i.test(intactOffLevelBounceAttemptCoach.primaryStory.text), 'Off-level intact bounce attempts should still explain that support needs to become clearer');
+  assert.ok(/not sitting near a support area|wait-and-see spot|clean pullback|drifted away from the area where a cleaner pullback would usually set up/i.test(intactOffLevelBounceAttemptCoach.primaryStory.text), 'Off-level intact bounce attempts should still explain that support needs to become clearer');
   assert.ok(!/bounce still needs|buyers are trying to defend support/i.test(intactOffLevelBounceAttemptCoach.primaryStory.text), 'Off-level intact bounce attempts must not imply the setup is valid just because a bounce attempt exists');
 
   const breakdownCoach = sandbox.buildDeterministicChartCoach(
@@ -946,8 +1032,11 @@ function runDeterministicCandleFallbackRegression(){
   );
   assert.strictEqual(breakdownCoach.primaryStory.key, 'structure_breaking_down', 'Broken structure should surface the breakdown story first');
   assert.ok(!breakdownCoach.primaryStory.evidenceFactIds.includes('failed_bounce'), 'Broken-structure breakdown story must not claim failed_bounce evidence when no failed bounce occurred');
-  assert.ok(/structure damage|support is starting to give way/i.test(breakdownCoach.sections[0].text), 'Breakdown story should explain that support is failing');
+  assert.ok(/support has given way|sellers are still controlling|sellers in charge/i.test(breakdownCoach.sections[0].text), 'Breakdown story should explain that support is failing');
   assert.ok(/rebuild a proper base/i.test((breakdownCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Breakdown story should tell the user to wait for a rebuild');
+  assert.strictEqual(breakdownCoach.recentStory.steps.join('|'), 'broken_structure|support_lost|avoid', 'Broken structure should expose the expected recent-story skeleton');
+  assert.ok(Array.isArray((breakdownCoach.sections.find(section => section.key === 'biggest_clue') || {}).evidenceFactIds) && (breakdownCoach.sections.find(section => section.key === 'biggest_clue') || {}).evidenceFactIds.includes('structure_broken'), 'Rendered Chart Story evidence should come through the recent-story contract for broken structures');
+  assert.strictEqual(breakdownCoach.primaryStory.readerTest.tone, 'bad', 'Broken structure should pass the Reader Test with a negative tone');
 
   const failedBounceBreakdownCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -1079,7 +1168,7 @@ function runDeterministicCandleFallbackRegression(){
   );
   assert.strictEqual(structureBrokenOnlyCoach.primaryStory.key, 'structure_breaking_down', 'Broken structure should still choose the breakdown story without a failed bounce');
   assert.ok(!structureBrokenOnlyCoach.primaryStory.evidenceFactIds.includes('failed_bounce'), 'Broken-structure-only story must not claim failed_bounce evidence');
-  assert.ok(/structure damage|support is starting to give way/i.test(structureBrokenOnlyCoach.primaryStory.text), 'Broken-structure-only story should stay focused on support failing');
+  assert.ok(/support has given way|sellers are still controlling|sellers in charge/i.test(structureBrokenOnlyCoach.primaryStory.text), 'Broken-structure-only story should stay focused on support failing');
   assert.ok(!/failed bounce/i.test(structureBrokenOnlyCoach.primaryStory.text), 'Broken-structure-only copy must not imply a failed bounce occurred');
 
   const nonStructuralAvoidCoach = sandbox.buildDeterministicChartCoach(
@@ -1202,7 +1291,7 @@ function runDeterministicCandleFallbackRegression(){
       chartCoach:{
         primaryStory:{
           key:'bounce_attempt',
-          label:'Biggest clue',
+          label:'Chart Story',
           icon:'🟢',
           text:'AI should not be able to change this primary story.',
           evidenceFactIds:['fake_fact'],
@@ -1212,7 +1301,7 @@ function runDeterministicCandleFallbackRegression(){
         source:'ai_chart_coach',
         sections:[
           {key:'volume', icon:'📊', label:'Volume', text:'Volume was unusually light, so the move still needs stronger backing.', confidence:0.61, source:'ai_chart_coach'},
-          {key:'biggest_clue', icon:'🟢', label:'Biggest clue', text:'AI wording should only polish this sentence.', confidence:0.82, source:'ai_chart_coach', teachingFocus:false},
+          {key:'biggest_clue', icon:'🟢', label:'Chart Story', text:'AI wording should only polish this sentence.', confidence:0.82, source:'ai_chart_coach', teachingFocus:false},
           {key:'what_next', icon:'🎯', label:'What next?', text:'Look for another strong close to prove buyers can keep control.', confidence:0.66, source:'ai_chart_coach'}
         ],
         summaryText:'AI supplied chart coach.'
@@ -1227,7 +1316,7 @@ function runDeterministicCandleFallbackRegression(){
       chartCoach:{
         primaryStory:{
           key:'bounce_attempt',
-          label:'Biggest clue',
+          label:'Chart Story',
           icon:'🟢',
           text:'AI should not be able to change this primary story.',
           evidenceFactIds:['fake_fact'],
@@ -1237,7 +1326,7 @@ function runDeterministicCandleFallbackRegression(){
         source:'ai_chart_coach',
         sections:[
           {key:'volume', icon:'📊', label:'Volume', text:'Volume was unusually light, so the move still needs stronger backing.', confidence:0.61, source:'ai_chart_coach'},
-          {key:'biggest_clue', icon:'🟢', label:'Biggest clue', text:'AI wording should only polish this sentence.', confidence:0.82, source:'ai_chart_coach', teachingFocus:false},
+          {key:'biggest_clue', icon:'🟢', label:'Chart Story', text:'AI wording should only polish this sentence.', confidence:0.82, source:'ai_chart_coach', teachingFocus:false},
           {key:'what_next', icon:'🎯', label:'What next?', text:'Look for another strong close to prove buyers can keep control.', confidence:0.66, source:'ai_chart_coach'}
         ],
         summaryText:'AI supplied chart coach.'
@@ -1251,7 +1340,10 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual(mergedAiCoach.chartCoach.diagnostics.priorityOrder.join('|'), mergedAiCoach.chartCoach.sections.map(section => section.key).join('|'), 'Merged AI Chart Coach diagnostics priority order must match final rendered sections');
   assert.strictEqual(mergedAiCoach.chartCoach.diagnostics.sectionConfidence.length, mergedAiCoach.chartCoach.sections.length, 'Merged AI Chart Coach section confidence diagnostics must match final rendered sections');
   assert.strictEqual(mergedAiCoach.chartCoach.diagnostics.sectionConfidence.filter(section => section.teachingFocus === true).length, 1, 'Merged AI Chart Coach diagnostics must preserve a single teaching-focus section');
+  assert.strictEqual((mergedAiCoach.chartCoach.diagnostics.storyContract && mergedAiCoach.chartCoach.diagnostics.storyContract.steps || []).join('|'), (mergedAiCoach.chartCoach.recentStory.steps || []).join('|'), 'Merged AI Chart Coach diagnostics should preserve the same story spine as the rendered model');
   assert.strictEqual(mergedAiCoach.chartCoach.primaryStory.key, deterministicBounceCoach.primaryStory.key, 'AI-supplied Chart Coach must not change the deterministic primary story');
+  assert.strictEqual((mergedAiCoach.chartCoach.sections.find(section => section.key === 'biggest_clue') || {}).text, (deterministicBounceCoach.sections.find(section => section.key === 'biggest_clue') || {}).text, 'AI-supplied Chart Coach must not override the deterministic Chart Story text');
+  assert.strictEqual((mergedAiCoach.chartCoach.sections.find(section => section.key === 'what_next') || {}).text, (deterministicBounceCoach.sections.find(section => section.key === 'what_next') || {}).text, 'AI-supplied Chart Coach must not override deterministic what-next guidance');
 
   const amatRead = sandbox.finalDisplayedAnalysisChartRead(
     {
@@ -1271,21 +1363,20 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   const amatKeys = amatRead.chartCoach.sections.map(section => section.key);
-  ['biggest_clue', 'trend', 'volume', 'learning_point', 'what_next'].forEach(key => {
+  ['biggest_clue', 'why_it_matters', 'volume', 'learning_point', 'what_next'].forEach(key => {
     assert.ok(amatKeys.includes(key), `AMAT-style Chart Guru should include ${key}`);
   });
-  assert.strictEqual(amatKeys[0], 'biggest_clue', 'AMAT-style strong upside acceleration selects Biggest clue first, not Trend');
+  assert.strictEqual(amatKeys[0], 'biggest_clue', 'AMAT-style strong upside acceleration should still lead with the Chart Story');
   const amatClue = amatRead.chartCoach.sections.find(section => section.key === 'biggest_clue');
-  const amatTrend = amatRead.chartCoach.sections.find(section => section.key === 'trend');
+  const amatWhy = amatRead.chartCoach.sections.find(section => section.key === 'why_it_matters');
   const amatVolume = amatRead.chartCoach.sections.find(section => section.key === 'volume');
   const amatLearning = amatRead.chartCoach.sections.find(section => section.key === 'learning_point');
   const amatNext = amatRead.chartCoach.sections.find(section => section.key === 'what_next');
   assert.strictEqual(amatRead.chartCoach.primaryStory.key, 'strong_upside_acceleration', 'AMAT-style chart should choose strong upside acceleration as the deterministic primary story');
-  assert.ok(/large and green/i.test(amatClue.text), 'AMAT-style Chart Guru should explain the primary acceleration story first');
-  assert.ok(/above the short, medium, and long-term averages/i.test(amatTrend.text), 'AMAT-style Chart Guru should explain the MA trend state');
-  assert.ok(!/prior close|follow(?:ing)? through|latest close|green candle|buyers finished/i.test(amatTrend.text), 'Trend section must not contain candle-close or follow-through commentary');
+  assert.ok(/buyers have been clearly in control|buyers have driven this move higher/i.test(amatClue.text), 'AMAT-style Chart Guru should explain the primary acceleration story first');
+  assert.ok(/become easier to mis-time|already extended/i.test(amatWhy.text), 'AMAT-style Chart Guru should explain why the strong run matters');
   assert.ok(/Volume is active, which makes the move more believable|Volume is active, which makes the move more convincing/i.test(amatVolume.text), 'AMAT-style Chart Guru should explain supportive volume');
-  assert.ok(/higher volume are usually more reliable/i.test(amatLearning.text), 'Chart Guru should include one learning point tied to the primary story');
+  assert.ok(/higher volume are usually more believable|quiet volume/i.test(amatLearning.text), 'Chart Guru should include one learning point tied to the primary story');
   assert.ok(/calm pullback that holds above the 20-day average/i.test(amatNext.text), 'Chart Guru should give a specific next step tied to the primary story');
 }
 
@@ -1600,9 +1691,9 @@ function runReviewChartGuruDisplayRegression(){
   const normalizedSuccess = sandbox.buildReviewChartGuruDisplay({
     aiSummaryGuard:{allowedToRender:true},
     analysisUiState:'complete',
-    analysisState:{normalizedAnalysis:{chartRead:{text:'🟢 Biggest clue: Buyers are in control.', markup:'[guru-markup]'}}}
+    analysisState:{normalizedAnalysis:{chartRead:{text:'🟢 Chart Story: Buyers are in control.', markup:'[guru-markup]'}}}
   });
-  assertGuruDisplay(normalizedSuccess, '🟢 Biggest clue: Buyers are in control.');
+  assertGuruDisplay(normalizedSuccess, '🟢 Chart Story: Buyers are in control.');
   assert.strictEqual(normalizedSuccess.display.markup, '[guru-markup]', 'Normalized-analysis branch should preserve rendered Chart Guru markup');
 
   const rawConflict = sandbox.buildReviewChartGuruDisplay({

@@ -233,11 +233,14 @@ test('Chart Guru renders deterministic teaching sections in the review UI', asyn
   await expect(page.locator('#reviewWorkspace')).not.toContainText('AI Summary');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Guru Notes');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Coach');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Biggest clue');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('bounce still needs confirmation');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Chart Story');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('buyers have started to respond');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('50-day average');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('setup constructive as long as buyers can follow through');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Why it matters');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('💡 Learning point');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📈 Trend');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('below the short-term average');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Volume');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Volume');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('AI analysis failed');
@@ -269,8 +272,8 @@ test('Chart Guru renders deterministic teaching sections in the review UI', asyn
     }
   });
 
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Biggest clue');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📈 Trend');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Chart Story');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Why it matters');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
 
@@ -498,7 +501,7 @@ test('Chart Guru renders the structure_breaking_down branch in the Review UI', a
   await expect(page.locator('#reviewWorkspace')).not.toContainText('AI Summary');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Guru Notes');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Coach');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📉 Biggest clue');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📉 Chart Story');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText(deterministicModel.biggestClueText);
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText(deterministicModel.whatNextText);
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');

@@ -23143,6 +23143,7 @@ function chartCoachStructureSignals(sequence = []){
 function chartCoachPrimaryOpportunityScore(section = {}){
   const key = String(section.key || '').trim();
   if(key === 'biggest_clue') return 120;
+  if(key === 'why_it_matters') return 110;
   if(key === 'wicks') return 104;
   if(key === 'indecision') return 102;
   if(key === 'strength') return 98;
@@ -23158,6 +23159,7 @@ function chartCoachPriorityForKey(key = ''){
   const normalized = String(key || '').trim();
   const priorityMap = {
     biggest_clue:120,
+    why_it_matters:108,
     indecision:102,
     wicks:100,
     strength:98,
@@ -23217,7 +23219,7 @@ function finalizeChartCoachSections(sections = []){
     });
 }
 
-function chartCoachDiagnosticsForSections(sections = []){
+function chartCoachDiagnosticsForSections(sections = [], recentStory = null, primaryStory = null){
   const finalSections = Array.isArray(sections) ? sections : [];
   return {
     sectionConfidence:finalSections.map(section => ({
@@ -23225,7 +23227,20 @@ function chartCoachDiagnosticsForSections(sections = []){
       confidence:Number.isFinite(Number(section && section.confidence)) ? Number(section.confidence) : null,
       teachingFocus:section && section.teachingFocus === true
     })),
-    priorityOrder:finalSections.map(section => String(section && section.key || '').trim())
+    priorityOrder:finalSections.map(section => String(section && section.key || '').trim()),
+    storyContract:recentStory && typeof recentStory === 'object' ? {
+      primaryStoryKey:String(primaryStory && primaryStory.key || '').trim(),
+      storyKey:String(recentStory.key || '').trim(),
+      toneMode:String(recentStory.toneMode || '').trim(),
+      confidenceMode:String(recentStory.confidenceMode || '').trim(),
+      steps:Array.isArray(recentStory.steps) ? recentStory.steps.map(step => String(step || '').trim()).filter(Boolean) : [],
+      stepDetails:Array.isArray(recentStory.stepDetails) ? recentStory.stepDetails.map(detail => ({
+        key:String(detail && detail.key || '').trim(),
+        evidenceFactIds:Array.isArray(detail && detail.evidenceFactIds) ? detail.evidenceFactIds.map(id => String(id || '').trim()).filter(Boolean) : [],
+        derivedFromSteps:Array.isArray(detail && detail.derivedFromSteps) ? detail.derivedFromSteps.map(value => String(value || '').trim()).filter(Boolean) : [],
+        derivedFromConditions:Array.isArray(detail && detail.derivedFromConditions) ? detail.derivedFromConditions.map(value => String(value || '').trim()).filter(Boolean) : []
+      })).filter(detail => detail.key) : []
+    } : null
   };
 }
 
@@ -23249,33 +23264,594 @@ function chartCoachLargeBodyRun(sequence = []){
   return run;
 }
 
+function chartNarratorDeterministicPick(options = [], seed = 0){
+  const list = Array.isArray(options) ? options.filter(Boolean) : [];
+  if(!list.length) return '';
+  const normalizedSeed = Number.isFinite(Number(seed)) ? Math.abs(Number(seed)) : 0;
+  return list[normalizedSeed % list.length];
+}
+
+function chartNarratorSupportLabel(context = {}){
+  if(context.near20 === 'near' || context.pullbackNear20 === true) return '20-day average';
+  if(context.near50 === 'near' || context.pullbackNear50 === true) return '50-day average';
+  return 'support';
+}
+
+function chartNarratorTrendLabel(context = {}){
+  if(context.structureBroken === true) return 'broken';
+  if(context.structureWeakening === true) return 'weak';
+  return 'healthy';
+}
+
+function chartNarratorBiasForStory(storyKey = '', context = {}){
+  if(storyKey === 'structure_breaking_down' || storyKey === 'sharp_selloff' || storyKey === 'failed_bounce') return 'bad';
+  if(storyKey === 'pullback_still_repairing' || storyKey === 'off_level_wait_for_clearer_support' || storyKey === 'doji_indecision') return 'neutral';
+  if(context.structureBroken === true) return 'bad';
+  if(context.structureWeakening === true) return 'neutral';
+  return 'good';
+}
+
+function chartNarratorToneModeForStorySteps(steps = []){
+  const set = new Set((Array.isArray(steps) ? steps : []).map(step => String(step || '').trim()).filter(Boolean));
+  if(set.has('broken_structure') || set.has('avoid') || set.has('support_lost') || set.has('failed_bounce')) return 'broken_avoid';
+  if(set.has('weak_structure') || set.has('repair_needed') || set.has('support_not_reclaimed')) return 'damaged_repairing';
+  if(set.has('off_level') || set.has('wait_for_clearer_support') || set.has('pause') || set.has('direction_unclear')) return 'neutral_off_level';
+  if(set.has('buyer_response') || set.has('buyers_in_control')) return 'constructive_buyer_response';
+  if(set.has('support_test') || set.has('early_support_defense')) return 'cautious_support_test';
+  return 'constructive_buyer_response';
+}
+
+function chartNarratorConfidenceModeForStorySteps(steps = []){
+  const set = new Set((Array.isArray(steps) ? steps : []).map(step => String(step || '').trim()).filter(Boolean));
+  if(set.has('broken_structure') || set.has('avoid') || set.has('support_lost') || set.has('failed_bounce')) return 'avoid_until_rebuilt';
+  if(set.has('repair_needed') || set.has('support_not_reclaimed')) return 'repair_first';
+  if(set.has('off_level') || set.has('wait_for_clearer_support')) return 'wait_for_better_location';
+  if(set.has('pause') || set.has('direction_unclear') || set.has('wait_for_clearer_move')) return 'wait_for_clarity';
+  if(set.has('buyer_response')){
+    return set.has('weak_volume') ? 'buyer_response_needs_volume_proof' : 'buyer_response_needs_follow_through';
+  }
+  if(set.has('support_test') || set.has('early_support_defense')){
+    return set.has('weak_volume') ? 'support_test_needs_buyer_proof' : 'support_test_needs_proof';
+  }
+  return 'context_only';
+}
+
+function chartNarratorStepEvidenceFactIds(step = '', context = {}){
+  const normalized = String(step || '').trim();
+  const supportEvidence = () => {
+    if(context.near20 === 'near' || context.pullbackNear20 === true) return ['support_short_term_average'];
+    if(context.near50 === 'near' || context.pullbackNear50 === true) return ['support_medium_term_average'];
+    return [];
+  };
+  const map = {
+    strong_uptrend:['trend_context', 'price_accelerating_higher'],
+    pullback_to_20ma:['support_short_term_average'],
+    pullback_to_50ma:['support_medium_term_average'],
+    buyer_response:[
+      ...(context.bounceAttempt === true ? ['bounce_attempt'] : []),
+      ...(context.latestWickRejection === 'lower_rejection' ? ['lower_rejection_wick'] : [])
+    ],
+    sellers_pushed_back:[
+      ...(context.latestWickRejection === 'upper_rejection' ? ['upper_rejection_wick', 'resistance_rejection'] : [])
+    ],
+    weak_volume:['low_volume'],
+    volume_supports_move:['high_volume'],
+    volume_not_a_problem:[],
+    confirmation_needed:context.bounceAttempt === true ? ['bounce_attempt'] : [],
+    support_still_unproven:supportEvidence(),
+    intact_structure:['trend_context'],
+    off_level:[],
+    wait_for_clearer_support:[],
+    weak_structure:['trend_context', 'weakness_signal'],
+    support_not_reclaimed:supportEvidence(),
+    repair_needed:['weakness_signal'],
+    broken_structure:['trend_context', 'structure_broken'],
+    failed_bounce:['failed_bounce'],
+    support_lost:['weakness_signal'],
+    avoid:[],
+    buyers_in_control:['price_accelerating_higher'],
+    volume_mixed:[],
+    wait_for_calmer_pullback:['price_accelerating_higher'],
+    weak_trend:['trend_context', 'price_accelerating_lower'],
+    sellers_in_control:['price_accelerating_lower'],
+    active_selling:['high_volume', 'price_accelerating_lower'],
+    selling_pressure:['weakness_signal'],
+    wait_for_damage_to_settle:['weakness_signal'],
+    early_support_defense:supportEvidence(),
+    extended_above_support:['price_accelerating_higher', 'extended_above_support'],
+    wait_for_pullback:['extended_above_support'],
+    support_test:supportEvidence(),
+    buyers_pushed_back:[
+      ...(context.latestWickRejection === 'lower_rejection' ? ['lower_rejection_wick'] : supportEvidence())
+    ],
+    follow_through_needed:context.latestWickRejection === 'upper_rejection'
+      ? ['upper_rejection_wick', 'resistance_rejection']
+      : (context.latestWickRejection === 'lower_rejection' ? ['lower_rejection_wick'] : []),
+    resistance_test:[
+      ...(context.latestWickRejection === 'upper_rejection' ? ['upper_rejection_wick', 'resistance_rejection'] : [])
+    ],
+    pause:['doji_or_small_body'],
+    direction_unclear:['doji_or_small_body'],
+    wait_for_clearer_move:['doji_or_small_body'],
+    bounce_attempt:['bounce_attempt'],
+    buyers_lost_control:['failed_bounce', 'weakness_signal'],
+    weakness_still_active:['weakness_signal'],
+    healthy_trend:['trend_context'],
+    near_20ma:['support_short_term_average'],
+    near_50ma:['support_medium_term_average'],
+    support_context:[]
+  };
+  const evidence = Object.prototype.hasOwnProperty.call(map, normalized)
+    ? map[normalized]
+    : [];
+  return [...new Set((Array.isArray(evidence) ? evidence : []).map(id => String(id || '').trim()).filter(Boolean))];
+}
+
+function chartNarratorStepDerivedSupport(step = '', context = {}, recentStory = null){
+  const normalized = String(step || '').trim();
+  const story = recentStory && typeof recentStory === 'object' ? recentStory : null;
+  const hasStep = value => Array.isArray(story && story.steps) && story.steps.includes(String(value || '').trim());
+  const supportZone = context.pullbackNear20 === true ? 'near_20ma' : (context.pullbackNear50 === true ? 'near_50ma' : 'support_context');
+  const map = {
+    confirmation_needed:{
+      derivedFromSteps:hasStep('buyer_response') ? ['buyer_response'] : ['support_test'],
+      derivedFromConditions:[context.bounceAttempt === true ? 'bounce_attempt_present' : 'bounce_attempt_absent', 'follow_through_missing']
+    },
+    support_still_unproven:{
+      derivedFromSteps:['support_test'],
+      derivedFromConditions:['buyer_response_absent', supportZone]
+    },
+    off_level:{
+      derivedFromSteps:[],
+      derivedFromConditions:['not_near_key_support']
+    },
+    follow_through_needed:{
+      derivedFromSteps:[hasStep('buyers_pushed_back') ? 'buyers_pushed_back' : (hasStep('sellers_pushed_back') ? 'sellers_pushed_back' : '')].filter(Boolean),
+      derivedFromConditions:['follow_through_missing']
+    },
+    wait_for_clearer_support:{
+      derivedFromSteps:['off_level'],
+      derivedFromConditions:['not_near_key_support']
+    },
+    avoid:{
+      derivedFromSteps:[hasStep('broken_structure') ? 'broken_structure' : '', hasStep('support_lost') ? 'support_lost' : '', hasStep('failed_bounce') ? 'failed_bounce' : ''].filter(Boolean),
+      derivedFromConditions:['negative_story_verdict']
+    },
+    wait_for_pullback:{
+      derivedFromSteps:['extended_above_support'],
+      derivedFromConditions:['price_extended_from_support']
+    },
+    wait_for_damage_to_settle:{
+      derivedFromSteps:['weak_trend', hasStep('sellers_in_control') ? 'sellers_in_control' : 'selling_pressure'].filter(Boolean),
+      derivedFromConditions:['damage_still_active']
+    },
+    wait_for_clearer_move:{
+      derivedFromSteps:['pause', 'direction_unclear'],
+      derivedFromConditions:['break_direction_unconfirmed']
+    },
+    repair_needed:{
+      derivedFromSteps:['weak_structure', 'support_not_reclaimed'],
+      derivedFromConditions:['structure_not_repaired']
+    }
+  };
+  return Object.prototype.hasOwnProperty.call(map, normalized) ? map[normalized] : null;
+}
+
+function chartNarratorEvidenceForStorySteps(recentStory = null, steps = []){
+  const story = recentStory && typeof recentStory === 'object' ? recentStory : null;
+  const requested = Array.isArray(steps) ? steps.map(step => String(step || '').trim()).filter(Boolean) : [];
+  const detailByKey = new Map(
+    Array.isArray(story && story.stepDetails)
+      ? story.stepDetails.map(detail => [String(detail && detail.key || '').trim(), Array.isArray(detail && detail.evidenceFactIds) ? detail.evidenceFactIds : []])
+      : []
+  );
+  const evidence = requested.flatMap(step => detailByKey.get(step) || []);
+  return [...new Set(evidence)].filter(Boolean);
+}
+
+function chartNarratorHasStep(recentStory = null, step = ''){
+  const normalized = String(step || '').trim();
+  if(!normalized) return false;
+  return Array.isArray(recentStory && recentStory.steps) && recentStory.steps.includes(normalized);
+}
+
+function chartNarratorRecentStoryForPrimaryStory(primaryStory = {}, context = {}){
+  const key = String(primaryStory && primaryStory.key || '').trim();
+  const supportLabel = chartNarratorSupportLabel(context);
+  const steps = [];
+  if(key === 'constructive_pullback_near_20ma' || key === 'constructive_pullback_near_50ma'){
+    steps.push('strong_uptrend');
+    steps.push(key === 'constructive_pullback_near_20ma' ? 'pullback_to_20ma' : 'pullback_to_50ma');
+    steps.push(context.bounceAttempt === true ? 'buyer_response' : 'support_test');
+    if(context.latestWickRejection === 'upper_rejection') steps.push('sellers_pushed_back');
+    steps.push(context.weakVolume === true ? 'weak_volume' : (context.activeVolume === true ? 'volume_supports_move' : 'volume_not_a_problem'));
+    steps.push(context.bounceAttempt === true ? 'confirmation_needed' : 'support_still_unproven');
+  }else if(key === 'off_level_wait_for_clearer_support'){
+    steps.push('intact_structure', 'off_level', 'wait_for_clearer_support');
+  }else if(key === 'pullback_still_repairing'){
+    steps.push('weak_structure', 'support_not_reclaimed', 'repair_needed');
+  }else if(key === 'structure_breaking_down'){
+    steps.push('broken_structure');
+    steps.push(context.failedBounce === true ? 'failed_bounce' : 'support_lost');
+    steps.push('avoid');
+  }else if(key === 'strong_upside_acceleration'){
+    steps.push('strong_uptrend', 'buyers_in_control', context.activeVolume === true ? 'volume_supports_move' : 'volume_mixed', 'wait_for_calmer_pullback');
+  }else if(key === 'sharp_selloff'){
+    steps.push('weak_trend', 'sellers_in_control', context.activeVolume === true ? 'active_selling' : 'selling_pressure', 'wait_for_damage_to_settle');
+  }else if(key === 'bounce_confirmation_pending'){
+    steps.push('intact_structure');
+    steps.push(context.pullbackNear20 === true ? 'pullback_to_20ma' : (context.pullbackNear50 === true ? 'pullback_to_50ma' : 'support_test'));
+    steps.push(context.bounceAttempt === true ? 'buyer_response' : 'early_support_defense');
+    steps.push('confirmation_needed');
+  }else if(key === 'extended_after_run'){
+    steps.push('strong_uptrend', 'extended_above_support', 'wait_for_pullback');
+  }else if(key === 'long_lower_wick_support_test'){
+    steps.push('support_test', 'buyers_pushed_back', 'follow_through_needed');
+  }else if(key === 'long_upper_wick_rejection'){
+    steps.push('resistance_test', 'sellers_pushed_back', 'follow_through_needed');
+  }else if(key === 'doji_indecision'){
+    steps.push('pause', 'direction_unclear', 'wait_for_clearer_move');
+  }else if(key === 'failed_bounce'){
+    steps.push('bounce_attempt', 'buyers_lost_control', 'weakness_still_active');
+  }else if(key === 'bounce_attempt'){
+    steps.push('support_test', 'buyer_response', 'confirmation_needed');
+  }else{
+    steps.push(`${chartNarratorTrendLabel(context)}_trend`, supportLabel === '20-day average' ? 'near_20ma' : (supportLabel === '50-day average' ? 'near_50ma' : 'support_context'));
+  }
+  const toneMode = chartNarratorToneModeForStorySteps(steps);
+  const confidenceMode = chartNarratorConfidenceModeForStorySteps(steps);
+  const provisionalStory = {steps};
+  const stepDetails = steps.map(step => {
+    const evidenceFactIds = chartNarratorStepEvidenceFactIds(step, context);
+    const derived = chartNarratorStepDerivedSupport(step, context, provisionalStory);
+    return {
+      key:step,
+      evidenceFactIds,
+      derivedFromSteps:Array.isArray(derived && derived.derivedFromSteps) ? derived.derivedFromSteps.map(value => String(value || '').trim()).filter(Boolean) : [],
+      derivedFromConditions:Array.isArray(derived && derived.derivedFromConditions) ? derived.derivedFromConditions.map(value => String(value || '').trim()).filter(Boolean) : []
+    };
+  });
+  const evidenceFactIds = [
+    ...(Array.isArray(primaryStory && primaryStory.evidenceFactIds) ? primaryStory.evidenceFactIds.slice() : []),
+    ...stepDetails.flatMap(detail => Array.isArray(detail.evidenceFactIds) ? detail.evidenceFactIds : [])
+  ];
+  return {
+    key:key || 'trend_context',
+    bias:chartNarratorBiasForStory(key, context),
+    toneMode,
+    confidenceMode,
+    trendLabel:chartNarratorTrendLabel(context),
+    supportLabel,
+    steps,
+    stepDetails,
+    evidenceFactIds:[...new Set(evidenceFactIds.map(id => String(id || '').trim()).filter(Boolean))]
+  };
+}
+
+function chartNarratorStoryTextForPrimaryStory(primaryStory = {}, context = {}, recentStory = null){
+  const story = recentStory && typeof recentStory === 'object' ? recentStory : chartNarratorRecentStoryForPrimaryStory(primaryStory, context);
+  const key = String(story && story.key || '').trim();
+  const supportLabel = story.supportLabel || chartNarratorSupportLabel(context);
+  const hasStep = step => chartNarratorHasStep(story, step);
+  const confidenceMode = String(story && story.confidenceMode || '').trim();
+  const seed = story.steps.length + (context.marketSupportive === true ? 1 : 0) + (context.weakVolume === true ? 2 : 0) + (context.bounceAttempt === true ? 3 : 0);
+  if(key === 'constructive_pullback_near_20ma' || key === 'constructive_pullback_near_50ma'){
+    const opener = chartNarratorDeterministicPick([
+      'The bigger trend still looks healthy, so this recent dip reads more like a normal pause than a chart falling apart.',
+      'The main trend is still in good shape, which means the recent pullback is happening inside strength rather than damage.'
+    ], seed);
+    const response = context.bounceAttempt === true
+      ? chartNarratorDeterministicPick([
+        `After pulling back toward the ${supportLabel}, buyers stepped back in and pushed price higher.`,
+        `Price pulled back toward the ${supportLabel}, and buyers have started to respond from that area.`
+      ], seed + 1)
+      : chartNarratorDeterministicPick([
+        `Price has pulled back toward the ${supportLabel}, which is where you want buyers to show up if the trend is still healthy.`,
+        `The pullback has brought price back toward the ${supportLabel}, putting it near an area that matters.`
+      ], seed + 1);
+    const confidence = confidenceMode === 'buyer_response_needs_volume_proof'
+      ? 'That is encouraging, but the volume is still a bit light, so the move needs more proof.'
+      : (confidenceMode === 'buyer_response_needs_follow_through'
+        ? 'That is encouraging, and it keeps the setup constructive as long as buyers can follow through.'
+        : (confidenceMode === 'support_test_needs_buyer_proof'
+          ? 'Price is in a useful area, but buyers still need to step in and the light volume means the setup still needs more proof.'
+          : 'That keeps the setup constructive, but buyers still need to prove they can hold this area.'));
+    const indecision = context.bodyDescriptor === 'small' || context.latestDirection === 'flat'
+      ? 'The latest candle was small, so neither buyers nor sellers proved much control by the close.'
+      : '';
+    return [opener, response, indecision, confidence].filter(Boolean).join(' ');
+  }
+  if(key === 'off_level_wait_for_clearer_support'){
+    return chartNarratorDeterministicPick([
+      'The bigger trend still looks fine, but price has already drifted away from the area where a cleaner pullback would usually set up. Nothing is badly wrong here, but there is not much edge until price comes back into support.',
+      'The chart still looks healthy overall, but price is not sitting near a support area right now. That makes this more of a wait-and-see spot than a clean pullback.'
+    ], seed);
+  }
+  if(key === 'pullback_still_repairing'){
+    return chartNarratorDeterministicPick([
+      `The chart has weakened during this pullback. Instead of holding the first support area cleanly, price is still trying to climb back above the ${supportLabel}, so the setup needs repair before it can improve.`,
+      `This pullback is not settled yet. Price has slipped enough to show that buyers have not really taken control again, so the chart still needs to rebuild before it looks healthier.`
+    ], seed);
+  }
+  if(key === 'structure_breaking_down'){
+    return chartNarratorDeterministicPick([
+      'The bigger picture is no longer healthy. Price has lost support and sellers are still controlling the recent candles, so this looks more like a chart breaking down than a normal pullback.',
+      'This is not a constructive pause anymore. Support has given way, and the recent action still shows sellers in charge.'
+    ], seed + (context.failedBounce === true ? 1 : 0));
+  }
+  if(key === 'strong_upside_acceleration'){
+    return chartNarratorDeterministicPick([
+      'The stock has pushed higher for several candles in a row, and buyers have been clearly in control. That is strong action, but sharp runs are usually easier to trust after they pause and reset.',
+      'Buyers have driven this move higher with several strong up days. The move looks powerful, even though it would be healthier to see it calm down before the next decision.'
+    ], seed);
+  }
+  if(key === 'sharp_selloff'){
+    return chartNarratorDeterministicPick([
+      'Recent candles show sellers taking control quickly. Price is being pushed lower with little sign of support yet, so this is still weak action.',
+      'The latest move has turned into a sharp drop rather than a calm pullback. Sellers are still in charge, which keeps the chart in a weak position.'
+    ], seed);
+  }
+  if(key === 'bounce_confirmation_pending'){
+    return context.bounceAttempt === true
+      ? `Price has reached an area that could matter, and buyers have started to respond, but one good day on its own is not enough yet. ${(context.bodyDescriptor === 'small' || context.latestDirection === 'flat') ? 'The latest candle was small, so neither buyers nor sellers proved much control by the close. ' : ''}The bounce has started to form, but it still needs follow-through before it means much.`
+      : `Price is testing an area that could matter, and buyers pushed it off the lows, but the move is still early. ${(context.bodyDescriptor === 'small' || context.latestDirection === 'flat') ? 'The latest candle was small, so neither buyers nor sellers proved much control by the close. ' : ''}It needs a stronger follow-through day before the chart looks more convincing.`;
+  }
+  if(key === 'extended_after_run'){
+    return 'The trend still looks strong, but price has already run away from support. That usually leaves less room for error until the stock pulls back and settles down again.';
+  }
+  if(key === 'long_lower_wick_support_test'){
+    return 'Price dipped lower during the day, but buyers pushed it back up before the close. That can be an encouraging sign, although it matters more if the next candle also stays firm.';
+  }
+  if(key === 'long_upper_wick_rejection'){
+    return 'The stock tried to move higher, but it could not hold those gains. That tells you sellers were still active near the top of the move.';
+  }
+  if(key === 'doji_indecision'){
+    return 'The latest candle shows a pause more than a decision. Neither side showed clear control by the close, so the chart is still waiting for a clearer move.';
+  }
+  if(key === 'failed_bounce'){
+    return 'The stock tried to recover, but buyers could not hold the move. That keeps the recent action weak because sellers are still taking back control.';
+  }
+  if(key === 'bounce_attempt'){
+    return 'Buyers are trying to push the stock back up from support. That is a start, but it still needs another solid day before the bounce looks trustworthy.';
+  }
+  return 'The recent candles matter most when you read them in sequence, not one by one, and right now the chart still needs a clearer next step.';
+}
+
+function chartNarratorWhyItMattersForStory(primaryStory = {}, context = {}, recentStory = null){
+  const story = recentStory && typeof recentStory === 'object' ? recentStory : chartNarratorRecentStoryForPrimaryStory(primaryStory, context);
+  const key = String(story && story.key || '').trim();
+  const supportLabel = story.supportLabel || chartNarratorSupportLabel(context);
+  if(key === 'constructive_pullback_near_20ma' || key === 'constructive_pullback_near_50ma'){
+    return context.bounceAttempt === true
+      ? `If buyers can keep holding around the ${supportLabel}, this can turn into a cleaner continuation of the trend instead of just a one-day pop.`
+      : `If buyers defend the ${supportLabel}, the pullback can stay healthy. If they do not, the chart can drift from constructive into messy quite quickly.`;
+  }
+  if(key === 'off_level_wait_for_clearer_support') return 'Good charts are usually easier to manage when they pull back into a level that clearly matters. Away from support, the reward-to-risk picture is usually less clear.';
+  if(key === 'pullback_still_repairing') return 'When price cannot quickly retake a support area, it tells you the pullback is still doing damage instead of settling down.';
+  if(key === 'structure_breaking_down') return 'Once support starts failing, small bounce attempts are less trustworthy because the chart first needs time to rebuild.';
+  if(key === 'strong_upside_acceleration') return 'Big up moves can keep going, but they also become easier to mis-time if you chase them after they are already extended.';
+  if(key === 'sharp_selloff') return 'Fast weakness usually matters because it shows buyers are stepping back, not because one red candle is magical on its own.';
+  if(key === 'bounce_confirmation_pending') return 'Early support reactions are useful, but the chart only improves if buyers can add another sign of strength.';
+  if(key === 'failed_bounce') return 'Failed recoveries often matter because they show sellers were strong enough to take control back quickly.';
+  return 'The important part is not the label. It is whether the recent candles are helping the chart improve, stall, or break down.';
+}
+
+function chartNarratorSupportSectionsForStory(recentStory = null, context = {}){
+  const story = recentStory && typeof recentStory === 'object' ? recentStory : null;
+  if(!story) return [];
+  const supportLabel = String(story.supportLabel || chartNarratorSupportLabel(context)).trim();
+  const hasStep = step => chartNarratorHasStep(story, step);
+  const sections = [];
+  const addSection = section => {
+    if(!section || !section.key || !section.label || !section.text) return;
+    sections.push({
+      key:String(section.key || '').trim(),
+      icon:String(section.icon || '').trim(),
+      label:String(section.label || '').trim(),
+      text:String(section.text || '').trim(),
+      confidence:Number.isFinite(Number(section.confidence)) ? Number(section.confidence) : 0.7,
+      teachingFocus:false,
+      source:'deterministic',
+      evidenceFactIds:chartNarratorEvidenceForStorySteps(story, Array.isArray(section.storySteps) ? section.storySteps : [])
+    });
+  };
+  if(hasStep('pullback_to_20ma') || hasStep('pullback_to_50ma')){
+    if(!hasStep('sellers_pushed_back')){
+      addSection({
+        key:'support',
+        icon:'➕',
+        label:'Support',
+        text:hasStep('buyer_response')
+          ? `Price pulled back toward the ${supportLabel}, and buyers have started to respond from that area.`
+          : `Price has pulled back toward the ${supportLabel}, so this is the area where buyers still need to show they can hold the chart up.`,
+        confidence:hasStep('buyer_response') ? 0.84 : 0.8,
+        storySteps:hasStep('pullback_to_20ma') ? ['pullback_to_20ma', hasStep('buyer_response') ? 'buyer_response' : 'support_test'] : ['pullback_to_50ma', hasStep('buyer_response') ? 'buyer_response' : 'support_test']
+      });
+    }
+  }else if(hasStep('off_level')){
+    addSection({
+      key:'support',
+      icon:'🟡',
+      label:'Setup location',
+      text:`Price is still away from the ${supportLabel === 'support' ? 'main support areas' : supportLabel}, so the chart is not in the cleaner pullback zone you would usually want to see.`,
+      confidence:0.78,
+      storySteps:['off_level', 'wait_for_clearer_support']
+    });
+  }else if(hasStep('support_not_reclaimed')){
+    addSection({
+      key:'weakness',
+      icon:'📉',
+      label:'Weakness',
+      text:`Price is still struggling to get back above the ${supportLabel}, which tells you the pullback has not repaired itself yet.`,
+      confidence:0.84,
+      storySteps:['support_not_reclaimed', 'repair_needed']
+    });
+  }else if(hasStep('support_lost')){
+    addSection({
+      key:'weakness',
+      icon:'📉',
+      label:'Weakness',
+      text:`Price has already lost the ${supportLabel}, so this has moved from a normal pullback into clear damage.`,
+      confidence:0.9,
+      storySteps:['support_lost', 'broken_structure']
+    });
+  }else if(hasStep('buyers_in_control')){
+    addSection({
+      key:'trend',
+      icon:'📈',
+      label:'Trend',
+      text:'Several recent candles have pushed higher in a row, which shows buyers have been controlling the move rather than just winning one day.',
+      confidence:0.88,
+      storySteps:['strong_uptrend', 'buyers_in_control']
+    });
+  }else if(hasStep('sellers_in_control')){
+    addSection({
+      key:'weakness',
+      icon:'📉',
+      label:'Weakness',
+      text:'Recent candles have kept pushing lower, so sellers are still driving the move rather than just winning one red day.',
+      confidence:0.88,
+      storySteps:['weak_trend', 'sellers_in_control']
+    });
+  }
+  if(hasStep('buyers_pushed_back') && !sections.some(section => section.key === 'support')){
+    addSection({
+      key:'support',
+      icon:'🕯',
+      label:'Buyer response',
+      text:'Buyers pushed the stock back up after it traded lower during the day, which is a useful early sign near support.',
+      confidence:0.82,
+      storySteps:['support_test', 'buyers_pushed_back']
+    });
+  }
+  if(hasStep('sellers_pushed_back')){
+    addSection({
+      key:'resistance',
+      icon:'🕯',
+      label:'Resistance',
+      text:'The stock tried to move higher, but sellers pushed it back before the close, which shows the move is still running into pressure.',
+      confidence:0.82,
+      storySteps:['resistance_test', 'sellers_pushed_back']
+    });
+  }else if(hasStep('direction_unclear')){
+    addSection({
+      key:'indecision',
+      icon:'⚪',
+      label:'Indecision',
+      text:'The latest candle is more of a pause than a decision, so the chart is still waiting for one side to take clearer control.',
+      confidence:0.8,
+      storySteps:['pause', 'direction_unclear']
+    });
+  }
+
+  if(hasStep('weak_volume')){
+    addSection({
+      key:'volume',
+      icon:'📊',
+      label:'Volume',
+      text:'Volume is still lighter than normal, so the move has less backing behind it for now.',
+      confidence:0.8,
+      storySteps:['weak_volume']
+    });
+  }else if(hasStep('volume_supports_move')){
+    addSection({
+      key:'volume',
+      icon:'📊',
+      label:'Volume',
+      text:'Volume is active, which makes the move more convincing.',
+      confidence:0.83,
+      storySteps:['volume_supports_move']
+    });
+  }else if(hasStep('active_selling')){
+    addSection({
+      key:'volume',
+      icon:'📊',
+      label:'Volume',
+      text:'Volume is active on the selloff, which makes the recent weakness harder to dismiss.',
+      confidence:0.83,
+      storySteps:['active_selling']
+    });
+  }
+
+  if((hasStep('strong_uptrend') || hasStep('intact_structure')) && !sections.some(section => section.key === 'trend') && !hasStep('off_level')){
+    addSection({
+      key:'trend',
+      icon:'📈',
+      label:'Trend',
+      text:'The bigger trend is still in good shape, which is why this chart still deserves a constructive read for now.',
+      confidence:0.78,
+      storySteps:[hasStep('strong_uptrend') ? 'strong_uptrend' : 'intact_structure']
+    });
+  }
+  if(hasStep('weak_structure') && !sections.some(section => section.key === 'weakness')){
+    addSection({
+      key:'weakness',
+      icon:'📉',
+      label:'Weakness',
+      text:'The bigger trend has already softened, so the chart needs repair rather than a quick decision.',
+      confidence:0.8,
+      storySteps:['weak_structure']
+    });
+  }
+  if(hasStep('broken_structure') && !sections.some(section => section.key === 'weakness')){
+    addSection({
+      key:'weakness',
+      icon:'📉',
+      label:'Weakness',
+      text:'The bigger trend is broken, so small bounce attempts matter less until the chart builds a new base.',
+      confidence:0.88,
+      storySteps:['broken_structure']
+    });
+  }
+  return sections;
+}
+
+function buildChartNarrator(primaryStory = {}, context = {}){
+  const recentStory = chartNarratorRecentStoryForPrimaryStory(primaryStory, context);
+  const story = chartNarratorStoryTextForPrimaryStory(primaryStory, context, recentStory);
+  const whatNext = chartCoachWhatNextForStory(String(recentStory && recentStory.key || '').trim(), context);
+  const learningPoint = chartCoachLearningPointForStory(String(recentStory && recentStory.key || '').trim(), context);
+  return {
+    story,
+    whyItMatters:chartNarratorWhyItMattersForStory(primaryStory, context, recentStory),
+    whatNext,
+    learningPoint,
+    readerTest:{
+      whatJustHappened:story,
+      tone:recentStory.bias,
+      whatToWaitForNext:whatNext
+    },
+    recentStory
+  };
+}
+
 function chartCoachLearningPointForStory(storyKey = '', context = {}){
   const volumeRatio = Number(context.volumeRatio);
   if(storyKey === 'constructive_pullback_near_20ma' || storyKey === 'constructive_pullback_near_50ma'){
     return volumeRatio <= 0.8
-      ? 'Constructive pullbacks are healthier when selling pressure stays controlled instead of expanding aggressively.'
-      : 'Constructive pullbacks work best when support holds first and buyers confirm the turn after the pause.';
+      ? 'A pullback looks healthier when the selling stays controlled instead of getting heavier as price dips.'
+      : 'A healthy pullback becomes more useful when buyers hold support first and then add a stronger response.';
   }
-  if(storyKey === 'pullback_still_repairing') return 'A pullback still needs repair when price starts losing key averages instead of finding support quickly.';
-  if(storyKey === 'off_level_wait_for_clearer_support') return 'A good chart can still be early if price is not testing a support area where buyers usually step in.';
+  if(storyKey === 'pullback_still_repairing') return 'If price cannot get back above support quickly, the pullback is still doing damage rather than settling down.';
+  if(storyKey === 'off_level_wait_for_clearer_support') return 'A strong chart is usually easier to trust when price pulls back into an area where buyers have shown up before.';
   if(storyKey === 'bounce_confirmation_pending'){
     return context.bounceAttempt === true
-      ? 'Early bounce attempts matter more when buyers add a second sign of strength instead of stalling after one day.'
-      : 'A lower wick matters more when the next candle also closes stronger instead of slipping back again.';
+      ? 'One good day can start a bounce, but it usually means more when buyers can back it up on the next day as well.'
+      : 'A push off the low matters more when the next candle also closes stronger instead of slipping back again.';
   }
-  if(storyKey === 'structure_breaking_down') return 'Once support stops holding, the chart usually needs time to rebuild before a safer pullback can form.';
-  if(storyKey === 'extended_after_run') return 'A strong trend is easier to manage after it pulls back into support than when price is still stretched above it.';
+  if(storyKey === 'structure_breaking_down') return 'When support stops holding, the chart usually needs time to rebuild before a safer setup can appear.';
+  if(storyKey === 'extended_after_run') return 'A strong trend is easier to manage after it pulls back into support than when price is still stretched well above it.';
   if(storyKey === 'strong_upside_acceleration'){
     return volumeRatio >= 1.05
-      ? 'Big moves on higher volume are usually more reliable than big moves on quiet volume.'
-      : 'Several strong green candles are more useful when volume also supports the move.';
+      ? 'Big moves on higher volume are usually more believable than big moves on quiet volume.'
+      : 'Several strong up days are more useful when volume also supports the move.';
   }
-  if(storyKey === 'sharp_selloff') return 'Fast sell-offs matter more when the candles stay large and the closes keep getting weaker.';
-  if(storyKey === 'long_lower_wick_support_test') return 'Long lower wicks often appear where buyers see value and refuse lower prices.';
-  if(storyKey === 'long_upper_wick_rejection') return 'Long upper wicks often appear where sellers are willing to push price back down.';
-  if(storyKey === 'doji_indecision') return 'Small-bodied candles often appear when the market is undecided and waiting for a clearer push.';
-  if(storyKey === 'failed_bounce') return 'Failed bounce attempts often warn that sellers are still active when price tries to recover.';
-  if(storyKey === 'bounce_attempt') return 'A bounce attempt matters more when the next candle also closes firmly higher.';
+  if(storyKey === 'sharp_selloff') return 'Fast selling matters more when the candles stay large and the closes keep getting weaker.';
+  if(storyKey === 'long_lower_wick_support_test') return 'A strong push off the low often shows buyers were not willing to accept those lower prices.';
+  if(storyKey === 'long_upper_wick_rejection') return 'A stock that cannot hold its push higher is often running into sellers before the move is ready.';
+  if(storyKey === 'doji_indecision') return 'Very small candles often appear when the market is pausing and waiting for a clearer push either way.';
+  if(storyKey === 'failed_bounce') return 'A recovery attempt matters less when sellers can quickly wipe it out.';
+  if(storyKey === 'bounce_attempt') return 'An early bounce matters more when the next candle also closes firmly higher.';
   return 'The clearest chart lessons usually come from the biggest visual clue, not from any single indicator.';
 }
 
@@ -23550,6 +24126,18 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:92
     });
   }
+  if(!candidates.length && (bodyDescriptor === 'small' || latestDirection === 'flat')){
+    candidates.push({
+      key:'doji_indecision',
+      label:'Biggest clue',
+      icon:'⚪',
+      text:'The latest candle is small, so neither side showed clear control by the close.',
+      evidenceFactIds:['doji_or_small_body'],
+      confidence:0.83,
+      rankReason:'indecision_is_clearest_available_story',
+      score:72
+    });
+  }
   if(!candidates.length){
     candidates.push({
       key:(maRelation.above20 === true && maRelation.above50 === true && maRelation.above200 === true) ? 'trend_climbing' : 'trend_mixed',
@@ -23568,6 +24156,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
 }
 
 function mergeChartCoachSections(deterministicSections = [], aiSections = []){
+  const narratorOwnedKeys = new Set(['biggest_clue', 'why_it_matters', 'support', 'resistance', 'trend', 'weakness', 'volume', 'wicks', 'indecision', 'learning_point', 'what_next']);
   const aiByKey = new Map();
   (Array.isArray(aiSections) ? aiSections : []).forEach(section => {
     const key = String(section && section.key || '').trim();
@@ -23577,6 +24166,7 @@ function mergeChartCoachSections(deterministicSections = [], aiSections = []){
   });
   return (Array.isArray(deterministicSections) ? deterministicSections : []).map(section => {
     const key = String(section && section.key || '').trim();
+    if(narratorOwnedKeys.has(key)) return section;
     if(!aiByKey.has(key)) return section;
     return {
       ...section,
@@ -23862,146 +24452,135 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     marketSupportive
   };
   const primaryStory = chartCoachPrimaryStoryCandidates(storyContext)[0] || null;
-  const primaryStorySupportExclusions = {
-    constructive_pullback_near_20ma:['strength'],
-    constructive_pullback_near_50ma:['strength'],
-    off_level_wait_for_clearer_support:['strength'],
-    pullback_still_repairing:[],
-    bounce_confirmation_pending:['strength'],
-    structure_breaking_down:['strength'],
-    extended_after_run:['strength'],
-    strong_upside_acceleration:['candle', 'strength'],
-    sharp_selloff:['candle', 'strength'],
-    long_lower_wick_support_test:['wicks', 'support'],
-    long_upper_wick_rejection:['wicks', 'resistance'],
-    doji_indecision:['indecision', 'candle'],
-    failed_bounce:['weakness'],
-    bounce_attempt:['strength']
-  };
-  const supportExclusions = primaryStory && primaryStorySupportExclusions[primaryStory.key]
-    ? primaryStorySupportExclusions[primaryStory.key]
+  const chartNarrator = primaryStory ? buildChartNarrator(primaryStory, storyContext) : null;
+  const recentStory = chartNarrator && chartNarrator.recentStory ? chartNarrator.recentStory : null;
+  const supportSections = recentStory
+    ? chartNarratorSupportSectionsForStory(recentStory, storyContext)
+      .slice()
+      .sort((left, right) => {
+        const priorityDelta = chartCoachPriorityForKey(String(right.key || '').trim()) - chartCoachPriorityForKey(String(left.key || '').trim());
+        if(priorityDelta !== 0) return priorityDelta;
+        return chartCoachPrimaryOpportunityScore(right) - chartCoachPrimaryOpportunityScore(left);
+      })
+      .slice(0, 2)
     : [];
-  const supportScoreForPrimaryStory = section => {
-    const key = String(section && section.key || '').trim();
-    const base = chartCoachPriorityForKey(key);
-    if(!primaryStory) return base;
-    if(key === 'support' && facts.latestWickRejection === 'lower_rejection' && (near20 === 'near' || near50 === 'near')) return 126;
-    if(key === 'resistance' && facts.latestWickRejection === 'upper_rejection') return 126;
-    if(['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma'].includes(primaryStory.key)){
-      if(key === 'trend') return 130;
-      if(key === 'support') return 126;
-      if(key === 'volume' && weakVolume) return 118;
-      if(key === 'indecision' || key === 'wicks') return 112;
-      if(key === 'weakness') return 106;
-      if(key === 'candle') return 72;
-    }
-    if(primaryStory.key === 'pullback_still_repairing'){
-      if(key === 'weakness') return 130;
-      if(key === 'trend') return 122;
-      if(key === 'support') return 116;
-      if(key === 'volume' && weakVolume) return 112;
-      if(key === 'indecision' || key === 'candle') return 78;
-    }
-    if(primaryStory.key === 'off_level_wait_for_clearer_support'){
-      if(key === 'trend') return 128;
-      if(key === 'volume' && weakVolume) return 112;
-      if(key === 'support') return 108;
-      if(key === 'indecision' || key === 'wicks') return 102;
-      if(key === 'candle') return 72;
-    }
-    if(primaryStory.key === 'bounce_confirmation_pending'){
-      if(key === 'trend') return 128;
-      if(key === 'support') return 124;
-      if(key === 'indecision' || key === 'wicks') return 118;
-      if(key === 'volume' && weakVolume) return 114;
-      if(key === 'candle') return 76;
-    }
-    if(primaryStory.key === 'structure_breaking_down'){
-      if(key === 'weakness') return 132;
-      if(key === 'trend') return 124;
-      if(key === 'support') return 96;
-      if(key === 'volume') return activeVolume ? 116 : 100;
-    }
-    if(primaryStory.key === 'extended_after_run'){
-      if(key === 'trend') return 128;
-      if(key === 'volume') return activeVolume ? 118 : 104;
-      if(key === 'indecision' || key === 'candle') return 74;
-    }
-    return base;
-  };
-  const supportSections = sections
-    .filter(section => !['what_next'].includes(String(section.key || '').trim()))
-    .filter(section => !supportExclusions.includes(String(section.key || '').trim()))
-    .filter(section => {
-      const key = String(section.key || '').trim();
-      if(key !== 'candle') return true;
-      return primaryStory && ['doji_indecision', 'strong_upside_acceleration', 'sharp_selloff'].includes(primaryStory.key);
-    })
-    .sort((left, right) => {
-      const priorityDelta = supportScoreForPrimaryStory(right) - supportScoreForPrimaryStory(left);
-      if(priorityDelta !== 0) return priorityDelta;
-      return chartCoachPriorityForKey(String(right.key || '').trim()) - chartCoachPriorityForKey(String(left.key || '').trim());
-    })
-    .slice(0, 2)
-    .map(section => ({
-      ...section,
-      teachingFocus:false,
-      evidenceFactIds:Array.isArray(section.evidenceFactIds) ? section.evidenceFactIds : []
-    }));
+  const whyItMattersSection = primaryStory ? {
+    key:'why_it_matters',
+    icon:'ðŸ§­',
+    label:'Why it matters',
+    text:chartNarrator ? chartNarrator.whyItMatters : 'The recent move matters in the context of the bigger chart, not as a one-candle event.',
+    confidence:Number.isFinite(Number(primaryStory.confidence)) ? Math.max(0.68, Number(primaryStory.confidence) - 0.06) : 0.72,
+    teachingFocus:false,
+    source:'deterministic',
+    evidenceFactIds:Array.isArray(recentStory && recentStory.evidenceFactIds) ? recentStory.evidenceFactIds.slice() : []
+  } : null;
   const learningPointSection = primaryStory ? {
     key:'learning_point',
     icon:'💡',
     label:'Learning point',
-    text:chartCoachLearningPointForStory(primaryStory.key, storyContext),
+    text:chartNarrator ? chartNarrator.learningPoint : chartCoachLearningPointForStory(primaryStory.key, storyContext),
     confidence:Number.isFinite(Number(primaryStory.confidence)) ? Number(primaryStory.confidence) : 0.76,
     teachingFocus:true,
     source:'deterministic',
-    evidenceFactIds:Array.isArray(primaryStory.evidenceFactIds) ? primaryStory.evidenceFactIds.slice() : []
+    evidenceFactIds:Array.isArray(recentStory && recentStory.evidenceFactIds) ? recentStory.evidenceFactIds.slice() : []
   } : null;
   const whatNextSection = {
     key:'what_next',
     icon:'🎯',
     label:'What next?',
-    text:primaryStory ? chartCoachWhatNextForStory(primaryStory.key, storyContext) : whatNextText,
+    text:primaryStory && chartNarrator ? chartNarrator.whatNext : (primaryStory ? chartCoachWhatNextForStory(primaryStory.key, storyContext) : whatNextText),
     confidence:0.72,
     teachingFocus:false,
     source:'deterministic',
-    evidenceFactIds:['next_check']
+    evidenceFactIds:Array.isArray(recentStory && recentStory.evidenceFactIds) ? recentStory.evidenceFactIds.slice() : ['next_check']
   };
   const guruSections = finalizeChartCoachSections([
     primaryStory ? {
       key:'biggest_clue',
       icon:String(primaryStory.icon || '🟢').trim(),
-      label:'Biggest clue',
-      text:String(primaryStory.text || '').trim(),
+      label:'Chart Story',
+      text:String(chartNarrator && chartNarrator.story || primaryStory.text || '').trim(),
       confidence:Number.isFinite(Number(primaryStory.confidence)) ? Number(primaryStory.confidence) : 0.76,
       teachingFocus:false,
       source:'deterministic',
-      evidenceFactIds:Array.isArray(primaryStory.evidenceFactIds) ? primaryStory.evidenceFactIds.slice() : []
+      evidenceFactIds:Array.isArray(recentStory && recentStory.evidenceFactIds) ? recentStory.evidenceFactIds.slice() : []
     } : null,
+    whyItMattersSection,
     ...supportSections,
     learningPointSection,
     whatNextSection
   ].filter(Boolean));
   const summaryText = guruSections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n');
+  const renderedEvidenceFactIds = guruSections.flatMap(section => Array.isArray(section && section.evidenceFactIds) ? section.evidenceFactIds : []);
   return {
     primaryStory:primaryStory ? {
       key:String(primaryStory.key || '').trim(),
-      label:String(primaryStory.label || 'Biggest clue').trim(),
+      label:'Chart Story',
       icon:String(primaryStory.icon || '').trim(),
-      text:String(primaryStory.text || '').trim(),
-      evidenceFactIds:Array.isArray(primaryStory.evidenceFactIds) ? primaryStory.evidenceFactIds.slice() : [],
+      text:String(chartNarrator && chartNarrator.story || primaryStory.text || '').trim(),
+      evidenceFactIds:Array.isArray(recentStory && recentStory.evidenceFactIds) ? recentStory.evidenceFactIds.slice() : [],
       confidence:Number.isFinite(Number(primaryStory.confidence)) ? Number(primaryStory.confidence) : 0.76,
-      rankReason:String(primaryStory.rankReason || '').trim()
+      rankReason:String(primaryStory.rankReason || '').trim(),
+      readerTest:chartNarrator && chartNarrator.readerTest ? {
+        whatJustHappened:String(chartNarrator.readerTest.whatJustHappened || '').trim(),
+        tone:String(chartNarrator.readerTest.tone || '').trim(),
+        whatToWaitForNext:String(chartNarrator.readerTest.whatToWaitForNext || '').trim()
+      } : null
+    } : null,
+    recentStory:recentStory ? {
+      key:String(recentStory.key || '').trim(),
+      bias:String(recentStory.bias || '').trim(),
+      toneMode:String(recentStory.toneMode || '').trim(),
+      confidenceMode:String(recentStory.confidenceMode || '').trim(),
+      trendLabel:String(recentStory.trendLabel || '').trim(),
+      supportLabel:String(recentStory.supportLabel || '').trim(),
+      steps:Array.isArray(recentStory.steps) ? recentStory.steps.map(step => String(step || '').trim()).filter(Boolean) : [],
+      stepDetails:Array.isArray(recentStory.stepDetails) ? recentStory.stepDetails.map(detail => ({
+        key:String(detail && detail.key || '').trim(),
+        evidenceFactIds:Array.isArray(detail && detail.evidenceFactIds) ? detail.evidenceFactIds.map(id => String(id || '').trim()).filter(Boolean) : [],
+        derivedFromSteps:Array.isArray(detail && detail.derivedFromSteps) ? detail.derivedFromSteps.map(value => String(value || '').trim()).filter(Boolean) : [],
+        derivedFromConditions:Array.isArray(detail && detail.derivedFromConditions) ? detail.derivedFromConditions.map(value => String(value || '').trim()).filter(Boolean) : []
+      })).filter(detail => detail.key) : [],
+      evidenceFactIds:Array.isArray(recentStory.evidenceFactIds) ? recentStory.evidenceFactIds.map(id => String(id || '').trim()).filter(Boolean) : []
+    } : null,
+    chartNarrator:chartNarrator ? {
+      story:String(chartNarrator.story || '').trim(),
+      whyItMatters:String(chartNarrator.whyItMatters || '').trim(),
+      whatNext:String(chartNarrator.whatNext || '').trim(),
+      learningPoint:String(chartNarrator.learningPoint || '').trim(),
+      readerTest:chartNarrator.readerTest && typeof chartNarrator.readerTest === 'object' ? {
+        whatJustHappened:String(chartNarrator.readerTest.whatJustHappened || '').trim(),
+        tone:String(chartNarrator.readerTest.tone || '').trim(),
+        whatToWaitForNext:String(chartNarrator.readerTest.whatToWaitForNext || '').trim()
+      } : null,
+      recentStory:recentStory ? {
+        key:String(recentStory.key || '').trim(),
+        bias:String(recentStory.bias || '').trim(),
+        toneMode:String(recentStory.toneMode || '').trim(),
+        confidenceMode:String(recentStory.confidenceMode || '').trim(),
+        trendLabel:String(recentStory.trendLabel || '').trim(),
+        supportLabel:String(recentStory.supportLabel || '').trim(),
+        steps:Array.isArray(recentStory.steps) ? recentStory.steps.map(step => String(step || '').trim()).filter(Boolean) : [],
+        stepDetails:Array.isArray(recentStory.stepDetails) ? recentStory.stepDetails.map(detail => ({
+          key:String(detail && detail.key || '').trim(),
+          evidenceFactIds:Array.isArray(detail && detail.evidenceFactIds) ? detail.evidenceFactIds.map(id => String(id || '').trim()).filter(Boolean) : [],
+          derivedFromSteps:Array.isArray(detail && detail.derivedFromSteps) ? detail.derivedFromSteps.map(value => String(value || '').trim()).filter(Boolean) : [],
+          derivedFromConditions:Array.isArray(detail && detail.derivedFromConditions) ? detail.derivedFromConditions.map(value => String(value || '').trim()).filter(Boolean) : []
+        })).filter(detail => detail.key) : []
+      } : null
     } : null,
     sections:guruSections,
     summaryText,
     source:'deterministic',
-    renderVersion:'chart-guru-v1',
-    explanationFacts:[...new Set(explanationFacts)].filter(Boolean),
+    renderVersion:'chart-guru-v2',
+    explanationFacts:[...new Set([
+      ...explanationFacts,
+      ...(Array.isArray(recentStory && recentStory.evidenceFactIds) ? recentStory.evidenceFactIds : []),
+      ...renderedEvidenceFactIds
+    ].map(id => String(id || '').trim()).filter(Boolean))],
     confidence:0.8,
     facts,
-    diagnostics:chartCoachDiagnosticsForSections(guruSections)
+    diagnostics:chartCoachDiagnosticsForSections(guruSections, recentStory, primaryStory)
   };
 }
 
@@ -24036,9 +24615,11 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
       ...deterministicCoach,
       ...chartCoach,
       primaryStory:deterministicCoach.primaryStory,
+      recentStory:deterministicCoach.recentStory,
+      chartNarrator:deterministicCoach.chartNarrator,
       sections:mergedSections,
       summaryText:mergedSections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n'),
-      diagnostics:chartCoachDiagnosticsForSections(mergedSections)
+      diagnostics:chartCoachDiagnosticsForSections(mergedSections, mergedChartCoach.recentStory, mergedChartCoach.primaryStory)
     };
     return {
       text:String(mergedChartCoach.summaryText || '').trim(),
