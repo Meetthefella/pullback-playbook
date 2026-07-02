@@ -5,6 +5,18 @@ function artifactPath(testInfo, name){
   return path.join(testInfo.outputDir, name);
 }
 
+function buildAppUrl(query = {}){
+  const params = new URLSearchParams();
+  const input = query && typeof query === 'object' ? query : {};
+  Object.keys(input).forEach(key => {
+    const value = input[key];
+    if(value === undefined || value === null || value === '') return;
+    params.set(key, String(value));
+  });
+  params.set('pp_parity_bust', String(Date.now()));
+  return `/?${params.toString()}`;
+}
+
 async function captureStage(page, testInfo, name){
   await page.screenshot({
     path:artifactPath(testInfo, `${name}.png`),
@@ -29,8 +41,8 @@ async function attachConsoleRecorder(page){
   return events;
 }
 
-async function gotoApp(page){
-  await page.goto(`/?pp_parity_bust=${Date.now()}`, {waitUntil:'domcontentloaded'});
+async function gotoApp(page, query = {}){
+  await page.goto(buildAppUrl(query), {waitUntil:'domcontentloaded'});
   await expect(page.locator('#buildBtn')).toBeVisible();
 }
 
@@ -165,6 +177,26 @@ async function openTrackTab(page){
   await openWorkspaceTab(page, 'track');
 }
 
+async function openReviewFromTrackTicker(page, ticker){
+  await openTrackTab(page);
+  const card = page.locator(`[data-watchlist-ticker="${ticker}"]`).first();
+  if(!(await card.isVisible().catch(() => false))){
+    for(let attempt = 0; attempt < 8; attempt += 1){
+      const collapsedToggle = page.locator('.watchlistgroup__toggle[aria-expanded="false"]').first();
+      if(!(await collapsedToggle.count())) break;
+      await collapsedToggle.click();
+      await waitForUiTransitionSettle(page);
+      if(await card.isVisible().catch(() => false)) break;
+    }
+  }
+  await expect(card).toBeVisible({timeout:30000});
+  const reviewButton = card.locator('[data-act="review"]').first();
+  await reviewButton.click();
+  await page.waitForFunction(symbol => {
+    return typeof activeReviewTicker === 'function' && activeReviewTicker() === symbol;
+  }, ticker, {timeout:30000});
+}
+
 async function openWorkspaceTab(page, tab){
   await page.locator(`[data-workspace-tab="${tab}"]`).click();
   await page.waitForFunction(activeTab => {
@@ -192,7 +224,9 @@ module.exports = {
   addActiveReviewToWatchlistIfEligible,
   openWorkspaceTab,
   openTrackTab,
+  openReviewFromTrackTicker,
   reloadApp,
   waitForUiTransitionSettle,
-  artifactPath
+  artifactPath,
+  buildAppUrl
 };

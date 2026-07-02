@@ -830,7 +830,7 @@ test('rendered Track card authority overrides stale committed cache during a new
 
   const state = await extractAppTickerState(page, 'WATC');
   expect(state.normalized.trackRenderedCanonicalVerdict).toBe('watch');
-  expect(state.normalized.trackRenderedVisualBucket).toBe('watch');
+  expect(state.normalized.trackRenderedVisualBucket).toBe('monitor');
   expect(state.normalized.trackDiagnosticCanonicalVerdict).toBe('watch');
   expect(state.authority.trackPresentation && state.authority.trackPresentation.canonicalVerdict).toBe('watch');
   expect(state.authority.trackPresentation && state.authority.trackPresentation.badgeLabel).toBe('Watch');

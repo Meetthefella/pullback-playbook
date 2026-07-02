@@ -4004,6 +4004,110 @@ function hasPresentationAuthoritySnapshot(snapshot, ticker = ''){
     || !!rawPresentationCopy;
 }
 
+function normalizeTickerJourneyAuthority(authority, fallback = {}){
+  const safeAuthority = authority && typeof authority === 'object' ? authority : {};
+  const safeFallback = fallback && typeof fallback === 'object' ? fallback : {};
+  const versionCandidate = safeAuthority.version ?? safeFallback.version ?? 0;
+  return {
+    version:Number.isFinite(Number(versionCandidate)) ? Math.max(0, Math.round(Number(versionCandidate))) : 0,
+    source:String(safeAuthority.source || safeFallback.source || '').trim().toLowerCase(),
+    updatedAt:String(safeAuthority.updatedAt || safeFallback.updatedAt || ''),
+    reason:String(safeAuthority.reason || safeFallback.reason || '')
+  };
+}
+
+function currentTickerJourneyAuthority(record){
+  const item = record && typeof record === 'object' ? record : {};
+  return normalizeTickerJourneyAuthority(item.authority, {
+    version:0,
+    source:'',
+    updatedAt:String(item.scan && (item.scan.updatedAt || item.scan.lastScannedAt) || ''),
+    reason:''
+  });
+}
+
+function authorityStampSourceCanReplaceTrackedAuthority(source){
+  const normalizedSource = String(source || '').trim().toLowerCase();
+  return ['watchlist_refresh', 'review_save', 'manual'].includes(normalizedSource);
+}
+
+function shouldAdvanceTickerJourneyAuthority(record, source, options = {}){
+  const item = record && typeof record === 'object' ? record : null;
+  const normalizedSource = String(source || '').trim().toLowerCase();
+  if(!item || !normalizedSource) return false;
+  if(options.forceAuthorityAdvance === true) return true;
+  const inWatchlist = !!(item.watchlist && item.watchlist.inWatchlist === true);
+  if(!inWatchlist) return true;
+  if(options.allowTrackedAuthorityOverride === true) return true;
+  if(normalizedSource === 'scan') return false;
+  return true;
+}
+
+function stampTickerJourneyAuthority(record, source, options = {}){
+  if(!record || typeof record !== 'object') return normalizeTickerJourneyAuthority(null);
+  const normalizedSource = String(source || '').trim().toLowerCase();
+  if(!normalizedSource) return currentTickerJourneyAuthority(record);
+  if(!shouldAdvanceTickerJourneyAuthority(record, normalizedSource, options)){
+    return currentTickerJourneyAuthority(record);
+  }
+  const current = currentTickerJourneyAuthority(record);
+  const next = normalizeTickerJourneyAuthority({
+    version:current.version + 1,
+    source:normalizedSource,
+    updatedAt:String(options.updatedAt || new Date().toISOString()),
+    reason:String(options.reason || '')
+  });
+  record.authority = next;
+  return next;
+}
+
+function isTrackProjectionAuthoritySource(source){
+  const normalizedSource = String(source || '').trim().toLowerCase();
+  return authorityStampSourceCanReplaceTrackedAuthority(normalizedSource) || normalizedSource === 'scan';
+}
+
+function projectionSnapshotAuthority(snapshot){
+  const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  return normalizeTickerJourneyAuthority(
+    safeSnapshot.authority || safeSnapshot.projectionAuthority || null
+  );
+}
+
+function snapshotMatchesCurrentTrackAuthority(snapshot, record){
+  const snapshotAuthority = projectionSnapshotAuthority(snapshot);
+  const currentAuthority = currentTickerJourneyAuthority(record);
+  if(!isTrackProjectionAuthoritySource(snapshotAuthority.source)) return false;
+  if(snapshotAuthority.version <= 0) return false;
+  return snapshotAuthority.version === currentAuthority.version
+    && snapshotAuthority.source === currentAuthority.source;
+}
+
+function projectionSnapshotWithAuthority(snapshot, record, overrides = {}){
+  const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+  if(!safeSnapshot) return null;
+  return {
+    ...safeSnapshot,
+    authority:normalizeTickerJourneyAuthority(
+      overrides.authority,
+      currentTickerJourneyAuthority(record)
+    )
+  };
+}
+
+function reviewProjectionCanDriveEntryDisplay(snapshot, projectionSource, record){
+  const safeRecord = record && typeof record === 'object' ? record : {};
+  const source = String(projectionSource || '').trim().toLowerCase();
+  if(!['clicked_card_snapshot', 'track_projection_updated'].includes(source)) return false;
+  if(!hasPresentationAuthoritySnapshot(snapshot, safeRecord.ticker || '')) return false;
+  return normalizeGlobalVerdictKey(
+    snapshot && (
+      snapshot.canonicalVerdict
+      || snapshot.finalVerdict
+      || snapshot.renderedVerdict
+    ) || ''
+  ) === 'entry';
+}
+
 function currentReviewStateHealthSnapshot(record){
   const item = record || currentReviewDiagnosticRecord();
   if(!item) return null;
@@ -8003,6 +8107,14 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
     || ''
   );
   record.scan.resolvedVerdict = resolvedScannerVerdict;
+  if(String(options.authoritySource || '').trim()){
+    stampTickerJourneyAuthority(record, options.authoritySource, {
+      updatedAt:card.scannerUpdatedAt || card.updatedAt || new Date().toISOString(),
+      reason:String(options.authorityReason || options.authoritySource || ''),
+      allowTrackedAuthorityOverride:options.allowTrackedAuthorityOverride === true,
+      forceAuthorityAdvance:options.forceAuthorityAdvance === true
+    });
+  }
   if(options.fromScanner && resolvedScannerVerdict){
     if(resolvedScannerVerdict === 'Avoid'){
       setLifecycleStage(record, {
@@ -8596,8 +8708,17 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor'));
   const suppressingTrackedAvoid = suppressAvoidForTrackedWatch === true;
   const preserveTrackedLifecycleLabels = preserveTrackedLifecycleCanonicalVerdict && !suppressingTrackedAvoid;
+  const effectiveTrackVisibleState = {
+    ...simplifiedState,
+    canonicalVerdict:effectiveCanonicalVerdict || simplifiedState.canonicalVerdict,
+    finalVerdict:effectiveCanonicalVerdict || simplifiedState.finalVerdict,
+    final_verdict:effectiveCanonicalVerdict || simplifiedState.final_verdict,
+    visualBucket:visualBucket || simplifiedState.visualBucket,
+    presentationBucket:visualBucket || simplifiedState.presentationBucket,
+    tone:tone || simplifiedState.tone
+  };
   const visibleModel = typeof resolveTrackCardVisibleModel === 'function'
-    ? resolveTrackCardVisibleModel(item, simplifiedState)
+    ? resolveTrackCardVisibleModel(item, effectiveTrackVisibleState)
     : {
       canonicalVerdict:effectiveCanonicalVerdict,
       visualBucket,
@@ -12039,6 +12160,7 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
 
 function watchlistLifecycleSnapshot(record, options = {}){
   const item = normalizeTickerRecord(record);
+  const lifecycleSource = String(options.source || '').trim().toLowerCase();
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   if(hasLockedLifecycle(item)){
     const expiryAt = String(item.lifecycle && item.lifecycle.expiresAt || todayIsoDate());
@@ -12271,7 +12393,22 @@ function watchlistLifecycleSnapshot(record, options = {}){
     final_verdict:snapshot.state,
     final_state:snapshot.state
   });
+  const suppressInitialWatchlistAddSoftPromotion = lifecycleSource === 'watchlist_add'
+    && !currentState
+    && snapshot.state === 'watch'
+    && ['near_entry', 'entry'].includes(String(transitionedState || '').trim().toLowerCase())
+    && canonicalVerdict === 'watch';
   if(transitionedState && transitionedState !== snapshot.state){
+    if(suppressInitialWatchlistAddSoftPromotion){
+      snapshot.reason = String(
+        globalVerdict.reason
+        || snapshot.reason
+        || 'Monitor setup - keep tracking.'
+      ).trim() || 'Monitor setup - keep tracking.';
+      snapshot.lifecycle_soft_promotion_suppressed = 'true';
+      snapshot.lifecycle_soft_promotion_source = lifecycleSource;
+      return snapshot;
+    }
     snapshot = applyLifecycleStatePresentation(snapshot, transitionedState, {
       globalVerdict,
       resolved,
@@ -13853,7 +13990,8 @@ function renderWatchlistCardElement(record, options = {}){
     sourceOfTruthVisualBucket:renderedBucket,
     usedProjectionBundle,
     recomputedDuringRender,
-    capturedAt:new Date().toISOString()
+    capturedAt:new Date().toISOString(),
+    authority:currentTickerJourneyAuthority(record)
   };
   maybeInvalidateActiveReviewProjectionFromTrack(entry.ticker, clickedCardProjectionSnapshot, 'track_projection_changed');
   record.watchlist = record.watchlist && typeof record.watchlist === 'object' ? record.watchlist : {};
@@ -25810,16 +25948,6 @@ function buildTrackLongPressContract(options = {}){
   }
 
   if(!hasTickerSpecificContext){
-    if(savedReviewSummary){
-      return toContract({
-        source:'saved_summary_fallback',
-        why:savedReviewSummary,
-        stillMissing:'current structured review data is missing, so this is using the last saved review summary',
-        upgrade:'refresh current market data to rebuild the setup explanation',
-        downgrade:'stale review data can hide whether quality is improving or fading',
-        fallbackSummary:savedReviewSummary
-      });
-    }
     if(currentTrackReasonCopy){
       return toContract({
         source:'current_track_presentation_fallback',
@@ -25828,6 +25956,16 @@ function buildTrackLongPressContract(options = {}){
         upgrade:'refresh current market data to rebuild the setup explanation',
         downgrade:'missing current chart context can hide whether quality is improving or fading',
         fallbackSummary:currentTrackReasonCopy
+      });
+    }
+    if(savedReviewSummary){
+      return toContract({
+        source:'saved_summary_fallback',
+        why:savedReviewSummary,
+        stillMissing:'current structured review data is missing, so this is using the last saved review summary',
+        upgrade:'refresh current market data to rebuild the setup explanation',
+        downgrade:'stale review data can hide whether quality is improving or fading',
+        fallbackSummary:savedReviewSummary
       });
     }
     return toContract({
@@ -27492,7 +27630,9 @@ function buildReviewSemanticStatus({
     planFieldsPresent,
     canonicalPlanAuthority,
     rrDisplay,
-    showPlanFields:constructivePricedButNotReady ? false : (verdict === 'entry' || unaffordableCanonicalPlan ? true : (planMathValid || planFieldsPresent)),
+    showPlanFields:(constructivePricedButNotReady && !resolverBlockedEstimatedPlan)
+      ? false
+      : (verdict === 'entry' || unaffordableCanonicalPlan ? true : (planMathValid || planFieldsPresent)),
     showPlanMetrics:constructivePricedButNotReady ? false : (verdict === 'entry' || unaffordableCanonicalPlan ? true : (actionable || (accepted50MaSupportTest && draftPlan))),
     showCapital:constructivePricedButNotReady ? false : (verdict === 'entry' || unaffordableCanonicalPlan ? true : actionable),
     entryGatePass:effectiveEntryGatePass
@@ -27886,9 +28026,12 @@ function projectTickerForCard(record, options = {}){
     const planCheckState = planCheckStateForRecord(item, {effectivePlan, displayedPlan});
     const planUiState = getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState, setupState:provisionalSetupUiState.state});
     const setupUiState = getSetupUiState(item, {displayStage:effectiveDisplayStage, derivedStates, planUiState});
-    const effectiveSetupScore = authoritativeScanSurface && Number.isFinite(Number(authoritativeScanSurface.score))
-      ? Math.max(0, Math.min(10, Math.round(Number(authoritativeScanSurface.score))))
-      : setupScoreForRecord(item);
+    const canonicalSetupScore = setupScoreForRecord(item);
+    const effectiveSetupScore = Number.isFinite(Number(canonicalSetupScore))
+      ? Math.max(0, Math.min(10, Math.round(Number(canonicalSetupScore))))
+      : (authoritativeScanSurface && Number.isFinite(Number(authoritativeScanSurface.score))
+        ? Math.max(0, Math.min(10, Math.round(Number(authoritativeScanSurface.score))))
+        : 0);
     const rrValue = displayedPlan.status === 'valid'
       ? displayedPlan.rewardRisk.rrRatio
       : numericOrNull(item.scan.estimatedRR);
@@ -30778,7 +30921,13 @@ async function refreshMarketDataForTickers(tickers, options = {}){
       if(outcome.ok){
         const {card, scan} = outcome;
         const record = upsertTickerRecord(card.ticker);
-        mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
+        mergeLegacyCardIntoRecord(record, card, {
+          fromScanner:true,
+          fromCards:record.review.cardOpen,
+          cardOpen:record.review.cardOpen,
+          authoritySource:'scan',
+          authorityReason:'scanner_workflow'
+        });
         const debugEntry = {
           ticker:card.ticker,
           passed:card.status !== 'Avoid',
@@ -30821,7 +30970,12 @@ async function refreshMarketDataForTickers(tickers, options = {}){
         suitability:null,
         pullbackType:''
       };
-      mergeLegacyCardIntoRecord(upsertTickerRecord(tickerSymbol), fallbackCard, {fromScanner:true, fromCards:false});
+      mergeLegacyCardIntoRecord(upsertTickerRecord(tickerSymbol), fallbackCard, {
+        fromScanner:true,
+        fromCards:false,
+        authoritySource:'scan',
+        authorityReason:'scanner_workflow_fallback'
+      });
       scannerDebug.push({
         ticker:tickerSymbol,
         passed:true,
@@ -34102,7 +34256,8 @@ function buildStableReviewProjectionSnapshot(record, context = 'review_open_duri
     actionGuidance,
     setupScore:setupScoreForRecord(item),
     capturedAt:new Date().toISOString(),
-    source:'stable_record_snapshot'
+    source:'stable_record_snapshot',
+    authority:currentTickerJourneyAuthority(item)
   };
   return projectionSnapshot;
 }
@@ -34157,7 +34312,8 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     persistedPresentationAvailable:persistedSharedPresentation != null,
     persistedPresentationCacheOnly:persistedSharedPresentation != null,
     capturedAt:new Date().toISOString(),
-    source:'persisted_track_presentation'
+    source:'persisted_track_presentation',
+    authority:currentTickerJourneyAuthority(item)
   };
 }
 
@@ -35272,8 +35428,24 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
     && ['watch', 'monitor'].includes(baseCanonical || 'watch')
     && ['monitor', 'watch'].includes(baseVisualBucket || 'monitor')
     && (finalKey === 'near_entry' || renderedKey === 'near_entry' || visualBucket === 'near_entry' || renderedBucket === 'near_entry');
+  const snapshotAuthoritativeTrackPromotion = !terminalAvoidReason
+    && snapshotMatchesCurrentTrackAuthority(snapshot, baseBundle.record)
+    && (
+      finalKey === 'near_entry'
+      || finalKey === 'entry'
+      || renderedKey === 'near_entry'
+      || renderedKey === 'entry'
+      || visualBucket === 'near_entry'
+      || visualBucket === 'entry'
+      || renderedBucket === 'near_entry'
+      || renderedBucket === 'entry'
+    );
   const freshNearEntryAuthoritative = !terminalAvoidReason
-    && (baseCanonical === 'near_entry' || baseVisualBucket === 'near_entry');
+    && (
+      baseCanonical === 'near_entry'
+      || baseVisualBucket === 'near_entry'
+      || snapshotAuthoritativeTrackPromotion
+    );
   const promotionSuppressed = trackPromotionAttempted && !freshNearEntryAuthoritative;
   const promotionSuppressedReason = promotionSuppressed
     ? 'Track projection cannot promote Review above fresh resolver watch/monitor state.'
@@ -35852,7 +36024,13 @@ async function refreshWatchlistRecordFromSourceOfTruth(ticker, options = {}){
     const pendingTickerNow = normalizeTicker(pendingReviewTicker() || '');
     const reviewOpenLocked = source === 'startup_refresh_full_user_open'
       && (activeTickerNow === symbol || pendingTickerNow === symbol);
-    mergeLegacyCardIntoRecord(record, card, {fromScanner:true, fromCards:record.review.cardOpen, cardOpen:record.review.cardOpen});
+    mergeLegacyCardIntoRecord(record, card, {
+      fromScanner:true,
+      fromCards:record.review.cardOpen,
+      cardOpen:record.review.cardOpen,
+      authoritySource:'watchlist_refresh',
+      authorityReason:source
+    });
     const refreshed = refreshTrackedTickerState(symbol, {
       source:'track',
       reason:source,
@@ -36786,14 +36964,18 @@ function addActiveReviewTickerToWatchlist(){
       source:'pre_add_review_projection'
     }
     : buildTrackProjectionSnapshotFromPersistedPresentation(entry && entry.record ? entry.record : liveRecord, 'watchlist_add_projection');
-  if(postAddProjectionSnapshot && activeReviewTicker() === liveRecord.ticker){
-    uiState.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshot;
+  const postAddProjectionSnapshotWithAuthority = projectionSnapshotWithAuthority(
+    postAddProjectionSnapshot,
+    entry && entry.record ? entry.record : liveRecord
+  );
+  if(postAddProjectionSnapshotWithAuthority && activeReviewTicker() === liveRecord.ticker){
+    uiState.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshotWithAuthority;
     uiState.activeReviewProjectionSource = 'track_projection_updated';
     uiState.activeReviewVerdictOverride = '';
   }
   setStatus('reviewWorkspaceStatus', statusMarkup);
   setStatus('inputStatus', statusMarkup);
-  renderReviewWorkspace(postAddProjectionSnapshot
+  renderReviewWorkspace(postAddProjectionSnapshotWithAuthority
     ? {
       source:'track_projection_updated',
       skipWatchlistLifecycle:true,
@@ -40269,12 +40451,8 @@ function renderReviewWorkspace(options = {}){
     || paperTradeLiveGlobalVerdict.final_verdict_rendered
     || 'watch'
   );
-  const paperTradeEntryReadyRecord = normalizeGlobalVerdictKey(record.scan && record.scan.resolvedVerdict || '') === 'entry'
-    || normalizeGlobalVerdictKey(record.scan && record.scan.verdict || '') === 'entry';
   const paperTradeAuthoritativeReviewVerdict = normalizeGlobalVerdictKey(
-    (paperTradeEntryReadyRecord ? 'entry' : '')
-    || effectiveSimplifiedCanonicalVerdict
-    || simplifiedState && simplifiedState.canonicalVerdict
+    simplifiedState && simplifiedState.canonicalVerdict
     || 'watch'
   );
   const paperTradeAuthoritySimplifiedState = {
@@ -40808,9 +40986,11 @@ function renderReviewWorkspace(options = {}){
     displayedPlan,
     planRealism
   });
-  const authoritativeEntryReviewPresentation = !!presentationProjectionSnapshot
-    && normalizeTicker(presentationProjectionSnapshot.ticker || '') === normalizeTicker(record.ticker || '')
-    && (looseProjectionCanonicalVerdict === 'entry' || effectiveSimplifiedCanonicalVerdict === 'entry');
+  const authoritativeEntryReviewPresentation = reviewProjectionCanDriveEntryDisplay(
+    presentationProjectionSnapshot,
+    reviewProjectionSource,
+    record
+  ) || effectiveSimplifiedCanonicalVerdict === 'entry';
   const reviewNextActionLabel = authoritativeEntryReviewPresentation
     ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
     : resolvedReviewDisplay.nextActionLabel;
@@ -41821,6 +42001,10 @@ function persistActiveReviewDraft(options = {}){
     if(Number.isFinite(numericOrNull(result.score))){
       record.review.savedScore = Number(result.score);
     }
+    stampTickerJourneyAuthority(record, 'review_save', {
+      updatedAt:manualReview.savedAt,
+      reason:String(options.source || 'review_save')
+    });
   }
   updateTickerInputFromState();
   if(isManualSave){
@@ -42133,18 +42317,15 @@ function syncPlanDisplayMeta(options = {}){
     uiState.activeReviewProjectionSource
     || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
   ).trim().toLowerCase();
-  const activeProjectionVerdict = activeProjectionSnapshot
-    ? normalizeGlobalVerdictKey(
-      activeProjectionSnapshot.canonicalVerdict
-      || activeProjectionSnapshot.finalVerdict
-      || activeProjectionSnapshot.renderedVerdict
-      || ''
-    )
-    : '';
+  const projectionEntryDisplayOverride = reviewProjectionCanDriveEntryDisplay(
+    activeProjectionSnapshot,
+    activeProjectionSource,
+    record
+  );
   const entryReadyRecord = normalizeGlobalVerdictKey(record.scan && record.scan.resolvedVerdict || '') === 'entry'
     || normalizeGlobalVerdictKey(record.scan && record.scan.verdict || '') === 'entry'
     || normalizeGlobalVerdictKey(effectiveMetaSimplifiedState.canonicalVerdict || '') === 'entry';
-  const authoritativeEntryDisplayOverride = entryReadyRecord || (!!activeProjectionSnapshot && activeProjectionVerdict === 'entry');
+  const authoritativeEntryDisplayOverride = entryReadyRecord || projectionEntryDisplayOverride;
   const authoritativeReviewNextActionLabel = authoritativeEntryDisplayOverride
     ? String(
       activeProjectionSnapshot && activeProjectionSnapshot.actionGuidance
@@ -42428,18 +42609,14 @@ function calculate(options = {}){
     uiState.activeReviewProjectionSource
     || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
   ).trim().toLowerCase();
-  const activeProjectionVerdict = activeProjectionSnapshot
-    ? normalizeGlobalVerdictKey(
-      activeProjectionSnapshot.canonicalVerdict
-      || activeProjectionSnapshot.finalVerdict
-      || activeProjectionSnapshot.renderedVerdict
-      || ''
-    )
-    : '';
+  const projectionEntryDisplayOverride = reviewProjectionCanDriveEntryDisplay(
+    activeProjectionSnapshot,
+    activeProjectionSource,
+    activeRecord || record
+  );
   const entryReadyRecord = normalizeGlobalVerdictKey(activeRecord && activeRecord.scan && activeRecord.scan.resolvedVerdict || '') === 'entry'
-    || normalizeGlobalVerdictKey(activeRecord && activeRecord.scan && activeRecord.scan.verdict || '') === 'entry'
-    || String(displayedPlan && displayedPlan.status || '').trim().toLowerCase() === 'valid';
-  const authoritativeEntryDisplayOverride = entryReadyRecord || (!!activeProjectionSnapshot && activeProjectionVerdict === 'entry');
+    || normalizeGlobalVerdictKey(activeRecord && activeRecord.scan && activeRecord.scan.verdict || '') === 'entry';
+  const authoritativeEntryDisplayOverride = entryReadyRecord || projectionEntryDisplayOverride;
   const authoritativeReviewNextActionLabel = authoritativeEntryDisplayOverride
     ? String(
       activeProjectionSnapshot && activeProjectionSnapshot.actionGuidance

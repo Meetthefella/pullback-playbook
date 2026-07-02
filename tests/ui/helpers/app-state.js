@@ -587,6 +587,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         visible:{
           badgeLabel:safeText(activeTrackCard && activeTrackCard.querySelector('.badge.state-pill') && activeTrackCard.querySelector('.badge.state-pill').textContent),
           visualState:String(activeTrackCard && activeTrackCard.dataset && activeTrackCard.dataset.visualState || ''),
+          visualTone:String(activeTrackCard && activeTrackCard.dataset && activeTrackCard.dataset.visualTone || ''),
           scoreLabel:safeText(activeTrackCard && activeTrackCard.querySelector('.watchlistscore, .watchlist-card__status .visual-score, .watchlist-card__status .score') && activeTrackCard.querySelector('.watchlistscore, .watchlist-card__status .visual-score, .watchlist-card__status .score').textContent),
           decisionSummary:safeText(activeTrackCard && activeTrackCard.querySelector('.decision-summary') && activeTrackCard.querySelector('.decision-summary').textContent),
           planMeta:safeText(activeTrackCard && activeTrackCard.querySelector('.watchlist-plan-meta') && activeTrackCard.querySelector('.watchlist-plan-meta').textContent),
@@ -604,6 +605,9 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         visibleCards:Array.from(document.querySelectorAll('#tradeDiary .diaryitem, #tradeDiary > div')).map(node => safeText(node.textContent)).filter(Boolean)
       },
       authority:{
+        journey:authoritativeRecord && authoritativeRecord.authority && typeof authoritativeRecord.authority === 'object'
+          ? cloneValue(authoritativeRecord.authority)
+          : null,
         scanner:scanSimplified ? {
           canonicalVerdict:String(scanSimplified.canonicalVerdict || ''),
           visualBucket:String(scanSimplified.visualBucket || ''),
@@ -683,12 +687,45 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
   const trackDiagnosticCanonicalVerdict = normalizeVerdictKey(appState.track && appState.track.simplifiedState && appState.track.simplifiedState.canonicalVerdict);
   const trackRenderedCanonicalVerdict = normalizeVerdictKey(appState.track && appState.track.visible && appState.track.visible.badgeLabel);
   const trackDiagnosticVisualBucket = normalizeVerdictKey(appState.track && appState.track.simplifiedState && appState.track.simplifiedState.visualBucket);
-  const trackRenderedVisualBucket = normalizeVerdictKey(appState.track && appState.track.visible && appState.track.visible.visualState);
+  const trackRenderedVisualBucket = normalizeVerdictKey(
+    appState.track && appState.track.visible && (
+      appState.track.visible.visualTone
+      || appState.track.visible.visualState
+    )
+  );
+  const trackAuthorityPresentation = appState.authority && (
+    appState.authority.trackPresentation
+    || appState.authority.sharedPresentation
+  ) && typeof (appState.authority.trackPresentation || appState.authority.sharedPresentation) === 'object'
+    ? (appState.authority.trackPresentation || appState.authority.sharedPresentation)
+    : null;
+  const trackAuthorityCanonicalVerdict = normalizeVerdictKey(
+    trackAuthorityPresentation && (
+      trackAuthorityPresentation.canonicalVerdict
+      || trackAuthorityPresentation.finalVerdict
+      || trackAuthorityPresentation.renderedVerdict
+    )
+  );
+  const trackAuthorityBucket = normalizeVerdictKey(
+    trackAuthorityPresentation && (
+      trackAuthorityPresentation.sourceOfTruthVisualBucket
+      || trackAuthorityPresentation.visualBucket
+      || trackAuthorityPresentation.renderedBucket
+    )
+  );
   appState.normalized = {
     reviewCanonicalVerdict:normalizeVerdictKey(appState.review && appState.review.stateHealth && appState.review.stateHealth.canonicalVerdict),
     reviewVisualBucket:normalizeVerdictKey(appState.review && appState.review.stateHealth && appState.review.stateHealth.visualBucket),
     trackCanonicalVerdict:trackRenderedCanonicalVerdict || trackDiagnosticCanonicalVerdict,
-    trackVisualBucket:trackRenderedVisualBucket || trackDiagnosticVisualBucket,
+    trackVisualBucket:trackRenderedVisualBucket,
+    trackRenderedBucket:trackRenderedVisualBucket,
+    trackDiagnosticBucket:trackDiagnosticVisualBucket,
+    trackAuthorityCanonicalVerdict,
+    trackAuthorityBucket,
+    trackRenderedVsAuthorityMismatch:!!(
+      (trackRenderedCanonicalVerdict && trackAuthorityCanonicalVerdict && trackRenderedCanonicalVerdict !== trackAuthorityCanonicalVerdict)
+      || (trackRenderedVisualBucket && trackAuthorityBucket && trackRenderedVisualBucket !== trackAuthorityBucket)
+    ),
     trackDiagnosticCanonicalVerdict,
     trackRenderedCanonicalVerdict,
     trackDiagnosticVisualBucket,

@@ -265,6 +265,12 @@
         latest: null,
         history: []
       },
+      authority: {
+        version: 0,
+        source: '',
+        updatedAt: '',
+        reason: ''
+      },
       meta: {
         createdAt,
         updatedAt: createdAt,
@@ -427,6 +433,7 @@
       watchlist: { ...base.watchlist, ...(normalized.watchlist || {}) },
       diary: { ...base.diary, ...(normalized.diary || {}) },
       lifecycle: { ...base.lifecycle, ...(normalized.lifecycle || {}) },
+      authority: { ...base.authority, ...(normalized.authority || {}) },
       meta: { ...base.meta, ...(normalized.meta || {}) }
     };
     const previousReview = normalized.review && typeof normalized.review === 'object' ? normalized.review : {};
@@ -734,6 +741,15 @@
         }))
         .slice(0, 10)
       : [];
+    merged.authority = merged.authority && typeof merged.authority === 'object'
+      ? merged.authority
+      : {};
+    merged.authority.version = Number.isFinite(Number(merged.authority.version))
+      ? Math.max(0, Math.round(Number(merged.authority.version)))
+      : 0;
+    merged.authority.source = String(merged.authority.source || '').trim().toLowerCase();
+    merged.authority.updatedAt = String(merged.authority.updatedAt || '');
+    merged.authority.reason = String(merged.authority.reason || '');
     merged.meta.tags = Array.isArray(merged.meta.tags) ? merged.meta.tags.map(item => String(item || '')).filter(Boolean) : [];
     merged.meta.dataVersion = 2;
     merged.meta.updatedAt = String(merged.meta.updatedAt || merged.meta.createdAt || new Date().toISOString());
