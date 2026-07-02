@@ -257,14 +257,75 @@
       mainBlocker = 'Rebound attempt is not confirmed - price remains below key reclaim levels and no safe entry structure is available yet.';
     }
     const accepted50MaSupportTest = accepted50MaSupportTestDisplayState(item, resolved, visual);
+    const canonicalSoftReadinessOverride = resolved.canonical_soft_readiness_alignment_applied === true;
+    const weakWatchVisualOverride = verdict === 'watch' && (
+      visual.weakWatchDowngradeApplied === true
+      || visual.weakWatchDiminishingApplied === true
+      || ['diminishing'].includes(String(visual.visualBucket || visual.presentationBucket || visual.bucket || '').trim().toLowerCase())
+    );
+    const preferredVisualBucket = canonicalSoftReadinessOverride
+      ? String(
+        (resolved.canonical_visual_bucket || '')
+        || visual.visualBucket
+        || visual.presentationBucket
+        || visual.bucket
+        || resolved.bucket
+        || 'monitor'
+      ).trim().toLowerCase() || 'monitor'
+      : (weakWatchVisualOverride
+        ? String(
+          visual.visualBucket
+          || visual.presentationBucket
+          || visual.bucket
+          || (resolved.canonical_visual_bucket || '')
+          || resolved.bucket
+          || 'monitor'
+        ).trim().toLowerCase() || 'monitor'
+        : String(
+          (resolved.canonical_visual_bucket || '')
+          || visual.visualBucket
+          || visual.presentationBucket
+          || visual.bucket
+          || resolved.bucket
+          || 'monitor'
+        ).trim().toLowerCase() || 'monitor');
+    const preferredTone = canonicalSoftReadinessOverride
+      ? String(
+        visual.tone
+        || visual.visual_tone
+        || resolved.tone
+        || (resolved.canonical_visual_bucket || '')
+        || preferredVisualBucket
+        || resolved.bucket
+        || 'monitor'
+      ).trim().toLowerCase() || 'monitor'
+      : (weakWatchVisualOverride
+        ? String(
+          visual.tone
+          || visual.visual_tone
+          || preferredVisualBucket
+          || resolved.tone
+          || (resolved.canonical_visual_bucket || '')
+          || resolved.bucket
+          || 'monitor'
+        ).trim().toLowerCase() || 'monitor'
+        : String(
+          visual.tone
+          || visual.visual_tone
+          || resolved.tone
+          || preferredVisualBucket
+          || (resolved.canonical_visual_bucket || '')
+          || resolved.bucket
+          || 'monitor'
+        ).trim().toLowerCase() || 'monitor');
     const normalizedVisualBucket = accepted50MaSupportTest
-      && String((resolved.canonical_visual_bucket || '') || visual.visualBucket || visual.presentationBucket || visual.bucket || resolved.bucket || 'monitor').trim().toLowerCase() === 'diminishing'
+      && preferredVisualBucket === 'diminishing'
         ? 'monitor'
-        : String((resolved.canonical_visual_bucket || '') || visual.visualBucket || visual.presentationBucket || visual.bucket || resolved.bucket || 'monitor').trim().toLowerCase() || 'monitor';
+        : preferredVisualBucket;
     const normalizedTone = accepted50MaSupportTest
-      && String(visual.tone || visual.visual_tone || resolved.tone || normalizedVisualBucket).trim().toLowerCase() === 'diminishing'
+      && preferredTone === 'diminishing'
         ? 'monitor'
-        : String(visual.tone || visual.visual_tone || resolved.tone || normalizedVisualBucket).trim().toLowerCase() || 'monitor';
+        : preferredTone;
     if(accepted50MaSupportTest && /trend is weakening|structure is broken|diminishing/i.test(mainBlocker)){
       mainBlocker = 'Testing 50MA support - waiting for buyers to confirm.';
     }

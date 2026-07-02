@@ -432,7 +432,7 @@
     result.debug = {
       ...(result.debug || {}),
       persistedPresentationAvailable:true,
-      persistedPresentationOverlayApplied:false,
+      persistedPresentationOverlayApplied:true,
       persistedPresentationAuthorityDisabled:'global_non_authoritative',
       persistedPresentationConflictSuppressed:conflictsDetected,
       persistedPresentationSnapshot:stableDebugValue({

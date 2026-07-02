@@ -516,6 +516,9 @@ test('persisted sharedPresentation Entry cannot become lifecycle or Review soft-
     record.plan.tradeability = 'risk_only';
     record.watchlist.inWatchlist = true;
     record.watchlist.addedAt = '2026-06-29';
+    state.paperTradeApiKey = 'paper-key';
+    state.paperTradeApiSecret = 'paper-secret';
+    state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
     record.watchlist.presentation = {
       sharedPresentation:{
         canonicalVerdict:'entry',
@@ -545,12 +548,15 @@ test('persisted sharedPresentation Entry cannot become lifecycle or Review soft-
       structure_eligibility:'alive'
     };
     const review = applyReviewWatchlistSoftReadinessDisplayOverride(record, simplified, globalVerdict, lifecycle);
+    const paperTrade = currentPaperTradeContextForTicker('LIFE');
     return {
       lifecycleState:lifecycle.state,
       lifecycleBucket:lifecycle.bucket,
       reviewCanonicalVerdict:review.canonicalVerdict,
       reviewVisualBucket:review.visualBucket,
-      reviewOverrideApplied:!!(review.debug && review.debug.reviewWatchlistSoftReadinessDisplayOverrideApplied === true)
+      reviewOverrideApplied:!!(review.debug && review.debug.reviewWatchlistSoftReadinessDisplayOverrideApplied === true),
+      paperTradeFinalVerdict:paperTrade && paperTrade.finalVerdict,
+      paperTradeEligible:!!(paperTrade && paperTrade.eligibility && paperTrade.eligibility.eligible === true)
     };
   });
 
@@ -559,6 +565,8 @@ test('persisted sharedPresentation Entry cannot become lifecycle or Review soft-
   expect(result.reviewCanonicalVerdict, 'persisted lifecycle/presentation must not soft-promote Review').toBe('watch');
   expect(result.reviewVisualBucket, 'persisted lifecycle/presentation must not promote Review bucket').toBe('monitor');
   expect(result.reviewOverrideApplied, 'Review soft-readiness override must not run without resolver alignment').toBe(false);
+  expect(result.paperTradeFinalVerdict, 'persisted Entry presentation must not promote paper-trade verdict').not.toBe('Entry');
+  expect(result.paperTradeEligible, 'persisted Entry presentation must not enable paper-trade eligibility').toBe(false);
 });
 
 test('stale persisted sharedPresentation copy cannot render after live resolver changes', async ({page}) => {

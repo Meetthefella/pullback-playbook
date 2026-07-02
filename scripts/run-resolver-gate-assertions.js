@@ -2300,7 +2300,7 @@ function runReviewProjectionAssertions(){
   if(/Trend is weakening|structure.*(?:broken|weakening)|failed/i.test(aliveVolatileText)){
     throw new Error('Alive volatile/recovery Review semantics must not use structural weakening wording.');
   }
-  if(!/Recovery attempt|stabilised|price reliably|Draft plan possible but weak|No actionable trade yet|The app knows the maths, but the trade isn't ready|Long-press the ticker card in Track|Priced/i.test(aliveVolatileText)){
+  if(!/Recovery attempt|stabilised|price reliably|Draft plan possible but weak|No actionable trade yet|Valid plan, waiting for confirmation|The app knows the maths, but the trade isn't ready|Long-press the ticker card in Track|Priced/i.test(aliveVolatileText)){
     throw new Error('Alive volatile/recovery Review semantics must use recovery/priceability or priced-but-not-ready wording.');
   }
 
@@ -2940,6 +2940,88 @@ function runSharedNarrativeConsistencyAssertions(){
     throw new Error('Track long-press narrative must not emit doubled punctuation.');
   }
 
+  const weakRrConstructiveInput = {
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      visualBucket:'monitor',
+      planStatus:'valid',
+      planVisible:true,
+      resolvedRR:0.74,
+      mainBlocker:'Nearby resistance limits current reward potential.'
+    },
+    resolvedState:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      structure_state:'intact',
+      bounce_state:'attempt',
+      stabilisation_state:'clear',
+      pullback_zone:'near_20ma',
+      priceability_state:'provisional',
+      plan_status:'valid',
+      resolved_rr:0.74,
+      main_blocker:'Nearby resistance limits current reward potential.'
+    },
+    derivedStates:{
+      structureState:'intact',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      stabilisationState:'clear',
+      pullbackZone:'near_20ma',
+      volumeState:'normal',
+      priceabilityState:'provisional'
+    },
+    displayedPlan:{
+      status:'valid',
+      entry:216.09,
+      stop:201.320658,
+      target:227.09,
+      firstTarget:227.09,
+      rewardRisk:{valid:true, rrRatio:0.7448, riskPerShare:14.769342},
+      rewardPerShare:11
+    }
+  };
+  const weakRrNarrative = narrativeSandbox.buildSharedSetupNarrative(weakRrConstructiveInput);
+  const weakRrText = [
+    weakRrNarrative.stateLabel,
+    weakRrNarrative.primaryReason,
+    weakRrNarrative.blocker,
+    weakRrNarrative.nextAction,
+    (weakRrNarrative.evidence || []).join(' '),
+    (weakRrNarrative.cautions || []).join(' ')
+  ].join(' ');
+  if(weakRrNarrative.canonicalVerdict !== 'watch' || weakRrNarrative.stateLabel !== 'Developing Watch'){
+    throw new Error('Constructive weak-RR bounce attempts must remain Watch, not Near Entry.');
+  }
+  if(!/buyers have started to respond|not enough room before resistance|first target close|nearby resistance|reward-to-risk/i.test(weakRrText) || !/stop still needs to sit lower|beneath support|tighter-risk pullback/i.test(weakRrText)){
+    throw new Error('Constructive weak-RR Watch copy must explain limited room before resistance versus the lower stop.');
+  }
+  if(/damaged|weakening|broken|near entry|entry ready/i.test(weakRrText)){
+    throw new Error('Constructive weak-RR Watch copy must stay constructive without implying damage or promotion.');
+  }
+
+  const weakRrReviewModel = narrativeSandbox.buildReviewSemanticStatus({
+    simplifiedState:weakRrConstructiveInput.simplifiedState,
+    globalVerdict:weakRrConstructiveInput.resolvedState,
+    derivedStates:weakRrConstructiveInput.derivedStates,
+    displayedPlan:weakRrConstructiveInput.displayedPlan,
+    planRealism:{realistic_rr:0.7448, raw_rr:0.7448}
+  });
+  const weakRrReviewText = [
+    weakRrReviewModel.stateLabel,
+    weakRrReviewModel.blocker,
+    weakRrReviewModel.tradeStatus && weakRrReviewModel.tradeStatus.line1,
+    weakRrReviewModel.tradeStatus && weakRrReviewModel.tradeStatus.line2
+  ].join(' ');
+  if(weakRrReviewModel.stateLabel !== 'Developing Watch'){
+    throw new Error('Review semantics must keep constructive weak-RR bounce attempts at Watch.');
+  }
+  if(!/reward-to-risk is still too weak|nearby resistance|first target close|stop still needs to sit lower/i.test(weakRrReviewText)){
+    throw new Error('Review semantics must explain that nearby resistance and a deeper stop leave weak reward-to-risk.');
+  }
+  if(/damaged|weakening|broken|near entry|entry ready/i.test(weakRrReviewText)){
+    throw new Error('Review semantics must not frame constructive weak-RR watches as damaged or promoted.');
+  }
+
   const diminishingNarrative = narrativeSandbox.buildSharedSetupNarrative({
     simplifiedState:{
       canonicalVerdict:'watch',
@@ -2979,7 +3061,7 @@ function runSharedNarrativeConsistencyAssertions(){
     || !/buildEntryConditionsSummary[\s\S]*buildSharedSetupNarrative/.test(appSource)){
     throw new Error('Scan, Review, and Track long-press surfaces must consume the shared narrative builder.');
   }
-  if(!/const entryConditionsSummary = buildTrackTickerSpecificEntryConditionsSummary\(\{/.test(appSource)){
+  if(!/(?:const|let) entryConditionsSummary = buildTrackTickerSpecificEntryConditionsSummary\(\{/.test(appSource)){
     throw new Error('Track card render must use the ticker-specific long-press summary wrapper.');
   }
   if(/const decisionSummary = String\(reviewSemanticStatus\.primaryReason[\s\S]{0,120}const reviewSemanticStatus = buildReviewSemanticStatus\(/.test(appSource)){
@@ -7389,6 +7471,173 @@ function runPlanSemanticsAssertions(){
   if(acceptableRrNearEntry.pass !== true || acceptableRrNearEntry.checks.rr_priceable !== true){
     throw new Error('Constructive provisional repairs with acceptable first-target RR must remain eligible for Near Entry.');
   }
+  const bounceAttemptPromotionTrace = sandbox.buildPromotionGateTrace({
+    structureState:'intact',
+    pullbackState:'near_20ma',
+    stabilisationState:'early',
+    bounceState:'attempt',
+    planStateKey:'valid',
+    hasPriceablePlanValues:true,
+    hasClearInvalidationLevel:true,
+    hasEntry:true,
+    hasStop:true,
+    hasTarget:true,
+    riskTooWide:false,
+    stopDistanceTooWide:false,
+    hardBlockers:false,
+    tradeStructureClearEnough:true,
+    rr:2.1,
+    priceBelow50MA:false,
+    reclaimAttempt:false
+  });
+  if(
+    bounceAttemptPromotionTrace.promotion_watch_to_near_allowed !== true
+    || bounceAttemptPromotionTrace.gate_bounce_ok_for_near !== true
+    || bounceAttemptPromotionTrace.gate_bounce_confirmed_for_entry !== false
+    || bounceAttemptPromotionTrace.promotion_near_to_entry_allowed === true
+  ){
+    throw new Error('Intact near-20MA bounce attempts with a priced plan must promote to Near Entry without becoming Entry.');
+  }
+
+  const noBouncePromotionTrace = sandbox.buildPromotionGateTrace({
+    structureState:'intact',
+    pullbackState:'near_20ma',
+    stabilisationState:'early',
+    bounceState:'none',
+    planStateKey:'valid',
+    hasPriceablePlanValues:true,
+    hasClearInvalidationLevel:true,
+    hasEntry:true,
+    hasStop:true,
+    hasTarget:true,
+    riskTooWide:false,
+    stopDistanceTooWide:false,
+    hardBlockers:false,
+    tradeStructureClearEnough:true,
+    rr:2.1,
+    priceBelow50MA:false,
+    reclaimAttempt:false
+  });
+  if(noBouncePromotionTrace.promotion_watch_to_near_allowed === true || noBouncePromotionTrace.gate_bounce_ok_for_near === true){
+    throw new Error('Near-20MA pullbacks without any bounce attempt must remain Watch.');
+  }
+
+  const confirmedEntryPromotionTrace = sandbox.buildPromotionGateTrace({
+    structureState:'intact',
+    pullbackState:'near_20ma',
+    stabilisationState:'clear',
+    bounceState:'confirmed',
+    planStateKey:'valid',
+    hasPriceablePlanValues:true,
+    hasClearInvalidationLevel:true,
+    hasEntry:true,
+    hasStop:true,
+    hasTarget:true,
+    riskTooWide:false,
+    stopDistanceTooWide:false,
+    hardBlockers:false,
+    tradeStructureClearEnough:true,
+    rr:2.3,
+    breaksLocalHigh:true,
+    priceBelow50MA:false,
+    reclaimAttempt:true
+  });
+  if(confirmedEntryPromotionTrace.promotion_near_to_entry_allowed !== true){
+    throw new Error('Confirmed bounce with trigger and valid priced plan must still promote to Entry.');
+  }
+
+  const weakStructurePromotionTrace = sandbox.buildPromotionGateTrace({
+    structureState:'weak',
+    pullbackState:'near_20ma',
+    stabilisationState:'early',
+    bounceState:'attempt',
+    planStateKey:'valid',
+    hasPriceablePlanValues:true,
+    hasClearInvalidationLevel:true,
+    hasEntry:true,
+    hasStop:true,
+    hasTarget:true,
+    riskTooWide:false,
+    stopDistanceTooWide:false,
+    hardBlockers:false,
+    tradeStructureClearEnough:true,
+    rr:2.1,
+    priceBelow50MA:false,
+    reclaimAttempt:false
+  });
+  if(weakStructurePromotionTrace.promotion_watch_to_near_allowed === true || weakStructurePromotionTrace.gate_not_weakening_for_near === true){
+    throw new Error('Weak or damaged structure must not promote to Near Entry just because a bounce attempt exists.');
+  }
+
+  const weakVolumeAttemptNearEntry = resolverCore.canPromoteToNearEntry({
+    structure_state:'intact',
+    trend_state:'strong',
+    bounce_state:'attempt',
+    stabilisation_state:'early',
+    pullback_zone:'near_20ma',
+    market_regime:'supportive',
+    volume_state:'weak',
+    plan_visible:true,
+    plan_status:'valid',
+    plan_blocked:false,
+    has_entry:true,
+    has_stop:true,
+    entry:161.74,
+    stop:157.2,
+    target:169.09,
+    rr:1.62,
+    credible_rr:1.62,
+    provisional_entry:161.74,
+    provisional_stop:157.2,
+    provisional_target:169.09,
+    provisional_rr:1.62,
+    tradeability:'tradable',
+    pullback_valid:true,
+    entry_trigger_hit:false,
+    stop_distance_too_wide:false,
+    capital_fit:'acceptable',
+    affordability:'acceptable',
+    price_below_50ma:false,
+    price_below_200ma:false,
+    ma50_below_200ma:false,
+    terminal_avoid_applied:false
+  });
+  const weakVolumeAttemptEntry = resolverCore.canPromoteToEntry({
+    structure_state:'intact',
+    trend_state:'strong',
+    bounce_state:'attempt',
+    stabilisation_state:'early',
+    pullback_zone:'near_20ma',
+    market_regime:'supportive',
+    volume_state:'weak',
+    plan_visible:true,
+    plan_status:'valid',
+    plan_blocked:false,
+    has_entry:true,
+    has_stop:true,
+    entry:161.74,
+    stop:157.2,
+    target:169.09,
+    rr:1.62,
+    credible_rr:1.62,
+    provisional_entry:161.74,
+    provisional_stop:157.2,
+    provisional_target:169.09,
+    provisional_rr:1.62,
+    tradeability:'tradable',
+    pullback_valid:true,
+    entry_trigger_hit:false,
+    stop_distance_too_wide:false,
+    capital_fit:'acceptable',
+    affordability:'acceptable',
+    price_below_50ma:false,
+    price_below_200ma:false,
+    ma50_below_200ma:false,
+    terminal_avoid_applied:false
+  });
+  if(weakVolumeAttemptNearEntry.pass !== true || weakVolumeAttemptEntry.pass === true){
+    throw new Error('Weak volume may stay non-actionable, but it must not block Near Entry when buyers have started to respond.');
+  }
 
   const frozenReplaySnapshotPath = path.join(os.tmpdir(), `pullback-playbook-frozen-replay-${Date.now()}.json`);
   fs.writeFileSync(frozenReplaySnapshotPath, JSON.stringify({
@@ -8086,6 +8335,48 @@ function runTrackPresentationAuthorityAssertions(){
     || freshProjection.tone !== 'monitor'
     || freshProjection.persistedPresentationCacheOnly !== true){
     throw new Error('Track projection snapshot must use fresh resolver/simplified state and keep embedded persisted presentation cache-only.');
+  }
+  const scanToneSandbox = {
+    console,
+    normalizeVisualBucketForPairing(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(['entry','near_entry','diminishing','avoid'].includes(safe)) return safe;
+      return 'monitor';
+    }
+  };
+  vm.createContext(scanToneSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'resolveScanCardTone'), scanToneSandbox, {filename:'app.js#resolveScanCardTone'});
+  const diminishingTone = scanToneSandbox.resolveScanCardTone(
+    {tone:'diminishing'},
+    {canonicalVerdict:'watch', visualBucket:'monitor', tone:'monitor'},
+    'monitor'
+  );
+  const monitorTone = scanToneSandbox.resolveScanCardTone(
+    {tone:'monitor'},
+    {canonicalVerdict:'watch', visualBucket:'monitor', tone:'monitor'},
+    'monitor'
+  );
+  if(diminishingTone !== 'diminishing'){
+    throw new Error('Scan tone precedence must preserve explicit diminishing tone ahead of monitor bucket fallback.');
+  }
+  if(monitorTone !== 'monitor'){
+    throw new Error('Ordinary monitor Scan cards must still resolve monitor tone when no explicit diminishing tone is present.');
+  }
+  const watchlistScoreSandbox = {console};
+  vm.createContext(watchlistScoreSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'shouldHideWatchlistScore'), watchlistScoreSandbox, {filename:'app.js#shouldHideWatchlistScore'});
+  const hideForDiminishing = watchlistScoreSandbox.shouldHideWatchlistScore('diminishing', 5);
+  const hideForZeroPriority = watchlistScoreSandbox.shouldHideWatchlistScore('watch', 0);
+  const showForMonitor = watchlistScoreSandbox.shouldHideWatchlistScore('watch', 3);
+  const showForNearEntry = watchlistScoreSandbox.shouldHideWatchlistScore('near_entry', 7);
+  if(hideForDiminishing !== true){
+    throw new Error('Diminishing watchlist cards must hide setup scores at runtime.');
+  }
+  if(hideForZeroPriority !== true){
+    throw new Error('Zero-priority watchlist cards must hide setup scores at runtime.');
+  }
+  if(showForMonitor !== false || showForNearEntry !== false){
+    throw new Error('Normal monitor and near-entry watchlist cards must keep setup scores visible at runtime.');
   }
   const renderWatchlistSandbox = {
     console,
@@ -8791,8 +9082,9 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/function persistTrackPresentationOnRecord\(record, bundle, options = \{\}\)\{[\s\S]*?const liveRecord = record && typeof record === 'object' \? record : null;[\s\S]*?liveRecord\.watchlist\.presentation = persisted;[\s\S]*?liveRecord\.watchlistVisualState = persisted\.watchlistVisualState;/s.test(appSource)){
     throw new Error('Persisted Track presentation must be written back onto the live ticker record, not a normalized clone, or Track will fall back to recomputation and stale grouping.');
   }
-  if(!/const persistedPresentationVerdict = normalizeGlobalVerdictKey\([\s\S]*?persistedSharedPresentation[\s\S]*?canonicalVerdict[\s\S]*?\);[\s\S]*?const canonicalVerdict = persistedPresentationVerdict[\s\S]*?\|\| resolvedFinalVerdictKey/s.test(appSource)){
-    throw new Error('Watchlist lifecycle snapshot must consume persisted shared presentation verdicts before falling back to live recomputation.');
+  if(/const persistedPresentationVerdict = normalizeGlobalVerdictKey\([\s\S]*?persistedSharedPresentation[\s\S]*?canonicalVerdict[\s\S]*?\);[\s\S]*?const canonicalVerdict = persistedPresentationVerdict[\s\S]*?\|\| resolvedFinalVerdictKey/s.test(appSource)
+    || !/const canonicalVerdict = resolvedFinalVerdictKey[\s\S]*?\|\| normalizeGlobalVerdictKey\(canonicalContract\.canonicalVerdictKey\);/s.test(appSource)){
+    throw new Error('Watchlist lifecycle snapshot must keep persisted shared presentation cache-only and must prefer the live resolved verdict.');
   }
   if(!/function buildTrackProjectionSnapshotFromPersistedPresentation\(record, context = 'watchlist_add_projection'\)\{[\s\S]*?const globalVerdict = resolveGlobalVerdict\(item\);[\s\S]*?const simplifiedState = resolveSimplifiedStateForSurface\(item, 'track', \{[\s\S]*?const sharedPresentation = buildSharedReviewTrackPresentation\(item,[\s\S]*?sourceOfTruth:'live_recomputed_fallback'[\s\S]*?const visualBucket = normalizeVisualBucketForPairing\(sharedPresentation\.visualBucket \|\| 'monitor'\);/s.test(appSource)){
     throw new Error('Review add-to-watchlist handoff must derive projection snapshots from fresh globalVerdict/simplifiedState, not embedded persisted presentation state.');
@@ -8833,8 +9125,11 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/trackDebug\s*=\s*\{/.test(appSource) || !/visibleModel:\s*\{/.test(appSource) || !/resolverTrace:\s*\{/.test(appSource) || !/planTrace:\s*\{/.test(appSource) || !/gateTrace:\s*\{/.test(appSource) || !/lifecycleTrace:\s*\{/.test(appSource)){
     throw new Error('Track debug output must use one namespaced trackDebug structure.');
   }
-  if(!/const trackedLifecycleHardStructuredBlock = \['invalidated','missed','target_too_close','broken_structure'\]\.includes\(explicitInvalidationAuthorityCode\)[\s\S]*?\|\| \['invalidated','missed','target_too_close','broken_structure','terminal','expired'\]\.includes\(planBlockedReasonCode\)[\s\S]*?const preserveTrackedEntryAuthority = !!\([\s\S]*?simplifiedVerdict === 'near_entry'[\s\S]*?trackedPlanStatus === 'valid'[\s\S]*?trackedPriceabilityState === 'priceable'[\s\S]*?\(persistedPresentationVerdict === 'entry' \|\| lifecycleVerdict === 'entry'\)[\s\S]*?\);[\s\S]*?const preserveTrackedLifecycleCanonicalVerdict = !!\([\s\S]*?\['entry','near_entry'\]\.includes\(lifecycleVerdict\)[\s\S]*?simplifiedVerdict === 'watch'[\s\S]*?trackedLifecycleHardStructuredBlock !== true[\s\S]*?\);[\s\S]*?const canonicalVerdict = suppressAvoidForTrackedWatch[\s\S]*?\: \(preserveTrackedEntryAuthority[\s\S]*?\? 'entry'[\s\S]*?\: \(preserveTrackedLifecycleCanonicalVerdict \? lifecycleVerdict : simplifiedVerdict\)\);/s.test(appSource)){
-    throw new Error('Track shared presentation must promote tracked Entry authority from persisted/lifecycle state when valid-plan near_entry would otherwise remain stale, while still allowing lifecycle entry/near_entry to outrank soft tracked watch only when no hard structured blocker exists.');
+  if(!/const trackedLifecycleHardStructuredBlock = \['invalidated','missed','target_too_close','broken_structure'\]\.includes\(explicitInvalidationAuthorityCode\)[\s\S]*?\|\| \['invalidated','missed','target_too_close','broken_structure','terminal','expired'\]\.includes\(planBlockedReasonCode\)[\s\S]*?const preserveTrackedEntryAuthority = !!\([\s\S]*?simplifiedVerdict === 'near_entry'[\s\S]*?trackedPlanStatus === 'valid'[\s\S]*?trackedPriceabilityState === 'priceable'[\s\S]*?lifecycleVerdict === 'entry'[\s\S]*?\);[\s\S]*?const preserveTrackedLifecycleCanonicalVerdict = !!\([\s\S]*?\['entry','near_entry'\]\.includes\(lifecycleVerdict\)[\s\S]*?simplifiedVerdict === 'watch'[\s\S]*?trackedLifecycleHardStructuredBlock !== true[\s\S]*?\);[\s\S]*?const canonicalVerdict = suppressAvoidForTrackedWatch[\s\S]*?\: \(preserveTrackedEntryAuthority[\s\S]*?\? 'entry'[\s\S]*?\: \(preserveTrackedLifecycleCanonicalVerdict \? lifecycleVerdict : simplifiedVerdict\)\);/s.test(appSource)){
+    throw new Error('Track shared presentation must allow live lifecycle entry/near_entry to preserve soft-readiness authority when valid, but persisted presentation must remain non-authoritative.');
+  }
+  if(!/const hideWatchlistScore = shouldHideWatchlistScore\(watchlistState, prioritySortValue\);/.test(appSource)){
+    throw new Error('Track watchlist card render must use the shared score-visibility helper for diminishing or zero-priority cards.');
   }
   if(/Final Verdict Rendered|Canonical Final Verdict|Track Visual Bucket|Scan Visual Bucket|Presentation Reason/.test(appSource)){
     throw new Error('Watchlist debug output must not print redundant flat Track state aliases.');

@@ -242,6 +242,7 @@ function loadReplayRuntime(){
     'deriveSetupStates',
     'deriveCurrentPlanState',
     'actionableRrValueForPlan',
+    'hasAnyPlanFields',
     'evaluatePlanRealism',
     'evaluateBouncePriceabilityGuard',
     'canonicalLifecycleState',

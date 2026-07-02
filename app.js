@@ -7768,7 +7768,8 @@ function reevaluateTickerProgress(record){
 }
 
 function getTickerRecord(ticker){
-  return getTickerRecordImpl(ticker, { normalizeTicker, state });
+  const symbol = normalizeTicker(ticker);
+  return getTickerRecordImpl(symbol, { normalizeTicker, state });
 }
 
 function upsertTickerRecord(ticker){
@@ -8419,13 +8420,16 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     ? options.globalVerdict
     : resolveGlobalVerdict(item);
   const sourceOfTruth = String(options.sourceOfTruth || 'live_recomputed_fallback');
-  const activeProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
-    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
-    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(item.ticker || '')
-      ? uiState.activeReviewSourceProjectionSnapshot
+  const safeUiState = typeof uiState !== 'undefined' && uiState && typeof uiState === 'object'
+    ? uiState
+    : {};
+  const activeProjectionSnapshot = safeUiState.activeReviewSourceProjectionSnapshot
+    && typeof safeUiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(safeUiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(item.ticker || '')
+      ? safeUiState.activeReviewSourceProjectionSnapshot
       : null;
   const activeProjectionSource = String(
-    uiState.activeReviewProjectionSource
+    safeUiState.activeReviewProjectionSource
     || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
   ).trim().toLowerCase();
   const projectionAuthority = String(options.surface || '').trim().toLowerCase() !== 'track'
@@ -8538,6 +8542,11 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       || globalVerdict.capital_fit_state
       || ''
     ).trim().toLowerCase() === 'unknown';
+  const storedPlanFxEstimated = /fx estimated|conversion unavailable|fx unavailable|capital check: fx estimated/i.test(String(
+    (item.plan && (item.plan.capitalNote || (item.plan.capitalFit && item.plan.capitalFit.capital_note)))
+    || globalVerdict.capital_note
+    || ''
+  ).trim());
   const preserveTrackedEntryAuthority = !!(
     item.watchlist
     && item.watchlist.inWatchlist
@@ -8546,7 +8555,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     && trackedLifecycleHardStructuredBlock !== true
     && trackedPlanStatus === 'valid'
     && trackedPriceabilityState === 'priceable'
-    && storedPlanCapitalFitUnknown !== true
+    && (storedPlanCapitalFitUnknown !== true || storedPlanFxEstimated === true)
     && lifecycleVerdict === 'entry'
   );
   const preserveTrackedLifecycleCanonicalVerdict = !!(
@@ -8558,11 +8567,12 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     && trackedLifecycleHardStructuredBlock !== true
   );
   const suppressAvoidForTrackedWatch = softTrackedWatchSuppression;
-  const canonicalVerdict = projectionCanonicalVerdict || (suppressAvoidForTrackedWatch
+  const canonicalVerdict = suppressAvoidForTrackedWatch
     ? 'watch'
     : (preserveTrackedEntryAuthority
       ? 'entry'
-      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict)));
+      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict));
+  const effectiveCanonicalVerdict = projectionCanonicalVerdict || canonicalVerdict;
   const simplifiedBucket = normalizeVisualBucketForPairing(
     simplifiedState.visualBucket
     || simplifiedState.presentationBucket
@@ -8576,9 +8586,9 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     : (preserveTrackedLifecycleCanonicalVerdict
       ? normalizeVisualBucketForPairing(lifecycleVisualBucket || simplifiedBucket || 'monitor')
       : simplifiedBucket);
-  const canonicalTone = canonicalVerdict === 'entry'
+  const canonicalTone = effectiveCanonicalVerdict === 'entry'
     ? 'entry'
-    : (canonicalVerdict === 'near_entry' ? 'near_entry' : '');
+    : (effectiveCanonicalVerdict === 'near_entry' ? 'near_entry' : '');
   const tone = suppressAvoidForTrackedWatch
     ? 'diminishing'
     : (preserveTrackedLifecycleCanonicalVerdict
@@ -8586,30 +8596,49 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor'));
   const suppressingTrackedAvoid = suppressAvoidForTrackedWatch === true;
   const preserveTrackedLifecycleLabels = preserveTrackedLifecycleCanonicalVerdict && !suppressingTrackedAvoid;
-  const visibleModel = resolveTrackCardVisibleModel(item, simplifiedState);
+  const visibleModel = typeof resolveTrackCardVisibleModel === 'function'
+    ? resolveTrackCardVisibleModel(item, simplifiedState)
+    : {
+      canonicalVerdict:effectiveCanonicalVerdict,
+      visualBucket,
+      tone,
+      badgeLabel:String(simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim(),
+      headline:String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim(),
+      statusText:String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim(),
+      actionLabel:String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim(),
+      primaryReason:String(simplifiedState.mainBlocker || globalVerdict.reason || '').trim(),
+      planVisible:simplifiedState.planVisible === true,
+      planSummary:String(simplifiedState.mainBlocker || '').trim()
+    };
   const mainBlocker = suppressAvoidForTrackedWatch
     ? 'Trend is extended away from support - keep on monitor until price resets or repairs.'
     : String(simplifiedState.mainBlocker || '').trim();
   const authoritativeProjectionEntry = projectionAuthority && projectionCanonicalVerdict === 'entry';
   const finalBadgeLabel = authoritativeProjectionEntry
     ? 'Entry'
+    : (preserveTrackedLifecycleLabels
+      ? String(globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()
+      : (effectiveCanonicalVerdict === 'entry'
+      ? 'Entry'
     : (suppressingTrackedAvoid
     ? 'Watch'
-    : (preserveTrackedLifecycleLabels
-      ? String(globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()
-      : String(simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()));
+      : String(simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim())));
   const finalActionLabel = authoritativeProjectionEntry
     ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
-    : (suppressingTrackedAvoid
-    ? (visualBucket === 'diminishing' ? 'Diminishing' : globalVerdictLabel(canonicalVerdict || 'watch'))
     : (preserveTrackedLifecycleLabels
-      ? String(globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()
-      : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim()));
+      ? String(globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()
+      : (effectiveCanonicalVerdict === 'entry'
+      ? 'Execute only if the trigger remains valid.'
+    : (suppressingTrackedAvoid
+    ? (visualBucket === 'diminishing' ? 'Diminishing' : globalVerdictLabel(effectiveCanonicalVerdict || 'watch'))
+      : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim())));
   const headline = authoritativeProjectionEntry
     ? 'Entry Ready'
-    : (canonicalVerdict === 'entry'
-    ? String((preserveTrackedLifecycleLabels ? finalActionLabel : 'Entry Ready') || 'Entry').trim()
-    : String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim());
+    : (preserveTrackedLifecycleLabels
+    ? String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()
+    : (effectiveCanonicalVerdict === 'entry'
+    ? String('Entry Ready' || 'Entry').trim()
+    : String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()));
   const primaryReason = authoritativeProjectionEntry
     ? 'Buyers are in control and the setup is ready to act on.'
     : (canonicalVerdict === 'entry'
@@ -8617,32 +8646,41 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     : (mainBlocker || String(globalVerdict.reason || '').trim()));
   const nextAction = authoritativeProjectionEntry
     ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
-    : (canonicalVerdict === 'entry'
+    : (effectiveCanonicalVerdict === 'entry'
     ? 'Execute only if the trigger remains valid.'
-    : (canonicalVerdict === 'watch'
+    : (effectiveCanonicalVerdict === 'watch'
       ? 'Wait for stronger confirmation before considering entry.'
       : ''));
-  const planVisible = authoritativeProjectionEntry || canonicalVerdict === 'entry' ? true : simplifiedState.planVisible === true;
+  const planVisible = authoritativeProjectionEntry || effectiveCanonicalVerdict === 'entry' ? true : simplifiedState.planVisible === true;
   const planStatus = String(simplifiedState.planStatus || '').trim().toLowerCase() || 'missing';
   const planSummary = authoritativeProjectionEntry
     ? 'Trade plan available.'
-    : (canonicalVerdict === 'entry'
+    : (effectiveCanonicalVerdict === 'entry'
     ? 'Trade plan available.'
     : (planVisible
     ? 'Trade plan available.'
     : (String(mainBlocker || primaryReason || 'No actionable trade plan yet.').trim() || 'No actionable trade plan yet.')));
-  const rawRecordDisplaySetupScore = Number.isFinite(Number(setupScoreForRecord(record)))
-    ? Number(setupScoreForRecord(record))
+  const resolveDisplaySetupScore = target => {
+    if(typeof setupScoreForRecord === 'function'){
+      const computed = Number(setupScoreForRecord(target));
+      if(Number.isFinite(computed)) return computed;
+    }
+    return Number.isFinite(Number(target && target.setup && target.setup.score))
+      ? Number(target.setup.score)
+      : null;
+  };
+  const rawRecordDisplaySetupScore = Number.isFinite(Number(resolveDisplaySetupScore(record)))
+    ? Number(resolveDisplaySetupScore(record))
     : null;
-  const normalizedRecordDisplaySetupScore = Number.isFinite(Number(setupScoreForRecord(item)))
-    ? Number(setupScoreForRecord(item))
+  const normalizedRecordDisplaySetupScore = Number.isFinite(Number(resolveDisplaySetupScore(item)))
+    ? Number(resolveDisplaySetupScore(item))
     : null;
   const displaySetupScore = Number.isFinite(rawRecordDisplaySetupScore)
     ? rawRecordDisplaySetupScore
     : (Number.isFinite(normalizedRecordDisplaySetupScore) ? normalizedRecordDisplaySetupScore : 0);
   return {
-    canonicalVerdict,
-    finalVerdict:canonicalVerdict,
+    canonicalVerdict:effectiveCanonicalVerdict,
+    finalVerdict:effectiveCanonicalVerdict,
     visualBucket,
     tone,
     badgeLabel:finalBadgeLabel,
@@ -9110,7 +9148,7 @@ function focusQueuePriorityForRecord(record){
 function resultSortScoreFromRecord(record){
   const item = normalizeTickerRecord(record);
   const rrRatio = numericOrNull(recordRrValue(item));
-  const score = Number.isFinite(item.setup.score) ? item.setup.score : 0;
+  const score = setupScoreForRecord(item);
   const cautionPenalty = item.setup.marketCaution ? 0.01 : 0;
   return ((5 - item.action.priority) * 1000) + (score * 100) + (Number.isFinite(rrRatio) ? rrRatio : 0) - cautionPenalty;
 }
@@ -9124,7 +9162,7 @@ function rankedTickerRecords(){
     .filter(record => record.scan && (record.scan.lastScannedAt || record.scan.verdict || Number.isFinite(record.scan.score)))
     .sort((a, b) =>
       statusRankFromRecord(a) - statusRankFromRecord(b)
-      || (Number.isFinite(b.setup.score) ? b.setup.score : setupScoreForRecord(b)) - (Number.isFinite(a.setup.score) ? a.setup.score : setupScoreForRecord(a))
+      || setupScoreForRecord(b) - setupScoreForRecord(a)
       || (numericOrNull(recordRrValue(b)) || -999) - (numericOrNull(recordRrValue(a)) || -999)
       || ((a.setup && a.setup.marketCaution) ? 1 : 0) - ((b.setup && b.setup.marketCaution) ? 1 : 0)
       || a.ticker.localeCompare(b.ticker)
@@ -13453,13 +13491,27 @@ function setWatchlistCardRefreshButtonState(ticker, busy = false){
   return true;
 }
 
+function shouldHideWatchlistScore(lifecycleState, prioritySortValue){
+  const stateKey = String(lifecycleState || '').trim().toLowerCase();
+  const priorityValue = Number(prioritySortValue);
+  return stateKey === 'diminishing' || (Number.isFinite(priorityValue) && priorityValue <= 0);
+}
+
 function renderWatchlistCardElement(record, options = {}){
   const entry = tickerRecordToWatchlistEntry(record);
   if(!entry) return null;
-  const renderStartDisplaySetupScore = numericOrNull(setupScoreForRecord(record));
   const debug = record && record.watchlist && record.watchlist.debug && typeof record.watchlist.debug === 'object'
     ? record.watchlist.debug
     : {};
+  const renderStartDisplaySetupScore = (() => {
+    const raw = typeof setupScoreForRecord === 'function'
+      ? setupScoreForRecord(record)
+      : (record && record.setup && record.setup.score);
+    if(typeof numericOrNull === 'function') return numericOrNull(raw);
+    if(raw === null || raw === undefined || String(raw).trim() === '') return null;
+    const numeric = Number(raw);
+    return Number.isFinite(numeric) ? numeric : null;
+  })();
   const view = options.precomputedView && typeof options.precomputedView === 'object'
     ? options.precomputedView
     : null;
@@ -13488,8 +13540,7 @@ function renderWatchlistCardElement(record, options = {}){
     surface:'track',
     source:'renderWatchlistCardElement',
     reason:'renderWatchlistCardElement',
-    passCache,
-    renderPass:String(options.renderPass || '')
+    passCache
   });
   const simplifiedDebug = simplifiedState && simplifiedState.debug && typeof simplifiedState.debug === 'object'
     ? simplifiedState.debug
@@ -13667,7 +13718,14 @@ function renderWatchlistCardElement(record, options = {}){
     displayedPlan
   });
   if(authoritativeEntryPanel && entryConditionsSummary && typeof entryConditionsSummary === 'object'){
-    const rrValue = numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
+    const rrValue = typeof numericOrNull === 'function'
+      ? numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio)
+      : (() => {
+        const raw = displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio;
+        if(raw === null || raw === undefined || String(raw).trim() === '') return null;
+        const numeric = Number(raw);
+        return Number.isFinite(numeric) ? numeric : null;
+      })();
     const rrLabel = Number.isFinite(rrValue)
       ? `${rrValue.toFixed(2).replace(/(\.\d)0$/, '$1')}R`
       : '';
@@ -13721,14 +13779,20 @@ function renderWatchlistCardElement(record, options = {}){
     scoreTransportByTicker.delete(normalizeTicker(record.ticker || ''));
   }
   const openScoreTransport = null;
-  const transportedSetupScore = numericOrNull(
+  const toNumericScore = value => {
+    if(typeof numericOrNull === 'function') return numericOrNull(value);
+    if(value === null || value === undefined || String(value).trim() === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
+  const transportedSetupScore = toNumericScore(
     (activeScoreTransport && activeScoreTransport.setupScore)
     ?? (openScoreTransport && openScoreTransport.setupScore)
   );
-  const sharedDisplaySetupScore = numericOrNull(sharedPresentation && sharedPresentation.setupScore);
+  const sharedDisplaySetupScore = toNumericScore(sharedPresentation && sharedPresentation.setupScore);
   const recordDisplaySetupScore = Number.isFinite(renderStartDisplaySetupScore)
     ? renderStartDisplaySetupScore
-    : numericOrNull(setupScoreForRecord(record));
+    : toNumericScore(typeof setupScoreForRecord === 'function' ? setupScoreForRecord(record) : (record && record.setup && record.setup.score));
   const canonicalWatchlistScoreDisplay = Number.isFinite(transportedSetupScore)
     ? `Setup ${Math.max(0, Math.min(10, Math.round(transportedSetupScore)))}/10`
     : (Number.isFinite(recordDisplaySetupScore)
@@ -13742,7 +13806,7 @@ function renderWatchlistCardElement(record, options = {}){
     ? 'Refreshing...'
     : (expired ? 'Expired' : canonicalWatchlistScoreDisplay.replace('Setup ', ''));
   const watchlistScoreClass = liveRefreshPending ? 's-neutral' : 'visual-score';
-  const hideWatchlistScore = watchlistState === 'diminishing' || prioritySortValue <= 0;
+  const hideWatchlistScore = shouldHideWatchlistScore(watchlistState, prioritySortValue);
   const watchlistScoreMarkup = hideWatchlistScore
     ? ''
     : `<span class="score watchlistscore ${escapeHtml(watchlistScoreClass)}">${escapeHtml(watchlistScoreText)}</span>`;
@@ -16760,6 +16824,35 @@ function scannerScoreGradientClass(score){
   return 'score-broken';
 }
 
+function resolveScanCardTone(scanPresentation = {}, simplifiedState = {}, fallbackBucket = 'monitor'){
+  const explicitTone = String(
+    scanPresentation.tone
+    || simplifiedState.tone
+    || scanPresentation.visualTone
+    || scanPresentation.visual_tone
+    || scanPresentation.presentationTone
+    || simplifiedState.visualTone
+    || simplifiedState.visual_tone
+    || simplifiedState.presentationTone
+    || ''
+  ).trim().toLowerCase();
+  if(explicitTone) return explicitTone;
+  const normalizeBucket = typeof normalizeVisualBucketForPairing === 'function'
+    ? normalizeVisualBucketForPairing
+    : (value => {
+      const safe = String(value || '').trim().toLowerCase();
+      if(['entry','near_entry','diminishing','avoid'].includes(safe)) return safe;
+      return 'monitor';
+    });
+  return normalizeBucket(
+    fallbackBucket
+    || simplifiedState.visualBucket
+    || scanPresentation.presentationBucket
+    || scanPresentation.visualBucket
+    || 'monitor'
+  );
+}
+
 /* LEGACY COLOUR LOGIC DISABLED
    Replaced by resolveGlobalVisualState(...)
    Left in place temporarily for later review
@@ -16832,13 +16925,17 @@ function renderCompactResultCardFromView(view){
       canonicalVerdict,
       visualBucket:String(simplifiedState.visualBucket || scanPresentation.visualBucket || 'monitor').trim().toLowerCase() || 'monitor',
       presentationBucket:String(simplifiedState.visualBucket || scanPresentation.presentationBucket || 'monitor').trim().toLowerCase() || 'monitor',
-      tone:String(simplifiedState.tone || scanPresentation.tone || simplifiedState.visualBucket || 'monitor').trim().toLowerCase() || 'monitor',
+      tone:resolveScanCardTone(
+        scanPresentation,
+        simplifiedState,
+        simplifiedState.visualBucket || scanPresentation.presentationBucket || scanPresentation.visualBucket || 'monitor'
+      ),
       badgeLabel:String(simplifiedState.badgeLabel || scanPresentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch').trim(),
       summary:String(simplifiedState.mainBlocker || simplifiedState.actionLabel || scanPresentation.summary || '').trim()
     }
     : scanPresentation;
   const visualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || effectiveScanPresentation.presentationBucket || 'monitor');
-  const tone = String(simplifiedState.tone || effectiveScanPresentation.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const tone = resolveScanCardTone(effectiveScanPresentation, simplifiedState, visualBucket || 'monitor');
   const badgeClass = simplifiedVisualBadgeClass(visualBucket);
   const cardClass = simplifiedVisualCardClass(visualBucket);
   const scanLegacyState = view && view.globalVerdict && typeof view.globalVerdict === 'object'
@@ -19608,6 +19705,11 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
       resolved.badgeLabel = authoritativeScanSurface.canonicalVerdict === 'watch'
         ? 'Watch'
         : globalVerdictLabel(authoritativeScanSurface.canonicalVerdict);
+      resolved.actionLabel = authoritativeScanSurface.canonicalVerdict === 'entry'
+        ? 'Execute only if the trigger remains valid.'
+        : (authoritativeScanSurface.canonicalVerdict === 'watch'
+          ? 'Wait for stronger confirmation before considering an entry.'
+          : (resolved.actionLabel || ''));
       if(authoritativeScanSurface.summary){
         resolved.mainBlocker = authoritativeScanSurface.summary;
       }
@@ -19823,7 +19925,51 @@ function currentRuntimeSummaryForRecord(record){
 function currentRuntimeScoreForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
   const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
-  return numericOrNull(scan.score);
+  const runtimeScore = numericOrNull(scan.score);
+  const hasUsableMarketData = !!(
+    Number.isFinite(numericOrNull(item.marketData && item.marketData.price))
+    || Number.isFinite(numericOrNull(item.marketData && item.marketData.ma20))
+    || Number.isFinite(numericOrNull(item.marketData && item.marketData.ma50))
+    || Number.isFinite(numericOrNull(item.marketData && item.marketData.ma200))
+  );
+  const summary = String(scan.summary || scan.lastError || '').trim().toLowerCase();
+  const scannerDataFailed = /request failed temporarily|manual review|market data pending/.test(summary);
+  if(!hasUsableMarketData && scannerDataFailed) return setupScoreForRecord(item);
+  return runtimeScore;
+}
+
+function preferredReviewRrDisplay(record, displayedPlan, fallbackText = 'No actionable plan yet.'){
+  const rrRatio = numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
+  if(Number.isFinite(rrRatio)) return `${Number(rrRatio).toFixed(2)}R`;
+  const entry = numericOrNull(
+    (displayedPlan && (displayedPlan.entry != null ? displayedPlan.entry : (displayedPlan.plan && displayedPlan.plan.entry)))
+    ?? (record && record.plan && record.plan.entry)
+  );
+  const stop = numericOrNull(
+    (displayedPlan && (displayedPlan.stop != null ? displayedPlan.stop : (displayedPlan.plan && displayedPlan.plan.stop)))
+    ?? (record && record.plan && record.plan.stop)
+  );
+  const target = numericOrNull(
+    (displayedPlan && (
+      displayedPlan.target != null
+        ? displayedPlan.target
+        : (displayedPlan.firstTarget != null
+          ? displayedPlan.firstTarget
+          : (displayedPlan.plan && displayedPlan.plan.firstTarget))
+    ))
+    ?? (record && record.plan && (record.plan.firstTarget != null ? record.plan.firstTarget : record.plan.target))
+  );
+  const computedRr = evaluateRewardRisk(entry, stop, target);
+  const computedRrValue = numericOrNull(computedRr && computedRr.rrRatio);
+  if(Number.isFinite(computedRrValue)) return `${Number(computedRrValue).toFixed(2)}R`;
+  const projectedRr = numericOrNull(
+    record
+    && record.scan
+    && record.scan.analysisProjection
+    && record.scan.analysisProjection.rr_ratio
+  );
+  if(Number.isFinite(projectedRr)) return `${Number(projectedRr).toFixed(2)}R`;
+  return fallbackText;
 }
 
 function preferredVerdictForRecord(record){
@@ -22120,6 +22266,17 @@ function buildSharedSetupNarrative({
     || resolved.priceability_state
     || ''
   ).trim().toLowerCase();
+  const resolvedRr = typeof numericOrNull === 'function'
+    ? numericOrNull(
+      simplified.resolvedRR != null
+        ? simplified.resolvedRR
+        : (resolved.resolved_rr != null
+          ? resolved.resolved_rr
+          : (resolved.resolvedRR != null
+            ? resolved.resolvedRR
+            : (displayedPlan && displayedPlan.rewardRisk ? displayedPlan.rewardRisk.rrRatio : null)))
+    )
+    : null;
   const viability = String(resolved.viability || '').trim().toLowerCase();
   const mainBlocker = String(simplified.mainBlocker || resolved.main_blocker || resolved.reason || '').trim();
   const planStatus = String(simplified.planStatus || resolved.plan_status || '').trim().toLowerCase();
@@ -22136,6 +22293,16 @@ function buildSharedSetupNarrative({
   const diminishingTone = visualBucket === 'diminishing';
   const nearMovingAverage = ['near_20ma','near_50ma','between_20_50ma'].includes(pullbackZone)
     || ['supportive','support_band','pullback_zone'].includes(setupLocationState);
+  const rrBlockedConstructiveWatch = canonicalVerdict === 'watch'
+    && monitorTone
+    && aliveStructure
+    && strongStructure
+    && bounceAttempt
+    && nearMovingAverage
+    && validPlan
+    && Number.isFinite(resolvedRr)
+    && resolvedRr < currentRrThreshold()
+    && /nearby resistance|reward potential|target is too close|first target is too close/i.test(mainBlocker);
   const hasClearInvalidationLevel = resolved.hasClearInvalidationLevel === true
     || (resolved.near_entry_gate_checks && resolved.near_entry_gate_checks.has_clear_invalidation_level === true)
     || (resolved.entry_gate_checks && resolved.entry_gate_checks.has_clear_invalidation_level === true);
@@ -22267,8 +22434,20 @@ function buildSharedSetupNarrative({
         'A breakout from the current range',
         'A clearer low-risk entry area'
       ].forEach(line => pushUnique(promotionRequirements, line));
-    }else
-    if(monitorTone && aliveStructure && strongStructure && bounceAttempt){
+    }else if(rrBlockedConstructiveWatch){
+      primaryReason = 'Buyers have started to respond from support, but there is still not enough room before resistance to justify the risk.';
+      blocker = 'Nearby resistance keeps the first target close, while the stop still needs to sit lower beneath support.';
+      nextAction = 'Wait for either more upside room above resistance or a tighter-risk pullback before treating this as actionable.';
+      pushUnique(evidence, movingAverageEvidence);
+      pushUnique(evidence, 'Buyers have started to respond from support.');
+      pushUnique(evidence, 'The first target is capped by nearby resistance.');
+      pushUnique(cautions, 'Reward-to-risk remains too weak because the target is close compared with the stop.');
+      [
+        'More room before the next resistance area',
+        'A tighter-risk pullback or higher low',
+        'Stronger follow-through that improves reward-to-risk'
+      ].forEach(line => pushUnique(promotionRequirements, line));
+    }else if(monitorTone && aliveStructure && strongStructure && bounceAttempt){
       primaryReason = 'Buyers are starting to step in, but the move is not convincing yet.';
       blocker = invalidationExplicitlyMissing
         ? 'There is not a clear support level for managing risk yet.'
@@ -25464,6 +25643,13 @@ function buildTrackLongPressContract(options = {}){
       || ''
     ) || ''
   ).trim();
+  const savedReviewSummary = String(
+    record && record.review && (
+      record.review.savedSummary
+      || (record.review.manualReview && record.review.manualReview.summary)
+      || ''
+    ) || ''
+  ).trim();
   const latestEntryAudit = record && record.entryPromotionAudit && record.entryPromotionAudit.latest && typeof record.entryPromotionAudit.latest === 'object'
     ? record.entryPromotionAudit.latest
     : null;
@@ -25578,7 +25764,7 @@ function buildTrackLongPressContract(options = {}){
     fallbackSummary:String(fallbackSummary || '').trim(),
     diagnostics:{
       hasTickerSpecificContext,
-      usedSavedSummary:false,
+      usedSavedSummary:source === 'saved_summary_fallback',
       usedCurrentTrackPresentation:source === 'current_track_presentation_fallback',
       accepted50MaSupportTest:specialCase === 'accepted_50ma_support_test'
     },
@@ -25624,6 +25810,16 @@ function buildTrackLongPressContract(options = {}){
   }
 
   if(!hasTickerSpecificContext){
+    if(savedReviewSummary){
+      return toContract({
+        source:'saved_summary_fallback',
+        why:savedReviewSummary,
+        stillMissing:'current structured review data is missing, so this is using the last saved review summary',
+        upgrade:'refresh current market data to rebuild the setup explanation',
+        downgrade:'stale review data can hide whether quality is improving or fading',
+        fallbackSummary:savedReviewSummary
+      });
+    }
     if(currentTrackReasonCopy){
       return toContract({
         source:'current_track_presentation_fallback',
@@ -26874,7 +27070,7 @@ function buildResolvedReviewDisplayModel({
     : (supportTestCopy
       ? supportTestCopy.blocker
       : String(rawTradeStatus.line2 || semantic.blocker || semantic.primaryReason || diagnosticsMessage || '').trim());
-  if(pricedButNotReady){
+  if(pricedButNotReady && semantic.constructiveWeakRr !== true){
     explanatoryReason = pricedButNotReadyCopy.line2;
   }
   if(sameVisibleCopy(explanatoryReason, compactTradeStatusLine)){
@@ -26973,6 +27169,8 @@ function resolveCanonicalTradePlanAuthority({
   const planStatus = String(plan.status || simplified.planStatus || global.plan_status || '').trim().toLowerCase();
   const riskStatus = String(plan.riskFit && plan.riskFit.risk_status || '').trim().toLowerCase();
   const capitalFit = String(plan.capitalFit && plan.capitalFit.capital_fit || '').trim().toLowerCase();
+  const capitalNote = String(plan.capitalFit && plan.capitalFit.capital_note || '').trim();
+  const capitalFxStatus = String(plan.capitalFit && plan.capitalFit.fx_status || '').trim().toLowerCase();
   const affordability = String(plan.affordability || '').trim().toLowerCase();
   const tradeability = String(plan.tradeability || '').trim().toLowerCase();
   const quoteCurrency = String(
@@ -26994,9 +27192,19 @@ function resolveCanonicalTradePlanAuthority({
   const planFieldsPresent = Number.isFinite(numericOrNull(plan.entry))
     && Number.isFinite(numericOrNull(plan.stop))
     && Number.isFinite(numericOrNull(plan.target ?? plan.firstTarget));
-  const capitalAffordable = ['ideal','acceptable','borderline','fits_capital'].includes(capitalFit)
+  const riskOnlyFxEstimatedTradeability = tradeability === 'risk_only'
+    && capitalFit === 'unknown'
+    && (
+      capitalFxStatus === 'estimated'
+      || /fx estimated|conversion unavailable|fx unavailable|capital check: fx estimated/i.test(capitalNote)
+    );
+  const capitalAffordable = (
+    ['ideal','acceptable','borderline','fits_capital'].includes(capitalFit)
+    || riskOnlyFxEstimatedTradeability
+  )
     && affordability !== 'not_affordable';
-  const tradeabilityActionable = ['tradable','entry','ready','action_now'].includes(tradeability);
+  const tradeabilityActionable = ['tradable','entry','ready','action_now'].includes(tradeability)
+    || riskOnlyFxEstimatedTradeability;
   const riskFits = riskStatus === 'fits_risk';
   const actionable = verdict === 'entry'
     && terminalAvoid !== true
@@ -27125,6 +27333,14 @@ function buildReviewSemanticStatus({
     ? Number(numericOrNull(planRealism.raw_rr))
     : (plan.rewardRisk && Number.isFinite(numericOrNull(plan.rewardRisk.rrRatio)) ? Number(numericOrNull(plan.rewardRisk.rrRatio)) : null);
   const rrAcceptable = Number.isFinite(rrValue) && rrValue >= currentRrThreshold();
+  const realisticRr = planRealism && Number.isFinite(numericOrNull(planRealism.realistic_rr))
+    ? Number(numericOrNull(planRealism.realistic_rr))
+    : null;
+  const constructiveWeakRr = aliveStructure
+    && !structuralWeakness
+    && ['attempt','early','developing'].includes(bounceState)
+    && Number.isFinite(realisticRr)
+    && realisticRr < currentRrThreshold();
   const staleWeakCopy = /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(rawBlocker);
   const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
     record,
@@ -27170,8 +27386,8 @@ function buildReviewSemanticStatus({
     blocker = rawBlocker && !staleWeakCopy
       ? rawBlocker
       : 'The trend remains strong, but price is too far above support to define risk safely.';
-  }else if(aliveStructure && planRealism && Number.isFinite(numericOrNull(planRealism.realistic_rr)) && Number(numericOrNull(planRealism.realistic_rr)) < currentRrThreshold()){
-    blocker = 'Nearby resistance limits current reward potential.';
+  }else if(constructiveWeakRr){
+    blocker = 'Nearby resistance keeps the first target close, while the stop still needs to sit lower beneath support.';
   }else if(!blocker){
     blocker = bounceState === 'none' || stabilisationState === 'none'
       ? 'Needs confirmation before promotion.'
@@ -27199,6 +27415,10 @@ function buildReviewSemanticStatus({
       line2:'Long-press the ticker card in Track for more info.',
       rr:'Priced'
     };
+  const constructiveWeakRrTradeStatus = {
+    line1:'Buyers are starting to respond, but reward-to-risk is still too weak.',
+    line2:'Nearby resistance keeps the first target close, while the stop still needs to sit lower beneath support.'
+  };
   let tradeStatus = {line1:'No actionable trade yet.', line2:blocker};
   if(actionable){
     tradeStatus = {
@@ -27222,8 +27442,12 @@ function buildReviewSemanticStatus({
     };
   }else if(constructivePricedButNotReady){
     tradeStatus = {
-      line1:'Valid plan, waiting for confirmation.',
-      line2:blocker || 'The trade plan exists, but the setup is not actionable yet.'
+      line1:constructiveWeakRr
+        ? constructiveWeakRrTradeStatus.line1
+        : pricedButNotReadyCopy.line1,
+      line2:constructiveWeakRr
+        ? constructiveWeakRrTradeStatus.line2
+        : pricedButNotReadyCopy.line2
     };
   }else if(accepted50MaSupportTest){
     tradeStatus = {
@@ -27237,11 +27461,13 @@ function buildReviewSemanticStatus({
   }else{
     tradeStatus = {line1:'Setup remains untradable.', line2:blocker || 'A safe entry point cannot be identified yet.'};
   }
-  const rrDisplay = (actionable || constructivePricedButNotReady || unaffordableCanonicalPlan) && Number.isFinite(rrValue)
+  const rrDisplay = constructivePricedButNotReady
+    ? pricedButNotReadyCopy.rr
+    : ((actionable || unaffordableCanonicalPlan) && Number.isFinite(rrValue)
     ? `${rrValue.toFixed(2)}R`
     : (accepted50MaSupportTest && draftPlan && Number.isFinite(rrValue)
       ? `Draft ${rrValue.toFixed(2)}R`
-      : (draftPlan ? 'No actionable trade yet.' : 'No actionable plan yet.'));
+      : (draftPlan ? 'No actionable trade yet.' : 'No actionable plan yet.')));
   return {
     stateLabel:String(sharedNarrative.stateLabel || globalVerdictLabel(verdict)).trim(),
     primaryReason:String(accepted50MaSupportTest ? supportTestCopy.monitoringReason : (sharedNarrative.primaryReason || blocker)).trim(),
@@ -27259,15 +27485,16 @@ function buildReviewSemanticStatus({
     planActionable:actionable,
     draftPlan,
     pricedButNotReady:constructivePricedButNotReady,
+    constructiveWeakRr,
     resolverBlockedEstimatedPlan,
     unaffordableCanonicalPlan,
     planMathValid,
     planFieldsPresent,
     canonicalPlanAuthority,
     rrDisplay,
-    showPlanFields:verdict === 'entry' || unaffordableCanonicalPlan || constructivePricedButNotReady ? true : (planMathValid || planFieldsPresent),
-    showPlanMetrics:verdict === 'entry' || unaffordableCanonicalPlan || constructivePricedButNotReady ? true : (actionable || (accepted50MaSupportTest && draftPlan)),
-    showCapital:verdict === 'entry' || unaffordableCanonicalPlan || constructivePricedButNotReady ? true : actionable,
+    showPlanFields:constructivePricedButNotReady ? false : (verdict === 'entry' || unaffordableCanonicalPlan ? true : (planMathValid || planFieldsPresent)),
+    showPlanMetrics:constructivePricedButNotReady ? false : (verdict === 'entry' || unaffordableCanonicalPlan ? true : (actionable || (accepted50MaSupportTest && draftPlan))),
+    showCapital:constructivePricedButNotReady ? false : (verdict === 'entry' || unaffordableCanonicalPlan ? true : actionable),
     entryGatePass:effectiveEntryGatePass
   };
 }
@@ -27659,13 +27886,17 @@ function projectTickerForCard(record, options = {}){
     const planCheckState = planCheckStateForRecord(item, {effectivePlan, displayedPlan});
     const planUiState = getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState, setupState:provisionalSetupUiState.state});
     const setupUiState = getSetupUiState(item, {displayStage:effectiveDisplayStage, derivedStates, planUiState});
-    const effectiveSetupScore = setupScoreForRecord(item);
+    const effectiveSetupScore = authoritativeScanSurface && Number.isFinite(Number(authoritativeScanSurface.score))
+      ? Math.max(0, Math.min(10, Math.round(Number(authoritativeScanSurface.score))))
+      : setupScoreForRecord(item);
     const rrValue = displayedPlan.status === 'valid'
       ? displayedPlan.rewardRisk.rrRatio
       : numericOrNull(item.scan.estimatedRR);
   const actionableRrValue = actionableRrValueForPlan(displayedPlan);
   const derivedActionState = deriveActionStateForRecord(item);
-  const actionLabel = displayedPlan.affordability === 'not_affordable'
+  const actionLabel = normalizeAnalysisVerdict(effectiveDisplayStage || displayStage) === 'Entry'
+    ? 'Execute only if the trigger remains valid.'
+    : displayedPlan.affordability === 'not_affordable'
     ? 'Too Expensive'
     : (displayedPlan.affordability === 'heavy_capital' || displayedPlan.tradeability === 'capital_heavy'
       ? 'Capital Heavy'
@@ -32267,7 +32498,20 @@ function ensureCanonicalPlanForRecord(record, options = {}){
   if(!(record && typeof record === 'object')) return false;
   const gated = applyGlobalVerdictGates(record, {source:'review'});
   if(!gated.globalVerdict.allow_plan) return gated.changed;
-  if(recordPlanHasConcreteValues(record)) return false;
+  if(recordPlanHasConcreteValues(record)){
+    if(hasCanonicalTradePlanStamp(record.plan)) return false;
+    applyPlanCandidateToRecord(record, {
+      entry:record.plan && record.plan.entry,
+      stop:record.plan && record.plan.stop,
+      firstTarget:record.plan && record.plan.firstTarget
+    }, {
+      source:String(record.plan && record.plan.source || options.source || 'review'),
+      reason:'promote_concrete_unstamped_plan',
+      writtenBy:'ensureCanonicalPlanForRecord',
+      updatedAt:new Date().toISOString()
+    });
+    return true;
+  }
   const derivedPlan = effectivePlanForRecord(record, {allowScannerFallback:options.allowScannerFallback === true});
   const hasDerivedValues = [derivedPlan.entry, derivedPlan.stop, derivedPlan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
   if(!hasDerivedValues) return false;
@@ -33383,7 +33627,7 @@ async function analyseSetup(ticker, options = {}){
       );
       if(shouldPromoteSimplifiedPipeline){
         const existingPipeline = getReviewChartAnalysisPipeline(record) || {};
-        const promotedPipeline = buildChartPipelineFromVerification(record, {
+        let promotedPipeline = buildChartPipelineFromVerification(record, {
           imageId:requestChartImageId,
           requestId:analysisRequestId,
           source:'chart_pipeline_quick_check',
@@ -33398,10 +33642,11 @@ async function analyseSetup(ticker, options = {}){
           sanitizedReadFacts:buildChartPipelineReadFacts(analysis),
           gatedReadFacts:buildChartPipelineReadFacts(simplifiedGateAnalysis)
         };
-        upsertReviewChartAnalysisPipeline(record, mergePromotedChartPipelineIdentity(record, existingPipeline, promotedPipeline, {
+        promotedPipeline = mergePromotedChartPipelineIdentity(record, existingPipeline, promotedPipeline, {
           imageId:requestChartImageId,
           requestId:analysisRequestId
-        }));
+        });
+        upsertReviewChartAnalysisPipeline(record, promotedPipeline);
       }
       const shouldCommitMergedTrace = !!(
         requestChartImageId &&
@@ -35493,15 +35738,18 @@ function refreshTrackedTickerState(ticker, options = {}){
   const lastRunAt = Number(trackedTickerRefreshRuntime.lastRunAt.get(symbol) || 0);
   const inFlight = trackedTickerRefreshRuntime.inFlight.has(symbol);
   const liveRecord = getTickerRecord(symbol) || upsertTickerRecord(symbol);
-  if(liveRecord && liveRecord.resolvedStateBundle) delete liveRecord.resolvedStateBundle;
+  const readOnlyRecordSnapshot = persist
+    ? null
+    : normalizeTickerRecord(cloneData(liveRecord));
+  if(persist && liveRecord && liveRecord.resolvedStateBundle) delete liveRecord.resolvedStateBundle;
   const cachedBundle = liveRecord && liveRecord.resolvedStateBundleCache && typeof liveRecord.resolvedStateBundleCache === 'object'
     ? liveRecord.resolvedStateBundleCache
     : null;
   if(inFlight){
     const bundle = cachedBundle
-      ? withLiveRecordFromCache(liveRecord, cachedBundle)
-      : buildResolvedStateBundleFromRecord(liveRecord, {source, sourceSurface, reason});
-    if(!cachedBundle){
+      ? withLiveRecordFromCache(persist ? liveRecord : readOnlyRecordSnapshot, cachedBundle)
+      : buildResolvedStateBundleFromRecord(readOnlyRecordSnapshot || liveRecord, {source, sourceSurface, reason});
+    if(persist && !cachedBundle){
       liveRecord.resolvedStateBundleCache = toResolvedStateBundleCache(bundle);
     }
     return {
@@ -35516,9 +35764,9 @@ function refreshTrackedTickerState(ticker, options = {}){
   }
   if(!force && lastRunAt > 0 && (now - lastRunAt) < TRACKED_TICKER_REFRESH_COOLDOWN_MS){
     const bundle = cachedBundle
-      ? withLiveRecordFromCache(liveRecord, cachedBundle)
-      : buildResolvedStateBundleFromRecord(liveRecord, {source, sourceSurface, reason});
-    if(!cachedBundle){
+      ? withLiveRecordFromCache(persist ? liveRecord : readOnlyRecordSnapshot, cachedBundle)
+      : buildResolvedStateBundleFromRecord(readOnlyRecordSnapshot || liveRecord, {source, sourceSurface, reason});
+    if(persist && !cachedBundle){
       liveRecord.resolvedStateBundleCache = toResolvedStateBundleCache(bundle);
     }
     return {
@@ -35534,21 +35782,22 @@ function refreshTrackedTickerState(ticker, options = {}){
 
   trackedTickerRefreshRuntime.inFlight.add(symbol);
   try{
-    const record = upsertTickerRecord(symbol);
+    const record = persist
+      ? upsertTickerRecord(symbol)
+      : (readOnlyRecordSnapshot || normalizeTickerRecord(cloneData(liveRecord)));
     const bundle = buildResolvedStateBundleFromRecord(record, {source, sourceSurface, reason});
     const canonicalContract = bundle.canonicalContract;
 
-    record.meta = record.meta && typeof record.meta === 'object' ? record.meta : {};
-    record.meta.lastRefreshSource = source;
-    record.meta.lastRefreshSurface = sourceSurface;
-    record.meta.lastRefreshReason = reason;
-    record.meta.lastRefreshTimestamp = new Date().toISOString();
-    record.meta.recordVersion = Number(record.meta.recordVersion || 0) + 1;
-    record.meta.lastResolvedCanonicalVerdict = String(canonicalContract && canonicalContract.canonicalVerdictKey || '');
-    if(record.resolvedStateBundle) delete record.resolvedStateBundle;
-    record.resolvedStateBundleCache = toResolvedStateBundleCache(bundle);
-
     if(persist){
+      record.meta = record.meta && typeof record.meta === 'object' ? record.meta : {};
+      record.meta.lastRefreshSource = source;
+      record.meta.lastRefreshSurface = sourceSurface;
+      record.meta.lastRefreshReason = reason;
+      record.meta.lastRefreshTimestamp = new Date().toISOString();
+      record.meta.recordVersion = Number(record.meta.recordVersion || 0) + 1;
+      record.meta.lastResolvedCanonicalVerdict = String(canonicalContract && canonicalContract.canonicalVerdictKey || '');
+      if(record.resolvedStateBundle) delete record.resolvedStateBundle;
+      record.resolvedStateBundleCache = toResolvedStateBundleCache(bundle);
       commitTickerState();
       if(activeWorkspaceTab() === 'track'){
         markWatchlistDirty([symbol], `${source}_refresh`);
@@ -36922,7 +37171,7 @@ function renderScannerResults(){
         if(canonicalScanState){
           const canonicalVerdict = normalizeGlobalVerdictKey(canonicalScanState.canonicalVerdict || 'watch');
           const canonicalBucket = normalizeVisualBucketForPairing(canonicalScanState.visualBucket || 'monitor');
-          const canonicalTone = String(canonicalScanState.tone || canonicalBucket || 'monitor').trim().toLowerCase() || 'monitor';
+          const canonicalTone = String(canonicalBucket || canonicalScanState.tone || 'monitor').trim().toLowerCase() || 'monitor';
           const badgeNode = node.querySelector('.badge.state-pill');
           if(badgeNode){
             badgeNode.textContent = String(canonicalScanState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch').trim();
@@ -37250,11 +37499,17 @@ function currentPaperTradeContextForTicker(ticker){
     || globalVerdict.final_verdict_rendered
     || ''
   );
+  const authoritativeReviewVerdictKey = normalizeGlobalVerdictKey(reviewEffectiveSimplifiedState.canonicalVerdict || 'watch');
   const paperTradeAuthoritySimplifiedState = canonicalResolverVerdict
     ? {
       ...simplifiedState,
-      canonicalVerdict:canonicalResolverVerdict
+      canonicalVerdict:authoritativeReviewVerdictKey || canonicalResolverVerdict
     }
+    : authoritativeReviewVerdictKey
+      ? {
+        ...simplifiedState,
+        canonicalVerdict:authoritativeReviewVerdictKey
+      }
     : simplifiedState;
   const planAuthority = resolveCanonicalTradePlanAuthority({
     record,
@@ -37264,7 +37519,6 @@ function currentPaperTradeContextForTicker(ticker){
     derivedStates,
     context:'paper_trade_context'
   });
-  const authoritativeReviewVerdictKey = normalizeGlobalVerdictKey(reviewEffectiveSimplifiedState.canonicalVerdict || 'watch');
   const projectedEntryAuthority = false;
   const canonicalPlanVerdict = normalizeGlobalVerdictKey(
     planAuthority.verdict
@@ -37289,6 +37543,12 @@ function currentPaperTradeContextForTicker(ticker){
   const planStatusForEligibility = canonicalPlanActionableEntry
     ? 'valid'
     : displayedPlan.status;
+  const tradeabilityForEligibility = canonicalPlanActionableEntry
+    ? 'tradable'
+    : displayedPlan.tradeability;
+  const capitalFitForEligibility = canonicalPlanActionableEntry
+    ? 'fits_capital'
+    : (displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit);
   const primaryStateForEligibility = canonicalPlanActionableEntry
     ? 'entry'
     : resolvedContract.primaryState;
@@ -37318,8 +37578,8 @@ function currentPaperTradeContextForTicker(ticker){
     maxLoss:displayedPlan.riskFit && displayedPlan.riskFit.max_loss,
     rrRatio:displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio,
     riskStatus:displayedPlan.riskFit && displayedPlan.riskFit.risk_status,
-    tradeability:displayedPlan.tradeability,
-    capitalFit:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit,
+    tradeability:tradeabilityForEligibility,
+    capitalFit:capitalFitForEligibility,
     primaryState:primaryStateForEligibility,
     hardBlocker:hardBlockerForEligibility
   });
@@ -39823,6 +40083,13 @@ function renderReviewWorkspace(options = {}){
       ) || ''
     ).trim()
     : '';
+  const looseProjectionCanonicalVerdict = normalizeGlobalVerdictKey(
+    presentationProjectionSnapshot && (
+      presentationProjectionSnapshot.canonicalVerdict
+      || presentationProjectionSnapshot.finalVerdict
+      || presentationProjectionSnapshot.renderedVerdict
+    ) || ''
+  );
   const derivedStates = refreshBundle.derivedStates || analysisDerivedStatesFromRecord(record);
   const globalVerdict = bundleValid ? refreshBundle.globalVerdict : resolveGlobalVerdict(record);
   const reviewEffectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(
@@ -40002,9 +40269,17 @@ function renderReviewWorkspace(options = {}){
     || paperTradeLiveGlobalVerdict.final_verdict_rendered
     || 'watch'
   );
+  const paperTradeEntryReadyRecord = normalizeGlobalVerdictKey(record.scan && record.scan.resolvedVerdict || '') === 'entry'
+    || normalizeGlobalVerdictKey(record.scan && record.scan.verdict || '') === 'entry';
+  const paperTradeAuthoritativeReviewVerdict = normalizeGlobalVerdictKey(
+    (paperTradeEntryReadyRecord ? 'entry' : '')
+    || effectiveSimplifiedCanonicalVerdict
+    || simplifiedState && simplifiedState.canonicalVerdict
+    || 'watch'
+  );
   const paperTradeAuthoritySimplifiedState = {
     ...simplifiedState,
-    canonicalVerdict:paperTradeLiveResolverVerdict || 'watch'
+    canonicalVerdict:paperTradeAuthoritativeReviewVerdict || paperTradeLiveResolverVerdict || 'watch'
   };
   const paperTradePlanAuthority = resolveCanonicalTradePlanAuthority({
     record,
@@ -40019,6 +40294,8 @@ function renderReviewWorkspace(options = {}){
   const reviewFinalVerdictForPaperTrade = normalizeAnalysisVerdict(
     paperTradePlanActionable ? 'entry' : 'watch'
   );
+  const paperTradeEligibilityTradeability = paperTradePlanActionable ? 'tradable' : displayedPlan.tradeability;
+  const paperTradeEligibilityCapitalFit = paperTradePlanActionable ? 'fits_capital' : (displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit);
   const paperTradeEligibilityState = paperTradeEligibility.evaluatePaperTradeEligibility({
     finalVerdict:reviewFinalVerdictForPaperTrade,
     planStatus:displayedPlan.status,
@@ -40029,8 +40306,8 @@ function renderReviewWorkspace(options = {}){
     maxLoss:displayedPlan.riskFit && displayedPlan.riskFit.max_loss,
     rrRatio:displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio,
     riskStatus:displayedPlan.riskFit && displayedPlan.riskFit.risk_status,
-    tradeability:displayedPlan.tradeability,
-    capitalFit:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit,
+    tradeability:paperTradeEligibilityTradeability,
+    capitalFit:paperTradeEligibilityCapitalFit,
     primaryState:safeResolvedContract.primaryState,
     hardBlocker:safeResolvedContract.blockerReason
   });
@@ -40531,12 +40808,26 @@ function renderReviewWorkspace(options = {}){
     displayedPlan,
     planRealism
   });
-  const authoritativeEntryReviewPresentation = reviewSnapshotAuthority && effectiveSimplifiedCanonicalVerdict === 'entry';
+  const authoritativeEntryReviewPresentation = !!presentationProjectionSnapshot
+    && normalizeTicker(presentationProjectionSnapshot.ticker || '') === normalizeTicker(record.ticker || '')
+    && (looseProjectionCanonicalVerdict === 'entry' || effectiveSimplifiedCanonicalVerdict === 'entry');
   const reviewNextActionLabel = authoritativeEntryReviewPresentation
     ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
     : resolvedReviewDisplay.nextActionLabel;
   const reviewBadgeLabel = effectiveReviewBadge.text;
   const planUI = resolvedReviewDisplay.planUI;
+  const entryReadyRecord = normalizeGlobalVerdictKey(record.scan && record.scan.resolvedVerdict || '') === 'entry'
+    || normalizeGlobalVerdictKey(record.scan && record.scan.verdict || '') === 'entry'
+    || effectiveSimplifiedCanonicalVerdict === 'entry';
+  const effectivePlanUi = (authoritativeEntryReviewPresentation || entryReadyRecord)
+    ? {
+      ...planUI,
+      showPlan:true,
+      showRR:true,
+      showCapital:true,
+      showPositionSize:true
+    }
+    : planUI;
   const tradeStatusText = authoritativeEntryReviewPresentation
     ? {
       line1:'Entry Ready',
@@ -40585,7 +40876,7 @@ function renderReviewWorkspace(options = {}){
   const analysisPanelClass = `reviewanalysispanel ${reviewPanelToneClass}`.trim();
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
-  const rawRrDisplay = resolvedReviewDisplay.rrDisplay;
+  const rawRrDisplay = preferredReviewRrDisplay(record, displayedPlan, resolvedReviewDisplay.rrDisplay);
   const credibleRrDisplay = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   const planRealismSummary = resolvedReviewDisplay.planSummary;
   const dedupedPlanRealismSummary = planRealismSummary;
@@ -40987,16 +41278,16 @@ function renderReviewWorkspace(options = {}){
       <div class="reviewsectionhead"><strong id="plannerSection">Trade Plan</strong></div>
       <div class="summary review-hidden" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div>
       <input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden />
-      <div class="plan-grid plan-grid-inputs ${planUI.showPlan ? '' : 'review-hidden'}" id="tradePlanInputs">
+      <div class="plan-grid plan-grid-inputs ${effectivePlanUi.showPlan ? '' : 'review-hidden'}" id="tradePlanInputs">
         <div><label>Planned Entry</label><input id="entryPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.entry || '')}" /></div>
         <div><label>Planned Stop</label><input id="stopPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.stop || '')}" /></div>
         <div><label>${escapeHtml(executionState.exitMode === 'dynamic_exit' ? 'Target Review Level' : 'Planned First Target')}</label><input id="targetPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.firstTarget || '')}" /></div>
       </div>
       <div class="reviewstats plan-grid plan-grid-stats reviewstats--compact">
         <div class="stat stat--trade-status"><div>Trade Status</div><div class="big" id="tradeStatusBox">${renderTradeStatusMarkup(tradeStatusText)}</div></div>
-        <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(planUI.showRR ? rrDisplayClass(planRealism.raw_rr) : '')}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
-        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)} ${planUI.showCapital ? '' : 'review-hidden'}" id="capitalFitMetric"><div>Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitMetricText(capitalComfort.label))}</div></div>
-        <div class="stat ${planUI.showPositionSize ? '' : 'review-hidden'}" id="positionSizeStat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
+        <div class="stat stat--primary"><div>R:R</div><div class="big ${escapeHtml(effectivePlanUi.showRR ? rrDisplayClass(planRealism.raw_rr) : '')}" id="rrValue">${escapeHtml(rawRrDisplay)}</div></div>
+        <div class="stat stat--capital-fit ${escapeHtml(capitalFitVisual.className)} ${effectivePlanUi.showCapital ? '' : 'review-hidden'}" id="capitalFitMetric"><div>Capital Fit</div><div class="big" id="capitalFitBox">${escapeHtml(capitalFitMetricText(capitalComfort.label))}</div></div>
+        <div class="stat ${effectivePlanUi.showPositionSize ? '' : 'review-hidden'}" id="positionSizeStat"><div>Position Size</div><div class="big" id="positionSize">-</div></div>
         <div class="stat ${resolvedReviewDisplay.positionCostVisible ? '' : 'review-hidden'}" id="positionCostStat"><div>Position Cost</div><div class="big" id="positionCostBox">${escapeHtml(resolvedReviewDisplay.positionCostText)}</div></div>
         <div class="stat review-hidden"><div>Risk / Share</div><div class="big" id="riskPerShare">-</div></div>
         <div class="stat review-hidden"><div>Reward / Share</div><div class="big" id="rewardPerShareBox">${escapeHtml(Number.isFinite(rewardPerShare) ? rewardPerShare.toFixed(2) : '-')}</div></div>
@@ -41004,13 +41295,13 @@ function renderReviewWorkspace(options = {}){
         <div class="stat review-hidden"><div>Risk / Capital</div><div class="big" id="riskFitBox">${escapeHtml(`${riskStatusLabel(record.plan.riskStatus || 'plan_missing')} / ${capitalComfort.label}`)}</div></div>
         <div class="stat review-hidden"><div>Capital Check</div><div class="big" id="capitalCheckBox">${escapeHtml(capitalComfort.note || 'Clear')}</div></div>
       </div>
-      <div class="statnote trade-plan-fx-note ${planUI.showCapital ? '' : 'review-hidden'}" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div>
+      <div class="statnote trade-plan-fx-note ${effectivePlanUi.showCapital ? '' : 'review-hidden'}" id="fxBasisBox">${escapeHtml(fxBasisNote)}</div>
     </div>
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
       <div class="reviewsectionhead"><strong>Technical Context</strong></div>
       <div class="summary review-technical-line" id="reviewTechnicalContextLine">${escapeHtml(technicalContextLine)}</div>
       <div class="review-action-row review-action-row--top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
-      ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(planUI.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
+      ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(effectivePlanUi.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
       ${aiSummaryVisible ? `<details class="responsepanel compact-open-on-demand" id="reviewResponse" data-tour="ai-summary" ${analysisResponseOpen}>
         <summary id="reviewAiSummaryTitle">${escapeHtml(aiSummaryTitle)}</summary>
         <div class="tiny review-ai-preview${chartCoachMarkup ? ' review-ai-preview--chart-coach' : ''}" id="reviewAiSummaryPreview">${chartCoachMarkup || escapeHtml(aiSummaryPreview)}</div>
@@ -41089,8 +41380,10 @@ function renderReviewWorkspace(options = {}){
     persistDraft:readOnlyReviewOpen ? false : options.persistDraft,
     reviewRenderSeq:reviewSeq
   });
-  renderReviewLifecycleSummary(record.ticker);
-  calculate({persist:false});
+  if(!readOnlyReviewOpen){
+    renderReviewLifecycleSummary(record.ticker);
+    calculate({persist:false});
+  }
   updateReviewAiSummaryOverflowHint();
   window.requestAnimationFrame(() => updateReviewAiSummaryOverflowHint());
   if(typeof window !== 'undefined'){
@@ -41840,9 +42133,7 @@ function syncPlanDisplayMeta(options = {}){
     uiState.activeReviewProjectionSource
     || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
   ).trim().toLowerCase();
-  const activeProjectionAuthority = !!activeProjectionSnapshot
-    && (activeProjectionSource === 'clicked_card_snapshot' || activeProjectionSource === 'track_projection_updated');
-  const activeProjectionVerdict = activeProjectionAuthority
+  const activeProjectionVerdict = activeProjectionSnapshot
     ? normalizeGlobalVerdictKey(
       activeProjectionSnapshot.canonicalVerdict
       || activeProjectionSnapshot.finalVerdict
@@ -41850,12 +42141,15 @@ function syncPlanDisplayMeta(options = {}){
       || ''
     )
     : '';
-  const authoritativeEntryDisplayOverride = activeProjectionAuthority && activeProjectionVerdict === 'entry';
+  const entryReadyRecord = normalizeGlobalVerdictKey(record.scan && record.scan.resolvedVerdict || '') === 'entry'
+    || normalizeGlobalVerdictKey(record.scan && record.scan.verdict || '') === 'entry'
+    || normalizeGlobalVerdictKey(effectiveMetaSimplifiedState.canonicalVerdict || '') === 'entry';
+  const authoritativeEntryDisplayOverride = entryReadyRecord || (!!activeProjectionSnapshot && activeProjectionVerdict === 'entry');
   const authoritativeReviewNextActionLabel = authoritativeEntryDisplayOverride
     ? String(
-      activeProjectionSnapshot.actionGuidance
-      || activeProjectionSnapshot.actionLabel
-      || activeProjectionSnapshot.actionShortLabel
+      activeProjectionSnapshot && activeProjectionSnapshot.actionGuidance
+      || activeProjectionSnapshot && activeProjectionSnapshot.actionLabel
+      || activeProjectionSnapshot && activeProjectionSnapshot.actionShortLabel
       || 'Execute only if the trigger remains valid.'
     ).trim()
     : resolvedReviewDisplay.nextActionLabel;
@@ -41887,11 +42181,14 @@ function syncPlanDisplayMeta(options = {}){
   if($('reviewNextActionPrimary')) $('reviewNextActionPrimary').textContent = `Can I trade this now? ${authoritativeReviewNextActionLabel}`;
   if($('reviewTechnicalContextLine')) $('reviewTechnicalContextLine').textContent = resolvedReviewDisplay.technicalContextLine;
   if($('rrValue')){
-    const authoritativeRrDisplay = authoritativeEntryDisplayOverride && Number.isFinite(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio)
-      ? `${Number(displayedPlan.rewardRisk.rrRatio).toFixed(2)}R`
+    const authoritativeRrDisplay = authoritativeEntryDisplayOverride
+      ? preferredReviewRrDisplay(record, displayedPlan, resolvedReviewDisplay.rrDisplay)
       : resolvedReviewDisplay.rrDisplay;
     $('rrValue').textContent = authoritativeRrDisplay || 'No actionable plan yet.';
     $('rrValue').className = `big ${effectivePlanUi.showRR ? rrDisplayClass(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
+    if(entryReadyRecord && /no actionable plan yet/i.test(String($('rrValue').textContent || ''))){
+      $('rrValue').textContent = preferredReviewRrDisplay(record, displayedPlan, 'No actionable plan yet.');
+    }
   }
   if($('planRealismSummary')){
     $('planRealismSummary').textContent = resolvedReviewDisplay.planSummary;
@@ -42131,9 +42428,7 @@ function calculate(options = {}){
     uiState.activeReviewProjectionSource
     || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
   ).trim().toLowerCase();
-  const activeProjectionAuthority = !!activeProjectionSnapshot
-    && (activeProjectionSource === 'clicked_card_snapshot' || activeProjectionSource === 'track_projection_updated');
-  const activeProjectionVerdict = activeProjectionAuthority
+  const activeProjectionVerdict = activeProjectionSnapshot
     ? normalizeGlobalVerdictKey(
       activeProjectionSnapshot.canonicalVerdict
       || activeProjectionSnapshot.finalVerdict
@@ -42141,12 +42436,15 @@ function calculate(options = {}){
       || ''
     )
     : '';
-  const authoritativeEntryDisplayOverride = activeProjectionAuthority && activeProjectionVerdict === 'entry';
+  const entryReadyRecord = normalizeGlobalVerdictKey(activeRecord && activeRecord.scan && activeRecord.scan.resolvedVerdict || '') === 'entry'
+    || normalizeGlobalVerdictKey(activeRecord && activeRecord.scan && activeRecord.scan.verdict || '') === 'entry'
+    || String(displayedPlan && displayedPlan.status || '').trim().toLowerCase() === 'valid';
+  const authoritativeEntryDisplayOverride = entryReadyRecord || (!!activeProjectionSnapshot && activeProjectionVerdict === 'entry');
   const authoritativeReviewNextActionLabel = authoritativeEntryDisplayOverride
     ? String(
-      activeProjectionSnapshot.actionGuidance
-      || activeProjectionSnapshot.actionLabel
-      || activeProjectionSnapshot.actionShortLabel
+      activeProjectionSnapshot && activeProjectionSnapshot.actionGuidance
+      || activeProjectionSnapshot && activeProjectionSnapshot.actionLabel
+      || activeProjectionSnapshot && activeProjectionSnapshot.actionShortLabel
       || 'Execute only if the trigger remains valid.'
     ).trim()
     : resolvedReviewDisplay.nextActionLabel;
@@ -42165,8 +42463,8 @@ function calculate(options = {}){
       showPositionSize:true
     }
     : planUI;
-  const authoritativeRrDisplay = authoritativeEntryDisplayOverride && Number.isFinite(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio)
-    ? `${Number(displayedPlan.rewardRisk.rrRatio).toFixed(2)}R`
+  const authoritativeRrDisplay = authoritativeEntryDisplayOverride
+    ? preferredReviewRrDisplay(activeRecord || record, displayedPlan, resolvedReviewDisplay.rrDisplay)
     : resolvedReviewDisplay.rrDisplay;
   if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
   if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !effectivePlanUi.showPlan);
@@ -42236,6 +42534,9 @@ function calculate(options = {}){
   $('positionSize').textContent = displayedPlan.riskFit.position_size > 0 ? `${displayedPlan.riskFit.position_size} shares` : '0 shares';
   $('rrValue').textContent = authoritativeRrDisplay || '-';
   $('rrValue').className = `big ${effectivePlanUi.showRR ? rrDisplayClass(displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
+  if(entryReadyRecord && /no actionable plan yet/i.test(String($('rrValue').textContent || ''))){
+    $('rrValue').textContent = preferredReviewRrDisplay(activeRecord || record, displayedPlan, 'No actionable plan yet.');
+  }
   if($('plannerBox')){
     const plannerBox = $('plannerBox');
     const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
@@ -43477,8 +43778,10 @@ function buildPromotionGateTrace(context = {}){
   const hasPriceablePlanValues = context.hasPriceablePlanValues === true;
   const pullbackValid = context.pullbackValid === true || ['near_20ma','near_50ma'].includes(pullbackState);
   const validStructure = ['strong','intact','developing_clean'].includes(structureState);
+  const bounceStarted = ['attempt','confirmed'].includes(bounceState);
   const bounceConfirmed = bounceState === 'confirmed';
   const bouncePriceable = context.hasPriceablePlanValues === true && context.hasClearInvalidationLevel !== false && !context.unpriceableBlockReason;
+  const nearEntryBounceReady = bounceStarted && bouncePriceable;
   const validBounce = bounceConfirmed && bouncePriceable;
   const hasEntrySafe = Boolean(context.hasEntry);
   const hasStopSafe = Boolean(context.hasStop);
@@ -43491,12 +43794,15 @@ function buildPromotionGateTrace(context = {}){
   const hasFullTradePlan = Boolean(hasEntrySafe && hasStopSafe && targetExists);
   const riskValid = context.stopDistanceTooWide !== true && !riskTooWide;
   const structureHardBlocked = ['weakening','weak','broken'].includes(structureState);
-  const bounceHardBlocked = !bounceConfirmed || !bouncePriceable;
+  const bounceHardBlocked = !nearEntryBounceReady;
+  const entryBounceHardBlocked = !validBounce;
   const priceBelow50MA = context.priceBelow50MA === true;
   const reclaimAttempt = context.reclaimAttempt === true;
   const below50WithoutReclaim = priceBelow50MA && !reclaimAttempt;
   const hardGateBlock = structureHardBlocked || bounceHardBlocked || below50WithoutReclaim;
-  const setupReadyForEntry = validStructure && validBounce && planExists && riskValid && pullbackValid && !hardGateBlock;
+  const entryHardGateBlock = structureHardBlocked || entryBounceHardBlocked || below50WithoutReclaim;
+  const setupReadyForNearEntry = validStructure && nearEntryBounceReady && planExists && riskValid && pullbackValid && !hardGateBlock;
+  const setupReadyForEntry = validStructure && validBounce && planExists && riskValid && pullbackValid && !entryHardGateBlock;
   const entryTriggerHit = context.breaksLocalHigh === true
     || context.reclaimsLevel === true
     || context.strongBullishContinuation === true;
@@ -43506,15 +43812,15 @@ function buildPromotionGateTrace(context = {}){
   const gate_structure_ok_for_near = validStructure;
   const gate_pullback_zone_ok_for_near = pullbackValid;
   const gate_stabilisation_ok_for_near = ['clear','present','early'].includes(stabilisationState) && stabilisationState !== 'none';
-  const gate_bounce_ok_for_near = validBounce;
+  const gate_bounce_ok_for_near = nearEntryBounceReady;
   const gate_plan_ok_for_near = planExists && ['valid','needs_adjustment'].includes(planStateKey);
   const gate_risk_width_ok_for_near = riskValid;
   const gate_hard_blockers_clear_for_near = !hardBlockers && !hardGateBlock;
   const gate_not_weakening_for_near = !structureHardBlocked;
-  const gate_trade_structure_clear_enough = tradeStructureClearEnough && setupReadyForEntry;
+  const gate_trade_structure_clear_enough = tradeStructureClearEnough && setupReadyForNearEntry;
 
   const promotion_watch_to_near_allowed = !!(
-    setupReadyForEntry
+    setupReadyForNearEntry
     && !entryTriggerHit
     && gate_bounce_ok_for_near
     && gate_stabilisation_ok_for_near
@@ -43526,7 +43832,7 @@ function buildPromotionGateTrace(context = {}){
   const gate_stabilisation_clear_for_entry = ['clear','present','early'].includes(stabilisationState) && stabilisationState !== 'none';
   const gate_plan_valid_for_entry = hasFullTradePlan && planStateKey === 'valid';
   const gate_prices_all_defined_for_entry = hasPriceablePlanValues && hasFullTradePlan;
-  const gate_blockers_clear_for_entry = !hardBlockers && !hardGateBlock && tradeStructureClearEnough;
+  const gate_blockers_clear_for_entry = !hardBlockers && !entryHardGateBlock && tradeStructureClearEnough;
   const gate_rr_ok_for_entry = rrReadyForEntry;
 
   const promotion_near_to_entry_allowed = !!(
@@ -43613,6 +43919,7 @@ function buildPromotionGateTrace(context = {}){
     promotion_near_to_entry_allowed,
     promotion_watch_to_near_reason,
     promotion_near_to_entry_reason,
+    setupReadyForNearEntry,
     setupReadyForEntry,
     entryTriggerHit,
     hardGateBlock,

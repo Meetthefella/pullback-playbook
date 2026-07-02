@@ -136,7 +136,9 @@ vm.runInContext(extractFunction('fallbackPlanProposalForCard'), sandbox, {filena
 vm.runInContext(extractFunction('tradePlanCandidateSnapshot'), sandbox, {filename:appPath});
 vm.runInContext(extractFunction('collectTradePlanAuthorityCandidates'), sandbox, {filename:appPath});
 vm.runInContext(extractFunction('effectivePlanForRecord'), sandbox, {filename:appPath});
+vm.runInContext(extractFunction('recordPlanHasConcreteValues'), sandbox, {filename:appPath});
 vm.runInContext(extractFunction('applyPlanCandidateToRecord'), sandbox, {filename:appPath});
+vm.runInContext(extractFunction('ensureCanonicalPlanForRecord'), sandbox, {filename:appPath});
 vm.runInContext(extractFunction('resolveCanonicalTradePlanAuthority'), sandbox, {filename:appPath});
 vm.runInContext(extractFunction('isResolverBlockedEstimatedPlanAuthority'), sandbox, {filename:appPath});
 vm.runInContext(extractFunction('buildReviewSemanticStatus'), sandbox, {filename:appPath});
@@ -193,6 +195,13 @@ sandbox.deriveExecutionPlanState = function(){
   };
 };
 sandbox.applyLifecycleStageFromPlan = function(){};
+sandbox.applyGlobalVerdictGates = function(record){
+  return {
+    record,
+    changed:false,
+    globalVerdict:{allow_plan:true}
+  };
+};
 
 function makeDisplayedPlan(overrides = {}){
   return {
@@ -370,6 +379,30 @@ function makeContext(overrides = {}){
   };
   const effectivePlan = sandbox.effectivePlanForRecord(unstampedPersistedRecord);
   assert(effectivePlan.source === 'not_generated', 'Review must refuse unstamped persisted plan objects.');
+}
+
+{
+  const unstampedConcreteRecord = {
+    ticker:'MIGR',
+    marketData:{currency:'USD'},
+    plan:{
+      entry:250,
+      stop:240,
+      firstTarget:280,
+      source:'manual_review',
+      status:'valid',
+      targetAlert:{},
+      exitMode:'fixed_target'
+    },
+    lifecycle:{},
+    review:{}
+  };
+  const changed = sandbox.ensureCanonicalPlanForRecord(unstampedConcreteRecord, {source:'review'});
+  assert(changed === true, 'Explicit canonical migration path must promote unstamped concrete plans.');
+  assert(unstampedConcreteRecord.plan.authoritySource === 'applyPlanCandidateToRecord', 'Explicit canonical migration must stamp authoritySource.');
+  assert(unstampedConcreteRecord.plan.authorityReason === 'promote_concrete_unstamped_plan', 'Explicit canonical migration must preserve promote_concrete_unstamped_plan reason.');
+  assert(unstampedConcreteRecord.plan.writtenBy === 'ensureCanonicalPlanForRecord', 'Explicit canonical migration must stamp ensureCanonicalPlanForRecord as writer.');
+  assert(sandbox.hasCanonicalTradePlanStamp(unstampedConcreteRecord.plan) === true, 'Explicit canonical migration must produce a valid canonical plan stamp.');
 }
 
 {

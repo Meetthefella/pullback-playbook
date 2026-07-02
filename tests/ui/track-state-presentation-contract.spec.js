@@ -353,6 +353,214 @@ test('canonical Near Entry stays distinct from Entry', async ({page}) => {
   expect(entryPanelText).not.toContain('This setup is Entry because');
 });
 
+test('constructive weak-RR Watch keeps the specific nearby-resistance explanation in Review', async ({page}) => {
+  await bootApp(page);
+
+  const result = await page.evaluate(() => {
+    const semantic = buildReviewSemanticStatus({
+      simplifiedState:{
+        canonicalVerdict:'watch',
+        structureState:'strong',
+        structureEligibility:'alive',
+        setupLocationState:'near_20ma',
+        priceabilityState:'priceable',
+        bounceState:'attempt',
+        planStatus:'valid',
+        mainBlocker:'Nearby resistance keeps the first target close, while the stop still needs to sit lower beneath support.'
+      },
+      globalVerdict:{
+        final_verdict:'watch',
+        structure_state:'strong',
+        structure_eligibility:'alive',
+        setup_location_state:'near_20ma',
+        priceability_state:'priceable',
+        bounce_state:'attempt'
+      },
+      derivedStates:{
+        structureState:'strong',
+        structureEligibility:'alive',
+        setupLocationState:'near_20ma',
+        priceabilityState:'priceable',
+        bounceState:'attempt',
+        stabilisationState:'clear',
+        volumeState:'weak'
+      },
+      displayedPlan:{
+        status:'valid',
+        entry:104.8,
+        stop:100.8,
+        target:107.78,
+        firstTarget:107.78,
+        rewardRisk:{valid:true, rrRatio:0.745},
+        riskFit:{risk_status:'fits_risk', position_size:10, max_loss:40},
+        capitalFit:{capital_fit:'acceptable', quote_currency:'USD'},
+        tradeability:'tradable',
+        affordability:'affordable'
+      },
+      planRealism:{raw_rr:0.7448, realistic_rr:0.7448}
+    });
+    const resolved = buildResolvedReviewDisplayModel({
+      record:{ticker:'MS', marketData:{price:104.8, currency:'USD'}},
+      simplifiedState:{
+        canonicalVerdict:'watch',
+        structureState:'strong',
+        structureEligibility:'alive',
+        bounceState:'attempt',
+        volumeState:'weak',
+        actionLabel:'Wait for stronger confirmation before considering entry.'
+      },
+      globalVerdict:{final_verdict:'watch'},
+      reviewSemanticStatus:semantic,
+      derivedStates:{
+        structureState:'strong',
+        structureEligibility:'alive',
+        pullbackState:'near_20ma',
+        setupLocationState:'near_20ma',
+        priceabilityState:'priceable',
+        bounceState:'attempt',
+        stabilisationState:'clear',
+        volumeState:'weak'
+      },
+      displayedPlan:{
+        status:'valid',
+        entry:104.8,
+        stop:100.8,
+        target:107.78,
+        firstTarget:107.78,
+        rewardRisk:{valid:true, rrRatio:0.745},
+        riskFit:{risk_status:'fits_risk', position_size:10, max_loss:40},
+        capitalFit:{capital_fit:'acceptable', quote_currency:'USD'},
+        tradeability:'tradable',
+        affordability:'affordable'
+      },
+      planRealism:{raw_rr:0.7448, realistic_rr:0.7448}
+    });
+    return {
+      stateLabel:String(semantic.stateLabel || ''),
+      tradeStatus:String(semantic.tradeStatus && `${semantic.tradeStatus.line1} ${semantic.tradeStatus.line2}` || ''),
+      blocker:String(semantic.blocker || ''),
+      resolvedNarrative:String(resolved.resolvedNarrative || ''),
+      reviewStatus:String(resolved.tradeStatus && resolved.tradeStatus.line1 || ''),
+      rrDisplay:String(resolved.rrDisplay || '')
+    };
+  });
+
+  const combinedText = [
+    result.stateLabel,
+    result.tradeStatus,
+    result.blocker,
+    result.resolvedNarrative,
+    result.reviewStatus
+  ].join(' ');
+
+  expect(result.stateLabel).toContain('Watch');
+  expect(result.rrDisplay).toBe('Priced');
+  expect(combinedText).toMatch(/buyers are starting to respond|bounce is interesting/i);
+  expect(combinedText).toMatch(/nearby resistance|first target close/i);
+  expect(combinedText).toMatch(/stop still needs to sit lower|beneath support/i);
+  expect(combinedText).toMatch(/reward-to-risk is still too weak|not good enough yet/i);
+  expect(combinedText).not.toMatch(/The app knows the maths, but the trade isn't ready/i);
+  expect(combinedText).not.toMatch(/Long-press the ticker card in Track for more info/i);
+});
+
+test('read-only getter, Review, Track, and diagnostics paths do not stamp or rewrite unstamped plans', async ({page}) => {
+  await bootApp(page);
+
+  const result = await page.evaluate(() => {
+    const ticker = 'READ';
+    const record = upsertTickerRecord(ticker);
+    record.meta.companyName = 'Read Path Systems';
+    record.meta.exchange = 'NASDAQ';
+    record.meta.tradingViewSymbol = `NASDAQ:${ticker}`;
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData.currency = 'USD';
+    record.marketData.price = 121.4;
+    record.marketData.previousClose = 120.8;
+    record.marketData.ma20 = 119.2;
+    record.marketData.ma50 = 114.6;
+    record.marketData.ma200 = 103.1;
+    record.marketData.volume = 1800000;
+    record.marketData.avgVolume = 1600000;
+    record.setup.structureState = 'strong';
+    record.setup.structureEligibility = 'alive';
+    record.setup.setupLocationState = 'near_20ma';
+    record.setup.pullbackZone = 'near_20ma';
+    record.setup.priceabilityState = 'priceable';
+    record.setup.bounceState = 'attempt';
+    record.setup.stabilisationState = 'stabilising';
+    record.setup.volumeState = 'supportive';
+    record.setup.trendState = 'strong';
+    delete record.setup.score;
+    record.plan.entry = 121.4;
+    record.plan.stop = 116.2;
+    record.plan.firstTarget = 132.8;
+    record.plan.target = 132.8;
+    record.plan.source = 'manual_review';
+    record.plan.status = 'valid';
+    record.plan.tradeability = 'tradable';
+    record.plan.riskStatus = 'fits_risk';
+    record.plan.writtenAt = '';
+    delete record.plan.authoritySource;
+    delete record.plan.authorityVersion;
+    delete record.plan.authorityReason;
+    delete record.plan.writtenBy;
+    delete record.plan.candidateSource;
+    delete record.plan.writtenAt;
+    record.review.manualReview = {
+      entry:121.4,
+      stop:116.2,
+      target:132.8
+    };
+    record.watchlist.inWatchlist = true;
+    record.watchlist.addedAt = '2026-06-29';
+    record.watchlist.expiryAfterTradingDays = 5;
+    state.marketStatus = 'S&P above 50 MA';
+    uiState.activeReviewProjectionSource = 'read_path_test';
+    uiState.activeReviewSourceProjectionSnapshot = null;
+    setActiveReviewTicker(ticker);
+
+    const beforeRecord = JSON.parse(JSON.stringify(state.tickerRecords[ticker]));
+
+    const liveRecord = getTickerRecord(ticker);
+    refreshTrackedTickerState(ticker, {
+      source:'review',
+      sourceSurface:'review',
+      reason:'read_path_test',
+      force:true,
+      persist:false,
+      emitTrace:true
+    });
+    resolveSimplifiedStateForSurface(cloneData(liveRecord), 'review', {
+      renderPass:0,
+      source:'read_path_test',
+      mutationSource:'read_path_test'
+    });
+    resolveSimplifiedStateForSurface(cloneData(liveRecord), 'track', {
+      renderPass:0,
+      source:'read_path_test',
+      mutationSource:'read_path_test'
+    });
+    currentReviewStateHealthSnapshot(cloneData(liveRecord));
+    buildTrackDiagnosticSnapshot(cloneData(liveRecord));
+
+    const afterRecord = JSON.parse(JSON.stringify(state.tickerRecords[ticker]));
+    return {
+      beforeRecord,
+      afterRecord,
+      unchanged:JSON.stringify(beforeRecord) === JSON.stringify(afterRecord)
+    };
+  });
+
+  expect(result.unchanged, 'read paths must not rewrite stored ticker records').toBe(true);
+  expect(result.afterRecord.plan.authoritySource, 'read paths must not stamp canonical authoritySource').toBeUndefined();
+  expect(result.afterRecord.plan.authorityVersion, 'read paths must not stamp canonical authorityVersion').toBeUndefined();
+  expect(result.afterRecord.plan.authorityReason, 'read paths must not stamp canonical authorityReason').toBeUndefined();
+  expect(result.afterRecord.plan.writtenBy, 'read paths must not stamp writtenBy').toBeUndefined();
+  expect(result.afterRecord.plan.writtenAt, 'read paths must not stamp writtenAt').toBeUndefined();
+  expect(result.afterRecord.plan.candidateSource, 'read paths must not stamp candidateSource').toBeUndefined();
+  expect(Object.prototype.hasOwnProperty.call(result.afterRecord.setup || {}, 'score'), 'read paths must not create setup.score').toBe(false);
+});
+
 test('debug card text cannot promote the Track long-press panel to Entry', async ({page}) => {
   await bootApp(page);
   const scenario = nearEntryScenario();
