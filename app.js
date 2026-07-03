@@ -4308,16 +4308,10 @@ function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedStat
   const item = normalizeTickerRecord(record || {});
   const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const verdict = normalizeGlobalVerdictKey(simplified.canonicalVerdict || 'watch');
-  if(verdict !== 'watch') return simplified;
-  if(!(item.watchlist && item.watchlist.inWatchlist)) return simplified;
-  if(String(simplified.planStatus || '').trim().toLowerCase() !== 'valid') return simplified;
-  if(String(simplified.priceabilityState || '').trim().toLowerCase() !== 'priceable') return simplified;
   const lifecycle = lifecycleSnapshot && typeof lifecycleSnapshot === 'object'
     ? lifecycleSnapshot
     : watchlistLifecycleSnapshot(item);
   const lifecycleVerdict = normalizeGlobalVerdictKey(lifecycle.state || '');
-  const overrideVerdict = lifecycleVerdict;
-  if(!['entry','near_entry'].includes(overrideVerdict)) return simplified;
   const global = globalVerdict && typeof globalVerdict === 'object'
     ? globalVerdict
     : resolveGlobalVerdict(item);
@@ -4327,8 +4321,11 @@ function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedStat
     || global.final_verdict_rendered
     || ''
   );
-  if(overrideVerdict === 'entry' && resolverVerdict !== 'entry') return simplified;
-  if(overrideVerdict === 'near_entry' && !['entry','near_entry'].includes(resolverVerdict)) return simplified;
+  const softReadinessOnlyDemotion = !!(
+    global
+    && global.contractDiagnostics
+    && global.contractDiagnostics.softReadinessOnlyDemotion === true
+  );
   const explicitInvalidationAuthorityCode = resolveStructuredExplicitInvalidationAuthorityCode(global);
   const planBlockedReasonCode = String(item.plan && item.plan.blockedReasonCode || '').trim().toLowerCase();
   const structureState = String(
@@ -4349,6 +4346,36 @@ function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedStat
     || structureEligibility === 'broken'
     || ['broken','failed'].includes(structureState);
   if(hardStructuredBlock) return simplified;
+  if(
+    verdict === 'entry'
+    && softReadinessOnlyDemotion
+    && String(simplified.planStatus || '').trim().toLowerCase() === 'valid'
+    && String(simplified.priceabilityState || '').trim().toLowerCase() === 'priceable'
+  ){
+    return {
+      ...simplified,
+      canonicalVerdict:'near_entry',
+      visualBucket:'near_entry',
+      tone:getTone('near_entry'),
+      entryGatePass:false,
+      nearEntryGatePass:true,
+      mainBlocker:String(simplified.mainBlocker || global.reason || 'Waiting for confirmation before entry.').trim(),
+      actionLabel:'Wait for confirmation before entry.',
+      debug:{
+        ...(simplified.debug || {}),
+        reviewWatchlistSoftReadinessDisplayOverrideApplied:true,
+        reviewWatchlistSoftReadinessDisplayOverrideSource:'soft_readiness_demotion'
+      }
+    };
+  }
+  if(verdict !== 'watch') return simplified;
+  if(!(item.watchlist && item.watchlist.inWatchlist)) return simplified;
+  if(String(simplified.planStatus || '').trim().toLowerCase() !== 'valid') return simplified;
+  if(String(simplified.priceabilityState || '').trim().toLowerCase() !== 'priceable') return simplified;
+  const overrideVerdict = lifecycleVerdict;
+  if(!['entry','near_entry'].includes(overrideVerdict)) return simplified;
+  if(overrideVerdict === 'entry' && resolverVerdict !== 'entry') return simplified;
+  if(overrideVerdict === 'near_entry' && !['entry','near_entry'].includes(resolverVerdict)) return simplified;
   const entryAuthorityAligned = overrideVerdict === 'entry';
   const nearEntryAuthorityAligned = overrideVerdict === 'entry' || overrideVerdict === 'near_entry';
   return {
@@ -8659,6 +8686,12 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     || globalVerdict.capital_note
     || ''
   ).trim());
+  const untrackedSoftReadinessReviewDemotion = !!(
+    (!item.watchlist || item.watchlist.inWatchlist !== true)
+    && softReadinessOnlyDemotion
+    && simplifiedVerdict === 'entry'
+    && trackedLifecycleHardStructuredBlock !== true
+  );
   const preserveTrackedEntryAuthority = !!(
     item.watchlist
     && item.watchlist.inWatchlist
@@ -8681,9 +8714,11 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const suppressAvoidForTrackedWatch = softTrackedWatchSuppression;
   const canonicalVerdict = suppressAvoidForTrackedWatch
     ? 'watch'
-    : (preserveTrackedEntryAuthority
+    : (untrackedSoftReadinessReviewDemotion
+      ? 'near_entry'
+      : (preserveTrackedEntryAuthority
       ? 'entry'
-      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict));
+      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict)));
   const effectiveCanonicalVerdict = projectionCanonicalVerdict || canonicalVerdict;
   const simplifiedBucket = normalizeVisualBucketForPairing(
     simplifiedState.visualBucket
@@ -8695,17 +8730,21 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     : (lifecycleVerdict === 'near_entry' ? 'near_entry' : '');
   const visualBucket = suppressAvoidForTrackedWatch
     ? (simplifiedBucket === 'avoid' ? 'diminishing' : (simplifiedBucket || 'diminishing'))
-    : (preserveTrackedLifecycleCanonicalVerdict
+    : (untrackedSoftReadinessReviewDemotion
+      ? 'near_entry'
+      : (preserveTrackedLifecycleCanonicalVerdict
       ? normalizeVisualBucketForPairing(lifecycleVisualBucket || simplifiedBucket || 'monitor')
-      : simplifiedBucket);
+      : simplifiedBucket));
   const canonicalTone = effectiveCanonicalVerdict === 'entry'
     ? 'entry'
     : (effectiveCanonicalVerdict === 'near_entry' ? 'near_entry' : '');
   const tone = suppressAvoidForTrackedWatch
     ? 'diminishing'
-    : (preserveTrackedLifecycleCanonicalVerdict
+    : (untrackedSoftReadinessReviewDemotion
+      ? 'near_entry'
+      : (preserveTrackedLifecycleCanonicalVerdict
       ? (canonicalTone || String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')
-      : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor'));
+      : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')));
   const suppressingTrackedAvoid = suppressAvoidForTrackedWatch === true;
   const preserveTrackedLifecycleLabels = preserveTrackedLifecycleCanonicalVerdict && !suppressingTrackedAvoid;
   const effectiveTrackVisibleState = {
@@ -8735,31 +8774,46 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     ? 'Trend is extended away from support - keep on monitor until price resets or repairs.'
     : String(simplifiedState.mainBlocker || '').trim();
   const authoritativeProjectionEntry = projectionAuthority && projectionCanonicalVerdict === 'entry';
+  const canonicalSoftReadinessLabel = effectiveCanonicalVerdict === 'near_entry'
+    ? 'Near Entry'
+    : globalVerdictLabel(effectiveCanonicalVerdict || 'watch');
+  const canonicalSoftReadinessAction = effectiveCanonicalVerdict === 'near_entry'
+    ? 'Wait for confirmation before entry.'
+    : canonicalSoftReadinessLabel;
+  const canonicalSoftReadinessHeadline = effectiveCanonicalVerdict === 'near_entry'
+    ? 'Near Entry'
+    : canonicalSoftReadinessLabel;
   const finalBadgeLabel = authoritativeProjectionEntry
     ? 'Entry'
+    : (untrackedSoftReadinessReviewDemotion
+      ? canonicalSoftReadinessLabel
     : (preserveTrackedLifecycleLabels
       ? String(globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()
       : (effectiveCanonicalVerdict === 'entry'
       ? 'Entry'
     : (suppressingTrackedAvoid
     ? 'Watch'
-      : String(simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim())));
+      : String(simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()))));
   const finalActionLabel = authoritativeProjectionEntry
     ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
+    : (untrackedSoftReadinessReviewDemotion
+      ? canonicalSoftReadinessAction
     : (preserveTrackedLifecycleLabels
       ? String(globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()
       : (effectiveCanonicalVerdict === 'entry'
       ? 'Execute only if the trigger remains valid.'
     : (suppressingTrackedAvoid
     ? (visualBucket === 'diminishing' ? 'Diminishing' : globalVerdictLabel(effectiveCanonicalVerdict || 'watch'))
-      : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim())));
+      : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()))));
   const headline = authoritativeProjectionEntry
     ? 'Entry Ready'
+    : (untrackedSoftReadinessReviewDemotion
+    ? canonicalSoftReadinessHeadline
     : (preserveTrackedLifecycleLabels
     ? String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()
     : (effectiveCanonicalVerdict === 'entry'
     ? String('Entry Ready' || 'Entry').trim()
-    : String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()));
+    : String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim())));
   const primaryReason = authoritativeProjectionEntry
     ? 'Buyers are in control and the setup is ready to act on.'
     : (canonicalVerdict === 'entry'
@@ -8767,11 +8821,13 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     : (mainBlocker || String(globalVerdict.reason || '').trim()));
   const nextAction = authoritativeProjectionEntry
     ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
+    : (untrackedSoftReadinessReviewDemotion
+    ? canonicalSoftReadinessAction
     : (effectiveCanonicalVerdict === 'entry'
     ? 'Execute only if the trigger remains valid.'
     : (effectiveCanonicalVerdict === 'watch'
       ? 'Wait for stronger confirmation before considering entry.'
-      : ''));
+      : '')));
   const planVisible = authoritativeProjectionEntry || effectiveCanonicalVerdict === 'entry' ? true : simplifiedState.planVisible === true;
   const planStatus = String(simplifiedState.planStatus || '').trim().toLowerCase() || 'missing';
   const planSummary = authoritativeProjectionEntry
@@ -8824,6 +8880,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       reason:String(options.reason || 'shared_presentation'),
       surface:String(options.surface || 'track'),
       softReadinessOnlyDemotion,
+      untrackedSoftReadinessReviewDemotion,
       preserveTrackedLifecycleCanonicalVerdict,
       suppressAvoidForTrackedWatch,
       suppressingTrackedAvoid
@@ -27531,7 +27588,14 @@ function buildReviewSemanticStatus({
       ? 'Needs confirmation before promotion.'
       : 'No actionable trade yet.';
   }
-  const actionable = canonicalPlanAuthority.actionable === true;
+  const actionable = canonicalPlanAuthority.actionable === true && verdict === 'entry';
+  const nearEntryPlanReady = verdict === 'near_entry'
+    && canonicalPlanAuthority.planStatus === 'valid'
+    && canonicalPlanAuthority.planFieldsPresent === true
+    && canonicalPlanAuthority.riskFits === true
+    && canonicalPlanAuthority.tradeabilityActionable === true
+    && canonicalPlanAuthority.terminalAvoid !== true
+    && canonicalPlanAuthority.structuralWeakness !== true;
   const resolverBlockedEstimatedPlan = resolverBlockedEstimatedPlanCheck(canonicalPlanAuthority);
   const unaffordableCanonicalPlan = planMathValid
     && planFieldsPresent
@@ -27562,6 +27626,11 @@ function buildReviewSemanticStatus({
     tradeStatus = {
       line1:'Entry Ready - plan is actionable.',
       line2:'Execute only if the trigger remains valid.'
+    };
+  }else if(nearEntryPlanReady){
+    tradeStatus = {
+      line1:'Near Entry - plan is defined, but confirmation is still required.',
+      line2:'Wait for confirmation before entry.'
     };
   }else if(resolverBlockedEstimatedPlan){
     const resolverBlockedCopy = String(
@@ -27618,7 +27687,11 @@ function buildReviewSemanticStatus({
     evidence:Array.isArray(sharedNarrative.evidence) ? sharedNarrative.evidence.slice() : [],
     cautions:Array.isArray(sharedNarrative.cautions) ? sharedNarrative.cautions.slice() : [],
     promotionRequirements:Array.isArray(sharedNarrative.promotionRequirements) ? sharedNarrative.promotionRequirements.slice() : [],
-    nextAction:String(accepted50MaSupportTest ? supportTestCopy.nextAction : (sharedNarrative.nextAction || '')).trim(),
+    nextAction:String(
+      nearEntryPlanReady
+        ? 'Wait for confirmation before entry.'
+        : (accepted50MaSupportTest ? supportTestCopy.nextAction : (sharedNarrative.nextAction || ''))
+    ).trim(),
     tradeStatus,
     planActionable:actionable,
     draftPlan,
@@ -40996,9 +41069,7 @@ function renderReviewWorkspace(options = {}){
     : resolvedReviewDisplay.nextActionLabel;
   const reviewBadgeLabel = effectiveReviewBadge.text;
   const planUI = resolvedReviewDisplay.planUI;
-  const entryReadyRecord = normalizeGlobalVerdictKey(record.scan && record.scan.resolvedVerdict || '') === 'entry'
-    || normalizeGlobalVerdictKey(record.scan && record.scan.verdict || '') === 'entry'
-    || effectiveSimplifiedCanonicalVerdict === 'entry';
+  const entryReadyRecord = effectiveSimplifiedCanonicalVerdict === 'entry';
   const effectivePlanUi = (authoritativeEntryReviewPresentation || entryReadyRecord)
     ? {
       ...planUI,
@@ -42322,9 +42393,7 @@ function syncPlanDisplayMeta(options = {}){
     activeProjectionSource,
     record
   );
-  const entryReadyRecord = normalizeGlobalVerdictKey(record.scan && record.scan.resolvedVerdict || '') === 'entry'
-    || normalizeGlobalVerdictKey(record.scan && record.scan.verdict || '') === 'entry'
-    || normalizeGlobalVerdictKey(effectiveMetaSimplifiedState.canonicalVerdict || '') === 'entry';
+  const entryReadyRecord = normalizeGlobalVerdictKey(effectiveMetaSimplifiedState.canonicalVerdict || '') === 'entry';
   const authoritativeEntryDisplayOverride = entryReadyRecord || projectionEntryDisplayOverride;
   const authoritativeReviewNextActionLabel = authoritativeEntryDisplayOverride
     ? String(
@@ -42614,8 +42683,7 @@ function calculate(options = {}){
     activeProjectionSource,
     activeRecord || record
   );
-  const entryReadyRecord = normalizeGlobalVerdictKey(activeRecord && activeRecord.scan && activeRecord.scan.resolvedVerdict || '') === 'entry'
-    || normalizeGlobalVerdictKey(activeRecord && activeRecord.scan && activeRecord.scan.verdict || '') === 'entry';
+  const entryReadyRecord = normalizeGlobalVerdictKey(effectiveMetaSimplifiedState.canonicalVerdict || '') === 'entry';
   const authoritativeEntryDisplayOverride = entryReadyRecord || projectionEntryDisplayOverride;
   const authoritativeReviewNextActionLabel = authoritativeEntryDisplayOverride
     ? String(
@@ -43948,17 +44016,43 @@ function buildPromotionGateTrace(context = {}){
   const pullbackState = String(context.pullbackState || '').toLowerCase();
   const stabilisationState = String(context.stabilisationState || '').toLowerCase();
   const bounceState = String(context.bounceState || '').toLowerCase();
+  const setupLocationState = String(context.setupLocationState || '').toLowerCase();
   const planStateKey = String(context.planStateKey || '').toLowerCase();
   const riskTooWide = !!context.riskTooWide;
   const hardBlockers = !!context.hardBlockers;
   const tradeStructureClearEnough = context.tradeStructureClearEnough === true;
   const hasPriceablePlanValues = context.hasPriceablePlanValues === true;
-  const pullbackValid = context.pullbackValid === true || ['near_20ma','near_50ma'].includes(pullbackState);
   const validStructure = ['strong','intact','developing_clean'].includes(structureState);
   const bounceStarted = ['attempt','confirmed'].includes(bounceState);
   const bounceConfirmed = bounceState === 'confirmed';
+  const currentPrice = Number(context.currentPrice);
+  const entryPrice = Number(context.entryPrice);
+  const priceHoldingEntry = Number.isFinite(currentPrice) && Number.isFinite(entryPrice) && currentPrice >= entryPrice;
+  const reclaimConfirmedAfterLeavingZone = !!(
+    (context.reclaimsLevel === true
+      || context.breaksLocalHigh === true
+      || context.strongBullishContinuation === true
+      || priceHoldingEntry)
+  );
+  const structureHardBlocked = ['weakening','weak','broken'].includes(structureState);
+  const priceBelow50MA = context.priceBelow50MA === true;
+  const reclaimAttempt = context.reclaimAttempt === true;
+  const below50WithoutReclaim = priceBelow50MA && !reclaimAttempt;
+  const recentlyLeftValidPullbackZone = context.recentlyLeftValidPullbackZone === true || !!(
+    ['none', 'off_level', ''].includes(pullbackState)
+    && ['off_level', 'extended', 'extended_from_support'].includes(setupLocationState)
+    && validStructure
+    && reclaimConfirmedAfterLeavingZone
+    && context.hasEntry === true
+    && context.hasStop === true
+    && !below50WithoutReclaim
+    && !structureHardBlocked
+  );
+  const pullbackValid = context.pullbackValid === true
+    || ['near_20ma','near_50ma'].includes(pullbackState)
+    || recentlyLeftValidPullbackZone;
   const bouncePriceable = context.hasPriceablePlanValues === true && context.hasClearInvalidationLevel !== false && !context.unpriceableBlockReason;
-  const nearEntryBounceReady = bounceStarted && bouncePriceable;
+  const nearEntryBounceReady = (bounceStarted && bouncePriceable) || (recentlyLeftValidPullbackZone && bouncePriceable && reclaimConfirmedAfterLeavingZone);
   const validBounce = bounceConfirmed && bouncePriceable;
   const hasEntrySafe = Boolean(context.hasEntry);
   const hasStopSafe = Boolean(context.hasStop);
@@ -43970,25 +44064,24 @@ function buildPromotionGateTrace(context = {}){
   const targetExists = hasTargetSafe || hasPlanValuesSafe;
   const hasFullTradePlan = Boolean(hasEntrySafe && hasStopSafe && targetExists);
   const riskValid = context.stopDistanceTooWide !== true && !riskTooWide;
-  const structureHardBlocked = ['weakening','weak','broken'].includes(structureState);
   const bounceHardBlocked = !nearEntryBounceReady;
   const entryBounceHardBlocked = !validBounce;
-  const priceBelow50MA = context.priceBelow50MA === true;
-  const reclaimAttempt = context.reclaimAttempt === true;
-  const below50WithoutReclaim = priceBelow50MA && !reclaimAttempt;
   const hardGateBlock = structureHardBlocked || bounceHardBlocked || below50WithoutReclaim;
   const entryHardGateBlock = structureHardBlocked || entryBounceHardBlocked || below50WithoutReclaim;
   const setupReadyForNearEntry = validStructure && nearEntryBounceReady && planExists && riskValid && pullbackValid && !hardGateBlock;
   const setupReadyForEntry = validStructure && validBounce && planExists && riskValid && pullbackValid && !entryHardGateBlock;
   const entryTriggerHit = context.breaksLocalHigh === true
     || context.reclaimsLevel === true
-    || context.strongBullishContinuation === true;
+    || context.strongBullishContinuation === true
+    || priceHoldingEntry;
   const rrValue = Number(context.rr);
   const rrReadyForEntry = Number.isFinite(rrValue) ? rrValue >= 2 : false;
 
   const gate_structure_ok_for_near = validStructure;
   const gate_pullback_zone_ok_for_near = pullbackValid;
-  const gate_stabilisation_ok_for_near = ['clear','present','early'].includes(stabilisationState) && stabilisationState !== 'none';
+  const gate_stabilisation_ok_for_near = (
+    ['clear','present','early'].includes(stabilisationState) && stabilisationState !== 'none'
+  ) || recentlyLeftValidPullbackZone;
   const gate_bounce_ok_for_near = nearEntryBounceReady;
   const gate_plan_ok_for_near = planExists && ['valid','needs_adjustment'].includes(planStateKey);
   const gate_risk_width_ok_for_near = riskValid;
@@ -43998,7 +44091,6 @@ function buildPromotionGateTrace(context = {}){
 
   const promotion_watch_to_near_allowed = !!(
     setupReadyForNearEntry
-    && !entryTriggerHit
     && gate_bounce_ok_for_near
     && gate_stabilisation_ok_for_near
     && gate_hard_blockers_clear_for_near
@@ -44096,6 +44188,8 @@ function buildPromotionGateTrace(context = {}){
     promotion_near_to_entry_allowed,
     promotion_watch_to_near_reason,
     promotion_near_to_entry_reason,
+    recentlyLeftValidPullbackZone,
+    reclaimConfirmedAfterLeavingZone,
     setupReadyForNearEntry,
     setupReadyForEntry,
     entryTriggerHit,
@@ -44152,6 +44246,7 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
     structureState,
     pullbackState,
     stabilisationState,
+    setupLocationState:String(context.setupLocationState || '').toLowerCase(),
     bounceState:effectiveBounceState,
     planStateKey,
     riskTooWide:!!context.riskTooWide,
@@ -44171,7 +44266,9 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
     strongBullishContinuation:!!context.strongBullishContinuation,
     priceBelow50MA:!!context.priceBelow50MA,
     reclaimAttempt:!!context.reclaimAttempt,
-    rr:numericOrNull(context.rr)
+    rr:numericOrNull(context.rr),
+    currentPrice:numericOrNull(context.currentPrice),
+    entryPrice:numericOrNull(context.planEntry || context.entry)
   });
   const blockerFlags = {
     structureState,
