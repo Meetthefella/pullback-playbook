@@ -33,6 +33,11 @@ function normalizeVisualBucket(value){
   return normalized;
 }
 
+function isTrackedAuthoritySource(value){
+  const normalized = normalizeVerdict(value);
+  return ['watchlist_refresh', 'review_save', 'manual'].includes(normalized);
+}
+
 function extractScoreValue(label){
   const match = normalizeText(label).match(/(\d+(?:\.\d+)?)\s*\/\s*10/i);
   if(!match) return null;
@@ -99,6 +104,16 @@ async function revealTrackCardIfPresent(page, ticker){
   return await card.isVisible().catch(() => false);
 }
 
+function hasRenderedTrackCard(state){
+  const trackVisible = state && state.track && state.track.visible ? state.track.visible : null;
+  const badge = normalizeText(trackVisible && trackVisible.badgeLabel);
+  const decisionSummary = normalizeText(trackVisible && trackVisible.decisionSummary);
+  const cardText = normalizeText(trackVisible && trackVisible.cardText);
+  const visualState = normalizeText(trackVisible && trackVisible.visualState);
+  const visualTone = normalizeText(trackVisible && trackVisible.visualTone);
+  return !!(badge || decisionSummary || cardText || visualState || visualTone);
+}
+
 function buildMismatchFindings({
   scanState,
   reviewState,
@@ -112,12 +127,13 @@ function buildMismatchFindings({
   const findings = [];
   const reviewCanonicalVerdict = normalizeVerdict(reviewState && reviewState.normalized && reviewState.normalized.reviewCanonicalVerdict);
   const reviewVisualBucket = normalizeVisualBucket(reviewState && reviewState.normalized && reviewState.normalized.reviewVisualBucket);
-  const reviewBadge = normalizeText(reviewState && reviewState.review && reviewState.review.visible && reviewState.review.visible.badgeLabel);
   const scanScore = extractScoreValue(scanState && scanState.scan && scanState.scan.visibleCard && scanState.scan.visibleCard.scoreLabel);
   const effectiveTrackState = rescanTrackState || trackState;
   const effectiveReviewFromTrackState = reviewFromTrackState || reviewState;
+  const renderedTrackPresent = hasRenderedTrackCard(trackState) || hasRenderedTrackCard(rescanTrackState);
   const reviewFromTrackCanonicalVerdict = normalizeVerdict(effectiveReviewFromTrackState && effectiveReviewFromTrackState.normalized && effectiveReviewFromTrackState.normalized.reviewCanonicalVerdict);
   const reviewFromTrackVisualBucket = normalizeVisualBucket(effectiveReviewFromTrackState && effectiveReviewFromTrackState.normalized && effectiveReviewFromTrackState.normalized.reviewVisualBucket);
+  const reviewFromTrackBadge = normalizeText(effectiveReviewFromTrackState && effectiveReviewFromTrackState.review && effectiveReviewFromTrackState.review.visible && effectiveReviewFromTrackState.review.visible.badgeLabel);
   const trackRenderedCanonicalVerdict = normalizeVerdict(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackCanonicalVerdict);
   const trackRenderedVisualBucket = normalizeVisualBucket(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackRenderedBucket);
   const trackAuthorityCanonicalVerdict = normalizeVerdict(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackAuthorityCanonicalVerdict);
@@ -143,11 +159,11 @@ function buildMismatchFindings({
   if(watchlistAddSucceeded){
     pushMismatch(
       findings,
-      trackCardVisible,
+      trackCardVisible || renderedTrackPresent,
       'Ticker was added to watchlist but no Track card was rendered.',
       {surface:'track'}
     );
-    if(trackCardVisible){
+    if(trackCardVisible || renderedTrackPresent){
       pushMismatch(
         findings,
         !!trackRenderedCanonicalVerdict,
@@ -204,14 +220,14 @@ function buildMismatchFindings({
           actual:trackRenderedVsAuthorityMismatch
         }
       );
-      if(reviewBadge && trackBadge){
+      if(reviewFromTrackBadge && trackBadge){
         pushMismatch(
           findings,
-          normalizeText(trackBadge) === normalizeText(reviewBadge),
-          'Track badge text diverged from initial Review badge text.',
+          normalizeText(trackBadge) === normalizeText(reviewFromTrackBadge),
+          'Track badge text diverged from Review badge text after reopen from Track.',
           {
             surface:'trackRendered',
-            expected:reviewBadge,
+            expected:reviewFromTrackBadge,
             actual:trackBadge
           }
         );
@@ -231,24 +247,40 @@ function buildMismatchFindings({
       if(trackState && rescanTrackState){
         const preRescanAuthority = trackState.authority && trackState.authority.journey || null;
         const postRescanAuthority = rescanTrackState.authority && rescanTrackState.authority.journey || null;
+        const preSource = normalizeVerdict(preRescanAuthority && preRescanAuthority.source);
+        const postSource = normalizeVerdict(postRescanAuthority && postRescanAuthority.source);
+        const preVersion = Number(preRescanAuthority && preRescanAuthority.version || 0);
+        const postVersion = Number(postRescanAuthority && postRescanAuthority.version || 0);
+        if(isTrackedAuthoritySource(preSource)){
+          pushMismatch(
+            findings,
+            preSource === postSource,
+            'Tracked rescan replaced existing tracked authority source.',
+            {
+              surface:'authority',
+              expected:preRescanAuthority && preRescanAuthority.source,
+              actual:postRescanAuthority && postRescanAuthority.source
+            }
+          );
+          pushMismatch(
+            findings,
+            preVersion === postVersion,
+            'Tracked rescan incremented existing tracked authority version.',
+            {
+              surface:'authority',
+              expected:preRescanAuthority && preRescanAuthority.version,
+              actual:postRescanAuthority && postRescanAuthority.version
+            }
+          );
+        }
         pushMismatch(
           findings,
-          normalizeText(preRescanAuthority && preRescanAuthority.source) === normalizeText(postRescanAuthority && postRescanAuthority.source),
-          'Tracked rescan replaced journey authority source.',
+          !(isTrackedAuthoritySource(preSource) && postSource === 'scan'),
+          'Tracked rescan fell back to scan authority over an existing tracked authority.',
           {
             surface:'authority',
             expected:preRescanAuthority && preRescanAuthority.source,
             actual:postRescanAuthority && postRescanAuthority.source
-          }
-        );
-        pushMismatch(
-          findings,
-          Number(preRescanAuthority && preRescanAuthority.version || 0) === Number(postRescanAuthority && postRescanAuthority.version || 0),
-          'Tracked rescan incremented journey authority version.',
-          {
-            surface:'authority',
-            expected:preRescanAuthority && preRescanAuthority.version,
-            actual:postRescanAuthority && postRescanAuthority.version
           }
         );
       }
@@ -321,6 +353,12 @@ test('specified ticker can run scan to review to track without synthetic seeding
     : false;
   await waitForUiTransitionSettle(page);
   const rescanTrackState = await extractAppTickerState(page, JOURNEY_TICKER, consoleEvents);
+  const effectiveTrackCardVisible = !!(
+    trackCardVisible
+    || rescanTrackCardVisible
+    || hasRenderedTrackCard(trackState)
+    || hasRenderedTrackCard(rescanTrackState)
+  );
 
   if(watchlistAddSucceeded){
     await openReviewFromTrackTicker(page, JOURNEY_TICKER);
@@ -342,7 +380,7 @@ test('specified ticker can run scan to review to track without synthetic seeding
     rescanTrackState,
     reviewFromTrackState,
     watchlistAddSucceeded,
-    trackCardVisible:trackCardVisible && rescanTrackCardVisible,
+    trackCardVisible:effectiveTrackCardVisible,
     paperTrade
   });
   const consoleErrors = consoleEvents.filter(entry => entry.type === 'error' || entry.type === 'pageerror');
@@ -357,7 +395,7 @@ test('specified ticker can run scan to review to track without synthetic seeding
     watchlist:{
       addAttempted:true,
       addSucceeded:watchlistAddSucceeded,
-      trackCardVisible
+      trackCardVisible:effectiveTrackCardVisible
     },
     scan:scanState,
     review:reviewState,

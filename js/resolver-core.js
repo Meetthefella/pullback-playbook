@@ -212,6 +212,44 @@
     ].includes(zone);
   }
 
+  function inferRecentlyLeftValidPullbackZone(ctx = {}){
+    if(ctx.recently_left_valid_pullback_zone === true) return true;
+    const zone = String(ctx.pullback_zone || '').trim().toLowerCase();
+    if(['left_20ma', 'left_50ma', 'recently_left_20ma', 'recently_left_50ma'].includes(zone)) return true;
+
+    const setupLocationState = String(ctx.setup_location_state || '').trim().toLowerCase();
+    const structureState = String(ctx.structure_state || '').trim().toLowerCase();
+    const stabilisationState = String(ctx.stabilisation_state || '').trim().toLowerCase();
+    const currentPrice = numericValueOrNull(ctx.current_price);
+    const ma20 = numericValueOrNull(ctx.ma20);
+    const ma50 = numericValueOrNull(ctx.ma50);
+    const hasPlan = ctx.has_entry === true && ctx.has_stop === true;
+    const reclaimConfirmed = ctx.reclaim_confirmed_independent === true
+      || ctx.reclaims_level === true
+      || (ctx.entry_trigger_hit === true && ctx.reclaim_attempt === true)
+      || (ctx.entry_trigger_hit === true && ['clear', 'present', 'early'].includes(stabilisationState));
+    const above20 = ctx.price_above_20ma === true
+      || (currentPrice !== null && ma20 !== null && currentPrice >= ma20);
+    const above50 = ctx.price_above_50ma === true
+      || (currentPrice !== null && ma50 !== null && currentPrice >= ma50);
+    const notTooExtendedFrom20 = currentPrice !== null && ma20 !== null && ma20 !== 0
+      ? ((currentPrice - ma20) / ma20) <= 0.08
+      : true;
+
+    return !!(
+      ['none', 'off_level', ''].includes(zone)
+      && ['off_level', 'extended', 'extended_from_support'].includes(setupLocationState)
+      && ['strong', 'intact', 'developing_clean'].includes(structureState)
+      && reclaimConfirmed
+      && hasPlan
+      && above20
+      && above50
+      && notTooExtendedFrom20
+      && ctx.price_below_50ma !== true
+      && ctx.price_below_200ma !== true
+    );
+  }
+
   function independentEntryTriggerHit(ctx = {}){
     const structureState = String(ctx.structure_state || '').trim().toLowerCase();
     const trendState = String(ctx.trend_state || '').trim().toLowerCase();
@@ -273,7 +311,11 @@
     const stop = provisionalNumericValue(ctx, 'stop', 'provisional_stop');
     const target = provisionalNumericValue(ctx, 'target', 'provisional_target');
     const rr = provisionalNumericValue(ctx, 'rr', 'provisional_rr');
-    const pullbackOk = nearEntryPullbackZoneOk(ctx.pullback_zone) || ctx.recently_left_valid_pullback_zone === true;
+    const recentlyLeftValidPullbackZone = inferRecentlyLeftValidPullbackZone({
+      ...ctx,
+      reclaim_confirmed_independent:bouncePriceability.reclaimConfirmed === true
+    });
+    const pullbackOk = nearEntryPullbackZoneOk(ctx.pullback_zone) || recentlyLeftValidPullbackZone;
     const structureOk = ['strong', 'intact', 'developing_clean'].includes(structureState);
     const hardStructureBlocked = ['weakening', 'weak', 'broken', 'developing_loose'].includes(structureState) || trendState === 'broken';
     const hasClearInvalidationLevel = bouncePriceability.hasClearInvalidationLevel === true
@@ -339,6 +381,7 @@
       hasClearInvalidationLevel,
       hasProvisionalPriceablePlan,
       provisionalPlanBlockReason:hardBlockReason,
+      recentlyLeftValidPullbackZone,
       pullbackOk,
       bounceAccepted
     };
@@ -432,14 +475,20 @@
       : ((rrValue !== null && rrValue >= MIN_NEAR_ENTRY_RR) || (provisionalRrValue !== null && provisionalRrValue >= MIN_NEAR_ENTRY_RR));
     const confirmedBounceOk = bounceState === 'confirmed' && !bouncePriceability.unpriceableBlockReason && bouncePriceability.reclaimConfirmed === true;
     const provisionalBounceOk = provisionalPlan.nearEntryProvisionalBounceApplied === true;
+    const recentlyLeftValidPullbackZone = provisionalPlan.recentlyLeftValidPullbackZone === true
+      || inferRecentlyLeftValidPullbackZone({
+        ...ctx,
+        reclaim_confirmed_independent:bouncePriceability.reclaimConfirmed === true
+      });
+    const reclaimConfirmedAfterLeavingZone = recentlyLeftValidPullbackZone && bouncePriceability.reclaimConfirmed === true;
     const checks = {
       structure_ok:['strong', 'intact', 'developing_clean'].includes(structureState),
       structure_hard_blocked:['weakening', 'weak', 'broken', 'developing_loose'].includes(structureState),
-      bounce_ok:confirmedBounceOk || provisionalBounceOk,
-      bounce_hard_blocked:!(confirmedBounceOk || provisionalBounceOk),
-      pullback_ok:nearEntryPullbackZoneOk(pullbackZone) || ctx.recently_left_valid_pullback_zone === true,
+      bounce_ok:confirmedBounceOk || provisionalBounceOk || reclaimConfirmedAfterLeavingZone,
+      bounce_hard_blocked:!(confirmedBounceOk || provisionalBounceOk || reclaimConfirmedAfterLeavingZone),
+      pullback_ok:nearEntryPullbackZoneOk(pullbackZone) || recentlyLeftValidPullbackZone,
       pullback_valid:ctx.pullback_valid !== false || provisionalPlan.pullbackOk === true,
-      near_entry_pullback_zone_accepted:nearEntryPullbackZoneOk(pullbackZone) || ctx.recently_left_valid_pullback_zone === true,
+      near_entry_pullback_zone_accepted:nearEntryPullbackZoneOk(pullbackZone) || recentlyLeftValidPullbackZone,
       near_entry_terminal_block_applied:nearEntryTerminalBlocked(ctx),
       plan_visible:ctx.plan_visible === true || hasProvisionalPlan,
       has_entry:ctx.has_entry === true || numericValueOrNull(ctx.provisional_entry) !== null,
@@ -465,6 +514,8 @@
       has_provisional_priceable_plan:provisionalPlan.hasProvisionalPriceablePlan === true,
       near_entry_provisional_bounce_applied:provisionalPlan.nearEntryProvisionalBounceApplied === true,
       near_entry_provisional_bounce_reason:String(provisionalPlan.nearEntryProvisionalBounceReason || '').trim(),
+      recently_left_valid_pullback_zone:recentlyLeftValidPullbackZone,
+      reclaim_confirmed_after_leaving_zone:reclaimConfirmedAfterLeavingZone,
       original_bounce_state:provisionalPlan.originalBounceState,
       adjusted_bounce_state:provisionalPlan.adjustedBounceState,
       provisional_plan_block_reason:String(provisionalPlan.provisionalPlanBlockReason || '').trim(),
@@ -1387,6 +1438,7 @@
       stabilisation_state:String(derivedStates.stabilisationState || '').toLowerCase(),
       bounce_state:bounceState,
       pullback_zone:pullbackZone,
+      setup_location_state:setupLocationState,
       market_regime:marketWeak ? 'weak' : 'normal',
       volume_state:volumeState,
       volume_required:volumeRequired,
@@ -1412,6 +1464,10 @@
       provisional_stop:rawPlanStop,
       provisional_target:rawPlanTarget,
       current_price:currentPrice,
+      ma20,
+      ma50,
+      price_above_20ma:priceBelow20MA === false,
+      price_above_50ma:priceBelow50MA === false,
       trend_state:trendState,
       reclaims_level:item && item.reclaimsLevel === true,
       setup_score:setupScore,
@@ -2066,6 +2122,42 @@
           terminal_avoid_applied:true
         },
         expect:{near:false, entry:false}
+      },
+      {
+        id:'UNP-reclaim-off-support-near-entry',
+        ctx:{
+          structure_state:'strong',
+          trend_state:'intact',
+          stabilisation_state:'none',
+          bounce_state:'attempt',
+          plan_visible:true,
+          has_entry:true,
+          has_stop:true,
+          has_target:true,
+          plan_status:'valid',
+          pullback_zone:'none',
+          setup_location_state:'off_level',
+          pullback_valid:false,
+          stop_distance_too_wide:false,
+          entry:282.25,
+          stop:264.38,
+          target:340.31,
+          current_price:282.25,
+          ma20:267.66,
+          ma50:267.05,
+          rr:3.25,
+          market_regime:'normal',
+          volume_state:'weak',
+          tradeability:'tradable',
+          entry_trigger_hit:true,
+          reclaim_attempt:true,
+          reclaims_level:true,
+          price_below_50ma:false,
+          price_below_200ma:false,
+          ma50_below_200ma:false,
+          capital_fit:'acceptable'
+        },
+        expect:{near:true, entry:false}
       }
     ];
     const buildResolverDepsForAssertions = () => ({
