@@ -16,7 +16,11 @@ module.exports = defineConfig({
     command:'node scripts/playwright-static-server.js',
     url:baseURL,
     reuseExistingServer:true,
-    timeout:30000
+    timeout:30000,
+    gracefulShutdown:{
+      signal:'SIGTERM',
+      timeout:1000
+    }
   },
   use:{
     baseURL,

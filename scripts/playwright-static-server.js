@@ -71,14 +71,26 @@ const server = http.createServer((request, response) => {
   });
 });
 
+let shuttingDown = false;
+
+function shutdown(exitCode = 0){
+  if(shuttingDown) return;
+  shuttingDown = true;
+  server.close(() => {
+    process.exit(exitCode);
+  });
+  setTimeout(() => {
+    process.exit(exitCode);
+  }, 1000).unref();
+}
+
 server.on('error', error => {
   if(error && error.code === 'EADDRINUSE'){
     const probe = http.get({host, port, path:'/'}, response => {
       response.resume();
       process.stdout.write(`Playwright static server already listening on http://${host}:${port}\n`);
       if(response.statusCode && response.statusCode < 500){
-        setInterval(() => {}, 1 << 30);
-        return;
+        process.exit(0);
       }
       process.exit(1);
     });
@@ -99,3 +111,7 @@ server.on('error', error => {
 server.listen(port, host, () => {
   process.stdout.write(`Playwright static server listening on http://${host}:${port}\n`);
 });
+
+process.on('SIGINT', () => shutdown(0));
+process.on('SIGTERM', () => shutdown(0));
+process.on('SIGBREAK', () => shutdown(0));
