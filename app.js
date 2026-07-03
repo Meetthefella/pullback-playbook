@@ -8697,6 +8697,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     && item.watchlist.inWatchlist
     && softReadinessOnlyDemotion
     && simplifiedVerdict === 'near_entry'
+    && normalizeGlobalVerdictKey(item.watchlist && item.watchlist.status || '') !== 'near_entry'
     && trackedLifecycleHardStructuredBlock !== true
     && trackedPlanStatus === 'valid'
     && trackedPriceabilityState === 'priceable'
@@ -8711,14 +8712,26 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     && simplifiedVerdict === 'watch'
     && trackedLifecycleHardStructuredBlock !== true
   );
+  const preserveReviewSoftDemotionOnWatchlistSeed = !!(
+    item.watchlist
+    && item.watchlist.inWatchlist
+    && sourceOfTruth === 'watchlist_persisted_presentation'
+    && String(options.source || '').trim().toLowerCase() === 'review'
+    && String(options.reason || '').trim().toLowerCase() === 'review_snapshot_authoritative'
+    && softReadinessOnlyDemotion
+    && simplifiedVerdict === 'near_entry'
+    && trackedLifecycleHardStructuredBlock !== true
+  );
   const suppressAvoidForTrackedWatch = softTrackedWatchSuppression;
   const canonicalVerdict = suppressAvoidForTrackedWatch
     ? 'watch'
-    : (untrackedSoftReadinessReviewDemotion
+    : (preserveReviewSoftDemotionOnWatchlistSeed
+      ? 'near_entry'
+      : (untrackedSoftReadinessReviewDemotion
       ? 'near_entry'
       : (preserveTrackedEntryAuthority
       ? 'entry'
-      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict)));
+      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict))));
   const effectiveCanonicalVerdict = projectionCanonicalVerdict || canonicalVerdict;
   const simplifiedBucket = normalizeVisualBucketForPairing(
     simplifiedState.visualBucket
@@ -8730,21 +8743,25 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     : (lifecycleVerdict === 'near_entry' ? 'near_entry' : '');
   const visualBucket = suppressAvoidForTrackedWatch
     ? (simplifiedBucket === 'avoid' ? 'diminishing' : (simplifiedBucket || 'diminishing'))
-    : (untrackedSoftReadinessReviewDemotion
+    : (preserveReviewSoftDemotionOnWatchlistSeed
+      ? 'near_entry'
+      : (untrackedSoftReadinessReviewDemotion
       ? 'near_entry'
       : (preserveTrackedLifecycleCanonicalVerdict
       ? normalizeVisualBucketForPairing(lifecycleVisualBucket || simplifiedBucket || 'monitor')
-      : simplifiedBucket));
+      : simplifiedBucket)));
   const canonicalTone = effectiveCanonicalVerdict === 'entry'
     ? 'entry'
     : (effectiveCanonicalVerdict === 'near_entry' ? 'near_entry' : '');
   const tone = suppressAvoidForTrackedWatch
     ? 'diminishing'
-    : (untrackedSoftReadinessReviewDemotion
+    : (preserveReviewSoftDemotionOnWatchlistSeed
+      ? 'near_entry'
+      : (untrackedSoftReadinessReviewDemotion
       ? 'near_entry'
       : (preserveTrackedLifecycleCanonicalVerdict
       ? (canonicalTone || String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')
-      : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')));
+      : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor'))));
   const suppressingTrackedAvoid = suppressAvoidForTrackedWatch === true;
   const preserveTrackedLifecycleLabels = preserveTrackedLifecycleCanonicalVerdict && !suppressingTrackedAvoid;
   const effectiveTrackVisibleState = {
@@ -8880,6 +8897,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       reason:String(options.reason || 'shared_presentation'),
       surface:String(options.surface || 'track'),
       softReadinessOnlyDemotion,
+      preserveReviewSoftDemotionOnWatchlistSeed,
       untrackedSoftReadinessReviewDemotion,
       preserveTrackedLifecycleCanonicalVerdict,
       suppressAvoidForTrackedWatch,
@@ -12494,6 +12512,13 @@ function shouldSuppressWatchlistAddSoftDowngrade(record, snapshot, context = {})
   if(source !== 'watchlist_add' && source !== 'auto_recompute') return false;
   const item = record && typeof record === 'object' ? record : {};
   const currentSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const watchlistSeedVerdict = normalizeGlobalVerdictKey(
+    item.watchlist && (
+      item.watchlist.status
+      || item.watchlist.verdictWhenAdded
+    ) || ''
+  );
+  if(watchlistSeedVerdict === 'near_entry') return false;
   if(String(currentSnapshot.state || '').trim().toLowerCase() !== 'entry') return false;
   const downgradeReason = String(
     currentSnapshot.downgradeReason
@@ -34294,22 +34319,30 @@ function reviewOpenMutationSnapshot(record, context = 'review_open'){
 function buildStableReviewProjectionSnapshot(record, context = 'review_open_during_refresh'){
   const item = normalizeTickerRecord(record);
   const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {log:false});
+  const globalVerdict = resolveGlobalVerdict(item);
+  const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
+  const effectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(
+    item,
+    simplifiedState,
+    globalVerdict,
+    lifecycleSnapshot
+  );
   const ticker = normalizeTicker(item.ticker || '');
   if(!ticker) return null;
-  const visualBucket = String(simplifiedState.visualBucket || '').trim();
-  const canonicalVerdict = String(simplifiedState.canonicalVerdict || '').trim();
-  const tone = String(simplifiedState.tone || visualBucket || '').trim();
+  const visualBucket = String(effectiveSimplifiedState.visualBucket || '').trim();
+  const canonicalVerdict = String(effectiveSimplifiedState.canonicalVerdict || '').trim();
+  const tone = String(effectiveSimplifiedState.tone || visualBucket || '').trim();
   const decisionSummary = String(
-    simplifiedState.decisionSummary
-    || simplifiedState.mainBlocker
-    || simplifiedState.actionLabel
-    || simplifiedState.planStatus
+    effectiveSimplifiedState.decisionSummary
+    || effectiveSimplifiedState.mainBlocker
+    || effectiveSimplifiedState.actionLabel
+    || effectiveSimplifiedState.planStatus
     || ''
   ).trim();
-  const actionGuidance = String(simplifiedState.actionLabel || '').trim();
+  const actionGuidance = String(effectiveSimplifiedState.actionLabel || '').trim();
   const resolvedSectionKey = String(
-    simplifiedState.sectionKey
-    || simplifiedState.renderedBucket
+    effectiveSimplifiedState.sectionKey
+    || effectiveSimplifiedState.renderedBucket
     || visualBucket
     || ''
   ).trim().toLowerCase();
@@ -35283,11 +35316,22 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
     }
   };
   const globalVerdict = resolveGlobalVerdict(liveRecord);
-  const simplifiedState = resolveSimplifiedStateForSurface(liveRecord, 'track', {
+  const simplifiedStateSurface = String(sourceSurface || '').trim().toLowerCase() === 'review'
+    ? 'review'
+    : 'track';
+  const resolvedSimplifiedState = resolveSimplifiedStateForSurface(liveRecord, simplifiedStateSurface, {
     log:false,
     source,
     reason
   });
+  const simplifiedState = simplifiedStateSurface === 'review'
+    ? applyReviewWatchlistSoftReadinessDisplayOverride(
+      liveRecord,
+      resolvedSimplifiedState,
+      globalVerdict,
+      watchlistLifecycleSnapshot(liveRecord)
+    )
+    : resolvedSimplifiedState;
   const persistedPresentation = persistTrackPresentationOnRecord(liveRecord, {
     resolvedContract,
     visualState,
@@ -36981,11 +37025,20 @@ function addActiveReviewTickerToWatchlist(){
     return;
   }
   const preAddReviewProjectionSnapshot = buildStableReviewProjectionSnapshot(liveRecord, 'watchlist_add_projection');
+  const reviewProjectedVerdictWhenAdded = normalizeAnalysisVerdict(
+    preAddReviewProjectionSnapshot && (
+      preAddReviewProjectionSnapshot.canonicalVerdict
+      || preAddReviewProjectionSnapshot.finalVerdict
+      || preAddReviewProjectionSnapshot.renderedVerdict
+    )
+    || preferredVerdictForRecord(liveRecord)
+    || ''
+  );
   const entry = addToWatchlist({
     ticker:liveRecord.ticker,
     dateAdded:todayIsoDate(),
     scoreWhenAdded:preferredScoreForRecord(liveRecord),
-    verdictWhenAdded:preferredVerdictForRecord(liveRecord),
+    verdictWhenAdded:reviewProjectedVerdictWhenAdded,
     expiryAfterTradingDays:5
   });
   renderReviewLifecycleSummary(ticker);
@@ -42596,6 +42649,14 @@ function calculate(options = {}){
   const plannerSimplifiedState = activeRecord
     ? resolveSimplifiedStateForSurface(activeRecord, 'review', {log:false})
     : resolveSimplifiedStateForSurface({}, 'review', {log:false});
+  const effectiveMetaSimplifiedState = activeRecord
+    ? applyReviewWatchlistSoftReadinessDisplayOverride(
+      activeRecord,
+      plannerSimplifiedState,
+      globalVerdict,
+      watchlistLifecycleSnapshot(activeRecord)
+    )
+    : plannerSimplifiedState;
   const plannerVisualState = activeRecord ? resolveVisualState(activeRecord, 'review', {
     resolvedContract,
     derivedStates:plannerDerivedStates,
