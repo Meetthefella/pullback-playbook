@@ -4334,13 +4334,9 @@ function currentReviewStateHealthSnapshot(record){
       ) || ''
     ).trim().toLowerCase() || '')
     : '';
-  const savedReviewVerdict = !reviewSnapshotAuthority && isPersistedDisplayProjectionSource(reviewProjectionSource)
-    ? normalizeOptionalGlobalVerdictKey(item.review && item.review.savedVerdict || '')
-    : '';
   const simplifiedCanonicalVerdict = projectionCanonicalVerdict
     || normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
   let simplifiedVisualBucket = projectionVisualBucket
-    || (savedReviewVerdict ? normalizeVisualBucketForPairing(savedReviewVerdict) : '')
     || normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
   if(simplifiedCanonicalVerdict === 'entry' && simplifiedVisualBucket !== 'entry'){
     simplifiedVisualBucket = 'entry';
@@ -4348,7 +4344,6 @@ function currentReviewStateHealthSnapshot(record){
     simplifiedVisualBucket = 'near_entry';
   }
   const derivedTone = projectionTone
-    || (savedReviewVerdict ? String(simplifiedVisualBucket || savedReviewVerdict).trim().toLowerCase() : '')
     || (String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor');
   const authoritativeEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'entry';
   const authoritativeNearEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'near_entry';
@@ -4613,7 +4608,7 @@ function currentReviewStateHealthSnapshot(record){
     terminalAvoidApplied:effectiveSimplifiedState.terminalAvoidApplied === true,
     divergenceDetected,
     lastReviewedAt:String(item.review && item.review.lastReviewedAt || ''),
-    displayContinuityVerdict:savedReviewVerdict,
+    displayContinuityVerdict:'',
     planAuthority,
     planTrace,
     planCandidates
@@ -43471,12 +43466,6 @@ function renderReviewWorkspace(options = {}){
     globalVerdict,
     refreshBundle && refreshBundle.lifecycleSnapshot
   );
-  const persistedDisplayStateHealth = !reviewSnapshotAuthority && isPersistedDisplayProjectionSource(reviewProjectionSource)
-    ? currentReviewStateHealthSnapshot(record)
-    : null;
-  const savedReviewVerdict = !reviewSnapshotAuthority && isPersistedDisplayProjectionSource(reviewProjectionSource)
-    ? normalizeOptionalGlobalVerdictKey(record.review && record.review.savedVerdict || '')
-    : '';
   const simplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
   const simplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
   let normalizedSimplifiedVisualBucket = simplifiedVisualBucket;
@@ -43486,28 +43475,13 @@ function renderReviewWorkspace(options = {}){
     normalizedSimplifiedVisualBucket = 'near_entry';
   }
   let effectiveSimplifiedCanonicalVerdict = projectionCanonicalVerdict
-    || savedReviewVerdict
-    || normalizeOptionalGlobalVerdictKey(persistedDisplayStateHealth && persistedDisplayStateHealth.canonicalVerdict || '')
     || normalizeGlobalVerdictKey(reviewEffectiveSimplifiedState.canonicalVerdict || 'watch');
   let effectiveSimplifiedVisualBucket = projectionVisualBucket
-    || (savedReviewVerdict ? normalizeVisualBucketForPairing(savedReviewVerdict) : '')
-    || normalizeVisualBucketForPairing(persistedDisplayStateHealth && persistedDisplayStateHealth.visualBucket || '')
     || normalizeVisualBucketForPairing(reviewEffectiveSimplifiedState.visualBucket || simplifiedState.visualBucket || 'monitor');
   if(effectiveSimplifiedCanonicalVerdict === 'entry' && effectiveSimplifiedVisualBucket !== 'entry'){
     effectiveSimplifiedVisualBucket = 'entry';
   }else if(effectiveSimplifiedCanonicalVerdict === 'near_entry' && effectiveSimplifiedVisualBucket === 'monitor'){
     effectiveSimplifiedVisualBucket = 'near_entry';
-  }
-  const savedEntryProjectionDisplay = (
-    !reviewSnapshotAuthority
-    && normalizeGlobalVerdictKey(record.review && record.review.savedVerdict || '') === 'entry'
-    && normalizeReviewProjectionSource(reviewProjectionSource, presentationProjectionSnapshot) === 'track_projection_updated'
-  )
-    ? persistedReviewProjectionSnapshot(record, 'review_saved_entry_render')
-    : null;
-  if(savedEntryProjectionDisplay && effectiveSimplifiedCanonicalVerdict !== 'entry'){
-    effectiveSimplifiedCanonicalVerdict = 'entry';
-    effectiveSimplifiedVisualBucket = 'entry';
   }
   const accepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
     record,
@@ -45532,9 +45506,6 @@ function persistActiveReviewDraft(options = {}){
   };
   record.review.draft = manualReview;
   if(isManualSave){
-    const normalizedSavedVerdict = String(result.status || '').trim()
-      ? normalizeImportedStatus(result.status, {preserveEmpty:true})
-      : '';
     const persistSavedReviewAuthority = typeof writeSavedReviewAuthority === 'function'
       ? writeSavedReviewAuthority
       : function fallbackWriteSavedReviewAuthority(targetRecord, payload = {}){
@@ -45565,7 +45536,8 @@ function persistActiveReviewDraft(options = {}){
       manualReview,
       lastReviewedAt:manualReview.savedAt,
       savedSummary:manualReview.summary,
-      savedVerdict:normalizedSavedVerdict,
+      savedVerdict:'',
+      savedProjectionSnapshot:null,
       savedScore:Number.isFinite(numericOrNull(result.score)) ? Number(result.score) : record.review.savedScore
     });
     if(activeReviewTicker() === ticker){
