@@ -8619,6 +8619,7 @@ function runTrackPresentationAuthorityAssertions(){
     }
   };
   vm.createContext(trackDiagnosticSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'diagnosticWatchlistDebugSnapshot'), trackDiagnosticSandbox, {filename:'app.js#diagnosticWatchlistDebugSnapshot'});
   vm.runInContext(extractFunctionSource(appSource, 'buildWatchlistSimplifiedStateCacheKey'), trackDiagnosticSandbox, {filename:'app.js#buildWatchlistSimplifiedStateCacheKey'});
   vm.runInContext(extractFunctionSource(appSource, 'resolveSimplifiedStateForWatchlistPresentation'), trackDiagnosticSandbox, {filename:'app.js#resolveSimplifiedStateForWatchlistPresentation'});
   vm.runInContext(extractFunctionSource(appSource, 'buildTrackDiagnosticSnapshot'), trackDiagnosticSandbox, {filename:'app.js#buildTrackDiagnosticSnapshot'});

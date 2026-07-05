@@ -266,6 +266,8 @@ function normalizeSnapshotInput(payload, fallbackTicker = ''){
   const ticker = normalizeTicker(fields.ticker || source.ticker || fallbackTicker);
   return {
     ticker,
+    canonicalContract:cloneObject(source.canonicalContract),
+    renderModels:cloneObject(source.renderModels),
     companyName:String(fields.companyName || source.companyName || '').trim(),
     exchange:String(fields.exchange || source.exchange || '').trim(),
     currency:String(fields.currency || source.currency || 'USD').trim() || 'USD',
@@ -342,6 +344,143 @@ function normalizeReviewProjectionContext(snapshot){
     projectionSnapshot,
     canonicalVerdict,
     visualBucket
+  };
+}
+
+function normalizeVerdictKey(value){
+  const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+  if(safe === 'near entry') return 'near_entry';
+  if(safe === 'near-entry') return 'near_entry';
+  if(['watch', 'near_entry', 'entry', 'avoid', 'monitor', 'diminishing'].includes(safe)) return safe;
+  if(safe.indexOf('near') >= 0 && safe.indexOf('entry') >= 0) return 'near_entry';
+  if(safe.indexOf('entry') >= 0) return 'entry';
+  if(safe.indexOf('avoid') >= 0) return 'avoid';
+  if(safe.indexOf('watch') >= 0) return 'watch';
+  return safe;
+}
+
+function normalizeVisualBucketKey(value, canonicalVerdict = ''){
+  const safe = normalizeVerdictKey(value);
+  if(['entry', 'near_entry', 'monitor', 'diminishing', 'avoid'].includes(safe)) return safe;
+  const verdict = normalizeVerdictKey(canonicalVerdict);
+  if(verdict === 'entry') return 'entry';
+  if(verdict === 'near_entry') return 'near_entry';
+  if(verdict === 'avoid') return 'avoid';
+  return 'monitor';
+}
+
+function extractSnapshotCanonicalAuthority(snapshot){
+  const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const contract = source.canonicalContract && typeof source.canonicalContract === 'object'
+    ? source.canonicalContract
+    : null;
+  const renderModels = source.renderModels && typeof source.renderModels === 'object'
+    ? source.renderModels
+    : null;
+  const reviewModel = renderModels && renderModels.review && typeof renderModels.review === 'object'
+    ? renderModels.review
+    : null;
+  const trackModel = renderModels && renderModels.track && typeof renderModels.track === 'object'
+    ? renderModels.track
+    : null;
+  const reviewCanonicalVerdict = normalizeVerdictKey(
+    reviewModel && reviewModel.canonicalVerdict
+    || contract && contract.canonicalVerdict
+    || ''
+  );
+  const scannerCanonicalVerdict = normalizeVerdictKey(
+    contract
+    && contract.authoritativeInputs
+    && contract.authoritativeInputs.scanner
+    && contract.authoritativeInputs.scanner.resolvedVerdict
+    || source.scan && (source.scan.resolvedVerdict || source.scan.verdict)
+    || ''
+  );
+  const reviewVisualBucket = normalizeVisualBucketKey(
+    reviewModel && (reviewModel.visualBucket || reviewModel.visibleBucket)
+    || trackModel && (trackModel.visualBucket || trackModel.visibleBucket)
+    || contract && contract.canonicalVisualBucket
+    || '',
+    reviewCanonicalVerdict
+  );
+  const derivedStates = contract && contract.derivedStates && typeof contract.derivedStates === 'object'
+    ? contract.derivedStates
+    : null;
+  const lifecycleAuthority = contract && contract.lifecycleAuthority && typeof contract.lifecycleAuthority === 'object'
+    ? contract.lifecycleAuthority
+    : null;
+  return {
+    contract,
+    renderModels,
+    scannerCanonicalVerdict,
+    scannerVisualBucket:normalizeVisualBucketKey(scannerCanonicalVerdict, scannerCanonicalVerdict),
+    reviewCanonicalVerdict,
+    reviewVisualBucket,
+    reviewNextAction:String(
+      reviewModel && (reviewModel.nextAction || reviewModel.actionLabel)
+      || trackModel && (trackModel.nextAction || trackModel.actionLabel)
+      || ''
+    ).trim(),
+    reviewPrimaryReason:String(
+      reviewModel && (reviewModel.primaryReason || reviewModel.mainBlocker)
+      || trackModel && (trackModel.primaryReason || trackModel.mainBlocker)
+      || ''
+    ).trim(),
+    contractFingerprint:String(contract && contract.contractFingerprint || reviewModel && reviewModel.contractFingerprint || trackModel && trackModel.contractFingerprint || '').trim(),
+    setupScore:Number.isFinite(Number(derivedStates && derivedStates.setupScore))
+      ? Number(derivedStates && derivedStates.setupScore)
+      : null,
+    structureState:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase(),
+    structureEligibility:String(derivedStates && derivedStates.structureEligibility || '').trim().toLowerCase(),
+    setupLocationState:String(derivedStates && derivedStates.setupLocationState || '').trim().toLowerCase(),
+    priceabilityState:String(derivedStates && derivedStates.priceabilityState || '').trim().toLowerCase(),
+    stabilisationState:String(derivedStates && derivedStates.stabilisationState || '').trim().toLowerCase(),
+    bounceState:String(derivedStates && derivedStates.bounceState || '').trim().toLowerCase(),
+    planStatus:String(
+      contract && contract.planAuthority && contract.planAuthority.status
+      || reviewModel && reviewModel.planStatus
+      || trackModel && trackModel.planStatus
+      || ''
+    ).trim().toLowerCase(),
+    lifecycleState:String(lifecycleAuthority && lifecycleAuthority.state || '').trim().toLowerCase()
+  };
+}
+
+function extractSnapshotReplayPublicFields(snapshotAuthority, snapshot){
+  const authority = snapshotAuthority && typeof snapshotAuthority === 'object' ? snapshotAuthority : {};
+  const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const contract = authority.contract && typeof authority.contract === 'object' ? authority.contract : {};
+  const renderModels = authority.renderModels && typeof authority.renderModels === 'object' ? authority.renderModels : {};
+  const reviewModel = renderModels.review && typeof renderModels.review === 'object' ? renderModels.review : {};
+  const trackModel = renderModels.track && typeof renderModels.track === 'object' ? renderModels.track : {};
+  const targetProfile = extractSnapshotTargetProfile(source);
+  return {
+    scannerCanonicalVerdict:String(authority.scannerCanonicalVerdict || '').trim().toLowerCase(),
+    scannerVisualBucket:String(authority.scannerVisualBucket || '').trim().toLowerCase(),
+    reviewCanonicalVerdict:String(authority.reviewCanonicalVerdict || '').trim().toLowerCase(),
+    reviewVisualBucket:String(authority.reviewVisualBucket || '').trim().toLowerCase(),
+    reviewNextAction:String(authority.reviewNextAction || '').trim(),
+    reviewPrimaryReason:String(authority.reviewPrimaryReason || '').trim(),
+    planStatus:String(
+      authority.planStatus
+      || contract.planAuthority && contract.planAuthority.status
+      || reviewModel.planStatus
+      || trackModel.planStatus
+      || ''
+    ).trim().toLowerCase(),
+    snapshotContractFingerprint:String(authority.contractFingerprint || '').trim(),
+    simulatedLifecycleFromWatch:String(authority.lifecycleState || '').trim().toLowerCase(),
+    structureState:String(authority.structureState || '').trim().toLowerCase(),
+    structureEligibility:String(authority.structureEligibility || '').trim().toLowerCase(),
+    bounceState:String(authority.bounceState || '').trim().toLowerCase(),
+    stabilisationState:String(authority.stabilisationState || '').trim().toLowerCase(),
+    priceabilityState:String(authority.priceabilityState || '').trim().toLowerCase(),
+    setupScore:Number.isFinite(Number(authority.setupScore)) ? Number(authority.setupScore) : null,
+    realisticTarget:targetProfile ? targetProfile.realistic_target : null,
+    extendedTarget:targetProfile ? targetProfile.extended_target : null,
+    realisticRr:targetProfile ? targetProfile.realistic_rr : null,
+    targetStretchPct:targetProfile ? targetProfile.target_stretch_pct : null,
+    targetCapReason:targetProfile ? String(targetProfile.target_cap_reason || '').trim() : ''
   };
 }
 
@@ -519,103 +658,6 @@ function buildVisualDeps(sandbox, resolveGlobalVerdict){
   };
 }
 
-function buildScannerDebugDeps(sandbox, resolveGlobalVerdict, resolveVisualState){
-  return {
-    normalizeTickerRecord(record){
-      return record;
-    },
-    analysisDerivedStatesFromRecord(record){
-      return record && record.derivedStates || {};
-    },
-    rrCategoryForView(view){
-      const rrValue = numericOrNull(view && view.rrValue);
-      if(view && view.planUiState && view.planUiState.state === 'unrealistic_rr') return 'unrealistic';
-      if(!Number.isFinite(rrValue)) return 'na';
-      if(rrValue > 12) return 'unrealistic';
-      if(rrValue > 8) return 'stretched';
-      if(rrValue < 1.5) return 'low';
-      return 'normal';
-    },
-    finalStructureQualityForView(view){
-      const states = view && view.setupStates ? view.setupStates : {};
-      const structureState = String(states.structureState || '').toLowerCase();
-      const stabilisationState = String(states.stabilisationState || '').toLowerCase();
-      const bounceState = String(states.bounceState || '').toLowerCase();
-      if(['broken','weak','developing_loose'].includes(structureState)) return 'weak';
-      if(['strong','intact'].includes(structureState)) return 'strong';
-      if(structureState === 'developing_clean') return 'developing_clean';
-      if(['developing','weakening'].includes(structureState)){
-        return bounceState === 'confirmed' && ['clear','early'].includes(stabilisationState)
-          ? 'developing_clean'
-          : 'developing_loose';
-      }
-      return 'developing_loose';
-    },
-    evaluatePlanRealism(record){
-      return record && record.planRealism || {};
-    },
-    numericOrNull,
-    resolveEmojiPresentation(){
-      return {};
-    },
-    normalizeScanType:value => sandbox.normalizeScanType(value),
-    currentSetupType:() => sandbox.currentSetupType(),
-    fmtPrice,
-    resolveGlobalVerdict,
-    resolveVisualState,
-    globalVerdictLabel:verdict => sandbox.window.ResolverCore.globalVerdictLabel(verdict),
-    getBucket:verdict => sandbox.window.ResolverCore.getBucket(verdict),
-    normalizeVerdict:verdict => sandbox.window.ResolverCore.normalizeVerdict(verdict),
-    normalizeGlobalVerdictKey:verdict => sandbox.window.ResolverCore.normalizeGlobalVerdictKey(verdict),
-    normalizeAnalysisVerdict:value => String(value || 'Watch'),
-    getActions:verdict => sandbox.window.ResolverCore.getActions(verdict),
-    escapeHtml:value => String(value || ''),
-    primaryShortlistStatusChip(){
-      return {label:'Watch', primaryState:'monitor'};
-    },
-    scannerCardClickTraceForTicker(){
-      return null;
-    },
-    scannerCardClickTraceHistoryForTicker(){
-      return [];
-    },
-    reviewAnalysisUiStateForRecord(){
-      return '';
-    },
-    uiState:{},
-    getSwipeFeedback(){
-      return null;
-    }
-  };
-}
-
-function buildBaseView(record, displayedPlan, chartVerdict, planRealism, setupScore){
-  const planState = (() => {
-    if(displayedPlan.status === 'missing') return 'missing';
-    if(displayedPlan.status !== 'valid') return 'invalid';
-    if(planRealism.optimistic_target_flag === true || planRealism.rr_realism === 'low' || displayedPlan.rewardRisk.rrState === 'weak') return 'needs_adjustment';
-    return 'valid';
-  })();
-  const setupState = (() => {
-    const derived = record.derivedStates || {};
-    if(derived.structureState === 'broken' || derived.trendState === 'broken') return 'broken';
-    if(String(chartVerdict || '').toLowerCase() === 'entry' && derived.bounceState === 'confirmed') return 'entry';
-    if(['Near Entry','Watch'].includes(String(chartVerdict || '')) && ['near_20ma','near_50ma'].includes(String(derived.pullbackZone || '').toLowerCase())) return 'watch';
-    return 'developing';
-  })();
-  return {
-    item:record,
-    displayedPlan,
-    setupUiState:{state:setupState},
-    planUiState:{state:planState, label:planState, capitalFitLabel:String(displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || '')},
-    displayStage:String(chartVerdict || 'Watch'),
-    warningState:null,
-    setupScore,
-    positionSize:numericOrNull(displayedPlan && displayedPlan.riskFit && displayedPlan.riskFit.position_size),
-    rrValue:displayedPlan.status === 'valid' ? numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio) : numericOrNull(record && record.scan && record.scan.estimatedRR)
-  };
-}
-
 function deriveStatesFromPreservedProjection(analysisProjection){
   const projection = analysisProjection && typeof analysisProjection === 'object' ? analysisProjection : {};
   const pullbackZone = String(
@@ -652,7 +694,68 @@ function deriveStatesFromPreservedProjection(analysisProjection){
   };
 }
 
+function mergeDerivedStatesWithSnapshotSetup(derivedStates, setup){
+  const base = derivedStates && typeof derivedStates === 'object' ? {...derivedStates} : {};
+  const source = setup && typeof setup === 'object' ? setup : {};
+  const override = (key, ...fields) => {
+    for(const field of fields){
+      const value = String(source[field] || '').trim().toLowerCase();
+      if(value){
+        base[key] = value;
+        return value;
+      }
+    }
+    return String(base[key] || '').trim().toLowerCase();
+  };
+  const pullbackZone = override('pullbackZone', 'pullbackZone', 'pullback_zone');
+  override('trendState', 'trendState', 'trend_state');
+  override('structureState', 'structureState', 'structure_state');
+  override('setupLocationState', 'setupLocationState', 'setup_location_state');
+  override('priceabilityState', 'priceabilityState', 'priceability_state');
+  override('stabilisationState', 'stabilisationState', 'stabilisation_state');
+  override('bounceState', 'bounceState', 'bounce_state');
+  override('volumeState', 'volumeState', 'volume_state');
+  if(pullbackZone){
+    base.pullbackState = pullbackZone;
+  }
+  const structureEligibility = String(source.structureEligibility || source.structure_eligibility || '').trim().toLowerCase();
+  if(structureEligibility){
+    base.structureEligibility = structureEligibility;
+  }
+  return base;
+}
+
+function extractSnapshotTargetProfile(snapshot){
+  const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const scan = source.scan && typeof source.scan === 'object' ? source.scan : {};
+  const analysisProjection = scan.analysisProjection && typeof scan.analysisProjection === 'object'
+    ? scan.analysisProjection
+    : {};
+  const targetProfile = analysisProjection.target_profile && typeof analysisProjection.target_profile === 'object'
+    ? analysisProjection.target_profile
+    : {};
+  if(!Object.keys(targetProfile).length) return null;
+  return {
+    nearest_resistance:numericOrNull(targetProfile.nearestResistance ?? targetProfile.nearest_resistance),
+    realistic_target:numericOrNull(targetProfile.realisticTarget ?? targetProfile.realistic_target),
+    extended_target:numericOrNull(targetProfile.extendedTarget ?? targetProfile.extended_target),
+    realistic_rr:numericOrNull(targetProfile.realisticRr ?? targetProfile.realistic_rr),
+    target_stretch_pct:numericOrNull(targetProfile.targetStretchPct ?? targetProfile.target_stretch_pct),
+    target_cap_reason:String(targetProfile.targetCapReason ?? targetProfile.target_cap_reason ?? '').trim()
+  };
+}
+
 function buildReplayRecord(snapshot, sandbox){
+  const snapshotAuthority = extractSnapshotCanonicalAuthority(snapshot);
+  const authorityContract = snapshotAuthority && snapshotAuthority.contract && typeof snapshotAuthority.contract === 'object'
+    ? snapshotAuthority.contract
+    : null;
+  const authorityDerivedStates = authorityContract && authorityContract.derivedStates && typeof authorityContract.derivedStates === 'object'
+    ? authorityContract.derivedStates
+    : null;
+  const authorityPlan = authorityContract && authorityContract.planAuthority && typeof authorityContract.planAuthority === 'object'
+    ? authorityContract.planAuthority
+    : null;
   const preservedMarketData = snapshot.marketData && typeof snapshot.marketData === 'object'
     ? deepClone(snapshot.marketData)
     : {};
@@ -701,37 +804,108 @@ function buildReplayRecord(snapshot, sandbox){
   const preservedManualReview = preservedReview.manualReview && typeof preservedReview.manualReview === 'object'
     ? preservedReview.manualReview
     : null;
+  const reviewProjectionContext = normalizeReviewProjectionContext(snapshot);
+  const liveManualReview = reviewProjectionContext.authoritative === true
+    ? preservedManualReview
+    : null;
   const preservedAnalysisProjection = preservedScan.analysisProjection && typeof preservedScan.analysisProjection === 'object'
     ? deepClone(preservedScan.analysisProjection)
     : null;
+  const snapshotTargetProfile = extractSnapshotTargetProfile(snapshot);
   const preservedDerivedStates = preservedAnalysisProjection
     ? deriveStatesFromPreservedProjection(preservedAnalysisProjection)
     : null;
   const derivedTradePlan = suitability && suitability.tradePlan ? suitability.tradePlan : sandbox.deriveTradePlan(marketData, '20MA');
-  const tradePlan = preservedPlan
+  const preservedPlanStatus = String(preservedPlan && preservedPlan.status || '').trim().toLowerCase();
+  const preservedPlanExplicitlyUnavailable = !!(
+    preservedPlan
+    && (
+      ['missing', 'invalid'].includes(preservedPlanStatus)
+      || String(preservedPlan.invalidatedState || '').trim()
+      || String(preservedPlan.missedState || '').trim()
+      || String(preservedPlan.tradeability || '').trim().toLowerCase() === 'invalid'
+      || String(preservedPlan.riskStatus || '').trim().toLowerCase() === 'plan_missing'
+    )
+  );
+  const tradePlan = preservedPlanExplicitlyUnavailable
     ? {
-      entry:numericOrNull(preservedPlan.entry ?? (preservedManualReview && preservedManualReview.entry)) ?? derivedTradePlan.entry,
-      stop:numericOrNull(preservedPlan.stop ?? (preservedManualReview && preservedManualReview.stop)) ?? derivedTradePlan.stop,
-      target:numericOrNull(preservedPlan.firstTarget ?? preservedPlan.target ?? (preservedManualReview && preservedManualReview.target)) ?? derivedTradePlan.target,
-      rr:numericOrNull(preservedPlan.plannedRR ?? preservedPlan.rr ?? derivedTradePlan.rr),
-      source:String(preservedPlan.source || (preservedManualReview ? 'manual' : derivedTradePlan.source || 'scanner_estimate'))
+      entry:null,
+      stop:null,
+      target:null,
+      rr:null,
+      source:String(preservedPlan && preservedPlan.source || 'suppressed_preserved_plan')
     }
-    : derivedTradePlan;
-  const derivedStates = preservedDerivedStates || sandbox.deriveSetupStates(card, marketData, checks, tradePlan);
+    : (preservedPlan
+    ? {
+      entry:numericOrNull(preservedPlan.entry ?? (liveManualReview && liveManualReview.entry)) ?? derivedTradePlan.entry,
+      stop:numericOrNull(preservedPlan.stop ?? (liveManualReview && liveManualReview.stop)) ?? derivedTradePlan.stop,
+      target:numericOrNull(preservedPlan.firstTarget ?? preservedPlan.target ?? (liveManualReview && liveManualReview.target)) ?? derivedTradePlan.target,
+      rr:numericOrNull(preservedPlan.plannedRR ?? preservedPlan.rr ?? derivedTradePlan.rr),
+      source:String(preservedPlan.source || (liveManualReview ? 'manual' : derivedTradePlan.source || 'scanner_estimate'))
+    }
+    : derivedTradePlan);
+  const derivedStates = mergeDerivedStatesWithSnapshotSetup(
+    preservedDerivedStates || sandbox.deriveSetupStates(card, marketData, checks, tradePlan),
+    snapshot.setup
+  );
+  if(authorityDerivedStates){
+    const overlayState = (targetKey, sourceKeys = []) => {
+      for(const sourceKey of sourceKeys){
+        const value = authorityDerivedStates[sourceKey];
+        if(value !== undefined && value !== null && String(value).trim() !== ''){
+          derivedStates[targetKey] = String(value).trim().toLowerCase();
+          return;
+        }
+      }
+    };
+    overlayState('structureState', ['structureState']);
+    overlayState('structureEligibility', ['structureEligibility']);
+    overlayState('setupLocationState', ['setupLocationState']);
+    overlayState('priceabilityState', ['priceabilityState']);
+    overlayState('stabilisationState', ['stabilisationState']);
+    overlayState('bounceState', ['bounceState']);
+    if(authorityDerivedStates.setupScore !== undefined && authorityDerivedStates.setupScore !== null){
+      derivedStates.setupScore = numericOrNull(authorityDerivedStates.setupScore);
+    }
+  }
+  const effectivePlan = {
+    entry:Number.isFinite(numericOrNull(authorityPlan && authorityPlan.entry))
+      ? numericOrNull(authorityPlan.entry)
+      : tradePlan.entry,
+    stop:Number.isFinite(numericOrNull(authorityPlan && authorityPlan.stop))
+      ? numericOrNull(authorityPlan.stop)
+      : tradePlan.stop,
+    firstTarget:Number.isFinite(numericOrNull(authorityPlan && authorityPlan.firstTarget))
+      ? numericOrNull(authorityPlan.firstTarget)
+      : tradePlan.target,
+    source:String(
+      authorityPlan && authorityPlan.source
+      || tradePlan.source
+      || ''
+    ).trim().toLowerCase()
+  };
   const riskFit = sandbox.evaluateRiskFit({
-    entry:tradePlan.entry,
-    stop:tradePlan.stop,
+    entry:effectivePlan.entry,
+    stop:effectivePlan.stop,
     ...sandbox.currentRiskSettings()
   });
-  const rewardRisk = sandbox.evaluateRewardRisk(tradePlan.entry, tradePlan.stop, tradePlan.target);
-  const chartVerdict = sandbox.determineScannerVerdict({
+  const rewardRisk = sandbox.evaluateRewardRisk(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget);
+  const recomputedChartVerdict = sandbox.determineScannerVerdict({
     technicalValid:true,
     score:suitability ? suitability.total : 0,
     checks,
     riskFit,
     rewardRisk
   });
-  const displayedPlan = sandbox.deriveCurrentPlanState(tradePlan.entry, tradePlan.stop, tradePlan.target, marketData.currency);
+  const chartVerdict = snapshotAuthority.scannerCanonicalVerdict
+    ? sandbox.window.ResolverCore.globalVerdictLabel(snapshotAuthority.scannerCanonicalVerdict)
+    : recomputedChartVerdict;
+  const displayedPlan = sandbox.deriveCurrentPlanState(
+    effectivePlan.entry,
+    effectivePlan.stop,
+    effectivePlan.firstTarget,
+    marketData.currency
+  );
   if(preservedPlan){
     displayedPlan.source = String(preservedPlan.source || tradePlan.source || displayedPlan.source || '');
     displayedPlan.status = String(preservedPlan.status || displayedPlan.status || '').trim().toLowerCase() || displayedPlan.status;
@@ -763,13 +937,21 @@ function buildReplayRecord(snapshot, sandbox){
       displayedPlan.capitalFit.fx_status = /fx estimated/i.test(String(preservedPlan.capitalNote || '')) ? 'estimated' : String(displayedPlan.capitalFit.fx_status || '').trim().toLowerCase();
     }
   }
+  if(authorityPlan){
+    displayedPlan.source = String(authorityPlan.source || displayedPlan.source || '').trim().toLowerCase() || displayedPlan.source;
+    displayedPlan.status = String(authorityPlan.status || displayedPlan.status || '').trim().toLowerCase() || displayedPlan.status;
+    displayedPlan.tradeability = String(authorityPlan.tradeability || displayedPlan.tradeability || '').trim().toLowerCase() || displayedPlan.tradeability;
+    if(displayedPlan.riskFit && typeof displayedPlan.riskFit === 'object'){
+      displayedPlan.riskFit.risk_status = String(authorityPlan.riskStatus || displayedPlan.riskFit.risk_status || '').trim().toLowerCase() || displayedPlan.riskFit.risk_status;
+    }
+  }
   const setupStateHint = String(chartVerdict || '').toLowerCase() === 'entry' ? 'entry' : 'developing';
-  const planRealism = sandbox.evaluatePlanRealism({
+  const recomputedPlanRealism = sandbox.evaluatePlanRealism({
     ticker:snapshot.ticker,
     meta:{marketStatus:sandbox.state.marketStatus},
     marketData,
     review:preservedReview || {},
-    plan:{entry:tradePlan.entry, stop:tradePlan.stop, firstTarget:tradePlan.target, source:tradePlan.source || 'scanner'},
+    plan:{entry:effectivePlan.entry, stop:effectivePlan.stop, firstTarget:effectivePlan.firstTarget, source:effectivePlan.source || 'scanner'},
     scan:{resolvedVerdict:chartVerdict},
     derivedStates
   }, {
@@ -778,11 +960,36 @@ function buildReplayRecord(snapshot, sandbox){
     displayStage:chartVerdict,
     setupState:setupStateHint
   });
-  const setupScore = suitability ? suitability.total : 0;
-  const canonicalSeed = chartVerdict === 'Entry'
-    ? 'entry'
-    : (chartVerdict === 'Near Entry' ? 'near_entry' : (chartVerdict === 'Avoid' ? 'avoid' : 'watch'));
-  const resolvedContract = buildResolvedContractSeed(chartVerdict, displayedPlan, suitability ? suitability.summary : '', canonicalSeed);
+  const planRealism = snapshotTargetProfile
+    ? {
+      ...recomputedPlanRealism,
+      nearest_resistance:snapshotTargetProfile.nearest_resistance,
+      realistic_target:snapshotTargetProfile.realistic_target,
+      extended_target:snapshotTargetProfile.extended_target,
+      realistic_rr:snapshotTargetProfile.realistic_rr,
+      target_stretch_pct:snapshotTargetProfile.target_stretch_pct,
+      target_cap_reason:snapshotTargetProfile.target_cap_reason
+    }
+    : recomputedPlanRealism;
+  const setupScore = Number.isFinite(Number(snapshotAuthority.setupScore))
+    ? Number(snapshotAuthority.setupScore)
+    : (suitability ? suitability.total : 0);
+  const canonicalSeed = String(
+    snapshotAuthority.reviewCanonicalVerdict
+    || (chartVerdict === 'Entry'
+      ? 'entry'
+      : (chartVerdict === 'Near Entry' ? 'near_entry' : (chartVerdict === 'Avoid' ? 'avoid' : 'watch')))
+  ).trim().toLowerCase();
+  const canonicalSeedLabel = sandbox.window.ResolverCore.globalVerdictLabel(canonicalSeed || 'watch');
+  const resolvedContract = buildResolvedContractSeed(
+    snapshotAuthority.reviewCanonicalVerdict ? canonicalSeedLabel : chartVerdict,
+    {
+      ...displayedPlan,
+      status:String(snapshotAuthority.planStatus || displayedPlan.status || '').trim().toLowerCase() || displayedPlan.status
+    },
+    String(snapshotAuthority.reviewPrimaryReason || suitability && suitability.summary || '').trim(),
+    canonicalSeed
+  );
   const record = {
     ticker:snapshot.ticker,
     meta:{
@@ -831,7 +1038,7 @@ function buildReplayRecord(snapshot, sandbox){
       }
     },
     derivedStates,
-    effectivePlan:{entry:tradePlan.entry, stop:tradePlan.stop, firstTarget:tradePlan.target, source:tradePlan.source || ''},
+    effectivePlan,
     displayedPlan,
     planRealism,
     resolvedContract,
@@ -846,6 +1053,7 @@ function buildReplayRecord(snapshot, sandbox){
     avoid_trigger_source:String(snapshot.avoid_trigger_source || '').trim()
   };
   return {
+    snapshotAuthority,
     record,
     checks,
     suitability,
@@ -856,27 +1064,27 @@ function buildReplayRecord(snapshot, sandbox){
   };
 }
 
-function promotionBlockers(globalVerdict, derivedStates = {}){
+function promotionBlockers(recomputedDiagnostics = {}, derivedStates = {}){
   const blockers = [];
   const push = value => {
     const text = String(value || '').trim();
     if(text && !blockers.includes(text)) blockers.push(text);
   };
-  push(globalVerdict.semantic_blocker_reason);
-  push(globalVerdict.main_blocker);
-  push(globalVerdict.promotionBlockedReason);
-  push(globalVerdict.downgrade_reason);
-  if(globalVerdict.entry_gate_pass !== true){
-    (globalVerdict.entry_gate_reasons || []).forEach(push);
+  push(recomputedDiagnostics.semanticBlockerReason);
+  push(recomputedDiagnostics.primaryReason);
+  push(recomputedDiagnostics.promotionBlockedReason);
+  push(recomputedDiagnostics.downgradeReason);
+  if(recomputedDiagnostics.entryGatePass !== true){
+    (recomputedDiagnostics.entryGateReasons || []).forEach(push);
   }
-  if(globalVerdict.near_entry_gate_pass !== true){
-    (globalVerdict.near_entry_gate_reasons || []).forEach(push);
+  if(recomputedDiagnostics.nearEntryGatePass !== true){
+    (recomputedDiagnostics.nearEntryGateReasons || []).forEach(push);
   }
-  push(globalVerdict.viabilityReason);
+  push(recomputedDiagnostics.viabilityReason);
   const structureState = String(
     derivedStates.structureState
     || derivedStates.structure_state
-    || globalVerdict.structure_state
+    || recomputedDiagnostics.structureState
     || ''
   ).trim().toLowerCase();
   const constructiveStructure = ['strong', 'intact', 'developing_clean'].includes(structureState);
@@ -918,7 +1126,7 @@ function structureContradictionForPromotionText(text, structureState, structureE
   return (healthyStructure || aliveEligibility) && /structure is not strong\/intact\/developing clean/i.test(safeText);
 }
 
-function fallbackPromotionDiagnostic({globalVerdict, replayBase, structureState, structureEligibility}){
+function fallbackPromotionDiagnostic({recomputedDiagnostics = {}, replayBase, structureState, structureEligibility}){
   const safeStructure = String(structureState || '').trim().toLowerCase();
   const safeEligibility = String(structureEligibility || '').trim().toLowerCase();
   const healthyStructure = ['strong', 'intact', 'developing_clean'].includes(safeStructure);
@@ -941,8 +1149,8 @@ function fallbackPromotionDiagnostic({globalVerdict, replayBase, structureState,
     };
   }
   return {
-    promotionBlocker:String(globalVerdict.promotionBlockedReason || globalVerdict.downgrade_reason || '').trim(),
-    failingGate:String(globalVerdict.promotionBlockedBy || '').trim()
+    promotionBlocker:String(recomputedDiagnostics.promotionBlockedReason || recomputedDiagnostics.downgradeReason || '').trim(),
+    failingGate:String(recomputedDiagnostics.promotionBlockedBy || '').trim()
   };
 }
 
@@ -955,19 +1163,407 @@ function derivedStateValue(derivedStates, camelKey, snakeKey){
   return '';
 }
 
+function buildPublicReplayView({
+  sandbox,
+  snapshotAuthority,
+  snapshotPublicFields,
+  reviewProjectionContext,
+  replayBase,
+  fallback = {}
+}){
+  const authority = snapshotAuthority && typeof snapshotAuthority === 'object' ? snapshotAuthority : {};
+  const snapshotFields = snapshotPublicFields && typeof snapshotPublicFields === 'object' ? snapshotPublicFields : {};
+  const safeFallback = fallback && typeof fallback === 'object' ? fallback : {};
+  const planRealism = replayBase && replayBase.record ? replayBase.record.planRealism || {} : {};
+  const record = replayBase && replayBase.record ? replayBase.record : {};
+  const scannerCanonicalVerdict = String(snapshotFields.scannerCanonicalVerdict || safeFallback.scannerCanonicalVerdict || 'unknown').trim().toLowerCase() || 'unknown';
+  const scannerVisualBucket = String(snapshotFields.scannerVisualBucket || safeFallback.scannerVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const reviewCanonicalVerdict = String(snapshotFields.reviewCanonicalVerdict || safeFallback.reviewCanonicalVerdict || 'watch').trim().toLowerCase() || 'watch';
+  const reviewVisualBucket = String(snapshotFields.reviewVisualBucket || safeFallback.reviewVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const setupScore = Number.isFinite(Number(snapshotFields.setupScore))
+    ? Number(snapshotFields.setupScore)
+    : (Number.isFinite(Number(safeFallback.setupScore)) ? Number(safeFallback.setupScore) : null);
+  return {
+    scannerCanonicalVerdict,
+    scannerCanonicalVerdictLabel:scannerCanonicalVerdict === 'unknown'
+      ? 'Unknown'
+      : sandbox.window.ResolverCore.globalVerdictLabel(scannerCanonicalVerdict),
+    scannerSnapshotIncomplete:safeFallback.scannerSnapshotIncomplete === true,
+    scannerVisualBucket,
+    reviewCanonicalVerdict,
+    reviewCanonicalVerdictLabel:sandbox.window.ResolverCore.globalVerdictLabel(reviewCanonicalVerdict),
+    reviewVisualBucket,
+    reviewNextAction:String(snapshotFields.reviewNextAction || safeFallback.reviewNextAction || '').trim(),
+    reviewPrimaryReason:String(snapshotFields.reviewPrimaryReason || safeFallback.reviewPrimaryReason || '').trim(),
+    planStatus:String(snapshotFields.planStatus || safeFallback.planStatus || '').trim().toLowerCase(),
+    snapshotContractFingerprint:String(snapshotFields.snapshotContractFingerprint || '').trim(),
+    replayAuthoritySource:snapshotFields.reviewCanonicalVerdict ? 'canonical_contract' : 'recomputed_fallback',
+    reviewProjectionSource:String(reviewProjectionContext && reviewProjectionContext.projectionSource || '').trim().toLowerCase(),
+    simulatedLifecycleFromWatch:String(snapshotFields.simulatedLifecycleFromWatch || safeFallback.simulatedLifecycleFromWatch || '').trim().toLowerCase(),
+    structureState:String(snapshotFields.structureState || safeFallback.structureState || '').trim().toLowerCase(),
+    structureEligibility:String(snapshotFields.structureEligibility || safeFallback.structureEligibility || 'unknown').trim().toLowerCase() || 'unknown',
+    bounceState:String(snapshotFields.bounceState || safeFallback.bounceState || '').trim().toLowerCase(),
+    stabilisationState:String(snapshotFields.stabilisationState || safeFallback.stabilisationState || '').trim().toLowerCase(),
+    priceabilityState:String(snapshotFields.priceabilityState || safeFallback.priceabilityState || '').trim().toLowerCase(),
+    setupScore,
+    realisticTarget:Number.isFinite(Number(snapshotFields.realisticTarget))
+      ? Number(snapshotFields.realisticTarget)
+      : planRealism.realistic_target,
+    extendedTarget:Number.isFinite(Number(snapshotFields.extendedTarget))
+      ? Number(snapshotFields.extendedTarget)
+      : planRealism.extended_target,
+    realisticRr:Number.isFinite(Number(snapshotFields.realisticRr))
+      ? Number(snapshotFields.realisticRr)
+      : planRealism.realistic_rr,
+    targetStretchPct:Number.isFinite(Number(snapshotFields.targetStretchPct))
+      ? Number(snapshotFields.targetStretchPct)
+      : planRealism.target_stretch_pct,
+      targetCapReason:String(snapshotFields.targetCapReason || planRealism.target_cap_reason || '').trim(),
+    blockers:[],
+    blockerSource:'',
+    promotionDiagnosticsActive:false,
+    promotionBlocker:'',
+    failingGate:'',
+    blockerCopy:'',
+    watchToDiminishingReason:'',
+    diminishingReasonActive:false,
+    canonicalInputDiagnostics:null,
+    layerMutationReason:'',
+    authorityDrift:null
+  };
+}
+
+function hasSnapshotReplayAuthority(snapshotAuthority){
+  const authority = snapshotAuthority && typeof snapshotAuthority === 'object' ? snapshotAuthority : {};
+  return !!(
+    authority.contract
+    && authority.renderModels
+    && authority.reviewCanonicalVerdict
+    && authority.reviewVisualBucket
+  );
+}
+
+function buildRecomputedReplayAuthority({
+  snapshotAuthority,
+  snapshotReplayAuthorityLocked,
+  reviewProjectionContext,
+  scannerCanonicalVerdict,
+  scannerCanonicalVerdictRaw,
+  authoritativeScannerSnapshotVerdict,
+  scannerVisualState,
+  simplifiedScannerState,
+  reviewVisualState,
+  simplifiedReviewState,
+  globalVerdict
+}){
+  const scannerVisualBucket = String(
+    snapshotAuthority.scannerVisualBucket
+    || (authoritativeScannerSnapshotVerdict
+      ? (
+        scannerCanonicalVerdict === 'entry'
+          ? 'entry'
+          : (scannerCanonicalVerdict === 'near_entry' ? 'near_entry' : (scannerCanonicalVerdict === 'avoid' ? 'avoid' : 'monitor'))
+      )
+      : '')
+    || (simplifiedScannerState && simplifiedScannerState.visualBucket)
+    || scannerVisualState.visualBucket
+    || ''
+  ).trim().toLowerCase() || 'monitor';
+  const recomputedReviewVisualBucket = String(
+    (reviewProjectionContext.authoritative && reviewProjectionContext.visualBucket)
+    || (simplifiedReviewState && simplifiedReviewState.visualBucket)
+    || reviewVisualState.visualBucket
+    || ''
+  ).trim().toLowerCase() || 'monitor';
+  const recomputedReviewCanonicalVerdict = String(
+    (reviewProjectionContext.authoritative && reviewProjectionContext.canonicalVerdict)
+    || (simplifiedReviewState && simplifiedReviewState.canonicalVerdict)
+    || globalVerdict.final_verdict
+    || ''
+  ).trim().toLowerCase() || 'watch';
+  let reviewVisualBucket = snapshotAuthority.reviewVisualBucket || recomputedReviewVisualBucket;
+  let reviewCanonicalVerdict = snapshotAuthority.reviewCanonicalVerdict || recomputedReviewCanonicalVerdict;
+  if(
+    !snapshotReplayAuthorityLocked
+    && reviewProjectionContext.authoritative !== true
+    && !snapshotAuthority.reviewCanonicalVerdict
+    && reviewCanonicalVerdict === 'entry'
+    && scannerCanonicalVerdict
+    && !['entry', 'unknown'].includes(scannerCanonicalVerdict)
+  ){
+    reviewCanonicalVerdict = scannerCanonicalVerdict;
+    reviewVisualBucket = String(
+      (simplifiedReviewState && simplifiedReviewState.visualBucket)
+      || reviewVisualState.visualBucket
+      || scannerVisualBucket
+      || 'monitor'
+    ).trim().toLowerCase() || 'monitor';
+  }
+  if(
+    !snapshotReplayAuthorityLocked
+    && reviewProjectionContext.authoritative !== true
+    && !snapshotAuthority.reviewVisualBucket
+    && reviewCanonicalVerdict !== 'entry'
+    && reviewVisualBucket === 'entry'
+  ){
+    const nonEntrySimplifiedBucket = String(simplifiedReviewState && simplifiedReviewState.visualBucket || '').trim().toLowerCase();
+    const nonEntryReviewBucket = String(reviewVisualState.visualBucket || '').trim().toLowerCase();
+    reviewVisualBucket = nonEntrySimplifiedBucket && nonEntrySimplifiedBucket !== 'entry'
+      ? nonEntrySimplifiedBucket
+      : (nonEntryReviewBucket && nonEntryReviewBucket !== 'entry'
+        ? nonEntryReviewBucket
+        : (reviewCanonicalVerdict === 'near_entry' ? 'monitor' : (scannerVisualBucket === 'entry' ? 'monitor' : (scannerVisualBucket || 'monitor'))));
+  }
+  const finalResolvedVerdict = String(
+    (snapshotReplayAuthorityLocked && snapshotAuthority.reviewCanonicalVerdict)
+    || globalVerdict.final_verdict
+    || ''
+  ).trim().toLowerCase();
+  const finalVisualBucket = String(
+    (snapshotReplayAuthorityLocked && snapshotAuthority.reviewVisualBucket)
+    || reviewVisualState.visualBucket
+    || ''
+  ).trim().toLowerCase();
+  const recomputedScannerVisualBucket = String(
+    ((simplifiedScannerState && simplifiedScannerState.visualBucket)
+    || scannerVisualState.visualBucket
+    || '')
+  ).trim().toLowerCase() || 'monitor';
+  return {
+    scannerCanonicalVerdict:String(scannerCanonicalVerdictRaw || '').trim().toLowerCase(),
+    scannerVisualBucket,
+    recomputedScannerVisualBucket,
+    recomputedReviewCanonicalVerdict,
+    recomputedReviewVisualBucket,
+    reviewCanonicalVerdict,
+    reviewVisualBucket,
+    finalResolvedVerdict,
+    finalVisualBucket
+  };
+}
+
+function buildReplayVerdictResolution({
+  sandbox,
+  replayBase,
+  resolveGlobalVerdict
+}){
+  const record = replayBase && replayBase.record ? replayBase.record : {};
+  const globalVerdict = resolveGlobalVerdict(record);
+  const resolvedContract = {
+    ...(record.resolvedContract || {}),
+    finalVerdict:sandbox.window.ResolverCore.globalVerdictLabel(globalVerdict.final_verdict),
+    final_verdict:globalVerdict.final_verdict,
+    baseVerdict:globalVerdict.base_verdict || record.resolvedContract && record.resolvedContract.baseVerdict,
+    planStatusKey:globalVerdict.planStateKey || record.resolvedContract && record.resolvedContract.planStatusKey,
+    entry_gate_pass:globalVerdict.entry_gate_pass,
+    near_entry_gate_pass:globalVerdict.near_entry_gate_pass,
+    entry_gate_checks:globalVerdict.entry_gate_checks || {},
+    near_entry_gate_checks:globalVerdict.near_entry_gate_checks || {},
+    presentationUpgradeBlocked:globalVerdict.downgrade_applied === true,
+    promotionBlockedBy:globalVerdict.downgrade_reason || ''
+  };
+  const lifecycleSeed = {
+    structure_state:derivedStateValue(record.derivedStates, 'structureState', 'structure_state'),
+    bounce_state:derivedStateValue(record.derivedStates, 'bounceState', 'bounce_state'),
+    plan_status:record.displayedPlan && record.displayedPlan.status,
+    rr_confidence:record.planRealism && record.planRealism.rr_confidence_label,
+    market_regime:globalVerdict.market_regime || '',
+    final_verdict:globalVerdict.final_verdict
+  };
+  const recomputedLifecycleFromWatch = typeof sandbox.resolveLifecycleTransition === 'function'
+    ? sandbox.resolveLifecycleTransition('watch', lifecycleSeed)
+    : sandbox.window.ResolverCore.normalizeGlobalVerdictKey(globalVerdict.final_verdict);
+  return {
+    globalVerdict,
+    resolvedContract,
+    recomputedLifecycleFromWatch
+  };
+}
+
+function buildRecomputedReplayDiagnostics({
+  globalVerdict,
+  reviewVisualState,
+  replayBase,
+  recomputedLifecycleFromWatch,
+  recomputedReviewCanonicalVerdict,
+  recomputedReviewVisualBucket,
+  recomputedScannerVisualBucket,
+  scannerCanonicalVerdictRaw
+}){
+  const safeGlobalVerdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  const safeReviewVisualState = reviewVisualState && typeof reviewVisualState === 'object' ? reviewVisualState : {};
+  const record = replayBase && replayBase.record ? replayBase.record : {};
+  return {
+    scannerCanonicalVerdict:String(scannerCanonicalVerdictRaw || '').trim().toLowerCase(),
+    scannerVisualBucket:String(recomputedScannerVisualBucket || '').trim().toLowerCase(),
+    canonicalVerdict:String(recomputedReviewCanonicalVerdict || '').trim().toLowerCase(),
+    visualBucket:String(recomputedReviewVisualBucket || '').trim().toLowerCase(),
+    lifecycleState:String(recomputedLifecycleFromWatch || '').trim().toLowerCase(),
+    structureState:String(
+      derivedStateValue(record.derivedStates, 'structureState', 'structure_state') || ''
+    ).trim().toLowerCase(),
+    structureEligibility:String(
+      derivedStateValue(record.derivedStates, 'structureEligibility', 'structure_eligibility')
+      || safeGlobalVerdict.structure_eligibility
+      || safeReviewVisualState.structureEligibility
+      || 'unknown'
+    ).trim().toLowerCase() || 'unknown',
+    primaryReason:String(
+      safeGlobalVerdict.main_blocker
+      || safeGlobalVerdict.reason
+      || record.resolvedContract && (
+        record.resolvedContract.blockerReason
+        || record.resolvedContract.reasonSummary
+      )
+      || ''
+    ).trim(),
+    blockerSource:String(
+      safeGlobalVerdict.primary_blocker_source
+      || safeGlobalVerdict.semantic_blocker_code
+      || ''
+    ).trim(),
+    promotionBlockedReason:String(
+      safeGlobalVerdict.promotionBlockedReason
+      || ''
+    ).trim(),
+    promotionBlockedBy:String(
+      safeGlobalVerdict.promotionBlockedBy
+      || ''
+    ).trim(),
+    downgradeReason:String(
+      safeGlobalVerdict.downgrade_reason
+      || ''
+    ).trim(),
+    semanticBlockerReason:String(
+      safeGlobalVerdict.semantic_blocker_reason
+      || ''
+    ).trim(),
+    viabilityReason:String(
+      safeGlobalVerdict.viabilityReason
+      || ''
+    ).trim(),
+    entryGatePass:safeGlobalVerdict.entry_gate_pass === true,
+    nearEntryGatePass:safeGlobalVerdict.near_entry_gate_pass === true,
+    entryGateReasons:Array.isArray(safeGlobalVerdict.entry_gate_reasons)
+      ? safeGlobalVerdict.entry_gate_reasons.map(reason => String(reason || '').trim()).filter(Boolean)
+      : [],
+    nearEntryGateReasons:Array.isArray(safeGlobalVerdict.near_entry_gate_reasons)
+      ? safeGlobalVerdict.near_entry_gate_reasons.map(reason => String(reason || '').trim()).filter(Boolean)
+      : [],
+    weakWatchDiminishingReason:String(
+      safeReviewVisualState.weakWatchDiminishingReason
+      || safeGlobalVerdict.downgrade_reason
+      || ''
+    ).trim()
+  };
+}
+
+function snapshotDiagnosticValue(snapshotReplayAuthorityLocked, authorityValue, fallbackValue = ''){
+  if(snapshotReplayAuthorityLocked && authorityValue !== undefined && authorityValue !== null && String(authorityValue).trim() !== ''){
+    return authorityValue;
+  }
+  return fallbackValue;
+}
+
+function buildReplayDiagnosticSources({
+  snapshotReplayAuthorityLocked,
+  snapshotAuthority,
+  recomputedDiagnostics
+}){
+  const authority = snapshotAuthority && typeof snapshotAuthority === 'object' ? snapshotAuthority : {};
+  const recomputed = recomputedDiagnostics && typeof recomputedDiagnostics === 'object'
+    ? recomputedDiagnostics
+    : {};
+  const snapshot = {
+    lifecycleState:String(authority.lifecycleState || '').trim().toLowerCase(),
+    structureState:String(authority.structureState || '').trim().toLowerCase(),
+    structureEligibility:String(authority.structureEligibility || '').trim().toLowerCase(),
+    primaryReason:String(authority.reviewPrimaryReason || '').trim()
+  };
+  return {
+    snapshot,
+    recomputed,
+    effective:{
+      lifecycleState:String(snapshotDiagnosticValue(snapshotReplayAuthorityLocked, snapshot.lifecycleState, recomputed.lifecycleState) || '').trim().toLowerCase(),
+      structureState:String(snapshotDiagnosticValue(snapshotReplayAuthorityLocked, snapshot.structureState, recomputed.structureState) || '').trim().toLowerCase(),
+      structureEligibility:String(snapshotDiagnosticValue(snapshotReplayAuthorityLocked, snapshot.structureEligibility, recomputed.structureEligibility) || 'unknown').trim().toLowerCase() || 'unknown',
+      primaryReason:String(snapshotDiagnosticValue(snapshotReplayAuthorityLocked, snapshot.primaryReason, recomputed.primaryReason) || '').trim()
+    }
+  };
+}
+
+function buildReplayDiagnostics({
+  snapshotAuthority,
+  scannerCanonicalVerdictRaw,
+  recomputedScannerVisualBucket,
+  recomputedReviewCanonicalVerdict,
+  recomputedReviewVisualBucket,
+  recomputedLifecycleFromWatch,
+  layerMutationParts,
+  normalizedReplayDiagnostics,
+  blockerSource,
+  promotionDiagnosticsActive,
+  promotionBlocker,
+  failingGate,
+  watchToDiminishingReason,
+  diminishingReasonActive,
+  canonicalInputDiagnostics
+}){
+  const authority = snapshotAuthority && typeof snapshotAuthority === 'object' ? snapshotAuthority : {};
+  return {
+    layerMutationReason:Array.isArray(layerMutationParts) ? layerMutationParts.join(' | ') : '',
+    blockers:normalizedReplayDiagnostics && Array.isArray(normalizedReplayDiagnostics.blockers)
+      ? normalizedReplayDiagnostics.blockers
+      : [],
+    blockerSource:String(blockerSource || '').trim(),
+    promotionDiagnosticsActive:promotionDiagnosticsActive === true,
+    promotionBlocker:String(promotionBlocker || '').trim(),
+    failingGate:String(failingGate || '').trim(),
+    blockerCopy:String(normalizedReplayDiagnostics && normalizedReplayDiagnostics.blockerCopy || '').trim(),
+    watchToDiminishingReason:String(watchToDiminishingReason || '').trim(),
+    diminishingReasonActive:diminishingReasonActive === true,
+    canonicalInputDiagnostics:canonicalInputDiagnostics || null,
+    authorityDrift:{
+      scannerCanonicalVerdict:String(scannerCanonicalVerdictRaw || '').trim().toLowerCase(),
+      scannerVisualBucket:String(recomputedScannerVisualBucket || '').trim().toLowerCase(),
+      canonicalVerdict:String(recomputedReviewCanonicalVerdict || '').trim().toLowerCase(),
+      visualBucket:String(recomputedReviewVisualBucket || '').trim().toLowerCase(),
+      lifecycleState:String(recomputedLifecycleFromWatch || '').trim().toLowerCase(),
+      differsFromSnapshot:!!(
+        authority.reviewCanonicalVerdict
+        && (
+          authority.scannerCanonicalVerdict && authority.scannerCanonicalVerdict !== scannerCanonicalVerdictRaw
+          || authority.scannerVisualBucket && authority.scannerVisualBucket !== recomputedScannerVisualBucket
+          || authority.lifecycleState && authority.lifecycleState !== String(recomputedLifecycleFromWatch || '').trim().toLowerCase()
+          || authority.reviewCanonicalVerdict !== recomputedReviewCanonicalVerdict
+          || authority.reviewVisualBucket !== recomputedReviewVisualBucket
+        )
+      )
+    }
+  };
+}
+
 function buildReplayJsonResult(result){
   return {
     ticker:result.ticker,
+    canonicalContract:result.snapshot && result.snapshot.canonicalContract ? deepClone(result.snapshot.canonicalContract) : null,
+    renderModels:result.snapshot && result.snapshot.renderModels ? deepClone(result.snapshot.renderModels) : null,
     rawShortlistSignal:{
       verdict:result.proxy.verdict,
       reasons:Array.isArray(result.proxy.reasons) ? result.proxy.reasons.slice() : [],
       blockers:Array.isArray(result.proxy.blockers) ? result.proxy.blockers.slice() : []
     },
+    rawShortlistVerdict:result.proxy && result.proxy.verdict ? String(result.proxy.verdict) : '',
     scannerCanonicalVerdict:result.replay.scannerCanonicalVerdict,
     scannerVisualBucket:result.replay.scannerVisualBucket,
     scannerSnapshotIncomplete:result.replay.scannerSnapshotIncomplete,
     reviewCanonicalVerdict:result.replay.reviewCanonicalVerdict,
     reviewVisualBucket:result.replay.reviewVisualBucket,
+    reviewNextAction:result.replay.reviewNextAction,
+    reviewPrimaryReason:result.replay.reviewPrimaryReason,
+    planStatus:result.replay.planStatus,
+    replayAuthoritySource:result.replay.replayAuthoritySource,
+    snapshotContractFingerprint:result.replay.snapshotContractFingerprint,
     reviewProjectionSource:result.replay.reviewProjectionSource,
     layerMutationReason:result.replay.layerMutationReason,
     simulatedLifecycleFromWatch:result.replay.simulatedLifecycleFromWatch,
@@ -991,7 +1587,8 @@ function buildReplayJsonResult(result){
         promotionBlocker:result.replay.promotionBlocker,
         failingGate:result.replay.failingGate
       }
-      : null
+      : null,
+    authorityDrift:result.replay.authorityDrift || null
   };
 }
 
@@ -1060,11 +1657,6 @@ async function main(){
   const sandbox = loadReplayRuntime();
   const {resolveGlobalVerdict, coreDeps} = buildReplayDeps(sandbox);
   const visualDeps = buildVisualDeps(sandbox, resolveGlobalVerdict);
-  const scannerDebugDeps = buildScannerDebugDeps(
-    sandbox,
-    resolveGlobalVerdict,
-    (record, context, options = {}) => sandbox.window.ResolverPresentation.resolveVisualState(record, context, options, visualDeps)
-  );
 
   let snapshots = [];
   const liveSnapshotPayloads = [];
@@ -1097,6 +1689,9 @@ async function main(){
     const proxy = classifyShortlistCandidate(snapshot);
     const reviewProjectionContext = normalizeReviewProjectionContext(snapshot);
     const replayBase = buildReplayRecord(snapshot, sandbox);
+    const snapshotAuthority = replayBase.snapshotAuthority || extractSnapshotCanonicalAuthority(snapshot);
+    const snapshotPublicFields = extractSnapshotReplayPublicFields(snapshotAuthority, snapshot);
+    const snapshotReplayAuthorityLocked = hasSnapshotReplayAuthority(snapshotAuthority);
     const scannerRecord = deepClone(replayBase.record);
     const scannerResolvedContract = deepClone(replayBase.record.resolvedContract);
     // Scanner-layer capture must remain immutable. Review/watchlist mutation happens on a cloned record only.
@@ -1132,22 +1727,16 @@ async function main(){
       || scannerResolvedContract.final_verdict
       || ''
     ).trim().toLowerCase();
-    const scannerSnapshotIncomplete = !scannerCanonicalVerdictRaw;
-    const scannerCanonicalVerdict = scannerCanonicalVerdictRaw || 'unknown';
-    const globalVerdict = resolveGlobalVerdict(replayBase.record);
-    replayBase.record.resolvedContract = {
-      ...replayBase.record.resolvedContract,
-      finalVerdict:sandbox.window.ResolverCore.globalVerdictLabel(globalVerdict.final_verdict),
-      final_verdict:globalVerdict.final_verdict,
-      baseVerdict:globalVerdict.base_verdict || replayBase.record.resolvedContract.baseVerdict,
-      planStatusKey:globalVerdict.planStateKey || replayBase.record.resolvedContract.planStatusKey,
-      entry_gate_pass:globalVerdict.entry_gate_pass,
-      near_entry_gate_pass:globalVerdict.near_entry_gate_pass,
-      entry_gate_checks:globalVerdict.entry_gate_checks || {},
-      near_entry_gate_checks:globalVerdict.near_entry_gate_checks || {},
-      presentationUpgradeBlocked:globalVerdict.downgrade_applied === true,
-      promotionBlockedBy:globalVerdict.downgrade_reason || ''
-    };
+    const scannerSnapshotCanonicalVerdict = snapshotAuthority.scannerCanonicalVerdict || '';
+    const scannerSnapshotIncomplete = !(scannerSnapshotCanonicalVerdict || scannerCanonicalVerdictRaw);
+    const scannerCanonicalVerdict = scannerSnapshotCanonicalVerdict || scannerCanonicalVerdictRaw || 'unknown';
+    const replayVerdictResolution = buildReplayVerdictResolution({
+      sandbox,
+      replayBase,
+      resolveGlobalVerdict
+    });
+    const globalVerdict = replayVerdictResolution.globalVerdict;
+    replayBase.record.resolvedContract = replayVerdictResolution.resolvedContract;
     const reviewVisualState = sandbox.window.ResolverPresentation.resolveVisualState(replayBase.record, 'scanner', {
       derivedStates:replayBase.record.derivedStates,
       effectivePlan:replayBase.record.effectivePlan,
@@ -1163,50 +1752,45 @@ async function main(){
         deps:coreDeps()
       })
       : null;
-    const baseView = buildBaseView(
-      replayBase.record,
-      replayBase.record.displayedPlan,
-      sandbox.window.ResolverCore.globalVerdictLabel(globalVerdict.final_verdict),
-      replayBase.record.planRealism,
-      replayBase.record.setupScore
-    );
-    const scannerResolution = sandbox.window.ScannerDebug.resolveScannerStateWithTrace(replayBase.record, {
-      baseView,
-      derivedStates:replayBase.record.derivedStates,
-      rrCategory:scannerDebugDeps.rrCategoryForView(baseView),
-      structureQuality:scannerDebugDeps.finalStructureQualityForView({...baseView, setupStates:replayBase.record.derivedStates})
-    }, scannerDebugDeps);
-    const simulatedLifecycleFromWatch = typeof sandbox.resolveLifecycleTransition === 'function'
-      ? sandbox.resolveLifecycleTransition('watch', {
-        structure_state:derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
-        bounce_state:derivedStateValue(replayBase.record.derivedStates, 'bounceState', 'bounce_state'),
-        plan_status:replayBase.record.displayedPlan && replayBase.record.displayedPlan.status,
-        rr_confidence:replayBase.record.planRealism && replayBase.record.planRealism.rr_confidence_label,
-        market_regime:globalVerdict.market_regime || '',
-        final_verdict:globalVerdict.final_verdict
-      })
-      : sandbox.window.ResolverCore.normalizeGlobalVerdictKey(globalVerdict.final_verdict);
-    const rawBlockerCopy = String(
-      globalVerdict.main_blocker
-      || globalVerdict.reason
-      || replayBase.record.resolvedContract.blockerReason
-      || replayBase.record.resolvedContract.reasonSummary
-      || ''
-    ).trim();
-    const blockerSource = String(
-      globalVerdict.primary_blocker_source
-      || globalVerdict.semantic_blocker_code
-      || ''
-    ).trim();
-    const finalResolvedVerdict = String(globalVerdict.final_verdict || '').trim().toLowerCase();
-    const finalVisualBucket = String(reviewVisualState.visualBucket || '').trim().toLowerCase();
+    const recomputedLifecycleFromWatch = replayVerdictResolution.recomputedLifecycleFromWatch;
+    const recomputedAuthority = buildRecomputedReplayAuthority({
+      snapshotAuthority,
+      snapshotReplayAuthorityLocked,
+      reviewProjectionContext,
+      scannerCanonicalVerdict,
+      scannerCanonicalVerdictRaw,
+      authoritativeScannerSnapshotVerdict,
+      scannerVisualState,
+      simplifiedScannerState,
+      reviewVisualState,
+      simplifiedReviewState,
+      globalVerdict
+    });
+    const recomputedDiagnostics = buildRecomputedReplayDiagnostics({
+      globalVerdict,
+      reviewVisualState,
+      replayBase,
+      recomputedLifecycleFromWatch,
+      recomputedReviewCanonicalVerdict:recomputedAuthority.recomputedReviewCanonicalVerdict,
+      recomputedReviewVisualBucket:recomputedAuthority.recomputedReviewVisualBucket,
+      recomputedScannerVisualBucket:recomputedAuthority.recomputedScannerVisualBucket,
+      scannerCanonicalVerdictRaw
+    });
+    const diagnosticSources = buildReplayDiagnosticSources({
+      snapshotReplayAuthorityLocked,
+      snapshotAuthority,
+      recomputedDiagnostics
+    });
+    const simulatedLifecycleFromWatch = diagnosticSources.effective.lifecycleState;
+    const replayStructureState = diagnosticSources.effective.structureState;
+    const replayStructureEligibility = diagnosticSources.effective.structureEligibility;
+    const rawBlockerCopy = diagnosticSources.effective.primaryReason;
+    const blockerSource = String(recomputedDiagnostics.blockerSource || '').trim();
+    const finalResolvedVerdict = recomputedAuthority.finalResolvedVerdict;
+    const finalVisualBucket = recomputedAuthority.finalVisualBucket;
     const promotionDiagnosticsActive = !['entry', 'near_entry'].includes(finalResolvedVerdict)
       && !['entry', 'near_entry'].includes(finalVisualBucket);
-    const rawWatchToDiminishingReason = String(
-      reviewVisualState.weakWatchDiminishingReason
-      || scannerResolution.remapReason
-      || ''
-    ).trim();
+    const rawWatchToDiminishingReason = String(recomputedDiagnostics.weakWatchDiminishingReason || '').trim();
     const diminishingReasonActive = finalResolvedVerdict === 'watch'
       && finalVisualBucket === 'diminishing'
       && !!rawWatchToDiminishingReason;
@@ -1214,33 +1798,33 @@ async function main(){
     let failingGate = '';
     if(promotionDiagnosticsActive){
       const fallbackDiagnostic = fallbackPromotionDiagnostic({
-        globalVerdict,
+        recomputedDiagnostics,
         replayBase,
-        structureState:derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
-        structureEligibility:globalVerdict.structure_eligibility || reviewVisualState.structureEligibility || 'unknown'
+        structureState:replayStructureState,
+        structureEligibility:replayStructureEligibility
       });
       promotionBlocker = String(
-        globalVerdict.promotionBlockedReason
-        || globalVerdict.downgrade_reason
+        recomputedDiagnostics.promotionBlockedReason
+        || recomputedDiagnostics.downgradeReason
         || fallbackDiagnostic.promotionBlocker
         || ''
       ).trim();
       failingGate = String(
-        globalVerdict.promotionBlockedBy
+        recomputedDiagnostics.promotionBlockedBy
         || fallbackDiagnostic.failingGate
         || ''
       ).trim();
       if(structureContradictionForPromotionText(
         promotionBlocker,
-        derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
-        globalVerdict.structure_eligibility || reviewVisualState.structureEligibility || 'unknown'
+        replayStructureState,
+        replayStructureEligibility
       )){
         promotionBlocker = fallbackDiagnostic.promotionBlocker;
         failingGate = fallbackDiagnostic.failingGate;
       }
     }
     const blockerCopy = promotionDiagnosticsActive ? rawBlockerCopy : '';
-    const blockers = promotionDiagnosticsActive ? promotionBlockers(globalVerdict, replayBase.record.derivedStates) : [];
+    const blockers = promotionDiagnosticsActive ? promotionBlockers(recomputedDiagnostics, replayBase.record.derivedStates) : [];
     const watchToDiminishingReason = diminishingReasonActive ? rawWatchToDiminishingReason : '';
     const normalizedReplayDiagnostics = normalizeReplayBlockers({
       finalResolvedVerdict,
@@ -1249,39 +1833,24 @@ async function main(){
       promotionBlocker,
       blockerCopy
     });
-    const scannerVisualBucket = String(
-      (authoritativeScannerSnapshotVerdict
-        ? (
-          scannerCanonicalVerdict === 'entry'
-            ? 'entry'
-            : (scannerCanonicalVerdict === 'near_entry' ? 'near_entry' : (scannerCanonicalVerdict === 'avoid' ? 'avoid' : 'monitor'))
-        )
-        : '')
-      || (simplifiedScannerState && simplifiedScannerState.visualBucket)
-      || scannerVisualState.visualBucket
-      || ''
-    ).trim().toLowerCase() || 'monitor';
-    const reviewVisualBucket = String(
-      (reviewProjectionContext.authoritative && reviewProjectionContext.visualBucket)
-      || (simplifiedReviewState && simplifiedReviewState.visualBucket)
-      || reviewVisualState.visualBucket
-      || ''
-    ).trim().toLowerCase() || 'monitor';
-    const reviewCanonicalVerdict = String(
-      (reviewProjectionContext.authoritative && reviewProjectionContext.canonicalVerdict)
-      || (simplifiedReviewState && simplifiedReviewState.canonicalVerdict)
-      || globalVerdict.final_verdict
-      || ''
-    ).trim().toLowerCase() || 'watch';
+    const scannerVisualBucket = recomputedAuthority.scannerVisualBucket;
+    const reviewVisualBucket = recomputedAuthority.reviewVisualBucket;
+    const reviewCanonicalVerdict = recomputedAuthority.reviewCanonicalVerdict;
     const layerMutationParts = [];
-    if(scannerCanonicalVerdict !== reviewCanonicalVerdict){
+    if(snapshotAuthority.reviewCanonicalVerdict && snapshotAuthority.reviewCanonicalVerdict !== recomputedAuthority.recomputedReviewCanonicalVerdict){
+      layerMutationParts.push(`snapshot contract ${snapshotAuthority.reviewCanonicalVerdict} != recomputed ${recomputedAuthority.recomputedReviewCanonicalVerdict}`);
+    }
+    if(snapshotAuthority.reviewVisualBucket && snapshotAuthority.reviewVisualBucket !== recomputedAuthority.recomputedReviewVisualBucket){
+      layerMutationParts.push(`snapshot bucket ${snapshotAuthority.reviewVisualBucket} != recomputed ${recomputedAuthority.recomputedReviewVisualBucket}`);
+    }
+    if(!snapshotReplayAuthorityLocked && scannerCanonicalVerdict !== reviewCanonicalVerdict){
       layerMutationParts.push(`verdict ${scannerCanonicalVerdict} -> ${reviewCanonicalVerdict}`);
     }
-    if(scannerVisualBucket !== reviewVisualBucket){
+    if(!snapshotReplayAuthorityLocked && scannerVisualBucket !== reviewVisualBucket){
       layerMutationParts.push(`bucket ${scannerVisualBucket} -> ${reviewVisualBucket}`);
     }
-    if(layerMutationParts.length && globalVerdict.downgrade_reason){
-      layerMutationParts.push(`reason ${String(globalVerdict.downgrade_reason).trim()}`);
+    if(layerMutationParts.length && recomputedDiagnostics.downgradeReason){
+      layerMutationParts.push(`reason ${String(recomputedDiagnostics.downgradeReason).trim()}`);
     }
     const canonicalInputDiagnostics = canonicalInputDiagnosticsEnabled
       && sandbox.window.CanonicalResolverInput
@@ -1291,54 +1860,66 @@ async function main(){
         mode:'diagnostic'
       })
       : null;
+    const publicReplay = buildPublicReplayView({
+      sandbox,
+      snapshotAuthority,
+      snapshotPublicFields,
+      reviewProjectionContext,
+      replayBase,
+      fallback:{
+        scannerCanonicalVerdict,
+        scannerVisualBucket,
+        scannerSnapshotIncomplete,
+        reviewCanonicalVerdict,
+        reviewVisualBucket,
+        reviewNextAction:'',
+        reviewPrimaryReason:'',
+        planStatus:String(replayBase.record.displayedPlan && replayBase.record.displayedPlan.status || '').trim().toLowerCase(),
+        simulatedLifecycleFromWatch:String(simulatedLifecycleFromWatch || ''),
+        structureState:replayStructureState,
+        structureEligibility:replayStructureEligibility,
+        bounceState:derivedStateValue(replayBase.record.derivedStates, 'bounceState', 'bounce_state'),
+        stabilisationState:derivedStateValue(replayBase.record.derivedStates, 'stabilisationState', 'stabilisation_state'),
+        priceabilityState:derivedStateValue(replayBase.record.derivedStates, 'priceabilityState', 'priceability_state'),
+        setupScore:replayBase.record.setupScore
+      }
+    });
+    const reducedCanonicalInputDiagnostics = canonicalInputDiagnostics
+      ? {
+        selectedPlanAuthority:String(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.selectedPlanAuthorityCandidate && canonicalInputDiagnostics.diagnostics.selectedPlanAuthorityCandidate.source || ''),
+        selectedDerivedStates:String(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.selectedDerivedStateAuthorityCandidate && canonicalInputDiagnostics.diagnostics.selectedDerivedStateAuthorityCandidate.source || ''),
+        auditOnlyCount:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.auditOnlyFields) ? canonicalInputDiagnostics.diagnostics.auditOnlyFields.length : 0,
+        presentationOnlyCount:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.presentationOnlyFields) ? canonicalInputDiagnostics.diagnostics.presentationOnlyFields.length : 0,
+        blockedFreeTextCount:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.blockedFreeTextAuthorityPaths) ? canonicalInputDiagnostics.diagnostics.blockedFreeTextAuthorityPaths.length : 0,
+        ignoredStaleFields:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.ignoredStaleFields)
+          ? canonicalInputDiagnostics.diagnostics.ignoredStaleFields
+          : []
+      }
+      : null;
+    const replayDiagnostics = buildReplayDiagnostics({
+      snapshotAuthority,
+      scannerCanonicalVerdictRaw:recomputedDiagnostics.scannerCanonicalVerdict,
+      recomputedScannerVisualBucket:recomputedDiagnostics.scannerVisualBucket,
+      recomputedReviewCanonicalVerdict:recomputedDiagnostics.canonicalVerdict,
+      recomputedReviewVisualBucket:recomputedDiagnostics.visualBucket,
+      recomputedLifecycleFromWatch:recomputedDiagnostics.lifecycleState,
+      layerMutationParts,
+      normalizedReplayDiagnostics,
+      blockerSource,
+      promotionDiagnosticsActive,
+      promotionBlocker,
+      failingGate,
+      watchToDiminishingReason,
+      diminishingReasonActive,
+      canonicalInputDiagnostics:reducedCanonicalInputDiagnostics
+    });
     return {
       ticker:snapshot.ticker,
       snapshot,
       proxy,
       replay:{
-        scannerCanonicalVerdict,
-        scannerCanonicalVerdictLabel:scannerCanonicalVerdict === 'unknown'
-          ? 'Unknown'
-          : sandbox.window.ResolverCore.globalVerdictLabel(scannerCanonicalVerdict),
-        scannerSnapshotIncomplete,
-        scannerVisualBucket,
-        reviewCanonicalVerdict,
-        reviewCanonicalVerdictLabel:sandbox.window.ResolverCore.globalVerdictLabel(reviewCanonicalVerdict),
-        reviewVisualBucket,
-        reviewProjectionSource:reviewProjectionContext.projectionSource,
-        layerMutationReason:layerMutationParts.join(' | '),
-        simulatedLifecycleFromWatch:String(simulatedLifecycleFromWatch || ''),
-        structureState:derivedStateValue(replayBase.record.derivedStates, 'structureState', 'structure_state'),
-        structureEligibility:globalVerdict.structure_eligibility || reviewVisualState.structureEligibility || 'unknown',
-        bounceState:derivedStateValue(replayBase.record.derivedStates, 'bounceState', 'bounce_state'),
-        stabilisationState:derivedStateValue(replayBase.record.derivedStates, 'stabilisationState', 'stabilisation_state'),
-        priceabilityState:derivedStateValue(replayBase.record.derivedStates, 'priceabilityState', 'priceability_state'),
-        setupScore:replayBase.record.setupScore,
-        realisticTarget:replayBase.record.planRealism.realistic_target,
-        extendedTarget:replayBase.record.planRealism.extended_target,
-        realisticRr:replayBase.record.planRealism.realistic_rr,
-        targetStretchPct:replayBase.record.planRealism.target_stretch_pct,
-        targetCapReason:replayBase.record.planRealism.target_cap_reason,
-        blockers:normalizedReplayDiagnostics.blockers,
-        blockerSource,
-        promotionDiagnosticsActive,
-        promotionBlocker,
-        failingGate,
-        blockerCopy:normalizedReplayDiagnostics.blockerCopy,
-        watchToDiminishingReason,
-        diminishingReasonActive,
-        canonicalInputDiagnostics:canonicalInputDiagnostics
-          ? {
-            selectedPlanAuthority:String(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.selectedPlanAuthorityCandidate && canonicalInputDiagnostics.diagnostics.selectedPlanAuthorityCandidate.source || ''),
-            selectedDerivedStates:String(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.selectedDerivedStateAuthorityCandidate && canonicalInputDiagnostics.diagnostics.selectedDerivedStateAuthorityCandidate.source || ''),
-            auditOnlyCount:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.auditOnlyFields) ? canonicalInputDiagnostics.diagnostics.auditOnlyFields.length : 0,
-            presentationOnlyCount:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.presentationOnlyFields) ? canonicalInputDiagnostics.diagnostics.presentationOnlyFields.length : 0,
-            blockedFreeTextCount:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.blockedFreeTextAuthorityPaths) ? canonicalInputDiagnostics.diagnostics.blockedFreeTextAuthorityPaths.length : 0,
-            ignoredStaleFields:Array.isArray(canonicalInputDiagnostics.diagnostics && canonicalInputDiagnostics.diagnostics.ignoredStaleFields)
-              ? canonicalInputDiagnostics.diagnostics.ignoredStaleFields
-              : []
-          }
-          : null
+        ...publicReplay,
+        ...replayDiagnostics
       }
     };
   });
@@ -1371,7 +1952,8 @@ async function main(){
 main().catch(error => {
   console.error(JSON.stringify({
     ok:false,
-    error:String(error && error.message || error || 'Replay failed.')
+    error:String(error && error.message || error || 'Replay failed.'),
+    stack:String(error && error.stack || '')
   }, null, 2));
   process.exitCode = 1;
 });
